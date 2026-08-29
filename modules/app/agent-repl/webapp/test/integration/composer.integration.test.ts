@@ -1,0 +1,674 @@
+/**
+ * COMPOSER — the dev-mode surface, and the fields a submission MUST carry.
+ *
+ * Production runs composer-less: the root composer is host-native (Emacs), so
+ * the first thing this file asserts is that no composer exists without
+ * `&composer=1`. Everything else is about the submission itself, because three
+ * of its fields are load-bearing and each fails silently if omitted:
+ *
+ *   - `workspace` and `origin` are REQUIRED (the fake refuses either missing
+ *     with InvalidArgument, so a forgotten field fails loudly here),
+ *   - `idempotency_key` is the contract's ONE client-minted value: fresh per
+ *     submission, and STABLE across a retry of the same submission, which is
+ *     what stops a double-send from becoming two turns.
+ *
+ * The minted `TurnId` is then matched against the feed row that arrives, since
+ * that match is the only thing tying a submission to its turn.
+ */
+import { afterEach, describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { ConnectError, Code } from "@connectrpc/connect";
+
+import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { SubmitPromptSuccessSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { SubmitPromptCommandPanelSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
+
+import { startHarness, type Harness } from "./harness";
+import { ROOT_FEED } from "./fake-daemon";
+import {
+  COMMAND_PANEL_ARMS,
+  MCP_STATUS_ARMS,
+  TODO_STATUS_ARMS,
+  WEBAPP_ORIGIN,
+  WORKSPACE_ID,
+  activityRow,
+  assertCoversOneof,
+  commandPanel,
+  feedId,
+  feedPageSuccess,
+  footerView,
+  responseUnit,
+  subagentUnit,
+  userPromptRow,
+} from "./fixtures";
+
+let harness: Harness;
+
+afterEach(async () => {
+  await harness?.stop();
+});
+
+/** The dev composer's input, typed and dispatched as a user would. */
+async function type(text: string, host = '[data-component="composer"]'): Promise<void> {
+  const input = harness.$(`${host} textarea`) as HTMLTextAreaElement;
+  if (!input) throw new Error(`no composer input at ${host}`);
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  await harness.settle();
+}
+
+/** Submit whatever is typed into the given composer. */
+async function send(host = '[data-component="composer"]'): Promise<void> {
+  await harness.click(`${host} [data-composer-send]`);
+}
+
+describe("production runs composer-less", () => {
+  it("draws no composer without the dev flag", async () => {
+    // Arrange / Act
+    harness = await startHarness();
+    // Assert
+    expect(harness.$('[data-component="composer"]')?.hidden).toBe(true);
+  });
+
+  it("mounts no composer input without the dev flag", async () => {
+    // Arrange / Act
+    harness = await startHarness();
+    // Assert
+    expect(harness.$('[data-component="composer"] textarea')).toBeNull();
+  });
+
+  it("mounts no bubble composer without the dev flag", async () => {
+    // Arrange
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    // Assert
+    expect(harness.$('[data-feed-row="bubble"] textarea')).toBeNull();
+  });
+});
+
+describe("the dev composer", () => {
+  it("draws when the dev flag is on", async () => {
+    // Arrange / Act
+    harness = await startHarness({ composer: true });
+    // Assert
+    expect(harness.$('[data-component="composer"]')?.hidden).toBe(false);
+  });
+
+  it("calls SubmitPrompt on send", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("do the thing");
+    // Act
+    await send();
+    // Assert
+    expect(harness.fake.calls("submitPrompt")).toHaveLength(1);
+  });
+
+  it("sends the text as a UserSaid text block", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("do the thing");
+    // Act
+    await send();
+    // Assert
+    const [request] = harness.fake.calls<{
+      said?: { content?: { blocks: { block: { case?: string; value?: { text: string } } }[] } };
+    }>("submitPrompt");
+    const block = request.said?.content?.blocks[0]?.block;
+    expect(block?.case === "text" ? block.value?.text : undefined).toBe("do the thing");
+  });
+
+  it("clears the input on a successful send", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("do the thing");
+    // Act
+    await send();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("sends nothing for an empty input", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    // Act
+    await send();
+    // Assert
+    expect(harness.fake.calls("submitPrompt")).toHaveLength(0);
+  });
+});
+
+describe("the required workspace", () => {
+  it("carries the context's workspace on every submission", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("a prompt");
+    // Act
+    await send();
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("submitPrompt");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
+  });
+
+  it("carries the workspace's dir, not just its id", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("a prompt");
+    // Act
+    await send();
+    // Assert: the ref is echoed whole; a half-built ref is a defect.
+    const [request] = harness.fake.calls<{ workspace?: { dir: string } }>("submitPrompt");
+    expect(request.workspace?.dir).not.toBe("");
+  });
+
+  it("carries the workspace on a bubble submission too", async () => {
+    // Arrange
+    harness = await startHarness({
+      composer: true,
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await type("into the bubble", '[data-feed-row="bubble"]');
+    // Act
+    await send('[data-feed-row="bubble"]');
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("submitPrompt");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
+  });
+
+  it("is refused by the daemon when absent", async () => {
+    // Arrange: prove the fake actually enforces it, so the assertions above
+    // are not passing against a lenient stub.
+    harness = await startHarness({ composer: true });
+    const failed = await harness.ctx.client
+      .submitPrompt({ idempotencyKey: "k", origin: WEBAPP_ORIGIN })
+      .catch((e: unknown) => e);
+    // Assert
+    expect(ConnectError.from(failed).code).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("the required origin", () => {
+  it("sends the webapp user-sent origin from the dev composer", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("a prompt");
+    // Act
+    await send();
+    // Assert
+    const [request] = harness.fake.calls<{ origin: PromptOrigin }>("submitPrompt");
+    expect(request.origin).toBe(PromptOrigin.WEBAPP_USER_SENT);
+  });
+
+  it("sends the webapp user-sent origin from a bubble composer", async () => {
+    // Arrange
+    harness = await startHarness({
+      composer: true,
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await type("into the bubble", '[data-feed-row="bubble"]');
+    // Act
+    await send('[data-feed-row="bubble"]');
+    // Assert
+    const [request] = harness.fake.calls<{ origin: PromptOrigin }>("submitPrompt");
+    expect(request.origin).toBe(PromptOrigin.WEBAPP_USER_SENT);
+  });
+
+  it("never sends the unspecified origin", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("a prompt");
+    // Act
+    await send();
+    // Assert
+    const requests = harness.fake.calls<{ origin: PromptOrigin }>("submitPrompt");
+    expect(requests.every((r) => r.origin !== PromptOrigin.UNSPECIFIED)).toBe(true);
+  });
+
+  it("is refused by the daemon when unspecified", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    const failed = await harness.ctx.client
+      .submitPrompt({ workspace: harness.ctx.workspace, idempotencyKey: "k" })
+      .catch((e: unknown) => e);
+    // Assert
+    expect(ConnectError.from(failed).code).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("the idempotency key", () => {
+  it("mints a key for every submission", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("a prompt");
+    // Act
+    await send();
+    // Assert
+    const [request] = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt");
+    expect(request.idempotencyKey).not.toBe("");
+  });
+
+  it("mints a FRESH key per distinct submission", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("first");
+    await send();
+    // Act
+    await type("second");
+    await send();
+    // Assert
+    const keys = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt").map((r) => r.idempotencyKey);
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  it("reuses the SAME key when the same submission is retried", async () => {
+    // Arrange: the first attempt fails at the transport, so the text stands
+    // and the retry is the same submission, not a new one.
+    harness = await startHarness({ composer: true });
+    harness.fake.failNext("submitPrompt", "the daemon dropped the call");
+    await type("a prompt");
+    await send();
+    // Act
+    await send();
+    // Assert
+    const keys = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt").map((r) => r.idempotencyKey);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("mints a new key after a successful send", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("first");
+    await send();
+    const [first] = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt");
+    // Act
+    await type("second");
+    await send();
+    // Assert
+    const keys = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt");
+    expect(keys[1].idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+});
+
+describe("the minted turn", () => {
+  it("matches the turn the feed row carries", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "turn", value: { turn: { value: "turn-mine" } } } },
+        },
+      }),
+    );
+    await harness.fake.awaitStream("watchFeed");
+    await type("a prompt");
+    await send();
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      userPromptRow("a prompt", { id: feedId("mine"), turn: { value: "turn-mine" } }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("mine")?.dataset.turn).toBe("turn-mine");
+  });
+
+  it("marks the row as this client's own submission", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "turn", value: { turn: { value: "turn-mine" } } } },
+        },
+      }),
+    );
+    await harness.fake.awaitStream("watchFeed");
+    await type("a prompt");
+    await send();
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      userPromptRow("a prompt", { id: feedId("mine"), turn: { value: "turn-mine" } }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("mine")?.dataset.mine).toBe("true");
+  });
+
+  it("does not claim a row from another submitter's turn", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await harness.fake.awaitStream("watchFeed");
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      userPromptRow("from Emacs", { id: feedId("theirs"), turn: { value: "turn-theirs" } }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("theirs")?.dataset.mine).toBeUndefined();
+  });
+});
+
+describe("the bubble composer's gate", () => {
+  /** Expand a bubble under the dev flag with the given footer status. */
+  const withBubble = async (status: string): Promise<void> => {
+    harness = await startHarness({
+      composer: true,
+      arrange: (fake) => {
+        fake.setFooter(WORKSPACE_ID, footerView({ status }));
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+  };
+
+  it("is open while the footer is idle", async () => {
+    // Arrange / Act
+    await withBubble("idle");
+    // Assert
+    expect(
+      (harness.$('[data-feed-row="bubble"] textarea') as HTMLTextAreaElement)?.disabled,
+    ).toBe(false);
+  });
+
+  it.each(["merging", "closing", "disconnected"])("closes while the footer is %s", async (status) => {
+    // Arrange / Act
+    await withBubble(status);
+    // Assert
+    expect(
+      (harness.$('[data-feed-row="bubble"] textarea') as HTMLTextAreaElement)?.disabled,
+    ).toBe(true);
+  });
+
+  it("re-opens when the footer leaves the merging state", async () => {
+    // Arrange
+    await withBubble("merging");
+    // Act
+    harness.fake.setFooter(WORKSPACE_ID, footerView({ status: "idle", substatus: "ready" }));
+    await harness.settle();
+    // Assert
+    expect(
+      (harness.$('[data-feed-row="bubble"] textarea') as HTMLTextAreaElement)?.disabled,
+    ).toBe(false);
+  });
+
+  it("addresses the bubble's own FeedId on submission", async () => {
+    // Arrange
+    await withBubble("idle");
+    await type("into the bubble", '[data-feed-row="bubble"]');
+    // Act
+    await send('[data-feed-row="bubble"]');
+    // Assert
+    const [request] = harness.fake.calls<{ feed?: { value: string } }>("submitPrompt");
+    expect(request.feed?.value).toBe("bubble");
+  });
+
+  it("sends no feed from the root composer", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await type("at the root");
+    // Act
+    await send();
+    // Assert: an absent `feed` addresses the workspace's own feed.
+    const [request] = harness.fake.calls<{ feed?: { value: string } }>("submitPrompt");
+    expect(request.feed).toBeUndefined();
+  });
+});
+
+describe("a command refusal answer", () => {
+  it("clears the composer text", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "commandRefused", value: { command: "/agents" } } },
+        },
+      }),
+    );
+    await type("/agents");
+    // Act
+    await send();
+    // Assert: it was ACCEPTED and answered, so the draft is spent.
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("draws no composer refusal, since this is a success arm", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "commandRefused", value: { command: "/agents" } } },
+        },
+      }),
+    );
+    await type("/agents");
+    // Act
+    await send();
+    // Assert
+    expect(harness.$(".composer-refusal")).toBeNull();
+  });
+});
+
+describe("command panels", () => {
+  it("covers every panel arm the SubmitPrompt success carries", () => {
+    assertCoversOneof(SubmitPromptCommandPanelSchema, "panel", [...COMMAND_PANEL_ARMS]);
+  });
+
+  it("covers both SubmitPrompt success outcomes plus the refusal", () => {
+    assertCoversOneof(SubmitPromptSuccessSchema, "outcome", [
+      "turn",
+      "commandPanel",
+      "commandRefused",
+    ]);
+  });
+
+  /** Submit a slash command whose answer is the given panel. */
+  const submitPanel = async (arm: (typeof COMMAND_PANEL_ARMS)[number]): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "commandPanel", value: commandPanel(arm) } } },
+      }),
+    );
+    await type(`/${arm}`);
+    await send();
+  };
+
+  it.each(COMMAND_PANEL_ARMS)("hands the %s panel to the composer's callback", async (arm) => {
+    // Arrange / Act
+    await submitPanel(arm);
+    // Assert
+    expect(harness.panels).toHaveLength(1);
+  });
+
+  it.each(COMMAND_PANEL_ARMS)("draws the %s panel", async (arm) => {
+    // Arrange / Act
+    await submitPanel(arm);
+    // Assert
+    expect(harness.$(`[data-panel="${arm}"]`)).not.toBeNull();
+  });
+
+  it("draws the status panel's thin label/value rows", async () => {
+    // Arrange / Act
+    await submitPanel("status");
+    // Assert
+    expect(harness.$('[data-panel="status"]')?.textContent).toContain("0.1.0");
+  });
+
+  it("draws every status panel row", async () => {
+    // Arrange / Act
+    await submitPanel("status");
+    // Assert: version, account, model, mode — the settled thin panel.
+    expect(harness.$$('[data-panel="status"] [data-row]')).toHaveLength(4);
+  });
+
+  it.each(TODO_STATUS_ARMS)("draws the todos panel's %s glyph arm", async (status) => {
+    // Arrange / Act
+    await submitPanel("todos");
+    // Assert
+    expect(harness.$(`[data-panel="todos"] [data-todo-status="${status}"]`)).not.toBeNull();
+  });
+
+  it("draws the todos panel's subjects verbatim", async () => {
+    // Arrange / Act
+    await submitPanel("todos");
+    // Assert
+    expect(harness.$('[data-panel="todos"]')?.textContent).toContain("write the harness");
+  });
+
+  it("draws the agents panel's names and descriptions", async () => {
+    // Arrange / Act
+    await submitPanel("agents");
+    // Assert
+    const drawn = harness.$('[data-panel="agents"]')?.textContent ?? "";
+    expect(drawn).toContain("reviewer");
+    expect(drawn).toContain("search the repo");
+  });
+
+  it.each(MCP_STATUS_ARMS)("draws the mcp panel's %s badge arm", async (status) => {
+    // Arrange / Act
+    await submitPanel("mcp");
+    // Assert
+    expect(harness.$(`[data-panel="mcp"] [data-mcp-status="${status}"]`)).not.toBeNull();
+  });
+
+  it("draws the mcp failure's own detail verbatim", async () => {
+    // Arrange / Act
+    await submitPanel("mcp");
+    // Assert
+    expect(harness.$('[data-panel="mcp"]')?.textContent).toContain("handshake refused");
+  });
+
+  it("draws the context panel's header verbatim", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert
+    expect(harness.$('[data-panel="context"]')?.textContent).toContain("context usage");
+  });
+
+  it("folds the context panel's tool-calls section automatically", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert: ruled — the tool calls render in an automatically folded fold.
+    expect(harness.$('[data-panel="context"] [data-fold="toolCalls"]')?.dataset.folded).toBe("true");
+  });
+
+  it("leaves the context panel's other sections unfolded", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert
+    expect(harness.$('[data-panel="context"] [data-fold="planes"]')?.dataset.folded).not.toBe("true");
+  });
+
+  it("draws the context panel's auto-compact line verbatim", async () => {
+    // Arrange / Act
+    await submitPanel("context");
+    // Assert
+    expect(harness.$('[data-panel="context"]')?.textContent).toContain("auto-compact at 90%");
+  });
+
+  it("draws the help panel's commands verbatim", async () => {
+    // Arrange / Act
+    await submitPanel("help");
+    // Assert
+    expect(harness.$('[data-panel="help"]')?.textContent).toContain("/compact");
+  });
+
+  it("draws no feed row for a command panel answer", async () => {
+    // Arrange / Act: Q3 — panels render only from the dev composer.
+    await submitPanel("status");
+    // Assert
+    expect(harness.feedContainer()?.querySelector("[data-panel]")).toBeNull();
+  });
+});
+
+describe("submission does not derive state", () => {
+  it("draws no optimistic prompt row before the daemon pushes one", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await harness.fake.awaitStream("watchFeed");
+    await type("a prompt");
+    // Act
+    await send();
+    // Assert: the client accumulates nothing; the row arrives on the feed.
+    expect(harness.rowIds()).toEqual([]);
+  });
+
+  it("draws the row once the daemon pushes it", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await harness.fake.awaitStream("watchFeed");
+    await type("a prompt");
+    await send();
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("a prompt", { id: feedId("mine") }));
+    await harness.settle();
+    // Assert
+    expect(harness.rowIds()).toEqual(["mine"]);
+  });
+
+  it("draws a response row pushed after the submission", async () => {
+    // Arrange
+    harness = await startHarness({ composer: true });
+    await harness.fake.awaitStream("watchFeed");
+    await type("a prompt");
+    await send();
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      activityRow(responseUnit("success", "the answer"), { id: feedId("answer") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("answer")?.textContent).toContain("the answer");
+  });
+});

@@ -86,10 +86,25 @@ describe("the title and session line", () => {
     await withTopbar({});
     // Act
     await harness.click(".topbar-title");
-    // Assert: the reveal is a following sibling of the strip, never above it.
-    const strip = harness.$('[data-component="topbar"]');
+    // Assert: reveals render BELOW their strip by ruling, so the reveal must
+    // FOLLOW the strip row in document order rather than precede it.
+    const strip = harness.$("[data-topbar-strip]");
     const reveal = harness.$('.topbar-reveal[data-reveal="session"]');
-    expect(strip?.compareDocumentPosition(reveal as Node) & Node.DOCUMENT_POSITION_CONTAINED_BY).toBeTruthy();
+    if (!strip || !reveal) throw new Error("the topbar drew no strip row or no session reveal");
+    const relation = strip.compareDocumentPosition(reveal);
+    expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("does not open the session reveal above the strip", async () => {
+    // Arrange
+    await withTopbar({});
+    // Act
+    await harness.click(".topbar-title");
+    // Assert
+    const strip = harness.$("[data-topbar-strip]");
+    const reveal = harness.$('.topbar-reveal[data-reveal="session"]');
+    if (!strip || !reveal) throw new Error("the topbar drew no strip row or no session reveal");
+    expect(strip.compareDocumentPosition(reveal) & Node.DOCUMENT_POSITION_PRECEDING).toBe(0);
   });
 });
 
@@ -142,7 +157,6 @@ describe("connectivity", () => {
     // Arrange / Act
     await withTopbar({ glyph: "dot" });
     // Assert
-    expect(harness.$(".topbar-connectivity")?.textContent).toContain("");
     expect(harness.$(".topbar-connectivity")?.dataset.glyph).toBe("dot");
   });
 
