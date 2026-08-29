@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"claude-repld/internal/notimpl"
-
 	// The daemon's SQLite driver. Registered here because wsm is the sole
 	// owner of the database handle; nothing else opens it.
 	_ "modernc.org/sqlite"
@@ -131,6 +129,9 @@ type DB interface {
 	CloseFault(ctx context.Context, id FaultID, at time.Time) error
 	// OpenFaults loads the open faults matching scope, all-or-nothing.
 	OpenFaults(ctx context.Context, scope FaultScope) ([]Fault, error)
+	// Fault loads one fault by id, open or resolved — the read that proves a
+	// closing edge was persisted rather than reopening on the next boot.
+	Fault(ctx context.Context, id FaultID) (Fault, error)
 
 	// PutDrainSchedule puts a drain schedule in force, replacing any current
 	// one.
@@ -149,16 +150,4 @@ type DB interface {
 	// ReleaseServing gives up serving ownership, refusing when this instance
 	// does not hold it.
 	ReleaseServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error
-}
-
-// Open opens the workspace-state-manager database at path, creating and
-// migrating it as needed. A layout newer than this build's refuses to open.
-func Open(ctx context.Context, path string) (DB, error) {
-	return nil, notimpl.Err
-}
-
-// OpenReadOnly opens the database with mode=ro&_pragma=query_only(1), for a
-// process that must observe without writing.
-func OpenReadOnly(ctx context.Context, path string) (DB, error) {
-	return nil, notimpl.Err
 }
