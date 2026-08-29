@@ -443,6 +443,11 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
   (`foo_test.go` beside `foo.go`), one edge case per test, no `time.Sleep`
   for synchronization (channels, WaitGroups, or injected clocks). Every
   production package ships its own unit tests and returns green.
+- GIT IS NEVER CALLED DURING TESTING (user directive, binding): packages
+  above the git client test against a fake `gitclient.Git`; the integration
+  harness scripts git facts as fixtures; the git-client leaf tests against a
+  scripted fake `git` executable first on PATH; the merge test gate is a
+  scripted fake script. No `git init`, no temp repositories in any test.
 - No real vendor calls anywhere: every test sets
   `AGENT_REPL_FORBID_VENDOR_CALLS=1`; the classifier and any exec site
   check `envc.VendorGuard`.
