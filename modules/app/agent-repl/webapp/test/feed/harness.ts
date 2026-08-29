@@ -348,6 +348,20 @@ export function mergeRow(id: string, folded = true): FeedRow {
   });
 }
 
+/** A merge-tab row: only ever a top-level row of a merge bubble's own feed. */
+export function mergeTabRow(id: string, label = "queue"): FeedRow {
+  return create(FeedRowSchema, {
+    id: feedId(id),
+    row: {
+      case: "mergeTab",
+      value: {
+        label: { text: label, round: 1 },
+        kind: { case: "queue", value: { state: { case: "live", value: {} } } },
+      },
+    },
+  });
+}
+
 /** A tail push carrying ROW. */
 export function push(row: FeedRow): WatchFeedResponse {
   return create(WatchFeedResponseSchema, { row });
