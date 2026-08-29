@@ -12,8 +12,10 @@
 //     window absorbs the ordinary rename/replace race before the conclusion.
 //  2. WentSilent   — the file is still there and has not grown for longer than
 //     its kind's silence window.
-//  3. SweptUp      — at boot, a run whose file has not been touched since before
-//     the machine booted. Nothing survives a reboot.
+//  3. SweptUp      — a run whose file has not been touched since before the
+//     machine booted. Nothing survives a reboot. It is checked at boot AND on
+//     every sweep, because a run discovered after the boot pass (a spool whose
+//     hold expired, say) is exactly as dead as one that was open during it.
 //
 // IT RE-DERIVES FROM FILES AND CURSORS, because there is nothing else left to
 // derive from: the store holds no open-task snapshot for the sidecar
@@ -102,6 +104,9 @@ type Tracker struct {
 	open map[string]*entry // by resolved path
 	opt  Options
 	log  *logging.Bound
+	// bootUnknownSaid keeps the "no boot time" statement to once per process:
+	// the sweep runs on a timer, and repeating it every tick would bury it.
+	bootUnknownSaid bool
 }
 
 // New builds a Tracker.
@@ -214,12 +219,19 @@ func (t *Tracker) Open(path string) bool {
 // Sweep concludes every run whose grace or silence window has expired, and
 // stops tracking it. The conclusions are returned in path order so a sweep's
 // records are stable across runs.
-func (t *Tracker) Sweep(nowMs int64) []Lost {
+func (t *Tracker) Sweep(bootMs, nowMs int64) []Lost {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if bootMs <= 0 && !t.bootUnknownSaid {
+		// BootSweep already said the loud part once; this records that the
+		// sweep's boot arm is inert too, rather than leaving it unstated.
+		t.bootUnknownSaid = true
+		t.log.With(logging.Context{Operation: "lost-policy"}).LogVerbose(
+			"boot time unavailable: the sweep's swept_up arm is inert and a pre-boot run can only be concluded by its silence")
+	}
 	var out []Lost
 	for path, existing := range t.open {
-		reason, concluded := t.conclude(existing, nowMs)
+		reason, concluded := t.conclude(existing, bootMs, nowMs)
 		if !concluded {
 			continue
 		}
@@ -230,12 +242,21 @@ func (t *Tracker) Sweep(nowMs int64) []Lost {
 }
 
 // conclude decides whether one entry's window has expired. Caller holds mu.
-func (t *Tracker) conclude(e *entry, nowMs int64) (Reason, bool) {
+//
+// A VANISHED FILE IS JUDGED ONLY BY ITS GRACE WINDOW: that we watched it
+// disappear is a better statement than any window could make, so nothing else
+// is consulted until the grace decides between a rename race and a LOST run.
+// Otherwise the BOOT rule comes first, because "the file predates the reboot"
+// says HOW we know rather than merely that the file is quiet.
+func (t *Tracker) conclude(e *entry, bootMs, nowMs int64) (Reason, bool) {
 	if e.vanishedAtMs != 0 && nowMs-e.vanishedAtMs >= t.opt.Grace.Milliseconds() {
 		return ReasonFileVanished, true
 	}
 	if e.vanishedAtMs != 0 {
 		return "", false
+	}
+	if bootMs > 0 && e.work.LastActivityMs < bootMs {
+		return ReasonSweptUp, true
 	}
 	if nowMs-e.work.LastActivityMs >= t.silence(e.work.Kind).Milliseconds() {
 		return ReasonWentSilent, true
