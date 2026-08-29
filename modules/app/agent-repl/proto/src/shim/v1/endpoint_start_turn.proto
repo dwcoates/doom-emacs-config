@@ -10,7 +10,7 @@ package shim.v1;
 import "conversation/v1/history.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
-import "shim/v1/prompt_origin.proto";
+import "conversation/v1/prompt_origin.proto";
 
 option go_package = "agentrepl/proto/shim/v1;shimv1";
 
@@ -28,7 +28,7 @@ message StartTurnRequest {
   // WHO CAUSED this prompt — a human send site, a daemon-driven merge step.
   // Closed attribution copied onto the turn's durable record so a stored turn
   // can be traced to the exact situation that caused it.
-  PromptOrigin origin = 3;
+  conversation.v1.PromptOrigin origin = 3;
   // The opening page's budget.
   uint32 page_size = 4;
   // The newest entry the caller already holds. UNSET = repaint: a full first

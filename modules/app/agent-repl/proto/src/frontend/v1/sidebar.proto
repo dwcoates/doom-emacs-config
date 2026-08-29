@@ -66,6 +66,11 @@ message WorkspaceRoster {
   optional RosterCurrentWorkspace current = 4;
 }
 
+// The priority badge's drawn label.
+message RosterRowPriorityBadge {
+  string label = 1;
+}
+
 // The attention marker. Empty: presence is the fact.
 //
 // THE CANONICAL BLINK CADENCE lives HERE, ONCE: TWO blinks — 500 ms on,
@@ -182,6 +187,11 @@ message RosterRow {
   // CLEARS it when SelectWorkspace names this workspace, re-pushing the
   // roster both times.
   optional RosterRowAttention attention = 32;
+
+  // The workspace's PRIORITY BADGE, resolver-composed ("P0.5", "P1", …).
+  // UNSET = unprioritized (no badge). Ordering is already the resolver's;
+  // this is only the drawn label.
+  optional RosterRowPriorityBadge priority = 33;
 
   // The row's display name.
   RosterRowName name = 2;
