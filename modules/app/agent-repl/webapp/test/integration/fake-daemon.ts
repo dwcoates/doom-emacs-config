@@ -14,7 +14,7 @@
  * every oneof set), because the client refuses malformed views by contract and
  * an accidentally-empty fake would fail tests for the wrong reason.
  */
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
@@ -236,6 +236,47 @@ const withUnknown = <T extends object>(message: T): T => {
   (message as { $unknown?: unknown[] }).$unknown = [{ ...UNKNOWN_FIELD }];
   return message;
 };
+
+/**
+ * The streaming content types a watch request arrives with. The response
+ * echoes the request's own type, which is what the adapter would have written.
+ */
+const STREAMING_CONTENT_TYPES = new Set([
+  "application/connect+proto",
+  "application/connect+json",
+  "application/grpc-web+proto",
+  "application/grpc-web+json",
+  "application/grpc+proto",
+  "application/grpc",
+]);
+
+/**
+ * FLUSH THE RESPONSE HEAD AS SOON AS A WATCH IS ACCEPTED.
+ *
+ * The daemon flushes headers on accept, so a client can observe that its watch
+ * is OPEN before any frame arrives — which matters because a standing stream
+ * may legitimately push nothing for a long time, and "accepted" and "not yet
+ * connected" must not look alike.
+ *
+ * connect-node writes the head lazily: it is emitted on the first frame, or at
+ * the end, and a watch that pushes nothing therefore leaves the client with no
+ * response head at all (measured: the head landed only when the stream ended).
+ * So the fake writes it here, echoing the request's content type — the same
+ * type the adapter would have written — and then neutralizes the adapter's own
+ * later `writeHead`, which would otherwise throw ERR_HTTP_HEADERS_SENT.
+ *
+ * Unary requests are left alone: their head carries the response and there is
+ * nothing to observe early.
+ */
+function flushHeadersOnAccept(req: IncomingMessage, res: ServerResponse): void {
+  const contentType = req.headers["content-type"];
+  if (typeof contentType !== "string" || !STREAMING_CONTENT_TYPES.has(contentType)) return;
+  const writeHead = res.writeHead.bind(res);
+  res.writeHead = ((...args: Parameters<ServerResponse["writeHead"]>) =>
+    res.headersSent ? res : writeHead(...args)) as ServerResponse["writeHead"];
+  res.writeHead(200, { "content-type": contentType });
+  res.flushHeaders();
+}
 
 export function createFakeDaemon(): FakeDaemon {
   const registrations = new Set<Registration>();
@@ -787,7 +828,10 @@ export function createFakeDaemon(): FakeDaemon {
   return {
     async start() {
       const handler = connectNodeAdapter({ routes });
-      const listener = createServer(handler);
+      const listener = createServer((req, res) => {
+        flushHeadersOnAccept(req, res);
+        handler(req, res);
+      });
       await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
       const address = listener.address() as AddressInfo;
       server = listener;
