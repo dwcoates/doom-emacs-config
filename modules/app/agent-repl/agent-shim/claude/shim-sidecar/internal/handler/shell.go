@@ -31,6 +31,10 @@ const maxExitMarkerDigits = 3
 type ShellOutputHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
+	// onTerminal reports that this handler READ the run's own terminal off the
+	// file. The reader owns what that means for the LOST policy; all this side
+	// states is that the run ended on evidence rather than on silence.
+	onTerminal func(path, run string)
 }
 
 // NewShellOutputHandler builds a handler.
@@ -90,6 +94,12 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		return entries
 	}
 	entries = append(entries, h.conv.BashExited(at, run, output.String(), code))
+	if h.onTerminal != nil {
+		// A RUN THAT ENDED ON ITS OWN MARKER CAN NEVER BE LOST. Telling the
+		// reader here is what stops the staleness policy restating a finished
+		// run as LOST once its finished spool inevitably goes quiet.
+		h.onTerminal(ctx.Path, run)
+	}
 	return entries
 }
 

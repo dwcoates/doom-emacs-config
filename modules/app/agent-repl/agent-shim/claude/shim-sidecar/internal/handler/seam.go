@@ -39,6 +39,16 @@ func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agen
 	h.conv.SetObserver(taskObserverFunc(fn))
 }
 
+// SetTerminalObserver adopts the reader's terminal-read sink.
+//
+// THE FILE IS THE ONLY PLACE A DETACHED RUN'S END IS WRITTEN, and only this
+// package reads it — so without this the reader has no way to tell a run that
+// finished from one it merely stopped hearing from, and every completed run
+// would eventually be restated LOST by the staleness sweep.
+func (h *ShellOutputHandler) SetTerminalObserver(fn func(path, run string)) {
+	h.onTerminal = fn
+}
+
 // LostTerminal spells the reader's LOST conclusion as the detached run's terminal.
 //
 // LOST IS ITS OWN WORD — "we stopped seeing it", not "known failed" — and the

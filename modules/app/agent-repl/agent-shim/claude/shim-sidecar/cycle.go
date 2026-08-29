@@ -99,6 +99,13 @@ type sidecar struct {
 	owners   *ownerIndex
 	held     *heldSpools
 
+	// settling holds the files whose converter READ a run's own terminal in the
+	// batch currently in flight. The tracker is only told once that batch is
+	// DURABLE: a run untracked against a write that never committed would be
+	// re-read, restate its terminal, and be neither tracked nor concludable in
+	// between.
+	settling map[string]string // resolved path -> run activity id
+
 	// cursors is CYCLE-SCOPED: recovered as the first act of every production
 	// cycle and dropped the moment production is suspended, so a tailer can
 	// never be built from a stale — or absent — recovery.
@@ -138,6 +145,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		tracker:  stale.New(options.Stale, log.With(logging.Context{Component: "stale"})),
 		log:      log,
 		watchers: map[string]*watched{},
+		settling: map[string]string{},
 		rewound:  map[string]bool{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
@@ -294,6 +302,9 @@ func (s *sidecar) suspend(operation string, cause error) {
 		return
 	}
 	s.cursors = nil
+	// A terminal whose batch never committed is a terminal the store never saw,
+	// so the promise to untrack its run goes with the cycle that made it.
+	s.settling = map[string]string{}
 	// EVERY TAILER GOES WITH THE CURSORS. A tailer that outlived its cycle would
 	// resume from a position the NEXT cycle's store never handed us, which is
 	// the one thing the invariant forbids.
@@ -458,6 +469,7 @@ func (s *sidecar) pollAll() {
 			return
 		}
 		w.tailer.Commit(result)
+		s.applySettled()
 		if w.vanished {
 			// A file that is readable again was a rename race; the tracker
 			// clears its own grace clock on the activity below.
@@ -468,6 +480,31 @@ func (s *sidecar) pollAll() {
 			Operation: "tail-pickup", Path: path, TaskID: w.target.TaskID,
 			FileID: result.Next.GetFileId(), Offset: logging.Off(result.Next.GetOffset()),
 		}).Log("picked up %d record(s) kind=%s", len(result.Entries), w.target.Kind)
+	}
+}
+
+// RunSettled records that a converter read a detached run's OWN terminal off
+// its file. It is the reader's half of the terminal seam.
+//
+// IT DOES NOT UNTRACK THE RUN YET. The terminal is a record like any other, and
+// it is only true of the store once the batch carrying it is durable; until then
+// this is a promise the poll loop keeps in applySettled.
+func (s *sidecar) RunSettled(path, run string) {
+	s.settling[path] = run
+}
+
+// applySettled tells the LOST policy about every terminal whose batch just
+// became durable. A settled run is never swept: LOST is the answer for a run we
+// stopped seeing, never for one we watched finish.
+func (s *sidecar) applySettled() {
+	for path, run := range s.settling {
+		delete(s.settling, path)
+		if !s.tracker.Open(path) {
+			continue
+		}
+		s.tracker.Settle(path)
+		s.log.With(logging.Context{Operation: "run-settled", Path: path, ActivityID: run}).
+			Log("the run's own terminal was read from its file and is durable; it can no longer be concluded LOST")
 	}
 }
 

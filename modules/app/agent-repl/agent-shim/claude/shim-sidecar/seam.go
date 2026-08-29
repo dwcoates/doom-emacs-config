@@ -39,6 +39,13 @@ type lostTerminalSink interface {
 	LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry
 }
 
+// terminalReadSink is implemented by a handler that can tell the reader it READ
+// a detached run's own terminal off the file (a spool's EXIT marker). The reader
+// is what turns that into "this run can no longer be concluded LOST".
+type terminalReadSink interface {
+	SetTerminalObserver(func(path, run string))
+}
+
 // newHandler builds the converter for one file kind and hands it the reader's
 // observations.
 func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
@@ -59,13 +66,41 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 		panic(fmt.Sprintf("sidecar: unsupported tail kind %d", kind))
 	}
 	s.plumbObserver(kind, built, handlerLog)
+	s.plumbTerminals(kind, built, handlerLog)
 	return built
 }
 
+// plumbTerminals hands the converter the reader's terminal-read callback.
+//
+// ONLY A DETACHED RUN HAS A TERMINAL TO READ. A transcript's silence concludes
+// nothing, so a converter for one is not expected to report terminals and its
+// silence here is recorded at verbose rather than as a defect.
+func (s *sidecar) plumbTerminals(kind tail.Kind, built tail.Handler, log *logging.Bound) {
+	sink, ok := built.(terminalReadSink)
+	if !ok {
+		log.With(logging.Context{Operation: "plumb-terminal-observer"}).LogVerbose(
+			"the %s converter reports no run terminals; only a detached run has one to read", kind)
+		return
+	}
+	sink.SetTerminalObserver(s.RunSettled)
+	log.With(logging.Context{Operation: "plumb-terminal-observer"}).LogVerbose("terminal observations plumbed for kind=%s", kind)
+}
+
 // plumbObserver hands the converter the reader's spawn-observation callback.
+//
+// ONLY A TRANSCRIPT CAN REPORT A LAUNCH. A launch is stated in a TOOL RESULT,
+// and a spool or a journal carries none — so their converters are not expected
+// to report one and their silence is ordinary. A TRANSCRIPT converter that
+// reports none is a different matter entirely: it is the only source the reader
+// has, and without it every spool waits out its hold and goes to residue.
 func (s *sidecar) plumbObserver(kind tail.Kind, built tail.Handler, log *logging.Bound) {
 	sink, ok := built.(taskObserverSink)
 	if !ok {
+		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
+			log.With(logging.Context{Operation: "plumb-observer"}).LogVerbose(
+				"the %s converter reports no spawn observations; only a transcript carries the tool results a launch is stated in", kind)
+			return
+		}
 		// The reader cannot learn which call spawned a task from any other
 		// source, so a converter that reports none leaves every spool unclaimed
 		// until its bounded wait expires and its bytes go to residue.

@@ -132,11 +132,13 @@ func TestPlumbedObservationsReachTheOwnerIndex(t *testing.T) {
 }
 
 func TestAConverterReportingNoSpawnsIsStatedLoudly(t *testing.T) {
-	// Arrange: nothing else can teach the reader who owns a spool.
+	// Arrange: a TRANSCRIPT is the only thing that can teach the reader who owns
+	// a spool, because a launch is stated in a tool result and nothing else
+	// carries one.
 	h := newHarness(t, &fakeStore{})
 
 	// Act.
-	h.sc.plumbObserver(tail.KindShellSpool, &lostCapable{}, h.sc.log)
+	h.sc.plumbObserver(tail.KindSessionTranscript, &lostCapable{}, h.sc.log)
 
 	// Assert.
 	if !strings.Contains(h.logText(), "implements no SetTaskObserver") {
@@ -214,5 +216,21 @@ func TestASilentRunKeepsItsTailer(t *testing.T) {
 	// Assert.
 	if _, ok := h.sc.watchers[spool]; !ok {
 		t.Fatal("a run that merely went quiet lost its tailer, so later bytes would be dropped")
+	}
+}
+
+func TestASpoolConverterReportingNoLaunchesIsNotADefect(t *testing.T) {
+	// Arrange. A launch is stated in a TOOL RESULT and a spool carries none, so
+	// the shell converter has nothing to report and its silence must not be
+	// logged as the error that a transcript's silence genuinely is.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+
+	// Act.
+	h.sc.newHandler(tail.KindShellSpool, h.sc.log)
+
+	// Assert.
+	if strings.Contains(h.logText(), "reports no spawn observations (it implements no SetTaskObserver)") {
+		t.Fatalf("a spool converter's silence was recorded as a defect: %s", h.logText())
 	}
 }
