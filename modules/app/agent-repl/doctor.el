@@ -1,8 +1,8 @@
 ;;; app/agent-repl/doctor.el -*- lexical-binding: t; -*-
 
 ;; Loaded by `doom doctor' to surface hook-install and capability
-;; problems.  The actual check logic lives in `install.el', `codex.el',
-;; and `daemon.el' so it is testable; here we translate the returned
+;; problems.  The actual check logic lives in `daemon.el' so it is
+;; testable; here we translate the returned
 ;; (LEVEL . MESSAGE) list into `warn!' / `error!' calls.
 
 ;; The doctor runs inside Doom, where `warn!' (doom-lib) exists.
@@ -21,7 +21,7 @@ not owned by a workspace."
 ;; doctor.el stays at the module root (that is where `doom doctor' looks for
 ;; it), but the sources it loads live in the `lisp/' subdirectory.
 (let ((dir (expand-file-name "lisp/" (file-name-directory load-file-name)))
-      (sources '("install.el" "codex.el" "daemon.el")))
+      (sources '("daemon.el")))
   (agent-repl--doctor-log
    "doctor: start dir=%s sources=%S logger-available=%s"
    dir sources (fboundp 'agent-repl--log))
@@ -62,9 +62,7 @@ not owned by a workspace."
                     "doctor: provider=%s outcome=skipped reason=unbound"
                     provider)
                    nil))
-               '(agent-repl--doctor-issues
-                 agent-repl--codex-doctor-issues
-                 agent-repl--widget-doctor-issues)))))
+               '(agent-repl--widget-doctor-issues)))))
   (agent-repl--doctor-log
    "doctor: aggregation issue-count=%d issues=%S"
    (length issues) issues)

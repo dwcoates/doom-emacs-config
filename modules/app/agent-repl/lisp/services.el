@@ -18,7 +18,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--assert-main-thread "core" (what))
-(declare-function agent-repl--error "core" (ws fmt &rest args))
+(declare-function agent-repl--fatal "core" (ws fmt &rest args))
 (declare-function agent-repl--frontend-all-turn-active-workspaces "frontend-client" ())
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
 (declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight stop-shims on-complete))
@@ -158,7 +158,7 @@ terminal latch timeout and is restored when the latch returns."
              (agent-repl--log nil
                               "shim-services launchctl: invalid verb=%S label=%s service=%s"
                               verb label service)
-             (agent-repl--error nil
+             (agent-repl--fatal nil
                                 "invalid launchctl verb %S for service %s"
                                 verb label))))
          (exit-code (agent-repl--launchctl-call args))
@@ -175,7 +175,7 @@ terminal latch timeout and is restored when the latch returns."
        nil "launchctl %s FAILED for %s (exit %s): %s — full output in %s"
        verb label exit-code (agent-repl--backend-output-tail output)
        (agent-repl--logfile-path))
-      (agent-repl--error nil
+      (agent-repl--fatal nil
                          "launchd service %s failed `%s' (exit %s): %s"
                          label verb exit-code
                          (if (string-empty-p output) "<no output>" output)))
@@ -311,7 +311,7 @@ validated both jobs before building any runtime artifact."
                      agent-repl--shim-store-binary (if store-present "t" "nil")
                      agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))
     (unless (and store-present sidecar-present)
-      (agent-repl--error nil
+      (agent-repl--fatal nil
                          "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
                          agent-repl--shim-store-binary (if store-present "t" "nil")
                          agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
@@ -563,18 +563,18 @@ failure or timeout is logged and signalled, so a caller cannot mistake the
 initial `:pending' dispatch for a completed deployment."
   (let ((limit (or timeout agent-repl-runtime-restart-await-timeout)))
     (unless (and (numberp limit) (> limit 0))
-      (agent-repl--error nil
+      (agent-repl--fatal nil
                          "runtime-restart-await: invalid timeout=%S stop-shims=%s"
                          limit (if stop-shims "t" "nil")))
     (unless (and (numberp agent-repl-runtime-restart-health-timeout)
                  (> agent-repl-runtime-restart-health-timeout 0))
-      (agent-repl--error
+      (agent-repl--fatal
        nil
        "runtime-restart-await: invalid health-timeout=%S stop-shims=%s"
        agent-repl-runtime-restart-health-timeout (if stop-shims "t" "nil")))
     (unless (and (integerp agent-repl-runtime-restart-ready-attempts)
                  (> agent-repl-runtime-restart-ready-attempts 0))
-      (agent-repl--error
+      (agent-repl--fatal
        nil
        "runtime-restart-await: invalid ready-attempts=%S stop-shims=%s"
        agent-repl-runtime-restart-ready-attempts (if stop-shims "t" "nil")))
@@ -613,12 +613,12 @@ initial `:pending' dispatch for a completed deployment."
                           (if stop-shims "t" "nil") (- (float-time) started))
          "runtime-restart-complete")
         (:failed
-         (agent-repl--error nil
+         (agent-repl--fatal nil
                             "runtime-restart-await: FAILED stop-shims=%s elapsed=%.3fs detail=%s"
                             (if stop-shims "t" "nil")
                             (- (float-time) started) failure))
         (_
-         (agent-repl--error nil
+         (agent-repl--fatal nil
                             "runtime-restart-await: TIMEOUT stop-shims=%s timeout=%.3fs elapsed=%.3fs state=%S"
                             (if stop-shims "t" "nil") limit
                             (- (float-time) started) state))))))
