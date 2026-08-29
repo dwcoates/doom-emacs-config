@@ -424,3 +424,36 @@ type DrainSchedule struct {
 	// SetAt is when the schedule was put in force.
 	SetAt time.Time
 }
+
+// RepoKey identifies one repository's merge queue: the TARGET repository's
+// canonical common dir. It is a path rather than a RepoID because the queue is
+// keyed by what a merge lands in, which the orchestrator knows before it knows
+// any workspace's registered repository.
+type RepoKey string
+
+// MergeQueueState is where one queue entry stands.
+type MergeQueueState int
+
+// The merge queue states.
+const (
+	// MergeQueued is waiting for its repository's turn.
+	MergeQueued MergeQueueState = iota
+	// MergeAdmitted is the entry the orchestrator is running now.
+	MergeAdmitted
+)
+
+// MergeQueueEntry is one workspace's place in its repository's merge queue. The
+// queue is DURABLE so a restart re-enqueues exactly what was waiting, in the
+// order it was waiting in.
+type MergeQueueEntry struct {
+	// Repo is the queue's repository key.
+	Repo RepoKey
+	// Workspace is the workspace whose merge is queued.
+	Workspace WorkspaceID
+	// Position is the entry's one-based place in the queue's order.
+	Position int
+	// State is where the entry stands.
+	State MergeQueueState
+	// EnqueuedAt is when it joined the queue.
+	EnqueuedAt time.Time
+}

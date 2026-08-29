@@ -123,6 +123,24 @@ type DB interface {
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
 
+	// EnqueueMerge puts a workspace in its target repository's DURABLE merge
+	// queue and returns its one-based position, refusing a workspace already
+	// queued there.
+	EnqueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) (int, error)
+	// AdmitMerge marks the entry the orchestrator is running now.
+	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
+	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
+	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
+	// MergeQueue loads one repository's queue in order, all-or-nothing.
+	MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error)
+	// AllMergeQueues loads every repository's queue for the boot re-enqueue,
+	// all-or-nothing.
+	AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEntry, error)
+	// SetMergeQueuePaused pauses or resumes one repository's queue.
+	SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bool) error
+	// MergeQueuePaused reports whether one repository's queue is paused.
+	MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error)
+
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)
 	// CloseFault stamps a fault's persisted resolved-at.
