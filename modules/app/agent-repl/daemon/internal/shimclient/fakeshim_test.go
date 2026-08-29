@@ -37,6 +37,24 @@ type fakeShim struct {
 	watchAgentRefusal  error
 	watchAgentFrames   []*shimv1.WatchAgentResponse
 	watchSessionRefuse error
+
+	// shutdown stops the server; a test calls it through stop.
+	shutdown func()
+	// conns are the accepted connections. h2c HIJACKS them, so http.Server's
+	// own Close leaves them open — the fake has to close them itself for a
+	// stop to look like a shim that is gone.
+	conns map[net.Conn]struct{}
+}
+
+// stop shuts the fake down and removes its socket, so a client dialing it
+// afterwards meets the same evidence a dead shim leaves behind.
+func (f *fakeShim) stop() {
+	f.mu.Lock()
+	stop := f.shutdown
+	f.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 // fakeSession is one open WatchSession stream.
@@ -70,18 +88,51 @@ func (f *fakeShim) serve(t *testing.T, udsPath string) {
 	}
 	mux := http.NewServeMux()
 	mux.Handle(shimv1connect.NewShimHandler(f))
-	srv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
+	f.mu.Lock()
+	f.conns = map[net.Conn]struct{}{}
+	f.mu.Unlock()
+
+	srv := &http.Server{
+		Handler: h2c.NewHandler(mux, &http2.Server{}),
+		ConnState: func(conn net.Conn, state http.ConnState) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			switch state {
+			case http.StateClosed:
+				delete(f.conns, conn)
+			default:
+				f.conns[conn] = struct{}{}
+			}
+		},
+	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		_ = srv.Serve(ln)
 	}()
-	t.Cleanup(func() {
-		_ = srv.Close()
-		<-done
-		_ = os.Remove(udsPath)
-	})
+	var once sync.Once
+	shutdown := func() {
+		once.Do(func() {
+			_ = srv.Close()
+			f.mu.Lock()
+			conns := make([]net.Conn, 0, len(f.conns))
+			for conn := range f.conns {
+				conns = append(conns, conn)
+			}
+			f.conns = map[net.Conn]struct{}{}
+			f.mu.Unlock()
+			for _, conn := range conns {
+				_ = conn.Close()
+			}
+			<-done
+			_ = os.Remove(udsPath)
+		})
+	}
+	f.mu.Lock()
+	f.shutdown = shutdown
+	f.mu.Unlock()
+	t.Cleanup(shutdown)
 }
 
 // count is how many times a verb was called.
