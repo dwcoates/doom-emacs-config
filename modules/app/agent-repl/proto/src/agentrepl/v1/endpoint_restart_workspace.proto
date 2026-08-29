@@ -46,6 +46,8 @@ message RestartWorkspaceError {
     RestartWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     RestartWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The workspace has no session to restart.
+    RestartWorkspaceNoSession no_session = 5;
   }
 }
 message RestartWorkspaceUnknownWorkspace {}
@@ -58,3 +60,4 @@ message RestartWorkspaceTransferringAway {
   string address = 1;
 }
 message RestartWorkspaceNotYetAdopted {}
+message RestartWorkspaceNoSession {}

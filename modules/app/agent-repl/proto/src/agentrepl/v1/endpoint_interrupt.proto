@@ -79,6 +79,12 @@ message InterruptError {
     InterruptTransferringAway transferring_away = 4;
     // A joining daemon has not finished adopting this workspace yet.
     InterruptNotYetAdopted not_yet_adopted = 5;
+    // The FeedId names no detached item.
+    InterruptNotDetachedWork not_detached_work = 6;
+    // The workspace has no session to interrupt.
+    InterruptNoSession no_session = 7;
+    // A typed shim refusal relayed (e.g. UpdateAgent nothing_running).
+    InterruptShimRefused shim_refused = 8;
   }
 }
 
@@ -97,3 +103,9 @@ message InterruptTransferringAway {
   string address = 1;
 }
 message InterruptNotYetAdopted {}
+message InterruptNotDetachedWork {}
+message InterruptNoSession {}
+message InterruptShimRefused {
+  // The shim's own account of the refusal.
+  string detail = 1;
+}

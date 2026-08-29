@@ -53,6 +53,10 @@ message OpenFeedError {
     OpenFeedTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     OpenFeedNotYetAdopted not_yet_adopted = 4;
+    // The FeedId does not decode.
+    OpenFeedFeedUndecodable feed_undecodable = 5;
+    // The FeedId decodes to another workspace.
+    OpenFeedFeedNotInWorkspace feed_not_in_workspace = 6;
   }
 }
 message OpenFeedUnknownWorkspace {}
@@ -65,3 +69,5 @@ message OpenFeedTransferringAway {
   string address = 1;
 }
 message OpenFeedNotYetAdopted {}
+message OpenFeedFeedUndecodable {}
+message OpenFeedFeedNotInWorkspace {}

@@ -44,6 +44,14 @@ message SetPermissionModeError {
     SetPermissionModeTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     SetPermissionModeNotYetAdopted not_yet_adopted = 4;
+    // The mode is not among the ones served.
+    SetPermissionModeModeNotServed mode_not_served = 5;
+    // An ungated mode was asked for without the explicit consent.
+    SetPermissionModeUngatedWithoutConsent ungated_without_consent = 6;
+    // The workspace has no session to set a mode on.
+    SetPermissionModeNoSession no_session = 7;
+    // The vendor refused the change.
+    SetPermissionModeVendorRefused vendor_refused = 8;
   }
 }
 message SetPermissionModeUnknownWorkspace {}
@@ -56,3 +64,10 @@ message SetPermissionModeTransferringAway {
   string address = 1;
 }
 message SetPermissionModeNotYetAdopted {}
+message SetPermissionModeModeNotServed {}
+message SetPermissionModeUngatedWithoutConsent {}
+message SetPermissionModeNoSession {}
+message SetPermissionModeVendorRefused {
+  // The vendor's own account of the refusal.
+  string detail = 1;
+}

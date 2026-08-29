@@ -135,6 +135,14 @@ message SubmitPromptError {
     SubmitPromptTransferringAway transferring_away = 4;
     // A joining daemon has not finished adopting this workspace yet.
     SubmitPromptNotYetAdopted not_yet_adopted = 5;
+    // The FeedId decodes to another workspace.
+    SubmitPromptFeedNotInWorkspace feed_not_in_workspace = 6;
+    // The FeedId does not decode.
+    SubmitPromptFeedUndecodable feed_undecodable = 7;
+    // A bubble-addressed submit while that agent's turn runs.
+    SubmitPromptTurnAlreadyOpen turn_already_open = 8;
+    // The workspace has no session to submit to.
+    SubmitPromptNoSession no_session = 9;
   }
 }
 // The merge-in-flight refusal. Empty: the set arm is the whole assertion —
@@ -151,3 +159,7 @@ message SubmitPromptTransferringAway {
   string address = 1;
 }
 message SubmitPromptNotYetAdopted {}
+message SubmitPromptFeedNotInWorkspace {}
+message SubmitPromptFeedUndecodable {}
+message SubmitPromptTurnAlreadyOpen {}
+message SubmitPromptNoSession {}

@@ -46,6 +46,8 @@ message OpenLoginError {
     OpenLoginTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     OpenLoginNotYetAdopted not_yet_adopted = 4;
+    // Spawning the login terminal failed.
+    OpenLoginSpawnFailed spawn_failed = 5;
   }
 }
 message OpenLoginUnknownWorkspace {}
@@ -58,3 +60,7 @@ message OpenLoginTransferringAway {
   string address = 1;
 }
 message OpenLoginNotYetAdopted {}
+message OpenLoginSpawnFailed {
+  // The spawn's own account of the failure.
+  string detail = 1;
+}

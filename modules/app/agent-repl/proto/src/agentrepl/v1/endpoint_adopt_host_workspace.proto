@@ -50,6 +50,10 @@ message AdoptHostWorkspaceError {
     AdoptHostWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     AdoptHostWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // No transfer was announced for this workspace.
+    AdoptHostWorkspaceNoTransferAnnounced no_transfer_announced = 5;
+    // The caller's stream was not open at announcement.
+    AdoptHostWorkspaceParticipantNotExpected participant_not_expected = 6;
   }
 }
 message AdoptHostWorkspaceUnknownWorkspace {}
@@ -62,3 +66,5 @@ message AdoptHostWorkspaceTransferringAway {
   string address = 1;
 }
 message AdoptHostWorkspaceNotYetAdopted {}
+message AdoptHostWorkspaceNoTransferAnnounced {}
+message AdoptHostWorkspaceParticipantNotExpected {}

@@ -61,6 +61,12 @@ message AnswerColdGateError {
     AnswerColdGateTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     AnswerColdGateNotYetAdopted not_yet_adopted = 4;
+    // No cold gate is standing for this workspace.
+    AnswerColdGateNoColdGate no_cold_gate = 5;
+    // A remediation the gate never served.
+    AnswerColdGateUnservedRemediation unserved_remediation = 6;
+    // The workspace has no session to answer to.
+    AnswerColdGateNoSession no_session = 7;
   }
 }
 message AnswerColdGateUnknownWorkspace {}
@@ -73,3 +79,6 @@ message AnswerColdGateTransferringAway {
   string address = 1;
 }
 message AnswerColdGateNotYetAdopted {}
+message AnswerColdGateNoColdGate {}
+message AnswerColdGateUnservedRemediation {}
+message AnswerColdGateNoSession {}

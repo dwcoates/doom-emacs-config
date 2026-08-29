@@ -36,6 +36,12 @@ message OpenWorkspaceError {
     OpenWorkspaceTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     OpenWorkspaceNotYetAdopted not_yet_adopted = 4;
+    // The workspace's session has been deleted and cannot be reopened.
+    OpenWorkspaceSessionDeleted session_deleted = 5;
+    // The vendor transcript to resume from is nowhere on disk.
+    OpenWorkspaceTranscriptMissing transcript_missing = 6;
+    // Spawning the session's shim failed.
+    OpenWorkspaceSpawnFailed spawn_failed = 7;
   }
 }
 message OpenWorkspaceUnknownWorkspace {}
@@ -48,3 +54,14 @@ message OpenWorkspaceTransferringAway {
   string address = 1;
 }
 message OpenWorkspaceNotYetAdopted {}
+message OpenWorkspaceSessionDeleted {}
+message OpenWorkspaceTranscriptMissing {
+  // The vendor session whose transcript is missing.
+  string vendor_session_id = 1;
+  // Every path the daemon looked in.
+  repeated string searched_paths = 2;
+}
+message OpenWorkspaceSpawnFailed {
+  // The spawn's own account of the failure.
+  string detail = 1;
+}

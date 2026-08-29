@@ -63,6 +63,12 @@ message AnswerPermissionError {
     AnswerPermissionTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     AnswerPermissionNotYetAdopted not_yet_adopted = 4;
+    // The permission card is no longer standing.
+    AnswerPermissionAskNotStanding ask_not_standing = 5;
+    // A standing allow was picked where none was offered.
+    AnswerPermissionNoStandingOffer no_standing_offer = 6;
+    // The workspace has no session to answer to.
+    AnswerPermissionNoSession no_session = 7;
   }
 }
 message AnswerPermissionUnknownWorkspace {}
@@ -75,3 +81,6 @@ message AnswerPermissionTransferringAway {
   string address = 1;
 }
 message AnswerPermissionNotYetAdopted {}
+message AnswerPermissionAskNotStanding {}
+message AnswerPermissionNoStandingOffer {}
+message AnswerPermissionNoSession {}

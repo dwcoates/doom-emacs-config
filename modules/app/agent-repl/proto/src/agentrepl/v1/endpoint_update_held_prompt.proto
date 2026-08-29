@@ -61,6 +61,14 @@ message UpdateHeldPromptError {
     UpdateHeldPromptTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     UpdateHeldPromptNotYetAdopted not_yet_adopted = 4;
+    // No hold by that id.
+    UpdateHeldPromptNoSuchHold no_such_hold = 5;
+    // The hold was already delivered.
+    UpdateHeldPromptAlreadyDelivered already_delivered = 6;
+    // An accept on a verdict other than hold_for_turn_end.
+    UpdateHeldPromptAcceptNotApplicable accept_not_applicable = 7;
+    // A force-through on an uninterruptible or session_starting hold.
+    UpdateHeldPromptReleaseRefused release_refused = 8;
   }
 }
 message UpdateHeldPromptUnknownWorkspace {}
@@ -73,3 +81,7 @@ message UpdateHeldPromptTransferringAway {
   string address = 1;
 }
 message UpdateHeldPromptNotYetAdopted {}
+message UpdateHeldPromptNoSuchHold {}
+message UpdateHeldPromptAlreadyDelivered {}
+message UpdateHeldPromptAcceptNotApplicable {}
+message UpdateHeldPromptReleaseRefused {}

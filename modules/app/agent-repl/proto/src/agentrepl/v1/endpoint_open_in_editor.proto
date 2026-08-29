@@ -49,6 +49,8 @@ message OpenInEditorError {
     OpenInEditorTransferringAway transferring_away = 3;
     // A joining daemon has not finished adopting this workspace yet.
     OpenInEditorNotYetAdopted not_yet_adopted = 4;
+    // The path resolves outside the workspace's worktree.
+    OpenInEditorPathEscapesWorkspace path_escapes_workspace = 5;
   }
 }
 message OpenInEditorUnknownWorkspace {}
@@ -61,3 +63,4 @@ message OpenInEditorTransferringAway {
   string address = 1;
 }
 message OpenInEditorNotYetAdopted {}
+message OpenInEditorPathEscapesWorkspace {}
