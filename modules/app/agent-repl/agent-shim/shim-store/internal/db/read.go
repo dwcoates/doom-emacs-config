@@ -110,10 +110,12 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 		return nil, d.refuse(base, err)
 	}
 
-	success := &storev1.ReadAgentPageSuccess{}
-	for _, line := range lines {
-		success.Lines = append(success.Lines, line.GetLine())
-	}
+	// EVERY CONTINUATION LINE CARRIES ITS OWN POINTER, exactly as the opening
+	// page's do. A reader walking older must be able to echo a real position
+	// back — for a later ReadAgentPage, for a known_through re-open — and a
+	// page that served bare lines forced it to mint a placeholder mark or to
+	// track positions it was never given.
+	success := &storev1.ReadAgentPageSuccess{Lines: lines}
 	if more {
 		success.Boundary = &storev1.ReadAgentPageSuccess_More{
 			More: &storev1.ReadAgentPageMore{LastItem: lines[len(lines)-1].GetAt()},

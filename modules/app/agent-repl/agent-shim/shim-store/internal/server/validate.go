@@ -35,6 +35,9 @@ const (
 	SiteDatabaseFailure        = "database_failure"
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
 	SiteStreamNotFlushable     = "stream_not_flushable"
+	SiteRunEmpty               = "run_empty"
+	SiteUnknownBashRun         = "unknown_bash_run"
+	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 )
 
 // refusal is one typed refusal: the site the server logs, and the human detail
@@ -205,6 +208,15 @@ func validateReadAgentPageRequest(req *storev1.ReadAgentPageRequest) *refusal {
 
 func validateWatchAgentSessionRequest(req *storev1.WatchAgentSessionRequest) *refusal {
 	return validateAgentSessionToken(req.GetWatch())
+}
+
+// validateWatchBashRunRequest is the use site for WatchBashRun: the run's unit
+// identity is the whole address, so an empty one names no run.
+func validateWatchBashRunRequest(req *storev1.WatchBashRunRequest) *refusal {
+	if req.GetRun() == nil || req.GetRun().GetValue() == "" {
+		return refuse(SiteRunEmpty, "run: an AgentActivityId with no value addresses no run")
+	}
+	return nil
 }
 
 func validateGetSidecarCursorsRequest(req *storev1.GetSidecarCursorsRequest) *refusal {

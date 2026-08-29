@@ -31,8 +31,12 @@ type Server struct {
 	store  Store
 	log    *logging.Logger
 	tokens *tokenRegistry
-	fan    *fanout
-	http   *http.Server
+	fan    *fanout[LineWritten]
+	// bashFan is the WatchBashRun registry. A SECOND REGISTRY, not a second
+	// key on the first: a bash row is not a page line, and a book watcher must
+	// never be handed one.
+	bashFan *fanout[BashRowWritten]
+	http    *http.Server
 
 	// done is CLOSED by Shutdown before the HTTP server is drained. Standing
 	// watch streams select on it and return cleanly, which is what lets
@@ -61,9 +65,10 @@ func New(store Store, log *logging.Logger, watchBuffer int) *Server {
 	s := &Server{
 		store:  store,
 		log:    log,
-		tokens: newTokenRegistry(),
-		fan:    newFanout(watchBuffer),
-		done:   make(chan struct{}),
+		tokens:  newTokenRegistry(),
+		fan:     newFanout(watchBuffer, lineKey),
+		bashFan: newFanout(watchBuffer, bashRowKey),
+		done:    make(chan struct{}),
 	}
 	s.http = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
 	log.Log(logging.Fields{Operation: "store.server.new"}, "store.v1.ShimStore ready watch_buffer=%d", s.fan.buffer)
@@ -100,7 +105,7 @@ func (s *Server) Serve(ln net.Listener) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		close(s.done)
-		s.log.Log(logging.Fields{Operation: "store.shutdown"}, "ending standing watches watchers=%d outstanding_tokens=%d", s.fan.subscribers(), s.tokens.outstanding())
+		s.log.Log(logging.Fields{Operation: "store.shutdown"}, "ending standing watches watchers=%d bash_watchers=%d outstanding_tokens=%d", s.fan.subscribers(), s.bashFan.subscribers(), s.tokens.outstanding())
 	})
 	if err := s.http.Shutdown(ctx); err != nil {
 		s.log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "draining the HTTP server failed: %v", err)
@@ -207,8 +212,9 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	}
 
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
-		"batch durable written=%d absorbed=%d page_lines=%d", result.Written, result.Absorbed, len(result.Lines))
+		"batch durable written=%d absorbed=%d page_lines=%d bash_rows=%d", result.Written, result.Absorbed, len(result.Lines), len(result.BashRows))
 	s.publish(log, msg.GetProducer(), result.Lines)
+	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
 	}), nil
@@ -232,7 +238,7 @@ func (s *Server) publish(log *logging.Logger, producer string, lines []LineWritt
 	log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer},
 		"published lines=%d watchers=%d", len(lines), s.fan.subscribers())
 	for _, sub := range overflowed {
-		log.Log(logging.Fields{Operation: "store.fanout.overflow", Level: "warn", BookAgentID: sub.agentID, WatchTokenHash: sub.tokenHash},
+		log.Log(logging.Fields{Operation: "store.fanout.overflow", Level: "warn", BookAgentID: sub.key, WatchTokenHash: sub.tokenHash},
 			"watch buffer overflowed; ending this subscriber's stream buffer=%d dropped=%d", s.fan.buffer, sub.dropped)
 	}
 }
@@ -356,7 +362,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 		case <-ctx.Done():
 			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the caller went away")
 			return nil
-		case line := <-sub.lines:
+		case line := <-sub.items:
 			if line.WriteSeq <= entry.pinSeq {
 				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line at or below the pin")
 				continue
@@ -383,10 +389,10 @@ func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.
 	return nil
 }
 
-func (s *Server) endOverflowed(log *logging.Logger, sub *subscriber) error {
+func (s *Server) endOverflowed(log *logging.Logger, sub *sink[LineWritten]) error {
 	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn"},
 		"watch ended: this subscriber overflowed its buffer and must re-open with known_through dropped=%d", sub.dropped)
-	return connect.NewError(connect.CodeResourceExhausted, refuse("watch_buffer_overflow",
+	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow,
 		"watch: the subscriber fell too far behind its buffer; re-open with known_through"))
 }
 

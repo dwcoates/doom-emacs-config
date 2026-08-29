@@ -10,6 +10,15 @@ import (
 	"agentrepl/shim-store/internal/logging"
 )
 
+// BashRowWritten is one detached-run row this write produced, ready for the
+// WatchBashRun fan-out. WriteSeq is the ordinal a watcher is pinned by; it
+// never reaches the wire.
+type BashRowWritten struct {
+	RunID    string
+	Row      *storev1.StoreAgentBash
+	WriteSeq uint64
+}
+
 // LineWritten is one page line this write produced, ready for the fan-out to
 // publish. WriteSeq is the store-internal ordinal a watcher is pinned by; it
 // never reaches the wire.
@@ -26,6 +35,9 @@ type WriteResult struct {
 	Written  int
 	Absorbed int
 	Lines    []LineWritten
+	// BashRows is the bash rows this write produced, ready for the WatchBashRun
+	// fan-out. A run's rows are published exactly as a book's lines are.
+	BashRows []BashRowWritten
 }
 
 // WriteBatch commits one producer's batch — records and cursor advance — as ONE
@@ -128,10 +140,17 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			return WriteResult{}, d.refuse(fields, err)
 		}
 		result.Written++
-		if r.kind == kindPageLine {
+		switch r.kind {
+		case kindPageLine:
 			result.Lines = append(result.Lines, LineWritten{
 				AgentID:  r.book.String,
 				Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine},
+				WriteSeq: nextSeq,
+			})
+		case kindBash:
+			result.BashRows = append(result.BashRows, BashRowWritten{
+				RunID:    r.runID.String,
+				Row:      r.bashRow,
 				WriteSeq: nextSeq,
 			})
 		}
@@ -227,22 +246,23 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq u
 // past it.
 func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) (int64, error) {
 	const upsertSQL = `INSERT INTO entry (
-	    upsert_key, write_id, write_seq, plane, kind, book_agent_id, top_level, frame,
+	    upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame,
 	    first_inserted_at_ms, last_written_at_ms)
-	  VALUES (?,?,?,?,?,?,?,?,?,?)
+	  VALUES (?,?,?,?,?,?,?,?,?,?,?)
 	  ON CONFLICT(upsert_key) DO UPDATE SET
 	    write_id = excluded.write_id,
 	    write_seq = excluded.write_seq,
 	    plane = excluded.plane,
 	    kind = excluded.kind,
 	    book_agent_id = excluded.book_agent_id,
+	    run_id = excluded.run_id,
 	    top_level = excluded.top_level,
 	    frame = excluded.frame,
 	    last_written_at_ms = excluded.last_written_at_ms
 	  RETURNING position`
 	var position int64
 	err := tx.QueryRowContext(ctx, upsertSQL,
-		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.topLevel, r.frame, now, now,
+		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, r.frame, now, now,
 	).Scan(&position)
 	if err != nil {
 		return 0, storagef(err, "writing entry upsert_key=%q write_id=%q", r.upsertKey, r.writeID)
