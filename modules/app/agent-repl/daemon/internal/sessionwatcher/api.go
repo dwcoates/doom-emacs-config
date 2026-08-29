@@ -140,7 +140,10 @@ type FooterSink interface {
 	// OnContextCut is the cut's END SIGNAL. SessionUpdate.compacting says a
 	// compaction BEGAN and nothing upstream says it finished, so this record
 	// is what clears the footer's compacting and clearing states — which is
-	// why the footer sees a page line the feed also draws.
+	// why the footer sees a page line the feed also draws. A FAILED compaction
+	// ends the status too: nothing was cut, so the session is idle again, and
+	// the producer's account becomes the footer's evidence rather than passing
+	// silently.
 	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
 	// OnAgentTerminal retires an agent from the status tree.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure)
