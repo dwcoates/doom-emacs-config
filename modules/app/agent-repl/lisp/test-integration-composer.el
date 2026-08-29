@@ -27,6 +27,10 @@
 (declare-function agent-repl--prepare-input "input")
 (declare-function agent-repl--meta-wrap "prompts")
 (declare-function agent-repl-queue-deferred-prompt "prompt-queue")
+;; NAME NOT IN THE SPEC (surfaced to the teamlead): §10 says clipboard-image.el
+;; "registers the file as an attached ImageBlock{path, media_type} on the input
+;; buffer" but names no function for it.  The suite calls it by this name.
+(declare-function agent-repl-input-attach-image "clipboard-image")
 (declare-function agent-repl-host-register "host")
 (declare-function agent-repl-host-subscribe "host")
 (declare-function agent-repl-host-unsubscribe "host")
@@ -117,7 +121,7 @@ daemon-minted echo token, never built from a path."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "run the tests")
+      (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (let ((body (agent-repl-itest-composer--submit-body daemon)))
@@ -135,7 +139,7 @@ webapp (R7), so a host submit must carry no feed at all."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "run the tests")
+      (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert: absence, not an empty value — PRESENCE, NEVER SENTINELS.
       (let ((body (agent-repl-itest-composer--submit-body daemon)))
@@ -149,9 +153,9 @@ Two submits sharing a key would let the daemon collapse them into one."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "first")
+      (agent-repl--send :user-sent "first" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt" 1)
-      (agent-repl--send agent-repl-itest-composer--ws "second")
+      (agent-repl--send :user-sent "second" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt" 2)
       ;; Assert.
       (let ((first (agent-repl-itest--body-field
@@ -170,7 +174,7 @@ UNSPECIFIED, so a site that forgot its origin cannot pass."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "run the tests")
+      (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (let ((origin (agent-repl-itest--body-field
@@ -186,8 +190,8 @@ prompt; a shared origin across sites would erase that."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "run the tests"
-                        :origin :user-sent-with-metaprompt)
+      (agent-repl--send :user-sent-with-metaprompt "run the tests"
+                        agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (let ((origin (agent-repl-itest--body-field
@@ -203,8 +207,8 @@ and delivered now, and the daemon is told so."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "run the tests"
-                        :origin :deferred-prompt)
+      (agent-repl--send :deferred-prompt "run the tests"
+                        agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (let ((origin (agent-repl-itest--body-field
@@ -223,7 +227,7 @@ never from what was submitted."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "run the tests")
+      (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (let ((texts (agent-repl-itest-composer--text-blocks
@@ -240,11 +244,10 @@ how the daemon knows which span to hide when it DRAWS the row."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       (let ((prepared (agent-repl--prepare-input
-                       agent-repl-itest-composer--ws "run the tests"
-                       :metaprompt t)))
+                       agent-repl-itest-composer--ws "run the tests" t)))
         ;; Act.
-        (agent-repl--send agent-repl-itest-composer--ws prepared
-                          :origin :user-sent-with-metaprompt)
+        (agent-repl--send :user-sent-with-metaprompt prepared
+                          agent-repl-itest-composer--ws)
         (agent-repl-itest--await-call daemon "SubmitPrompt")
         ;; Assert: what is submitted is what was composed, unrewritten.
         (let ((texts (agent-repl-itest-composer--text-blocks
@@ -261,8 +264,9 @@ keeps the attachment list per buffer and clears it on a successful send."
       (ignore ref)
       (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir)))
         ;; Act.
-        (agent-repl--send agent-repl-itest-composer--ws "look at this"
-                          :images (list (list :path image :media-type "image/png")))
+        (agent-repl-input-attach-image image "image/png")
+        (agent-repl--send :user-sent "look at this"
+                          agent-repl-itest-composer--ws)
         (agent-repl-itest--await-call daemon "SubmitPrompt")
         ;; Assert.
         (let ((body (agent-repl-itest-composer--submit-body daemon)))
@@ -278,8 +282,9 @@ WHERE the bytes are, the media type says WHAT they are."
       (ignore ref)
       (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir)))
         ;; Act.
-        (agent-repl--send agent-repl-itest-composer--ws "look at this"
-                          :images (list (list :path image :media-type "image/png")))
+        (agent-repl-input-attach-image image "image/png")
+        (agent-repl--send :user-sent "look at this"
+                          agent-repl-itest-composer--ws)
         (agent-repl-itest--await-call daemon "SubmitPrompt")
         ;; Assert.
         (let* ((body (agent-repl-itest-composer--submit-body daemon))
@@ -298,7 +303,7 @@ WHERE the bytes are, the media type says WHAT they are."
       (let ((ran nil))
         (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (push t ran)))
         ;; Act.
-        (agent-repl--send agent-repl-itest-composer--ws "run the tests")
+        (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
         ;; Assert.
         (agent-repl-itest--wait-until (lambda () ran) nil "the send posthooks")
         (should ran)))))
@@ -315,7 +320,7 @@ and Emacs clears the input and logs."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "/agents")
+      (agent-repl--send :user-sent "/agents" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.input.command-answered" "info")
@@ -333,7 +338,7 @@ clears the input; the webapp draws panels from its own dev composer."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "/status")
+      (agent-repl--send :user-sent "/status" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.input.command-answered" "info")
@@ -351,7 +356,7 @@ must not discard what the user typed."
       (let ((cleared nil))
         (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (setq cleared t)))
         ;; Act.
-        (agent-repl--send agent-repl-itest-composer--ws "run the tests")
+        (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
         (agent-repl-itest--await-call daemon "SubmitPrompt")
         ;; Assert: the send did not complete, so no posthook ran.
         (should (null cleared))))))
@@ -365,7 +370,7 @@ enforces it rather than letting the daemon refuse."
     (agent-repl-itest-composer--with-composer daemon 'merging ref
       (ignore ref)
       ;; Act.
-      (ignore-errors (agent-repl--send agent-repl-itest-composer--ws "run the tests"))
+      (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
       ;; Assert.
       (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
 
@@ -376,7 +381,7 @@ enforces it rather than letting the daemon refuse."
     (agent-repl-itest-composer--with-composer daemon 'draining ref
       (ignore ref)
       ;; Act.
-      (ignore-errors (agent-repl--send agent-repl-itest-composer--ws "run the tests"))
+      (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
       ;; Assert.
       (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
 
@@ -387,7 +392,7 @@ enforces it rather than letting the daemon refuse."
     (agent-repl-itest-composer--with-composer daemon 'restarting ref
       (ignore ref)
       ;; Act.
-      (ignore-errors (agent-repl--send agent-repl-itest-composer--ws "run the tests"))
+      (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
       ;; Assert.
       (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
 
@@ -400,7 +405,7 @@ the session's own turn."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'mergeParked ref
       ;; Act.
-      (agent-repl--send agent-repl-itest-composer--ws "rebase onto master")
+      (agent-repl--send :user-sent "rebase onto master" agent-repl-itest-composer--ws)
       (agent-repl-itest--await-call daemon "SubmitPrompt")
       ;; Assert.
       (let ((body (agent-repl-itest-composer--submit-body daemon)))
@@ -433,7 +438,7 @@ Ruled at kickoff — the daemon starts or revives the session implicitly."
                             :no-session))
              nil "the :no-session gate")
             ;; Act.
-            (agent-repl--send agent-repl-itest-composer--ws "start working")
+            (agent-repl--send :user-sent "start working" agent-repl-itest-composer--ws)
             ;; Assert.
             (agent-repl-itest--await-call daemon "SubmitPrompt")
             (should (agent-repl-itest--calls daemon "SubmitPrompt")))
@@ -454,7 +459,7 @@ on link-up."
           ;; The daemon goes away mid-composition.
           (agent-repl-itest--stop-daemon daemon t)
           ;; Act.
-          (ignore-errors (agent-repl--send agent-repl-itest-composer--ws "run the tests"))
+          (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
           ;; Assert.
           (agent-repl-itest--wait-until (lambda () queued) nil
                                         "the prompt to reach the outage queue")
