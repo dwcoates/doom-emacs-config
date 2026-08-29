@@ -163,27 +163,41 @@ describe("liveWork", () => {
 });
 
 describe("closingAgentTerminal", () => {
-  it("closes an agent that did not survive as interrupted by host shutdown", async () => {
+  it("closes an agent the record holds no terminal for as swept up by the boot sweep", async () => {
     const { reconciler: plane } = await reconciler("close-agent");
 
     const entry = plane.closingAgentTerminal(BOOK);
 
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
-    const success = frame?.result.value as conversationv1.AgentSuccess;
-    expect(success.outcome.case).toBe("interrupted");
-    const interrupted = success.outcome.value as conversationv1.AgentInterrupted;
-    expect(interrupted.cause.case).toBe("hostShutdown");
+    const failure = frame?.result.value as conversationv1.AgentFailure;
+    expect(failure.failure.case).toBe("lost");
+    const lost = failure.failure.value as conversationv1.DetachedLost;
+    expect(lost.how.case).toBe("sweptUp");
   });
 
-  it("never draws a host shutdown as a user stop", async () => {
+  it("accuses nobody: never a user stop, never an execution error", async () => {
     const { reconciler: plane } = await reconciler("close-agent-not-user");
 
     const entry = plane.closingAgentTerminal(BOOK);
 
     const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
-    const success = frame?.result.value as conversationv1.AgentSuccess;
-    const interrupted = success.outcome.value as conversationv1.AgentInterrupted;
-    expect(interrupted.cause.case).not.toBe("byUser");
+    expect(frame?.result.case).toBe("failure");
+    const failure = frame?.result.value as conversationv1.AgentFailure;
+    expect(failure.failure.case).not.toBe("executionError");
+    expect(failure.errors).toEqual([]);
+  });
+
+  it("closes the SPAWN unit too, since the spawn bubble is a second row", async () => {
+    const { reconciler: plane } = await reconciler("close-spawn");
+
+    const entry = plane.closingSubagentTerminal(BOOK, RUN);
+
+    const frame = entry.item.kind === "frame" ? entry.item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    const activity = update.value as conversationv1.AgentActivity;
+    const subagent = activity.item.value as conversationv1.AgentSubagent;
+    const failed = subagent.result.value as conversationv1.AgentSubagentFailure;
+    expect(failed.cause.case).toBe("lost");
   });
 
   it("keys the row deterministically, so a second reconciliation upserts one ending", async () => {
@@ -209,7 +223,7 @@ describe("closingBashTerminal", () => {
     expect(success.command?.line).toBe("sleep 100");
   });
 
-  it("settles the run as interrupted, with no cause it did not observe", async () => {
+  it("settles the run as interrupted because we lost sight of it, not because it failed", async () => {
     const { reconciler: plane } = await reconciler("close-bash-cause");
     const start = findBashStart([recordedBashStart("sleep 100")], RUN);
 
@@ -219,7 +233,9 @@ describe("closingBashTerminal", () => {
     const success = frame?.result.value as conversationv1.AgentBashSuccess;
     const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
     expect(success.outcome.case).toBe("interrupted");
-    expect(interrupted.cause.case).toBeUndefined();
+    expect(interrupted.cause.case).toBe("lost");
+    const lost = interrupted.cause.value as conversationv1.DetachedLost;
+    expect(lost.how.case).toBe("sweptUp");
   });
 
   it("refuses to invent a command when the record holds no start", async () => {

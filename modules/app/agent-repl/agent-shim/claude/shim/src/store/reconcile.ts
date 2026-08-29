@@ -11,15 +11,16 @@
  * "every started thing eventually gets a terminal row" hold across any gap in
  * observation.
  *
- * # The honest closing arm
+ * # The honest closing arm: `lost.swept_up`
  *
- * A thing that did not survive a shim restart was not an execution error and
- * nobody stopped it: the process hosting it went down. So an agent closes as
- * `AgentSuccess.interrupted{host_shutdown}` — the arm the contract declares for
- * exactly this — and never as `AgentFailure.execution_error` with an invented
- * error string. Drawing a host shutdown as a user stop tells the user they
- * stopped something they did not; drawing it as a failure tells them something
- * broke that did not.
+ * A thing the record holds no terminal for after a restart is NOT known to have
+ * failed and NOT known to have finished — we simply stopped being able to see
+ * it. `DetachedLost.swept_up` is that fact exactly: "a boot sweep found the run
+ * open with no living producer" (landing 3). Every other arm would be a claim
+ * nobody can support: `execution_error` says something broke, `interrupted.
+ * by_user` accuses the user of a stop they did not command, and
+ * `interrupted.host_shutdown` asserts a cause the record cannot distinguish
+ * from a shim that was simply not watching.
  *
  * # Why the original start has to be read back
  *
@@ -32,7 +33,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
-import { bashUpsertKey, terminalUpsertKey } from "./keys.js";
+import { activityUpsertKey, bashUpsertKey, terminalUpsertKey } from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
 import { readFailure, transportFailure } from "./reader.js";
 
@@ -70,6 +71,32 @@ export interface Reconciler {
     run: conversationv1.AgentActivityId,
     originalStart: conversationv1.AgentBashStart,
   ): PersistEntry;
+  /**
+   * The row that closes a SPAWN unit the record holds no terminal for.
+   *
+   * Distinct from {@link Reconciler.closingAgentTerminal}: that closes the
+   * detached AGENT's own book, and this closes the calling agent's unit that
+   * spawned it. Both are owed — a reader looking at the spawn bubble and a
+   * reader looking at the subagent's container are looking at two rows.
+   */
+  closingSubagentTerminal(
+    agent: conversationv1.AgentId,
+    spawn: conversationv1.AgentActivityId,
+  ): PersistEntry;
+}
+
+/**
+ * The one arm a RECONCILIATION may ever state.
+ *
+ * `swept_up` is the reconciliation's own word for what it did: it found the run
+ * open with no living producer. `file_vanished` belongs to the SIDECAR, which is
+ * the only thing that reads files, and `went_silent` belongs to whoever holds a
+ * silence ruling — neither is knowable from a store row.
+ */
+export function sweptUp(): conversationv1.DetachedLost {
+  return create(conversationv1.DetachedLostSchema, {
+    how: { case: "sweptUp", value: create(conversationv1.DetachedLostSweptUpSchema, {}) },
+  });
 }
 
 /** What a reconciler needs to exist. */
@@ -145,22 +172,17 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry {
       LOGGER.log(
         { agent: agent.value },
-        "closing an agent that did not survive the shim's restart as interrupted by host shutdown",
+        "closing an agent the record holds no terminal for: the boot sweep found it open with no producer",
       );
       const frame = create(conversationv1.AgentFrameSchema, {
         agentId: agent,
         result: {
-          case: "success",
-          value: create(conversationv1.AgentSuccessSchema, {
-            outcome: {
-              case: "interrupted",
-              value: create(conversationv1.AgentInterruptedSchema, {
-                cause: {
-                  case: "hostShutdown",
-                  value: create(conversationv1.AgentInterruptedByHostShutdownSchema, {}),
-                },
-              }),
-            },
+          case: "failure",
+          value: create(conversationv1.AgentFailureSchema, {
+            // NO ERROR STRINGS: the run accumulated none that anyone observed,
+            // and inventing one ("did not survive the shim restart") would put
+            // a sentence in the record that no producer ever said.
+            failure: { case: "lost", value: sweptUp() },
           }),
         },
       });
@@ -168,12 +190,54 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       return {
         agentId: agent,
         upsertKey: terminalUpsertKey(agent, coordinate),
-        source: {
-          vendorUuid: coordinate,
-          discriminator: "agent_frame.success.interrupted.host_shutdown",
-        },
+        source: { vendorUuid: coordinate, discriminator: "agent_frame.failure.lost.swept_up" },
         keepalive: false,
         item: { kind: "frame", frame },
+      };
+    },
+
+    closingSubagentTerminal(
+      agent: conversationv1.AgentId,
+      spawn: conversationv1.AgentActivityId,
+    ): PersistEntry {
+      LOGGER.log(
+        { agent: agent.value, spawn: spawn.value },
+        "closing a spawn unit the record holds no terminal for as lost",
+      );
+      const activity = create(conversationv1.AgentActivitySchema, {
+        activityId: spawn,
+        item: {
+          case: "subagent",
+          value: create(conversationv1.AgentSubagentSchema, {
+            result: {
+              case: "failure",
+              value: create(conversationv1.AgentSubagentFailureSchema, {
+                cause: { case: "lost", value: sweptUp() },
+              }),
+            },
+          }),
+        },
+      });
+      return {
+        agentId: agent,
+        upsertKey: activityUpsertKey(spawn),
+        source: {
+          vendorUuid: reconciledCoordinate(spawn.value),
+          discriminator: "activity.subagent.failure.lost.swept_up",
+        },
+        keepalive: false,
+        item: {
+          kind: "frame",
+          frame: create(conversationv1.AgentFrameSchema, {
+            agentId: agent,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: { case: "activity", value: activity },
+              }),
+            },
+          }),
+        },
       };
     },
 
@@ -221,8 +285,9 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
                     }),
                   },
                 }),
-                // The cause arm stays UNSET: nobody stopped it and it did not
-                // time out — the host went down, which the arms do not spell.
+                // THE CAUSE IS NOW STATEABLE (landing 3): we stopped being
+                // able to see the run, which is what `lost.swept_up` says.
+                cause: { case: "lost", value: sweptUp() },
               }),
             },
           }),
@@ -233,7 +298,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         upsertKey: bashUpsertKey(run),
         source: {
           vendorUuid: reconciledCoordinate(run.value),
-          discriminator: "agent_bash.success.interrupted",
+          discriminator: "agent_bash.success.interrupted.lost.swept_up",
         },
         keepalive: false,
         item: { kind: "bash_run", run, frame },
