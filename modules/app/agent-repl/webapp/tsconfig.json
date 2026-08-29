@@ -7,6 +7,8 @@
     "paths": {
       "@bufbuild/protobuf": ["node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"],
       "@bufbuild/protobuf/codegenv2": ["node_modules/@bufbuild/protobuf/dist/esm/codegenv2/index.d.ts"],
+      "@bufbuild/protobuf/reflect": ["node_modules/@bufbuild/protobuf/dist/esm/reflect/index.d.ts"],
+      "@bufbuild/protobuf/wire": ["node_modules/@bufbuild/protobuf/dist/esm/wire/index.d.ts"],
       "@bufbuild/protobuf/wkt": ["node_modules/@bufbuild/protobuf/dist/esm/wkt/index.d.ts"]
     },
     "resolveJsonModule": true,
