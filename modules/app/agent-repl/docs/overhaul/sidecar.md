@@ -330,3 +330,18 @@ orchestration chain. Cross-cutting conventions are in
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Corpus corrections (2026-08-29, project lead)
+
+- The subagent companion `projects/<slug>/<session>/subagents/agent-<id>.meta.json`
+  carries exactly FOUR camelCase fields — `agentType`, `description`,
+  `toolUseId`, `spawnDepth` — and NO model (observed in testdata/corpus/
+  sidechain/agent-aef975b7bc3422d4b.meta.json; observed beats declared). The
+  snake_case five-field spelling above and the claim that meta.json sources a
+  subagent's MODEL are superseded: a subagent's model is observable only from
+  its own transcript's assistant lines (message.model).
+- The vendor's `<cwd-slug>` replaces EVERY byte of the absolute cwd that is
+  not [A-Za-z0-9] with `-` (verified on the live projects tree); the same
+  slug names the subagent directory and the spool tree. The slug is lossy —
+  never decode a path from it.
+
