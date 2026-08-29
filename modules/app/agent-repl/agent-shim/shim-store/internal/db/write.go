@@ -121,6 +121,9 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		if err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
+		if err := d.recordApplied(ctx, tx, r, nextSeq, now); err != nil {
+			return WriteResult{}, d.refuse(fields, err)
+		}
 		if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
@@ -181,13 +184,19 @@ func (d *DB) currentWriteSeq(ctx context.Context, tx *sql.Tx) (uint64, error) {
 	return seq, nil
 }
 
-// absorbedBefore reports whether this exact write already landed. It is the
-// FIRST question asked of every entry, because a replay must not bump the
-// write ordinal of a row nothing changed — doing so would re-deliver an
-// unchanged line to every live watcher on every retry.
+// absorbedBefore reports whether this exact write already landed, by asking
+// the WRITE LEDGER rather than the `entry` row.
+//
+// THE LEDGER IS THE WHOLE POINT. `entry.write_id` holds only the LATEST write
+// applied to a row, so probing it answered "has this write landed?" with "is
+// this write the most recent one?" — and a replay of a SUPERSEDED write (w1
+// after w2 settled the same upsert_key) read as never-seen, was re-applied over
+// the newer content, and bumped write_seq, re-delivering the regressed line to
+// every live watcher. The ledger keeps one row per write ever APPLIED, so
+// absorption is a single indexed lookup that no later write can erase.
 func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bool, error) {
 	var one int
-	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM entry WHERE write_id = ?`, writeID).Scan(&one); {
+	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM write_ledger WHERE write_id = ?`, writeID).Scan(&one); {
 	case err == nil:
 		return true, nil
 	case errors.Is(err, sql.ErrNoRows):
@@ -195,6 +204,18 @@ func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bo
 	default:
 		return false, storagef(err, "probing write_id %q", writeID)
 	}
+}
+
+// recordApplied writes the ledger row for one applied write, IN THE SAME
+// TRANSACTION as the row it applied. Split them and a crash between the two
+// would either lose the absorption fact (a replay regresses the row) or claim
+// one that never happened (a write is silently dropped).
+func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) error {
+	const insertSQL = `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms) VALUES (?,?,?,?)`
+	if _, err := tx.ExecContext(ctx, insertSQL, r.writeID, r.upsertKey, writeSeq, now); err != nil {
+		return storagef(err, "recording write_id %q in the write ledger", r.writeID)
+	}
+	return nil
 }
 
 // upsertEntry writes the row and returns the position it occupies.
