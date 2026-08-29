@@ -609,3 +609,17 @@ generated arms when the landing merges (one place each):
   MUST place such items on the ROOT feed (root-feed fallback), never drop
   them (ruled by the daemon lead; a shim-side re-announce with the
   `created` origin is requested upstream).
+
+## Cross-system literals the daemon consumes (pinned)
+
+- METAPROMPT SENTINELS (Emacs `agent-repl--meta-wrap`, lisp/core.el): an
+  injected span is `<!--agent-repl:meta-->` + text + `<!--/agent-repl:meta-->`.
+  `prompts.StripSentinels` removes every such span (and the whitespace it
+  leaves) from the DRAWN prompt text only; the record keeps the full text.
+  The daemon wraps its own injected spans (one-shot decoration, add-support
+  briefs, merge briefs) with the same markers.
+- `.claude.json` (per account root): the daemon READS only
+  `oauthAccount.emailAddress` (absent → logged out; malformed file → error)
+  and NEVER writes the file; the project entry the CLI keeps under
+  `projects.<cwd>` is not read or written by the daemon — transcript porting
+  moves files under `<root>/projects/<encoded cwd>/` only.
