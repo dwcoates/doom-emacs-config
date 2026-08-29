@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"claude-repld/internal/ids"
 	"claude-repld/internal/notimpl"
 )
 
@@ -25,10 +26,9 @@ type Feed struct {
 	Merge *LeaseID
 }
 
-// LeaseID is the merge lease a merge sub-feed belongs to. It mirrors
-// wsm.LeaseID; feedid keeps its own newtype because it sits below wsm in the
-// dependency order and may not import it.
-type LeaseID string
+// LeaseID is the merge lease a merge sub-feed belongs to — an alias of the
+// one spelling in internal/ids, which feedid and wsm share.
+type LeaseID = ids.LeaseID
 
 // Ref is a fully qualified row address: which workspace, which feed, which
 // row.
@@ -41,9 +41,9 @@ type Ref struct {
 	Row RowKey
 }
 
-// WorkspaceID mirrors wsm.WorkspaceID for the same dependency-order reason as
-// LeaseID.
-type WorkspaceID string
+// WorkspaceID is the workspace an addressed row belongs to — the same alias
+// of internal/ids that wsm exposes.
+type WorkspaceID = ids.WorkspaceID
 
 // RowKind is the closed set of row kinds a FeedId can address.
 type RowKind string

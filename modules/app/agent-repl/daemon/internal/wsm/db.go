@@ -5,6 +5,10 @@ import (
 	"time"
 
 	"claude-repld/internal/notimpl"
+
+	// The daemon's SQLite driver. Registered here because wsm is the sole
+	// owner of the database handle; nothing else opens it.
+	_ "modernc.org/sqlite"
 )
 
 // DB is the daemon's durable state. One handle, one writer: the
