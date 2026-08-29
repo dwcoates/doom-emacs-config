@@ -1084,6 +1084,26 @@ func bashRun(topLevel *conversationv1.AgentId, runActID string, frame *conversat
 	}
 }
 
+// bashActivityFrame is a shell run's activity IN ITS SPAWNING AGENT'S BOOK — an
+// ordinary page line whose activity_id is the run's unit id. When its item
+// reaches a terminal arm, that is what closes the detached row joined on
+// origin_unit.
+func bashActivityFrame(agent, runActID string, frame *conversationv1.AgentBash) *conversationv1.AgentFrame {
+	return &conversationv1.AgentFrame{
+		AgentId: agentID(agent),
+		Result: &conversationv1.AgentFrame_Update{
+			Update: &conversationv1.AgentUpdate{
+				Update: &conversationv1.AgentUpdate_Activity{
+					Activity: &conversationv1.AgentActivity{
+						ActivityId: activityID(runActID),
+						Item:       &conversationv1.AgentActivity_Bash{Bash: frame},
+					},
+				},
+			},
+		},
+	}
+}
+
 // workflowRun wraps a workflow run's frame with the run's agent identity.
 func workflowRun(topLevel *conversationv1.AgentId, runAgent string, frame *conversationv1.AgentWorkflow) *storev1.StoreAgentUpdate {
 	return &storev1.StoreAgentUpdate{

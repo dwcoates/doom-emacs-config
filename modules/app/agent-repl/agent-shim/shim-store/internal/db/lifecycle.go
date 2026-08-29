@@ -209,8 +209,14 @@ func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string,
 			}
 		}
 	}
+	// A run frame may already have created this run's row under the run's own
+	// identity, so the announcement joins it rather than opening a second one.
+	workID, err := d.resolveDetachedRowKey(ctx, tx, originUnit, work.GetWork().GetValue())
+	if err != nil {
+		return err
+	}
 	return d.upsertDetachedWork(ctx, tx, detachedRow{
-		workID:     work.GetWork().GetValue(),
+		workID:     workID,
 		kind:       kind,
 		originUnit: originUnit,
 		ownerAgent: sql.NullString{String: owner, Valid: owner != ""},
@@ -227,21 +233,60 @@ func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, bash *storev1.S
 	if err != nil {
 		return invalidf("bash frame for run %q cannot be re-serialized: %v", runID, err)
 	}
+	// The run IS the unit, so the origin join is the identity itself — which is
+	// what lets a terminal on the spawning stream close this row. The row may
+	// already exist under the ANNOUNCEMENT's handle, which is a different
+	// string; resolving by origin unit finds it instead of opening a second row.
+	origin := sql.NullString{String: runID, Valid: true}
+	workID, err := d.resolveDetachedRowKey(ctx, tx, origin, runID)
+	if err != nil {
+		return err
+	}
 	if err := d.upsertDetachedWork(ctx, tx, detachedRow{
-		workID: runID,
-		kind:   detachedKindBash,
-		// The run IS the unit, so the origin join is the identity itself —
-		// which is what lets a terminal on the spawning stream close this row.
-		originUnit: sql.NullString{String: runID, Valid: true},
+		workID:     workID,
+		kind:       detachedKindBash,
+		originUnit: origin,
 		now:        now,
 	}); err != nil {
 		return err
 	}
 	switch bash.GetFrame().GetResult().(type) {
 	case *conversationv1.AgentBash_Success, *conversationv1.AgentBash_Failure:
-		return d.endDetachedWork(ctx, tx, runID, state, now)
+		return d.endDetachedWork(ctx, tx, workID, state, now)
 	}
 	return nil
+}
+
+// resolveDetachedRowKey answers which detached_work row a write belongs to.
+//
+// THE ORIGIN UNIT IS TRIED FIRST, AND THAT IS THE WHOLE POINT. The two writers
+// of this table address the same run by DIFFERENT identities: the announcement
+// knows the DetachedWorkId handle, and the run's own frames know the
+// AgentActivityId of the run. Those strings are not required to be equal, and
+// keying each writer by the identity it happens to hold produced TWO rows for
+// one run — which GetLiveWork then reported as two open obligations, so the
+// shim had to resolve a run that did not exist.
+//
+// Either writer may arrive first (the file plane can observe a spool before the
+// stream plane announces it), so the rule is symmetric: if any row already
+// carries this origin unit, that row IS the run and its key is returned;
+// otherwise the caller's own identity keys it, and the later writer will find
+// it through this same lookup. One indexed lookup on detached_work(origin_unit).
+func (d *DB) resolveDetachedRowKey(ctx context.Context, tx *sql.Tx, originUnit sql.NullString, fallback string) (string, error) {
+	if !originUnit.Valid || originUnit.String == "" {
+		return fallback, nil
+	}
+	var existing string
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT work_id FROM detached_work WHERE origin_unit = ? LIMIT 1`, originUnit.String).Scan(&existing); {
+	case err == nil:
+		return existing, nil
+	case isNoRows(err):
+		return fallback, nil
+	default:
+		return "", d.queryError("store.db.write-batch", "detached_work", logging.Fields{ActivityID: originUnit.String},
+			storagef(err, "locating the detached work row of origin unit %q", originUnit.String))
+	}
 }
 
 // detachedRow is one upsert of the detached_work table: the join columns only.

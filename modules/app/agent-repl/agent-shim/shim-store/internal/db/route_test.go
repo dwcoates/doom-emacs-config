@@ -415,6 +415,17 @@ func bashStart() *conversationv1.AgentBash {
 	}}}
 }
 
+func bashFailure() *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{}}}
+}
+
+// terminalBash is the run's activity reaching a terminal arm IN THE SPAWNING
+// AGENT'S OWN BOOK — the frame whose activity_id is the run's unit id and whose
+// item has concluded, which is what closes the detached row by origin unit.
+func terminalBash() *conversationv1.AgentBash {
+	return bashSuccess()
+}
+
 func bashSuccess() *conversationv1.AgentBash {
 	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 		Command: &conversationv1.AgentBashCommand{Line: "make test"},
