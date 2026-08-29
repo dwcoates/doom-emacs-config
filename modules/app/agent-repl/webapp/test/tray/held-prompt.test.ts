@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
@@ -78,13 +78,17 @@ const errorResponse = () =>
   create(UpdateHeldPromptResponseSchema, { result: { case: "error", value: {} } });
 
 /** A held prompt with every required field, overridden by OVERRIDES. */
-function heldPrompt(overrides: Partial<HeldPrompt> = {}): HeldPrompt {
+type HeldPromptInit = Exclude<MessageInitShape<typeof HeldPromptSchema>, HeldPrompt>;
+
+function heldPrompt(overrides: Partial<HeldPromptInit> = {}): HeldPrompt {
   return create(HeldPromptSchema, {
     turn: { value: "turn-1" },
-    said: { content: { blocks: [{ block: { case: "text", value: { text: "fix the test" } } }] } },
     queuedAt: { atMs: BigInt(NOW - 12_000) },
-    classification: { case: "classifying", value: {} },
-    ...overrides,
+    said: overrides.said ?? {
+      content: { blocks: [{ block: { case: "text", value: { text: "fix the test" } } }] },
+    },
+    classification: overrides.classification ?? { case: "classifying", value: {} },
+    ...(overrides.hold !== undefined ? { hold: overrides.hold } : {}),
   });
 }
 
