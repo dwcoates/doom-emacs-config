@@ -1,0 +1,863 @@
+/**
+ * THE FAKE DAEMON — a real Connect server the integration suite drives.
+ *
+ * It is a genuine HTTP/1.1 listener on 127.0.0.1 speaking the real Connect
+ * protocol over the real generated `AgentRepl` service descriptor, so the app
+ * under test exercises its own transport, its own codec, and its own stream
+ * plumbing end to end. Nothing here mocks a client seam.
+ *
+ * Everything it serves is SCRIPTED. The driver API below is the only way state
+ * changes: a test pushes a view, answers an rpc, or fails one, and the server
+ * hands that exact message to whoever is listening. Anything a test has not
+ * scripted answers with a DEFAULT HEALTHY message: every response carries its
+ * `success` arm and every message is COMPLETE (every non-optional field set,
+ * every oneof set), because the client refuses malformed views by contract and
+ * an accidentally-empty fake would fail tests for the wrong reason.
+ */
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
+import { connectNodeAdapter } from "@connectrpc/connect-node";
+import type { ConnectRouter } from "@connectrpc/connect";
+import { Code, ConnectError } from "@connectrpc/connect";
+
+import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
+import type { FeedPage, FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { DaemonHoldTray } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
+import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
+import { WatchFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
+import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
+import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
+import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
+import { WatchDaemonHoldsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
+import { WatchWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
+import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
+import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
+import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
+import { AnswerQuestionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
+import { AnswerColdGateResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
+import { CreateWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
+import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
+import { KillWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
+import { NukeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
+import { MergeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+import { RestartWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
+import { SetWorkspacePriorityResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
+import { CreateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
+import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import { AssignWorkspaceTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
+import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
+import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
+import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
+import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
+import { UpdateShutdownScheduleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_shutdown_schedule_pb";
+import { UpdateMergeQueueResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import { DaemonHealthResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_daemon_health_pb";
+import { SessionHealthResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_session_health_pb";
+import { ClientLogResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import { RegisterWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_register_workspace_pb";
+import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { AdoptHostWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_host_workspace_pb";
+import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
+import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
+import { CloseLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_login_pb";
+import { OpenExternalResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import {
+  LoginTerminalOutputSchema,
+  type LoginTerminalInput,
+  type LoginTerminalOutput,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
+import type { WatchHostWorkspaceResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_host_workspace_pb";
+import {
+  emptyFeedPage,
+  emptyFooterView,
+  emptyRoster,
+  emptyTopbarView,
+  emptyTray,
+  hostWorkspacePush,
+} from "./fixtures";
+
+/** Every rpc the fake serves, by its generated lowerCamel method name. */
+export type RpcName = keyof typeof AgentRepl.method;
+
+/** The `$unknown` shape protobuf-es carries and re-serializes verbatim. */
+const UNKNOWN_FIELD = { no: 999, wireType: 0, data: new Uint8Array([1]) } as const;
+
+/** The workspace's own feed. Sub-feeds are addressed by their bubble's FeedId. */
+export const ROOT_FEED = "root";
+export type FeedKey = string;
+
+/** One open server stream: a queue plus the parked reader waiting on it. */
+class Channel<T> {
+  private readonly queue: T[] = [];
+  private waiting: ((r: IteratorResult<T>) => void) | undefined;
+  private done = false;
+
+  push(value: T): void {
+    if (this.done) return;
+    const waiting = this.waiting;
+    if (waiting) {
+      this.waiting = undefined;
+      waiting({ value, done: false });
+      return;
+    }
+    this.queue.push(value);
+  }
+
+  end(): void {
+    this.done = true;
+    const waiting = this.waiting;
+    if (waiting) {
+      this.waiting = undefined;
+      waiting({ value: undefined as never, done: true });
+    }
+  }
+
+  async *iterate(signal: AbortSignal): AsyncGenerator<T> {
+    for (;;) {
+      if (signal.aborted) return;
+      if (this.queue.length > 0) {
+        yield this.queue.shift() as T;
+        continue;
+      }
+      if (this.done) return;
+      const next = await new Promise<IteratorResult<T>>((resolve) => {
+        this.waiting = resolve;
+        signal.addEventListener("abort", () => resolve({ value: undefined as never, done: true }), {
+          once: true,
+        });
+      });
+      if (next.done) return;
+      yield next.value;
+    }
+  }
+}
+
+/** A live stream registration, keyed so `liveStreams`/`endStream` can find it. */
+interface Registration {
+  rpc: RpcName;
+  /** The workspace the stream was opened for; "" for the global streams. */
+  workspace: string;
+  /** The feed a WatchFeed stream tails; undefined for every other rpc. */
+  feed?: FeedKey;
+  channel: Channel<unknown>;
+}
+
+/** A recorded request, in arrival order, with the rpc that received it. */
+export interface RecordedCall<Req = unknown> {
+  rpc: RpcName;
+  request: Req;
+  atMs: number;
+}
+
+/**
+ * The driver a test holds. Every method is synchronous state manipulation
+ * except `start`/`stop` and the awaitable `nextCall`/`awaitStream`.
+ */
+export interface FakeDaemon {
+  /** Boot the listener; resolves with the base url the transport dials. */
+  start(): Promise<{ baseUrl: string }>;
+  /** Shut the listener down and end every live stream. */
+  stop(): Promise<void>;
+  /** The base url once started. Throws before `start` resolves. */
+  readonly baseUrl: string;
+
+  // --- scripted views: each setter also pushes to every live subscriber ----
+  setFooter(workspace: string, view: FooterView): void;
+  setTopbar(workspace: string, view: TopbarView): void;
+  setRoster(roster: WorkspaceRoster): void;
+  setTray(workspace: string, tray: DaemonHoldTray): void;
+  setHostWorkspace(workspace: string, push: WatchHostWorkspaceResponse): void;
+
+  // --- the feed universe --------------------------------------------------
+  /** The page OpenFeed answers with, and GetFeedPage `first` returns. */
+  setPage(workspace: string, feed: FeedKey, page: FeedPage): void;
+  /** The page GetFeedPage `next` returns; falls back to `setPage` when unset. */
+  setNextPage(workspace: string, feed: FeedKey, page: FeedPage): void;
+  /** Deliver a row on every live WatchFeed tailing that feed. */
+  pushRow(workspace: string, feed: FeedKey, row: FeedRow): void;
+  /** The tokens OpenFeed has minted, oldest first, for one feed. */
+  mintedTokens(workspace: string, feed: FeedKey): string[];
+
+  // --- web-link and daemon-lifecycle pushes --------------------------------
+  transfer(workspace: string, address: string): void;
+  announceShutdown(init: {
+    address?: string;
+    expectedOutageMs: bigint;
+    mintedAtMs: bigint;
+    reason?: DrainReason;
+  }): void;
+  scheduleDrain(atMs: bigint, reason: DrainReason): void;
+  cancelDrain(): void;
+
+  // --- scripted unary answers ---------------------------------------------
+  /** Serve `response` for every later call of `rpc` (replaces the default). */
+  answer(rpc: RpcName, response: unknown): void;
+  /** Serve a transport-level error for the NEXT call of `rpc` only. */
+  failNext(rpc: RpcName, errorMessage: string): void;
+  /** Put an unknown field on the next response or push of `rpc`. */
+  injectUnknown(rpc: RpcName): void;
+
+  // --- observation ---------------------------------------------------------
+  calls<Req = unknown>(rpc: RpcName): Req[];
+  /** Resolve with the next call of `rpc` not yet handed out by `nextCall`. */
+  nextCall<Req = unknown>(rpc: RpcName): Promise<Req>;
+  /** Every recorded call across every rpc, in arrival order. */
+  log(): RecordedCall[];
+  clearCalls(): void;
+
+  // --- stream bookkeeping --------------------------------------------------
+  liveStreams(rpc: RpcName, workspace?: string, feed?: FeedKey): number;
+  /** Kill every matching stream WITHOUT a terminal frame (transport death). */
+  endStream(rpc: RpcName, workspace?: string, feed?: FeedKey): void;
+  /** Resolve once at least `count` streams of `rpc` are live. */
+  awaitStream(rpc: RpcName, count?: number): Promise<void>;
+}
+
+const key = (workspace: string, feed: FeedKey): string => `${workspace} ${feed}`;
+
+/** Attach the unknown field protobuf-es re-serializes verbatim. */
+const withUnknown = <T extends object>(message: T): T => {
+  (message as { $unknown?: unknown[] }).$unknown = [{ ...UNKNOWN_FIELD }];
+  return message;
+};
+
+export function createFakeDaemon(): FakeDaemon {
+  const registrations = new Set<Registration>();
+  const recorded: RecordedCall[] = [];
+  const observed = new Map<RpcName, number>();
+  const callWaiters: Array<{ rpc: RpcName; index: number; resolve: (request: unknown) => void }> = [];
+  const streamWaiters: Array<{ rpc: RpcName; count: number; resolve: () => void }> = [];
+
+  const footers = new Map<string, FooterView>();
+  const topbars = new Map<string, TopbarView>();
+  const trays = new Map<string, DaemonHoldTray>();
+  const hosts = new Map<string, WatchHostWorkspaceResponse>();
+  const pages = new Map<string, FeedPage>();
+  const nextPages = new Map<string, FeedPage>();
+  const tokens = new Map<string, string[]>();
+  /** token value -> the feed it was minted for. WatchFeed refuses anything else. */
+  const tokenFeeds = new Map<string, { workspace: string; feed: FeedKey }>();
+  let roster: WorkspaceRoster = emptyRoster();
+
+  const scripted = new Map<RpcName, unknown>();
+  const failures = new Map<RpcName, string[]>();
+  const unknowns = new Set<RpcName>();
+
+  let server: Server | undefined;
+  let baseUrl = "";
+  let mintCounter = 0;
+
+  const countStreams = (rpc: RpcName, workspace?: string, feed?: FeedKey): number => {
+    let n = 0;
+    for (const reg of registrations) {
+      if (reg.rpc !== rpc) continue;
+      if (workspace !== undefined && reg.workspace !== workspace) continue;
+      if (feed !== undefined && reg.feed !== feed) continue;
+      n += 1;
+    }
+    return n;
+  };
+
+  const notifyStreamWaiters = (): void => {
+    for (let i = streamWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = streamWaiters[i];
+      if (countStreams(waiter.rpc) >= waiter.count) {
+        streamWaiters.splice(i, 1);
+        waiter.resolve();
+      }
+    }
+  };
+
+  const record = (rpc: RpcName, request: unknown): void => {
+    recorded.push({ rpc, request, atMs: Date.now() });
+    const index = recorded.filter((c) => c.rpc === rpc).length - 1;
+    for (let i = callWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = callWaiters[i];
+      if (waiter.rpc === rpc && waiter.index === index) {
+        callWaiters.splice(i, 1);
+        waiter.resolve(request);
+      }
+    }
+  };
+
+  /** Throw for a scripted `failNext`, consuming one queued failure. */
+  const consumeFailure = (rpc: RpcName): void => {
+    const queue = failures.get(rpc);
+    if (!queue || queue.length === 0) return;
+    const message = queue.shift() as string;
+    throw new ConnectError(message, Code.Unavailable);
+  };
+
+  /** Build the answer for `rpc`: the scripted one, else a default healthy one. */
+  const answerFor = <Desc extends DescMessage>(
+    rpc: RpcName,
+    schema: Desc,
+    fallback: MessageInitShape<Desc>,
+  ): never => {
+    consumeFailure(rpc);
+    const supplied = scripted.get(rpc);
+    const message = supplied ?? create(schema, fallback);
+    if (unknowns.delete(rpc)) withUnknown(message as object);
+    return message as never;
+  };
+
+  /**
+   * Open a server stream: register it, hand the caller the async iterable, and
+   * deregister on the client's cancellation.
+   */
+  const openStream = (
+    rpc: RpcName,
+    workspace: string,
+    signal: AbortSignal,
+    feed?: FeedKey,
+  ): { channel: Channel<unknown>; iterate: () => AsyncGenerator<never> } => {
+    const channel = new Channel<unknown>();
+    const reg: Registration = { rpc, workspace, feed, channel };
+    registrations.add(reg);
+    notifyStreamWaiters();
+    const iterate = async function* (): AsyncGenerator<never> {
+      try {
+        yield* channel.iterate(signal) as AsyncGenerator<never>;
+      } finally {
+        registrations.delete(reg);
+      }
+    };
+    return { channel, iterate };
+  };
+
+  /** Push one value to every live stream of `rpc` matching workspace/feed. */
+  const broadcast = (
+    rpc: RpcName,
+    workspace: string | undefined,
+    feed: FeedKey | undefined,
+    value: object,
+  ): void => {
+    const message = unknowns.has(rpc) ? withUnknown(value) : value;
+    for (const reg of registrations) {
+      if (reg.rpc !== rpc) continue;
+      if (workspace !== undefined && reg.workspace !== workspace) continue;
+      if (feed !== undefined && reg.feed !== feed) continue;
+      reg.channel.push(message);
+    }
+    unknowns.delete(rpc);
+  };
+
+  const routes = (router: ConnectRouter): void => {
+    router.service(AgentRepl, {
+      // ---- the feed -------------------------------------------------------
+      submitPrompt(request) {
+        record("submitPrompt", request);
+        return answerFor("submitPrompt", SubmitPromptResponseSchema, {
+          result: {
+            case: "success",
+            value: { outcome: { case: "turn", value: { turn: { value: "turn-1" } } } },
+          },
+        });
+      },
+      openFeed(request) {
+        record("openFeed", request);
+        consumeFailure("openFeed");
+        const workspace = request.workspace?.id ?? "";
+        const feed: FeedKey = request.feed?.value ?? ROOT_FEED;
+        mintCounter += 1;
+        const token = `watch-${mintCounter}`;
+        const minted = tokens.get(key(workspace, feed)) ?? [];
+        minted.push(token);
+        tokens.set(key(workspace, feed), minted);
+        tokenFeeds.set(token, { workspace, feed });
+        const message =
+          scripted.get("openFeed") ??
+          create(OpenFeedResponseSchema, {
+            result: {
+              case: "success",
+              value: {
+                page: pages.get(key(workspace, feed)) ?? emptyFeedPage(),
+                watch: create(FeedWatchTokenSchema, { value: token }),
+              },
+            },
+          });
+        if (unknowns.delete("openFeed")) withUnknown(message as object);
+        return message as never;
+      },
+      async *watchFeed(request, context) {
+        record("watchFeed", request);
+        consumeFailure("watchFeed");
+        const token = request.watch?.value ?? "";
+        const target = tokenFeeds.get(token);
+        if (!target) {
+          throw new ConnectError(`unknown feed watch token: ${JSON.stringify(token)}`, Code.NotFound);
+        }
+        const { iterate } = openStream("watchFeed", target.workspace, context.signal, target.feed);
+        yield* iterate();
+      },
+      getFeedPage(request) {
+        record("getFeedPage", request);
+        consumeFailure("getFeedPage");
+        const workspace = request.workspace?.id ?? "";
+        const feed: FeedKey = request.feed?.value ?? ROOT_FEED;
+        const wanted =
+          request.page.case === "next"
+            ? nextPages.get(key(workspace, feed)) ?? pages.get(key(workspace, feed))
+            : pages.get(key(workspace, feed));
+        const message =
+          scripted.get("getFeedPage") ??
+          create(GetFeedPageResponseSchema, {
+            result: { case: "success", value: wanted ?? emptyFeedPage() },
+          });
+        if (unknowns.delete("getFeedPage")) withUnknown(message as object);
+        return message as never;
+      },
+      interrupt(request) {
+        record("interrupt", request);
+        return answerFor("interrupt", InterruptResponseSchema, {
+          result: { case: "success", value: { outcome: { case: "interruptedTurn", value: {} } } },
+        });
+      },
+      answerPermission(request) {
+        record("answerPermission", request);
+        return answerFor("answerPermission", AnswerPermissionResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      answerQuestion(request) {
+        record("answerQuestion", request);
+        return answerFor("answerQuestion", AnswerQuestionResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      answerColdGate(request) {
+        record("answerColdGate", request);
+        return answerFor("answerColdGate", AnswerColdGateResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- the sidebar ----------------------------------------------------
+      async *watchWorkspaceRoster(request, context) {
+        record("watchWorkspaceRoster", request);
+        consumeFailure("watchWorkspaceRoster");
+        const { channel, iterate } = openStream("watchWorkspaceRoster", "", context.signal);
+        channel.push(create(WatchWorkspaceRosterResponseSchema, { roster }));
+        yield* iterate();
+      },
+      createWorkspace(request) {
+        record("createWorkspace", request);
+        return answerFor("createWorkspace", CreateWorkspaceResponseSchema, {
+          result: {
+            case: "success",
+            value: { workspace: { id: "ws-created", dir: "/tmp/ws-created" } },
+          },
+        });
+      },
+      openWorkspace(request) {
+        record("openWorkspace", request);
+        return answerFor("openWorkspace", OpenWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      closeWorkspace(request) {
+        record("closeWorkspace", request);
+        return answerFor("closeWorkspace", CloseWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      killWorkspace(request) {
+        record("killWorkspace", request);
+        return answerFor("killWorkspace", KillWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      nukeWorkspace(request) {
+        record("nukeWorkspace", request);
+        return answerFor("nukeWorkspace", NukeWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      mergeWorkspace(request) {
+        record("mergeWorkspace", request);
+        return answerFor("mergeWorkspace", MergeWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      restartWorkspace(request) {
+        record("restartWorkspace", request);
+        return answerFor("restartWorkspace", RestartWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      setWorkspacePriority(request) {
+        record("setWorkspacePriority", request);
+        return answerFor("setWorkspacePriority", SetWorkspacePriorityResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      createTask(request) {
+        record("createTask", request);
+        return answerFor("createTask", CreateTaskResponseSchema, {
+          result: { case: "success", value: { task: { id: "task-created" } } },
+        });
+      },
+      updateTask(request) {
+        record("updateTask", request);
+        return answerFor("updateTask", UpdateTaskResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      assignWorkspaceTask(request) {
+        record("assignWorkspaceTask", request);
+        return answerFor("assignWorkspaceTask", AssignWorkspaceTaskResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- topbar / footer / tray -----------------------------------------
+      async *watchTopbar(request, context) {
+        record("watchTopbar", request);
+        consumeFailure("watchTopbar");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchTopbar", workspace, context.signal);
+        channel.push(
+          create(WatchTopbarResponseSchema, { topbar: topbars.get(workspace) ?? emptyTopbarView() }),
+        );
+        yield* iterate();
+      },
+      setModel(request) {
+        record("setModel", request);
+        return answerFor("setModel", SetModelResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      setPermissionMode(request) {
+        record("setPermissionMode", request);
+        return answerFor("setPermissionMode", SetPermissionModeResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      async *watchFooter(request, context) {
+        record("watchFooter", request);
+        consumeFailure("watchFooter");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchFooter", workspace, context.signal);
+        channel.push(
+          create(WatchFooterResponseSchema, { footer: footers.get(workspace) ?? emptyFooterView() }),
+        );
+        yield* iterate();
+      },
+      async *watchDaemonHolds(request, context) {
+        record("watchDaemonHolds", request);
+        consumeFailure("watchDaemonHolds");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchDaemonHolds", workspace, context.signal);
+        channel.push(create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }));
+        yield* iterate();
+      },
+      updateHeldPrompt(request) {
+        record("updateHeldPrompt", request);
+        return answerFor("updateHeldPrompt", UpdateHeldPromptResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      answerHeldOffer(request) {
+        record("answerHeldOffer", request);
+        return answerFor("answerHeldOffer", AnswerHeldOfferResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- admin / diagnostics --------------------------------------------
+      updateShutdownSchedule(request) {
+        record("updateShutdownSchedule", request);
+        return answerFor("updateShutdownSchedule", UpdateShutdownScheduleResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      updateMergeQueue(request) {
+        record("updateMergeQueue", request);
+        return answerFor("updateMergeQueue", UpdateMergeQueueResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      daemonHealth(request) {
+        record("daemonHealth", request);
+        return answerFor("daemonHealth", DaemonHealthResponseSchema, {
+          result: { case: "success", value: { health: { case: "healthy", value: {} } } },
+        });
+      },
+      sessionHealth(request) {
+        record("sessionHealth", request);
+        return answerFor("sessionHealth", SessionHealthResponseSchema, {
+          result: { case: "success", value: { health: { case: "healthy", value: {} } } },
+        });
+      },
+      clientLog(request) {
+        record("clientLog", request);
+        return answerFor("clientLog", ClientLogResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- host section (Emacs's, served so the fake is complete) ----------
+      registerWorkspace(request) {
+        record("registerWorkspace", request);
+        return answerFor("registerWorkspace", RegisterWorkspaceResponseSchema, {
+          result: {
+            case: "success",
+            value: { workspace: { id: "ws-registered", dir: "/tmp/ws-registered" } },
+          },
+        });
+      },
+      selectWorkspace(request) {
+        record("selectWorkspace", request);
+        return answerFor("selectWorkspace", SelectWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      async *watchHostWorkspace(request, context) {
+        record("watchHostWorkspace", request);
+        consumeFailure("watchHostWorkspace");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchHostWorkspace", workspace, context.signal);
+        channel.push(hosts.get(workspace) ?? hostWorkspacePush());
+        yield* iterate();
+      },
+      async *watchDaemon(request, context) {
+        record("watchDaemon", request);
+        consumeFailure("watchDaemon");
+        const { iterate } = openStream("watchDaemon", "", context.signal);
+        yield* iterate();
+      },
+      adoptHostWorkspace(request) {
+        record("adoptHostWorkspace", request);
+        return answerFor("adoptHostWorkspace", AdoptHostWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- the web link ---------------------------------------------------
+      async *watchWebWorkspace(request, context) {
+        record("watchWebWorkspace", request);
+        consumeFailure("watchWebWorkspace");
+        const workspace = request.workspace?.id ?? "";
+        const { iterate } = openStream("watchWebWorkspace", workspace, context.signal);
+        yield* iterate();
+      },
+      adoptWebWorkspace(request) {
+        record("adoptWebWorkspace", request);
+        return answerFor("adoptWebWorkspace", AdoptWebWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- the login pty --------------------------------------------------
+      openLogin(request) {
+        record("openLogin", request);
+        return answerFor("openLogin", OpenLoginResponseSchema, {
+          result: { case: "success", value: { configDir: "/tmp/config" } },
+        });
+      },
+      async *watchLoginTerminal(requests: AsyncIterable<LoginTerminalInput>, context) {
+        consumeFailure("watchLoginTerminal");
+        const { channel, iterate } = openStream("watchLoginTerminal", "", context.signal);
+        void (async () => {
+          for await (const input of requests) {
+            record("watchLoginTerminal", input);
+            if (input.input.case === "attach") {
+              channel.push(
+                create(LoginTerminalOutputSchema, {
+                  output: { case: "bytes", value: { data: new TextEncoder().encode("login") } },
+                }),
+              );
+            }
+          }
+          channel.push(create(LoginTerminalOutputSchema, { output: { case: "closed", value: {} } }));
+          channel.end();
+        })();
+        yield* iterate() as AsyncGenerator<LoginTerminalOutput>;
+      },
+      closeLogin(request) {
+        record("closeLogin", request);
+        return answerFor("closeLogin", CloseLoginResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      openExternal(request) {
+        record("openExternal", request);
+        return answerFor("openExternal", OpenExternalResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+    });
+  };
+
+  return {
+    async start() {
+      const handler = connectNodeAdapter({ routes });
+      const listener = createServer(handler);
+      await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+      const address = listener.address() as AddressInfo;
+      server = listener;
+      baseUrl = `http://127.0.0.1:${address.port}`;
+      return { baseUrl };
+    },
+    async stop() {
+      for (const reg of registrations) reg.channel.end();
+      registrations.clear();
+      const listener = server;
+      server = undefined;
+      if (!listener) return;
+      listener.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        listener.close((error) => (error ? reject(error) : resolve())),
+      );
+    },
+    get baseUrl() {
+      if (!baseUrl) throw new Error("fake daemon: start() has not resolved");
+      return baseUrl;
+    },
+
+    setFooter(workspace, view) {
+      footers.set(workspace, view);
+      broadcast("watchFooter", workspace, undefined, create(WatchFooterResponseSchema, { footer: view }));
+    },
+    setTopbar(workspace, view) {
+      topbars.set(workspace, view);
+      broadcast("watchTopbar", workspace, undefined, create(WatchTopbarResponseSchema, { topbar: view }));
+    },
+    setRoster(next) {
+      roster = next;
+      broadcast(
+        "watchWorkspaceRoster",
+        undefined,
+        undefined,
+        create(WatchWorkspaceRosterResponseSchema, { roster: next }),
+      );
+    },
+    setTray(workspace, tray) {
+      trays.set(workspace, tray);
+      broadcast("watchDaemonHolds", workspace, undefined, create(WatchDaemonHoldsResponseSchema, { tray }));
+    },
+    setHostWorkspace(workspace, push) {
+      hosts.set(workspace, push);
+      broadcast("watchHostWorkspace", workspace, undefined, push);
+    },
+
+    setPage(workspace, feed, page) {
+      pages.set(key(workspace, feed), page);
+    },
+    setNextPage(workspace, feed, page) {
+      nextPages.set(key(workspace, feed), page);
+    },
+    pushRow(workspace, feed, row) {
+      broadcast("watchFeed", workspace, feed, create(WatchFeedResponseSchema, { row }));
+    },
+    mintedTokens(workspace, feed) {
+      return [...(tokens.get(key(workspace, feed)) ?? [])];
+    },
+
+    transfer(workspace, address) {
+      broadcast(
+        "watchWebWorkspace",
+        workspace,
+        undefined,
+        create(WatchWebWorkspaceResponseSchema, { push: { case: "transferred", value: { address } } }),
+      );
+    },
+    announceShutdown(init) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, {
+          push: {
+            case: "shutdownAnnounced",
+            value: {
+              address: init.address,
+              cause: {
+                kind: {
+                  case: "scheduledDrain",
+                  value: { reason: init.reason ?? { kind: { case: "deploy", value: {} } } },
+                },
+              },
+              expectedOutageMs: init.expectedOutageMs,
+              mintedAtMs: init.mintedAtMs,
+            },
+          },
+        }),
+      );
+    },
+    scheduleDrain(atMs, reason) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, { push: { case: "drainScheduled", value: { atMs, reason } } }),
+      );
+    },
+    cancelDrain() {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, { push: { case: "drainCancelled", value: {} } }),
+      );
+    },
+
+    answer(rpc, response) {
+      scripted.set(rpc, response);
+    },
+    failNext(rpc, errorMessage) {
+      const queue = failures.get(rpc) ?? [];
+      queue.push(errorMessage);
+      failures.set(rpc, queue);
+    },
+    injectUnknown(rpc) {
+      unknowns.add(rpc);
+    },
+
+    calls<Req>(rpc: RpcName): Req[] {
+      return recorded.filter((c) => c.rpc === rpc).map((c) => c.request as Req);
+    },
+    nextCall<Req>(rpc: RpcName): Promise<Req> {
+      const index = observed.get(rpc) ?? 0;
+      observed.set(rpc, index + 1);
+      const already = recorded.filter((c) => c.rpc === rpc);
+      if (already.length > index) return Promise.resolve(already[index].request as Req);
+      return new Promise<Req>((resolve) =>
+        callWaiters.push({ rpc, index, resolve: resolve as (r: unknown) => void }),
+      );
+    },
+    log() {
+      return [...recorded];
+    },
+    clearCalls() {
+      recorded.length = 0;
+      observed.clear();
+    },
+
+    liveStreams(rpc, workspace, feed) {
+      return countStreams(rpc, workspace, feed);
+    },
+    endStream(rpc, workspace, feed) {
+      for (const reg of [...registrations]) {
+        if (reg.rpc !== rpc) continue;
+        if (workspace !== undefined && reg.workspace !== workspace) continue;
+        if (feed !== undefined && reg.feed !== feed) continue;
+        registrations.delete(reg);
+        reg.channel.end();
+      }
+    },
+    awaitStream(rpc, count = 1) {
+      if (countStreams(rpc) >= count) return Promise.resolve();
+      return new Promise<void>((resolve) => streamWaiters.push({ rpc, count, resolve }));
+    },
+  };
+}
