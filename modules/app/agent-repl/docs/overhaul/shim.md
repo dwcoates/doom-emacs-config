@@ -27,6 +27,24 @@ deliberately absent.)
   Agent* frames — replaces convert/delta/extras suites.
 - Reattach: daemon reconnect via WatchAgent known_through catch-up (replaces
   reattach.test.ts's subject).
+- Compaction: shim writes the summarized transcript → the CLI resumes it →
+  the conversation serves. WARNING: the CLI's required per-line field union
+  is internal and undocumented — the written lines must mimic OBSERVED real
+  transcript lines, discovered empirically; this test doubles as that
+  experiment.
+- Keep-alive rewind: a real prompt submitted after trailing keep-alive turns
+  → the served context excludes them (the yield obligation, verified against
+  the vendor's actual transcript, not assumed).
+- SDK upgrade canary: the SDK version is PINNED (lockfile); one integration
+  test asserts every relied-on SDK method and response shape exists (incl.
+  the experimental get_usage), failing loudly when an upgrade removes or
+  reshapes one.
+- CAPTURE HARNESS (deferred vetting item 5 — assigned HERE): the golden
+  transcripts above are REAL captures from the actual agent binary, taken in
+  a one-time supervised capture run the project lead dispatches (the one
+  sanctioned exception to the no-real-calls rule); the mocked vendor's
+  scripts are rebuilt FROM these captures so the fake cannot agree with us
+  by construction.
 
 ## Contract context (for implementers)
 
@@ -39,6 +57,49 @@ set, implementation/validation/logging conventions) live in
 `the teamlead prompt (standing conventions) and the proto comments` and are NOT restated here.
 Implementers never change protobufs; a needed change is a request up the
 orchestration chain.
+
+### Process-level obligations (rulings 2026-08-29)
+
+- KERNEL LOCKS — THE SHIM HOLDS BOTH: at startup, before anything else, the
+  shim takes two exclusive kernel flocks for its lifetime — one keyed by
+  session id, one keyed by workspace dir. They exist because on a fresh
+  daemon boot a surviving shim may not have dialed in yet, so only a kernel
+  lock answers "is this conversation already owned" (connection tracking
+  says NO when the truth is NOT YET); the workspace key catches two session
+  ids over one transcript. The daemon PROBES these locks before spawning,
+  and the rollout's per-workspace transfer waits on the shim's workspace
+  lock. A platform that cannot take an exclusive open-lock fails LOUDLY
+  rather than reading as free. Failure to acquire = refusal to start.
+- SYSTEM PROMPT AND SETTINGS (load-bearing): every session starts with the
+  vendor's `claude_code` preset system prompt PLUS the harness metaprompt
+  appended (read from the canonical metaprompt.md file at spawn — the
+  file-based mechanism survives), and `settingSources` user+project+local.
+  Without the preset the model cannot resolve `~` and invents paths; without
+  the setting sources the session loses the user's permission allowlists,
+  hooks, and CLAUDE.md — and the vendor-side `denied.by_policy` emissions
+  the permission gate RELIES on only exist when settings are loaded.
+- THE BINARY: the shim drives the SDK's own bundled agent binary — the
+  pinned version the upgrade canary guards. No system-binary override.
+- SIGNALS: SIGTERM is the one authorized process-level shutdown and takes
+  the same graceful path as `KillSession` (the daemon may be dead, so an
+  rpc cannot be the only teardown). SIGINT is REFUSED and logged — an
+  attached terminal's Ctrl-C must not end the query.
+- PERMISSION-CALLBACK LIVENESS: every teardown path — interrupt, shutdown,
+  SDK abort — resolves ALL pending permission callbacks (as denied) before
+  proceeding. An unresolved `canUseTool` promise wedges the vendor process.
+- TRANSCRIPT BACKUP (shim-owned): the shim captures a copy of the vendor
+  transcript at every turn end and at vendor-uuid rotation, into a bounded,
+  pruned backup directory beside the work, restorable — the rung below the
+  fresh-start refusal, protecting the one artifact nobody can regenerate.
+- BUILD IDENTITY: `SessionStarted` reports the shim's build sha; the daemon
+  compares it against the current deploy stamp and bounces a stale survivor
+  at freeness (the rollout's build-staleness bounce rides this field).
+- `--version` stays: a dependency-free bundle smoke that loads every static
+  import and exits before touching a socket or the SDK.
+- LOG SINK SURVIVAL: the shim logs to an inherited fd (`--log-fd 3`), never
+  to a pipe whose far end is the daemon's stderr — a shim must survive its
+  daemon's death without dying on its own log line (EPIPE incident,
+  2026-08-10); a poisoned sink is surfaced, never silently swallowed.
 
 ### What the shim IS
 
@@ -72,7 +133,10 @@ orchestration chain.
   - the question tool's answer serialization: the vendor keys answers by
     question TEXT and comma-joins multi-selects; the shim undoes both at the
     boundary using echoed values (it validates echoes against the pending
-    callback it already holds — no new state).
+    callback it already holds — no new state). FREE-TEXT RESIDUE (ruled
+    2026-08-29): whatever remains of the joined answer string after every
+    validated label is removed IS the typed free text — that residue is
+    `free_text`'s producer definition.
 - What the shim DROPS: exempt tools (TaskStop, TaskOutput, TaskGet, TaskList,
   ToolSearch, NotebookEdit, REPL, the MCP-resource family, SendFeedback,
   ClaudeDesign, Projects, ShowOnboardingRolePicker, ProposeSkills, the
@@ -119,12 +183,21 @@ purpose).
     vendor's get_context_usage (never derived from usage frames). NOTE: the
     rpc comment in `service.proto` ("the shim's own health is pulled")
     predates that fold; the SessionUpdate arm comments are current.
+    A `compacting` arm is owed (contract increment, ruled 2026-08-29):
+    vendor-initiated auto-compaction still happens, and its start signal
+    (the system status:compacting message — the ContextCut record is the
+    end) is forwarded so a surface can draw the in-progress state.
   - `SetSessionModel`: resolves AFTER the current turn ends (one model per
     turn, a deliberate departure from the SDK's mid-turn setModel); refused
     IMMEDIATELY with `SessionCold` when context exceeds the request's
     threshold (daemon policy per call; the shim only measures) and no
     remediation is named. A model switch is a cold cache (cache is per model).
   - `SetSessionPermissionMode`: session state conditioning every gate.
+  - `Hibernate` (ruled 2026-08-29, contract increment owed): hibernation is
+    a first-class directive — the daemon calls it; the shim COMPACTS the
+    session (its ordinary compaction mechanism), then acks; only after the
+    ack does the daemon stand the shim down. Revival then never pays a cold
+    context.
   - `KillSession {force}`: ends the turn if open and EVERY live task,
     whichever turn spawned it (the vendor's own live-set answer — no shim
     tracking). Refuses while live unless forced; both outcomes NAME the work.
@@ -158,7 +231,9 @@ purpose).
     `WatchWorkflow` (token-addressed tail: stateless subagent LEVELS with
     replace semantics, then the terminal; the run's agents are then watched
     individually via WatchAgent — the daemon owns the fan-out) /
-    `StopWorkflow` (the run's only addressable act).
+    `StopWorkflow` (the run's only addressable act). WORKFLOW IS KICKED
+    (ruled 2026-08-29): the workflow verbs and vocabulary stay in the
+    contract but are NOT implemented in this wave — a future feature.
   - `DetachForeground {AgentActivityId}`: Ctrl-B — moves in-flight turn work
     onto its own stream; the turn announces the detachment and the consumer
     opens the matching Watch.
@@ -347,8 +422,21 @@ purpose).
 - The vendor's `elapsed_time_seconds`/`heartbeat` are consumed, never
   forwarded (the start instant + progress beat replace them). The shim stamps
   start instants at announcement.
-- Backgrounding causes are harvested from the BASH TOOL RESULT
+- Backgrounding causes for SHELLS are harvested from the BASH TOOL RESULT
   (`timedOutAfterMs`, `backgroundedByUser`), never from the task stream.
+  This rule does NOT cover a backgrounded AGENT (Ctrl-B on a foreground
+  subagent): there the candidate producer IS the task stream
+  (`task_updated{patch.is_backgrounded}`) — an implementation-wave
+  observation confirms or refutes it (no observed sequence exists yet).
+- KNOWN-OPEN, BEST-EFFORT ARMS (do not escalate; fill only if the wave finds
+  a producer, otherwise leave unset): `AgentPermissionAbandoned` (the SDK
+  declares no park deadline, so the arm may be unproducible),
+  `AgentPermissionDeniedForWantOfDecider` (no declared discriminator),
+  `SessionIdentityRotated.reason`, `ContextCompacted.
+  cumulative_dropped_tokens` + `tools_before_cut`, `ContextCleared.tokens`,
+  and `AgentEffortLevel`'s missing vendor `max`. Each is a landed
+  declaration whose producer the vetting runs could not find; an unset one
+  is expected, not a missed obligation.
 - Grep/glob omitted figures are shim-subtracted (the vendor reports totals);
   hook duration and spawn depth are shim-derived.
 - A subagent is one-run-per-input: it runs its commission to completion,
