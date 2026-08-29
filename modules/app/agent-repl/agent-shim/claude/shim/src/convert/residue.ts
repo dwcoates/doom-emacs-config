@@ -27,8 +27,8 @@
  * an attachment record is `attachment/<type>`, a system record is
  * `system/<subtype>`, and any other record kind is `<type>` verbatim.
  */
-import { create, fromJson } from "@bufbuild/protobuf";
-import { StructSchema } from "@bufbuild/protobuf/wkt";
+import { create } from "@bufbuild/protobuf";
+import type { JsonObject } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { storev1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
@@ -44,9 +44,16 @@ const LOGGER = bindLog({ component: "shim-convert-residue", operation: "shim.con
  * put there) is not a reason to lose it: it degrades to the `unparsed` arm,
  * which carries the bytes as a string and says why.
  */
-export function rawStruct(record: unknown): ReturnType<typeof create<typeof StructSchema>> | undefined {
+export function rawStruct(record: unknown): JsonObject | undefined {
   try {
-    return fromJson(StructSchema, JSON.parse(JSON.stringify(record)) as never);
+    // protobuf-es types a `google.protobuf.Struct` FIELD as a plain JSON object
+    // rather than as a Struct message, so the round-trip through JSON is both
+    // the representability check and the conversion.
+    const cloned: unknown = JSON.parse(JSON.stringify(record));
+    if (typeof cloned !== "object" || cloned === null || Array.isArray(cloned)) {
+      return { value: cloned as never };
+    }
+    return cloned as JsonObject;
   } catch (error) {
     LOGGER.log(
       { level: "warn", detail: error instanceof Error ? error.message : String(error) },
