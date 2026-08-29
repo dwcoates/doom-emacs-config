@@ -73,7 +73,9 @@ func New(store Store, log *logging.Logger, watchBuffer int) *Server {
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	path, connectHandler := storev1connect.NewShimStoreHandler(s)
-	mux.Handle(path, connectHandler)
+	// The flusher middleware is INSIDE the mux so the writer it captures is
+	// the one Connect writes the stream through.
+	mux.Handle(path, s.withResponseFlusher(connectHandler))
 	return h2c.NewHandler(mux, &http2.Server{})
 }
 
@@ -305,6 +307,14 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 			return err
 		}
 		replayed[line.WriteSeq] = struct{}{}
+	}
+	// THE HEADERS GO OUT BEFORE THE TAIL BLOCKS. Until they do, the caller's
+	// WatchAgentSession call has not returned, so the producer that would write
+	// the next line is itself still waiting on this stream. A replay that sent
+	// frames has flushed already; this is what covers the empty replay, which
+	// is the ordinary case for a watch pinned exactly after its page.
+	if err := s.openStream(ctx, log, "store.rpc.watch-agent-session"); err != nil {
+		return err
 	}
 	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: entry.pinSeq},
 		"watch live after replay replayed=%d", len(replay))
