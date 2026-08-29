@@ -23,7 +23,9 @@ const DefaultDirName = ".claude-emacs"
 const maxSocketPathLen = 103
 
 // socketNameBudget is the longest per-workspace socket file name the layout
-// must accommodate: a 16-character workspace id plus the ".sock" suffix.
+// must accommodate: a 16-character workspace id plus the ".sock" suffix. The
+// 16 is wsm.IDLength, which stateroot cannot import (wsm sits above it); the
+// two constants are documented on each other and move together or not at all.
 const socketNameBudget = 16 + len(".sock")
 
 // Layout names every path under one state root. It is a value; construct it
