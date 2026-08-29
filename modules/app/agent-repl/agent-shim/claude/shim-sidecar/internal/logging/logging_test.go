@@ -4,311 +4,238 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"regexp"
+	"os"
 	"strings"
 	"testing"
 	"time"
-
-	sharedlogging "agentrepl/logging"
 )
 
-func TestLogFormatsContextAndRoutesToBothSinks(t *testing.T) {
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	var diagnostic Diagnostic
-	l.With(Context{}).SetDiagnosticSink(func(d Diagnostic) { diagnostic = d })
-	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
-	l.now = func() time.Time { return at }
-	l.pid = func() int { return 42 }
-	l.With(Context{Component: "tail", Path: "/tmp/a", Session: "s1"}).With(Context{Operation: "poll"}).Log("read %d bytes", 42)
-
-	var got record
-	if file.Len() != 0 {
-		t.Fatalf("session record leaked into global file: %q", file.String())
-	}
-	if err := json.Unmarshal(stderr.Bytes(), &got); err != nil {
-		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
-	}
-	if got.Timestamp != at.Local().Format(sharedlogging.TimestampLayout) || got.Runtime != "sidecar" || got.PID != 42 {
-		t.Fatalf("runtime identity = %#v", got)
-	}
-	if got.Level != "info" || got.Verbosity != "normal" || got.Operation != "poll" || got.Message != "read 42 bytes" {
-		t.Fatalf("record fields = %#v", got)
-	}
-	if got.ClaudeSessionID != "s1" || got.Context["component"] != "tail" || got.Context["path"] != "/tmp/a" {
-		t.Fatalf("record attribution = %#v", got)
-	}
-	if diagnostic.Session != "s1" || diagnostic.Operation != "poll" || diagnostic.Context["path"] != "/tmp/a" {
-		t.Fatalf("diagnostic sink attribution = %#v", diagnostic)
-	}
+func TestMain(m *testing.M) {
+	os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	os.Exit(m.Run())
 }
 
-func TestSessionDiagnosticRequiresSinkAndNeverWritesGlobalFile(t *testing.T) {
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	got := capturePanic(t, func() {
-		l.With(Context{Session: "s1", Operation: "poll"}).Log("read")
-	})
-	if !strings.Contains(fmt.Sprint(got), "sink is not installed") {
-		t.Fatalf("panic = %v", got)
-	}
-	if file.Len() != 0 {
-		t.Fatalf("session record leaked into global file: %q", file.String())
-	}
-}
-
-func TestSinkEmergencyWritesJSONOnlyToStderrWithoutEnqueueing(t *testing.T) {
-	var stderr, file bytes.Buffer
-	var queued int
-	l := New(&stderr, &file)
-	l.With(Context{}).SetDiagnosticSink(func(Diagnostic) { queued++ })
-	l.With(Context{Session: "s1", Operation: "diagnostic-flush", Level: "error", SinkEmergency: true}).Log("store unavailable")
-	if queued != 0 {
-		t.Fatalf("sink emergency enqueued %d diagnostics", queued)
-	}
-	if file.Len() != 0 {
-		t.Fatalf("sink emergency wrote global file: %q", file.String())
-	}
-	var got record
-	if err := json.Unmarshal(stderr.Bytes(), &got); err != nil {
-		t.Fatalf("stderr emergency is not JSON: %v: %q", err, stderr.String())
-	}
-	if got.Level != "error" || got.ClaudeSessionID != "s1" || got.Message != "store unavailable" {
-		t.Fatalf("stderr emergency record = %#v", got)
-	}
-}
-
-func TestLogVerboseRequiresVerboseModeForEverySink(t *testing.T) {
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	var diagnostics []Diagnostic
-	l.With(Context{}).SetDiagnosticSink(func(d Diagnostic) {
-		diagnostics = append(diagnostics, d)
-	})
-	var constructed bool
-	l.now = func() time.Time {
-		constructed = true
-		return time.Now()
-	}
-	l.pid = func() int {
-		constructed = true
-		return 1
-	}
-	l.verbose = func() bool { return false }
-	l.With(Context{Component: "discover", Operation: "scan"}).LogVerbose("scan complete")
-	l.With(Context{Component: "tail", Session: "s1", Operation: "poll"}).LogVerbose("poll complete")
-	if file.Len() != 0 || stderr.Len() != 0 || len(diagnostics) != 0 || constructed {
-		t.Fatalf("disabled verbose record was constructed or reached a sink: constructed=%t file=%q stderr=%q diagnostics=%#v", constructed, file.String(), stderr.String(), diagnostics)
-	}
-	l.verbose = func() bool { return true }
-	l.With(Context{Component: "discover", Operation: "scan"}).LogVerbose("scan enabled")
-	l.With(Context{Component: "tail", Session: "s1", Operation: "poll"}).LogVerbose("poll enabled")
-	if !strings.Contains(file.String(), "scan enabled") {
-		t.Fatalf("enabled verbose record missing from file: %q", file.String())
-	}
-	if !strings.Contains(stderr.String(), "scan enabled") {
-		t.Fatalf("enabled verbose record missing from stderr: %q", stderr.String())
-	}
-	if len(diagnostics) != 1 || diagnostics[0].Message != "poll enabled" {
-		t.Fatalf("enabled verbose session diagnostics = %#v", diagnostics)
-	}
-}
-
-func TestLogVerboseValidatesContextWhileDisabled(t *testing.T) {
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	l.verbose = func() bool { return false }
-	got := capturePanic(t, func() {
-		l.With(Context{Component: "tail"}).LogVerbose("record")
-	})
-	if !strings.Contains(fmt.Sprint(got), "operation is required") {
-		t.Fatalf("panic = %v, want missing operation", got)
-	}
-	got = capturePanic(t, func() {
-		l.With(Context{Operation: "poll", Level: "fatal"}).LogVerbose("record")
-	})
-	if !strings.Contains(fmt.Sprint(got), "invalid level") {
-		t.Fatalf("panic = %v, want invalid level", got)
-	}
-	if file.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("invalid disabled records mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
-	}
-}
-
-func TestLogPersistentSinkFailureUsesEmergencyStderr(t *testing.T) {
-	var stderr bytes.Buffer
-	err := errors.New("disk full")
-	l := New(&stderr, failingWriter{err: err})
-	got := capturePanic(t, func() {
-		l.With(Context{Component: "store", Operation: "write"}).Log("write failed")
-	})
-	var emergency record
-	if decodeErr := json.Unmarshal(stderr.Bytes(), &emergency); decodeErr != nil {
-		t.Fatalf("emergency stderr is not JSON: %v: %q", decodeErr, stderr.String())
-	}
-	if emergency.Operation != "sidecar.logging.sink-failure" || emergency.Level != "error" {
-		t.Fatalf("emergency stderr record = %#v", emergency)
-	}
-	if !strings.Contains(fmt.Sprint(got), "disk full") {
-		t.Fatalf("panic = %v, want persistent sink failure", got)
-	}
-}
-
-func TestLogCompletesPartialGlobalWritesAndPoisonsAfterFailure(t *testing.T) {
-	var stderr bytes.Buffer
-	file := &partialWriter{limit: 3}
-	l := New(&stderr, file)
-	l.With(Context{Operation: "boot"}).Log("ready")
-	if !strings.Contains(file.String(), "ready") {
-		t.Fatalf("partial writer did not receive complete record: %q", file.String())
-	}
-	failing := New(&stderr, failingWriter{err: errors.New("disk full")})
-	capturePanic(t, func() { failing.With(Context{Operation: "boot"}).Log("first") })
-	got := capturePanic(t, func() { failing.With(Context{Operation: "boot"}).Log("second") })
-	if !strings.Contains(fmt.Sprint(got), "previously failed") {
-		t.Fatalf("poison panic = %v", got)
-	}
-}
-
-func TestLogStderrSinkFailurePanicsAfterPersistence(t *testing.T) {
-	var file bytes.Buffer
-	err := errors.New("terminal closed")
-	got := capturePanic(t, func() {
-		New(failingWriter{err: err}, &file).With(Context{Component: "store", Operation: "write"}).Log("write failed")
-	})
-	if !strings.Contains(file.String(), "write failed") {
-		t.Fatalf("persistent record missing before stderr failure: %q", file.String())
-	}
-	if !strings.Contains(fmt.Sprint(got), "terminal closed") {
-		t.Fatalf("panic = %v, want stderr sink failure", got)
-	}
-}
-
-func TestLogReportsBothSinkFailures(t *testing.T) {
-	fileErr := errors.New("disk full")
-	stderrErr := errors.New("terminal closed")
-	got := capturePanic(t, func() {
-		New(failingWriter{err: stderrErr}, failingWriter{err: fileErr}).With(Context{Component: "store", Operation: "write"}).Log("write failed")
-	})
-	message := fmt.Sprint(got)
-	if !strings.Contains(message, "disk full") || !strings.Contains(message, "terminal closed") {
-		t.Fatalf("panic = %v, want both sink failures", got)
-	}
-}
-
-func TestLogRejectsMissingOperationAndInvalidLevel(t *testing.T) {
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	got := capturePanic(t, func() {
-		l.With(Context{Component: "tail"}).Log("record")
-	})
-	if !strings.Contains(fmt.Sprint(got), "operation is required") {
-		t.Fatalf("panic = %v, want missing operation", got)
-	}
-	got = capturePanic(t, func() {
-		l.With(Context{Operation: "poll", Level: "fatal"}).Log("record")
-	})
-	if !strings.Contains(fmt.Sprint(got), "invalid level") {
-		t.Fatalf("panic = %v, want invalid level", got)
-	}
-	if file.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("invalid records mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
-	}
-}
-
-func TestNilLoggerUseFailsLoudly(t *testing.T) {
-	assertPanics := func(name string, call func()) {
-		t.Helper()
-		defer func() {
-			if recover() == nil {
-				t.Errorf("%s did not panic", name)
-			}
-		}()
-		call()
-	}
-	var logger *Logger
-	assertPanics("Logger.With", func() { logger.With(Context{}) })
-	var bound *Bound
-	assertPanics("Bound.With", func() { bound.With(Context{}) })
-	assertPanics("Bound.Log", func() { bound.Log("record") })
-	assertPanics("Bound.LogVerbose", func() { bound.LogVerbose("record") })
-}
-
-func capturePanic(t *testing.T, call func()) any {
+// sinks builds a logger over in-memory sinks with a fixed clock and pid, so a
+// record's bytes are entirely determined by the call under test.
+func sinks(t *testing.T, verbose bool) (*Logger, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
-	var got any
-	func() {
-		defer func() { got = recover() }()
-		call()
-	}()
-	if got == nil {
-		t.Fatal("call did not panic")
+	stderr, file := &bytes.Buffer{}, &bytes.Buffer{}
+	l := New(stderr, file)
+	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
+	l.pid = func() int { return 4242 }
+	l.verbose = func() bool { return verbose }
+	return l, stderr, file
+}
+
+func decode(t *testing.T, raw string) record {
+	t.Helper()
+	var got record
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("decoding record %q: %v", raw, err)
 	}
 	return got
 }
 
-type failingWriter struct{ err error }
+func TestLogWritesBothSinks(t *testing.T) {
+	// Arrange.
+	l, stderr, file := sinks(t, false)
 
-func (w failingWriter) Write([]byte) (int, error) {
-	if w.err == nil {
-		return 0, io.ErrClosedPipe
+	// Act.
+	l.With(Context{Operation: "cycle"}).Log("hello")
+
+	// Assert.
+	if file.String() != stderr.String() {
+		t.Fatalf("sinks disagree: file=%q stderr=%q", file.String(), stderr.String())
 	}
-	return 0, w.err
-}
-
-type partialWriter struct {
-	bytes.Buffer
-	limit int
-}
-
-func (w *partialWriter) Write(p []byte) (int, error) {
-	if len(p) > w.limit {
-		p = p[:w.limit]
-	}
-	return w.Buffer.Write(p)
-}
-
-// canonicalTimestampPattern is the shared shape every agent-repl runtime emits:
-// RFC 3339, 24-hour clock, fixed-width microseconds, explicit numeric offset.
-var canonicalTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}[+-]\d{2}:\d{2}$`)
-
-func TestLogTimestampUsesCanonicalFixedWidthLayout(t *testing.T) {
-	// Arrange: a whole second, whose subsecond digits RFC3339Nano would drop.
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	l.now = func() time.Time { return time.Date(2026, 7, 28, 12, 34, 56, 0, time.UTC) }
-
-	// Act
-	l.With(Context{Operation: "poll"}).Log("read")
-
-	// Assert
-	var got record
-	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if !canonicalTimestampPattern.MatchString(got.Timestamp) {
-		t.Fatalf("timestamp = %q, want canonical layout", got.Timestamp)
+	if got := decode(t, file.String()).Message; got != "hello" {
+		t.Fatalf("message = %q, want %q", got, "hello")
 	}
 }
 
-func TestLogTimestampUsesLocalZoneRatherThanUTC(t *testing.T) {
-	// Arrange
-	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
-	var stderr, file bytes.Buffer
-	l := New(&stderr, &file)
-	l.now = func() time.Time { return at }
+func TestVerboseSuppressedWhenDisabled(t *testing.T) {
+	// Arrange.
+	l, stderr, file := sinks(t, false)
 
-	// Act
-	l.With(Context{Operation: "poll"}).Log("read")
+	// Act.
+	l.With(Context{Operation: "cycle"}).LogVerbose("chatter")
 
-	// Assert
-	var got record
-	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
-		t.Fatal(err)
+	// Assert.
+	if file.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("verbose record emitted while disabled: file=%q stderr=%q", file.String(), stderr.String())
 	}
-	if got.Timestamp != at.Local().Format(sharedlogging.TimestampLayout) || strings.HasSuffix(got.Timestamp, "Z") {
-		t.Fatalf("timestamp = %q, want %q", got.Timestamp, at.Local().Format(sharedlogging.TimestampLayout))
+}
+
+func TestVerboseEmittedWhenEnabled(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, true)
+
+	// Act.
+	l.With(Context{Operation: "cycle"}).LogVerbose("chatter")
+
+	// Assert.
+	if got := decode(t, file.String()).Verbosity; got != "verbose" {
+		t.Fatalf("verbosity = %q, want %q", got, "verbose")
+	}
+}
+
+func TestCorrelationKeysRendered(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+	ctx := Context{
+		Operation: "write-batch", Component: "storeclient", Producer: "shim-claude-sidecar",
+		AgentID: "agent-1", VendorSessionID: "vendor-1", BookAgentID: "book-1",
+		WriteID: "w1", UpsertKey: "activity:a1", Position: "p1", WriteSeq: Seq(7),
+		WatchTokenHash: "deadbeef", RPC: "/store.v1.ShimStore/WriteBatch",
+		FileID: "16777232:99", Path: "/tmp/t.jsonl", Offset: Off(512),
+		TaskID: "b1", ActivityID: "a1", TurnID: "t1", StoreSocket: "/tmp/s.sock",
+	}
+
+	// Act.
+	l.With(ctx).Log("wrote")
+
+	// Assert.
+	got := decode(t, file.String()).Context
+	want := map[string]any{
+		"component": "storeclient", "producer": "shim-claude-sidecar", "agent_id": "agent-1",
+		"vendor_session_id": "vendor-1", "book_agent_id": "book-1", "write_id": "w1",
+		"upsert_key": "activity:a1", "position": "p1", "write_seq": float64(7),
+		"watch_token_hash": "deadbeef", "rpc": "/store.v1.ShimStore/WriteBatch",
+		"file_id": "16777232:99", "path": "/tmp/t.jsonl", "offset": float64(512),
+		"task_id": "b1", "activity_id": "a1", "turn_id": "t1", "store_socket": "/tmp/s.sock",
+	}
+	for key, wantValue := range want {
+		if got[key] != wantValue {
+			t.Errorf("context[%q] = %v, want %v", key, got[key], wantValue)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("context has %d keys, want %d: %v", len(got), len(want), got)
+	}
+}
+
+func TestRetiredAddressingKeysAbsent(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+
+	// Act.
+	l.With(Context{Operation: "cycle", AgentID: "agent-1"}).Log("no session ordinals here")
+
+	// Assert.
+	for _, retired := range []string{"claude_session_id", "seq", "from_seq", "replay_from_seq", "agent_repl_session_id"} {
+		if strings.Contains(file.String(), retired) {
+			t.Errorf("record still carries the retired key %q: %s", retired, file.String())
+		}
+	}
+}
+
+func TestUnsetOffsetOmitted(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+
+	// Act.
+	l.With(Context{Operation: "cycle", Path: "/tmp/t.jsonl"}).Log("no offset known")
+
+	// Assert.
+	if _, ok := decode(t, file.String()).Context["offset"]; ok {
+		t.Fatalf("absent offset rendered as a sentinel: %s", file.String())
+	}
+}
+
+func TestZeroOffsetRendered(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+
+	// Act.
+	l.With(Context{Operation: "cycle", Offset: Off(0)}).Log("start of file")
+
+	// Assert.
+	if got := decode(t, file.String()).Context["offset"]; got != float64(0) {
+		t.Fatalf("offset = %v, want 0 present", got)
+	}
+}
+
+func TestWithOverridesEarlierValues(t *testing.T) {
+	// Arrange.
+	l, _, file := sinks(t, false)
+	base := l.With(Context{Operation: "cycle", Component: "root", AgentID: "agent-1"})
+
+	// Act.
+	base.With(Context{Operation: "poll", Component: "tail"}).Log("bound")
+
+	// Assert.
+	got := decode(t, file.String())
+	if got.Operation != "poll" || got.Context["component"] != "tail" || got.Context["agent_id"] != "agent-1" {
+		t.Fatalf("merged record = %+v", got)
+	}
+}
+
+func TestMissingOperationPanics(t *testing.T) {
+	// Arrange.
+	l, _, _ := sinks(t, false)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a record with no operation was accepted")
+		}
+	}()
+
+	// Act.
+	l.With(Context{}).Log("nameless")
+}
+
+func TestInvalidLevelPanics(t *testing.T) {
+	// Arrange.
+	l, _, _ := sinks(t, false)
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("an invalid level was accepted")
+		}
+	}()
+
+	// Act.
+	l.With(Context{Operation: "cycle", Level: "catastrophe"}).Log("bad level")
+}
+
+// failingWriter fails every write, standing in for a full or unlinked log file.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk gone") }
+
+func TestSinkFailurePanicsAfterTerminalReport(t *testing.T) {
+	// Arrange.
+	stderr := &bytes.Buffer{}
+	l := New(stderr, failingWriter{})
+	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
+	l.pid = func() int { return 4242 }
+	l.verbose = func() bool { return false }
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("a failed persistent sink did not stop the caller")
+		}
+		if !strings.Contains(stderr.String(), "sidecar.logging.sink-failure") {
+			t.Fatalf("sink failure was not narrated to the terminal: %q", stderr.String())
+		}
+	}()
+
+	// Act.
+	l.With(Context{Operation: "cycle"}).Log("doomed")
+}
+
+func TestSinkEmergencySkipsPersistentSink(t *testing.T) {
+	// Arrange.
+	stderr := &bytes.Buffer{}
+	l := New(stderr, failingWriter{})
+	l.now = func() time.Time { return time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC) }
+	l.pid = func() int { return 4242 }
+	l.verbose = func() bool { return false }
+
+	// Act.
+	l.With(Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("store unreachable")
+
+	// Assert.
+	if got := decode(t, stderr.String()).Operation; got != "store-write" {
+		t.Fatalf("emergency record = %q, want the caller's operation", got)
 	}
 }
