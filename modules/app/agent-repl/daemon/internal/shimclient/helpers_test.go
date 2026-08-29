@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -57,6 +58,12 @@ func TestMain(m *testing.M) {
 // runHelper is the child: it reports the spawn contract it observed on fd 3,
 // then behaves as its mode says.
 func runHelper(mode string) {
+	if mode == helperIgnoreTerm {
+		// Installed BEFORE the record is written, so a parent that has read the
+		// record knows the disposition is already in place.
+		signal.Ignore(syscall.SIGTERM)
+	}
+
 	env := map[string]string{}
 	for _, entry := range os.Environ() {
 		name, value, ok := strings.Cut(entry, "=")
@@ -84,12 +91,23 @@ func runHelper(mode string) {
 		}
 		code, _ := strconv.Atoi(os.Getenv(helperExitEnv))
 		os.Exit(code)
-	case helperIgnoreTerm:
-		signal.Ignore(syscall.SIGTERM)
-		select {}
 	default:
-		select {}
+		blockForever()
 	}
+}
+
+// blockForever parks the helper in a real read syscall, which is immune to the
+// runtime's all-goroutines-asleep detector: the child must stay alive until it
+// is signaled, never exit on its own.
+func blockForever() {
+	r, w, err := os.Pipe()
+	if err != nil {
+		os.Exit(1)
+	}
+	defer runtime.KeepAlive(w)
+	var b [1]byte
+	_, _ = r.Read(b[:])
+	os.Exit(0)
 }
 
 // testSurfaces is the dlog.Surfaces every test hands the supervisor: one
