@@ -54,7 +54,6 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	}
 
 	out := convertFrames(h.conv, h.log, frames, ctx)
-	logResidue(h.log, ctx, out)
 	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
@@ -69,10 +68,14 @@ func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Fr
 		if frame.ParseErr != nil {
 			log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
 				Log("parse failure; the record is stored whole with no path to a page: %v", frame.ParseErr)
-			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
+			unparsed := convert.UnparsedEntry(at, frame.Raw, frame.ParseErr)
+			logResidue(log, ctx, frame.Offset, []*storev1.StoreEntry{unparsed})
+			out = append(out, unparsed)
 			continue
 		}
-		out = append(out, conv.Line(frame.Obj, at, lookahead(frames, i+1))...)
+		converted := conv.Line(frame.Obj, at, lookahead(frames, i+1))
+		logResidue(log, ctx, frame.Offset, converted)
+		out = append(out, converted...)
 	}
 	return out
 }

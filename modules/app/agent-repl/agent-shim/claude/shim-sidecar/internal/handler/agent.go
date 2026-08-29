@@ -39,7 +39,6 @@ func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 	out := convertFrames(h.conv, h.log, frames, ctx)
-	logResidue(h.log, ctx, out)
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
