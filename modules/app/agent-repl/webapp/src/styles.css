@@ -4285,3 +4285,175 @@ body.ungated #mode-select {
 /* An AGENT-addressed prompt wears the orange border the schema names for it. */
 .bubble.user.prompt-agent { border: 1px solid var(--thinking); }
 .prompt-block-unsupported { color: var(--muted); font-style: italic; }
+
+/* ---- footer (src/footer) ------------------------------------------------
+   The consolidated progress dock, ported onto the resolved FooterView. The
+   LOOK IS UNCHANGED: the strip reuses `.pfooter`, `.pfooter-cells`,
+   `.pfooter-cell`, `.pfooter-grow`, `.pfooter-phase`, `.pfooter-clock`,
+   `.pfooter-tokens`, `.pfooter-counters` and `.pfooter-sheet` above, and
+   everything here is either a NEW element the new contract brought (the
+   substatus cell, the stop controls, the live-work chips, the five panels) or
+   a hook the integration suite targets.
+
+   The status word's COLOR comes from `.tone-*` (render-colors.json's
+   `footer_status`), not from `.pfooter-phase`'s legacy per-state rules — the
+   shared vocabulary is the one table now — so the phase cell keeps its weight
+   and padding and spends no color of its own. */
+
+/* The substatus cell: the step within the status, set a notch quieter than the
+   status word it qualifies, exactly as the old interrupt chip was. */
+.footer-substatus {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+/* The queue place and the parked line ride inside it; the place carries its own
+   datum color (see `.tone-*`), so only the figures stand out. */
+.footer-substatus-place { font-variant-numeric: tabular-nums; }
+/* With no substatus to say, the status cell spans that segment: it keeps its
+   own padding and simply drops the hairline it would have divided against. */
+.footer-status-merged { border-right: 1px solid var(--border); }
+
+/* The activity cell's typed datums take their color from `.tone-*`; the prose
+   around them stays the cell's own muted register. */
+.footer-activity { color: var(--muted); }
+.footer-activity-age { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The newsworthy allowance is the one the reader must act on, so it is the one
+   set in the foreground weight; its sibling stays reference. */
+.footer-allowance-newsworthy { font-weight: 650; }
+.footer-allowance { font-variant-numeric: tabular-nums; }
+
+/* THE STOP CONTROLS (src/footer/stop.ts). A quiet square that only exists
+   while there is something to stop — never a disabled control, and never a
+   colored one until it has something to report. */
+.footer-stop { display: inline-flex; align-items: center; gap: 6px; }
+.footer-stop-button,
+.footer-stop-confirm {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  padding: 1px 6px;
+}
+.footer-stop-button:hover,
+.footer-stop-confirm:hover { color: var(--fg); border-color: var(--fg); }
+.footer-stop-glyph { font-size: 0.62rem; }
+/* The challenge is the one control that asks for a decision, so it wears the
+   warning register the rest of the strip deliberately does not. */
+.footer-stop-confirm { color: var(--thinking); border-color: var(--thinking); }
+.footer-stop-note { font-size: 0.7rem; color: var(--ok); }
+.footer-stop-refusal { font-size: 0.7rem; color: var(--err); }
+
+/* THE LIVE-WORK CHIPS. An unset chip is not drawn at all, so the cluster is
+   frequently empty; the chips themselves are the old counter chips' size and
+   weight with the new glyphs in front. */
+.footer-chips { display: flex; align-items: center; gap: 8px; }
+.footer-chip {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  border-radius: 8px;
+  padding: 0 5px;
+  color: var(--muted);
+}
+.footer-chip:hover { color: var(--fg); }
+/* The open panel's chip stays lit, so the strip says which section is showing
+   without the section having to repeat its own name. */
+.footer-chip-selected { color: var(--fg); background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.footer-chip-glyph { opacity: 0.85; }
+
+/* The tokens cell's two glyphs. Presence IS the fact for both: the alarm's
+   sentence and the verdict's evidence are the panel's lines, never repeated
+   here, so each is a single character with a hover. */
+.footer-tokens-alarm { color: var(--thinking); }
+.footer-tokens-verdict { font-size: 0.72rem; }
+.footer-tokens-verdict.arm-complete { color: var(--ok); }
+.footer-tokens-verdict.arm-incomplete,
+.footer-tokens-verdict.arm-invalid { color: var(--err); }
+
+/* THE EXPANDED PANELS. The sheet's geometry is `.pfooter-sheet`'s; these are
+   the row shapes the five panels draw inside it, all sharing one layout so a
+   monitor row and an agent row read as the same kind of line. Delimiters come
+   from the shared `.list-rows` rule, never from a rule of this section's. */
+.footer-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+.footer-panel-title { font-weight: 650; }
+.footer-panel-header .footer-stop { margin-left: auto; }
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.footer-row-jump { cursor: pointer; }
+.footer-row-jump:hover { color: var(--fg); }
+.footer-row-label { font-weight: 600; white-space: nowrap; }
+/* The description is the row's only elastic part, so a long commission
+   truncates instead of pushing the figures off the sheet's right edge. */
+.footer-row-description,
+.footer-row-command {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.footer-row-command { font-family: ui-monospace, monospace; }
+.footer-row-figures {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.footer-row-clock { color: var(--info-time); }
+.footer-row-tokens { color: var(--info-tokens); }
+.footer-row-caret { opacity: 0.6; }
+/* A jump that could not land says so at the row it was clicked on. */
+.footer-row-unreachable { color: var(--err); font-style: italic; }
+/* Presence markers (persistent, recurring, durable): a word, not a badge —
+   they qualify the row rather than competing with it. */
+.footer-row-marker {
+  font-size: 0.68rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+.footer-glyph { opacity: 0.85; }
+/* HOLLOW FOR DONE, BREATHING FOR LIVE: the running task's glyph breathes on the
+   same cadence the phase word does, and the completed box is drawn plainly
+   rather than colored — a finished task is not news. */
+.footer-glyph[data-glyph="completed"] { color: var(--ok); }
+.footer-glyph-running {
+  display: inline-block;
+  color: var(--thinking);
+  animation: pfooter-breath 2.6s ease-in-out infinite;
+}
+
+/* The tokens panel's lines: name dim, value bright, thinking indented under
+   output because it is already inside it. */
+.footer-token-line { display: flex; gap: 10px; }
+.footer-token-line-indented { padding-left: 1.2rem; }
+.footer-token-name { color: var(--muted); }
+.footer-token-value {
+  margin-left: auto;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+/* The alarm line reports money already spent that the user would have wanted to
+   prevent, so it keeps the error register the old expensive-turn row had. */
+.footer-token-alarm { color: var(--err); }
+.footer-token-verdict.arm-complete { color: var(--muted); }
+.footer-token-verdict.arm-incomplete,
+.footer-token-verdict.arm-invalid { color: var(--err); }
