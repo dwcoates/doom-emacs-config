@@ -268,7 +268,7 @@ describe("drawFeedSubagent: the stop control", () => {
     expect(el.querySelector(".refusal")?.textContent).toContain("3");
   });
 
-  it("offers a confirm step that resends the stop", async () => {
+  it("offers no confirm step, the challenge not applying to a detached target", async () => {
     const h = harness({
       interrupt: () =>
         create(InterruptResponseSchema, {
@@ -281,9 +281,23 @@ describe("drawFeedSubagent: the stop control", () => {
     const { el } = drawRow(subagentRow("b1", { detached: true }), h);
     el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
-    el.querySelector<HTMLElement>("[data-interrupt-confirm]")?.click();
+    expect(el.querySelector("[data-interrupt-confirm]")).toBeNull();
+  });
+
+  it("does not resend the stop after the challenge", async () => {
+    const h = harness({
+      interrupt: () =>
+        create(InterruptResponseSchema, {
+          result: {
+            case: "error",
+            value: { kind: { case: "confirmRequired", value: { liveAgentCount: 1n } } },
+          },
+        }),
+    });
+    const { el } = drawRow(subagentRow("b1", { detached: true }), h);
+    el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
-    expect(h.calls.interrupt).toHaveLength(2);
+    expect(h.calls.interrupt).toHaveLength(1);
   });
 
   it("tells the reader when the click never reached the daemon", async () => {
