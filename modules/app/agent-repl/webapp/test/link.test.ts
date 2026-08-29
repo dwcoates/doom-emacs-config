@@ -269,6 +269,12 @@ describe("renderEditorLink", () => {
     expect(renderEditorLink(ctx, { text: "plan.md", path: "/w/plan.md" }).tagName).toBe("A");
   });
 
+  it("carries the shared editor-link hook, whichever view drew it", () => {
+    const { ctx } = harness();
+    const a = renderEditorLink(ctx, { text: "plan.md", path: "/w/plan.md" });
+    expect(a.hasAttribute("data-editor-link")).toBe(true);
+  });
+
   it("carries NO href, since the destination is on the daemon's host", () => {
     const { ctx } = harness();
     expect(renderEditorLink(ctx, { text: "plan.md", path: "/w/plan.md" }).hasAttribute("href")).toBe(false);
