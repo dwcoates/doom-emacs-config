@@ -387,6 +387,9 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
        :desc "Close workspace"          "d" #'agent-repl-close-workspace
        :desc "Update GitHub PR description"  "r" #'agent-repl-update-pr
        :desc "Rebase branch onto origin/master" "b" #'agent-repl-rebase-onto-origin-master
+       :desc "Toggle debug logging"    "D" #'agent-repl-toggle-debug
+       :desc "Set durable log level"   "L" #'agent-repl-set-log-file-level
+       :desc "Toggle verbose to disk"  "V" #'agent-repl-toggle-verbose-to-disk
        :desc "Kill workspace"           "x" #'agent-repl-kill-workspace
        :desc "Kill ALL workspaces"      "X" #'agent-repl-kill-all-workspaces
        :desc "Paste workspace clipboard" "p" #'agent-repl-paste-clipboard

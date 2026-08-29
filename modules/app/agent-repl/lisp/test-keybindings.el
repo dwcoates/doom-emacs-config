@@ -802,3 +802,44 @@ final bindings, not error and not duplicate state."
       (should (eq (lookup-key general-override-mode-map (kbd (car entry)))
                   (cdr entry))))))
 
+
+;;;; ---- Tests: the SPC j log-verbosity bindings ----
+;;
+;; `map!' is a no-op stub in batch, so a leader binding is not observable
+;; through any keymap here.  The source text is: these assert that SPC j
+;; D / L / V still name the three restored commands, which is exactly the
+;; regression the dead `agent-repl-debug/*' family caused when it took
+;; those keys with it.
+
+(defconst agent-repl-test--keybindings-file
+  (expand-file-name "keybindings.el"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "Absolute path of keybindings.el, captured at LOAD time.
+`load-file-name' is nil inside an ERT body, so the path cannot be resolved
+when the test runs — only while this file is being loaded.")
+
+(defun agent-repl-test--keybindings-source ()
+  "Return the text of keybindings.el, for asserting on leader bindings."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--keybindings-file)
+    (buffer-string)))
+
+(ert-deftest agent-repl-test-spc-j-d-binds-toggle-debug ()
+  "SPC j D names `agent-repl-toggle-debug'."
+  (should (string-match-p "\"D\" #'agent-repl-toggle-debug"
+                          (agent-repl-test--keybindings-source))))
+
+(ert-deftest agent-repl-test-spc-j-l-binds-set-log-file-level ()
+  "SPC j L names `agent-repl-set-log-file-level'."
+  (should (string-match-p "\"L\" #'agent-repl-set-log-file-level"
+                          (agent-repl-test--keybindings-source))))
+
+(ert-deftest agent-repl-test-spc-j-v-binds-toggle-verbose-to-disk ()
+  "SPC j V names `agent-repl-toggle-verbose-to-disk'."
+  (should (string-match-p "\"V\" #'agent-repl-toggle-verbose-to-disk"
+                          (agent-repl-test--keybindings-source))))
+
+(ert-deftest agent-repl-test-log-verbosity-bindings-name-no-debug-prefix ()
+  "No `agent-repl-debug/' command survives in any binding."
+  (should-not (string-match-p "agent-repl-debug/"
+                              (agent-repl-test--keybindings-source))))
