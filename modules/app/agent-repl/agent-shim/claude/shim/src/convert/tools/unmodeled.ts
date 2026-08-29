@@ -13,13 +13,17 @@
  * carried as a `Struct`: structured enough that a generic view can list fields
  * without re-parsing, and NOTHING here branches on a key inside it.
  *
- * # `mcp_server` is STATED, never parsed
+ * # `mcp_server` is RESOLVED BY LOOKUP, never parsed
  *
- * The qualified tool name could be split — but the qualification grammar is the
- * vendor's, and a server whose own name contains the separator would be split
- * wrongly. The vendor states the server nowhere the fold can see it (neither
- * the `tool_use` block nor the tool's input carries such a field), so this
- * producer leaves it UNSET rather than deriving it from the name.
+ * No vendor field states which server served an `mcp__<server>__<tool>` call —
+ * neither the corpus nor the SDK declares one — and the qualified name cannot
+ * simply be split, because the qualification grammar is the vendor's and a
+ * server whose own name contains the separator would be split wrongly.
+ *
+ * So the candidate segment is matched EXACTLY against the server names the
+ * session actually knows (`system:init.mcp_servers`, `mcpServerStatus()`),
+ * which arrive on the tool environment. A match is a resolution; anything else
+ * leaves the field UNSET and is logged (shim lead's ruling, 2026-08-29).
  */
 import { create, isMessage, toJson, type JsonObject } from "@bufbuild/protobuf";
 import { StructSchema } from "@bufbuild/protobuf/wkt";
@@ -27,7 +31,7 @@ import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { settledAt, startedAt } from "../entries.js";
 import { rawStruct } from "../residue.js";
-import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
+import type { PendingCall, ToolConverter, ToolEnvironment, ToolOutcome } from "../tool-calls.js";
 
 const LOGGER = bindLog({
   component: "shim-convert-tools",
@@ -68,12 +72,44 @@ function argumentsOf(call: PendingCall): JsonObject | undefined {
   return (isMessage(raw, StructSchema) ? toJson(StructSchema, raw) : raw) as JsonObject;
 }
 
+/** The vendor's MCP tool-name prefix. */
+const MCP_PREFIX = "mcp__";
+
+/** The separator between an MCP server's name and its tool's. */
+const MCP_SEPARATOR = "__";
+
+/**
+ * Which MCP server served this call, when the session knows a name that matches.
+ *
+ * A LOOKUP, NOT A PARSE: the split is only ever a CANDIDATE, and it becomes an
+ * answer solely by matching a server the session actually has. That is what
+ * makes a server called `my__server` safe — its qualified names split wrongly,
+ * every candidate misses, and the field stays unset instead of naming `my`.
+ */
+export function resolveMcpServer(
+  toolName: string,
+  environment: ToolEnvironment | undefined,
+): string | undefined {
+  if (!toolName.startsWith(MCP_PREFIX)) return undefined;
+  const known = environment?.mcpServerNames ?? [];
+  const remainder = toolName.slice(MCP_PREFIX.length);
+  for (const name of known) {
+    if (remainder === name) continue;
+    if (remainder.startsWith(`${name}${MCP_SEPARATOR}`)) return name;
+  }
+  LOGGER.log(
+    { level: "warn", tool: toolName, known_servers: known.length },
+    "no MCP server this session knows matches this qualified tool name; the server is left unset",
+  );
+  return undefined;
+}
+
 /** A tool this contract does not model. */
 export const unmodeledConverter: ToolConverter = {
   kind: "unmodeled",
   carriesProgress: true,
 
-  start(call) {
+  start(call, environment) {
     return {
       case: "unmodeled",
       value: create(conversationv1.AgentUnmodeledSchema, {
@@ -83,16 +119,14 @@ export const unmodeledConverter: ToolConverter = {
             toolName: call.toolName,
             arguments: argumentsOf(call),
             startedAt: startedAt(call.startedAtMs),
-            // UNSET: no vendor field states the serving MCP server, and the
-            // qualified name is never split to guess one.
-            mcpServer: undefined,
+            mcpServer: resolveMcpServer(call.toolName, environment),
           }),
         },
       }),
     };
   },
 
-  settle(call, outcome) {
+  settle(call, outcome, environment) {
     if (outcome.isError) {
       LOGGER.logVerbose(
         { tool: call.toolName, tool_use_id: call.toolUseId },
@@ -106,7 +140,7 @@ export const unmodeledConverter: ToolConverter = {
             value: create(conversationv1.AgentUnmodeledFailureSchema, {
               toolName: call.toolName,
               content: content(outcome),
-              mcpServer: undefined,
+              mcpServer: resolveMcpServer(call.toolName, environment),
               settledAt: settledAt(outcome.settledAtMs),
             }),
           },
@@ -125,7 +159,7 @@ export const unmodeledConverter: ToolConverter = {
           value: create(conversationv1.AgentUnmodeledSuccessSchema, {
             toolName: call.toolName,
             content: content(outcome),
-            mcpServer: undefined,
+            mcpServer: resolveMcpServer(call.toolName, environment),
             settledAt: settledAt(outcome.settledAtMs),
           }),
         },

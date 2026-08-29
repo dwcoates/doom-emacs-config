@@ -76,6 +76,18 @@ export interface ToolOutcome {
 }
 
 /**
+ * What a converter may need to know about the SESSION rather than the call.
+ *
+ * Deliberately tiny: the only per-session fact a per-tool mapping has needed so
+ * far is the set of MCP server names, and it is needed to RESOLVE a server
+ * rather than to parse one out of a qualified tool name.
+ */
+export interface ToolEnvironment {
+  /** Every MCP server name this session knows. */
+  readonly mcpServerNames: readonly string[];
+}
+
+/**
  * One tool kind's mapping.
  *
  * `settle` may answer `undefined`, which means THIS RESULT IS NOT THE UNIT'S
@@ -90,9 +102,13 @@ export interface ToolConverter {
   /** Whether the vendor emits a per-call heartbeat for this kind. */
   readonly carriesProgress: boolean;
   /** The unit's `start` arm. */
-  start(call: PendingCall): conversationv1.AgentActivity["item"];
+  start(call: PendingCall, environment?: ToolEnvironment): conversationv1.AgentActivity["item"];
   /** The unit's terminal arm, or `undefined` when this result does not settle it. */
-  settle(call: PendingCall, outcome: ToolOutcome): conversationv1.AgentActivity["item"] | undefined;
+  settle(
+    call: PendingCall,
+    outcome: ToolOutcome,
+    environment?: ToolEnvironment,
+  ): conversationv1.AgentActivity["item"] | undefined;
   /** The unit's `progress` arm, for the kinds that declare one. */
   progress?(beat: conversationv1.AgentToolCallProgress): conversationv1.AgentActivity["item"];
 }
@@ -234,6 +250,11 @@ export function dispositionOf(
 // The call side
 // ---------------------------------------------------------------------------
 
+/** The session facts a converter may read, from the context the engine handed in. */
+export function environmentOf(context: FoldContext): ToolEnvironment {
+  return { mcpServerNames: context.mcpServerNames() };
+}
+
 /** The activity envelope every tool frame shares: the unit's identity. */
 export function toolActivity(
   call: PendingCall,
@@ -281,7 +302,7 @@ export function convertToolUse(
         activityEntry(
           context,
           { ...origin, discriminator: `activity.${disposition.converter.kind}.start` },
-          toolActivity(call, disposition.converter.start(call), envelope),
+          toolActivity(call, disposition.converter.start(call, environmentOf(context)), envelope),
         ),
       ];
     }
@@ -298,7 +319,7 @@ export function convertToolUse(
         activityEntry(
           context,
           { ...origin, discriminator: "activity.unmodeled.start" },
-          toolActivity(call, unmodeled.start(call), envelope),
+          toolActivity(call, unmodeled.start(call, environmentOf(context)), envelope),
         ),
       ];
     }
@@ -353,7 +374,7 @@ export function convertToolResult(
   if (converter === undefined) {
     throw new Error("shim convert: the unmodeled converter is missing from the registry");
   }
-  const item = converter.settle(call, outcome);
+  const item = converter.settle(call, outcome, environmentOf(context));
   if (item === undefined) {
     LOGGER.logVerbose(
       { tool: call.toolName, kind: converter.kind, tool_use_id: toolUseId },

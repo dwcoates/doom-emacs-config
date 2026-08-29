@@ -25,6 +25,11 @@
  * number of blocks. `effort` follows the same rule.
  */
 import { create } from "@bufbuild/protobuf";
+import {
+  InvalidModeledUsageError,
+  normalizeApiUsage,
+  type NormalizedApiUsage,
+} from "../api-usage.js";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
@@ -84,9 +89,43 @@ function nextIndexFor(state: BlockState, messageId: string): number {
 // Usage
 // ---------------------------------------------------------------------------
 
-/** The vendor's usage counters, in the one canonical token shape. */
+/**
+ * The vendor's usage counters, in the one canonical token shape.
+ *
+ * VALIDATED FIRST, never coerced. `normalizeApiUsage` is the strict reader
+ * harvested from the old shim: it refuses a malformed usage block outright
+ * rather than defaulting a counter to zero, and it collects every field the
+ * typed contract cannot express. A usage block that does not validate produces
+ * NO usage at all — absence means "not the carrying unit", and a zeroed bill
+ * would be read as "this cost nothing".
+ *
+ * An UNMODELED usage field is a TRANSLATION defect and therefore the shim's own
+ * business: the vendor sent something this contract cannot carry, and that is
+ * worth a warning even though nothing is lost from the figures below.
+ */
 export function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
   if (typeof usage !== "object" || usage === null) return undefined;
+  let normalized: NormalizedApiUsage;
+  try {
+    normalized = normalizeApiUsage(usage);
+  } catch (error) {
+    LOGGER.log(
+      {
+        level: "error",
+        detail: error instanceof Error ? error.message : String(error),
+        field_path: error instanceof InvalidModeledUsageError ? error.fieldPath : undefined,
+      },
+      "the vendor's usage block did not validate; this response carries NO usage rather than a zeroed bill",
+    );
+    return undefined;
+  }
+  const unknownFields = Object.keys(normalized.unknownUsageFields);
+  if (unknownFields.length > 0) {
+    LOGGER.log(
+      { level: "warn", unmodeled_usage_fields: unknownFields },
+      "the vendor's usage block carries fields this contract cannot express",
+    );
+  }
   const record = usage as Record<string, unknown>;
   const count = (key: string): bigint => {
     const value = record[key];
@@ -94,11 +133,8 @@ export function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefine
       ? BigInt(Math.trunc(value))
       : 0n;
   };
-  const details = record.output_tokens_details;
-  const reasoning =
-    typeof details === "object" && details !== null
-      ? (details as Record<string, unknown>).reasoning_tokens
-      : undefined;
+  const details = normalized.outputTokensDetails;
+  const reasoning = details === undefined ? undefined : details.reasoning_tokens;
   return create(conversationv1.TokenUsageSchema, {
     // ORGANIZED BY ECONOMICS, not by the vendor's field names: the cache READ is
     // the only cheap bucket, and both miss buckets together are the expensive
