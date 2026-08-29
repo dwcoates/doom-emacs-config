@@ -429,3 +429,15 @@ every UX or contract gap you surfaced instead of improvising.
   prompt→scenario table location = agent-shim/claude/shim/AGENTS.md).
 - ESCALATIONS OUTSTANDING: none (all seven answered in landing 3).
 - Project lead address for SendMessage: `main`.
+- LEDGER: mock additions landed on overhaul/shim-mock2 (2babe459c..e017fe398,
+  awaiting one fix: `!usage-window-unavailable` must null five_hour). ENGINE
+  GAPS queued for an opus-low remediation agent after the record plane lands
+  (they touch engine/pushes.ts, session.ts, the fold seam): (a) a fold
+  converter defect (StoreUnparsed with parse_error "converter defect: …")
+  must raise SessionFault.converter_defect + a degraded window and recover
+  (a FoldContext.reportFault channel or the Persistence fault source);
+  (b) model_changed must also be derived from the next assistant message's
+  message.model (unsolicited vendor fallback), not only init/SetSessionModel;
+  (c) fast_mode has no producer — the engine drops the fold's fast_mode
+  update as an owned arm and pushes none; produce it from init/result
+  fast_mode_state.
