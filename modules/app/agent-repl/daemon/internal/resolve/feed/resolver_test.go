@@ -452,3 +452,191 @@ func (h *harness) openPage(feed feedid.Feed, reader ReaderID) (*frontendv1.FeedP
 	}
 	return page, token
 }
+
+// ---- THE MERGE BUBBLE: synthesized by the orchestrator, placed by us ----
+//
+// The feed resolver is MERGE-AGNOSTIC: it honors a generic output address and
+// upserts whatever row the orchestrator hands it. Only the orchestrator and the
+// footer know "merge" as a concept, so these cases pin the PLACEMENT and the
+// sub-feed mechanics rather than any merge composition.
+
+func TestAMergeHeadIsUpsertedWhereTheOrchestratorPlacesIt(t *testing.T) {
+	// Arrange: the orchestrator's own head row.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	head := &frontendv1.FeedId{Value: "row|merge-head"}
+	row := &frontendv1.FeedRow{
+		Id: head,
+		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
+			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{
+				Head: &frontendv1.FeedMergeHead{
+					Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
+					Label:   &frontendv1.FeedMergeLabel{Text: "DWC/fix-flaky → master"},
+					Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: 1_000},
+					Fold:    &frontendv1.FeedMergeFold{Folded: false},
+				},
+				Result: &frontendv1.FeedMerge_Update{Update: &frontendv1.FeedMergeUpdate{}},
+			}},
+		}},
+	}
+
+	// Act.
+	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), row)
+	h.resolver.MintSubFeedHead(testWorkspace, head, feedid.Feed{Merge: &lease}, "DWC/fix-flaky → master")
+
+	// Assert: on the root feed, and its sub-feed is addressable.
+	rows := h.rows(rootFeed())
+	if len(rows) != 1 || rows[0].GetActivity().GetMerge() == nil {
+		t.Fatalf("rows = %+v, want the merge head", rows)
+	}
+	page, _ := h.openPage(feedid.Feed{Merge: &lease}, "reader-1")
+	crumbs := page.GetResult().(*frontendv1.FeedPage_Success).Success.GetBreadcrumbs().GetCrumbs()
+	if len(crumbs) != 1 || crumbs[0].GetTarget().GetValue() != head.GetValue() {
+		t.Fatalf("crumbs = %+v, want the merge head", crumbs)
+	}
+	if !h.hasRecord("debug", "daemon.feed.synthesized") {
+		t.Fatalf("records = %+v, want the synthesized branch recorded", h.records())
+	}
+}
+
+func TestMergeTabsAreAppendOnlyTopLevelRowsOfTheBubblesOwnFeed(t *testing.T) {
+	// Arrange: two rounds of the tests tab — a second round is a SECOND TAB,
+	// never a reopened one.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mergeFeed := feedid.Feed{Merge: &lease}
+
+	// Act.
+	for round := uint32(1); round <= 2; round++ {
+		h.resolver.UpsertSynthesized(testWorkspace, mergeFeed, &frontendv1.FeedRow{
+			Id: h.resolver.rowID(testWorkspace, mergeFeed, feedid.RowKey{
+				Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "tests:" + string(rune('0'+round)),
+			}),
+			Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{
+				Label: &frontendv1.FeedMergeTabLabel{Text: "tests", Round: round},
+				Kind: &frontendv1.FeedMergeTab_Tests{Tests: &frontendv1.FeedMergeTabTests{
+					State: &frontendv1.FeedMergeTabTests_Live{Live: &frontendv1.FeedMergeTabLive{}},
+				}},
+			}},
+		})
+	}
+
+	// Assert.
+	rows := h.rows(mergeFeed)
+	if len(rows) != 2 {
+		t.Fatalf("tabs = %d, want 2 — a second round is a second tab", len(rows))
+	}
+	if rows[1].GetMergeTab().GetLabel().GetRound() != 2 {
+		t.Fatalf("second round = %d, want 2", rows[1].GetMergeTab().GetLabel().GetRound())
+	}
+	for _, row := range rows {
+		if row.GetParent() != nil {
+			t.Fatal("a merge tab named a parent; tabs are top-level rows of the bubble's own feed")
+		}
+	}
+}
+
+func TestAnAgenticTabsRowsNestUnderItByTheOutputAddress(t *testing.T) {
+	// Arrange: the orchestrator addresses the conflicts tab.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mergeFeed := feedid.Feed{Merge: &lease}
+	tab := feedid.Ref{WS: testWorkspace, Feed: mergeFeed,
+		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "lease-7", Sub: "conflicts:1"}}
+	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+		Feed: mergeFeed, Parent: &tab,
+	})
+
+	// Act: the lease session's own conversation.
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseSuccessActivity("unit-1", "fixing TestReconnect"), noAddress())
+
+	// Assert: the tab's content IS the sub-feed rows parented to it.
+	rows := h.rows(mergeFeed)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want the agent's row", len(rows))
+	}
+	if rows[0].GetParent().GetRow().GetValue() != testEncode(tab).GetValue() {
+		t.Fatalf("parent = %q, want the conflicts tab", rows[0].GetParent().GetRow().GetValue())
+	}
+}
+
+func TestARetiredMergeRowLeavesTheFeedButNotTheAlreadyStreamedHistory(t *testing.T) {
+	// Arrange: a synthesized row a reader has already been streamed.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-7")
+	mergeFeed := feedid.Feed{Merge: &lease}
+	id := &frontendv1.FeedId{Value: "row|merge-tab"}
+	h.resolver.UpsertSynthesized(testWorkspace, mergeFeed, &frontendv1.FeedRow{
+		Id:  id,
+		Row: &frontendv1.FeedRow_MergeTab{MergeTab: &frontendv1.FeedMergeTab{}},
+	})
+
+	// Act.
+	h.resolver.RetireRow(testWorkspace, mergeFeed, id)
+
+	// Assert: gone from the pages.
+	if rows := h.rows(mergeFeed); len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0 after retirement", len(rows))
+	}
+	if !h.hasRecord("debug", "daemon.feed.retire_row") {
+		t.Fatalf("records = %+v, want the retirement recorded", h.records())
+	}
+}
+
+func TestRetiringARowThatIsNotThereSaysSo(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.resolver.RetireRow(testWorkspace, rootFeed(), &frontendv1.FeedId{Value: "row|nothing"})
+
+	// Assert: recorded rather than silently tolerated.
+	var found any
+	for _, record := range h.records() {
+		if record.Operation == "daemon.feed.retire_row" {
+			found = record.Context["found"]
+		}
+	}
+	if found != false {
+		t.Fatalf("logged found = %v, want false", found)
+	}
+}
+
+func TestARowWithNoIdentityIsRefusedLoudly(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.resolver.UpsertSynthesized(testWorkspace, rootFeed(), &frontendv1.FeedRow{})
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want none", len(rows))
+	}
+	if !h.hasRecord("error", "daemon.feed.row_without_identity") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.row_without_identity", h.records())
+	}
+}
+
+func TestEachWorkspaceHoldsItsOwnFeedUniverse(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	other := ids.WorkspaceID("ws-2")
+
+	// Act.
+	h.deliverPrompt("turn-1", "on ws-1")
+	h.resolver.OnPrompt(other, mainAgent(), &conversationv1.AgentPrompt{
+		Id:     &conversationv1.TurnId{Value: "turn-9"},
+		Agent:  mainAgent(),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+		Said:   &conversationv1.UserSaid{Content: &conversationv1.UserContent{}},
+	}, noAddress())
+
+	// Assert: one row each, and neither leaked.
+	if rows := h.rows(rootFeed()); len(rows) != 1 {
+		t.Fatalf("ws-1 rows = %d, want 1", len(rows))
+	}
+	h.resolver.mu.Lock()
+	otherRows := len(h.resolver.feed(h.resolver.state(other), rootFeed()).order)
+	h.resolver.mu.Unlock()
+	if otherRows != 1 {
+		t.Fatalf("ws-2 rows = %d, want 1", otherRows)
+	}
+}

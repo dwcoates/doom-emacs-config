@@ -417,3 +417,320 @@ func TestAMonitorDrawsNoFeedRow(t *testing.T) {
 		t.Fatalf("records = %+v, want the not-a-row branch recorded", h.records())
 	}
 }
+
+// ---- THE DETACHED SHELL BUBBLE ----
+
+// shellRow finds the detached shell bubble on the root feed.
+func (h *harness) shellRow() *frontendv1.FeedShell {
+	h.t.Helper()
+	for _, row := range h.rows(rootFeed()) {
+		if detached := row.GetDetachedShell(); detached != nil {
+			return detached.GetShell()
+		}
+	}
+	h.t.Fatal("no detached shell bubble on the root feed")
+	return nil
+}
+
+// bash sends one frame on a detached shell's own stream.
+func (h *harness) bash(work string, result any) {
+	h.t.Helper()
+	item := &conversationv1.AgentBash{}
+	switch r := result.(type) {
+	case *conversationv1.AgentBashStart:
+		item.Result = &conversationv1.AgentBash_Start{Start: r}
+	case *conversationv1.AgentBashUpdate:
+		item.Result = &conversationv1.AgentBash_Update{Update: r}
+	case *conversationv1.AgentToolCallProgress:
+		item.Result = &conversationv1.AgentBash_Progress{Progress: r}
+	case *conversationv1.AgentBashSuccess:
+		item.Result = &conversationv1.AgentBash_Success{Success: r}
+	case *conversationv1.AgentBashFailure:
+		item.Result = &conversationv1.AgentBash_Failure{Failure: r}
+	}
+	h.resolver.OnBash(testWorkspace, &conversationv1.DetachedWorkId{Value: work}, item, noAddress())
+}
+
+func TestADetachedShellDrawsItsCommandAndItsClock(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert: the "$" chrome is the client's, so the text is the command.
+	shell := h.shellRow()
+	if shell.GetCommand().GetText() != "npm run dev" {
+		t.Fatalf("command = %q", shell.GetCommand().GetText())
+	}
+	if shell.GetRuntime().GetStartedAtMs() != 1_000 {
+		t.Fatalf("runtime = %d", shell.GetRuntime().GetStartedAtMs())
+	}
+	if shell.GetLive() == nil {
+		t.Fatalf("state = %T, want live", shell.GetState())
+	}
+}
+
+func TestASpoolWithNoOutputYetIsUnsetRatherThanEmpty(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "sleep 1"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Assert: present from the FIRST output, and not before.
+	if h.shellRow().GetSpool() != nil {
+		t.Fatalf("spool = %+v, want unset before any output", h.shellRow().GetSpool())
+	}
+}
+
+func TestSpoolUpdatesAccumulateAndStampTheBeat(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+
+	// Act: two deltas, each continuing the sequence.
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 10})
+
+	// Assert: spool growth IS the beat.
+	shell := h.shellRow()
+	if shell.GetSpool().GetText() != "compiling\nready\n" {
+		t.Fatalf("spool = %q", shell.GetSpool().GetText())
+	}
+	if shell.GetLive().GetLastProgress().GetAtMs() != h.nowMs {
+		t.Fatalf("last_progress = %d, want the observed append", shell.GetLive().GetLastProgress().GetAtMs())
+	}
+}
+
+func TestASpoolGapIsRefusedRatherThanConcatenatedAcross(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Act: an offset that does not continue the sequence — bytes were lost.
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "ready\n", FromOffset: 999})
+
+	// Assert: output that never existed is never drawn.
+	if got := h.shellRow().GetSpool().GetText(); got != "compiling\n" {
+		t.Fatalf("spool = %q, want the frame refused", got)
+	}
+	if !h.hasRecord("error", "daemon.feed.spool_gap") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.spool_gap", h.records())
+	}
+}
+
+func TestACappedSpoolKeepsItsTailAndSaysWhatItDropped(t *testing.T) {
+	// Arrange: more output than the daemon carries.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "yes"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	var offset uint64
+	line := "a line of output\n"
+	for i := 0; i < 2_000; i++ {
+		h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: line, FromOffset: offset})
+		offset += uint64(len(line))
+	}
+
+	// Act.
+	spool := h.shellRow().GetSpool()
+
+	// Assert: the TAIL, cut on a line boundary, with the drop stated.
+	if len(spool.GetText()) > spoolCap {
+		t.Fatalf("spool = %d bytes, want at most the cap %d", len(spool.GetText()), spoolCap)
+	}
+	if spool.GetText()[0] != 'a' {
+		t.Fatalf("spool begins %q, want a line boundary", spool.GetText()[:20])
+	}
+	if spool.GetOmitted() == nil || !contains(spool.GetOmitted().GetText(), "earlier lines not shown") {
+		t.Fatalf("omitted = %+v, want the truncation line", spool.GetOmitted())
+	}
+}
+
+func TestAnUncappedSpoolStatesNoTruncation(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "echo hi"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "hi\n", FromOffset: 0})
+
+	// Assert.
+	if h.shellRow().GetSpool().GetOmitted() != nil {
+		t.Fatalf("omitted = %+v, want unset", h.shellRow().GetSpool().GetOmitted())
+	}
+}
+
+func TestASettledShellCarriesItsExitChip(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm test"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm test"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{},
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Exited{
+					Exited: &conversationv1.AgentBashExited{Code: 1},
+				},
+			},
+		}},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+	})
+
+	// Assert: a non-zero exit still COMPLETED; the tone is the client's reading
+	// of the code.
+	settled := h.shellRow().GetSettled()
+	if settled.GetCompleted() == nil {
+		t.Fatalf("outcome = %T, want completed", settled.GetOutcome())
+	}
+	if settled.GetExit().GetCode() != 1 {
+		t.Fatalf("exit = %+v, want the chip", settled.GetExit())
+	}
+	if settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("ended_at = %d", settled.GetEndedAtMs())
+	}
+}
+
+func TestAShellKilledBySignalCarriesNoExitChip(t *testing.T) {
+	// Arrange, Act: a kill never reported a status, so there is no number.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm test"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{},
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Killed{
+					Killed: &conversationv1.AgentBashKilled{},
+				},
+			},
+		}},
+	})
+
+	// Assert: absence draws no chip, never a zero.
+	if h.shellRow().GetSettled().GetExit() != nil {
+		t.Fatalf("exit = %+v, want unset", h.shellRow().GetSettled().GetExit())
+	}
+}
+
+func TestAForegroundShellsMissingTerminationCarriesNoExitChip(t *testing.T) {
+	// Arrange, Act: the fact exists for exactly one of the two paths.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm test"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{},
+		}},
+	})
+
+	// Assert.
+	if h.shellRow().GetSettled().GetExit() != nil {
+		t.Fatalf("exit = %+v, want unset", h.shellRow().GetSettled().GetExit())
+	}
+}
+
+func TestAShellWeStoppedSeeingIsLostAndNotCancelled(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Output: &conversationv1.AgentBashOutput{},
+			Cause: &conversationv1.AgentBashInterrupted_Lost{Lost: &conversationv1.DetachedLost{
+				How: &conversationv1.DetachedLost_FileVanished{
+					FileVanished: &conversationv1.DetachedLostFileVanished{},
+				},
+			}},
+		}},
+	})
+
+	// Assert: not known to have failed, and never drawn as a cancel.
+	settled := h.shellRow().GetSettled()
+	if settled.GetLost() == nil {
+		t.Fatalf("outcome = %T, want lost", settled.GetOutcome())
+	}
+}
+
+func TestAShellStoppedByHandIsCancelled(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Output: &conversationv1.AgentBashOutput{},
+			Cause: &conversationv1.AgentBashInterrupted_ByUser{
+				ByUser: &conversationv1.AgentBashInterruptedByUser{},
+			},
+		}},
+	})
+
+	// Assert.
+	if h.shellRow().GetSettled().GetCancelled() == nil {
+		t.Fatalf("outcome = %T, want cancelled", h.shellRow().GetSettled().GetOutcome())
+	}
+}
+
+func TestAForegroundShellThatDetachesKeepsItsCommandAndClock(t *testing.T) {
+	// Arrange: a foreground call already on screen.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Act: it moves rather than ending.
+	h.resolver.OnDetachedWork(testWorkspace, mainAgent(), &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "unit-1"},
+			Cause: &conversationv1.DetachedWorkDetached_ByUser{
+				ByUser: &conversationv1.DetachedCauseByUser{},
+			},
+		}},
+	}, noAddress())
+
+	// Assert: the ORIGINAL instant, so the drawn clock does not reset.
+	shell := h.shellRow()
+	if shell.GetCommand().GetText() != "npm run dev" {
+		t.Fatalf("command = %q, want the command carried across the move", shell.GetCommand().GetText())
+	}
+	if shell.GetRuntime().GetStartedAtMs() != 1_000 {
+		t.Fatalf("runtime = %d, want the original instant", shell.GetRuntime().GetStartedAtMs())
+	}
+	if !h.hasRecord("debug", "daemon.feed.detached_shell") {
+		t.Fatalf("records = %+v, want the move recorded", h.records())
+	}
+}
+
+func TestADetachedShellsFailureSettlesTheBubble(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashFailure{
+		Error: &conversationv1.AgentToolFailure{
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+		},
+	})
+
+	// Assert.
+	settled := h.shellRow().GetSettled()
+	if settled == nil || settled.GetEndedAtMs() != 9_000 {
+		t.Fatalf("settled = %+v, want the bubble concluded", settled)
+	}
+}
