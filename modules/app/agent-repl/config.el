@@ -161,6 +161,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
     version))
 
 (agent-repl--load-module "core")
+;; WHY: wire-verbs.el is the protojson codec for the agentrepl.v1 workspace
+;; and daemon-admin VERBS.  It needs nothing but core.el's logging ladder
+;; and the shared leaf codecs it reaches by name, so it loads with the rest
+;; of the wire layer, ahead of every module that sends or receives a verb.
+(agent-repl--load-module "wire-verbs")
 ;; WHY: connect.el is the Connect-over-HTTP/1.1 transport every daemon
 ;; exchange rides.  It loads immediately after core.el, whose logging ladder
 ;; and state-dir resolver it uses, and before any consumer of the daemon.
