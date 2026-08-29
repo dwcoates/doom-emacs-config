@@ -27,7 +27,7 @@ src/
                           forwardSubagentText, sessionId pre-mint, resume, canUseTool
   service/
     server.ts             UDS listener (h2c + HTTP/1.1 on one socket), Connect router
-    routes.ts             the shim.v1 service implementation: 16 handlers, one function each
+    routes.ts             the shim.v1 service implementation: 17 handlers (ReadHistory included), one function each
     validate/*.ts         request validation: one base function per request message, one
                           per non-primitive field (the proto→code mapping convention)
   engine/
@@ -264,8 +264,9 @@ is fd 3; the contract is `modules/app/agent-repl/logging-contract.md`.
   - `<spool-root>/<cwd-slug>/<vendor-session-id>/tasks/<task-id>.output`
     where `<spool-root>` = `$AGENT_REPL_FAKE_SPOOL_ROOT` or
     `/tmp/claude-<uid>`; task ids are `b<hex>` (shell), `a<hex>` (agent)
-  - `<cwd-slug>` = the absolute cwd with every `/` and `.` replaced by `-`
-    (observed: `/Users/x/.config/y` → `-Users-x--config-y`).
+  - `<cwd-slug>` = the absolute cwd with EVERY byte not in `[A-Za-z0-9]`
+    replaced by `-` (underscore included; case preserved), verified against
+    the live tree: `/private/var/folders/_m/x` → `-private-var-folders--m-x`.
 
 ## Tests
 
@@ -326,3 +327,17 @@ every UX or contract gap you surfaced instead of improvising.
   AGENTS.md table + shim.md mock section), INTEGRATION SUITE
   (test/integration) — the first three first, the suite in the first freed
   slot, auditors after.
+- RPC COUNT: shim.v1 has SEVENTEEN rpcs (shim.md's "16" undercounts;
+  ReadHistory is the seventeenth); audits count 17.
+- PAGE SIZE ZERO IS LEGAL: a `page_size` of 0 on StartTurn/WatchAgent/
+  ReadHistory means an empty page (no entries; `more` when any entry exists,
+  else `floor`) — the caller only wants the tail. The validator must not
+  refuse it.
+- LOG SESSION ID: the shim names its own log correlation id
+  `shim-<workspace-md5-8>-<pid>` (no daemon id reaches it at spawn); the
+  vendor session id attaches once known. Daemon-side correlation is by
+  workspace_dir + pid.
+- LEFTOVER MODULES: src/api-usage.ts, subscription-usage.ts, usage-log.ts,
+  model.ts survive from the old shim; the record-plane agent adopts (as
+  harvest for TokenUsage / account-usage mapping) or retires each, with a
+  stated reason; model.ts's normalizeOptionalModel may serve the engine.
