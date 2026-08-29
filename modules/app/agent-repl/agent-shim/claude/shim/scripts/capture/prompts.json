@@ -13,7 +13,8 @@
     "permission_script": "{default, rules:[{tool, decision, message?, delay_ms?}]}; decision is allow_once | allow_standing | deny | park.",
     "question_script": "{answers:[{question, select:[label...], free_text?}]}; a question with no entry is left UNANSWERED.",
     "controls": "[{at: session_start|on_message|turn_end, after?: {type, subtype, contains}, do: <verb>, args}].",
-    "expect": "What the capture must contain for the scenario to have discharged its coverage. Prose, read by a human at review time — not asserted by code."
+    "expect": "What the capture must contain for the scenario to have discharged its coverage. Prose, read by a human at review time — not asserted by code.",
+    "expects_api_error": "True only for a scenario whose GOLDEN is an API error. Every other scenario is quarantined if its result carries is_error / terminal_reason api_error / api_error_status, or if any message carries is_api_error_message."
   },
   "scenarios": [
     {
@@ -1106,7 +1107,8 @@
         "system:api_error",
         "api_retry",
         "rate_limit_event"
-      ]
+      ],
+      "expects_api_error": true
     },
     {
       "name": "max-tokens",

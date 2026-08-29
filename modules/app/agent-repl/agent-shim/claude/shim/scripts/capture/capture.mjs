@@ -38,7 +38,6 @@
 
 import { spawnSync } from "node:child_process";
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -47,6 +46,8 @@ import {
   statSync,
   writeFileSync,
   appendFileSync,
+  renameSync,
+  rmSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -57,6 +58,7 @@ import {
   anonymizeJsonl,
   anonymizePlainText,
 } from "./anonymize.mjs";
+import { apiKeySource, classifyCapture, verdictLine } from "./outcome.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,6 +73,27 @@ export const EXIT_REFUSED = 2;
 
 /** Exit code for a run that was authorized but failed. */
 export const EXIT_FAILED = 1;
+
+/**
+ * Exit code when the run completed but one or more scenarios were QUARANTINED.
+ *
+ * Distinct from EXIT_FAILED so an operator (or a CI wrapper) can tell "the
+ * harness broke" from "the harness worked and the vendor gave us nothing
+ * usable" — the second is the case the first real run hit.
+ */
+export const EXIT_POISONED = 3;
+
+/** Where a capture lands while it is still being written. */
+export const INFLIGHT_DIR = "_inflight";
+
+/**
+ * Where a capture lands when it did not earn the right to be a golden.
+ *
+ * The evidence is KEPT, not deleted: the operator needs to see the "Not logged
+ * in" transcript to know what to fix. It just must not sit where the converter
+ * suites will pick it up as truth.
+ */
+export const FAILED_DIR = "_failed";
 
 /**
  * Thrown by {@link assertCaptureAuthorized}. A named class so the spawn test
@@ -431,12 +454,18 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
  * and without `forwardSubagentText` a subagent's prose never arrives at all.
  */
 async function runScenario(sdk, scenario, opts) {
-  const outDir = path.join(opts.outDir, scenario.name);
+  // STAGED, NEVER WRITTEN IN PLACE: a capture becomes a golden only after it
+  // is classified, so a poisoned run can never occupy captures/<name>/ even
+  // for an instant (a run interrupted mid-scenario leaves _inflight/, which is
+  // obviously not a fixture).
+  const outDir = path.join(opts.outDir, INFLIGHT_DIR, scenario.name);
+  rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const streamPath = path.join(outDir, "stream.jsonl");
   writeFileSync(streamPath, "", "utf8");
 
   const report = { unparsed: [], controls: [], errors: [] };
+  const entries = [];
   const scratch = mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${scenario.name}-`));
   const cwd = path.join(scratch, "cwd");
   const configDir = path.join(scratch, "config");
@@ -448,11 +477,9 @@ async function runScenario(sdk, scenario, opts) {
 
   const t0 = Date.now();
   const record = (dir, msg) => {
-    appendFileSync(
-      streamPath,
-      `${JSON.stringify({ t_ms: Date.now() - t0, dir, msg: anonymize(msg) })}\n`,
-      "utf8",
-    );
+    const entry = { t_ms: Date.now() - t0, dir, msg: anonymize(msg) };
+    entries.push(entry);
+    appendFileSync(streamPath, `${JSON.stringify(entry)}\n`, "utf8");
   };
 
   // The scratch config root is the account root for THIS scenario only, so
@@ -583,15 +610,24 @@ async function runScenario(sdk, scenario, opts) {
   const defaultSpool = path.join("/tmp", `claude-${process.getuid?.() ?? 0}`, cwdSlug(cwd));
   copyTreeAnonymized(defaultSpool, path.join(filesDir, "spool-default"), report);
 
+  // THE GATE. A capture is a golden the converter suites are graded against
+  // and the mock is rebuilt from, so it must earn that standing rather than
+  // inherit it from having finished.
+  const outcome = classifyCapture(entries, scenario, report);
+
   writeFileSync(
     path.join(outDir, "meta.json"),
     `${JSON.stringify(
       {
         scenario: scenario.name,
+        ok: outcome.ok,
+        failure_reasons: outcome.reasons,
         prompt: scenario.prompt ?? null,
+        prompts: scenario.prompts ?? null,
         manual: scenario.manual ?? null,
         expect: scenario.expect,
         cwd_slug: cwdSlug(cwd),
+        api_key_source: apiKeySource(entries),
         captured_at: new Date().toISOString(),
         controls: report.controls,
         unparsed_lines: report.unparsed,
@@ -602,7 +638,16 @@ async function runScenario(sdk, scenario, opts) {
     )}\n`,
     "utf8",
   );
-  return report;
+
+  const finalDir = outcome.ok
+    ? path.join(opts.outDir, scenario.name)
+    : path.join(opts.outDir, FAILED_DIR, scenario.name);
+  rmSync(finalDir, { recursive: true, force: true });
+  mkdirSync(path.dirname(finalDir), { recursive: true });
+  renameSync(outDir, finalDir);
+
+  process.stderr.write(`${verdictLine(scenario.name, outcome)}\n`);
+  return { report, outcome, dir: finalDir };
 }
 
 /** Run one control and record both halves of the exchange. */
@@ -647,6 +692,7 @@ async function main(argv, env) {
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
   mkdirSync(opts.outDir, { recursive: true });
   const skipped = [];
+  const poisoned = [];
   for (const scenario of selected) {
     if (!scenario.prompt) {
       if (!opts.includeManual) {
@@ -661,13 +707,28 @@ async function main(argv, env) {
       continue;
     }
     process.stderr.write(`capture.mjs: capturing ${scenario.name}\n`);
-    await runScenario(sdk, scenario, opts);
+    const { outcome } = await runScenario(sdk, scenario, opts);
+    if (!outcome.ok) poisoned.push({ scenario: scenario.name, reasons: outcome.reasons });
   }
   writeFileSync(
     path.join(opts.outDir, "SKIPPED.json"),
     `${JSON.stringify({ skipped, reason: "manual scenarios have no prompt-only provocation" }, null, 2)}\n`,
     "utf8",
   );
+
+  if (poisoned.length > 0) {
+    // LOUD, LAST, AND NON-ZERO. The first real run exited 0 with an
+    // authentication failure sitting in captures/ as a fixture; the whole
+    // point of this block is that that outcome is now impossible to miss.
+    process.stderr.write(
+      `\ncapture.mjs: ${poisoned.length} of ${selected.length} scenario(s) DID NOT CAPTURE A USABLE GOLDEN.\n` +
+        `They are quarantined under ${path.join(opts.outDir, FAILED_DIR)}/ and are NOT fixtures.\n`,
+    );
+    for (const { scenario, reasons } of poisoned) {
+      process.stderr.write(`  ${scenario}: ${reasons.join("; ")}\n`);
+    }
+    return EXIT_POISONED;
+  }
   return 0;
 }
 
