@@ -122,6 +122,16 @@ question with options — never silently decided.
   systems running together, NO mocks (the analog, one level up, of the
   teamleads' mock-only integration suites). Dispatch one dedicated
   authoring agent for it if you like; ONLY YOU ever run the suite.
+- THE ADVERSARIAL SUITE AUDIT: refine the e2e suite through an
+  adversarial agent loop. Dispatch a FRESH-CONTEXT fable agent, pointed
+  at `docs/overhaul/` — the per-service spec documents (`<service>.md`)
+  across every system the suite spans — and ask it to find holes in the
+  suite relative to those specifications: cross-system behaviors
+  specified but untested, seams and sequences the specs imply that no
+  test exercises. Feed real critiques back into the suite, then dispatch
+  a fresh auditor again. Loop until an audit produces no critiques, or
+  until YOU are satisfied — you are the lead, and you need not suffer
+  nitpicking.
 - THE LOOP: once all five teamleads report green integration suites and
   are merged, run the e2e suite, ATTRIBUTE each failure to its owning
   system, and hand remediation back to that system's TEAMLEAD — never to
