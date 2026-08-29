@@ -456,3 +456,66 @@ func linkName(link sessionwatcher.LinkState) string {
 		return "unknown"
 	}
 }
+
+// OnContextCut takes the AgentUpdate.context_cut page line, which is what ENDS
+// a clear or a compaction.
+//
+// THE ASYMMETRY IS THE POINT: `SessionUpdate.compacting` only STARTS
+// `thinking · compacting` — no progress figure exists upstream — and this
+// record is the only end signal there is. Whichever way the cut went the
+// session is idle again afterwards, because a failed compaction cut nothing
+// and the turn is over either way.
+//
+// A FAILED COMPACTION IS NOT SILENCE: nothing was cut and the context is still
+// too large, which is exactly what the context-budget line says, so the
+// producer's account rides there as the idle status's activity evidence and is
+// recorded at WARN.
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, cut *conversationv1.ContextCut) {
+	if cut == nil {
+		return
+	}
+	arm := contextCutArm(cut)
+	failed, _ := cut.GetCut().(*conversationv1.ContextCut_CompactionFailed)
+
+	r.mu.Lock()
+	s := r.stateLocked(ws)
+	s.seen = true
+	s.turn = nil
+	s.turnEverRan = true
+	s.compacting = false
+	s.tok.settled = true
+	if failed != nil {
+		s.contextBudget = &standing{
+			text: "compaction failed — " + truncate(failed.CompactionFailed.GetError(), DefaultWarningRowWidth),
+			at:   r.opts.clock.Now(),
+		}
+	}
+	view := r.render(ws, s)
+	topic := r.topicLocked(ws)
+	log := r.logOf(ws, s)
+	r.mu.Unlock()
+
+	if failed != nil {
+		log.Warn("daemon.footer.on_context_cut",
+			"a compaction failed, so nothing was cut and the context is still too large",
+			dlog.Context{"arm": arm, "error": failed.CompactionFailed.GetError()})
+	} else {
+		log.Debug("daemon.footer.on_context_cut", "the footer took a context cut",
+			dlog.Context{"arm": arm})
+	}
+	topic.Publish(view)
+}
+
+// contextCutArm names the cut's arm for the record.
+func contextCutArm(cut *conversationv1.ContextCut) string {
+	switch cut.GetCut().(type) {
+	case *conversationv1.ContextCut_Cleared:
+		return "cleared"
+	case *conversationv1.ContextCut_Compacted:
+		return "compacted"
+	case *conversationv1.ContextCut_CompactionFailed:
+		return "compaction_failed"
+	default:
+		return "unset"
+	}
+}
