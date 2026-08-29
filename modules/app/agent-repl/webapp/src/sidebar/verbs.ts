@@ -1,0 +1,625 @@
+/**
+ * verbs — the workspace actions a roster row offers, and the requests they
+ * are.
+ *
+ * EVERY CLICK IS AN agentrepl RPC with plain fields, and every refusal is
+ * drawn AT THE CONTROL THAT MADE THE CALL. Nothing here waits for a pushed
+ * view to say what happened: a verb's answer is its own response, and the
+ * roster's new state arrives separately on the stream — so a success draws
+ * NOTHING and simply lets the next push replace the row.
+ *
+ * THE TWO DESTRUCTIVE VERBS ASK FIRST, and they ask differently because they
+ * destroy different things. `kill` ends a session and keeps the worktree, so a
+ * single confirm is proportionate. `nuke` DELETES THE WORKTREE AND BRANCH,
+ * unrecoverably, so it demands the workspace's name typed back — the one
+ * gesture that cannot be made by a mis-aimed click.
+ *
+ * WHY THE MENU IS BUILT HERE RATHER THAN IN `row.ts`. The row draws a
+ * workspace; this draws what can be DONE to one, which is a different surface
+ * with its own dozen call sites and its own refusal handling. Splitting them
+ * keeps each file's tests about one thing.
+ */
+import { create, type Message, type MessageInitShape } from "@bufbuild/protobuf";
+import {
+  AssignWorkspaceTaskRequestSchema,
+  AssignWorkspaceTaskResponseSchema,
+  type AssignWorkspaceTaskRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
+import {
+  CloseWorkspaceRequestSchema,
+  CloseWorkspaceResponseSchema,
+  type CloseWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
+import {
+  KillWorkspaceRequestSchema,
+  KillWorkspaceResponseSchema,
+  type KillWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
+import {
+  MergeWorkspaceRequestSchema,
+  MergeWorkspaceResponseSchema,
+  type MergeWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+import {
+  NukeWorkspaceRequestSchema,
+  NukeWorkspaceResponseSchema,
+  type NukeWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
+import {
+  OpenWorkspaceRequestSchema,
+  OpenWorkspaceResponseSchema,
+  type OpenWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import {
+  RestartWorkspaceRequestSchema,
+  RestartWorkspaceResponseSchema,
+  type RestartWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
+import {
+  SelectWorkspaceRequestSchema,
+  SelectWorkspaceResponseSchema,
+  type SelectWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import {
+  SetWorkspacePriorityRequestSchema,
+  SetWorkspacePriorityResponseSchema,
+  type SetWorkspacePriorityRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
+import { WorkspacePrioritySchema } from "../../../proto/gen/ts/agentrepl/v1/workspace_priority_pb";
+import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { log } from "../log.js";
+import { isMalformedView } from "../rpc/malformed.js";
+import { requireCase } from "../rpc/strict.js";
+import { callUnary } from "../rpc/unary.js";
+import type { SidebarContext } from "./context.js";
+
+/** The verbs a row's menu offers, exactly as `data-verb` spells them. */
+export type Verb =
+  | "open"
+  | "close"
+  | "kill"
+  | "nuke"
+  | "merge"
+  | "restart"
+  | "restartForce"
+  | "priority"
+  | "assign";
+
+/** The priority menu's entries; `clear` is the unset request. */
+export type PriorityChoice = "p05" | "p1" | "p2" | "p3" | "clear";
+
+/** The workspace a menu acts on. */
+export interface VerbTarget {
+  sc: SidebarContext;
+  /** The row's echoed identity — never rebuilt, never parsed. */
+  workspace: WorkspaceRef;
+  /** The row's display name, which is what `nuke` asks to be typed back. */
+  name: string;
+}
+
+/** What each menu entry is labelled. */
+const VERB_LABELS: Readonly<Record<Verb, string>> = {
+  open: "Open",
+  close: "Close",
+  kill: "Kill",
+  nuke: "Nuke",
+  merge: "Merge",
+  restart: "Restart",
+  restartForce: "Restart (forced)",
+  priority: "Priority",
+  assign: "Task",
+};
+
+/** What each priority entry is labelled; the badge itself is the daemon's. */
+const PRIORITY_LABELS: Readonly<Record<PriorityChoice, string>> = {
+  p05: "P0.5",
+  p1: "P1",
+  p2: "P2",
+  p3: "P3",
+  clear: "Clear",
+};
+
+/**
+ * The row's verb menu.
+ *
+ * A LIST like every other list in this app: the shared `.list-rows` delimiter
+ * class, and it opens DOWNWARD from the control, clamped inside the rail.
+ */
+export function drawRowMenu(target: VerbTarget): HTMLElement {
+  log("debug", "drawing a roster row's verb menu", {
+    operation: "sidebar.verbs.menu",
+    context: { workspace: target.workspace.id },
+  });
+  const menu = document.createElement("div");
+  menu.className = "sb-menu list-rows";
+  menu.appendChild(simpleVerbItem("open", target));
+  menu.appendChild(simpleVerbItem("close", target));
+  menu.appendChild(simpleVerbItem("merge", target));
+  menu.appendChild(simpleVerbItem("restart", target));
+  menu.appendChild(simpleVerbItem("restartForce", target));
+  menu.appendChild(drawPriorityItem(target));
+  menu.appendChild(drawAssignItem(target));
+  menu.appendChild(drawKillItem(target));
+  menu.appendChild(drawNukeItem(target));
+  return menu;
+}
+
+/** The verbs whose whole interaction is one click. */
+function simpleVerbItem(
+  verb: "open" | "close" | "merge" | "restart" | "restartForce",
+  target: VerbTarget,
+): HTMLElement {
+  const row = menuRow();
+  const button = verbButton(verb);
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void runSimpleVerb(verb, target, button);
+  });
+  row.appendChild(button);
+  return row;
+}
+
+/** Issue one of the plain verbs and say at the button what came back. */
+async function runSimpleVerb(
+  verb: "open" | "close" | "merge" | "restart" | "restartForce",
+  target: VerbTarget,
+  button: HTMLButtonElement,
+): Promise<void> {
+  switch (verb) {
+    case "open":
+      await runVerb(button, {
+        sc: target.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(target.workspace)),
+        schema: OpenWorkspaceResponseSchema,
+      });
+      return;
+    case "close":
+      await runVerb(button, {
+        sc: target.sc,
+        rpc: "CloseWorkspace",
+        call: (client) => client.closeWorkspace(buildCloseWorkspaceRequest(target.workspace)),
+        schema: CloseWorkspaceResponseSchema,
+        // The ONE typed refusal in this menu, and the reasons are deliberately
+        // not restated here: the footer carries them, pushed beside this
+        // answer, so the row points at the footer rather than guessing.
+        refusalText: (arm) =>
+          arm === "blocked"
+            ? "close refused: work in flight (see the footer)"
+            : "CloseWorkspace refused",
+      });
+      return;
+    case "merge":
+      await runVerb(button, {
+        sc: target.sc,
+        rpc: "MergeWorkspace",
+        call: (client) => client.mergeWorkspace(buildMergeWorkspaceRequest(target.workspace)),
+        schema: MergeWorkspaceResponseSchema,
+      });
+      return;
+    case "restart":
+    case "restartForce":
+      await runVerb(button, {
+        sc: target.sc,
+        rpc: "RestartWorkspace",
+        call: (client) =>
+          client.restartWorkspace(
+            buildRestartWorkspaceRequest(target.workspace, verb === "restartForce"),
+          ),
+        schema: RestartWorkspaceResponseSchema,
+      });
+      return;
+  }
+}
+
+/** Kill: one confirm step, because the worktree survives it. */
+function drawKillItem(target: VerbTarget): HTMLElement {
+  const row = menuRow();
+  const button = verbButton("kill");
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (row.querySelector(".sb-confirm") !== null) return;
+    row.appendChild(drawKillConfirm(target));
+  });
+  row.appendChild(button);
+  return row;
+}
+
+/** The kill confirmation: what it does, and the button that does it. */
+export function drawKillConfirm(target: VerbTarget): HTMLElement {
+  const confirm = document.createElement("div");
+  confirm.className = "sb-confirm";
+  const note = document.createElement("div");
+  note.className = "sb-confirm-note";
+  note.textContent = "Kill the session? The worktree and branch survive.";
+  confirm.appendChild(note);
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "sb-confirm-go";
+  go.textContent = "Kill";
+  go.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void runVerb(go, {
+      sc: target.sc,
+      rpc: "KillWorkspace",
+      call: (client) => client.killWorkspace(buildKillWorkspaceRequest(target.workspace)),
+      schema: KillWorkspaceResponseSchema,
+    });
+  });
+  confirm.appendChild(go);
+  return confirm;
+}
+
+/** Nuke: the name typed back, because this one deletes data for good. */
+function drawNukeItem(target: VerbTarget): HTMLElement {
+  const row = menuRow();
+  row.classList.add("sb-menu-destructive");
+  const button = verbButton("nuke");
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (row.querySelector(".sb-confirm") !== null) return;
+    row.appendChild(drawNukeConfirm(target));
+  });
+  row.appendChild(button);
+  return row;
+}
+
+/**
+ * The nuke confirmation.
+ *
+ * The go button stays DISABLED until the typed text equals the workspace's
+ * name exactly. Nothing about that is a formality: this is the only verb in
+ * the contract that destroys data, and the typing is the deliberation.
+ */
+export function drawNukeConfirm(target: VerbTarget): HTMLElement {
+  const confirm = document.createElement("div");
+  confirm.className = "sb-confirm sb-confirm-nuke";
+  const note = document.createElement("div");
+  note.className = "sb-confirm-note";
+  note.textContent = `Deletes the worktree and branch. Type "${target.name}" to confirm.`;
+  confirm.appendChild(note);
+
+  const typed = document.createElement("input");
+  typed.type = "text";
+  typed.className = "sb-confirm-name";
+  typed.setAttribute("name", "confirm_name");
+  confirm.appendChild(typed);
+
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "sb-confirm-go";
+  go.textContent = "Nuke";
+  go.disabled = true;
+  typed.addEventListener("input", () => {
+    go.disabled = typed.value !== target.name;
+  });
+  go.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void runVerb(go, {
+      sc: target.sc,
+      rpc: "NukeWorkspace",
+      call: (client) => client.nukeWorkspace(buildNukeWorkspaceRequest(target.workspace)),
+      schema: NukeWorkspaceResponseSchema,
+    });
+  });
+  confirm.appendChild(go);
+  return confirm;
+}
+
+/** Priority: the four levels and the clear, as one submenu. */
+function drawPriorityItem(target: VerbTarget): HTMLElement {
+  const row = menuRow();
+  const button = verbButton("priority");
+  const submenu = document.createElement("div");
+  submenu.className = "sb-submenu list-rows";
+  submenu.hidden = true;
+  for (const choice of ["p05", "p1", "p2", "p3", "clear"] as const) {
+    const entry = document.createElement("button");
+    entry.type = "button";
+    entry.className = "sb-menu-item";
+    entry.setAttribute("data-priority", choice);
+    entry.textContent = PRIORITY_LABELS[choice];
+    entry.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void runVerb(entry, {
+        sc: target.sc,
+        rpc: "SetWorkspacePriority",
+        call: (client) =>
+          client.setWorkspacePriority(
+            buildSetWorkspacePriorityRequest(target.workspace, choice),
+          ),
+        schema: SetWorkspacePriorityResponseSchema,
+      });
+    });
+    submenu.appendChild(entry);
+  }
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    submenu.hidden = !submenu.hidden;
+  });
+  row.appendChild(button);
+  row.appendChild(submenu);
+  return row;
+}
+
+/**
+ * Task assignment: the task view's own sections, offered as choices.
+ *
+ * The list comes off the LAST PUSHED ROSTER rather than from anything this
+ * menu remembers, and the ids are the daemon's `RosterTaskKey.task_id` handed
+ * straight back. "Unassign" is the empty id, which is the request's UNSET.
+ */
+function drawAssignItem(target: VerbTarget): HTMLElement {
+  const row = menuRow();
+  const button = verbButton("assign");
+  const submenu = document.createElement("div");
+  submenu.className = "sb-submenu list-rows";
+  submenu.hidden = true;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (submenu.hidden) fillAssignSubmenu(submenu, target);
+    submenu.hidden = !submenu.hidden;
+  });
+  row.appendChild(button);
+  row.appendChild(submenu);
+  return row;
+}
+
+/** (Re)build the assign choices from whatever the last push resolved. */
+export function fillAssignSubmenu(submenu: HTMLElement, target: VerbTarget): void {
+  const choices: Array<{ id: string; label: string }> = [
+    { id: "", label: "Unassign" },
+    ...target.sc.tasks,
+  ];
+  log("debug", "filling the assign-task submenu", {
+    operation: "sidebar.verbs.assign-choices",
+    context: { workspace: target.workspace.id, choices: choices.length },
+  });
+  submenu.replaceChildren();
+  for (const choice of choices) {
+    const entry = document.createElement("button");
+    entry.type = "button";
+    entry.className = "sb-menu-item";
+    entry.setAttribute("data-assign-task", choice.id);
+    entry.textContent = choice.label;
+    entry.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void runVerb(entry, {
+        sc: target.sc,
+        rpc: "AssignWorkspaceTask",
+        call: (client) =>
+          client.assignWorkspaceTask(
+            buildAssignWorkspaceTaskRequest(
+              target.workspace,
+              choice.id === "" ? null : choice.id,
+            ),
+          ),
+        schema: AssignWorkspaceTaskResponseSchema,
+      });
+    });
+    submenu.appendChild(entry);
+  }
+}
+
+function menuRow(): HTMLElement {
+  const row = document.createElement("div");
+  row.className = "sb-menu-row";
+  return row;
+}
+
+function verbButton(verb: Verb): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "sb-menu-item";
+  button.setAttribute("data-verb", verb);
+  button.textContent = VERB_LABELS[verb];
+  return button;
+}
+
+/** A response with the outcome oneof every verb in this section answers on. */
+type VerbResponse = Message & { result: { case?: string | undefined; value?: unknown } };
+
+/** What one verb call needs to run and to report. */
+interface VerbCall<Res extends VerbResponse> {
+  sc: SidebarContext;
+  rpc: string;
+  call: (client: SidebarContext["ctx"]["client"]) => Promise<Res>;
+  schema: Parameters<typeof callUnary>[3];
+  /** The sentence a refusal says; the default names the rpc and no more. */
+  refusalText?: (arm: string) => string;
+}
+
+/**
+ * Issue one verb, disable its control while it is in flight, and draw the
+ * answer beside it.
+ *
+ * SUCCESS DRAWS NOTHING and leaves the control disabled: the roster push that
+ * follows replaces the row outright, and re-enabling a button about to be
+ * thrown away would only flicker. Every other outcome re-enables, because the
+ * user is going to want to try again.
+ *
+ * ANSWERS TRUE ON SUCCESS, so a caller with a form to dismiss can dismiss it
+ * on the answer rather than by inspecting the DOM for a refusal.
+ */
+export async function runVerb<Res extends VerbResponse>(
+  control: HTMLElement,
+  spec: VerbCall<Res>,
+): Promise<boolean> {
+  clearRefusal(control);
+  setDisabled(control, true);
+  try {
+    const response = await callUnary(
+      spec.sc.ctx,
+      spec.rpc,
+      (client) => spec.call(client),
+      spec.schema,
+    );
+    const result = requireCase(response.result, `${spec.rpc}Response.result`);
+    if (result.case === "success") return true;
+    const arm = refusalArm(result.value);
+    const say = spec.refusalText?.(arm) ?? `${spec.rpc} refused`;
+    log("warn", `${spec.rpc} was refused`, {
+      operation: "sidebar.verbs.refused",
+      context: { rpc: spec.rpc, arm },
+    });
+    drawRefusal(control, arm, say);
+    setDisabled(control, false);
+    return false;
+  } catch (err) {
+    // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE. The renderer's own refusal
+    // — an unset outcome arm, an unknown field on the answer — says the daemon
+    // sent something this build cannot read, and it travels up loudly rather
+    // than being drawn as "could not be reached", which would be a lie.
+    if (isMalformedView(err)) throw err;
+    log("error", `${spec.rpc} failed at the transport: ${String(err)}`, {
+      operation: "sidebar.verbs.failed",
+      context: { rpc: spec.rpc, cause: err },
+    });
+    drawRefusal(control, "transport", "the daemon could not be reached");
+    setDisabled(control, false);
+    return false;
+  }
+}
+
+/**
+ * Disable a control for the duration of its call.
+ *
+ * The row LINE is a control too (the click that selects a workspace), and it
+ * is a div rather than a button, so the in-flight state is stated on the
+ * element either way: `disabled` where the element has one, and the shared
+ * `is-busy` class — which turns pointer events off — everywhere.
+ */
+function setDisabled(control: HTMLElement, disabled: boolean): void {
+  if (control instanceof HTMLButtonElement) control.disabled = disabled;
+  control.classList.toggle("is-busy", disabled);
+}
+
+/**
+ * The arm a refusal is labelled with.
+ *
+ * Most `<Method>Error` messages in this section are EMPTY ON PURPOSE — their
+ * arms are derived later — so there is nothing to name but the error itself.
+ * `CloseWorkspaceError` does carry a cause, and when it is set it is the more
+ * specific thing to say.
+ */
+export function refusalArm(error: unknown): string {
+  const cause = (error as { cause?: { case?: string } } | undefined)?.cause;
+  return cause?.case ?? "error";
+}
+
+/** The refusal, drawn as the NEXT SIBLING of the control that made the call. */
+export function drawRefusal(control: HTMLElement, arm: string, text: string): void {
+  const refusal = document.createElement("div");
+  refusal.className = "refusal sb-refusal";
+  refusal.setAttribute("data-arm", arm);
+  refusal.textContent = text;
+  control.after(refusal);
+}
+
+/** Drop whatever a previous attempt at this control left behind. */
+export function clearRefusal(control: HTMLElement): void {
+  for (const stale of control.parentElement?.querySelectorAll(":scope > .sb-refusal") ?? []) {
+    stale.remove();
+  }
+}
+
+/** SelectWorkspace: the row click. Idempotent — re-selecting is a success. */
+export function buildSelectWorkspaceRequest(workspace: WorkspaceRef): SelectWorkspaceRequest {
+  return create(SelectWorkspaceRequestSchema, { workspace });
+}
+
+/** OpenWorkspace: bring a registered-but-closed workspace back up. */
+export function buildOpenWorkspaceRequest(workspace: WorkspaceRef): OpenWorkspaceRequest {
+  return create(OpenWorkspaceRequestSchema, { workspace });
+}
+
+/** CloseWorkspace: the soft close, which refuses while work is in flight. */
+export function buildCloseWorkspaceRequest(workspace: WorkspaceRef): CloseWorkspaceRequest {
+  return create(CloseWorkspaceRequestSchema, { workspace });
+}
+
+/** KillWorkspace: forced session death; the worktree survives. */
+export function buildKillWorkspaceRequest(workspace: WorkspaceRef): KillWorkspaceRequest {
+  return create(KillWorkspaceRequestSchema, { workspace });
+}
+
+/** NukeWorkspace: the one verb that destroys data. */
+export function buildNukeWorkspaceRequest(workspace: WorkspaceRef): NukeWorkspaceRequest {
+  return create(NukeWorkspaceRequestSchema, { workspace });
+}
+
+/** MergeWorkspace: enqueue; the merge's life thereafter is the feed's. */
+export function buildMergeWorkspaceRequest(workspace: WorkspaceRef): MergeWorkspaceRequest {
+  return create(MergeWorkspaceRequestSchema, { workspace });
+}
+
+/** RestartWorkspace: graceful (force false) or forced (force true). */
+export function buildRestartWorkspaceRequest(
+  workspace: WorkspaceRef,
+  force: boolean,
+): RestartWorkspaceRequest {
+  return create(RestartWorkspaceRequestSchema, { workspace, force });
+}
+
+/**
+ * SetWorkspacePriority: a level, or the UNSET request that clears one.
+ *
+ * `clear` omits the field rather than sending a sentinel level — presence is
+ * the whole distinction the request draws.
+ */
+export function buildSetWorkspacePriorityRequest(
+  workspace: WorkspaceRef,
+  choice: PriorityChoice,
+): SetWorkspacePriorityRequest {
+  if (choice === "clear") return create(SetWorkspacePriorityRequestSchema, { workspace });
+  return create(SetWorkspacePriorityRequestSchema, {
+    workspace,
+    priority: create(WorkspacePrioritySchema, { level: priorityLevel(choice) }),
+  });
+}
+
+/**
+ * The priority message for one level.
+ *
+ * A switch rather than `{ case: choice, value: {} }`: the four levels are four
+ * distinct message types, and spelling them out is what makes a fifth level a
+ * compile error here instead of a silently-typed object.
+ */
+function priorityLevel(
+  choice: Exclude<PriorityChoice, "clear">,
+): MessageInitShape<typeof WorkspacePrioritySchema>["level"] {
+  switch (choice) {
+    case "p05":
+      return { case: "p05", value: {} };
+    case "p1":
+      return { case: "p1", value: {} };
+    case "p2":
+      return { case: "p2", value: {} };
+    case "p3":
+      return { case: "p3", value: {} };
+  }
+}
+
+/**
+ * AssignWorkspaceTask: a task, or the UNSET request that unassigns.
+ *
+ * The id is echoed verbatim — it is the daemon's `RosterTaskKey.task_id` and
+ * this end never parses or constructs one.
+ */
+export function buildAssignWorkspaceTaskRequest(
+  workspace: WorkspaceRef,
+  taskId: string | null,
+): AssignWorkspaceTaskRequest {
+  if (taskId === null) return create(AssignWorkspaceTaskRequestSchema, { workspace });
+  return create(AssignWorkspaceTaskRequestSchema, { workspace, task: { id: taskId } });
+}
+
