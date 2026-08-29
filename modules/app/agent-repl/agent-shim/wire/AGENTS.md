@@ -1,5 +1,24 @@
 # agent-shim/wire/
 
+## RETIRED FROM STORE AND SIDECAR (2026-08-29)
+
+This package no longer carries the store's traffic. `store.v1` is served with
+Connect over a UNIX domain socket: `connectrpc.com/connect` handlers behind an
+`h2c` server, both Connect codecs for free, and HTTP/2 owning liveness. There
+is no length-prefixed framing, no `google.protobuf.Any` type tag, and no
+Subscribe/EntryDelivery/ConnectionHeartbeat/HealthCheck dial protocol on that
+hop any more. `shim-store` and `shim-claude-sidecar` are ported off this
+package.
+
+The package is deliberately NOT deleted: the daemon still imports it, and the
+daemon rewrite owns that remaining import and its eventual disposition. Nothing
+new should be built on this package.
+
+Everything below describes the framing as it still exists for that one
+remaining consumer.
+
+---
+
 The shared Go framing layer for every agent-shim UDS hop, in two layers:
 
 1. **Raw frames** — `WriteFrame` / `ReadFrame`: a 4-byte big-endian length

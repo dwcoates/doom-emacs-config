@@ -1,0 +1,417 @@
+package main
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	storev1 "agentrepl/proto/store/v1"
+)
+
+func TestCycleBeginsOnlyAfterASuccessfulCursorRead(t *testing.T) {
+	// Arrange: a store that refuses cursor recovery.
+	h := newHarness(t, &fakeStore{cursorsFail: "database is locked"})
+	h.transcript(t, "sess-1", promptLine)
+
+	// Act.
+	h.sc.attempt()
+
+	// Assert: production may not begin without the store's own answer.
+	if h.sc.cursors != nil {
+		t.Fatal("production began on a refused cursor read")
+	}
+}
+
+func TestSuspendedCycleReadsNothing(t *testing.T) {
+	// Arrange: no store is listening at all.
+	h := newHarness(t, nil)
+	h.transcript(t, "sess-1", promptLine)
+
+	// Act.
+	h.sc.attempt()
+	h.sc.producing(h.sc.pollAll)
+
+	// Assert.
+	if len(h.sc.watchers) != 0 {
+		t.Fatalf("watching %d file(s) with production suspended", len(h.sc.watchers))
+	}
+}
+
+func TestSuspensionIsStatedOnce(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: two failing writes in one pass surface the same dead store twice.
+	store.writeFail = "transaction rolled back"
+	h.sc.suspend("first", nil)
+	h.sc.suspend("second", nil)
+
+	// Assert.
+	if got := strings.Count(h.logText(), "production suspended"); got != 1 {
+		t.Fatalf("suspension stated %d times, want once", got)
+	}
+}
+
+func TestBeginCycleStartsReading(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, "sess-1", promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: recovery is followed by a rescan, in that order.
+	if _, ok := h.sc.watchers[path]; !ok {
+		t.Fatalf("the transcript is not being watched; watchers=%v", h.sc.watchers)
+	}
+}
+
+func TestTailerResumesFromTheStoresCursor(t *testing.T) {
+	// Arrange: two complete turns, the store's cursor at the end of the file.
+	h := newHarness(t, &fakeStore{})
+	turn := promptLine + "\n" + assistantLine + "\n"
+	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+	h.store.cursors = []*storev1.CursorState{{FileId: "1:2", Path: path, Offset: int64(2 * len(turn))}}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: the position came from the store (rewound to the last turn start),
+	// never from zero.
+	if got := h.sc.watchers[path].tailer.Offset(); got != int64(len(turn)) {
+		t.Fatalf("resumed offset = %d, want %d (the last turn start below the store's cursor)", got, int64(len(turn)))
+	}
+}
+
+func TestAFileTheStoreHoldsNoCursorForStartsAtZero(t *testing.T) {
+	// Arrange: the honest backfill path — a REACHED store that genuinely holds
+	// no cursor for a newly discovered transcript.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, "sess-1", promptLine)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	if got := h.sc.watchers[path].tailer.Offset(); got != 0 {
+		t.Fatalf("offset = %d, want 0 for a file with no stored cursor", got)
+	}
+}
+
+func TestTheBootRewindHappensOncePerFile(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	turn := promptLine + "\n" + assistantLine + "\n"
+	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+	h.store.cursors = []*storev1.CursorState{{FileId: "1:2", Path: path, Offset: int64(2 * len(turn))}}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: a reconnect rebuilds the tailer from the same stored cursor.
+	h.sc.suspend("test", nil)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("second beginCycle: %v", err)
+	}
+
+	// Assert: one bounded backward scan per file per boot, not per reconnect.
+	if got := strings.Count(h.logText(), "rewound the restored cursor"); got != 1 {
+		t.Fatalf("rewind ran %d times, want once per file per boot", got)
+	}
+}
+
+func TestRescanWithoutCursorsPanics(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	defer func() {
+		// Assert: a tailer built without a recovered cursor starts at 0, and
+		// that silent cold start is what the whole cycle exists to prevent.
+		if recover() == nil {
+			t.Fatal("rescan ran with production suspended")
+		}
+	}()
+
+	// Act.
+	h.sc.rescan()
+}
+
+func TestWriteFailureSuspendsProduction(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "transaction rolled back"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if h.sc.cursors != nil {
+		t.Fatal("a refused batch left production running")
+	}
+}
+
+func TestWriteFailureLeavesTheCursorUnchanged(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	tailer := h.sc.watchers[path].tailer
+	store.writeFail = "transaction rolled back"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: nothing was committed, so the reader must re-read the same bytes.
+	if got := tailer.Offset(); got != 0 {
+		t.Fatalf("committed offset = %d, want 0 after a failed write", got)
+	}
+}
+
+func TestWriteFailureAbandonsTheRestOfThePass(t *testing.T) {
+	// Arrange: two files, one failing write.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	h.transcript(t, "sess-2", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "transaction rolled back"
+	store.writeCalls = 0
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: reading the second file would mean reading with nowhere to put it.
+	if store.writeCalls != 1 {
+		t.Fatalf("write calls = %d, want 1 (the pass must stop at the first failure)", store.writeCalls)
+	}
+}
+
+func TestSuccessfulWriteCommitsTheCursor(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	path := h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if got := h.sc.watchers[path].tailer.Offset(); got != int64(len(promptLine)+1) {
+		t.Fatalf("committed offset = %d, want the whole line", got)
+	}
+}
+
+func TestWriteCarriesTheCursorAdvance(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: the position must become durable in the same transaction.
+	if len(store.writes) != 1 || store.writes[0].GetCursorAdvance() == nil {
+		t.Fatalf("batch = %+v, want one batch carrying its cursor advance", store.writes)
+	}
+}
+
+func TestSuspensionDropsEveryTailer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	h.sc.suspend("test", nil)
+
+	// Assert: a tailer that outlived its cycle would resume from a position the
+	// next cycle's store never handed us.
+	if len(h.sc.watchers) != 0 {
+		t.Fatalf("%d tailer(s) survived the suspension", len(h.sc.watchers))
+	}
+}
+
+func TestRecoveryReReadsCursorsThenRescans(t *testing.T) {
+	// Arrange: a cycle that has been suspended.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.suspend("test", nil)
+	store.cursorsCalls = 0
+
+	// Act.
+	h.sc.attempt()
+
+	// Assert.
+	if store.cursorsCalls != 1 {
+		t.Fatalf("cursor reads on recovery = %d, want 1", store.cursorsCalls)
+	}
+	if len(h.sc.watchers) != 1 {
+		t.Fatalf("watchers after recovery = %d, want the rescan to have rebuilt them", len(h.sc.watchers))
+	}
+}
+
+func TestFailedAttemptArmsABackoff(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+
+	// Assert.
+	if !h.sc.nextAttemptAt.After(h.clock) {
+		t.Fatalf("next attempt at %s, want it armed after the failure", h.sc.nextAttemptAt)
+	}
+}
+
+func TestBackoffIsBoundedAndClimbs(t *testing.T) {
+	tests := []struct {
+		name string
+		from time.Duration
+		want time.Duration
+	}{
+		{name: "first failure", from: 0, want: recoverBackoffMin},
+		{name: "doubling", from: recoverBackoffMin, want: 2 * recoverBackoffMin},
+		{name: "at the ceiling", from: recoverBackoffMax, want: recoverBackoffMax},
+		{name: "past the ceiling", from: 2 * recoverBackoffMax, want: recoverBackoffMax},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			got := nextBackoff(tc.from)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("nextBackoff(%s) = %s, want %s", tc.from, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAttemptIsNotDueBeforeItsDeadline(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.sc.nextAttemptAt = h.clock.Add(time.Second)
+
+	// Act.
+	h.sc.attemptDue()
+
+	// Assert.
+	if h.store.cursorsCalls != 0 {
+		t.Fatalf("cursor reads = %d, want none before the armed deadline", h.store.cursorsCalls)
+	}
+}
+
+func TestAttemptIsDueAtItsDeadline(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	h.sc.nextAttemptAt = h.clock.Add(time.Second)
+	h.advance(time.Second)
+
+	// Act.
+	h.sc.attemptDue()
+
+	// Assert.
+	if h.store.cursorsCalls != 1 {
+		t.Fatalf("cursor reads = %d, want 1 once the deadline passed", h.store.cursorsCalls)
+	}
+}
+
+func TestARunningCycleDoesNotReattempt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.store.cursorsCalls = 0
+
+	// Act.
+	h.sc.attemptDue()
+
+	// Assert.
+	if h.store.cursorsCalls != 0 {
+		t.Fatalf("cursor reads = %d, want none while production is live", h.store.cursorsCalls)
+	}
+}
+
+func TestResumeReportsTheOutage(t *testing.T) {
+	// Arrange: one failed attempt, then a reachable store.
+	h := newHarness(t, &fakeStore{})
+	h.sc.attempts = 2
+	h.sc.suspendedSince = h.clock.Add(-5 * time.Second)
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(h.logText(), "production resumed") {
+		t.Fatalf("the outage window was never closed in the log; got %s", h.logText())
+	}
+}
+
+func TestAFirstAttemptCycleReportsNoOutage(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert.
+	if strings.Contains(h.logText(), "production resumed") {
+		t.Fatalf("a cycle that began immediately reported an outage; got %s", h.logText())
+	}
+}
+
+func TestNoHeartbeatPathRemains(t *testing.T) {
+	// Arrange: the store declares no health verb by design, so nothing may probe
+	// one. This is the executable form of that ruling.
+	h := newHarness(t, &fakeStore{})
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Assert.
+	for _, retired := range []string{"heartbeat", "health"} {
+		if strings.Contains(strings.ToLower(h.logText()), retired) {
+			t.Fatalf("the retired %q path is still exercised; got %s", retired, h.logText())
+		}
+	}
+}

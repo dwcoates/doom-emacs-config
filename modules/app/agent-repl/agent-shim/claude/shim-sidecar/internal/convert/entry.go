@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"agentrepl/shim-claude-sidecar/internal/logging"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -58,10 +60,48 @@ type Attribution struct {
 	Path   string
 	Offset int64
 
+	// FileID is the tailed file's stable "dev:inode" identity, so a log record
+	// names the file the same way the cursor does even across a rename.
+	FileID string
+
 	// TaskID is the vendor task id of a spool file (b*/a*/w*), empty for a
 	// transcript. It never crosses the contract; it is logging and owner
 	// resolution only.
 	TaskID string
+}
+
+// ctxFor is the CORRELATION BASE every log record in this package starts from.
+//
+// THE KEYS LIVE IN FIELDS, NEVER IN MESSAGE TEXT. A record whose identifiers are
+// interpolated into a sentence cannot be filtered, joined or aggregated by the
+// integration loop that reads these logs — so producer, path, file id, offset,
+// agent and task all ride dedicated keys here, and a call site adds only what is
+// specific to its branch (activity id, upsert key, write id).
+func (at Attribution) ctxFor(operation string) logging.Context {
+	return logging.Context{
+		Operation:       operation,
+		Producer:        Producer,
+		Path:            at.Path,
+		FileID:          at.FileID,
+		Offset:          logging.Off(at.Offset),
+		AgentID:         at.AgentID,
+		VendorSessionID: at.VendorSessionID,
+		TaskID:          at.TaskID,
+	}
+}
+
+// ctxWarn is ctxFor at warning level: degraded, unexpected, but handled.
+func (at Attribution) ctxWarn(operation string) logging.Context {
+	c := at.ctxFor(operation)
+	c.Level = "warn"
+	return c
+}
+
+// ctxError is ctxFor at error level: a failure or an invariant violation.
+func (at Attribution) ctxError(operation string) logging.Context {
+	c := at.ctxFor(operation)
+	c.Level = "error"
+	return c
 }
 
 // writeID mints the STABLE write identity for one record.

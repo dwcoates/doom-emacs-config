@@ -39,8 +39,8 @@ const (
 // means bytes were lost and the consumer refuses the frame rather than
 // concatenating across a hole.
 func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int64) *storev1.StoreEntry {
-	c.log.With(logging.Context{Operation: "bash-delta", Path: at.Path, Task: at.TaskID}).
-		LogVerbose("spool delta run=%s upsert_key=%s bytes=%d from_offset=%d", run, BashKey(run), len(output), fromOffset)
+	c.log.With(at.ctxFor("bash-delta")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+		LogVerbose("spool delta bytes=%d from_offset=%d", len(output), fromOffset)
 	return BashRun(at, "bash_delta:"+itoa(int(fromOffset)), BashKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{
 			NewOutput:  output,
@@ -57,8 +57,8 @@ func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int
 // also what keeps a task that plainly finished from sitting open until a
 // staleness sweep eventually — and wrongly — calls it LOST.
 func (c *Converter) BashExited(at Attribution, run, output string, code int) *storev1.StoreEntry {
-	c.log.With(logging.Context{Operation: "bash-exit", Path: at.Path, Task: at.TaskID}).
-		Log("EXIT=%d observed on disk for run=%s upsert_key=%s; the run ends on evidence rather than on a silence timeout", code, run, BashKey(run))
+	c.log.With(at.ctxFor("bash-exit")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+		Log("EXIT=%d observed on disk; the run ends on evidence rather than on a silence timeout", code)
 	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
@@ -79,8 +79,8 @@ func (c *Converter) BashExited(at Attribution, run, output string, code int) *st
 // either would be an accusation with no evidence, so the cause stays UNSET and
 // the reason is stated loudly in the log instead.
 func (c *Converter) BashLost(at Attribution, run, output string, reason LostReason) *storev1.StoreEntry {
-	c.log.With(logging.Context{Operation: "bash-lost", Path: at.Path, Task: at.TaskID, Level: "warn"}).
-		Log("detached run=%s upsert_key=%s is LOST (%s); it resolves interrupted with no cause because the wire carries no DetachedLost this wave", run, BashKey(run), reason)
+	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+		Log("the detached run is LOST (%s); it resolves interrupted with no cause because the wire carries no DetachedLost this wave", reason)
 	return BashLostEntry(at, run, output, reason)
 }
 
@@ -111,15 +111,15 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 	taskID := str(pick(result, "task_id", "taskId"))
 	taskType := str(pick(result, "task_type", "taskType"))
 	if taskID == "" {
-		c.log.With(logging.Context{Operation: "task-stop", Path: at.Path, Level: "warn"}).
-			Log("TaskStop result at offset=%d names no task; the stop cannot be attributed and the record is stored as vendor_specific", at.Offset)
+		c.log.With(at.ctxWarn("task-stop")).
+			Log("TaskStop result names no task; the stop cannot be attributed and the record is stored as vendor_specific")
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
 
 	switch taskType {
 	case "agent":
-		c.log.With(logging.Context{Operation: "task-stop", Path: at.Path, Task: taskID}).
-			Log("TaskStop consumed as the CANCELLED terminal of agent task=%s upsert_key=%s", taskID, ActivityKey(taskID))
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: taskID, UpsertKey: ActivityKey(taskID)}).
+			Log("TaskStop consumed as the CANCELLED terminal of an agent task")
 		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
 				Cause: &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
@@ -128,8 +128,8 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		activity.ActivityId = activityID(taskID)
 		return []*storev1.StoreEntry{c.settledEntry(at, agent, taskID, activity)}
 	default:
-		c.log.With(logging.Context{Operation: "task-stop", Path: at.Path, Task: taskID}).
-			Log("TaskStop consumed as the CANCELLED terminal of shell run=%s upsert_key=%s", taskID, BashKey(taskID))
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: taskID, UpsertKey: BashKey(taskID)}).
+			Log("TaskStop consumed as the CANCELLED terminal of a shell run")
 		return []*storev1.StoreEntry{BashRun(at, "bash_terminal", BashKey(taskID), taskID, &conversationv1.AgentBash{
 			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 				Command:   &conversationv1.AgentBashCommand{Line: taskID},

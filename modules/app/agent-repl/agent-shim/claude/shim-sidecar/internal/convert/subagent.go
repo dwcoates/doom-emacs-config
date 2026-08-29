@@ -34,8 +34,8 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		if boolean(pick(result, "stoppedByUser", "stopped_by_user")) {
 			f.Cause = &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}}
 		}
-		c.log.With(logging.Context{Operation: "subagent", Path: at.Path, Level: "warn"}).
-			Log("subagent spawn activity_id=%s created_agent_id=%q failed at offset=%d", call.activityID, created, at.Offset)
+		c.log.With(at.ctxWarn("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
+			Log("subagent spawn failed")
 		return item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: f},
 		}})
@@ -46,12 +46,12 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	// its own stream carries it from now on.
 	if boolean(result["isAsync"]) {
 		if created == "" {
-			c.log.With(logging.Context{Operation: "subagent", Path: at.Path, Level: "error"}).
-				Log("async subagent launch activity_id=%s at offset=%d names no agent id; the spawn has no join key and cannot be announced", call.activityID, at.Offset)
+			c.log.With(at.ctxError("subagent")).With(logging.Context{ActivityID: call.activityID}).
+				Log("async subagent launch names no agent id; the spawn has no join key and cannot be announced")
 			return nil
 		}
-		c.log.With(logging.Context{Operation: "subagent", Path: at.Path}).
-			Log("async subagent launch activity_id=%s created_agent_id=%s announced at offset=%d", call.activityID, created, at.Offset)
+		c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
+			Log("async subagent launch announced; its own stream carries it from here")
 		return item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Start{Start: &conversationv1.AgentSubagentStart{
 				CreatedAgentId:       agentID(created),
@@ -65,11 +65,11 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	}
 
 	if created == "" {
-		c.log.With(logging.Context{Operation: "subagent", Path: at.Path, Level: "warn"}).
-			Log("subagent result activity_id=%s at offset=%d names no agent id; the settled spawn carries no join key", call.activityID, at.Offset)
+		c.log.With(at.ctxWarn("subagent")).With(logging.Context{ActivityID: call.activityID}).
+			Log("subagent result names no agent id; the settled spawn carries no join key")
 	}
-	c.log.With(logging.Context{Operation: "subagent", Path: at.Path}).
-		LogVerbose("subagent spawn activity_id=%s created_agent_id=%q settled at offset=%d", call.activityID, created, at.Offset)
+	c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
+		LogVerbose("subagent spawn settled")
 
 	success := &conversationv1.AgentSubagentSuccess{
 		Prompt:               prompt,

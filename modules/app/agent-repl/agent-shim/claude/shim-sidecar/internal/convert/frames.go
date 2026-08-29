@@ -52,8 +52,8 @@ func (c *Converter) settledEntry(at Attribution, agent, unitID string, activity 
 // them out at read time and no activity routes onward from one.
 func (c *Converter) landFrame(at Attribution, agent, upsertKey, discriminator string, frame *conversationv1.AgentFrame) *storev1.StoreEntry {
 	if c.keepalive {
-		c.log.With(logging.Context{Operation: "keepalive", Path: at.Path}).
-			LogVerbose("upsert_key=%s converted while the keep-alive bit is set; landing as a never-served item", upsertKey)
+		c.log.With(at.ctxFor("keepalive")).With(logging.Context{UpsertKey: upsertKey}).
+			LogVerbose("converted while the keep-alive bit is set; landing as a never-served item")
 		return Keepalive(at, discriminator, upsertKey, agent, &storev1.StoreAgentItem{
 			Item: &storev1.StoreAgentItem_AgentFrame{AgentFrame: frame},
 		})
@@ -61,8 +61,8 @@ func (c *Converter) landFrame(at Attribution, agent, upsertKey, discriminator st
 	if agent == "" {
 		// A frame must name its agent: the store reads the book from the frame
 		// and never invents one. A frame with no agent is residue, loudly.
-		c.log.With(logging.Context{Operation: "attribution", Path: at.Path, Level: "error"}).
-			Log("frame for upsert_key=%s at offset=%d names no agent; the record has no book and is stored as unknown residue", upsertKey, at.Offset)
+		c.log.With(at.ctxError("attribution")).With(logging.Context{UpsertKey: upsertKey}).
+			Log("frame names no agent; the record has no book and is stored as unknown residue")
 		return UnknownEntry(at, "unattributed_frame", "agent_id", map[string]any{
 			"upsert_key": upsertKey,
 			"path":       at.Path,
@@ -90,12 +90,12 @@ func (c *Converter) noteKeepalive(message map[string]any, at Attribution) {
 	}
 	c.keepalive = marked
 	if marked {
-		c.log.With(logging.Context{Operation: "keepalive", Path: at.Path}).
-			Log("keep-alive prompt at offset=%d opens a turn whose records are never served", at.Offset)
+		c.log.With(at.ctxFor("keepalive")).
+			Log("keep-alive prompt opens a turn whose records are never served")
 		return
 	}
-	c.log.With(logging.Context{Operation: "keepalive", Path: at.Path}).
-		Log("ordinary prompt at offset=%d closes the keep-alive turn; records are served again", at.Offset)
+	c.log.With(at.ctxFor("keepalive")).
+		Log("ordinary prompt closes the keep-alive turn; records are served again")
 }
 
 // firstText returns the text of a user message's first text block, or the whole

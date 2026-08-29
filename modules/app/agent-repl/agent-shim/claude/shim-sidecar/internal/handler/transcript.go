@@ -37,7 +37,7 @@ func (h *SessionTranscriptHandler) SetObserver(o convert.Observer) { h.conv.SetO
 
 // Handle implements tail.Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Task: ctx.TaskID}).
+	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 
 	// A compaction boundary at the very end of a batch is UNSETTLED: its summary
@@ -47,14 +47,15 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	originalCount := len(frames)
 	frames = frames[:h.holdCount(frames, ctx)]
 	if len(frames) != originalCount {
-		h.log.With(logging.Context{Operation: "hold", Path: ctx.Path}).
-			Log("deferred the trailing compaction boundary: frames=%d processed=%d held_offset=%d held_deliveries=%d",
-				originalCount, len(frames), ctx.HeldOffset, ctx.HeldDeliveries)
+		h.log.With(handleCtx("hold", ctx)).
+			With(logging.Context{Offset: logging.Off(ctx.HeldOffset)}).
+			Log("deferred the trailing compaction boundary: frames=%d processed=%d held_deliveries=%d",
+				originalCount, len(frames), ctx.HeldDeliveries)
 	}
 
 	out := convertFrames(h.conv, h.log, frames, ctx)
 	logResidue(h.log, ctx, out)
-	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Task: ctx.TaskID}).
+	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }
@@ -66,8 +67,8 @@ func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Fr
 	for i, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
-			log.With(logging.Context{Operation: "parse", Path: ctx.Path, Task: ctx.TaskID, Level: "warn"}).
-				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
+			log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
+				Log("parse failure; the record is stored whole with no path to a page: %v", frame.ParseErr)
 			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
 			continue
 		}
@@ -119,8 +120,8 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 	if heldOffset == last.Offset && heldFor >= maxHoldDeliveries {
 		// Held once already and the file still says nothing after it. Stop
 		// waiting: the boundary converts without a summary, loudly.
-		h.log.With(logging.Context{Operation: "hold", Path: ctx.Path, Level: "warn"}).
-			Log("compaction boundary at offset=%d was held for %d delivery and no summary followed; converting it without one", last.Offset, heldFor)
+		h.log.With(handleWarn("hold", ctx)).With(logging.Context{Offset: logging.Off(last.Offset)}).
+			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it without one", heldFor)
 		return n
 	}
 	if heldOffset == last.Offset {

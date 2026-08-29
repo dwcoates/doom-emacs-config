@@ -32,8 +32,8 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// CONSUMED by the compaction boundary that precedes it, so emitting it
 		// here would render the summary twice and attribute the harness's text
 		// to the person.
-		c.log.With(logging.Context{Operation: "compact-summary", Path: at.Path}).
-			LogVerbose("compaction summary at offset=%d folded into its boundary", at.Offset)
+		c.log.With(at.ctxFor("compact-summary")).
+			LogVerbose("compaction summary folded into its boundary")
 		return out
 	case c.isClearCommand(message):
 		return append(out, c.contextCleared(record, at, env, agent))
@@ -48,13 +48,13 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 	case env.isMeta:
 		// A harness-injected user record: a system reminder, an attachment
 		// carrier. Not something a person said.
-		c.log.With(logging.Context{Operation: "withhold", Path: at.Path}).
-			LogVerbose("harness-injected user record at offset=%d withheld as vendor_specific", at.Offset)
+		c.log.With(at.ctxFor("withhold")).
+			LogVerbose("harness-injected user record withheld as vendor_specific")
 		return append(out, VendorSpecificEntry(at, "user/meta", record))
 	default:
 		c.noteKeepalive(message, at)
-		c.log.With(logging.Context{Operation: "user-prompt", Path: at.Path}).
-			LogVerbose("file-plane user prompt at offset=%d withheld as vendor_specific (R15: TurnId and PromptOrigin are daemon-minted)", at.Offset)
+		c.log.With(at.ctxFor("user-prompt")).
+			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: TurnId and PromptOrigin are daemon-minted)")
 		return append(out, VendorSpecificEntry(at, "user_prompt", record))
 	}
 }
@@ -98,8 +98,8 @@ func (c *Converter) skillDocument(record map[string]any, at Attribution, env env
 	delete(c.openSkills, env.sourceTool)
 
 	markdown := firstText(obj(record["message"]))
-	c.log.With(logging.Context{Operation: "skill-document", Path: at.Path}).
-		LogVerbose("skill document activity_id=%s (%d characters) settles its invocation at offset=%d", call.activityID, len(markdown), at.Offset)
+	c.log.With(at.ctxFor("skill-document")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
+		LogVerbose("skill document (%d characters) settles its invocation", len(markdown))
 
 	activity := c.skillSettled(call, markdown, env.timestampMs)
 	activity.ActivityId = activityID(call.activityID)

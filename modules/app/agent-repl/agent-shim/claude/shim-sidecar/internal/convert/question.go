@@ -35,8 +35,8 @@ func (c *Converter) settleQuestion(call openCall, result, block map[string]any, 
 	question := &conversationv1.AgentQuestion{Id: &conversationv1.AgentQuestionId{Value: call.activityID}}
 
 	if failed {
-		c.log.With(logging.Context{Operation: "question", Path: at.Path, Level: "warn"}).
-			Log("ask activity_id=%s at offset=%d could not be put to the user", call.activityID, at.Offset)
+		c.log.With(at.ctxWarn("question")).With(logging.Context{ActivityID: call.activityID, UpsertKey: QuestionKey(call.activityID)}).
+			Log("the ask could not be put to the user")
 		question.Result = &conversationv1.AgentQuestion_Failure{Failure: &conversationv1.AgentQuestionFailure{
 			Error: toolFailure(block, env.timestampMs),
 		}}
@@ -48,12 +48,12 @@ func (c *Converter) settleQuestion(call openCall, result, block map[string]any, 
 	success := &conversationv1.AgentQuestionSuccess{Batch: batch}
 	answers := questionAnswers(result)
 	if len(answers.GetAnswers()) == 0 {
-		c.log.With(logging.Context{Operation: "question", Path: at.Path}).
-			Log("ask activity_id=%s at offset=%d went unanswered; the agent proceeded without a choice", call.activityID, at.Offset)
+		c.log.With(at.ctxFor("question")).With(logging.Context{ActivityID: call.activityID, UpsertKey: QuestionKey(call.activityID)}).
+			Log("the ask went unanswered; the agent proceeded without a choice")
 		success.Outcome = &conversationv1.AgentQuestionSuccess_Unanswered{Unanswered: &conversationv1.AgentQuestionUnanswered{}}
 	} else {
-		c.log.With(logging.Context{Operation: "question", Path: at.Path}).
-			LogVerbose("ask activity_id=%s answered with %d selection(s) at offset=%d", call.activityID, len(answers.GetAnswers()), at.Offset)
+		c.log.With(at.ctxFor("question")).With(logging.Context{ActivityID: call.activityID, UpsertKey: QuestionKey(call.activityID)}).
+			LogVerbose("the ask was answered with %d selection(s)", len(answers.GetAnswers()))
 		success.Outcome = &conversationv1.AgentQuestionSuccess_Answered{Answered: answers}
 	}
 	question.Result = &conversationv1.AgentQuestion_Success{Success: success}

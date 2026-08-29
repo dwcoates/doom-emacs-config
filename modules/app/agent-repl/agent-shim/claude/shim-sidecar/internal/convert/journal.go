@@ -24,13 +24,12 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID s
 	kind := str(record["type"])
 	switch kind {
 	case "started", "result":
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Task: at.TaskID}).
-			LogVerbose("workflow journal %s record run=%s agent=%s at offset=%d held as residue (workflow is kicked this wave)",
-				kind, runID, str(record["agentId"]), at.Offset)
+		c.log.With(at.ctxFor("journal-record")).With(logging.Context{BookAgentID: str(record["agentId"])}).
+			LogVerbose("workflow journal %s record for run=%s held as residue (workflow is kicked this wave)", kind, runID)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "workflow_journal/"+kind, record)}
 	default:
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Level: "warn"}).
-			Log("workflow journal record type=%q at offset=%d is not one of the two journal shapes; stored as unknown residue", kind, at.Offset)
+		c.log.With(at.ctxWarn("journal-record")).
+			Log("workflow journal record type=%q is not one of the two journal shapes; stored as unknown residue", kind)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
@@ -40,8 +39,8 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID s
 // Same disposition as the journal: discovered, tailed, and held as residue until
 // the workflow wave, so no byte the vendor wrote is lost in the meantime.
 func (c *Converter) WorkflowSpool(at Attribution, output string) *storev1.StoreEntry {
-	c.log.With(logging.Context{Operation: "workflow-spool", Path: at.Path, Task: at.TaskID}).
-		LogVerbose("workflow spool bytes=%d at offset=%d held as residue (workflow is kicked this wave)", len(output), at.Offset)
+	c.log.With(at.ctxFor("workflow-spool")).
+		LogVerbose("workflow spool bytes=%d held as residue (workflow is kicked this wave)", len(output))
 	return VendorSpecificEntry(at, "workflow_spool", map[string]any{
 		"task_id": at.TaskID,
 		"path":    at.Path,

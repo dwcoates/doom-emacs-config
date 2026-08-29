@@ -28,8 +28,8 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// remembered, because the RESULT of one exempt tool (TaskStop) is
 		// consumed as a terminal before its own drop.
 		c.rememberCall(id, openCall{name: name, input: input, startedAt: env.timestampMs, activityID: id, agentID: agent})
-		c.log.With(logging.Context{Operation: "exempt-drop", Path: at.Path}).
-			LogVerbose("tool call name=%q activity_id=%s at offset=%d is in the exempt set; dropped entirely", name, id, at.Offset)
+		c.log.With(at.ctxFor("exempt-drop")).With(logging.Context{ActivityID: id}).
+			LogVerbose("tool call name=%q is in the exempt set; dropped entirely", name)
 		return nil
 	}
 
@@ -52,13 +52,13 @@ func (c *Converter) toolCallBlock(block map[string]any, index int, messageID str
 		// A recognized built-in whose ANNOUNCEMENT this converter does not mint
 		// — today only the subagent spawn, whose created_agent_id is not knowable
 		// until the launch answers. The unit appears at its settle instead.
-		c.log.With(logging.Context{Operation: "deferred-announce", Path: at.Path}).
-			LogVerbose("tool call name=%q activity_id=%s at offset=%d announces at its result, not at its call", name, id, at.Offset)
+		c.log.With(at.ctxFor("deferred-announce")).With(logging.Context{ActivityID: id}).
+			LogVerbose("tool call name=%q announces at its result, not at its call", name)
 		return nil
 	}
 
-	c.log.With(logging.Context{Operation: "tool-call", Path: at.Path}).
-		LogVerbose("tool call name=%q activity_id=%s upsert_key=%s announced at offset=%d", name, id, ActivityKey(id), at.Offset)
+	c.log.With(at.ctxFor("tool-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
+		LogVerbose("tool call name=%q announced", name)
 	activity.ActivityId = activityID(id)
 	return []*storev1.StoreEntry{c.activityEntry(at, env, agent, id, index, activity)}
 }
@@ -74,8 +74,8 @@ func (c *Converter) rememberCall(id string, call openCall) {
 
 // unmodeledCall announces a tool whose schema genuinely cannot be known.
 func (c *Converter) unmodeledCall(name, id string, index int, input, block map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
-	c.log.With(logging.Context{Operation: "unmodeled-call", Path: at.Path}).
-		Log("tool call name=%q activity_id=%s at offset=%d has no modeled schema; carried as AgentUnmodeled", name, id, at.Offset)
+	c.log.With(at.ctxFor("unmodeled-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
+		Log("tool call name=%q has no modeled schema; carried as AgentUnmodeled", name)
 	start := &conversationv1.AgentUnmodeledStart{
 		ToolName:  name,
 		Arguments: rawStruct(input),
@@ -428,8 +428,8 @@ func (c *Converter) questionAsk(id string, input map[string]any, at Attribution,
 		}
 		batch.Questions = append(batch.Questions, questionAsked(q))
 	}
-	c.log.With(logging.Context{Operation: "question", Path: at.Path}).
-		LogVerbose("ask activity_id=%s upsert_key=%s posed %d question(s) at offset=%d", id, QuestionKey(id), len(batch.Questions), at.Offset)
+	c.log.With(at.ctxFor("question")).With(logging.Context{ActivityID: id, UpsertKey: QuestionKey(id)}).
+		LogVerbose("ask posed %d question(s)", len(batch.Questions))
 
 	frame := updateFrame(agent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
