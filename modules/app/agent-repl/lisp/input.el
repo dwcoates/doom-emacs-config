@@ -72,7 +72,6 @@
 (declare-function agent-repl--history-prev "agent-repl-history" ())
 (declare-function agent-repl--history-next "agent-repl-history" ())
 (declare-function agent-repl-history-search "agent-repl-history" ())
-(declare-function agent-repl--mark-agent-done "agent-repl-session" (ws))
 (declare-function agent-repl--on-close "agent-repl-panels" ())
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
@@ -252,29 +251,37 @@ timer that never fires costs a stale badge and nothing else."
 
 ;;;; ---- Attachments -----------------------------------------------------
 
-(defun agent-repl-input-attach-image (ws path media-type)
-  "Record PATH (MIME MEDIA-TYPE) as an image attached to WS's composer.
-Returns the resulting attachment list.  The file is NOT read here: an
-`ImageBlock' carries a REFERENCE, and the daemon and the shim run on this
-same host, so the path is the whole payload."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (unless buf
-      (agent-repl--fatal ws "elisp.input.attach-no-buffer ws=%s path=%s" ws path))
-    (with-current-buffer buf
-      (setq agent-repl-input-attachments
-            (append agent-repl-input-attachments
-                    (list (list :path path :media-type media-type))))
-      (agent-repl--info ws "elisp.input.attached ws=%s path=%s media-type=%s count=%d"
-                        ws path media-type (length agent-repl-input-attachments))
-      agent-repl-input-attachments)))
+(defun agent-repl-input-attach-image (path media-type)
+  "Register PATH (MIME MEDIA-TYPE) as an image attached to THIS composer.
+The ONE entry point that attaches an image: `clipboard-image.el' calls it
+after capturing the pasteboard, and it operates on the CURRENT buffer,
+which must be a composer.  Returns the resulting attachment list.
 
-(defun agent-repl-input-attachments (ws)
-  "Return the images attached to WS's composer, oldest first."
-  (let ((buf (agent-repl--input-buffer ws)))
-    (if buf
-        (buffer-local-value 'agent-repl-input-attachments buf)
-      (agent-repl--log ws "elisp.input.attachments-no-buffer ws=%s" ws)
-      nil)))
+The file is NOT read here: an `ImageBlock' carries a REFERENCE, and the
+daemon and the shim run on this same host, so the path is the whole
+payload."
+  (unless (derived-mode-p 'agent-repl-input-mode)
+    (agent-repl--fatal nil "elisp.input.attach-outside-composer buffer=%s path=%s"
+                       (buffer-name) path))
+  (setq agent-repl-input-attachments
+        (append agent-repl-input-attachments
+                (list (list :path path :media-type media-type))))
+  (agent-repl--info nil "elisp.input.attached path=%s media-type=%s count=%d"
+                    path media-type (length agent-repl-input-attachments))
+  agent-repl-input-attachments)
+
+(defun agent-repl-input-attachments (&optional ws)
+  "Return the images attached to a composer, oldest first.
+With WS, reads WS's composer; without it, THIS buffer's own list -- the
+send pipeline knows which workspace it is submitting for, while a caller
+already inside the composer does not have to say so."
+  (if (null ws)
+      agent-repl-input-attachments
+    (let ((buf (agent-repl--input-buffer ws)))
+      (if buf
+          (buffer-local-value 'agent-repl-input-attachments buf)
+        (agent-repl--log ws "elisp.input.attachments-no-buffer ws=%s" ws)
+        nil))))
 
 (defun agent-repl-input-clear-attachments (ws)
   "Drop every image attached to WS's composer.
@@ -330,20 +337,17 @@ slash command runs a skill or built-in that owns its own behavior."
                              (length raw) slash-command-p exempt-p numeral-p result)
     result))
 
-(defvar agent-repl-send-posthooks
-  '(("^/clear$" . agent-repl--posthook-mark-done))
+(defvar agent-repl-send-posthooks nil
   "Alist of (PATTERN . FUNCTION) posthooks run after input is ACCEPTED.
 PATTERN is a string or regexp matched against the raw input (trimmed).
 FUNCTION is called with (WS RAW).  They run on the minted-turn arm only:
-a refused submission caused nothing to post-process.")
+a refused submission caused nothing to post-process.
 
-(defun agent-repl--posthook-mark-done (ws _raw)
-  "Mark workspace WS's agent-state as `:done'.
-The /clear posthook: clearing the context ends the current work cycle, so
-the tab should immediately reflect finished rather than linger on
-whatever state preceded the clear."
-  (agent-repl--log ws "elisp.input.posthook-mark-done ws=%s" ws)
-  (agent-repl--mark-agent-done ws))
+EMPTY BY DEFAULT, deliberately.  The one posthook that used to live here
+marked the tab finished after a `/clear\', and the tab\'s state is now the
+ROSTER ROW\'S STATUS ARM -- the daemon pushes it, Emacs paints it, and a
+client-side guess about when a turn ended is exactly the derivation the
+overhaul removed.  The hook stays as the extension point it always was.")
 
 (defun agent-repl--run-send-posthooks (ws raw)
   "Run posthooks matching RAW input for workspace WS."
