@@ -100,6 +100,11 @@ than a silently ignored instruction.
 | `GET /_fake/subscribers` | — | Open streams: `[{id, stream, workspace_id?}]`. |
 | `POST /_fake/exit` | — | Answer, then exit orderly (removing `daemon.addr`). |
 
+Every push is validated against the regenerated response type, so a newly
+landed arm (`HostNotificationKind.question_asked{header}`, say) is accepted the
+moment the bindings carry it — and a misspelled field on that new arm is
+refused exactly like one on an old arm. Nothing here needs a per-arm allowlist.
+
 `stream` is one of `host`, `daemon`, `roster`. `workspace_id` is **required**
 for `host` (that stream is keyed by workspace) and **refused** for the other
 two (they are the workspace-independent channels by ruling).
