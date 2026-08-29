@@ -165,6 +165,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; exchange rides.  It loads immediately after core.el, whose logging ladder
 ;; and state-dir resolver it uses, and before any consumer of the daemon.
 (agent-repl--load-module "connect")
+;; WHY: rpc.el is the one function per `agentrepl.v1' rpc Emacs calls, and
+;; every daemon-facing module calls it rather than the transport directly.
+;; It names the codec (`wire-*.el') without requiring it, so its position
+;; here does not constrain where the codec loads.
+(agent-repl--load-module "rpc")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
