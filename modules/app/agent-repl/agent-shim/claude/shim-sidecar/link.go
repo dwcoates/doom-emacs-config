@@ -42,7 +42,6 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
-	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -294,19 +293,14 @@ func (s *sidecar) watchedSessions() []string {
 // already honest: the store is the sidecar's only channel, so while the link is
 // down there is by definition nobody to tell.
 func degradedWindowEvents(sessions []string, reason string) []*storev1.StoreEntry {
-	now := time.Now().UnixMilli()
-	out := make([]*storev1.StoreEntry, 0, len(sessions))
-	for _, id := range sessions {
-		out = append(out, convert.ProducerDiagnostic(
-			convert.Attribution{SessionID: id, ProducedAtMs: now},
-			// The write identity names the OUTAGE, not the moment it is reported,
-			// so the same outage reported twice is one record at the store.
-			fmt.Sprintf("degraded:%s:%s:%s", degradedComponent, id, reason),
-			"store-link-degraded",
-			reason,
-		))
-	}
-	return out
+	// R10: the degraded window is a STRUCTURED LOG, not a store record. There is
+	// no bookkeeping arm on store.v1 StoreEntry and none is invented here; the
+	// reason text still reaches the operator through the canonical logger at the
+	// site that detected the outage.
+	_ = sessions
+	_ = reason
+	_ = degradedComponent
+	return nil
 }
 
 // armDial records that the next dial attempt is due after d. It only moves a

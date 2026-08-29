@@ -269,11 +269,27 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*storev1.StoreEntry {
 func (t *Tracker) lost(tk *task, inference string) *storev1.StoreEntry {
 	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session, Level: "warn"}).
 		Log("LOST kind=%d inference=%s; never reported as succeeded", tk.kind, inference)
-	return convert.DetachedLost(convert.Attribution{
-		SessionID:    tk.session,
-		Path:         tk.outputPath,
-		ProducedAtMs: nowMillis(),
-	}, tk.id, inference)
+	return convert.BashLostEntry(convert.Attribution{
+		VendorSessionID: tk.session,
+		MainAgentID:     tk.session,
+		AgentID:         tk.session,
+		Path:            tk.outputPath,
+		TaskID:          tk.id,
+	}, tk.id, "", lostReason(inference))
+}
+
+// lostReason maps this tracker's inference wording onto the reader's LOST
+// vocabulary. THE ARM IS HOW WE CONCLUDED IT, which is the whole point of the
+// word: a swept-up run and one that went quiet are different observations.
+func lostReason(inference string) convert.LostReason {
+	switch inference {
+	case "boot-sweep":
+		return convert.LostSweptUp
+	case "file-vanished":
+		return convert.LostFileVanished
+	default:
+		return convert.LostWentSilent
+	}
 }
 
 func (t *Tracker) silence(k tail.Kind) time.Duration {
