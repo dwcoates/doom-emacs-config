@@ -652,6 +652,19 @@ names; each brief owns every file listed for its constituent rows.
   the tab; unknown workspace → WARNING, no switch), host (unfocused branch
   passes the workspace), the integration host suite's click case.
 
+- FIRST INTEGRATION RUN (tip 942659cd6 + landing 3): connect 12/16, link
+  14/18, host 21/32, roster 17/20, daemon 1/12; composer/verbs not run
+  (W2-C pending). Clusters, dispatched in this order as slots free:
+  R-DAEMON (the cold-start suite, 11 timeouts — independent of every other
+  cluster); R-PUSHINVALID (host ×2, roster ×2: an invalid push must log
+  `elisp.rpc.push-invalid` at ERROR and leave the stream standing, and the
+  suite's log reader must find the record — verify where core.el writes
+  global records versus where test-integration-helpers reads them);
+  R-NOTIFY (host banner/blink/click + roster attention blink + R-CLICK +
+  the `:unknown` gate before any push — after the R-QUESTION agent leaves
+  host.el); R-HANDOVER (link dual attach/promotion, host transferred ×4 —
+  re-run after R-ACCEPT/R-STREAMCLOSE land; remediate what remains).
+
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
