@@ -10,10 +10,14 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-func spoolContext(path, task string) *Context {
+// spoolContext names the two identities a spool carries SEPARATELY, because
+// the whole contract here is that they are not interchangeable: `task` is the
+// vendor's runtime bookkeeping id, `run` is the spawning call's tool_use_id and
+// the only thing a bash frame may be keyed by.
+func spoolContext(path, task, run string) *Context {
 	return &Context{
 		Path: path, SessionID: "s", MainAgentID: "s", AgentID: "s",
-		TaskID: task, Kind: tail.KindShellSpool, FileID: "dev:7",
+		TaskID: task, RunActivityID: run, Kind: tail.KindShellSpool, FileID: "dev:7",
 	}
 }
 
@@ -27,10 +31,10 @@ func TestSpoolBytesBecomeADeltaCarryingTheirStartOffset(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.Handle(spoolFrames("second chunk", 512), spoolContext("/t/b1.output", "b1"))
+	entries := h.Handle(spoolFrames("second chunk", 512), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
-	delta := entryByKey(t, entries, convert.BashKey("b1"))
+	delta := entryByKey(t, entries, convert.BashKey("toolu_run1"))
 	update := delta.GetAgentUpdate().GetBash().GetFrame().GetUpdate()
 	if update == nil {
 		t.Fatal("spool bytes must land on the bash update arm")
@@ -48,11 +52,11 @@ func TestSpoolDeltaNamesTheRunAndIsNotPaginatable(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.Handle(spoolFrames("output", 0), spoolContext("/t/b1.output", "b1"))
+	entries := h.Handle(spoolFrames("output", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
-	delta := entryByKey(t, entries, convert.BashKey("b1"))
-	if got := delta.GetAgentUpdate().GetBash().GetRun().GetValue(); got != "b1" {
+	delta := entryByKey(t, entries, convert.BashKey("toolu_run1"))
+	if got := delta.GetAgentUpdate().GetBash().GetRun().GetValue(); got != "toolu_run1" {
 		t.Fatalf("run = %q, want the spawning call's unit id", got)
 	}
 	if delta.GetAgentUpdate().GetServeableFrame() != nil {
@@ -66,7 +70,7 @@ func TestExitMarkerEndsTheRunAsCompleted(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.Handle(spoolFrames("boom\nEXIT=17\n", 0), spoolContext("/t/b1.output", "b1"))
+	entries := h.Handle(spoolFrames("boom\nEXIT=17\n", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
 	var completed bool
@@ -95,7 +99,7 @@ func TestMidLineExitIsNotReadAsTheMarker(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.Handle(spoolFrames("BUILD_EXIT=0\n", 0), spoolContext("/t/b1.output", "b1"))
+	entries := h.Handle(spoolFrames("BUILD_EXIT=0\n", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
 	for _, e := range entries {
@@ -110,7 +114,7 @@ func TestNonNumericExitIsNotReadAsTheMarker(t *testing.T) {
 	h := NewShellOutputHandler(testLogger(t))
 
 	// Act.
-	entries := h.Handle(spoolFrames("EXIT=abc\n", 0), spoolContext("/t/b1.output", "b1"))
+	entries := h.Handle(spoolFrames("EXIT=abc\n", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
 
 	// Assert.
 	for _, e := range entries {
@@ -121,11 +125,11 @@ func TestNonNumericExitIsNotReadAsTheMarker(t *testing.T) {
 }
 
 func TestUnownedSpoolBytesLandAsResidueRatherThanBeingDropped(t *testing.T) {
-	// Arrange. A spool with no task identity names no run — but its bytes are
+	// Arrange. A spool with no spawning call names no run — but its bytes are
 	// NEVER discarded; the aged-unowned-spool policy requires them to be ingested
 	// attributed to the residue path.
 	h := NewShellOutputHandler(testLogger(t))
-	ctx := spoolContext("/t/orphan.output", "")
+	ctx := spoolContext("/t/orphan.output", "bbkq1", "")
 
 	// Act.
 	entries := h.Handle(spoolFrames("orphaned bytes", 0), ctx)
@@ -206,4 +210,22 @@ func TestTaskObserverReceivesALaunchReadOffAToolResult(t *testing.T) {
 	if seen[0].output != "/tmp/a15.output" {
 		t.Fatalf("output = %q, want the spool path the vendor named", seen[0].output)
 	}
+}
+
+func TestSpoolFramesAreKeyedByTheSpawningCallRatherThanTheVendorTaskId(t *testing.T) {
+	// Arrange. A detached command is announced under ONE identity on both planes
+	// — the tool_use_id of the call that launched it — so the vendor's task id
+	// must never reach the key space.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.Handle(spoolFrames("output", 0), spoolContext("/t/b1.output", "bbkq1", "toolu_run1"))
+
+	// Assert.
+	for _, e := range entries {
+		if e.GetUpsertKey() == convert.BashKey("bbkq1") {
+			t.Fatalf("entry keyed by the vendor task id %q; the run is the spawning call", "bbkq1")
+		}
+	}
+	entryByKey(t, entries, convert.BashKey("toolu_run1"))
 }

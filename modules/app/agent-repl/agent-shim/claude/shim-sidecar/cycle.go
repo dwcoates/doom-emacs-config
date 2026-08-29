@@ -348,6 +348,7 @@ func (s *sidecar) watch(target discover.Target, now time.Time) {
 		TaskID:            target.TaskID,
 		SpoolDir:          target.SpoolDir,
 		RunID:             target.RunID,
+		RunActivityID:     s.owners.activityFor(target.TaskID),
 	}
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
 	if cursor := s.cursors[target.Path]; cursor != nil {
