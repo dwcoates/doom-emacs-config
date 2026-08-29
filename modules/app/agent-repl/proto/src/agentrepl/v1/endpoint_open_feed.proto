@@ -41,7 +41,27 @@ message OpenFeedSuccess {
   FeedWatchToken watch = 2;
 }
 
-// EMPTY ON PURPOSE: the refusal arms are DERIVED from the daemon's real
-// refusal sites at the wave (an unregistered workspace; a feed id that does
-// not decode or names a bubble this workspace does not own), spelled per 3b.
-message OpenFeedError {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message OpenFeedError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenFeedUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenFeedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenFeedTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenFeedNotYetAdopted not_yet_adopted = 4;
+  }
+}
+message OpenFeedUnknownWorkspace {}
+message OpenFeedWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message OpenFeedTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message OpenFeedNotYetAdopted {}

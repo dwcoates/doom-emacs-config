@@ -24,6 +24,27 @@ message OpenWorkspaceResponse {
 // Done; every visible effect arrives on the streams.
 message OpenWorkspaceSuccess {}
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message OpenWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    OpenWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    OpenWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    OpenWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    OpenWorkspaceNotYetAdopted not_yet_adopted = 4;
+  }
 }
+message OpenWorkspaceUnknownWorkspace {}
+message OpenWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message OpenWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message OpenWorkspaceNotYetAdopted {}
