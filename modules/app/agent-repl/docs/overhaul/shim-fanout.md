@@ -105,9 +105,10 @@ TS for shim/v1, store/v1, conversation/v1). Tests move with their modules.
   lock (keyed by cwd) → bind the UDS → serve. The SESSION lock is taken inside
   StartSession (fresh: keyed by the pre-minted vendor session id; resume:
   keyed by the resume id), before the SDK is touched, and held for the
-  process lifetime. Lock files stay at `~/.cache/agent-repl/run/`
-  (`workspace-<md5-8>.lock`, `session-<vendor-session-id>.lock`), the
-  existing convention the daemon probes.
+  process lifetime. Lock files live in `$AGENT_REPL_LOCK_DIR` (default
+  `~/.cache/agent-repl/run/`; the override exists so tests run private
+  locks) as `workspace-<md5-8>.lock` and `session-<vendor-session-id>.lock`,
+  the convention the daemon probes.
 - SIGTERM = graceful stand-down (same path as KillSession{force:true} then
   wait for all store acks, then exit 0); SIGINT refused and logged at ERROR.
 - Log-fd survival: EPIPE/EBADF on fd 3 is surfaced once (a SessionFault +
@@ -317,3 +318,11 @@ every UX or contract gap you surfaced instead of improvising.
   daemon probes the workspace lock only.
 - VERSIONS: `@connectrpc/*` and `@bufbuild/protobuf` are pinned to exact
   versions in package.json.
+- LOCK DIR OVERRIDE: env `AGENT_REPL_LOCK_DIR` overrides the lock directory
+  (default `~/.cache/agent-repl/run/`); the real shim honors it.
+- FANOUT REGROUPED under the session-wide subagent cap (at most three
+  implementation agents running at once): wave 1 is four briefs — ENGINE
+  (engine/*), RECORD PLANE (convert/* + store/*), MOCK VENDOR (fake/* +
+  AGENTS.md table + shim.md mock section), INTEGRATION SUITE
+  (test/integration) — the first three first, the suite in the first freed
+  slot, auditors after.
