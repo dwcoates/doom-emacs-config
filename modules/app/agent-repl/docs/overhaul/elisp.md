@@ -440,3 +440,53 @@ These are not host-natured; elisp is the plumbing that reaches them.
   alike: event-driven, whole-replace, no ticks — push whole on any resolved
   change, push nothing on no change; clients tick clocks locally from
   shipped instants.
+
+## Kickoff increments and rulings (2026-08-29, project lead)
+
+- LANDED: WatchHostWorkspace push arm `open_in_editor {path, optional
+  line}` — Emacs reacts with the ONE shared editor-popup subroutine (dired
+  for a directory); nothing acks. SubmitPromptSuccess gains
+  `command_refused` — both non-turn arms mean "answered, nothing to await";
+  the webapp draws panels and refusals. SubmitPromptRequest.origin is
+  REQUIRED: every Emacs send site sends its own PromptOrigin value.
+- The webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`.
+- R8: a roster `current` change Emacs did not originate is a tab-switch
+  request (re-selection is idempotent). Tabs derive from `closed = false`
+  rows in roster order (repository sections depth-first, then recently
+  merged); the daemon sets `closed = true` on merged/closed/killed rows.
+- Cold start (ruled): Emacs adopts any daemon that answers DaemonHealth
+  (healthy or unhealthy), never kills one, and only builds + starts
+  `daemon/bin/claude-repld` (no required argv; state root via the env) when
+  daemon.addr is absent or answers nothing. Everything after boot is the
+  daemon's own blue-green.
+- No permission-answering surface in Emacs (permission.el dies; the
+  notification policy is the whole reaction); no task verbs in Emacs (org
+  notes stay local). Submitting on a workspace with no/terminal session
+  simply submits — the daemon starts or revives the session implicitly.
+  Pasted images travel as `ImageBlock{path}` in UserSaid. Pending: the
+  create-or-update-workspace skill's `status` verb loses its
+  workspace-status.json source (follow-up outside this wave).
+
+- CROSS-SYSTEM PROCESS CONTRACTS (project lead, kickoff): one state root
+  `$AGENT_REPL_STATE_DIR` (default ~/.claude-emacs); the daemon binds ONE
+  loopback TCP listener serving Connect (HTTP/1.1 + h2c, binary + JSON) and
+  the webapp assets on one origin, writes `127.0.0.1:<port>` to
+  `$AGENT_REPL_STATE_DIR/daemon.addr` (atomic replace; removed on orderly
+  exit; a joining successor writes it only after it owns every workspace);
+  the webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`
+  (`&composer=1` only in dev mode); the shim is spawned as `node
+  agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <uds>
+  --log-fd 3 [--fake]` with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
+  AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA (tests add
+  AGENT_REPL_FORBID_VENDOR_CALLS=1), cwd = the workspace; session facts
+  travel only in StartSession; readiness = the first healthy `diagnostics`
+  push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
+  store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
+  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
+  inside StartSession; pre-minted on a fresh start); proto/vocab/
+  render-colors.json + paint-classes.json are the daemon's, consumed by
+  webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
+  golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
+  `go 1.23`).

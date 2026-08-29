@@ -4,17 +4,15 @@
  * Identities are DAEMON-MINTED ECHO TOKENS: `id` is opaque, compared
  * byte-wise, never parsed and never derived from a path. Everything else in
  * the app takes a ref from a view and hands it straight back, so the only ref
- * this end ever CONSTRUCTS is the one for the workspace its own URL names.
+ * this end ever CONSTRUCTS is the one for the workspace its own URL names —
+ * and it constructs it once, here, from the page address.
  *
- * `dir` IS PROVISIONAL. The webview knows only the id — its address carries no
- * path, and the daemon's own registry holds the normalized directory — so this
- * sends the empty string. The proto states outright that `dir` is display
- * material and NOT an identifier, so the daemon routes on the id regardless.
- * Pending the project lead's ruling: either the daemon accepts an empty `dir`
- * on request addressing (the reading taken here), or the address must carry
- * the directory too, in which case this function grows a second argument and
- * every caller keeps working. Concentrating the construction here is what
- * makes that a one-line change.
+ * BOTH FIELDS COME OFF THE URL. The webview is launched with
+ * `?workspace=<id>&dir=<dir>`, so `dir` is the daemon's own normalized
+ * spelling relayed through the address rather than anything this end derived.
+ * It is display material and NOT an identifier — the daemon routes on the id —
+ * but a request that carried an empty one would make every surface drawing the
+ * directory blank, so it is required at the address and complete here.
  */
 import { create } from "@bufbuild/protobuf";
 import {
@@ -23,6 +21,6 @@ import {
 } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 
 /** The ref addressing every request this page makes. */
-export function workspaceRefFromId(id: string): WorkspaceRef {
-  return create(WorkspaceRefSchema, { id, dir: "" });
+export function workspaceRef(id: string, dir: string): WorkspaceRef {
+  return create(WorkspaceRefSchema, { id, dir });
 }

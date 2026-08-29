@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_stop_bash.proto.
  */
 export const file_shim_v1_endpoint_stop_bash: GenFile = /*@__PURE__*/
-  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X3N0b3BfYmFzaC5wcm90bxIHc2hpbS52MSJACg9TdG9wQmFzaFJlcXVlc3QSLQoEd29yaxgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZCJ2ChBTdG9wQmFzaFJlc3BvbnNlEisKB3N1Y2Nlc3MYASABKAsyGC5zaGltLnYxLlN0b3BCYXNoU3VjY2Vzc0gAEisKB2ZhaWx1cmUYAiABKAsyGC5zaGltLnYxLlN0b3BCYXNoRmFpbHVyZUgAQggKBnJlc3VsdCIRCg9TdG9wQmFzaFN1Y2Nlc3MiIQoPU3RvcEJhc2hGYWlsdXJlEg4KBmRldGFpbBgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_detached_work]);
+  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X3N0b3BfYmFzaC5wcm90bxIHc2hpbS52MSJACg9TdG9wQmFzaFJlcXVlc3QSLQoEd29yaxgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZCJ2ChBTdG9wQmFzaFJlc3BvbnNlEisKB3N1Y2Nlc3MYASABKAsyGC5zaGltLnYxLlN0b3BCYXNoU3VjY2Vzc0gAEisKB2ZhaWx1cmUYAiABKAsyGC5zaGltLnYxLlN0b3BCYXNoRmFpbHVyZUgAQggKBnJlc3VsdCIRCg9TdG9wQmFzaFN1Y2Nlc3MilwEKD1N0b3BCYXNoRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSNAoMdW5rbm93bl93b3JrGAIgASgLMhwuc2hpbS52MS5TdG9wQmFzaFVua25vd25Xb3JrSAASNgoNYWxyZWFkeV9lbmRlZBgDIAEoCzIdLnNoaW0udjEuU3RvcEJhc2hBbHJlYWR5RW5kZWRIAEIGCgRraW5kIhUKE1N0b3BCYXNoVW5rbm93bldvcmsiFgoUU3RvcEJhc2hBbHJlYWR5RW5kZWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_detached_work]);
 
 /**
  * Which command to kill.
@@ -85,8 +85,7 @@ export const StopBashSuccessSchema: GenMessage<StopBashSuccess> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_stop_bash, 2);
 
 /**
- * Not sent: no such item, already ended. `kind` arms are DERIVED at the wave from the shim's real refusal
- * sites.
+ * Not sent. THE ARM IS WHY.
  *
  * @generated from message shim.v1.StopBashFailure
  */
@@ -97,6 +96,27 @@ export type StopBashFailure = Message<"shim.v1.StopBashFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof shim.v1.StopBashFailure.kind
+   */
+  kind: {
+    /**
+     * No live shell carries this handle.
+     *
+     * @generated from field: shim.v1.StopBashUnknownWork unknown_work = 2;
+     */
+    value: StopBashUnknownWork;
+    case: "unknownWork";
+  } | {
+    /**
+     * The shell already ended.
+     *
+     * @generated from field: shim.v1.StopBashAlreadyEnded already_ended = 3;
+     */
+    value: StopBashAlreadyEnded;
+    case: "alreadyEnded";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -105,4 +125,30 @@ export type StopBashFailure = Message<"shim.v1.StopBashFailure"> & {
  */
 export const StopBashFailureSchema: GenMessage<StopBashFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_stop_bash, 3);
+
+/**
+ * @generated from message shim.v1.StopBashUnknownWork
+ */
+export type StopBashUnknownWork = Message<"shim.v1.StopBashUnknownWork"> & {
+};
+
+/**
+ * Describes the message shim.v1.StopBashUnknownWork.
+ * Use `create(StopBashUnknownWorkSchema)` to create a new message.
+ */
+export const StopBashUnknownWorkSchema: GenMessage<StopBashUnknownWork> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_stop_bash, 4);
+
+/**
+ * @generated from message shim.v1.StopBashAlreadyEnded
+ */
+export type StopBashAlreadyEnded = Message<"shim.v1.StopBashAlreadyEnded"> & {
+};
+
+/**
+ * Describes the message shim.v1.StopBashAlreadyEnded.
+ * Use `create(StopBashAlreadyEndedSchema)` to create a new message.
+ */
+export const StopBashAlreadyEndedSchema: GenMessage<StopBashAlreadyEnded> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_stop_bash, 5);
 

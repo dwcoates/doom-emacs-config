@@ -10,6 +10,7 @@ package agentrepl.v1;
 
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
+import "conversation/v1/prompt_origin.proto";
 import "frontend/v1/status_panel.proto";
 import "frontend/v1/todos_panel.proto";
 import "frontend/v1/agents_panel.proto";
@@ -36,6 +37,11 @@ message SubmitPromptRequest {
   // the same hold-and-deliver machinery (the shim's UpdateAgent.prompt
   // underneath). Command recognition is unchanged either way.
   optional frontend.v1.FeedId feed = 3;
+  // WHICH SEND SITE caused this prompt — the closed attribution vocabulary
+  // every Emacs send site chooses its own value from; the daemon persists
+  // it onto the turn's durable record (StartTurn.origin → AgentPrompt).
+  // Never UNSPECIFIED: a submission carrying it is refused at once.
+  conversation.v1.PromptOrigin origin = 4;
 }
 
 // THE ARM IS THE OUTCOME.
@@ -55,7 +61,18 @@ message SubmitPromptSuccess {
     SubmitPromptTurn turn = 1;
     // It is a programmatically handled command: here is its panel, resolved.
     SubmitPromptCommandPanel command_panel = 2;
+    // It is a command the daemon RECOGNIZES but neither answers nor forwards
+    // (/agents, /help, …): refused with the add-support offer. The card is
+    // the feed's `command_refused` row; the caller learns only that no turn
+    // was minted.
+    SubmitPromptCommandRefused command_refused = 3;
   }
+}
+
+// The recognized-but-unsupported answer.
+message SubmitPromptCommandRefused {
+  // The command as typed ("/agents").
+  string command = 1;
 }
 
 // The minted turn — what a client matches against FeedRow.turn to find its
