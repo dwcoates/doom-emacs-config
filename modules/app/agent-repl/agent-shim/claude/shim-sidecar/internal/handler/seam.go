@@ -80,5 +80,5 @@ func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, r
 		AgentID:         ownerAgentID,
 		TaskID:          taskID,
 	}
-	return []*storev1.StoreEntry{h.conv.BashLost(at, run, "", convert.LostReason(reason))}
+	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason))}
 }

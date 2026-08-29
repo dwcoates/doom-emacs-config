@@ -56,14 +56,14 @@ func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int
 // non-zero exit is still the COMPLETED arm. Ending the run on this evidence is
 // also what keeps a task that plainly finished from sitting open until a
 // staleness sweep eventually — and wrongly — calls it LOST.
-func (c *Converter) BashExited(at Attribution, run, output string, code int) *storev1.StoreEntry {
+func (c *Converter) BashExited(at Attribution, run, output string, omitted uint64, code int) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("bash-exit")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
 		Log("EXIT=%d observed on disk; the run ends on evidence rather than on a silence timeout", code)
 	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
-				Output: wholeStdout(output),
+				Output: spoolOutput(output, omitted),
 				Termination: &conversationv1.AgentBashTermination{
 					How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: int32(code)}},
 				},
@@ -78,10 +78,10 @@ func (c *Converter) BashExited(at Attribution, run, output string, code int) *st
 // `timed_out`, and neither is what happened: we simply stopped observing. Setting
 // either would be an accusation with no evidence, so the cause stays UNSET and
 // the reason is stated loudly in the log instead.
-func (c *Converter) BashLost(at Attribution, run, output string, reason LostReason) *storev1.StoreEntry {
+func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason) *storev1.StoreEntry {
 	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
 		Log("the detached run is LOST (%s); it resolves interrupted with no cause because the wire carries no DetachedLost this wave", reason)
-	return BashLostEntry(at, run, output, reason)
+	return BashLostEntry(at, run, output, omitted, reason)
 }
 
 // BashLostEntry is BashLost without a converter, for the staleness policy in the
@@ -90,12 +90,12 @@ func (c *Converter) BashLost(at Attribution, run, output string, reason LostReas
 // THE WRITE IDENTITY IS STABLE FOR THE VERDICT: a run is lost once however many
 // sweeps observe it, so a re-emission is absorbed at the store rather than
 // appending a second terminal.
-func BashLostEntry(at Attribution, run, output string, reason LostReason) *storev1.StoreEntry {
+func BashLostEntry(at Attribution, run, output string, omitted uint64, reason LostReason) *storev1.StoreEntry {
 	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
-				Output: wholeStdout(output),
+				Output: spoolOutput(output, omitted),
 			}},
 		}},
 	})
@@ -153,14 +153,29 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 	}
 }
 
-// wholeStdout wraps a spool's accumulated bytes. ALWAYS SET, even for a command
+// wholeStdout wraps output the producer knows to be complete.
+func wholeStdout(output string) *conversationv1.AgentBashOutput {
+	return spoolOutput(output, 0)
+}
+
+// spoolOutput wraps a spool's accumulated bytes. ALWAYS SET, even for a command
 // that said nothing: an empty output still draws its header, so a reader can tell
 // "ran and was silent" from "has not run".
-func wholeStdout(output string) *conversationv1.AgentBashOutput {
+//
+// THE EXTENT IS STATED, NEVER ASSUMED. A producer that kept only part of what a
+// run said says so on the partial arm with the count it dropped, rather than
+// claiming `whole` over a prefix — a consumer offered "whole" has no way to find
+// out it was lied to.
+func spoolOutput(output string, omitted uint64) *conversationv1.AgentBashOutput {
+	text := &conversationv1.AgentBashOutputText{Stdout: output}
+	if omitted == 0 {
+		text.Extent = &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}}
+	} else {
+		text.Extent = &conversationv1.AgentBashOutputText_Partial{Partial: &conversationv1.AgentBashOutputPartial{
+			BytesOmitted: omitted,
+		}}
+	}
 	return &conversationv1.AgentBashOutput{
-		Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
-			Stdout: output,
-			Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
-		}},
+		Form: &conversationv1.AgentBashOutput_Text{Text: text},
 	}
 }

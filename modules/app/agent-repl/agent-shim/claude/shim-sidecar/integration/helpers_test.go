@@ -545,6 +545,11 @@ func defaultSidecarOptions(t *testing.T, storeSocket string, tree *vendorTree) s
 		LogPath:      filepath.Join(t.TempDir(), "sidecar.log"),
 		PollInterval: 50 * time.Millisecond,
 		RescanEvery:  200 * time.Millisecond,
+		// The unclaimed-spool hold defaults to 60s in production, which is the
+		// whole budget of this suite: a subject that is not ABOUT the hold would
+		// simply time out inside it. Subjects that ARE about the hold set their
+		// own window.
+		UnownedSpoolWindow: 200 * time.Millisecond,
 	}
 }
 
@@ -828,6 +833,45 @@ func awaitBookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStor
 	}
 }
 
+// awaitBookUnits re-reads one book until it holds EVERY named unit, and returns
+// its lines.
+//
+// IT WAITS ON THE UNITS RATHER THAN ON A COUNT, because a count is satisfied by
+// whatever happens to be in the book already: a subject that stops a sidecar
+// with four lines written and then waits for "at least four" is not waiting for
+// anything at all, and reads the book back before the restarted sidecar has
+// written a byte.
+func awaitBookUnits(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, want ...string) []*storev1.StoreLineAt {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		lines := bookLines(ctx, t, c, agent, 200)
+		held := map[string]bool{}
+		for _, at := range lines {
+			if a := activityOf(at.GetLine()); a != nil {
+				held[a.GetActivityId().GetValue()] = true
+			}
+		}
+		missing := false
+		for _, id := range want {
+			if !held[id] {
+				missing = true
+				break
+			}
+		}
+		if !missing {
+			return lines
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("book %s never held every unit %v within the deadline; it holds %v",
+				agent, want, sortedStrings(keysOf(held)))
+		case <-tick.C:
+		}
+	}
+}
+
 // watchBook opens a session and follows its tail. A delivered frame is a
 // legitimate synchronization primitive; the returned channel is closed when the
 // stream ends.
@@ -904,11 +948,26 @@ func samePath(a, b string) bool {
 	return resolved(a) == resolved(b)
 }
 
+// resolved answers a path's canonical spelling.
+//
+// IT RESOLVES THE DIRECTORY, NOT THE FILE. filepath.EvalSymlinks fails on a path
+// whose last element does not exist, and the subjects that matter most here are
+// exactly the ones about a file that was DELETED — so resolving the whole path
+// left "/var/…/spool" and "/private/var/…/spool" comparing unequal the moment
+// the file vanished, and every vanished-file assertion silently stopped
+// matching the reader's own record of it.
 func resolved(p string) string {
 	if r, err := filepath.EvalSymlinks(p); err == nil {
 		return r
 	}
-	return filepath.Clean(p)
+	dir, base := filepath.Split(p)
+	if dir == "" {
+		return p
+	}
+	if r, err := filepath.EvalSymlinks(filepath.Clean(dir)); err == nil {
+		return filepath.Join(r, base)
+	}
+	return p
 }
 
 // ---------------------------------------------------------------------------
@@ -920,9 +979,15 @@ type fakeStore struct {
 	t      *testing.T
 	Socket string
 
-	mu             sync.Mutex
-	calls          []string
-	batches        []*storev1.WriteBatchRequest
+	mu      sync.Mutex
+	calls   []string
+	batches []*storev1.WriteBatchRequest
+	// acked holds only the batches the fake answered with the SUCCESS arm — the
+	// ones that are actually durable. A refused batch is remembered in `batches`
+	// (a test proves the same records are re-sent under the same write_ids) but
+	// it committed NOTHING, so a helper that waits for a cursor to become
+	// durable must never be satisfied by one.
+	acked          []*storev1.WriteBatchRequest
 	cursors        []*storev1.CursorState
 	cursorsFailure string
 	writeFailures  int
@@ -1069,6 +1134,9 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 			},
 		}), nil
 	}
+	f.mu.Lock()
+	f.acked = append(f.acked, recorded)
+	f.mu.Unlock()
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
 	}), nil
@@ -1118,6 +1186,13 @@ func (f *fakeStore) Calls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
+}
+
+// AckedBatches returns only the batches the fake made durable.
+func (f *fakeStore) AckedBatches() []*storev1.WriteBatchRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]*storev1.WriteBatchRequest(nil), f.acked...)
 }
 
 func (f *fakeStore) Batches() []*storev1.WriteBatchRequest {
@@ -1619,21 +1694,27 @@ func compactSummaryLine(t *testing.T, session, cwd, uuid, parent, summary string
 	})
 }
 
-// awaitCursorInBatches waits until the sidecar has offered the fake store a
-// cursor advance for path at or past offset — the file-plane statement that
-// everything up to that byte has been read and handed over.
+// awaitCursorInBatches waits until the sidecar has DURABLY advanced its cursor
+// for path to at least offset — the file-plane statement that everything up to
+// that byte has been read and handed over.
+//
+// IT COUNTS ONLY ACKED BATCHES. A refused WriteBatch committed nothing, so a
+// cursor inside one is an offer the store rejected; waiting on those made every
+// "and then it wrote" assertion satisfiable by a write that FAILED, which is how
+// a suite that refuses the first writes could sail past the retry it meant to
+// observe.
 func awaitCursorInBatches(ctx context.Context, t *testing.T, f *fakeStore, path string, offset int64) {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		if cs := latestCursorFor(f.Batches(), path); cs != nil && cs.GetOffset() >= offset {
+		if cs := latestCursorFor(f.AckedBatches(), path); cs != nil && cs.GetOffset() >= offset {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			cs := latestCursorFor(f.Batches(), path)
-			t.Fatalf("the sidecar never advanced its cursor for %s to %d (last: %v) within the deadline", path, offset, cs)
+			cs := latestCursorFor(f.AckedBatches(), path)
+			t.Fatalf("the sidecar never durably advanced its cursor for %s to %d (last: %v) within the deadline", path, offset, cs)
 		case <-tick.C:
 		}
 	}
