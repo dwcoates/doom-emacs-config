@@ -48,6 +48,13 @@ dispatcher names YOUR SYSTEM when you are launched.
   accountable for reviewing, testing and reporting the offloaded work.
 - You have a PROJECT LEAD above you. Issues above your pay grade go to the
   project lead for remediation.
+- ON CONTEXT COMPACTION (user ruling 2026-08-29): the moment your context
+  is summarized, LOWER YOURSELF TO LOW EFFORT immediately (`/effort low`
+  when the command is available to you; otherwise adopt low-effort
+  behavior — no re-derivation, no exploration, act on the summary and the
+  docs) and tell the project lead you compacted. Your remaining work is
+  orchestration over settled contracts; high effort after compaction is
+  waste.
 
 ## What goes to the project lead
 
