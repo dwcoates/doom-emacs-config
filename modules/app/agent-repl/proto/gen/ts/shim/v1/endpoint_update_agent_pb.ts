@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_update_agent.proto.
  */
 export const file_shim_v1_endpoint_update_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3VwZGF0ZV9hZ2VudC5wcm90bxIHc2hpbS52MSJ6ChJVcGRhdGVBZ2VudFJlcXVlc3QSLQoGdGFyZ2V0GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWRIAIgBARIqCgVpbnB1dBgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudElucHV0QgkKB190YXJnZXQifwoTVXBkYXRlQWdlbnRSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudEZhaWx1cmVIAEIICgZyZXN1bHQiFAoSVXBkYXRlQWdlbnRTdWNjZXNzItACChJVcGRhdGVBZ2VudEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjkKDXVua25vd25fYWdlbnQYAiABKAsyIC5zaGltLnYxLlVwZGF0ZUFnZW50VW5rbm93bkFnZW50SAASNAoLbm9fb3Blbl9hc2sYAyABKAsyHS5zaGltLnYxLlVwZGF0ZUFnZW50Tm9PcGVuQXNrSAASPQoPYW5zd2VyX21pc21hdGNoGAQgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudEFuc3dlck1pc21hdGNoSAASPQoPbm90aGluZ19ydW5uaW5nGAUgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudE5vdGhpbmdSdW5uaW5nSAASMwoKbm9fc2Vzc2lvbhgGIAEoCzIdLnNoaW0udjEuVXBkYXRlQWdlbnROb1Nlc3Npb25IAEIGCgRraW5kIhkKF1VwZGF0ZUFnZW50VW5rbm93bkFnZW50IhYKFFVwZGF0ZUFnZW50Tm9PcGVuQXNrIhsKGVVwZGF0ZUFnZW50QW5zd2VyTWlzbWF0Y2giGwoZVXBkYXRlQWdlbnROb3RoaW5nUnVubmluZyIWChRVcGRhdGVBZ2VudE5vU2Vzc2lvbkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent, file_conversation_v1_agent_activity]);
+  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3VwZGF0ZV9hZ2VudC5wcm90bxIHc2hpbS52MSJ6ChJVcGRhdGVBZ2VudFJlcXVlc3QSLQoGdGFyZ2V0GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWRIAIgBARIqCgVpbnB1dBgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudElucHV0QgkKB190YXJnZXQifwoTVXBkYXRlQWdlbnRSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudEZhaWx1cmVIAEIICgZyZXN1bHQiFAoSVXBkYXRlQWdlbnRTdWNjZXNzIo8DChJVcGRhdGVBZ2VudEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjkKDXVua25vd25fYWdlbnQYAiABKAsyIC5zaGltLnYxLlVwZGF0ZUFnZW50VW5rbm93bkFnZW50SAASNAoLbm9fb3Blbl9hc2sYAyABKAsyHS5zaGltLnYxLlVwZGF0ZUFnZW50Tm9PcGVuQXNrSAASPQoPYW5zd2VyX21pc21hdGNoGAQgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudEFuc3dlck1pc21hdGNoSAASPQoPbm90aGluZ19ydW5uaW5nGAUgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudE5vdGhpbmdSdW5uaW5nSAASMwoKbm9fc2Vzc2lvbhgGIAEoCzIdLnNoaW0udjEuVXBkYXRlQWdlbnROb1Nlc3Npb25IABI9Cg9ub3RfZGVsaXZlcmFibGUYByABKAsyIi5zaGltLnYxLlVwZGF0ZUFnZW50Tm90RGVsaXZlcmFibGVIAEIGCgRraW5kIhkKF1VwZGF0ZUFnZW50VW5rbm93bkFnZW50IhYKFFVwZGF0ZUFnZW50Tm9PcGVuQXNrIhsKGVVwZGF0ZUFnZW50QW5zd2VyTWlzbWF0Y2giGwoZVXBkYXRlQWdlbnROb3RoaW5nUnVubmluZyIWChRVcGRhdGVBZ2VudE5vU2Vzc2lvbiIbChlVcGRhdGVBZ2VudE5vdERlbGl2ZXJhYmxlQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent, file_conversation_v1_agent_activity]);
 
 /**
  * The input and its address.
@@ -151,6 +151,18 @@ export type UpdateAgentFailure = Message<"shim.v1.UpdateAgentFailure"> & {
      */
     value: UpdateAgentNoSession;
     case: "noSession";
+  } | {
+    /**
+     * The input is well-formed and the agent is known, but the vendor offers
+     * NO ROUTE to deliver it to this agent kind — a prompt addressed to a
+     * subagent on an SDK whose input stream reaches only the main thread.
+     * Not a fault of the caller's state: the same input to the main agent
+     * would deliver.
+     *
+     * @generated from field: shim.v1.UpdateAgentNotDeliverable not_deliverable = 7;
+     */
+    value: UpdateAgentNotDeliverable;
+    case: "notDeliverable";
   } | { case: undefined; value?: undefined };
 };
 
@@ -225,4 +237,17 @@ export type UpdateAgentNoSession = Message<"shim.v1.UpdateAgentNoSession"> & {
  */
 export const UpdateAgentNoSessionSchema: GenMessage<UpdateAgentNoSession> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_update_agent, 8);
+
+/**
+ * @generated from message shim.v1.UpdateAgentNotDeliverable
+ */
+export type UpdateAgentNotDeliverable = Message<"shim.v1.UpdateAgentNotDeliverable"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentNotDeliverable.
+ * Use `create(UpdateAgentNotDeliverableSchema)` to create a new message.
+ */
+export const UpdateAgentNotDeliverableSchema: GenMessage<UpdateAgentNotDeliverable> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 9);
 

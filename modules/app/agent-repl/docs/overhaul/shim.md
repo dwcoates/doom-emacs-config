@@ -150,7 +150,7 @@ orchestration chain.
   turn`), kept solely so `KillTurn` can name its transitive refusal set; never
   on the wire except inside a refusal.
 
-### shim/v1 — the service the shim serves (16 rpcs, four sections)
+### shim/v1 — the service the shim serves (17 rpcs, four sections)
 
 Files: `service.proto`, one `endpoint_<rpc>.proto` each, `prompt_origin.proto`
 (the one shared file — an enum of send sites; it has no keep-alive value on
@@ -505,3 +505,14 @@ purpose).
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Landing 3 relay (2026-08-29, project lead)
+
+- StartTurnSuccess.page is the opening page (required; empty page ≠ absent).
+- UpdateAgent to a subagent with a prompt refuses `not_deliverable`; DetachForeground on a live, detachable unit that the SDK cannot detach refuses `unsupported` (never `not_detachable`).
+- AgentId minting rule is binding and in the proto comment: main = original vendor session id; subagent = spawning call's tool_use_id.
+- R9 settled as proposed: rotation/fork link file `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/vendor-id/<vendor-id>.json` → {vendor_session_id, original_vendor_session_id, linked_at_ms}; absent file ⇒ the id is its own original.
+- ReadAgentPage lines now carry pointers (StoreLineAt); placeholder marks go.
+- store.v1 WatchBashRun serves the sidecar-written bash rows; WatchBash serves a run from it when the shim did not write the run itself.
+- The detached-work announcement is a page line keyed `detached:<work id>`; the run's rows live in the lifecycle table only.
+- Producer string `claude-shim:<original vendor session id>`.

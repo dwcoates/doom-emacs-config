@@ -91,3 +91,15 @@ script in tests. No `git init`, no temp repositories, anywhere in tests. Unlande
 arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
+
+## Coverage deliberately not attainable under the no-git-in-tests directive
+
+The git client's tests pin argv, env scrubbing, `-C` selection and output
+parsing against a scripted fake `git`; they can no longer prove git's OWN
+behavior: that a `--no-ff` merge yields a two-parent commit, that the
+landed range equals the source branch, that a conflicted merge leaves
+unmerged index entries and MERGE_HEAD, that a revert removes the content
+in one commit, that `worktree prune` clears a stale registration, the
+exact `status --porcelain` markers, that git honors GIT_DIR over `-C`, and
+real-git version compatibility (`rev-list --no-commit-header` needs
+git >= 2.33). Those are e2e facts now (the project lead's suite).
