@@ -150,18 +150,21 @@ are deleted by the verbs agent once verbs.el replaces them.
 ## 5. Codec scopes
 
 - wire-common.el: WorkspaceRef, RepositoryRef (both directions); UserSaid,
-  UserContent, UserContentBlock, TextBlock, ImageBlock(+Path/Url) (ENCODE;
-  Emacs produces, never decodes); DrainReason + arms (both); WorkspacePriority
-  (encode; decode not needed); TurnId (decode); shared helpers (oneof,
-  int64, optional, unknown-key check); `agent-repl-wire-error`.
+  UserContent, UserContentBlock, TextBlock, ImageBlock(+Path/Url,
+  media_type) (ENCODE; Emacs produces, never decodes); PromptOrigin (ENCODE
+  as the enum's string name, e.g. `"PROMPT_ORIGIN_USER_SENT"`; the elisp
+  value is the kebab keyword `:user-sent`; UNSPECIFIED is refused before
+  send); DrainReason + arms (both); WorkspacePriority (encode; decode not
+  needed); TurnId (decode); shared helpers (oneof, int64, uint32, optional,
+  unknown-key check); `agent-repl-wire-error`.
 - wire-host.el: RegisterWorkspace{Request,Response,Success,Error};
   SelectWorkspace{...}; WatchHostWorkspaceRequest, WatchHostWorkspaceResponse
   with the whole HostWorkspace tree (session none|existing; existing.id +
   standing live|terminal; live: generation, shim_attached, vendor_info
   claude, backfill 4 arms, composer 5 arms, faults; naming), Host
   WorkspaceNotification + HostNotificationKind arms, Transferred,
-  ReloadWebapp, and the Q2 arm `open_in_editor {path, optional line}`
-  (decoded to `(:path P :line L-or-nil)`); AdoptHostWorkspace{...}; WatchDaemonRequest,
+  ReloadWebapp, and the landed arm `open_in_editor {path, optional uint32
+  line}` (decoded to `(:path P :line L-or-nil)`); AdoptHostWorkspace{...}; WatchDaemonRequest,
   WatchDaemonResponse (shutdown_announced with cause arms, drain_scheduled,
   drain_cancelled).
 - wire-roster.el: WatchWorkspaceRosterRequest/Response and the whole
@@ -176,10 +179,11 @@ are deleted by the verbs agent once verbs.el replaces them.
   model, priority, allow_ungated, merge_actions, base_ref, name,
   initial_prompt; response); Open/Close(blocked arm)/Kill/Nuke/Merge/
   Restart(force)/SetWorkspacePriority (absent priority = clear); SubmitPrompt
-  (request said + idempotency_key, feed omitted; response: success turn
-  {TurnId} | command_panel — decode only the ARM KEYWORD and keep the
-  panel payload as the raw alist | command_refused (Q3 ruling; decode the
-  arm keyword, keep the payload raw) | error merging);
+  (request said + idempotency_key + REQUIRED origin, feed omitted;
+  response: success turn {TurnId} | command_panel — decode only the ARM
+  KEYWORD and keep the panel payload as the raw alist |
+  command_refused{command} (decoded `(:command "/agents")`) | error
+  merging);
   UpdateShutdownSchedule (3 arms); UpdateMergeQueue (3 arms);
   DaemonHealth (healthy | unhealthy{faults[{detail}]}); SessionHealth.
 - Empty error messages decode to `(:arm :error :value nil)`; a future arm
@@ -234,8 +238,10 @@ are deleted by the verbs agent once verbs.el replaces them.
   prompts go to the resolution agent"; `:merging` refuse "composer closed: a
   merge owns this session"; `:draining` refuse "composer closed: daemon
   draining"; `:restarting` refuse "composer closed: restarting";
-  `:no-session` / `:terminal` refuse "no live session — open the workspace
-  (agent-repl-open-workspace)"; `:unknown` refuse "no host state yet".
+  `:no-session` / `:terminal` SEND (ruled: SubmitPrompt has no
+  precondition; the daemon starts or revives the session implicitly);
+  `:unknown` (no host push yet) SEND as well, logging INFO — the daemon is
+  the authority and answers with its own refusal arms.
 - Naming: tab label = the ROSTER row name (roster.el); buffer titles use
   `naming.title`, else `naming.slug`, else the row name. `(agent-repl-host-
   display-title WS)` exposes it.
@@ -350,19 +356,24 @@ are deleted by the verbs agent once verbs.el replaces them.
 - `agent-repl--send` pipeline: text → `agent-repl--prepare-input`
   (metaprompt prepend with the sentinel markers via `agent-repl--meta-wrap`,
   prefix/postfix variants) → `(agent-repl-host-composer-gate WS)` treatment
-  → UserSaid `(:content (:blocks ((:arm :text :value (:text TEXT)))))` →
+  → UserSaid `(:content (:blocks (...)))` where the blocks are the text
+  block(s) plus one `(:arm :image :value (:location (:arm :path :value
+  (:path P)) :media-type M))` per image attached through clipboard-image.el
+  (ruled: pasted images travel as ImageBlock{path}; the composer keeps a
+  per-buffer list of attached images and their MIME types, drawn as the
+  existing thumbnail overlay, cleared on a successful send) →
   `agent-repl-rpc-submit-prompt` with `(:said SAID :idempotency-key
-  (agent-repl--uuid))` (RFC 4122 v4 from `random`) → success `:turn` →
+  (agent-repl--uuid) :origin ORIGIN)` (RFC 4122 v4 from `random`; ORIGIN
+  is the send site's keyword, REQUIRED) → success `:turn` →
   clear the input, push history, run `agent-repl-send-posthooks`; success
   `:command-panel` or `:command-refused` → "answered, nothing to await":
   log INFO (`elisp.input.command-answered` with the arm), clear the input
   (the webapp draws the panel or refusal as feed rows; Q3 ruling); error `:merging` → keep the text, `message` + a
   mode-line flash "refused: merge in flight"; transport failure → keep the
   text and offer it to prompt-queue.el (drained on link-up).
-- Prompt origins are per-send-site constants `agent-repl-prompt-origin-<site>`
-  (symbols spelled like the enum) logged in the submit's context under
-  `origin`; NOT on the wire this wave (escalated: SubmitPromptRequest has no
-  origin field). Sites: user-sent, user-sent-and-hide,
+- Prompt origins ride the wire (landed: SubmitPromptRequest.origin is
+  REQUIRED, never UNSPECIFIED): each send site passes its own keyword,
+  also logged in the submit's context. Sites: user-sent, user-sent-and-hide,
   user-sent-with-metaprompt, user-sent-with-postfix, user-sent-with-prefix,
   metaprompt-read, command-diff-analysis, command-explain-context,
   command-explain-prompt, command-update-pr, command-rebase,
@@ -379,9 +390,10 @@ are deleted by the verbs agent once verbs.el replaces them.
   their site's origin; `agent-repl-link-code` opens via
   `agent-repl-popup-open`; snapshot save/load/archive, push/pull tab,
   paste-clipboard, switch-to-N and the restore machinery die.
-- clipboard-image.el stays as-is (path token inserted as text; the
-  ImageBlock alternative is a surfaced toss-up). prompt-summary.el stays
-  with the FORBID guard.
+- clipboard-image.el keeps capturing the pasteboard image to the workspace
+  dir and drawing the thumbnail, but registers the file as an attached
+  ImageBlock{path, media_type} on the input buffer instead of inserting a
+  path token. prompt-summary.el stays with the FORBID guard.
 
 ## 11. daemon.el and services.el (cold start)
 
@@ -460,8 +472,9 @@ them).
 
 - `lisp/testsupport/fakedaemon/` — a Go program (module
   `agentrepl/fakedaemon`; `replace agentrepl/proto => ../../../proto/gen/go`;
-  `connectrpc.com/connect v1.17.0`; `google.golang.org/protobuf v1.36.11`;
-  builds OFFLINE with `GOFLAGS=-mod=mod GOPROXY=off go build`). It binds
+  `connectrpc.com/connect v1.17.0`; `golang.org/x/net v0.43.0` (h2c);
+  `google.golang.org/protobuf v1.36.11`; `go 1.23` directive; builds
+  OFFLINE with `GOFLAGS=-mod=mod GOPROXY=off go build`). It binds
   127.0.0.1:0, writes `$AGENT_REPL_STATE_DIR/daemon.addr` exactly per the
   common contract (address plus newline, atomic replace; removed on orderly
   exit), serves agentrepl.v1 through the generated Connect handler
@@ -553,18 +566,18 @@ teamlead resolves merge seams.
 
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
-- E1 SubmitPromptRequest carries no PromptOrigin (UserSaid tag 2 retired):
-  default = origin as a local per-site constant, logged, off the wire.
+- E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
 - E2 RESOLVED: the trimmed vocabulary landed (cherry-pick of 24740ae4f);
   §8 keys from it.
-- E3 Daemon launch contract (binary, argv, foreign/stale handling):
-  default = `daemon/bin/claude-repld`, no argv, env only; never kill an
-  answering daemon.
-- E4 Emacs has no permission surface (the webapp's card answers): default =
-  permission.el deleted.
-- E5 Tabs follow `RosterRow.closed` (false → tab); the daemon must mark a
-  merged workspace closed for its tab to leave.
-- E6 Task verbs are not an Emacs deliverable; org notes stay per workspace.
+- E3 RULED as the default: `daemon/bin/claude-repld`, no required argv,
+  state root via env; adopt any answering daemon; never kill one.
+- E4 CONFIRMED: permission.el dies; the notification policy is the whole
+  reaction.
+- E5 RULED: merged, closed and killed rows carry closed=true; nuked rows
+  leave the roster; tabs derive from closed=false rows in roster order.
+- E6 CONFIRMED: no task verbs in Emacs; org notes stay local.
+- Soft spots RULED: submitting on a none/terminal session simply submits;
+  pasted images travel as ImageBlock{path}.
 - E7 transcripts.el (resume choice), ai-title.el (naming.title replaces),
   workspace-status-export.el (the roster stream replaces; the
   create-or-update-workspace skill's status source dies) removed by API
