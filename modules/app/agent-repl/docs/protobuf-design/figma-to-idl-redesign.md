@@ -8140,3 +8140,14 @@ cold context). `SessionUpdate.compacting = 27` (empty arm): vendor
 auto-compaction began; the ContextCut record is the end. Build identity
 needed NO new field — `SessionRuntime.shim_build_sha` already rides
 SessionStarted; its comment now names the staleness-bounce use.
+
+## 2026-08-29 — the rollout/admin pair (typed, landed)
+
+`drain_reason.proto`: `DrainReason { deploy | maintenance | operator{note
+required non-blank} }` — a TYPED vocabulary; no bare reason strings.
+`DaemonShutdownAnnounced` enriched: optional address (UNSET = plain
+bounce), `DaemonShutdownCause { self_merge_rollout | scheduled_drain
+{reason} | immediate {reason} }`, expected_outage_ms, minted_at_ms (a late
+receiver shortens its window). `WatchDaemon` gains `drain_scheduled
+{at_ms, reason}` / `drain_cancelled` pushes; `UpdateShutdownSchedule`'s
+schedule and now arms both REQUIRE a DrainReason.
