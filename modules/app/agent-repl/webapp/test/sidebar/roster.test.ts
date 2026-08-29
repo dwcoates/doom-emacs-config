@@ -1,0 +1,475 @@
+// @vitest-environment jsdom
+import { describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import {
+  RosterRepoSectionSchema,
+  RosterTaskSectionSchema,
+  WorkspaceRosterSchema,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { MalformedView } from "../../src/rpc/malformed.js";
+import { MERGED_FOLD_KEY, repoFoldKey, taskFoldKey } from "../../src/sidebar/context.js";
+import { drawWorkspaceRoster } from "../../src/sidebar/roster.js";
+import {
+  appContext,
+  memoryPrefs,
+  mergedSection,
+  repoSection,
+  roster,
+  row,
+  sidebarContext,
+  taskSection,
+} from "./harness.js";
+
+const UPDATE_OK = create(UpdateTaskResponseSchema, { result: { case: "success", value: {} } });
+
+async function click(control: Element): Promise<void> {
+  (control as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+}
+
+function pane(drawn: HTMLElement, grouping: string): HTMLElement {
+  return drawn.querySelector(`[data-grouping='${grouping}']`) as HTMLElement;
+}
+
+/** The task SECTION's header, which owns the rename controls; the pane's own
+ *  new-task form carries a `[data-task-title]` of its own. */
+function taskHead(drawn: HTMLElement): HTMLElement {
+  return pane(drawn, "task").querySelector(".task-head") as HTMLElement;
+}
+
+describe("the two groupings", () => {
+  it("draws both, because both arrive resolved", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(drawn.querySelectorAll("[data-grouping]").length).toBe(2);
+  });
+
+  it("shows the repository grouping by default", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(pane(drawn, "repository").hidden).toBe(false);
+  });
+
+  it("hides the grouping the user is not looking at, rather than dropping it", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(pane(drawn, "task").hidden).toBe(true);
+  });
+
+  it("honors a remembered preference for the task grouping", () => {
+    const sc = sidebarContext(appContext(), memoryPrefs({ grouping: "task" }));
+    const drawn = drawWorkspaceRoster(roster(), sc);
+    expect([pane(drawn, "task").hidden, pane(drawn, "repository").hidden]).toEqual([false, true]);
+  });
+
+  it("draws a workspace in BOTH groupings when both place it", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({
+        repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })],
+        tasks: [taskSection({ id: "task-1", rows: [row({ id: "ws-1" })] })],
+      }),
+      sidebarContext(),
+    );
+    expect(drawn.querySelectorAll("[data-roster-row='ws-1']").length).toBe(2);
+  });
+});
+
+describe("the sections", () => {
+  it("draws one section per repository, in the resolver's order", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "b" }), repoSection({ id: "a" })] }),
+      sidebarContext(),
+    );
+    const keys = [...pane(drawn, "repository").querySelectorAll(".repo:not(.merged-section)")].map(
+      (el) => el.getAttribute("data-section"),
+    );
+    expect(keys).toEqual([repoFoldKey("b"), repoFoldKey("a")]);
+  });
+
+  it("draws the repository's label", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1", label: "doom" })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector(".sb-label")?.textContent).toBe("doom");
+  });
+
+  it("draws one section per task", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1" }), taskSection({ id: "task-2" })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "task").querySelectorAll(".task-section").length).toBe(2);
+  });
+
+  it("offers each section a fold toggle", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector("[data-section-fold]")).not.toBeNull();
+  });
+
+  it("draws a section open unless it was folded", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(
+      false,
+    );
+  });
+
+  it("folds on the toggle", async () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(),
+    );
+    const section = pane(drawn, "repository").querySelector(".repo") as HTMLElement;
+    await click(section.querySelector("[data-section-fold]") as Element);
+    expect(section.classList.contains("folded")).toBe(true);
+  });
+
+  it("remembers a repository's fold under the repository's own id", async () => {
+    const prefs = memoryPrefs();
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(appContext(), prefs),
+    );
+    await click(pane(drawn, "repository").querySelector("[data-section-fold]") as Element);
+    expect(prefs.state.folded[repoFoldKey("repo-1")]).toBe(true);
+  });
+
+  it("remembers a task's fold under the task's id, not its title", async () => {
+    const prefs = memoryPrefs({ grouping: "task" });
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }),
+      sidebarContext(appContext(), prefs),
+    );
+    await click(pane(drawn, "task").querySelector("[data-section-fold]") as Element);
+    expect(prefs.state.folded[taskFoldKey("task-1")]).toBe(true);
+  });
+
+  it("draws a remembered fold folded on the next push", () => {
+    const prefs = memoryPrefs({ folded: { [repoFoldKey("repo-1")]: true } });
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(appContext(), prefs),
+    );
+    expect(pane(drawn, "repository").querySelector(".repo")?.classList.contains("folded")).toBe(
+      true,
+    );
+  });
+});
+
+describe("recently merged", () => {
+  it("appears under BOTH groupings", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(drawn.querySelectorAll(".merged-section").length).toBe(2);
+  });
+
+  it("starts folded, because settled history should not spend rail height", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(
+      pane(drawn, "repository").querySelector(".merged-section")?.classList.contains("folded"),
+    ).toBe(true);
+  });
+
+  it("remembers its fold under the one fixed key", async () => {
+    const prefs = memoryPrefs();
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext(appContext(), prefs));
+    const section = pane(drawn, "repository").querySelector(".merged-section") as HTMLElement;
+    await click(section.querySelector("[data-section-fold]") as Element);
+    expect(prefs.state.folded[MERGED_FOLD_KEY]).toBe(false);
+  });
+
+  it("draws its rows", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]) }),
+      sidebarContext(),
+    );
+    expect(
+      pane(drawn, "repository").querySelector(".merged-section [data-roster-row='ws-9']"),
+    ).not.toBeNull();
+  });
+
+  it("draws its header label", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(
+      pane(drawn, "repository").querySelector(".merged-section .sb-label")?.textContent,
+    ).toBe("Recently Merged");
+  });
+});
+
+describe("the task section's header", () => {
+  it("draws the done check from the wire", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1", done: true })] }),
+      sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
+    );
+    expect(pane(drawn, "task").querySelector("[data-task-status]")?.getAttribute("data-task-status")).toBe(
+      "done",
+    );
+  });
+
+  it("completes an open task through the set_done arm", async () => {
+    const arms: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        updateTask: (request) => {
+          arms.push(request.change.case ?? "unset");
+          return UPDATE_OK;
+        },
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1", done: false })] }),
+      sc,
+    );
+    await click(pane(drawn, "task").querySelector("[data-task-status]") as Element);
+    expect(arms).toEqual(["setDone"]);
+  });
+
+  it("reopens a done task through the set_open arm", async () => {
+    const arms: string[] = [];
+    const sc = sidebarContext(
+      appContext({
+        updateTask: (request) => {
+          arms.push(request.change.case ?? "unset");
+          return UPDATE_OK;
+        },
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1", done: true })] }),
+      sc,
+    );
+    await click(pane(drawn, "task").querySelector("[data-task-status]") as Element);
+    expect(arms).toEqual(["setOpen"]);
+  });
+
+  it("echoes the task's id on the change", async () => {
+    let id = "";
+    const sc = sidebarContext(
+      appContext({
+        updateTask: (request) => {
+          id = request.task?.id ?? "";
+          return UPDATE_OK;
+        },
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(pane(drawn, "task").querySelector("[data-task-status]") as Element);
+    expect(id).toBe("task-1");
+  });
+
+  it("does not fold the section when the check is clicked", async () => {
+    const sc = sidebarContext(appContext({ updateTask: () => UPDATE_OK }), memoryPrefs({ grouping: "task" }));
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    const section = pane(drawn, "task").querySelector(".task-section") as HTMLElement;
+    await click(section.querySelector("[data-task-status]") as Element);
+    expect(section.classList.contains("folded")).toBe(false);
+  });
+
+  it("offers a rename on the label", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1" })] }),
+      sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
+    );
+    expect(
+      pane(drawn, "task").querySelector("[data-task-rename]")?.getAttribute("data-task-rename"),
+    ).toBe("task-1");
+  });
+
+  it("opens an inline editor holding the current title", async () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }),
+      sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
+    );
+    await click(taskHead(drawn).querySelector("[data-task-rename]") as Element);
+    expect((taskHead(drawn).querySelector("[data-task-title]") as HTMLInputElement).value).toBe(
+      "ship",
+    );
+  });
+
+  it("retitles through the set_title arm", async () => {
+    let title = "";
+    const sc = sidebarContext(
+      appContext({
+        updateTask: (request) => {
+          title = request.change.case === "setTitle" ? request.change.value.title : "";
+          return UPDATE_OK;
+        },
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(taskHead(drawn).querySelector("[data-task-rename]") as Element);
+    (taskHead(drawn).querySelector("[data-task-title]") as HTMLInputElement).value = "renamed";
+    await click(taskHead(drawn).querySelector("[data-task-change='setTitle']") as Element);
+    expect(title).toBe("renamed");
+  });
+
+  it("sends no blank retitle, because the contract forbids one", async () => {
+    let calls = 0;
+    const sc = sidebarContext(
+      appContext({
+        updateTask: () => {
+          calls += 1;
+          return UPDATE_OK;
+        },
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(taskHead(drawn).querySelector("[data-task-rename]") as Element);
+    (taskHead(drawn).querySelector("[data-task-title]") as HTMLInputElement).value = "   ";
+    await click(taskHead(drawn).querySelector("[data-task-change='setTitle']") as Element);
+    expect(calls).toBe(0);
+  });
+});
+
+describe("the create controls", () => {
+  it("offers a new workspace per repository section", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(),
+    );
+    expect(pane(drawn, "repository").querySelector(".repo-head .sb-add")).not.toBeNull();
+  });
+
+  it("opens the create form under that section's header", async () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(),
+    );
+    await click(pane(drawn, "repository").querySelector(".repo-head .sb-add") as Element);
+    expect(
+      pane(drawn, "repository").querySelector(".repo-head")?.nextElementSibling?.hasAttribute(
+        "data-create-form",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not fold the section when the create control is clicked", async () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ repos: [repoSection({ id: "repo-1" })] }),
+      sidebarContext(),
+    );
+    const section = pane(drawn, "repository").querySelector(".repo") as HTMLElement;
+    await click(section.querySelector(".sb-add") as Element);
+    expect(section.classList.contains("folded")).toBe(false);
+  });
+
+  it("offers the new-task control at the head of the task grouping", () => {
+    const drawn = drawWorkspaceRoster(roster(), sidebarContext());
+    expect(pane(drawn, "task").querySelector("[data-task-create]")).not.toBeNull();
+  });
+});
+
+describe("the assign menu's choices", () => {
+  it("are refreshed from the task view on every push", () => {
+    const sc = sidebarContext();
+    drawWorkspaceRoster(
+      roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }),
+      sc,
+    );
+    expect(sc.tasks).toEqual([{ id: "task-1", label: "ship" }]);
+  });
+
+  it("hold nothing over from a push that no longer carries the task", () => {
+    const sc = sidebarContext();
+    drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    drawWorkspaceRoster(roster(), sc);
+    expect(sc.tasks).toEqual([]);
+  });
+});
+
+describe("a malformed roster", () => {
+  it("refuses one with no repository view", () => {
+    const malformed = create(WorkspaceRosterSchema, {
+      task: { sections: [] },
+      recentlyMerged: mergedSection(),
+    });
+    expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses one with no task view", () => {
+    const malformed = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      recentlyMerged: mergedSection(),
+    });
+    expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses one with no recently-merged section", () => {
+    const malformed = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      task: { sections: [] },
+    });
+    expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a current workspace with no identity", () => {
+    const malformed = create(WorkspaceRosterSchema, {
+      repository: { sections: [] },
+      task: { sections: [] },
+      recentlyMerged: mergedSection(),
+      current: {},
+    });
+    expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
+  });
+
+  it("refuses a repository section with no key", () => {
+    const malformed = create(RosterRepoSectionSchema, {
+      header: { label: { text: "doom" } },
+      rows: { rows: [] },
+    });
+    expect(() =>
+      drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a repository section with no header", () => {
+    const malformed = create(RosterRepoSectionSchema, {
+      key: { repository: { id: "repo-1", dir: "/repo" } },
+      rows: { rows: [] },
+    });
+    expect(() =>
+      drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a repository section with no rows box", () => {
+    const malformed = create(RosterRepoSectionSchema, {
+      key: { repository: { id: "repo-1", dir: "/repo" } },
+      header: { label: { text: "doom" } },
+    });
+    expect(() =>
+      drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a task section with no done check", () => {
+    const malformed = create(RosterTaskSectionSchema, {
+      key: { taskId: "task-1" },
+      header: { label: { text: "ship" } },
+      rows: { rows: [] },
+    });
+    expect(() =>
+      drawWorkspaceRoster(roster({ tasks: [malformed] }), sidebarContext()),
+    ).toThrow(MalformedView);
+  });
+
+  it("refuses a section header with no label", () => {
+    const malformed = create(RosterRepoSectionSchema, {
+      key: { repository: { id: "repo-1", dir: "/repo" } },
+      header: {},
+      rows: { rows: [] },
+    });
+    expect(() =>
+      drawWorkspaceRoster(roster({ repos: [malformed] }), sidebarContext()),
+    ).toThrow(MalformedView);
+  });
+});
