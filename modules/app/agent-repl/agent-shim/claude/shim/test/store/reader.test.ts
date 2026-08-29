@@ -13,7 +13,6 @@ import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { PersistenceError } from "../../src/store/persistence.js";
 import {
-  UNPOINTERED_PREFIX,
   createReader,
   readFailure,
   toHistoryEntry,
@@ -243,21 +242,19 @@ describe("readAgentPage", () => {
     expect(older.entries).toHaveLength(2);
   });
 
-  it("mints unpointered marks, because ReadAgentPage serves lines without pointers", async () => {
-    const { plane } = await seeded("older-page-pointers", 2);
+  it("carries the served pointers, so a continuation page is a reconnect mark too", async () => {
+    const { started, plane } = await seeded("older-page-pointers", 2);
     const session = await plane.openAgentPage(BOOK, 1);
     session.close();
     const more = session.page.boundary.value as conversationv1.HistoryMore;
 
     const older = await plane.readAgentPage(BOOK, 10, more.lastEntry as conversationv1.HistoryPointer);
 
-    expect(older.entries[0]?.at?.value.startsWith(UNPOINTERED_PREFIX)).toBe(true);
+    expect(older.entries[0]?.at?.value).toBe(started.book("book-1")[0]?.at?.value);
   });
 
-  it("refuses an unpointered mark echoed back, rather than paging from the wrong place", () => {
-    const pointer = create(conversationv1.HistoryPointerSchema, {
-      value: `${UNPOINTERED_PREFIX}7`,
-    });
+  it("refuses an empty pointer, which names no position at all", () => {
+    const pointer = create(conversationv1.HistoryPointerSchema, { value: "" });
 
     expect(() => toStorePointer(pointer)).toThrow(PersistenceError);
   });
