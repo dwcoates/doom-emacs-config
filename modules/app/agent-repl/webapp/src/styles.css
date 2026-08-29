@@ -3878,3 +3878,91 @@ body.ungated #mode-select {
   text-decoration: underline wavy var(--err);
   text-underline-offset: 0.2em;
 }
+
+/* ---- paint classes (src/feed/cards/paint.ts) --------------------------- */
+
+/* ONE RULE PER NAME in proto/vocab/paint-classes.json, keyed by the name and
+   nothing else — the file pins WHICH names exist, never how they look, so the
+   values below are this renderer's own and reuse the variables the stylesheet
+   already carries for the same ideas (`--hl-*`, which is what a highlighted
+   Read has always been drawn in here). A highlighted read therefore looks
+   exactly as it did when highlight.js painted it client-side; the only change
+   is who decided which run is a keyword.
+
+   A SPAN CARRIES EXACTLY ONE CLASS (the wire has no class algebra), so an ANSI
+   run that is bold AND red arrives as adjacent spans, one per class. That is
+   why the attribute classes below set only their own property and never a
+   color: they must compose by adjacency, not by cascade. */
+
+/* The syntax family: a code block's spans. */
+.paint-keyword { color: var(--hl-keyword); }
+.paint-string { color: var(--hl-string); }
+.paint-comment { color: var(--hl-comment); font-style: italic; }
+.paint-number { color: var(--hl-number); }
+.paint-type { color: var(--hl-attr); }
+.paint-function { color: var(--hl-title); }
+.paint-operator { color: var(--hl-keyword); }
+.paint-punctuation { color: var(--muted); }
+.paint-variable { color: var(--hl-attr); }
+.paint-constant { color: var(--hl-number); }
+.paint-attribute { color: var(--hl-attr); }
+.paint-tag { color: var(--hl-title); }
+.paint-heading { color: var(--hl-title); font-weight: 600; }
+.paint-link { color: var(--accent); text-decoration: underline; }
+.paint-emphasis { font-style: italic; }
+.paint-strong { font-weight: 700; }
+/* `added`/`removed` let a highlighted block carry diff coloring without a
+   second vocabulary; they take the same two hues the diff output does. */
+.paint-added { color: var(--ok); }
+.paint-removed { color: var(--err); }
+.paint-meta { color: var(--hl-meta); }
+
+/* The ANSI family: captured process output the daemon's parser already
+   decoded. The six attribute classes. */
+.paint-ansi-bold { font-weight: 700; }
+.paint-ansi-dim { opacity: 0.65; }
+.paint-ansi-italic { font-style: italic; }
+.paint-ansi-underline { text-decoration: underline; }
+.paint-ansi-strike { text-decoration: line-through; }
+/* Inverse swaps the pair the terminal was drawing in, which here is the card
+   ground and its text color. */
+.paint-ansi-inverse { background: var(--fg); color: var(--card); }
+
+/* The eight base colors and their bright variants, foreground. The hues are
+   the conventional terminal palette, lifted enough to stay legible on both the
+   light and the dark card ground. */
+.paint-ansi-fg-black { color: #4b5563; }
+.paint-ansi-fg-red { color: var(--err); }
+.paint-ansi-fg-green { color: var(--ok); }
+.paint-ansi-fg-yellow { color: #b45309; }
+.paint-ansi-fg-blue { color: var(--accent); }
+.paint-ansi-fg-magenta { color: #a855f7; }
+.paint-ansi-fg-cyan { color: #0891b2; }
+.paint-ansi-fg-white { color: var(--muted); }
+.paint-ansi-fg-bright-black { color: var(--muted); }
+.paint-ansi-fg-bright-red { color: #f87171; }
+.paint-ansi-fg-bright-green { color: #4ade80; }
+.paint-ansi-fg-bright-yellow { color: #fbbf24; }
+.paint-ansi-fg-bright-blue { color: #60a5fa; }
+.paint-ansi-fg-bright-magenta { color: #d8b4fe; }
+.paint-ansi-fg-bright-cyan { color: #22d3ee; }
+.paint-ansi-fg-bright-white { color: var(--fg); }
+
+/* Backgrounds. A background span keeps the inherited text color, so a
+   foreground span adjacent to it is unaffected. */
+.paint-ansi-bg-black { background: #1f2937; }
+.paint-ansi-bg-red { background: color-mix(in srgb, var(--err) 25%, transparent); }
+.paint-ansi-bg-green { background: color-mix(in srgb, var(--ok) 25%, transparent); }
+.paint-ansi-bg-yellow { background: color-mix(in srgb, #fbbf24 30%, transparent); }
+.paint-ansi-bg-blue { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.paint-ansi-bg-magenta { background: color-mix(in srgb, #a855f7 25%, transparent); }
+.paint-ansi-bg-cyan { background: color-mix(in srgb, #0891b2 25%, transparent); }
+.paint-ansi-bg-white { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.paint-ansi-bg-bright-black { background: color-mix(in srgb, var(--fg) 20%, transparent); }
+.paint-ansi-bg-bright-red { background: color-mix(in srgb, #f87171 30%, transparent); }
+.paint-ansi-bg-bright-green { background: color-mix(in srgb, #4ade80 30%, transparent); }
+.paint-ansi-bg-bright-yellow { background: color-mix(in srgb, #fbbf24 40%, transparent); }
+.paint-ansi-bg-bright-blue { background: color-mix(in srgb, #60a5fa 30%, transparent); }
+.paint-ansi-bg-bright-magenta { background: color-mix(in srgb, #d8b4fe 30%, transparent); }
+.paint-ansi-bg-bright-cyan { background: color-mix(in srgb, #22d3ee 30%, transparent); }
+.paint-ansi-bg-bright-white { background: color-mix(in srgb, var(--fg) 18%, transparent); }
