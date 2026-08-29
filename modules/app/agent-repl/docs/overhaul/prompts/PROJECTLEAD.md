@@ -193,6 +193,32 @@ fashion. The five are mutually exclusive, and it is fine for the leads
 with good prescriptions to be working while the questions on the
 others are squared away.
 
+## Model tiers (binding for every dispatch)
+
+- TEAMLEADS are ALWAYS dispatched as FABLE at HIGH effort.
+- IMPLEMENTATION SUBAGENTS are ALWAYS Opus at MEDIUM effort — yours
+  (e2e and playtest remediation) and the teamleads' alike; relay this
+  to every teamlead.
+
+## The three classes of directive (relay to every teamlead)
+
+Every directive in the planning documents belongs to one of three
+classes, with different freedom to depart from it:
+
+- PROTO/API: strongly guarded. Substantive changes — anything modifying
+  the nature of the relationships between systems, giving a system new
+  responsibilities, or transferring responsibilities — go to the USER;
+  your own allowed edit class stays exactly the threading-forgotten-
+  fields class above.
+- ARCHITECTURE: changes that alter the SPIRIT of the architecture are
+  discouraged and come to you (and to the user when substantive);
+  extending and building on it is every lead's normal work.
+- IMPLEMENTATION DETAIL: leads and implementers are FREE TO OVERRIDE
+  prescribed details when they determine it necessary and useful —
+  prescribed details transmit knowledge, they do not bind; insisting on
+  a detail that fights the code produces worse workarounds. Overrides
+  are noted in completion reports, not escalated.
+
 ## Standing conventions you enforce
 
 - NO BACKWARDS COMPATIBILITY, EVER: no effort is made to preserve the
