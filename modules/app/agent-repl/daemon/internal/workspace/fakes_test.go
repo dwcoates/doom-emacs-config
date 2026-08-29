@@ -652,6 +652,7 @@ func (c *fakeCards) PermissionModes(ids.WorkspaceID) ([]string, bool) {
 type fakeSurfaces struct {
 	logger       *dlog.TestLogger
 	workspaceErr error
+	shimSinkErr  error
 }
 
 func newFakeSurfaces() *fakeSurfaces { return &fakeSurfaces{logger: dlog.NewTestLogger()} }
@@ -665,7 +666,31 @@ func (s *fakeSurfaces) Workspace(dir string) (dlog.Logger, error) {
 	return s.logger.With(dlog.Context{"dir": dir}), nil
 }
 
-func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) { return nil, errFake }
+func (s *fakeSurfaces) ShimSink(string) (dlog.Borrowed, error) {
+	if s.shimSinkErr != nil {
+		return nil, s.shimSinkErr
+	}
+	return &fakeBorrowed{}, nil
+}
+
+// fakeBorrowed is a non-closeable sink handle over the null device, which is
+// what a spawn is handed as fd 3.
+type fakeBorrowed struct {
+	file *os.File
+}
+
+func (b *fakeBorrowed) File() uintptr {
+	if b.file == nil {
+		file, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			panic(err)
+		}
+		b.file = file
+	}
+	return b.file.Fd()
+}
+
+func (b *fakeBorrowed) Close() error { return nil }
 
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }
 
