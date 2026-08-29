@@ -442,15 +442,32 @@ message SessionUnhealthy {
   repeated SessionFault faults = 1;
 }
 
-// One fault of the shim's own.
+// One fault of the shim's own. THE KIND IS A TYPED ARM (the shim's real
+// fault sites) plus a dynamic detail for what only prose can carry.
 message SessionFault {
-  // Which part of the shim (its store client, its converter, its sidecar
-  // link, …).
+  // Which part of the shim (its store client, its converter, its log sink, …).
   string component = 1;
-  // The fault, for a human and for logs. A `kind` oneof is added WITH its
-  // first derived arms at the wave, from the shim's real fault sites.
+  // The fault, for a human and for logs; supplements the kind.
   string detail = 2;
+  oneof kind {
+    // The store cannot be reached; writes are buffering (or dropping).
+    SessionFaultStoreUnreachable store_unreachable = 3;
+    // The converter met a record it should model and could not.
+    SessionFaultConverterDefect converter_defect = 4;
+    // The log sink is poisoned; records are being lost.
+    SessionFaultLogSinkPoisoned log_sink_poisoned = 5;
+    // A keep-alive submission failed; the cache may lapse.
+    SessionFaultKeepaliveFailed keepalive_failed = 6;
+    // A vendor query failed in a way the stream's own terminals did not
+    // carry.
+    SessionFaultVendorQueryFailed vendor_query_failed = 7;
+  }
 }
+message SessionFaultStoreUnreachable {}
+message SessionFaultConverterDefect {}
+message SessionFaultLogSinkPoisoned {}
+message SessionFaultKeepaliveFailed {}
+message SessionFaultVendorQueryFailed {}
 
 // A window during which one component of the shim was degraded. THE ARM IS
 // WHETHER IT HAS CLOSED, and only a closed window knows what was lost.
