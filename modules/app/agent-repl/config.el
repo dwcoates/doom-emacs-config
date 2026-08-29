@@ -161,6 +161,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
     version))
 
 (agent-repl--load-module "core")
+;; WHY: the wire-*.el codec is the protojson layer every agentrepl.v1 caller
+;; sits on, so it loads directly after core.el — its only dependency is
+;; core.el's logging ladder — and before anything that speaks to the daemon.
+;; Order within the group is the dependency order: wire-common.el carries the
+;; error, the shared primitives and the leaf vocabularies the other two build
+;; on.
+(agent-repl--load-module "wire-common")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
