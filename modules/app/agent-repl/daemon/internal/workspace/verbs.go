@@ -45,9 +45,10 @@ const (
 // verbs is the whole verb surface. It holds no state: every fact it reads is
 // WSM's or a resolver's, so two verbs racing cannot disagree about a workspace.
 type verbs struct {
-	deps Deps
-	load PromptLoader
-	now  func() time.Time
+	deps   Deps
+	load   PromptLoader
+	splice PromptSplicer
+	now    func() time.Time
 }
 
 // load resolves one workspace's durable record and its own logger. Failing to

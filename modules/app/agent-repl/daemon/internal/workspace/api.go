@@ -239,6 +239,9 @@ type Deps struct {
 	// LoadPrompt reads one brief from the prompts directory at use time. It is
 	// a function so the read is faked in tests; nil means prompts.Load.
 	LoadPrompt PromptLoader
+	// SplicePrompt substitutes a brief's placeholders. It is a function for the
+	// same reason LoadPrompt is; nil means the brief's own Splice.
+	SplicePrompt PromptSplicer
 	// Now supplies the instants the verbs stamp. nil means time.Now.
 	Now func() time.Time
 	// EvictLogSink drops one workspace's durable log sink when the workspace
@@ -249,6 +252,11 @@ type Deps struct {
 
 // PromptLoader reads one brief by name from a prompts directory at use time.
 type PromptLoader func(dir, name string) (prompts.Prompt, error)
+
+// PromptSplicer substitutes values into a loaded brief's placeholders. A value
+// for an unknown placeholder, or a placeholder with no value, is an error: a
+// brief is never sent with a hole in it.
+type PromptSplicer func(prompt prompts.Prompt, values map[string]string) (string, error)
 
 // ShimFunc resolves a workspace's live shim surface, reporting false when the
 // workspace has no live session.
@@ -425,9 +433,15 @@ func New(deps Deps) (Verbs, error) {
 	if load == nil {
 		load = prompts.Load
 	}
+	splice := deps.SplicePrompt
+	if splice == nil {
+		splice = func(prompt prompts.Prompt, values map[string]string) (string, error) {
+			return prompt.Splice(values)
+		}
+	}
 	now := deps.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &verbs{deps: deps, load: load, now: now}, nil
+	return &verbs{deps: deps, load: load, splice: splice, now: now}, nil
 }
