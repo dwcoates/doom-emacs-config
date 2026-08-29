@@ -1,11 +1,14 @@
-// prompt_origin.proto — WHY A PROMPT WAS SUBMITTED: closed attribution shared
-// by the turn's request and the session's durable bookkeeping.
+// prompt_origin.proto — WHY A PROMPT WAS SUBMITTED: closed attribution
+// shared by the turn's request (shim.v1 StartTurn) and the turn's DURABLE
+// record (AgentPrompt) — moved into conversation.v1 (2026-08-29) so replay
+// resolvers can read it: merge-born rows route by it, restart re-drives
+// label by it.
 
 syntax = "proto3";
 
-package shim.v1;
+package conversation.v1;
 
-option go_package = "agentrepl/proto/shim/v1;shimv1";
+option go_package = "agentrepl/proto/conversation/v1;conversationv1";
 
 // Why a prompt entered the agent-repl submit pipeline.
 //
