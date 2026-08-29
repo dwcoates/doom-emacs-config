@@ -177,6 +177,13 @@ type Verbs interface {
 	// verbatim. The daemon validates the workspace and opens nothing itself;
 	// there is no ack and no command loop.
 	OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path string, line *uint32) error
+	// OnOneShotTurnConcluded is the TURN-TERMINAL hook for a one-shot
+	// workspace's finish action: the prompt queue calls it when a turn
+	// concludes with the success marker, and this package does NOT detect the
+	// terminal itself. The action is the one recorded in the creation job at
+	// creation, and it is SPENT when it runs, so a second conclusion takes it
+	// exactly once.
+	OnOneShotTurnConcluded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Notify raises one host notification: it relays the TYPED notification
 	// onto the workspace's host stream and sets the roster's attention marker,
 	// which SelectWorkspace clears. It is the session watcher's LifecycleSink

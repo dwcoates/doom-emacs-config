@@ -133,12 +133,14 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 // workspace-creation origin, no bubble target. It exists so the create verb and
 // the command-file ingress cannot spell the same submission differently.
 func promptSubmission(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid) promptqueue.Submission {
-	return promptqueue.Submission{
-		WS:     ws,
-		Turn:   turn,
-		Said:   said,
-		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED,
-	}
+	return daemonSubmission(ws, turn, said, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED)
+}
+
+// daemonSubmission composes a daemon-born submission under a named origin.
+// Every daemon-born prompt goes through here, so none of them can reach the
+// queue without the required origin.
+func daemonSubmission(ws ids.WorkspaceID, turn ids.TurnID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) promptqueue.Submission {
+	return promptqueue.Submission{WS: ws, Turn: turn, Said: said, Origin: origin}
 }
 
 // rootFeed is the workspace's top-level feed, which is where every
