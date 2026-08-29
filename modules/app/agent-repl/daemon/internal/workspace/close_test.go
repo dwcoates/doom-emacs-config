@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -181,8 +182,8 @@ func TestCloseEvictsTheWorkspaceLogSink(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.evicted) != 1 || f.evicted[0] != ws.Dir {
-		t.Fatalf("evicted sinks = %v, want the workspace's own", f.evicted)
+	if len(f.log.evicted) != 1 || f.log.evicted[0] != ws.Dir {
+		t.Fatalf("evicted sinks = %v, want the workspace's own", f.log.evicted)
 	}
 }
 
@@ -200,5 +201,24 @@ func TestCloseLeavesTheSessionAlone(t *testing.T) {
 	// Assert.
 	if len(f.fleet.stopped) != 0 {
 		t.Fatalf("stopped sessions = %+v, want none", f.fleet.stopped)
+	}
+}
+
+func TestCloseSucceedsWhenTheSinkEvictionFails(t *testing.T) {
+	// Arrange: a sink that will not release is a LEAK, not a reason to refuse a
+	// close the record already says happened.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.log.evictErr = errors.New("the sink is already closed")
+
+	// Act.
+	err := f.verbs.Close(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !f.db.closedFlags["w1"] {
+		t.Fatal("Close() did not record the workspace as closed")
 	}
 }
