@@ -57,9 +57,22 @@
 FIELD names the offending field (or oneof); REASON says what is wrong.
 The signalled data is `(MESSAGE-NAME FIELD REASON)'.
 
-`agent-repl--error' signals an ordinary `error' of its own by design, so
-its signal is caught here: the caller must see the TYPED wire error, not
-the logging ladder's generic one.  The log line still lands first."
+THE ONE PLACE a wire contract breach becomes a signal.  Every codec file
+routes here (`wire-verbs.el' keeps a same-named thin wrapper for
+readability at its own call sites), so the breach path is a single
+function rather than a shape re-derived per file.
+
+NOTHING IS SWALLOWED HERE.  `agent-repl--error' currently BOTH persists
+the record at ERROR level and signals a plain `error' as its display
+mechanism; that generic signal is caught precisely so the TYPED
+`agent-repl-wire-error' — the one every wire consumer catches, carrying
+which message, which field and why — is what leaves this function.  The
+failure is surfaced, and surfaced with strictly more information.  The
+fanout spec §13 has core.el's pre-pass making `agent-repl--error' a
+non-signaling ERROR rung like `agent-repl--warn'; when that lands, this
+`condition-case' becomes dead and should be deleted outright.  Deleting
+it BEFORE then would replace the typed error with an untyped one at every
+breach and break every consumer's handler."
   (condition-case nil
       (agent-repl--error nil "elisp.wire.contract-breach message=%s field=%s reason=%s"
                          message-name field reason)
