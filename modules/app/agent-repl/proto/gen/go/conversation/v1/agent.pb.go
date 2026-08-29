@@ -162,9 +162,11 @@ type AgentFrame_Failure struct {
 
 type AgentFrame_DetachedWork struct {
 	// Work left this agent's stream for a life of its own. The consumer opens
-	// the connection its handle names; the store lands it in the lifecycle
-	// record for its kind, never as a page line — the spawning CALL is
-	// already one.
+	// the connection its handle names. The announcement IS a page line of the
+	// announcing agent's book (upsert key `detached:<work id>`): a replayed
+	// page must carry it, and the store's liveness of non-agent detached runs
+	// is read from it. The run's own rows land in the lifecycle table for its
+	// kind, which never holds the announcement.
 	DetachedWork *AgentDetachedWork `protobuf:"bytes,5,opt,name=detached_work,json=detachedWork,proto3,oneof"`
 }
 
@@ -961,6 +963,7 @@ type AgentFailure struct {
 	//	*AgentFailure_TurnSetupFailed
 	//	*AgentFailure_ExecutionError
 	//	*AgentFailure_ContinuationPrevented
+	//	*AgentFailure_Lost
 	Failure       isAgentFailure_Failure `protobuf_oneof:"failure"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1163,6 +1166,15 @@ func (x *AgentFailure) GetContinuationPrevented() *AgentContinuationPrevented {
 	return nil
 }
 
+func (x *AgentFailure) GetLost() *DetachedLost {
+	if x != nil {
+		if x, ok := x.Failure.(*AgentFailure_Lost); ok {
+			return x.Lost
+		}
+	}
+	return nil
+}
+
 type isAgentFailure_Failure interface {
 	isAgentFailure_Failure()
 }
@@ -1265,6 +1277,13 @@ type AgentFailure_ContinuationPrevented struct {
 	ContinuationPrevented *AgentContinuationPrevented `protobuf:"bytes,17,opt,name=continuation_prevented,json=continuationPrevented,proto3,oneof"`
 }
 
+type AgentFailure_Lost struct {
+	// WE STOPPED BEING ABLE TO SEE THE AGENT — a detached agent whose
+	// transcript vanished or went silent, or one a boot sweep found open with
+	// no producer. Not known to have failed; the feed draws "lost".
+	Lost *DetachedLost `protobuf:"bytes,18,opt,name=lost,proto3,oneof"`
+}
+
 func (*AgentFailure_ApiRequestFailed) isAgentFailure_Failure() {}
 
 func (*AgentFailure_BlockingLimit) isAgentFailure_Failure() {}
@@ -1298,6 +1317,8 @@ func (*AgentFailure_TurnSetupFailed) isAgentFailure_Failure() {}
 func (*AgentFailure_ExecutionError) isAgentFailure_Failure() {}
 
 func (*AgentFailure_ContinuationPrevented) isAgentFailure_Failure() {}
+
+func (*AgentFailure_Lost) isAgentFailure_Failure() {}
 
 // An account-level block stopped the run.
 type AgentStoppedAtBlockingLimit struct {
@@ -2640,7 +2661,7 @@ const file_conversation_v1_agent_proto_rawDesc = "" +
 	"\rhost_shutdown\x18\x02 \x01(\v2/.conversation.v1.AgentInterruptedByHostShutdownH\x00R\fhostShutdownB\a\n" +
 	"\x05cause\"\x18\n" +
 	"\x16AgentInterruptedByUser\" \n" +
-	"\x1eAgentInterruptedByHostShutdown\"\x9b\f\n" +
+	"\x1eAgentInterruptedByHostShutdown\"\xd0\f\n" +
 	"\fAgentFailure\x12\x16\n" +
 	"\x06errors\x18\x1e \x03(\tR\x06errors\x12Q\n" +
 	"\x12api_request_failed\x18\x01 \x01(\v2!.conversation.v1.ApiRequestFailedH\x00R\x10apiRequestFailed\x12U\n" +
@@ -2662,7 +2683,8 @@ const file_conversation_v1_agent_proto_rawDesc = "" +
 	"!structured_output_retry_exhausted\x18\x0e \x01(\v26.conversation.v1.AgentStructuredOutputRetriesExhaustedH\x00R\x1estructuredOutputRetryExhausted\x12S\n" +
 	"\x11turn_setup_failed\x18\x0f \x01(\v2%.conversation.v1.AgentTurnSetupFailedH\x00R\x0fturnSetupFailed\x12O\n" +
 	"\x0fexecution_error\x18\x10 \x01(\v2$.conversation.v1.AgentExecutionErrorH\x00R\x0eexecutionError\x12d\n" +
-	"\x16continuation_prevented\x18\x11 \x01(\v2+.conversation.v1.AgentContinuationPreventedH\x00R\x15continuationPreventedB\t\n" +
+	"\x16continuation_prevented\x18\x11 \x01(\v2+.conversation.v1.AgentContinuationPreventedH\x00R\x15continuationPrevented\x123\n" +
+	"\x04lost\x18\x12 \x01(\v2\x1d.conversation.v1.DetachedLostH\x00R\x04lostB\t\n" +
 	"\afailure\"\x1d\n" +
 	"\x1bAgentStoppedAtBlockingLimit\"\"\n" +
 	" AgentStoppedByRapidRefillBreaker\"\x14\n" +
@@ -2778,9 +2800,10 @@ var file_conversation_v1_agent_proto_goTypes = []any{
 	(*ContextCut)(nil),                            // 47: conversation.v1.ContextCut
 	(*ApiRequestFailed)(nil),                      // 48: conversation.v1.ApiRequestFailed
 	(*AgentActivityId)(nil),                       // 49: conversation.v1.AgentActivityId
-	(*AgentWorkflowStart)(nil),                    // 50: conversation.v1.AgentWorkflowStart
-	(*AgentSubagentStart)(nil),                    // 51: conversation.v1.AgentSubagentStart
-	(*AgentWorkflowSummary)(nil),                  // 52: conversation.v1.AgentWorkflowSummary
+	(*DetachedLost)(nil),                          // 50: conversation.v1.DetachedLost
+	(*AgentWorkflowStart)(nil),                    // 51: conversation.v1.AgentWorkflowStart
+	(*AgentSubagentStart)(nil),                    // 52: conversation.v1.AgentSubagentStart
+	(*AgentWorkflowSummary)(nil),                  // 53: conversation.v1.AgentWorkflowSummary
 }
 var file_conversation_v1_agent_proto_depIdxs = []int32{
 	39, // 0: conversation.v1.AgentFrame.agent_id:type_name -> conversation.v1.AgentId
@@ -2821,24 +2844,25 @@ var file_conversation_v1_agent_proto_depIdxs = []int32{
 	25, // 35: conversation.v1.AgentFailure.turn_setup_failed:type_name -> conversation.v1.AgentTurnSetupFailed
 	26, // 36: conversation.v1.AgentFailure.execution_error:type_name -> conversation.v1.AgentExecutionError
 	27, // 37: conversation.v1.AgentFailure.continuation_prevented:type_name -> conversation.v1.AgentContinuationPrevented
-	50, // 38: conversation.v1.AgentWorkflow.start:type_name -> conversation.v1.AgentWorkflowStart
-	29, // 39: conversation.v1.AgentWorkflow.update:type_name -> conversation.v1.AgentWorkflowUpdate
-	33, // 40: conversation.v1.AgentWorkflow.success:type_name -> conversation.v1.AgentWorkflowSuccess
-	36, // 41: conversation.v1.AgentWorkflow.failure:type_name -> conversation.v1.AgentWorkflowFailure
-	30, // 42: conversation.v1.AgentWorkflowUpdate.all_subagents:type_name -> conversation.v1.AgentWorkflowSubagent
-	51, // 43: conversation.v1.AgentWorkflowSubagent.agent_start:type_name -> conversation.v1.AgentSubagentStart
-	31, // 44: conversation.v1.AgentWorkflowSubagent.live:type_name -> conversation.v1.AgentWorkflowSubagentLive
-	32, // 45: conversation.v1.AgentWorkflowSubagent.ended:type_name -> conversation.v1.AgentWorkflowSubagentEnded
-	34, // 46: conversation.v1.AgentWorkflowSuccess.completed:type_name -> conversation.v1.AgentWorkflowCompleted
-	35, // 47: conversation.v1.AgentWorkflowSuccess.interrupted:type_name -> conversation.v1.AgentWorkflowInterrupted
-	52, // 48: conversation.v1.AgentWorkflowCompleted.summary:type_name -> conversation.v1.AgentWorkflowSummary
-	37, // 49: conversation.v1.AgentWorkflowFailure.script_rejected:type_name -> conversation.v1.AgentWorkflowScriptRejected
-	38, // 50: conversation.v1.AgentWorkflowFailure.run_ended:type_name -> conversation.v1.AgentWorkflowRunEnded
-	51, // [51:51] is the sub-list for method output_type
-	51, // [51:51] is the sub-list for method input_type
-	51, // [51:51] is the sub-list for extension type_name
-	51, // [51:51] is the sub-list for extension extendee
-	0,  // [0:51] is the sub-list for field type_name
+	50, // 38: conversation.v1.AgentFailure.lost:type_name -> conversation.v1.DetachedLost
+	51, // 39: conversation.v1.AgentWorkflow.start:type_name -> conversation.v1.AgentWorkflowStart
+	29, // 40: conversation.v1.AgentWorkflow.update:type_name -> conversation.v1.AgentWorkflowUpdate
+	33, // 41: conversation.v1.AgentWorkflow.success:type_name -> conversation.v1.AgentWorkflowSuccess
+	36, // 42: conversation.v1.AgentWorkflow.failure:type_name -> conversation.v1.AgentWorkflowFailure
+	30, // 43: conversation.v1.AgentWorkflowUpdate.all_subagents:type_name -> conversation.v1.AgentWorkflowSubagent
+	52, // 44: conversation.v1.AgentWorkflowSubagent.agent_start:type_name -> conversation.v1.AgentSubagentStart
+	31, // 45: conversation.v1.AgentWorkflowSubagent.live:type_name -> conversation.v1.AgentWorkflowSubagentLive
+	32, // 46: conversation.v1.AgentWorkflowSubagent.ended:type_name -> conversation.v1.AgentWorkflowSubagentEnded
+	34, // 47: conversation.v1.AgentWorkflowSuccess.completed:type_name -> conversation.v1.AgentWorkflowCompleted
+	35, // 48: conversation.v1.AgentWorkflowSuccess.interrupted:type_name -> conversation.v1.AgentWorkflowInterrupted
+	53, // 49: conversation.v1.AgentWorkflowCompleted.summary:type_name -> conversation.v1.AgentWorkflowSummary
+	37, // 50: conversation.v1.AgentWorkflowFailure.script_rejected:type_name -> conversation.v1.AgentWorkflowScriptRejected
+	38, // 51: conversation.v1.AgentWorkflowFailure.run_ended:type_name -> conversation.v1.AgentWorkflowRunEnded
+	52, // [52:52] is the sub-list for method output_type
+	52, // [52:52] is the sub-list for method input_type
+	52, // [52:52] is the sub-list for extension type_name
+	52, // [52:52] is the sub-list for extension extendee
+	0,  // [0:52] is the sub-list for field type_name
 }
 
 func init() { file_conversation_v1_agent_proto_init() }
@@ -2904,6 +2928,7 @@ func file_conversation_v1_agent_proto_init() {
 		(*AgentFailure_TurnSetupFailed)(nil),
 		(*AgentFailure_ExecutionError)(nil),
 		(*AgentFailure_ContinuationPrevented)(nil),
+		(*AgentFailure_Lost)(nil),
 	}
 	file_conversation_v1_agent_proto_msgTypes[28].OneofWrappers = []any{
 		(*AgentWorkflow_Start)(nil),

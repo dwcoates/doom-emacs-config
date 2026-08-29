@@ -327,35 +327,6 @@ from START (default 0), or nil when NEEDLE does not occur."
   (defvar agent-repl--notification-backend (lambda (_ws _title _msg) nil)
     "Stub: no-op notification backend for test environments."))
 
-(defun agent-repl-test--send-command-stub (request-id &optional record)
-  "Return a stand-in for `agent-repl--uds-send-command' answering REQUEST-ID.
-
-RECORD, when non-nil, is a function of one plist describing the call:
-`:request-id', `:field', `:payload', `:workspace' and the four callbacks
-`:on-registered', `:on-failure', `:on-success', `:on-challenge'.  Tests
-drive a callback by pulling it out of that plist, which is now the ONLY
-way to reach one — the transport folded command tracking into the send,
-so there is no separate tracker to shadow.
-
-The stub reproduces the real function's ORDER: it runs `:on-registered'
-with REQUEST-ID before returning, exactly as the real send runs it after
-registering the pending entry and before writing the frame.  A test whose
-subject sets a lexical request-id from that hook therefore sees the same
-state a live send would leave it in."
-  (lambda (field payload &optional workspace _process &rest keys)
-    (let ((call (list :request-id request-id
-                      :field field
-                      :payload payload
-                      :workspace workspace
-                      :on-registered (plist-get keys :on-registered)
-                      :on-failure (plist-get keys :on-failure)
-                      :on-success (plist-get keys :on-success)
-                      :on-challenge (plist-get keys :on-challenge))))
-      (when record (funcall record call))
-      (when-let ((registered (plist-get keys :on-registered)))
-        (funcall registered request-id))
-      request-id)))
-
 (defun agent-repl-test--inert-timer (&rest _)
   "Return a fresh timer object that is not scheduled on any timer list.
 Used as the `:override' for `run-with-timer' / `run-with-idle-timer'
@@ -448,10 +419,10 @@ work in the batch process.  Ignores every argument by design."
 ;; merge-rebase worktree, and CI alike.
 ;;
 ;; The redirect is of the DIRECTORY, not of `agent-repl--frontend-build-id'
-;; itself: the production function still runs, still reads a real stamp off
-;; disk, and test-frontend-client.el's own tests of a missing and of a
-;; well-formed stamp keep exercising it by rebinding this same variable.
-;; Overriding the function would have taken the reader out of the suite.
+;; itself: the production function still runs and still reads a real stamp
+;; off disk, so its owner's suite keeps exercising the missing-stamp and
+;; well-formed-stamp paths by rebinding this same variable.  Overriding the
+;; function would have taken the reader out of the suite.
 ;;
 ;; Batch-gated like the state-dir redirect above: in a live session this
 ;; would address the webview at a temp directory the daemon serves nothing
@@ -695,9 +666,8 @@ webview can actually be created.  The buffer carries the \"WebKit: \"
 header-line that `xwidget-webkit-mode' installs, so any mount path's
 clearing of it is observable.
 
-Shared by every webview consumer's tests (the workspace frontend and
-the explain-config popup mount the same wrapper), so the two cannot
-drift apart in what they pretend a webview is."
+Shared by every webview consumer's tests, so no two of them drift apart
+in what they pretend a webview is."
   (lambda (url)
     (push url (symbol-value log-sym))
     (let ((buf (generate-new-buffer "*fake-webview*")))
@@ -743,11 +713,6 @@ re-routes their frontend resolution instead."
          (agent-repl-workspace-snapshot-file
           (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
          (agent-repl--snapshot-archived-this-run nil)
-         ;; Change gate for the workspace-status JSON export
-         ;; (workspace-status-export.el).  It suppresses a write whose
-         ;; content matches the last one written, so a value left behind by
-         ;; one test would decide whether a LATER test's write happens.
-         (agent-repl--workspace-status-last-written-fingerprint nil)
          ;; Roster-durability state (commands.el).  Both are per-Emacs-boot
          ;; globals: `--snapshot-loaded-p' gates whether a save may write at
          ;; all, and `--snapshot-materialized-pending' is the debt list a
@@ -765,31 +730,6 @@ re-routes their frontend resolution instead."
          (agent-repl--update-in-flight nil)
          (agent-repl--update-chain-timer nil)
          (agent-repl--update-spread-sync t)
-         ;; Sidebar roster state (sidebar.el): the 1Hz tick rides
-         ;; `agent-repl--update-all-workspace-states', so any test
-         ;; driving that entrypoint mutates these globals — a stale
-         ;; signature or repo-key memo leaking across tests makes a
-         ;; later test's push behavior depend on suite order.
-         (agent-repl--sidebar-nav-dir nil)
-         (agent-repl--sidebar-flat-dirs nil)
-         (agent-repl--sidebar-last-signature nil)
-         ;; The roster revision counter is per-Emacs-boot, and a test suite
-         ;; is one boot: without rebinding it, a test asserting the revision
-         ;; a publish carries would depend on how many publishes ran before
-         ;; it, which is suite order.
-         (agent-repl--sidebar-roster-revision 0)
-         ;; The roster coalescing gate (sidebar.el): a test that leaves a
-         ;; publish in flight would otherwise make every later test's push
-         ;; coalesce into a gate nobody is going to settle.
-         (agent-repl--sidebar-publish-inflight nil)
-         (agent-repl--sidebar-publish-dirty nil)
-         ;; Active sidebar view (sidebar.el): a test that flips to the
-         ;; Task view would otherwise leak that choice into every later
-         ;; test's roster build.  Task hash state is rebound alongside so
-         ;; a task created mid-test can't bleed across the suite.
-         (agent-repl--sidebar-view :repository)
-         (agent-repl--tasks (make-hash-table :test 'equal))
-         (agent-repl--tasks-loaded t)
          ;; Pending-open placeholders (open-progress.el).  A test that drives
          ;; the `SPC o c' entry point leaves an entry here, and the entry is
          ;; precisely the guard that makes a LATER open dispatch nothing — so
