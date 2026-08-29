@@ -132,8 +132,9 @@ read as free.
 (the store socket is ALWAYS passed explicitly: `-store-socket` flag beats
 env `AGENT_REPL_STORE_SOCKET` beats the default
 `~/.cache/agent-repl/sock/store.sock`),
-env `CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
-`AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA`, and in tests
+env = the daemon's OWN environment passed through (never an allowlist) with
+`CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
+`AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA` set/overridden, and in tests
 `AGENT_REPL_FORBID_VENDOR_CALLS=1`; cwd is the workspace dir; fd 3 is the
 already-open shim log sink (never a pipe to the daemon's stderr). Process
 group discipline; stderr captured in a ring buffer as failure evidence.
