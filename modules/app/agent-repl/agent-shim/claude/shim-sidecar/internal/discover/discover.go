@@ -12,10 +12,22 @@
 //     spawn depth, model and worktree)
 //  3. workflow journals and their per-agent transcripts, under
 //     .../subagents/workflows/wf_<id>/
-//  4. task spools              <spool root>/claude-<uid>/<project>/<session>/tasks/<task>.output
+//  4. task spools              <spool root>/[claude-<uid>/]<cwd-slug>/<vendor session>/tasks/<task>.output
 //
 // MULTI-ROOT IS NOT OPTIONAL: the second account's config dir holds real
 // transcripts, and a single-root scan simply cannot see them.
+//
+// NOTHING IS EVER DECODED FROM THE <cwd-slug> DIRECTORY NAME. The vendor builds
+// it by replacing every byte of the absolute cwd outside [A-Za-z0-9] with `-`
+// (underscores included, case preserved), so `/private/var/folders/_m/x`
+// becomes `-private-var-folders--m-x`. THAT MAPPING IS LOSSY AND NOT
+// INVERTIBLE: two different directories can produce one slug, so a slug read
+// back as a workspace path would be a guess. This package therefore treats the
+// slug as an opaque directory name and reads its POSITION only — never its
+// content. Every identity comes from what is INSIDE it: the session uuid file
+// names, `subagents/`, `wf_*`, `agent-<id>`, and the `tasks/` basenames. Do not
+// add a slug-to-path decoder, and never compare slugs across roots as though
+// they were paths.
 //
 // A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY. The spool layout embeds a
 // session-shaped segment, and this package used to read it as the owning
@@ -145,7 +157,16 @@ func (d *Discoverer) Scan() []Target {
 			add(d.Classify(match))
 		}
 	}
-	for _, match := range globAll(filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output")) {
+	// BOTH SPOOL-ROOT SPELLINGS ARE ACCEPTED. The vendor writes spools under
+	// <uid dir>/<cwd-slug>/<vendor session>/tasks/, and a caller may point
+	// --spool-root either at the parent of the uid dir (production: /tmp, which
+	// resolves claude-<uid> itself) or directly at the uid dir (a mock harness,
+	// whose own root default IS that directory). Neither spelling may make a
+	// spool invisible, so both are globbed.
+	for _, match := range globAll(
+		filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output"),
+		filepath.Join(d.spoolRoot, "*", "*", "tasks", "*.output"),
+	) {
 		add(d.Classify(match))
 	}
 	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
@@ -180,7 +201,10 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 			continue
 		}
 		segs := strings.Split(filepath.ToSlash(path[len(prefix):]), "/")
-		// segs[0] is the project dir.
+		// segs[0] is the <cwd-slug> directory. It is matched POSITIONALLY and
+		// never read: the vendor's slug is a lossy, non-invertible rendering of
+		// the cwd (see the package comment), so anything decoded from it is a
+		// guess. Every identity below comes from a segment INSIDE it.
 		switch {
 		case len(segs) == 2 && strings.HasSuffix(segs[1], ".jsonl"):
 			// projects/<project>/<session>.jsonl
@@ -269,16 +293,27 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	if !strings.HasPrefix(path, prefix) {
 		return Target{}, false
 	}
-	// claude-<uid>/<project>/<session>/tasks/<task>.output
-	//
-	// segs[2] is session-SHAPED and deliberately NOT read: it is the harness's
-	// runtime session id, which disagrees with the transcript's whenever a
-	// session was resumed.
 	segs := strings.Split(filepath.ToSlash(path[len(prefix):]), "/")
-	if len(segs) != 5 || !strings.HasPrefix(segs[0], "claude-") || segs[3] != "tasks" || !strings.HasSuffix(segs[4], ".output") {
+	// Two accepted shapes, because --spool-root may be pointed at either level:
+	//
+	//	claude-<uid>/<cwd-slug>/<vendor session>/tasks/<task>.output   (root = /tmp)
+	//	<cwd-slug>/<vendor session>/tasks/<task>.output                (root = the uid dir)
+	//
+	// NEITHER MIDDLE SEGMENT IS READ. <cwd-slug> is the vendor's lossy,
+	// non-invertible rendering of the cwd; <vendor session> is the harness's
+	// RUNTIME session id, which disagrees with the transcript's whenever a
+	// session was resumed. Only the task basename below carries an identity.
+	switch {
+	case len(segs) == 5 && strings.HasPrefix(segs[0], "claude-"):
+		segs = segs[1:]
+	case len(segs) == 4:
+	default:
 		return Target{}, false
 	}
-	taskID := strings.TrimSuffix(segs[4], ".output")
+	if segs[2] != "tasks" || !strings.HasSuffix(segs[3], ".output") {
+		return Target{}, false
+	}
+	taskID := strings.TrimSuffix(segs[3], ".output")
 	target := Target{Path: path, TaskID: taskID, SpoolDir: filepath.Dir(path)}
 	switch {
 	case strings.HasPrefix(taskID, "b"):
