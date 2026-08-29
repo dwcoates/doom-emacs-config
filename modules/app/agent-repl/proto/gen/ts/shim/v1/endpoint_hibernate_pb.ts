@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_hibernate.proto.
  */
 export const file_shim_v1_endpoint_hibernate: GenFile = /*@__PURE__*/
-  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X2hpYmVybmF0ZS5wcm90bxIHc2hpbS52MSISChBIaWJlcm5hdGVSZXF1ZXN0InUKEUhpYmVybmF0ZVJlc3BvbnNlEiwKB3N1Y2Nlc3MYASABKAsyGS5zaGltLnYxLkhpYmVybmF0ZVN1Y2Nlc3NIABIoCgVlcnJvchgCIAEoCzIXLnNoaW0udjEuSGliZXJuYXRlRXJyb3JIAEIICgZyZXN1bHQiEgoQSGliZXJuYXRlU3VjY2VzcyIQCg5IaWJlcm5hdGVFcnJvckIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw");
+  fileDesc("CiBzaGltL3YxL2VuZHBvaW50X2hpYmVybmF0ZS5wcm90bxIHc2hpbS52MSISChBIaWJlcm5hdGVSZXF1ZXN0InUKEUhpYmVybmF0ZVJlc3BvbnNlEiwKB3N1Y2Nlc3MYASABKAsyGS5zaGltLnYxLkhpYmVybmF0ZVN1Y2Nlc3NIABIoCgVlcnJvchgCIAEoCzIXLnNoaW0udjEuSGliZXJuYXRlRXJyb3JIAEIICgZyZXN1bHQiEgoQSGliZXJuYXRlU3VjY2VzcyLGAQoOSGliZXJuYXRlRXJyb3ISOAoOdHVybl9pbl9mbGlnaHQYASABKAsyHi5zaGltLnYxLkhpYmVybmF0ZVR1cm5JbkZsaWdodEgAEj8KEWNvbXBhY3Rpb25fZmFpbGVkGAIgASgLMiIuc2hpbS52MS5IaWJlcm5hdGVDb21wYWN0aW9uRmFpbGVkSAASMQoKbm9fc2Vzc2lvbhgDIAEoCzIbLnNoaW0udjEuSGliZXJuYXRlTm9TZXNzaW9uSABCBgoEa2luZCIXChVIaWJlcm5hdGVUdXJuSW5GbGlnaHQiKgoZSGliZXJuYXRlQ29tcGFjdGlvbkZhaWxlZBINCgVlcnJvchgBIAEoCSIUChJIaWJlcm5hdGVOb1Nlc3Npb25CIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM");
 
 /**
  * @generated from message shim.v1.HibernateRequest
@@ -79,12 +79,39 @@ export const HibernateSuccessSchema: GenMessage<HibernateSuccess> = /*@__PURE__*
   messageDesc(file_shim_v1_endpoint_hibernate, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (turn in flight,
- * compaction failed, …), spelled per the standing conventions.
+ * Not hibernated. THE ARM IS WHY.
  *
  * @generated from message shim.v1.HibernateError
  */
 export type HibernateError = Message<"shim.v1.HibernateError"> & {
+  /**
+   * @generated from oneof shim.v1.HibernateError.kind
+   */
+  kind: {
+    /**
+     * A turn is in flight; hibernation waits for freeness.
+     *
+     * @generated from field: shim.v1.HibernateTurnInFlight turn_in_flight = 1;
+     */
+    value: HibernateTurnInFlight;
+    case: "turnInFlight";
+  } | {
+    /**
+     * The compaction ran and failed; nothing was cut.
+     *
+     * @generated from field: shim.v1.HibernateCompactionFailed compaction_failed = 2;
+     */
+    value: HibernateCompactionFailed;
+    case: "compactionFailed";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.HibernateNoSession no_session = 3;
+     */
+    value: HibernateNoSession;
+    case: "noSession";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -93,4 +120,51 @@ export type HibernateError = Message<"shim.v1.HibernateError"> & {
  */
 export const HibernateErrorSchema: GenMessage<HibernateError> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_hibernate, 3);
+
+/**
+ * @generated from message shim.v1.HibernateTurnInFlight
+ */
+export type HibernateTurnInFlight = Message<"shim.v1.HibernateTurnInFlight"> & {
+};
+
+/**
+ * Describes the message shim.v1.HibernateTurnInFlight.
+ * Use `create(HibernateTurnInFlightSchema)` to create a new message.
+ */
+export const HibernateTurnInFlightSchema: GenMessage<HibernateTurnInFlight> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_hibernate, 4);
+
+/**
+ * The compaction failed; the context is as it was.
+ *
+ * @generated from message shim.v1.HibernateCompactionFailed
+ */
+export type HibernateCompactionFailed = Message<"shim.v1.HibernateCompactionFailed"> & {
+  /**
+   * What went wrong, verbatim.
+   *
+   * @generated from field: string error = 1;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message shim.v1.HibernateCompactionFailed.
+ * Use `create(HibernateCompactionFailedSchema)` to create a new message.
+ */
+export const HibernateCompactionFailedSchema: GenMessage<HibernateCompactionFailed> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_hibernate, 5);
+
+/**
+ * @generated from message shim.v1.HibernateNoSession
+ */
+export type HibernateNoSession = Message<"shim.v1.HibernateNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.HibernateNoSession.
+ * Use `create(HibernateNoSessionSchema)` to create a new message.
+ */
+export const HibernateNoSessionSchema: GenMessage<HibernateNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_hibernate, 6);
 
