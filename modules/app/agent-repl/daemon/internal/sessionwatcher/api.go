@@ -108,6 +108,13 @@ type FooterSink interface {
 	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission)
 	// OnApiError is mid-turn evidence the footer draws as a retry notice.
 	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed)
+	// OnContextCut is the AgentUpdate.context_cut page line. It is what ENDS
+	// `thinking · clearing` and `thinking · compacting`: SessionUpdate.compacting
+	// only STARTS the compaction, and the cut record is the only end signal
+	// there is. A failed compaction ends the status too — nothing was cut, so
+	// the session is idle again — and carries its account as the footer's
+	// evidence rather than passing silently.
+	OnContextCut(ws ids.WorkspaceID, cut *conversationv1.ContextCut)
 	// OnAgentTerminal retires an agent from the status tree.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure)
 	// OnDetachedWork adds or updates a live-work chip.
