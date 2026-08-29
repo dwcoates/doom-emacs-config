@@ -25,7 +25,7 @@ import { HostGlobal } from "./host.js";
 import { escapeHtml } from "./highlight.js";
 import { mergeFacts, mergeStatusLogValue } from "./merge-status.js";
 import type { MergeStatus, WebRenderState } from "./state-adapter.js";
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /**
  * A workspace's lifecycle, as the Emacs side classifies it.

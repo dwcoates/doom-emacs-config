@@ -73,7 +73,7 @@ describe("every rpc answers", () => {
     // Arrange: each unary rpc with a minimally addressed request.
     const workspace = workspaceRef();
     const calls: Array<[string, Promise<{ result: { case?: string } }>]> = [
-      ["submitPrompt", client.submitPrompt({ said: userSaid(), idempotencyKey: "k1", origin: WEBAPP_ORIGIN })],
+      ["submitPrompt", client.submitPrompt({ workspace, said: userSaid(), idempotencyKey: "k1", origin: WEBAPP_ORIGIN })],
       ["openFeed", client.openFeed({ workspace })],
       ["getFeedPage", client.getFeedPage({ workspace, page: { case: "first", value: {} } })],
       ["interrupt", client.interrupt({ workspace, target: { case: "turn", value: {} } })],
@@ -130,7 +130,12 @@ describe("scripted answers", () => {
       }),
     );
     // Act
-    const response = await client.submitPrompt({ said: userSaid(), idempotencyKey: "k", origin: WEBAPP_ORIGIN });
+    const response = await client.submitPrompt({
+      workspace: workspaceRef(),
+      said: userSaid(),
+      idempotencyKey: "k",
+      origin: WEBAPP_ORIGIN,
+    });
     // Assert
     expect(response.result.case).toBe("error");
   });
@@ -149,10 +154,51 @@ describe("scripted answers", () => {
   it("refuses a submission whose origin is unspecified", async () => {
     // Arrange / Act: `origin` omitted entirely, which proto3 sends as 0.
     const failed = await client
-      .submitPrompt({ said: userSaid(), idempotencyKey: "k" })
+      .submitPrompt({ workspace: workspaceRef(), said: userSaid(), idempotencyKey: "k" })
       .catch((e: unknown) => e);
     // Assert
     expect(ConnectError.from(failed).code).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a submission carrying no workspace", async () => {
+    // Arrange / Act: `workspace` omitted, which proto3 sends as absent.
+    const failed = await client
+      .submitPrompt({ said: userSaid(), idempotencyKey: "k", origin: WEBAPP_ORIGIN })
+      .catch((e: unknown) => e);
+    // Assert
+    expect(ConnectError.from(failed).code).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses a submission addressing another workspace's feed", async () => {
+    // Arrange: the feed becomes known as ws-other's.
+    fake.setPage("ws-other", "bubble-x", feedPageSuccess([]));
+    // Act
+    const failed = await client
+      .submitPrompt({
+        workspace: workspaceRef(WORKSPACE_ID),
+        said: userSaid(),
+        idempotencyKey: "k",
+        origin: WEBAPP_ORIGIN,
+        feed: feedId("bubble-x"),
+      })
+      .catch((e: unknown) => e);
+    // Assert
+    expect(ConnectError.from(failed).code).toBe(Code.InvalidArgument);
+  });
+
+  it("accepts a submission addressing its own workspace's feed", async () => {
+    // Arrange
+    fake.setPage(WORKSPACE_ID, "bubble-mine", feedPageSuccess([]));
+    // Act
+    const response = await client.submitPrompt({
+      workspace: workspaceRef(WORKSPACE_ID),
+      said: userSaid(),
+      idempotencyKey: "k",
+      origin: WEBAPP_ORIGIN,
+      feed: feedId("bubble-mine"),
+    });
+    // Assert
+    expect(response.result.case).toBe("success");
   });
 });
 

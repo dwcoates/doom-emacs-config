@@ -259,6 +259,8 @@ export function createFakeDaemon(): FakeDaemon {
   const tokenFeeds = new Map<string, { workspace: string; feed: FeedKey }>();
   /** The pty buffer WatchLoginTerminal replays to a newly attached viewer. */
   const loginScrollback = new Map<string, Uint8Array[]>();
+  /** Which workspace each known feed belongs to, for the submission check. */
+  const feedOwners = new Map<FeedKey, string>();
   let roster: WorkspaceRoster = emptyRoster();
 
   const scripted = new Map<RpcName, unknown>();
@@ -380,15 +382,38 @@ export function createFakeDaemon(): FakeDaemon {
       // ---- the feed -------------------------------------------------------
       submitPrompt(request) {
         record("submitPrompt", request);
-        // `origin` is REQUIRED by the contract, and an unset enum is the one
-        // shape a proto3 client can send without noticing. The real daemon
-        // rejects it, so the fake does too: a suite that forgets the field
-        // fails here rather than passing against a lenient stub.
+        // `origin` and `workspace` are both REQUIRED by the contract, and an
+        // unset enum and an absent message are the two shapes a proto3 client
+        // can send without noticing. The real daemon rejects both, so the fake
+        // does too: a suite that forgets one fails here rather than passing
+        // against a lenient stub.
         if (request.origin === PromptOrigin.UNSPECIFIED) {
           throw new ConnectError(
             "SubmitPromptRequest.origin is required and was PROMPT_ORIGIN_UNSPECIFIED",
             Code.InvalidArgument,
           );
+        }
+        const submitter = request.workspace?.id;
+        if (submitter === undefined || submitter === "") {
+          throw new ConnectError(
+            "SubmitPromptRequest.workspace is required and was absent",
+            Code.InvalidArgument,
+          );
+        }
+        // A `feed` addresses a bubble's composer, and a bubble belongs to
+        // exactly one workspace. Submitting into another workspace's feed is
+        // the identity-space confusion the four-id rule exists to prevent, so
+        // it is refused rather than quietly accepted.
+        const addressed = request.feed?.value;
+        if (addressed !== undefined) {
+          const owner = feedOwners.get(addressed);
+          if (owner !== undefined && owner !== submitter) {
+            throw new ConnectError(
+              `SubmitPromptRequest.feed ${JSON.stringify(addressed)} belongs to workspace ` +
+                `${JSON.stringify(owner)}, not ${JSON.stringify(submitter)}`,
+              Code.InvalidArgument,
+            );
+          }
         }
         return answerFor("submitPrompt", SubmitPromptResponseSchema, {
           result: {
@@ -408,6 +433,7 @@ export function createFakeDaemon(): FakeDaemon {
         minted.push(token);
         tokens.set(key(workspace, feed), minted);
         tokenFeeds.set(token, { workspace, feed });
+        feedOwners.set(feed, workspace);
         const message =
           scripted.get("openFeed") ??
           create(OpenFeedResponseSchema, {
@@ -816,6 +842,7 @@ export function createFakeDaemon(): FakeDaemon {
 
     setPage(workspace, feed, page) {
       pages.set(key(workspace, feed), page);
+      feedOwners.set(feed, workspace);
     },
     setNextPage(workspace, feed, page) {
       nextPages.set(key(workspace, feed), page);
