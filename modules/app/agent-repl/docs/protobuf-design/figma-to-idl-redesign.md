@@ -8123,3 +8123,11 @@ also the future SetWorkspacePriority vocabulary), and
 creation without it is refused). `CreateWorkspaceOneShot` = required
 prompt + required `finish` oneof (`self_merge` | `open_pr {self_certified,
 add_to_merge_queue}`); the daemon owns the one-shot's whole sequence.
+
+## 2026-08-29 — SetWorkspacePriority + SetPermissionMode (landed cb76e1873)
+
+Two verbs: `SetWorkspacePriority {workspace, optional priority}` (SIDEBAR;
+UNSET clears; roster push carries the state) and `SetPermissionMode
+{workspace, mode string}` (TOPBAR, SetModel's sibling; mode spelled as the
+session facts spell it, validated against the switchable set; new mode
+arrives on the pushed surfaces). Both empty-success, empty derived-error.
