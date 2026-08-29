@@ -3878,3 +3878,1027 @@ body.ungated #mode-select {
   text-decoration: underline wavy var(--err);
   text-underline-offset: 0.2em;
 }
+
+/* ---- paint classes (src/feed/cards/paint.ts) --------------------------- */
+
+/* ONE RULE PER NAME in proto/vocab/paint-classes.json, keyed by the name and
+   nothing else — the file pins WHICH names exist, never how they look, so the
+   values below are this renderer's own and reuse the variables the stylesheet
+   already carries for the same ideas (`--hl-*`, which is what a highlighted
+   Read has always been drawn in here). A highlighted read therefore looks
+   exactly as it did when highlight.js painted it client-side; the only change
+   is who decided which run is a keyword.
+
+   A SPAN CARRIES EXACTLY ONE CLASS (the wire has no class algebra), so an ANSI
+   run that is bold AND red arrives as adjacent spans, one per class. That is
+   why the attribute classes below set only their own property and never a
+   color: they must compose by adjacency, not by cascade. */
+
+/* The syntax family: a code block's spans. */
+.paint-keyword { color: var(--hl-keyword); }
+.paint-string { color: var(--hl-string); }
+.paint-comment { color: var(--hl-comment); font-style: italic; }
+.paint-number { color: var(--hl-number); }
+.paint-type { color: var(--hl-attr); }
+.paint-function { color: var(--hl-title); }
+.paint-operator { color: var(--hl-keyword); }
+.paint-punctuation { color: var(--muted); }
+.paint-variable { color: var(--hl-attr); }
+.paint-constant { color: var(--hl-number); }
+.paint-attribute { color: var(--hl-attr); }
+.paint-tag { color: var(--hl-title); }
+.paint-heading { color: var(--hl-title); font-weight: 600; }
+.paint-link { color: var(--accent); text-decoration: underline; }
+.paint-emphasis { font-style: italic; }
+.paint-strong { font-weight: 700; }
+/* `added`/`removed` let a highlighted block carry diff coloring without a
+   second vocabulary; they take the same two hues the diff output does. */
+.paint-added { color: var(--ok); }
+.paint-removed { color: var(--err); }
+.paint-meta { color: var(--hl-meta); }
+
+/* The ANSI family: captured process output the daemon's parser already
+   decoded. The six attribute classes. */
+.paint-ansi-bold { font-weight: 700; }
+.paint-ansi-dim { opacity: 0.65; }
+.paint-ansi-italic { font-style: italic; }
+.paint-ansi-underline { text-decoration: underline; }
+.paint-ansi-strike { text-decoration: line-through; }
+/* Inverse swaps the pair the terminal was drawing in, which here is the card
+   ground and its text color. */
+.paint-ansi-inverse { background: var(--fg); color: var(--card); }
+
+/* The eight base colors and their bright variants, foreground. The hues are
+   the conventional terminal palette, lifted enough to stay legible on both the
+   light and the dark card ground. */
+.paint-ansi-fg-black { color: #4b5563; }
+.paint-ansi-fg-red { color: var(--err); }
+.paint-ansi-fg-green { color: var(--ok); }
+.paint-ansi-fg-yellow { color: #b45309; }
+.paint-ansi-fg-blue { color: var(--accent); }
+.paint-ansi-fg-magenta { color: #a855f7; }
+.paint-ansi-fg-cyan { color: #0891b2; }
+.paint-ansi-fg-white { color: var(--muted); }
+.paint-ansi-fg-bright-black { color: var(--muted); }
+.paint-ansi-fg-bright-red { color: #f87171; }
+.paint-ansi-fg-bright-green { color: #4ade80; }
+.paint-ansi-fg-bright-yellow { color: #fbbf24; }
+.paint-ansi-fg-bright-blue { color: #60a5fa; }
+.paint-ansi-fg-bright-magenta { color: #d8b4fe; }
+.paint-ansi-fg-bright-cyan { color: #22d3ee; }
+.paint-ansi-fg-bright-white { color: var(--fg); }
+
+/* Backgrounds. A background span keeps the inherited text color, so a
+   foreground span adjacent to it is unaffected. */
+.paint-ansi-bg-black { background: #1f2937; }
+.paint-ansi-bg-red { background: color-mix(in srgb, var(--err) 25%, transparent); }
+.paint-ansi-bg-green { background: color-mix(in srgb, var(--ok) 25%, transparent); }
+.paint-ansi-bg-yellow { background: color-mix(in srgb, #fbbf24 30%, transparent); }
+.paint-ansi-bg-blue { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.paint-ansi-bg-magenta { background: color-mix(in srgb, #a855f7 25%, transparent); }
+.paint-ansi-bg-cyan { background: color-mix(in srgb, #0891b2 25%, transparent); }
+.paint-ansi-bg-white { background: color-mix(in srgb, var(--fg) 12%, transparent); }
+.paint-ansi-bg-bright-black { background: color-mix(in srgb, var(--fg) 20%, transparent); }
+.paint-ansi-bg-bright-red { background: color-mix(in srgb, #f87171 30%, transparent); }
+.paint-ansi-bg-bright-green { background: color-mix(in srgb, #4ade80 30%, transparent); }
+.paint-ansi-bg-bright-yellow { background: color-mix(in srgb, #fbbf24 40%, transparent); }
+.paint-ansi-bg-bright-blue { background: color-mix(in srgb, #60a5fa 30%, transparent); }
+.paint-ansi-bg-bright-magenta { background: color-mix(in srgb, #d8b4fe 30%, transparent); }
+.paint-ansi-bg-bright-cyan { background: color-mix(in srgb, #22d3ee 30%, transparent); }
+.paint-ansi-bg-bright-white { background: color-mix(in srgb, var(--fg) 18%, transparent); }
+
+/* ---- feed cards: tool call (src/feed/cards/tool-call.ts) --------------- */
+
+/* THE CARD ITSELF IS UNCHANGED: the shell, the head, the badges, the input
+   line and the output boxes all reuse the classes an ordinary bash call has
+   always rendered in. What follows is only the elements the new schema added,
+   drawn in the register the card already speaks in — nothing here restyles an
+   existing class. */
+
+/* "quiet for 12s": the client's own clock over the daemon's last observed
+   beat. Muted and italic like every other aside on a card, NOT the run badge's
+   orange — it qualifies the badge rather than repeating it. */
+.tool-quiet {
+  color: var(--muted);
+  font-style: italic;
+}
+/* "ran 4.2 s", composed daemon-side, sitting beside the verdict badge it
+   qualifies. It is a settled figure, so it gets no motion and no hue. */
+.tool-runtime {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+/* The composed truncation line, below its output box and outside it, so the
+   count stays put while the box scrolls. No divider of its own: the output
+   above already drew the card's one dashed rule. */
+.tool-omitted {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-top: 0.2rem;
+}
+/* A link list draws as rows, delimited by the one shared list rule. */
+.tool-link-row {
+  padding: 0.15rem 0;
+}
+/* The IDE's findings against an edit, under the output that caused them. The
+   overflow toggle reveals the rest in place — the row already carries every
+   line, so there is nothing to fetch. */
+.tool-diagnostics {
+  margin-top: 0.35rem;
+}
+.tool-diagnostic {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  padding: 0.1rem 0;
+}
+.tool-diagnostics-more {
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 0.05rem 0.5rem;
+  color: var(--accent);
+}
+/* A diff's unchanged context line takes the card's own register: the added and
+   removed hues mean something, and a context line means the absence of that. */
+.diff .ctx {
+  color: inherit;
+}
+
+/* ---- feed cards: hook (src/feed/cards/hook.ts) ------------------------- */
+
+/* A hook card is a tool card; only the two things the arm decides differ. */
+.tool-card.tool-hook-blocked {
+  border-color: var(--err);
+}
+/* The refusal's reason wears the error hue, because the refusal IS the card's
+   statement — the loud treatment the blocked arm calls for. */
+.tool-hook-blocked .hook-reason {
+  color: var(--err);
+}
+/* "▸ gated:" — the reference to the call this firing gated. It reveals a row
+   that already exists rather than drawing the call a second time. */
+.hook-gated {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.hook-gated-caret {
+  margin-right: 0.15rem;
+}
+/* A row the feed could not reach (a collapsed shell bubble, say) says so at
+   the link the user just pressed, in the muted register of a fact rather than
+   the error hue of a failure: nothing broke, the target is simply not there. */
+.hook-gated[data-unreachable="true"] {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+/* The exit chip's tone is the code's; a zero keeps the plain badge. */
+.badge.hook-exit {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- feed cards: response (src/feed/cards/response.ts) ----------------- */
+
+/* The bubble, its body, its 25-line cap and the green final-answer border are
+   all the existing `.bubble.assistant.md` treatment, unchanged. These are the
+   corner stamp and the two state marks. */
+
+/* The cost corner: the daemon's composed figure, drawn verbatim in the token
+   amber the footer's token cell wears, so the same idea reads the same color
+   wherever it appears. */
+.usage-stamp {
+  color: var(--info-tokens);
+  font-variant-numeric: tabular-nums;
+}
+/* The arriving indicator trails the prose that has landed so far. The dots are
+   the same animated ellipsis every other live face uses. */
+.response-arriving {
+  margin-left: 0.15rem;
+}
+/* A bubble the turn's death cut short: the border says it and the marker names
+   it. WHY it died is the turn's terminal row, never this bubble's, so the
+   marker carries no reason text. */
+.bubble.assistant.response-cut-short {
+  border-color: var(--err);
+}
+.response-cut-short-marker {
+  display: block;
+  color: var(--err);
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-top: 0.2rem;
+}
+/* ---- feed core (src/feed) ----------------------------------------------- */
+
+/* The row's own body sits above its nesting slot; the chrome itself adds no
+   box, so a card looks exactly as it did before the port. */
+.feed-nest {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-left: 1rem;
+}
+
+/* The rows a body renderer laid out, in the same column rhythm #feed uses. */
+.feed-body,
+.feed-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* THE LOAD-MORE CONTROL: the walk into the past, at the top of the feed it
+   walks. Drawn in the same pill vocabulary as a fold's ticker (.async-ticker)
+   so it reads as feed chrome rather than as a card. */
+.feed-load-more {
+  align-self: center;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.8rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.feed-load-more:disabled { cursor: progress; opacity: 0.6; }
+
+/* The breadcrumb header a nested page draws — ONLY when the trail is non-empty
+   (R6): expansion is inline, so this is context, never navigation. */
+.feed-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.feed-breadcrumb {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+/* A row this build could not draw. Compact and loud enough to be noticed
+   without displacing the rest of the feed, which goes on working. */
+.row-malformed {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  color: var(--err);
+  border: 1px dashed var(--err);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+}
+
+/* The page the daemon could not serve, drawn where the rows would be. */
+.feed-page-error {
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+}
+.feed-page-error-evidence {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+/* Where a jump lands: a brief inset bar, the same affordance the feed already
+   used to say "the cursor is here", so the two read as one vocabulary. */
+.row-revealed { box-shadow: inset 3px 0 0 var(--accent); border-radius: 4px; }
+
+/* THE BUBBLE'S FOLD TOGGLE — a caret, not an icon font: ▸ collapsed, ▾ open. */
+.bubble-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-right: 0.25rem;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* The subagent head line: label, description, tokens, clock, quietness, stop.
+   Laid out on one row in the fold's own pill, which the existing .async-ticker
+   rule already dresses. */
+.subagent-head {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.subagent-description,
+.subagent-tokens,
+.subagent-clock,
+.subagent-quiet,
+.subagent-outcome {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.subagent-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 24rem;
+}
+/* LOST IS NOT FAILURE: we stopped being able to see it, which the muted dot
+   says and the red error dot would not. */
+.agent-dot.agent-lost { color: var(--muted); }
+.subagent-stop-button {
+  font-size: 0.7rem;
+  padding: 0 0.5rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+.subagent-stop-outcome { font-size: 0.7rem; color: var(--muted); }
+
+/* THE ONE SEPARATION SHAPE. Same 4px bar and centered label the /clear and
+   /compact dividers already drew, confined to the same central column; the arm
+   picks only the accent. */
+.sep-rule {
+  height: 4px;
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+  border-radius: 2px;
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+}
+.sep-accent-cleared { background: var(--clear-divider); }
+.sep-accent-compacted { background: var(--compact-rule); }
+.sep-accent-worktree { background: var(--init); }
+.sep-label {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.sep-tokens { color: var(--muted); }
+.sep-compacted,
+.sep-worktree {
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 0.75rem;
+}
+.sep-fold-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+/* The cold read is a WARNING on a compaction that happened, not a failure of
+   it, so it takes the warning register rather than the error one. */
+.sep-cold-read { color: var(--thinking); }
+/* A removed worktree that took work with it says so LOUDLY. */
+.sep-discarded { color: var(--err); }
+
+/* The turn's terminal row. A conclusion says nothing; the other two do. */
+.turn-ended {
+  width: var(--agent-bubble-cap);
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 0.75rem;
+}
+.turn-ended-errored { color: var(--err); }
+.turn-ended-vendor,
+.turn-ended-retry { color: var(--muted); }
+.turn-ended-interrupted { color: var(--muted); }
+
+/* The prompt's author line, above its body inside the existing bubble. */
+.prompt-author {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+/* An AGENT-addressed prompt wears the orange border the schema names for it. */
+.bubble.user.prompt-agent { border: 1px solid var(--thinking); }
+.prompt-block-unsupported { color: var(--muted); font-style: italic; }
+
+/* ---- hold tray (src/tray) ---------------------------------------------- */
+
+/* The tray's own heading, composed daemon-side. Quiet: it labels a region the
+   reader is scrolling past, not a section they came for. */
+.hold-tray-heading {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  padding: 0.4rem 0 0.3rem;
+}
+/* The items list. Delimited by the one shared `.list-rows` rule, so a held
+   prompt is separated from the next exactly as a footer panel's rows are. */
+.hold-tray-items > * + * { padding-top: 0.5rem; }
+.hold-tray-items > * { padding-bottom: 0.5rem; }
+/* AN EMPTY TRAY IS A VALUE, drawn rather than collapsed away: the reader can
+   see that nothing is held instead of inferring it from a gap. */
+.hold-tray-empty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The ticking queued-at age, trailing the badge. Tabular so the number does
+   not shuffle the badge sideways once a second. */
+.queued-age {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The classifier is still deciding: a slow breath, which is how every other
+   transient state in this app says "not settled". */
+.queued-badge.classifying {
+  color: var(--muted);
+  border-color: var(--muted);
+  animation: hold-breathe 2.6s ease-in-out infinite;
+}
+@keyframes hold-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+/* NOTHING classified this entry, and that is a warning rather than a state:
+   the orange the app spends on "something did not work as intended". */
+.queued-badge.unclassified {
+  color: var(--thinking);
+  border-color: var(--thinking);
+  font-weight: 700;
+}
+.queued-reason.queued-unclassified { font-style: normal; color: var(--muted); }
+/* The hold the user has seen and confirmed. A quiet mark, never a second
+   button: accepting changes nothing about delivery. */
+.queued-accepted {
+  margin-left: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.queued-accepted::before {
+  content: "✓";
+  margin-right: 0.2rem;
+}
+/* The prompt's own words, at full color inside the subdued chrome. */
+.queued-text > *:first-child { margin-top: 0; }
+.queued-text > *:last-child { margin-bottom: 0; }
+/* An attached image, capped so a paste cannot take over the tray. */
+.queued-image { max-width: 100%; max-height: 8rem; border-radius: 6px; }
+/* A host-local image the webview cannot fetch: named, not drawn broken. */
+.queued-image-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+/* The row's controls, and the refusal that lands under them. */
+.queued-actions button {
+  padding: 0.15rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+}
+.queued-actions button:disabled { cursor: not-allowed; opacity: 0.5; }
+.queued-refusal {
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+}
+
+/* The parked question, sharing the merge-dequeue card's alarm frame. It is
+   the same statement — a button here destroys work — so it is the same look,
+   reached through the existing `#merge-dequeue` rules by class. */
+.held-offer {
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--err) 8%, transparent);
+}
+.offer-refusal { margin-top: 0.35rem; font-size: 0.75rem; }
+
+/* ---- composer (src/composer) ------------------------------------------- */
+
+/* The dev-mode and per-bubble composer. It reuses the shell composer's shape
+   (a flex row of textarea and send button) so a bubble's box reads as the same
+   control as the one at the page's foot. */
+.composer-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.composer-input {
+  flex: 1;
+  resize: none;
+  cursor: text;
+  background: var(--composer-bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-family: inherit;
+}
+.composer-send { cursor: pointer; }
+/* THE SEND CONTROL CARRIES THE GATE, never the textarea: a closed composer
+   keeps the draft editable, exactly as the legacy merge gate left it. */
+.composer-send:disabled { cursor: not-allowed; opacity: 0.5; }
+/* Why the composer is closed, in the footer's own words. Muted rather than
+   alarming: merging and closing are deliberate, routine states. */
+.composer-notice {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 0 0.25rem 0.2rem;
+}
+.composer-notice:empty { display: none; }
+/* The submitter's own refusal, inline, with the text still in the box above
+   it. Orange rather than red: nothing failed, the submission was declined. */
+.composer-refusal {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--thinking);
+  padding: 0.15rem 0.25rem 0;
+}
+
+/* ---- command panels (src/panels) --------------------------------------- */
+
+/* A panel is a quiet framed block in the feed's column: it answers a command
+   the daemon handled itself, so it must not read as the agent speaking. */
+.command-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+.panel-rows > * { padding: 0.22rem 0; }
+.panel-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.panel-row-label { flex: 0 0 auto; }
+/* The figure hugs the right rail so a column of them lines up and can be read
+   down rather than across. */
+.panel-row-value {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.panel-row-detail {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.panel-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* The checklist glyphs: hollow for not-started, filled for done, and the
+   running one breathing. Never emoji — a box glyph keeps the text's weight. */
+.todo-glyph { flex: 0 0 auto; margin-right: 0.4rem; }
+[data-todo-status="pending"] .todo-glyph { color: var(--muted); }
+[data-todo-status="running"] .todo-glyph {
+  color: var(--thinking);
+  animation: hold-breathe 2.6s ease-in-out infinite;
+}
+[data-todo-status="completed"] .todo-glyph { color: var(--ok); }
+[data-todo-status="completed"] .todo-subject { color: var(--muted); }
+
+/* The mcp badges. ONE table, keyed by the arm, so a new arm draws unstyled
+   rather than borrowing another arm's meaning. */
+.mcp-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+[data-mcp-status="connected"] .mcp-badge { color: var(--ok); border-color: var(--ok); }
+[data-mcp-status="failed"] .mcp-badge { color: var(--err); border-color: var(--err); }
+[data-mcp-status="needsAuth"] .mcp-badge {
+  color: var(--thinking);
+  border-color: var(--thinking);
+}
+[data-mcp-status="disabled"] .mcp-badge { opacity: 0.55; }
+.mcp-detail { color: var(--err); }
+
+.help-command { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* The /context panel's own presentation. The composed header leads; the
+   category band sits under it as the at-a-glance summary; the detail sections
+   follow, each with a small heading, and each drawn only when it has rows. */
+.context-header {
+  font-weight: 700;
+  padding-bottom: 0.35rem;
+}
+.context-categories > * { padding: 0.18rem 0; }
+.context-section-heading {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-transform: lowercase;
+}
+.context-rollup { margin-top: 0.5rem; color: var(--muted); }
+.context-auto-compact {
+  margin-top: 0.6rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+/* The tool-call section: the longest and the least often wanted, so it ships
+   FOLDED with its own toggle and a caret that announces the state. */
+.context-fold { margin-top: 0.5rem; }
+.context-fold-toggle {
+  font: inherit;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.context-fold-caret { margin-right: 0.3rem; }
+
+/* ---- sidebar (src/sidebar) --------------------------------------------- */
+
+/* The rail's own look is UNCHANGED: `#ws-sidebar`, `.sb-head`, `.sb-views`,
+   `.repo-head`, `.task-head`, `.row`, `.st*`, `.kids`, `.detail` and the
+   Recently Merged band above are reused as they stand. What follows is only
+   what the new feature set adds — the two panes, the attention marker's
+   cadence, the priority badge, the verb menu and the two forms — plus the
+   handful of rules that key the status mark off the shared color vocabulary
+   instead of a per-state hue. */
+
+/* The two resolved groupings. One is shown, the other is `hidden`; the
+   selection costs no round trip and derives nothing. */
+#ws-sidebar .sb-pane[hidden] { display: none; }
+
+/* THE STATUS MARK. The dot's SIZE and shape are the rail's (above); its COLOR
+   comes from `.tone-<color>` through src/vocab.ts, so a workspace cannot read
+   one color here and another in the footer or the Emacs tab bar. `currentColor`
+   is what makes one fill rule serve all five tones. */
+#ws-sidebar .st[data-glyph="dot"] { background: currentColor; }
+/* The glyph statuses are not discs: a box that centers a single character, so
+   the recycle mark turns on its own axis rather than orbiting. */
+#ws-sidebar .st-glyph {
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  background: none;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+/* A merge spends no color of its own (`none` in the vocabulary), so the glyph
+   takes the rail's accent — except the two that wait on a human, which are the
+   one merge state worth an alarm. */
+#ws-sidebar .st[data-glyph="queue"],
+#ws-sidebar .st[data-glyph="recycle"],
+#ws-sidebar .st[data-glyph="check"] { color: var(--accent); }
+#ws-sidebar .st[data-glyph="conflict"],
+#ws-sidebar .st[data-glyph="failed"] { color: var(--err); }
+#ws-sidebar .st[data-glyph="inactive"] { color: var(--muted); }
+#ws-sidebar .st[data-glyph="none"] { visibility: hidden; }
+/* ONE breath and ONE spin for the whole rail, so the animation always makes
+   the same claim: breathing = work in flight, spinning = the merge queue is on
+   this run. */
+#ws-sidebar .st.breathes { animation: ws-pulse 1.3s ease-in-out infinite; }
+#ws-sidebar .st.spins { animation: ws-spin 1.4s linear infinite; }
+
+/* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
+   specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are
+   driven from src/sidebar/attention.ts (a stylesheet cannot hold a cadence that
+   must survive a redraw), so all this does is honor the state it stamps. */
+#ws-sidebar .sb-attn {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--async);
+}
+#ws-sidebar .ws[data-blink="off"] .sb-attn { opacity: 0; }
+#ws-sidebar .ws[data-blink="on"] .sb-attn,
+#ws-sidebar .ws[data-blink="steady"] .sb-attn { opacity: 1; }
+
+/* The priority badge: the resolver's own label, drawn verbatim, in the quiet
+   pill treatment the rail already uses for its counts. */
+#ws-sidebar .sb-prio {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.4em;
+}
+
+/* The row's action control, quiet until the row is hovered. */
+#ws-sidebar .sb-more {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.2rem;
+  cursor: pointer;
+  opacity: 0;
+}
+#ws-sidebar .row:hover .sb-more,
+#ws-sidebar .sb-more:focus-visible { opacity: 1; }
+#ws-sidebar .sb-more:hover { color: var(--fg); }
+
+/* THE VERB MENU opens DOWNWARD, inside the row's own box, so it can never
+   clip off the top of the rail; it caps its height and scrolls if the rail is
+   short. Delimited by the shared `.list-rows` rule, like every other list. */
+#ws-sidebar .sb-menu,
+#ws-sidebar .sb-submenu {
+  margin: 0.15rem 0.7rem 0.3rem 2rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 0.78rem;
+}
+#ws-sidebar .sb-submenu { margin: 0.15rem 0 0.15rem 0.8rem; }
+#ws-sidebar .sb-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-menu-item:hover { background: var(--code-bg); }
+#ws-sidebar .sb-menu-item:disabled { color: var(--muted); cursor: default; }
+#ws-sidebar .sb-menu-destructive .sb-menu-item[data-verb="nuke"] { color: var(--err); }
+#ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
+#ws-sidebar .sb-confirm-note { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.3rem; }
+#ws-sidebar .sb-confirm-name { width: 100%; margin-bottom: 0.3rem; }
+#ws-sidebar .sb-confirm-go {
+  border: 1px solid var(--err);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-confirm-go:disabled { border-color: var(--border); color: var(--muted); cursor: default; }
+
+/* A refusal is said AT THE CONTROL that made the call, in the rail's error
+   hue, and never anywhere else. */
+#ws-sidebar .sb-refusal {
+  color: var(--err);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.6rem 0.25rem;
+}
+/* A control with a call in flight takes no further clicks. */
+#ws-sidebar .is-busy { pointer-events: none; opacity: 0.6; }
+
+/* The two forms: the create-workspace form under a repo header, and the
+   one-field new-task form at the head of the task grouping. Both open
+   downward from the control that asked for them. */
+#ws-sidebar .sb-create,
+#ws-sidebar .sb-task-form {
+  margin: 0.2rem 0.7rem 0.4rem 1.2rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+#ws-sidebar .sb-create-field { display: flex; flex-direction: column; gap: 0.1rem; }
+#ws-sidebar .sb-create-field > span { color: var(--muted); font-size: 0.68rem; }
+#ws-sidebar .sb-create-field input,
+#ws-sidebar .sb-create-field select,
+#ws-sidebar .sb-create-field textarea,
+#ws-sidebar .sb-task-form input {
+  font: inherit;
+  font-size: 0.75rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.15rem 0.3rem;
+}
+#ws-sidebar .sb-create-radios { display: flex; gap: 0.6rem; }
+#ws-sidebar .sb-create-radios label,
+#ws-sidebar .sb-create-check { display: inline-flex; align-items: center; gap: 0.25rem; }
+#ws-sidebar .sb-create-standard,
+#ws-sidebar .sb-create-one-shot,
+#ws-sidebar .sb-create-shared { display: flex; flex-direction: column; gap: 0.3rem; }
+#ws-sidebar .sb-create-standard[hidden],
+#ws-sidebar .sb-create-one-shot[hidden],
+#ws-sidebar .sb-task-form[hidden] { display: none; }
+#ws-sidebar .sb-form-go {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--info-ws);
+  font: inherit;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+#ws-sidebar .sb-form-go:hover { background: var(--code-bg); }
+#ws-sidebar .sb-task-create { padding: 0.35rem 0.7rem 0; }
+#ws-sidebar .task-rename { font: inherit; font-size: 0.75rem; }
+/* ---- footer (src/footer) ------------------------------------------------
+   The consolidated progress dock, ported onto the resolved FooterView. The
+   LOOK IS UNCHANGED: the strip reuses `.pfooter`, `.pfooter-cells`,
+   `.pfooter-cell`, `.pfooter-grow`, `.pfooter-phase`, `.pfooter-clock`,
+   `.pfooter-tokens`, `.pfooter-counters` and `.pfooter-sheet` above, and
+   everything here is either a NEW element the new contract brought (the
+   substatus cell, the stop controls, the live-work chips, the five panels) or
+   a hook the integration suite targets.
+
+   The status word's COLOR comes from `.tone-*` (render-colors.json's
+   `footer_status`), not from `.pfooter-phase`'s legacy per-state rules — the
+   shared vocabulary is the one table now — so the phase cell keeps its weight
+   and padding and spends no color of its own. */
+
+/* The substatus cell: the step within the status, set a notch quieter than the
+   status word it qualifies, exactly as the old interrupt chip was. */
+.footer-substatus {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+/* The queue place and the parked line ride inside it; the place carries its own
+   datum color (see `.tone-*`), so only the figures stand out. */
+.footer-substatus-place { font-variant-numeric: tabular-nums; }
+/* With no substatus to say, the status cell spans that segment: it keeps its
+   own padding and simply drops the hairline it would have divided against. */
+.footer-status-merged { border-right: 1px solid var(--border); }
+
+/* The activity cell's typed datums take their color from `.tone-*`; the prose
+   around them stays the cell's own muted register. */
+.footer-activity { color: var(--muted); }
+.footer-activity-age { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The newsworthy allowance is the one the reader must act on, so it is the one
+   set in the foreground weight; its sibling stays reference. */
+.footer-allowance-newsworthy { font-weight: 650; }
+.footer-allowance { font-variant-numeric: tabular-nums; }
+
+/* THE STOP CONTROLS (src/footer/stop.ts). A quiet square that only exists
+   while there is something to stop — never a disabled control, and never a
+   colored one until it has something to report. */
+.footer-stop { display: inline-flex; align-items: center; gap: 6px; }
+.footer-stop-button,
+.footer-stop-confirm {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  padding: 1px 6px;
+}
+.footer-stop-button:hover,
+.footer-stop-confirm:hover { color: var(--fg); border-color: var(--fg); }
+.footer-stop-glyph { font-size: 0.62rem; }
+/* The challenge is the one control that asks for a decision, so it wears the
+   warning register the rest of the strip deliberately does not. */
+.footer-stop-confirm { color: var(--thinking); border-color: var(--thinking); }
+.footer-stop-note { font-size: 0.7rem; color: var(--ok); }
+.footer-stop-refusal { font-size: 0.7rem; color: var(--err); }
+
+/* THE LIVE-WORK CHIPS. An unset chip is not drawn at all, so the cluster is
+   frequently empty; the chips themselves are the old counter chips' size and
+   weight with the new glyphs in front. */
+.footer-chips { display: flex; align-items: center; gap: 8px; }
+.footer-chip {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  border-radius: 8px;
+  padding: 0 5px;
+  color: var(--muted);
+}
+.footer-chip:hover { color: var(--fg); }
+/* The open panel's chip stays lit, so the strip says which section is showing
+   without the section having to repeat its own name. */
+.footer-chip-selected { color: var(--fg); background: color-mix(in srgb, var(--fg) 10%, transparent); }
+.footer-chip-glyph { opacity: 0.85; }
+
+/* The tokens cell's two glyphs. Presence IS the fact for both: the alarm's
+   sentence and the verdict's evidence are the panel's lines, never repeated
+   here, so each is a single character with a hover. */
+.footer-tokens-alarm { color: var(--thinking); }
+.footer-tokens-verdict { font-size: 0.72rem; }
+.footer-tokens-verdict.arm-complete { color: var(--ok); }
+.footer-tokens-verdict.arm-incomplete,
+.footer-tokens-verdict.arm-invalid { color: var(--err); }
+
+/* THE EXPANDED PANELS. The sheet's geometry is `.pfooter-sheet`'s; these are
+   the row shapes the five panels draw inside it, all sharing one layout so a
+   monitor row and an agent row read as the same kind of line. Delimiters come
+   from the shared `.list-rows` rule, never from a rule of this section's. */
+.footer-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+.footer-panel-title { font-weight: 650; }
+.footer-panel-header .footer-stop { margin-left: auto; }
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.footer-row-jump { cursor: pointer; }
+.footer-row-jump:hover { color: var(--fg); }
+.footer-row-label { font-weight: 600; white-space: nowrap; }
+/* The description is the row's only elastic part, so a long commission
+   truncates instead of pushing the figures off the sheet's right edge. */
+.footer-row-description,
+.footer-row-command {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.footer-row-command { font-family: ui-monospace, monospace; }
+.footer-row-figures {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.footer-row-clock { color: var(--info-time); }
+.footer-row-tokens { color: var(--info-tokens); }
+.footer-row-caret { opacity: 0.6; }
+/* A jump that could not land says so at the row it was clicked on. */
+.footer-row-unreachable { color: var(--err); font-style: italic; }
+/* Presence markers (persistent, recurring, durable): a word, not a badge —
+   they qualify the row rather than competing with it. */
+.footer-row-marker {
+  font-size: 0.68rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+.footer-glyph { opacity: 0.85; }
+/* HOLLOW FOR DONE, BREATHING FOR LIVE: the running task's glyph breathes on the
+   same cadence the phase word does, and the completed box is drawn plainly
+   rather than colored — a finished task is not news. */
+.footer-glyph[data-glyph="completed"] { color: var(--ok); }
+.footer-glyph-running {
+  display: inline-block;
+  color: var(--thinking);
+  animation: pfooter-breath 2.6s ease-in-out infinite;
+}
+
+/* The tokens panel's lines: name dim, value bright, thinking indented under
+   output because it is already inside it. */
+.footer-token-line { display: flex; gap: 10px; }
+.footer-token-line-indented { padding-left: 1.2rem; }
+.footer-token-name { color: var(--muted); }
+.footer-token-value {
+  margin-left: auto;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+/* The alarm line reports money already spent that the user would have wanted to
+   prevent, so it keeps the error register the old expensive-turn row had. */
+.footer-token-alarm { color: var(--err); }
+.footer-token-verdict.arm-complete { color: var(--muted); }
+.footer-token-verdict.arm-incomplete,
+.footer-token-verdict.arm-invalid { color: var(--err); }
