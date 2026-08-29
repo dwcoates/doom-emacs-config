@@ -1,0 +1,629 @@
+/**
+ * The turn verbs.
+ *
+ * WHAT THIS GUARDS: the two invariants a consumer cannot see being broken. One
+ * turn is in flight STRUCTURALLY — a second StartTurn is refused, never queued,
+ * because a queue nobody can see makes the daemon's model of what is pending
+ * silently untrue. And the prompt row is DURABLE before the prompt is submitted
+ * (R15) — a crash between the two would leave a turn's activity hanging under a
+ * prompt that was never recorded.
+ */
+import { create } from "@bufbuild/protobuf";
+import { describe, expect, it } from "vitest";
+import { conversationv1, shimv1 } from "../../src/proto.js";
+import { PersistenceError } from "../../src/store/persistence.js";
+import { PermissionGate } from "../../src/engine/permission-gate.js";
+import { LiveWorkTable } from "../../src/engine/detached.js";
+import { SessionIdentity, createAgentIdentityStore } from "../../src/engine/identity.js";
+import {
+  buildPrompt,
+  promptEntry,
+  saidText,
+  textSaid,
+  TurnEngine,
+  type OpenTurn,
+  type SessionContext,
+} from "../../src/engine/turn.js";
+import { RecordingPersistence, ScriptedQuery } from "./fakes.js";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { SdkTaskStartedMessage } from "../../src/sdk/types.js";
+
+const TURN = create(conversationv1.TurnIdSchema, { value: "turn-1" });
+
+interface Harness {
+  readonly turns: TurnEngine;
+  readonly persistence: RecordingPersistence;
+  readonly query: ScriptedQuery;
+  readonly live: LiveWorkTable;
+  readonly gate: PermissionGate;
+  readonly submitted: { said: conversationv1.UserSaid; keepalive: boolean }[];
+  open: OpenTurn | undefined;
+  identity: SessionIdentity | undefined;
+  submitRejects: Error | undefined;
+}
+
+async function harness(): Promise<Harness> {
+  const persistence = new RecordingPersistence();
+  const query = new ScriptedQuery();
+  const live = new LiveWorkTable();
+  const identity = await SessionIdentity.fresh(
+    createAgentIdentityStore(mkdtempSync(path.join(os.tmpdir(), "shim-turn-")), "ws000000"),
+    () => "agent-1",
+  );
+  const gate = new PermissionGate({
+    mainAgentId: () => identity.agentId,
+    persist: (entries) => persistence.write(entries),
+    keepalive: () => false,
+    nowMs: () => 1,
+    onPermissionModeSet: () => undefined,
+  });
+  const state: Harness = {
+    turns: undefined as unknown as TurnEngine,
+    persistence,
+    query,
+    live,
+    gate,
+    submitted: [],
+    open: undefined,
+    identity,
+    submitRejects: undefined,
+  };
+  const context: SessionContext = {
+    persistence,
+    gate,
+    live,
+    identity: () => state.identity,
+    query: () => query,
+    nowMs: () => 1,
+    openTurn: () => state.open,
+    submit: (said, keepalive) => {
+      if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
+      state.submitted.push({ said, keepalive });
+      return Promise.resolve();
+    },
+    setOpenTurn: (turn) => {
+      state.open = turn;
+    },
+  };
+  return Object.assign(state, { turns: new TurnEngine(context) });
+}
+
+function startTurn(): shimv1.StartTurnRequest {
+  return create(shimv1.StartTurnRequestSchema, {
+    turn: TURN,
+    said: textSaid("do the thing"),
+    origin: conversationv1.PromptOrigin.USER_SENT,
+    pageSize: 20,
+  });
+}
+
+function failureKind(response: { result: { case?: string; value?: unknown } }): string | undefined {
+  const failure = response.result.value as { kind?: { case?: string }; cause?: { case?: string } };
+  return failure?.kind?.case ?? failure?.cause?.case;
+}
+
+describe("what the user said", () => {
+  it("is the text of the text blocks", () => {
+    expect(saidText(textSaid("hello"))).toBe("hello");
+  });
+
+  it("carries an image by its path rather than re-encoding its bytes", () => {
+    const said = create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          create(conversationv1.UserContentBlockSchema, {
+            block: {
+              case: "image",
+              value: create(conversationv1.ImageBlockSchema, {
+                mediaType: "image/png",
+                location: { case: "path", value: create(conversationv1.ImageBlockPathSchema, { path: "/tmp/a.png" }) },
+              }),
+            },
+          }),
+        ],
+      }),
+    });
+
+    expect(saidText(said)).toBe("/tmp/a.png");
+  });
+
+  it("RAISES on an UnsupportedBlock rather than silently dropping what the user sent", () => {
+    const said = create(conversationv1.UserSaidSchema, {
+      content: create(conversationv1.UserContentSchema, {
+        blocks: [
+          create(conversationv1.UserContentBlockSchema, {
+            block: {
+              case: "unsupported",
+              value: create(conversationv1.UnsupportedBlockSchema, { kind: "video" }),
+            },
+          }),
+        ],
+      }),
+    });
+
+    expect(() => saidText(said)).toThrow(/UnsupportedBlock is not a fallback/);
+  });
+});
+
+describe("the prompt row", () => {
+  it("is keyed by the turn", () => {
+    const agent = create(conversationv1.AgentIdSchema, { value: "agent-1" });
+    const prompt = buildPrompt(TURN, agent, textSaid("x"), conversationv1.PromptOrigin.USER_SENT);
+
+    expect(promptEntry(prompt, agent, false).upsertKey).toBe("prompt:turn-1");
+  });
+
+  it("is flagged keep-alive for the shim's own turns", () => {
+    const agent = create(conversationv1.AgentIdSchema, { value: "agent-1" });
+    const prompt = buildPrompt(TURN, agent, textSaid("x"), conversationv1.PromptOrigin.UNSPECIFIED);
+
+    expect(promptEntry(prompt, agent, true).keepalive).toBe(true);
+  });
+});
+
+describe("StartTurn", () => {
+  it("accepts the prompt and returns it as delivered", async () => {
+    const h = await harness();
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(response.result.case).toBe("success");
+  });
+
+  it("adopts the daemon's TurnId rather than minting one", async () => {
+    const h = await harness();
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(
+      response.result.case === "success" ? response.result.value.prompt?.id?.value : undefined,
+    ).toBe("turn-1");
+  });
+
+  it("addresses the prompt to the main agent — the WatchAgent address", async () => {
+    const h = await harness();
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(
+      response.result.case === "success" ? response.result.value.prompt?.agent?.value : undefined,
+    ).toBe("agent-1");
+  });
+
+  it("writes the prompt row DURABLY (R15)", async () => {
+    const h = await harness();
+
+    await h.turns.startTurn(startTurn());
+
+    expect(h.persistence.durable.map((entry) => entry.upsertKey)).toEqual(["prompt:turn-1"]);
+  });
+
+  it("has that ack BEFORE it submits", async () => {
+    // The order is the whole of R15: a crash between the two must never leave a
+    // turn's activity hanging under a prompt nothing recorded.
+    const h = await harness();
+    const order: string[] = [];
+    const durable = h.persistence.writeDurable.bind(h.persistence);
+    h.persistence.writeDurable = async (entries) => {
+      await durable(entries);
+      order.push("durable");
+    };
+    const submitted = h.submitted;
+    Object.defineProperty(submitted, "push", {
+      value: (...items: { said: conversationv1.UserSaid; keepalive: boolean }[]) => {
+        order.push("submit");
+        return Array.prototype.push.apply(submitted, items);
+      },
+    });
+
+    await h.turns.startTurn(startTurn());
+
+    expect(order).toEqual(["durable", "submit"]);
+  });
+
+  it("REFUSES a second StartTurn while one is open", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    const second = await h.turns.startTurn(startTurn());
+
+    expect(failureKind(second)).toBe("turnAlreadyOpen");
+  });
+
+  it("does not queue the refused prompt", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    await h.turns.startTurn(startTurn());
+
+    expect(h.submitted).toHaveLength(1);
+  });
+
+  it("refuses when no session has been started", async () => {
+    const h = await harness();
+    h.identity = undefined;
+
+    expect(failureKind(await h.turns.startTurn(startTurn()))).toBe("noSession");
+  });
+
+  it("refuses with the vendor's wording when the submission fails", async () => {
+    const h = await harness();
+    h.submitRejects = new Error("the binary said no");
+
+    expect(failureKind(await h.turns.startTurn(startTurn()))).toBe("vendorRefused");
+  });
+
+  it("does not leave the turn open after a refused submission", async () => {
+    const h = await harness();
+    h.submitRejects = new Error("no");
+
+    await h.turns.startTurn(startTurn());
+
+    expect(h.open).toBeUndefined();
+  });
+});
+
+describe("UpdateAgent.stop", () => {
+  const stop = (target?: conversationv1.AgentId): shimv1.UpdateAgentRequest =>
+    create(shimv1.UpdateAgentRequestSchema, {
+      ...(target === undefined ? {} : { target }),
+      input: create(conversationv1.AgentInputSchema, {
+        input: { case: "stop", value: create(conversationv1.AgentStopSchema, {}) },
+      }),
+    });
+
+  it("interrupts the main agent", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    await h.turns.updateAgent(stop());
+
+    expect(h.query.calls).toContain("interrupt");
+  });
+
+  it("resolves pending callbacks BEFORE the interrupt", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    const pending = h.gate.canUseTool("Bash", {}, {
+      signal: new AbortController().signal,
+      toolUseID: "toolu_1",
+      requestId: "r",
+    } as Parameters<PermissionGate["canUseTool"]>[2]);
+    await Promise.resolve();
+
+    await h.turns.updateAgent(stop());
+
+    expect(await pending).toEqual({ behavior: "deny", message: "the main agent was stopped" });
+  });
+
+  it("refuses when the main agent has no turn in flight", async () => {
+    const h = await harness();
+
+    expect(failureKind(await h.turns.updateAgent(stop()))).toBe("nothingRunning");
+  });
+
+  it("stops a subagent by its task id", async () => {
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "a01",
+      tool_use_id: "toolu_1",
+      description: "",
+      uuid: "u",
+      session_id: "s",
+    } as SdkTaskStartedMessage);
+
+    await h.turns.updateAgent(stop(create(conversationv1.AgentIdSchema, { value: "a01" })));
+
+    expect(h.query.stoppedTasks).toEqual(["a01"]);
+  });
+
+  it("refuses an unknown agent", async () => {
+    const h = await harness();
+
+    expect(
+      failureKind(await h.turns.updateAgent(stop(create(conversationv1.AgentIdSchema, { value: "nope" })))),
+    ).toBe("unknownAgent");
+  });
+});
+
+describe("UpdateAgent.prompt", () => {
+  const prompt = (target: conversationv1.AgentId): shimv1.UpdateAgentRequest =>
+    create(shimv1.UpdateAgentRequestSchema, {
+      target,
+      input: create(conversationv1.AgentInputSchema, {
+        input: { case: "prompt", value: textSaid("more") },
+      }),
+    });
+
+  it("refuses to prompt the session's own turn — StartTurn is that verb", async () => {
+    const h = await harness();
+
+    expect(
+      failureKind(await h.turns.updateAgent(prompt(create(conversationv1.AgentIdSchema, { value: "agent-1" })))),
+    ).toBe("unknownAgent");
+  });
+
+  it("REFUSES to prompt a subagent, stating that no declared route delivers one", async () => {
+    // Guessing an address would inject the user's words into the main thread.
+    const response = await (await harness()).turns.updateAgent(
+      prompt(create(conversationv1.AgentIdSchema, { value: "a01" })),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    ).toMatch(/declares no route/);
+  });
+});
+
+describe("KillTurn", () => {
+  const kill = (force: boolean, turn = TURN): shimv1.KillTurnRequest =>
+    create(shimv1.KillTurnRequestSchema, { turn, force });
+
+  it("refuses when no turn is open", async () => {
+    const h = await harness();
+
+    expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("noTurnOpen");
+  });
+
+  it("refuses a turn that is not the open one", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    const response = await h.turns.killTurn(
+      kill(false, create(conversationv1.TurnIdSchema, { value: "turn-2" })),
+    );
+
+    expect(failureKind(response)).toBe("notTheOpenTurn");
+  });
+
+  it("kills an idle turn as agent_only", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+
+    const response = await h.turns.killTurn(kill(false));
+
+    expect(response.result.case === "success" ? response.result.value.killed?.how.case : undefined).toBe(
+      "agentOnly",
+    );
+  });
+
+  it("REFUSES while the turn has live work and force was not set", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+
+    expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("live");
+  });
+
+  it("NAMES the live work in the refusal", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+
+    const response = await h.turns.killTurn(kill(false));
+    const failure = response.result.case === "failure" ? response.result.value : undefined;
+    expect(
+      failure?.cause.case === "live" ? failure.cause.value.liveWork.map((id) => id.value) : undefined,
+    ).toEqual(["b01"]);
+  });
+
+  it("stops the whole transitive set when forced", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+
+    await h.turns.killTurn(kill(true));
+
+    expect(h.query.stoppedTasks).toEqual(["b01"]);
+  });
+
+  it("does not reach work another turn spawned", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b99", tool_use_id: "t", description: "", uuid: "u", session_id: "s" } as SdkTaskStartedMessage,
+      "another-turn",
+    );
+
+    await h.turns.killTurn(kill(true));
+
+    expect(h.query.stoppedTasks).toEqual([]);
+  });
+});
+
+describe("DetachForeground", () => {
+  const detach = (unit: string): shimv1.DetachForegroundRequest =>
+    create(shimv1.DetachForegroundRequestSchema, {
+      unit: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+    });
+
+  it("refuses a unit nothing knows about", async () => {
+    const h = await harness();
+
+    expect(failureKind(await h.turns.detachForeground(detach("toolu_x")))).toBe("unknownUnit");
+  });
+
+  it("refuses a known unit with no live background work", async () => {
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "toolu_1",
+      description: "",
+      uuid: "u",
+      session_id: "s",
+    } as SdkTaskStartedMessage);
+
+    expect(failureKind(await h.turns.detachForeground(detach("toolu_1")))).toBe("alreadyConcluded");
+  });
+
+  it("reports a unit the vendor is already running in the background as detached", async () => {
+    const h = await harness();
+    h.query.backgroundTaskAnswer = true;
+
+    expect((await h.turns.detachForeground(detach("toolu_1"))).result.case).toBe("success");
+  });
+});
+
+describe("ReadHistory", () => {
+  const first = (): shimv1.ReadHistoryRequest =>
+    create(shimv1.ReadHistoryRequestSchema, {
+      pageSize: 10,
+      position: { case: "first", value: create(shimv1.ReadHistoryFirstSchema, {}) },
+    });
+
+  it("serves the first page from the store", async () => {
+    const h = await harness();
+
+    expect((await h.turns.readHistory(first())).result.case).toBe("success");
+  });
+
+  it("closes the reading session it opened, because ReadHistory has no tail", async () => {
+    const h = await harness();
+
+    await h.turns.readHistory(first());
+
+    expect(h.persistence.closedPages).toBe(1);
+  });
+
+  it("maps an unknown agent onto the ReadHistory arm for it", async () => {
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("unknown_agent", "no such book");
+
+    expect(failureKind(await h.turns.readHistory(first()))).toBe("unknownAgent");
+  });
+
+  it("maps a stale pointer onto its own arm", async () => {
+    const h = await harness();
+    h.persistence.readError = new PersistenceError("stale_pointer", "that pointer is gone");
+
+    const response = await h.turns.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 10,
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+
+    expect(failureKind(response)).toBe("stalePointer");
+  });
+
+  it("maps an unreachable store onto its own arm", async () => {
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
+
+    expect(failureKind(await h.turns.readHistory(first()))).toBe("storeUnavailable");
+  });
+});
+
+describe("WatchAgent", () => {
+  it("opens with the page", async () => {
+    const h = await harness();
+    const frames: string[] = [];
+
+    for await (const response of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      frames.push(response.frame.case ?? "");
+    }
+
+    expect(frames[0]).toBe("page");
+  });
+
+  it("then tails one entry per store write", async () => {
+    const h = await harness();
+    h.persistence.tail = [
+      create(conversationv1.HistoryEntryAtSchema, {
+        at: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+      }),
+    ];
+    const frames: string[] = [];
+
+    for await (const response of h.turns.watchAgent(
+      create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+    )) {
+      frames.push(response.frame.case ?? "");
+    }
+
+    expect(frames).toEqual(["page", "entry"]);
+  });
+
+  it("closes the stream at the transport when the target names no agent", async () => {
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("unknown_agent", "no such book");
+
+    await expect(
+      (async () => {
+        for await (const _ of h.turns.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          // the open is refused before anything is yielded
+        }
+      })(),
+    ).rejects.toThrow(/no such book/);
+  });
+});
+
+describe("StopBash", () => {
+  const stop = (work: string): shimv1.StopBashRequest =>
+    create(shimv1.StopBashRequestSchema, {
+      work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
+    });
+
+  it("stops the run by its task id", async () => {
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "t",
+      description: "",
+      uuid: "u",
+      session_id: "s",
+    } as SdkTaskStartedMessage);
+
+    await h.turns.stopBash(stop("b01"));
+
+    expect(h.query.stoppedTasks).toEqual(["b01"]);
+  });
+
+  it("refuses work nothing is running", async () => {
+    const h = await harness();
+
+    expect(failureKind(await h.turns.stopBash(stop("b99")))).toBe("unknownWork");
+  });
+});
+
+describe("WatchBash", () => {
+  it("relays the run's frames", async () => {
+    const h = await harness();
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+    const frames: conversationv1.AgentBash[] = [];
+
+    for await (const response of h.turns.watchBash(
+      create(shimv1.WatchBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "b01" }),
+      }),
+    )) {
+      if (response.bash !== undefined) frames.push(response.bash);
+    }
+
+    expect(frames).toHaveLength(1);
+  });
+});
