@@ -28,6 +28,10 @@ import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_merge_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_open_external.proto";
+import "agentrepl/v1/endpoint_create_task.proto";
+import "agentrepl/v1/endpoint_update_task.proto";
+import "agentrepl/v1/endpoint_assign_workspace_task.proto";
 import "agentrepl/v1/endpoint_open_login.proto";
 import "agentrepl/v1/endpoint_watch_login_terminal.proto";
 import "agentrepl/v1/endpoint_close_login.proto";
@@ -115,6 +119,15 @@ service AgentRepl {
   // Set or clear a workspace's priority; the roster orders by it. See
   // endpoint_set_workspace_priority.proto.
   rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
+
+  // A new user task; the roster's task view renders it. See
+  // endpoint_create_task.proto.
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  // Change one task (retitle, done, reopen). See endpoint_update_task.proto.
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  // Assign a workspace to a task, or unassign it. See
+  // endpoint_assign_workspace_task.proto.
+  rpc AssignWorkspaceTask(AssignWorkspaceTaskRequest) returns (AssignWorkspaceTaskResponse);
 
   // ---- TOPBAR ----
 
@@ -208,6 +221,9 @@ service AgentRepl {
   // End the login session; closing an absent one is success. See
   // endpoint_close_login.proto.
   rpc CloseLogin(CloseLoginRequest) returns (CloseLoginResponse);
+  // Open a clicked link in the pinned external browser profile. See
+  // endpoint_open_external.proto.
+  rpc OpenExternal(OpenExternalRequest) returns (OpenExternalResponse);
 
   // The webview's half of the handover rendezvous, called on the NEW
   // daemon. See endpoint_adopt_web_workspace.proto.

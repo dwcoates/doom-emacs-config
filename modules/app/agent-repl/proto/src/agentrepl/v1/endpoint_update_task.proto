@@ -1,0 +1,51 @@
+// endpoint_update_task.proto — UpdateTask: change one task. SIDEBAR
+// section. THE ARM IS THE CHANGE; the new state rides the roster stream.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/task.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message UpdateTaskRequest {
+  TaskRef task = 1;
+  // THE ARM IS THE CHANGE.
+  oneof change {
+    UpdateTaskSetTitle set_title = 2;
+    UpdateTaskSetDone set_done = 3;
+    UpdateTaskSetOpen set_open = 4;
+  }
+}
+
+// Retitle the task.
+message UpdateTaskSetTitle {
+  // The new title, non-blank.
+  string title = 1;
+}
+
+// Mark the task done.
+message UpdateTaskSetDone {
+}
+
+// Reopen a done task.
+message UpdateTaskSetOpen {
+}
+
+// THE ARM IS THE OUTCOME.
+message UpdateTaskResponse {
+  oneof result {
+    UpdateTaskSuccess success = 1;
+    UpdateTaskError error = 2;
+  }
+}
+
+// Done; the roster push carries the new state.
+message UpdateTaskSuccess {
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown task, blank
+// title, …), spelled per 3b.
+message UpdateTaskError {
+}
