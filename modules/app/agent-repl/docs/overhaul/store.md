@@ -305,3 +305,12 @@ bounded streams, clock convention, validation/logging invariants) are in
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Landing 3 relay (2026-08-29, project lead)
+
+- Every refusal site sets its `kind` arm (keeping `detail`), asserted per refusal.
+- ReadAgentPageSuccess.lines is `repeated StoreLineAt`: continuation pages carry real pointers.
+- New rpc WatchBashRun {run: AgentActivityId} → stream {row: StoreAgentBash}: replay every stored row of the run in write order, then follow, end after the terminal; unknown run = refused open at the transport (no failure frame).
+- AgentFrame.detached_work is a PAGE LINE (upsert key `detached:<work id>`), the source of GetLiveWork.live_detached; lifecycle tables never hold the announcement.
+- R9 (shim-settled): rotation/fork lineage lives in the shim's link files, not in the store; no store verb.
+- DetachedLost `lost` arms replace the sidecar's LostTerminal placeholder.
