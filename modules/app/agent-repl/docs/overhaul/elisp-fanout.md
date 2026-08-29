@@ -201,6 +201,16 @@ are deleted by the verbs agent once verbs.el replaces them.
   DaemonHealth (healthy | unhealthy{faults[{detail}]}); SessionHealth.
 - Empty error messages decode to `(:arm :error :value nil)`; a future arm
   is an unknown key → loud error (by design: the teamlead threads new arms).
+- LANDED SHAPES (wire-verbs.el as merged): presence-only fields (`fork`,
+  `allow_ungated`) are passed as `t` on the elisp side (nil = absent, since
+  nil is also the value of a set empty message); `force`, `self_certified`
+  and `add_to_merge_queue` are always encoded explicitly, false included;
+  an unset one-shot `finish` is refused before send; an unset
+  `CloseWorkspaceError.cause` is a decode breach; merge-action fields are
+  UserSaid values. REMEDIATION OWED (teamlead loop): wire-verbs.el wraps
+  `agent-repl--error` in a `condition-case` that swallows a signal — once
+  core.el's non-signaling `agent-repl--error` lands, that wrapper is
+  removed (never swallow errors).
 
 ## 6. daemon-link.el
 
