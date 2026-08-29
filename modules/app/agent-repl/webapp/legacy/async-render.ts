@@ -59,7 +59,7 @@ import { Fold, capLabel } from "./fold.js";
 import { escapeHtml } from "./highlight.js";
 import { SkillBodySection } from "./skill-body.js";
 import { asyncAgentItems } from "./state-adapter.js";
-import { log } from "./wslog.js";
+import { log } from "./log.js";
 
 /** What the renderer needs from the surfaces around it. */
 export interface AsyncRenderContext {

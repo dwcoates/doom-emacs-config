@@ -3743,3 +3743,138 @@ body.ungated #mode-select {
 .list-rows > * + * {
   border-top: 1px solid var(--border);
 }
+
+/* ---- semantic color tones (src/vocab.ts) ------------------------------- */
+
+/* THE FIVE COLORS, plus the explicit absence of one, exactly as
+   proto/vocab/render-colors.json assigns them. Stated ONCE here and keyed by
+   the color NAME, so every surface that resolves a color through
+   `src/vocab.ts` paints it identically: a workspace cannot read one color in
+   the rail and another in the footer.
+
+   The file pins WHICH color a state takes and never the hex, so the values
+   below are this renderer's own and reuse the variables the stylesheet
+   already carries for the same ideas -- `--init` is the blue a compromised
+   route has always taken here, `--blocked` the vendor purple, `--err` the
+   live turn's red, `--async` detached work's amber, `--ok` a session that is
+   yours to use.
+
+   `none` is a real answer, not a gap: a workspace with no session has no
+   lifecycle verdict, and the merge states carry glyphs rather than spending
+   one of the five. It inherits, so a `.tone-none` element takes whatever
+   register it sits in. */
+.tone-none { color: inherit; }
+.tone-blue { color: var(--init); }
+.tone-purple { color: var(--blocked); }
+.tone-red { color: var(--err); }
+.tone-yellow { color: var(--async); }
+.tone-green { color: var(--ok); }
+
+/* ---- client-local failure overlay (src/failure/overlay.ts) ------------- */
+
+/* The page-wide region for the six failures a FRONTEND mints. It is the
+   residue the pushed surfaces cannot carry, because when it fires the footer
+   and the topbar may be exactly what is broken -- so it is fixed to the
+   viewport rather than placed in the document flow, and it does not move when
+   the feed scrolls.
+
+   Bottom-right, above everything, and NOT modal: a page whose link dropped is
+   still readable, and stealing the pointer would stop the user re-reading the
+   conversation the card is about. `pointer-events` is therefore off on the
+   region and back on for the cards themselves. */
+#failure-overlay {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(28rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+/* Empty while healthy, and the overlay costs nothing until a card is filed. */
+#failure-overlay[data-empty] {
+  display: none;
+}
+
+#failure-overlay > .failure-card {
+  pointer-events: auto;
+  background: var(--bg);
+  box-shadow: var(--sidebar-shadow);
+}
+
+/* The card's own outline is the ported system-failure look: a rounded rule
+   with a thick LEFT edge in the failure's color. The color comes from
+   `.tone-*` above, resolved through render-colors.json's `failure_sides`, so
+   the border and the text take it from `currentColor` and the card can never
+   explain a workspace in a color the workspace is not. */
+.failure-card {
+  border: 1px solid currentColor;
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.failure-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+/* A GLYPH, never an emoji: it inherits the card's color, which an emoji
+   cannot, so the mark and the border always agree. */
+.failure-mark {
+  flex: none;
+  font-weight: 700;
+}
+
+/* The headline is the sentence the reader is meant to take away, so it takes
+   the page foreground rather than the alarm color -- the border and the mark
+   already carry the alarm, and coloring the prose too reads as shouting. */
+.failure-message {
+  color: var(--fg);
+}
+
+/* The evidence: the producer's own account, for whoever debugs this. Muted
+   and monospaced so it plainly is not the sentence above it. */
+.failure-detail {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.failure-detail-label {
+  margin-right: 0.3rem;
+  opacity: 0.8;
+}
+
+/* ---- link components (src/link.ts) ------------------------------------- */
+
+/* Both links cancel their click and call an rpc, so neither navigates. The
+   editor link carries no href at all (its destination is on the daemon's
+   host), which would leave it without the pointer an anchor normally gets. */
+.editor-link {
+  cursor: pointer;
+}
+
+/* A destination this page will not open renders as text and says so by NOT
+   looking like a link: no underline, no accent, just the muted register. */
+.external-link.unlinkable {
+  color: var(--muted);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* THE REFUSAL, drawn at the clicked control. The <Method>Error is this
+   click's own answer, so it marks the link the user just pressed rather than
+   appearing anywhere else; the sentence itself rides the `title` hover. */
+.refusal[data-arm] {
+  color: var(--err);
+  text-decoration: underline wavy var(--err);
+  text-underline-offset: 0.2em;
+}
