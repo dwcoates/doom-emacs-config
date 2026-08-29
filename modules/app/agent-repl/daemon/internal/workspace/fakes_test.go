@@ -347,6 +347,7 @@ type fakeMerge struct {
 	facts       map[ids.WorkspaceID]footer.MergeFacts
 	interrupted []ids.WorkspaceID
 	enqueued    []ids.WorkspaceID
+	enqueueErr  error
 }
 
 func newFakeMerge() *fakeMerge {
@@ -363,6 +364,9 @@ func (m *fakeMerge) OnInterrupt(_ context.Context, ws ids.WorkspaceID) {
 }
 
 func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID) error {
+	if m.enqueueErr != nil {
+		return m.enqueueErr
+	}
 	m.enqueued = append(m.enqueued, ws)
 	return nil
 }

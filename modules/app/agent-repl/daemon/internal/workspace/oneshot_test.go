@@ -43,7 +43,7 @@ func TestDecorateOneShotSelfMergeNamesTheWorkspaceSkill(t *testing.T) {
 	}
 }
 
-func TestDecorateOneShotOpenPrChainsTheFollowup(t *testing.T) {
+func TestDecorateOneShotOpenPrCarriesOnlyTheFirstGate(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	oneShotBriefs(f)
@@ -52,12 +52,16 @@ func TestDecorateOneShotOpenPrChainsTheFollowup(t *testing.T) {
 	// Act.
 	got, err := v.decorateOneShot("task", &OneShotFinish{OpenPr: &OneShotOpenPr{}})
 
-	// Assert: both gates are present — the implementation gate and the CICD one.
+	// Assert: the CICD-gated wrap-up is a post-prompt, so the agent is never
+	// told how to finish before it has started.
 	if err != nil {
 		t.Fatalf("decorateOneShot: %v", err)
 	}
-	if !strings.Contains(got, openPrActionPhrase) || !strings.Contains(got, WorkspaceSkill+" close") {
-		t.Fatalf("decorated prompt = %q, want both one-shot gates", got)
+	if !strings.Contains(got, openPrActionPhrase) {
+		t.Fatalf("decorated prompt = %q, want the pr gate", got)
+	}
+	if strings.Contains(got, WorkspaceSkill+" close") {
+		t.Fatalf("decorated prompt = %q, want the CICD gate held back", got)
 	}
 }
 
@@ -169,5 +173,70 @@ func TestFinishOriginNamesTheRecordedFinish(t *testing.T) {
 				t.Fatalf("finishOrigin() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseFinishOriginIsFinishOriginsInverse(t *testing.T) {
+	tests := []*OneShotFinish{
+		{SelfMerge: true},
+		{OpenPr: &OneShotOpenPr{}},
+		{OpenPr: &OneShotOpenPr{SelfCertified: true}},
+		{OpenPr: &OneShotOpenPr{AddToMergeQueue: true}},
+		{OpenPr: &OneShotOpenPr{SelfCertified: true, AddToMergeQueue: true}},
+	}
+	for _, finish := range tests {
+		t.Run(finishOrigin(finish), func(t *testing.T) {
+			// Arrange in the table. Act.
+			got, err := parseFinishOrigin(finishOrigin(finish))
+			// Assert.
+			if err != nil {
+				t.Fatalf("parseFinishOrigin: %v", err)
+			}
+			if finishOrigin(got) != finishOrigin(finish) {
+				t.Fatalf("round trip = %q, want %q", finishOrigin(got), finishOrigin(finish))
+			}
+		})
+	}
+}
+
+func TestParseFinishOriginOfNothingIsNoAction(t *testing.T) {
+	// Arrange. Act.
+	got, err := parseFinishOrigin("")
+
+	// Assert.
+	if err != nil || got != nil {
+		t.Fatalf("parseFinishOrigin(\"\") = (%v, %v), want no action", got, err)
+	}
+}
+
+func TestParseFinishOriginRefusesAnUnknownRecord(t *testing.T) {
+	tests := []string{"teleport", "self_merge+self_certified", "open_pr+rebase"}
+	for _, recorded := range tests {
+		t.Run(recorded, func(t *testing.T) {
+			// Arrange in the table. Act.
+			_, err := parseFinishOrigin(recorded)
+			// Assert.
+			if err == nil {
+				t.Fatalf("parseFinishOrigin(%q) = nil error, want a refusal", recorded)
+			}
+		})
+	}
+}
+
+func TestOpenPrFollowupNamesBothCommands(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	v := f.verbs.(*verbs)
+
+	// Act.
+	got, err := v.openPrFollowup(&OneShotOpenPr{AddToMergeQueue: true})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("openPrFollowup: %v", err)
+	}
+	if !strings.Contains(got, "--add-to-merge-queue") || !strings.Contains(got, WorkspaceSkill+" close") {
+		t.Fatalf("follow-up = %q, want the pr command and the wrap-up", got)
 	}
 }

@@ -52,3 +52,4 @@ the same commit that switches the handler onto it.
 | CreateTask / UpdateTask | `blank_title` | a blank title, or an update that changes nothing | workspace |
 | RequestCommandSupport | `blank_command` | no command was named | workspace |
 | RequestCommandSupport | `brief_missing` | `prompts/add-support-slash-command.md` is absent or will not splice | workspace |
+| SubmitPrompt (the one-shot finish hook) | `brief_missing` | `prompts/oneshot-create-pr-then-close-followup.md` is absent or will not splice when the one-shot's turn concludes | workspace |
