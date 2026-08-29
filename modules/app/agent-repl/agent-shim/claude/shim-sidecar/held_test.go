@@ -1,9 +1,12 @@
 package main
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
 
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -135,5 +138,33 @@ func TestAConfigRootTargetNeedsNoOwner(t *testing.T) {
 	// Assert.
 	if _, watched := h.sc.watchers[path]; !watched {
 		t.Fatal("a session transcript was held for an owner it names itself")
+	}
+}
+
+func TestAZeroHoldWindowKeepsTheDefault(t *testing.T) {
+	// Arrange: zero is how the caller says "unset".
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "held-test"})
+
+	// Act.
+	held := newHeldSpools(0, log)
+
+	// Assert.
+	if held.window != UnownedSpoolWindow {
+		t.Fatalf("hold window = %s, want the default %s", held.window, UnownedSpoolWindow)
+	}
+}
+
+func TestAConfiguredHoldWindowReplacesTheDefault(t *testing.T) {
+	// Arrange.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "held-test"})
+
+	// Act.
+	held := newHeldSpools(15*time.Millisecond, log)
+
+	// Assert.
+	if held.window != 15*time.Millisecond {
+		t.Fatalf("hold window = %s, want the configured 15ms", held.window)
 	}
 }

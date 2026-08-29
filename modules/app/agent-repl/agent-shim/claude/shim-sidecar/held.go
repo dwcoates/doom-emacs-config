@@ -24,7 +24,9 @@ import (
 )
 
 // UnownedSpoolWindow is how long a spool may sit unclaimed before its bytes are
-// ingested as residue rather than waited on any longer.
+// ingested as residue rather than waited on any longer. It is the DEFAULT:
+// --unowned-spool-window replaces it, so the residue path can be exercised in
+// milliseconds instead of waited out.
 const UnownedSpoolWindow = 60 * time.Second
 
 // heldSpools remembers when each unclaimed spool was first seen.
@@ -36,6 +38,11 @@ type heldSpools struct {
 }
 
 func newHeldSpools(window time.Duration, log *logging.Bound) *heldSpools {
+	if window == 0 {
+		// Zero is how the caller says "unset", exactly as it is for the LOST
+		// windows; the default is filled here so there is one place that knows it.
+		window = UnownedSpoolWindow
+	}
 	return &heldSpools{
 		firstSeen: map[string]time.Time{},
 		demoted:   map[string]bool{},

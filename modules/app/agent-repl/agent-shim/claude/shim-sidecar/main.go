@@ -28,6 +28,7 @@
 //	--stale-shell-silence     $AGENT_REPL_STALE_SHELL_SILENCE     (30m)
 //	--stale-agent-silence     $AGENT_REPL_STALE_AGENT_SILENCE     (60m)
 //	--stale-workflow-silence  $AGENT_REPL_STALE_WORKFLOW_SILENCE  (60m)
+//	--unowned-spool-window    $AGENT_REPL_UNOWNED_SPOOL_WINDOW    (60s)
 //
 // UNSET KEEPS THE PACKAGE DEFAULT; A MALFORMED VALUE IS REFUSED. A window that
 // does not parse, or that is negative, is a bootstrap error: the process states
@@ -74,6 +75,11 @@ const (
 	StaleShellSilenceEnv    = "AGENT_REPL_STALE_SHELL_SILENCE"
 	StaleAgentSilenceEnv    = "AGENT_REPL_STALE_AGENT_SILENCE"
 	StaleWorkflowSilenceEnv = "AGENT_REPL_STALE_WORKFLOW_SILENCE"
+
+	// UnownedSpoolWindowEnv names how long an unclaimed spool is held before
+	// its bytes are ingested as residue. It sits with the LOST windows because
+	// it is the other wall-clock wait the file plane makes a caller sit through.
+	UnownedSpoolWindowEnv = "AGENT_REPL_UNOWNED_SPOOL_WINDOW"
 )
 
 func main() {
@@ -96,7 +102,15 @@ func main() {
 		"how long an agent transcript spool may stop growing before it is LOST (Go duration; default $"+StaleAgentSilenceEnv+", else 60m)")
 	staleWorkflowSilence := flag.String("stale-workflow-silence", "",
 		"how long a workflow journal may stop growing before it is LOST (Go duration; default $"+StaleWorkflowSilenceEnv+", else 60m)")
+	unownedSpoolWindow := flag.String("unowned-spool-window", "",
+		"how long an unclaimed spool is held before its bytes are ingested as residue (Go duration; default $"+UnownedSpoolWindowEnv+", else 60s)")
 	flag.Parse()
+
+	unowned, err := durationSource{flagName: "unowned-spool-window", envName: UnownedSpoolWindowEnv, raw: *unownedSpoolWindow}.resolve()
+	if err != nil {
+		reportFatal(err, os.Stderr)
+		os.Exit(1)
+	}
 
 	staleOptions, err := resolveStaleOptions(
 		durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: *staleGrace},
@@ -110,12 +124,13 @@ func main() {
 	}
 
 	options := Options{
-		StoreSocket:    *storeSocket,
-		ConfigRoots:    parseRoots(*configRoots),
-		SpoolRoot:      *spoolRoot,
-		PollInterval:   *pollInterval,
-		RescanInterval: *rescanInterval,
-		Stale:          staleOptions,
+		StoreSocket:        *storeSocket,
+		ConfigRoots:        parseRoots(*configRoots),
+		SpoolRoot:          *spoolRoot,
+		PollInterval:       *pollInterval,
+		RescanInterval:     *rescanInterval,
+		Stale:              staleOptions,
+		UnownedSpoolWindow: unowned,
 	}
 	if err := run(options, *logPath); err != nil {
 		reportFatal(err, os.Stderr)
@@ -133,6 +148,9 @@ type Options struct {
 	// Stale carries the LOST policy's windows. A zero field keeps
 	// internal/stale's own default, which is the only meaning "unset" has here.
 	Stale stale.Options
+	// UnownedSpoolWindow is how long an unclaimed spool is held before its bytes
+	// are ingested as residue. Zero keeps held.go's UnownedSpoolWindow.
+	UnownedSpoolWindow time.Duration
 }
 
 // durationSource is one duration option's two spellings: the flag value the
