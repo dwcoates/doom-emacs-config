@@ -1,236 +1,156 @@
 package convert
 
-// detached.go — work that LEFT the turn and now runs alongside it.
+// detached.go — THE DETACHED SHELL SPOOL: bytes on disk becoming a run's frames.
 //
-// A detachment is announced by a TOOL RESULT: the harness reports the launch
-// back to the agent, and that report is what names the thing that detached.
+// A foreground shell call has NO output anywhere until it returns, so the update
+// arm is structurally detach-only: every delta here comes from a `b*.output`
+// spool the vendor writes for a backgrounded command. The spool is a delta stream
+// terminated by its own `EXIT=<code>` line.
 //
-// THE LIFECYCLE CONVERSION IS UNPORTED. Its target — conversation.v1's
-// DetachedWorkStarted / DetachedWorkProgressed / DetachedWorkEnded family with
-// its DetachedWorkKind and outcome arms — was deleted by the redesign. The
-// successor (AgentDetachedWork over DetachableWork, carried on an AgentFrame)
-// is a DIFFERENT structure keyed by DetachedWorkId and AgentActivityId, not a
-// rename of the old one, and populating it from Claude's JSONL is a design
-// decision this reconciliation is not entitled to take.
-//
-// So the vendor-side CLASSIFICATION is kept verbatim — it is JSON reading, not
-// protocol — and every record it classifies is stored whole through
-// UnportedEntry, loudly, rather than converted onto a shape nobody agreed.
+// LOST IS ITS OWN WORD — "we stopped seeing it", not "known failed". The wire has
+// no DetachedLost message this wave, so a lost run resolves as
+// AgentBash.success.interrupted with NO cause (the producer states none) and the
+// LOST arm is named in the log. Folding it into a failure would have this system
+// assert something it never observed: that the work died.
 
 import (
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-// launch is one detachment read out of a tool result.
-type launch struct {
-	taskID string
-	label  string
-	// kind names the sort of work that detached, as the vendor's own signature
-	// keys reveal it. It was a conversation.v1 DetachedWorkKind; that type is
-	// gone, so the classification survives as the plain name it always was.
-	kind string
-	// skillName is set only for a skill invocation, so the body that arrives
-	// later can be resolved onto this card by name.
-	skillName string
-}
+// LostReason is HOW we concluded a detached run was lost. It rides the log, not
+// the wire.
+type LostReason string
 
-// launchRecords classifies a user record's `toolUseResult` as the detached-work
-// lifecycle it implies, and stores each such record unported.
+const (
+	// LostFileVanished: the spool we were tailing is no longer on disk.
+	LostFileVanished LostReason = "file_vanished"
+	// LostWentSilent: the spool stopped growing past the staleness window.
+	LostWentSilent LostReason = "went_silent"
+	// LostSweptUp: a boot sweep found the run open with nothing still writing.
+	LostSweptUp LostReason = "swept_up"
+)
+
+// BashDelta converts a batch of spool bytes into the run's update frame.
 //
-// A tool result that is not a launch produces nothing here.
-func (c *Converter) launchRecords(record map[string]any, at Attribution, env envelope, container string) []*storev1.StoreEntry {
-	_ = container
-	result := obj(record["toolUseResult"])
-	if result == nil {
-		return nil
-	}
-	if stop := c.taskStop(result, at, record); stop != nil {
-		return []*storev1.StoreEntry{stop}
-	}
-	found := classifyLaunch(result, env)
-	if found == nil {
-		return nil
-	}
-	if found.taskID == "" {
-		// A launch the harness did not name. The card would have no identity for
-		// its own output to route to, so the record is stored whole instead of
-		// opening a card nothing can ever update.
-		c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, VendorSessionID: at.SessionID, Level: "warn"}).
-			Log("detached launch at offset=%d carries no task identity; stored unconverted rather than opening a card nothing can update", at.Offset)
-		return []*storev1.StoreEntry{UnknownEntry(at, "launch", "toolUseResult", record)}
-	}
-
-	messageID := DetachedWorkMessageID(found.taskID)
-	if found.skillName != "" {
-		c.skillMessage[found.skillName] = messageID
-	}
-	c.log.With(logging.Context{Operation: "detached-launch", Path: at.Path, VendorSessionID: at.SessionID, TaskID: found.taskID, Level: "error"}).
-		Log("detached-work START (kind=%s label=%q message_id=%s origin_tool_call_id=%q) has NO conversion under the redesigned conversation.v1: "+
-			"DetachedWorkStarted was deleted and AgentDetachedWork is a different structure. Record stored unported at offset=%d",
-			found.kind, found.label, messageID, env.toolUseID, at.Offset)
-	return []*storev1.StoreEntry{UnportedEntry(at, "detached_started:"+found.kind, record)}
+// `fromOffset` is a GAP DETECTOR, not addressing: it MUST equal the number of
+// bytes the consumer has already accumulated for this unit, and anything else
+// means bytes were lost and the consumer refuses the frame rather than
+// concatenating across a hole.
+func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int64) *storev1.StoreEntry {
+	c.log.With(at.ctxFor("bash-delta")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+		LogVerbose("spool delta bytes=%d from_offset=%d", len(output), fromOffset)
+	return BashRun(at, "bash_delta:"+itoa(int(fromOffset)), BashKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{
+			NewOutput:  output,
+			FromOffset: uint64(fromOffset),
+		}},
+	})
 }
 
-// classifyLaunch identifies which kind of work detached, by the signature keys
-// the harness's launch results carry. Order is most-specific first, and an
-// object matching nothing is not a launch at all.
-func classifyLaunch(result map[string]any, env envelope) *launch {
-	switch {
-	case has(result, "isAsync"):
-		return &launch{
-			taskID: str(result["agentId"]),
-			label:  str(result["description"]),
-			kind:   "agent",
-		}
-	case has(result, "runId"):
-		return &launch{
-			taskID: firstNonEmpty(str(result["runId"]), str(result["taskId"])),
-			label:  firstNonEmpty(str(result["summary"]), str(result["workflowName"])),
-			kind:   "workflow",
-		}
-	case str(result["backgroundTaskId"]) != "":
-		return &launch{
-			taskID: str(result["backgroundTaskId"]),
-			label:  str(result["backgroundCwdHint"]),
-			kind:   "shell",
-		}
-	case has(result, "commandName"):
-		name := str(result["commandName"])
-		// A skill owns its own window, and the tool call that invoked it is the
-		// only identity it has — the harness mints no task id for one.
-		return &launch{
-			taskID:    env.toolUseID,
-			label:     name,
-			skillName: name,
-			kind:      "skill",
-		}
-	default:
-		return nil
-	}
+// BashExited converts the spool's `EXIT=<code>` terminator into the run's
+// terminal.
+//
+// THE CODE IS THE COMMAND'S VERDICT ON ITSELF, never a failure of the call: a
+// non-zero exit is still the COMPLETED arm. Ending the run on this evidence is
+// also what keeps a task that plainly finished from sitting open until a
+// staleness sweep eventually — and wrongly — calls it LOST.
+func (c *Converter) BashExited(at Attribution, run, output string, code int) *storev1.StoreEntry {
+	c.log.With(at.ctxFor("bash-exit")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+		Log("EXIT=%d observed on disk; the run ends on evidence rather than on a silence timeout", code)
+	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: wholeStdout(output),
+				Termination: &conversationv1.AgentBashTermination{
+					How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: int32(code)}},
+				},
+			}},
+		}},
+	})
 }
 
-// taskStop recognizes a TaskStop result — the end of work someone stopped
-// deliberately — and stores it unported.
-func (c *Converter) taskStop(result map[string]any, at Attribution, record map[string]any) *storev1.StoreEntry {
-	if !has(result, "command") || !has(result, "taskType") {
-		return nil
-	}
-	taskID := str(result["taskId"])
+// BashLost converts a run we STOPPED BEING ABLE TO SEE into its terminal.
+//
+// NO CAUSE ARM IS SET. AgentBashInterrupted's causes are `by_user` and
+// `timed_out`, and neither is what happened: we simply stopped observing. Setting
+// either would be an accusation with no evidence, so the cause stays UNSET and
+// the reason is stated loudly in the log instead.
+func (c *Converter) BashLost(at Attribution, run, output string, reason LostReason) *storev1.StoreEntry {
+	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+		Log("the detached run is LOST (%s); it resolves interrupted with no cause because the wire carries no DetachedLost this wave", reason)
+	return BashLostEntry(at, run, output, reason)
+}
+
+// BashLostEntry is BashLost without a converter, for the staleness policy in the
+// root package, which owns its own logging and holds no per-file converter.
+//
+// THE WRITE IDENTITY IS STABLE FOR THE VERDICT: a run is lost once however many
+// sweeps observe it, so a re-emission is absorbed at the store rather than
+// appending a second terminal.
+func BashLostEntry(at Attribution, run, output string, reason LostReason) *storev1.StoreEntry {
+	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
+			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+				Output: wholeStdout(output),
+			}},
+		}},
+	})
+}
+
+// taskStopTerminal consumes a TaskStop RESULT as the owning task's CANCELLED
+// terminal, before the call itself is dropped.
+//
+// DELIBERATELY-STOPPED WORK MUST RESOLVE CANCELLED, NEVER LOST. A bash task
+// becomes the run's interrupted-by-user terminal; an agent task becomes the
+// spawn unit's stopped-by-user failure.
+func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env envelope, agent string) []*storev1.StoreEntry {
+	taskID := str(pick(result, "task_id", "taskId"))
+	taskType := str(pick(result, "task_type", "taskType"))
 	if taskID == "" {
-		return nil
+		c.log.With(at.ctxWarn("task-stop")).
+			Log("TaskStop result names no task; the stop cannot be attributed and the record is stored as vendor_specific")
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
-	c.log.With(logging.Context{Operation: "detached-stop", Path: at.Path, VendorSessionID: at.SessionID, TaskID: taskID, Level: "error"}).
-		Log("detached-work CANCELLED (message_id=%s) has NO conversion under the redesigned conversation.v1: "+
-			"DetachedWorkEnded and its Cancelled arm were deleted. Record stored unported at offset=%d",
-			DetachedWorkMessageID(taskID), at.Offset)
-	return UnportedEntry(at, "detached_cancelled", record)
+
+	switch taskType {
+	case "agent":
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: taskID, UpsertKey: ActivityKey(taskID)}).
+			Log("TaskStop consumed as the CANCELLED terminal of an agent task")
+		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
+				Cause: &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
+			}},
+		}})
+		activity.ActivityId = activityID(taskID)
+		return []*storev1.StoreEntry{c.settledEntry(at, agent, taskID, activity)}
+	default:
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: taskID, UpsertKey: BashKey(taskID)}).
+			Log("TaskStop consumed as the CANCELLED terminal of a shell run")
+		return []*storev1.StoreEntry{BashRun(at, "bash_terminal", BashKey(taskID), taskID, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+				Command:   &conversationv1.AgentBashCommand{Line: taskID},
+				SettledAt: settledAt(env.timestampMs),
+				Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+					Output: wholeStdout(""),
+					Cause:  &conversationv1.AgentBashInterrupted_ByUser{ByUser: &conversationv1.AgentBashInterruptedByUser{}},
+				}},
+			}},
+		})}
+	}
 }
 
-// DetachedProgress records output appended to detached work already open.
-//
-// UNPORTED. DetachedWorkProgressed was deleted and nothing in the Agent* model
-// spells "more output arrived on work already open" as a producer-written
-// record, so the delta is stored whole and the loss is stated.
-func DetachedProgress(at Attribution, taskID, output string) *storev1.StoreEntry {
-	return UnportedEntry(at, "detached_progress", map[string]any{
-		"task_id":            taskID,
-		"detached_work_id":   DetachedWorkMessageID(taskID),
-		"output":             output,
-		"__unported_because": "conversation.v1 DetachedWorkProgressed was deleted with no producer-side successor",
-	})
-}
-
-// DetachedExited records detached work that told us how it exited.
-//
-// UNPORTED. The exit code is still READ and carried verbatim — losing it would
-// leave a task that plainly finished sitting as running until a staleness sweep
-// called it LOST — but DetachedWorkEnded's Succeeded/Failed arms are gone, so
-// the outcome is stored rather than asserted in the protocol.
-func DetachedExited(at Attribution, taskID string, code int) *storev1.StoreEntry {
-	return UnportedEntry(at, "detached_exited", map[string]any{
-		"task_id":            taskID,
-		"detached_work_id":   DetachedWorkMessageID(taskID),
-		"exit_code":          float64(code),
-		"summary":            exitSummary(code),
-		"__unported_because": "conversation.v1 DetachedWorkEnded (Succeeded/Failed) was deleted with no producer-side successor",
-	})
-}
-
-// DetachedLost records detached work we stopped being able to see.
-//
-// UNPORTED, but STILL A SEPARATE OUTCOME FROM FAILURE. Folding it into failure
-// would have this system assert something it never observed: that the work
-// died. The inference is carried so "we watched it exit" stays distinguishable
-// from "we stopped hearing from it".
-//
-// The verdict is stable for a task however many sweeps observe it, so the write
-// identity is too and a re-emission is a no-op at the store.
-func DetachedLost(at Attribution, taskID, inference string) *storev1.StoreEntry {
-	return SyntheticUnportedEntry(at, "detached_lost:"+at.SessionID+":"+taskID, "detached_lost", map[string]any{
-		"task_id":            taskID,
-		"detached_work_id":   DetachedWorkMessageID(taskID),
-		"inference":          inference,
-		"__unported_because": "conversation.v1 DetachedWorkEnded (Lost) was deleted with no producer-side successor",
-	})
-}
-
-func exitSummary(code int) string {
-	return "exited with status " + itoa(code)
-}
-
-// itoa avoids pulling strconv in for one call in a hot path.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
+// wholeStdout wraps a spool's accumulated bytes. ALWAYS SET, even for a command
+// that said nothing: an empty output still draws its header, so a reader can tell
+// "ran and was silent" from "has not run".
+func wholeStdout(output string) *conversationv1.AgentBashOutput {
+	return &conversationv1.AgentBashOutput{
+		Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+			Stdout: output,
+			Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
+		}},
 	}
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	var digits [20]byte
-	i := len(digits)
-	for n > 0 {
-		i--
-		digits[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if negative {
-		i--
-		digits[i] = '-'
-	}
-	return string(digits[i:])
-}
-
-// has reports whether an object carries a key, matching the vendor's camelCase
-// and snake_case spellings of one name.
-func has(o map[string]any, key string) bool {
-	if _, ok := o[key]; ok {
-		return true
-	}
-	want := canon(key)
-	for k := range o {
-		if canon(k) == want {
-			return true
-		}
-	}
-	return false
-}
-
-// canon folds a field name to its case- and separator-insensitive form, so the
-// disk's `toolUseID`, `tool_use_id` and `toolUseId` all collide.
-func canon(s string) string {
-	var b []byte
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case ch == '_' || ch == '-':
-			continue
-		case ch >= 'A' && ch <= 'Z':
-			b = append(b, ch+('a'-'A'))
-		default:
-			b = append(b, ch)
-		}
-	}
-	return string(b)
 }

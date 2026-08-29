@@ -1,19 +1,19 @@
-// Package handler is the sidecar's record→record layer: pure functions with
-// ZERO IO that turn decoded file records into the stored records the shim-store
-// persists.
+// Package handler is the sidecar's record→record layer: pure functions with ZERO
+// IO that turn decoded file records into the store entries shim-store persists.
 //
 // A handler owns a converter and does three things with a batch of frames:
-// attributes each frame (which session, which detached-work card, which file
-// offset), asks the converter what the record IS, and defers the one record
-// whose meaning depends on a line that may not be written yet.
+// ATTRIBUTES each frame (whose book, which file, which offset), asks the
+// converter what the record IS, and DEFERS the one record whose meaning depends
+// on a line that may not be written yet.
 //
 // IT NEVER DECIDES WHETHER A RECORD IS INTERESTING. Curation is a downstream
-// concern; ingestion's only job is that every JSON object on disk ends up in the
-// store as a protobuf shape.
+// concern; ingestion's only job is that every byte on disk ends up in the store
+// as a protobuf shape — as a page line, a run frame, or durable residue.
 package handler
 
 import (
-	"time"
+	"path/filepath"
+	"strings"
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
@@ -21,53 +21,140 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// Producer is the fixed StoreEntryWrite producer identity for the sidecar.
+// Producer is the fixed WriteBatch producer identity for the sidecar.
 const Producer = convert.Producer
 
 // Context / Kind live in the tail package (tailer-owned attribution); aliased
 // here so handler code reads naturally.
 type Context = tail.Context
 
-// nowMillis is the producer wall clock in unix millis. Overridable in tests.
-var nowMillis = func() int64 { return time.Now().UnixMilli() }
-
 // attribute builds the conversion attribution for one frame.
 //
-// `Container` is the detached-work card every record in this file sits inside.
-// It is DERIVED from the task id rather than looked up, which is what lets a
-// spool read after a restart land on the same card as the launch that opened it
-// before one.
+// EVERY IDENTITY COMES FROM THE READER, which derived it from the file path (R9:
+// the main agent is the transcript FILE's session uuid, never the per-record
+// `sessionId`, which diverges from the runtime's answer in ~22% of records).
+// Reading it here rather than re-deriving it means the two halves of the seam
+// cannot disagree about whose book a record lands in.
+//
+// EVERY FIELD IS READ DEFENSIVELY: an empty value means the reader has not
+// supplied it, and the fallbacks below are what keep a book named rather than
+// leaving a record unservable.
 func attribute(ctx *Context, offset int64) convert.Attribution {
+	main := firstNonEmpty(ctx.MainAgentID, ctx.SessionID, sessionIDFromPath(ctx.Path))
 	at := convert.Attribution{
-		SessionID:    ctx.SessionID,
-		Path:         ctx.Path,
-		Offset:       offset,
-		ProducedAtMs: nowMillis(),
+		VendorSessionID: firstNonEmpty(ctx.SessionID, main),
+		MainAgentID:     main,
+		Path:            ctx.Path,
+		FileID:          ctx.FileID,
+		Offset:          offset,
+		TaskID:          ctx.TaskID,
+		Backgrounded:    ctx.SpawnBackgrounded,
 	}
-	if ctx.Kind != tail.KindSessionTranscript && ctx.TaskID != "" {
-		at.Container = convert.DetachedWorkMessageID(ctx.TaskID)
+	switch ctx.Kind {
+	case tail.KindSessionTranscript:
+		// The session's own book is the main agent's.
+		at.AgentID = main
+	case tail.KindAgentTranscript:
+		// A subagent's constituents form ITS OWN book, keyed by the vendor
+		// `agentId`. The SPAWN that created it is a line in the PARENT's book,
+		// which is why the two identities are distinct here.
+		at.AgentID = firstNonEmpty(ctx.AgentID, agentIDFromPath(ctx.Path))
+	default:
+		// A spool or a journal: the run's frames name the run, and the owning
+		// agent is whatever the reader resolved.
+		at.AgentID = firstNonEmpty(ctx.AgentID, main)
 	}
 	return at
 }
 
-// logUnconverted records every record stored as an UNSERVED item.
+// sessionIDFromPath reads the session uuid out of a transcript path, for the case
+// where the reader supplied none.
 //
-// THE TEST CHANGED WITH THE CONTRACT. It used to be "carries no external half",
-// because store.v1's predecessor split every record into an internal and an
-// external half and only the external one reached the daemon. StoreEntry has no
-// such split, so the equivalent question is now which agent_info arm the record
-// landed on: an unserved_item is by construction not a serveable frame, so it
-// never reaches a page and is invisible to the user.
+// `projects/<project>/<session>.jsonl` names it directly; a subagent transcript
+// at `projects/<project>/<session>/subagents/agent-<id>.jsonl` names it as the
+// directory two levels above.
+func sessionIDFromPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	if !strings.HasPrefix(base, "agent-") {
+		return base
+	}
+	return filepath.Base(filepath.Dir(filepath.Dir(path)))
+}
+
+// agentIDFromPath reads a subagent's vendor id out of its transcript file name.
+func agentIDFromPath(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	return strings.TrimPrefix(base, "agent-")
+}
+
+// firstNonEmpty is the defensive read the seam requires: the first value the
+// reader actually supplied.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// logResidue records every record that landed with no path to a page.
 //
-// That is a legitimate outcome and also the one worth counting: it is the
-// running measure of how much of what the vendor writes this schema does not yet
-// model — a number the unported conversions have made much larger.
-func logUnconverted(log *logging.Bound, ctx *Context, entries []*storev1.StoreEntry) {
+// IT IS THE RUNNING MEASURE of how much of what the vendor writes this schema
+// does not carry. An unserved item is by construction not a servable frame, so it
+// never reaches a page and is invisible to the user — a legitimate outcome, and
+// the one worth counting.
+func logResidue(log *logging.Bound, ctx *Context, entries []*storev1.StoreEntry) {
 	for _, entry := range entries {
 		if entry.GetAgentUpdate().GetUnservedItem() == nil {
 			continue
 		}
-		log.With(logging.Context{Operation: "unconverted", Path: ctx.Path, VendorSessionID: ctx.SessionID, TaskID: ctx.TaskID}).
-			LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
+		log.With(logging.Context{
+			Operation: "residue", Path: ctx.Path, FileID: ctx.FileID, TaskID: ctx.TaskID,
+			AgentID: ctx.AgentID, VendorSessionID: ctx.SessionID,
+			UpsertKey: entry.GetUpsertKey(), WriteID: entry.GetWriteId(),
+		}).LogVerbose("record stored as an unserved item: %s", convert.Describe(entry))
 	}
+}
+
+// handleCtx is the correlation base for a handler's own records: the reader's
+// identities in DEDICATED KEYS, never interpolated into a sentence, so the
+// integration loop that reads these logs can filter and join on them.
+func handleCtx(operation string, ctx *Context) logging.Context {
+	return logging.Context{
+		Operation:       operation,
+		Producer:        Producer,
+		Path:            ctx.Path,
+		FileID:          ctx.FileID,
+		TaskID:          ctx.TaskID,
+		AgentID:         firstNonEmpty(ctx.AgentID, ctx.MainAgentID),
+		VendorSessionID: ctx.SessionID,
+	}
+}
+
+// handleWarn is handleCtx at warning level.
+func handleWarn(operation string, ctx *Context) logging.Context {
+	c := handleCtx(operation, ctx)
+	c.Level = "warn"
+	return c
+}
+
+// handleErr is handleCtx at error level.
+func handleErr(operation string, ctx *Context) logging.Context {
+	c := handleCtx(operation, ctx)
+	c.Level = "error"
+	return c
+}
+
+// lookahead returns the decoded record that FOLLOWS a frame in the file, or nil
+// past the end of the batch. It exists for exactly one record: a compaction
+// boundary, whose summary the harness writes as the following line.
+func lookahead(frames []tail.Frame, i int) map[string]any {
+	if i < 0 || i >= len(frames) {
+		return nil
+	}
+	return frames[i].Obj
 }
