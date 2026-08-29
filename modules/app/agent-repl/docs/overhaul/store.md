@@ -22,6 +22,9 @@
 - AgentSessionToken mint/resolve (OpenAgentSession → WatchAgentSession).
 - Idle-producer liveness: ConnectionHeartbeat died deliberately (streams +
   transport own liveness); confirm the sidecar needs no substitute.
+- The -health-check JSON/exit-code contract DIES with the port (ruled
+  2026-08-29); updating agent-shim-doctor to probe the Connect endpoints
+  directly is the store teamlead's task.
 - Store health probing: no health verb exists by design; agent-shim-doctor's
   probe re-derives from the Connect endpoints.
 - Pre-existing Serve/Close race (trackConn after Accept vs Close snapshot):
@@ -79,7 +82,10 @@ bounded streams, clock convention, validation/logging invariants) are in
     authoritative for session/turn LIFECYCLE) or `file` (the sidecar, reading
     the vendor's own disk; authoritative for conversation CONTENT). Two arms
     only; the daemon has no write path.
-  - `write_id` — replay dedup, unique; minted once per write, never
+  - `write_id` — replay dedup, unique; minted once per write and
+    DETERMINISTICALLY (ruled 2026-08-29: a digest of the write's source
+    coordinates — the same bytes re-read mint the same id; randomness
+    breaks replay absorption), never
     regenerated.
   - `upsert_key` — the row's identity, OPAQUE to the store. One row per key; a
     write supersedes it whole. The mapping (a prompt's TurnId, a unit's
@@ -106,6 +112,9 @@ bounded streams, clock convention, validation/logging invariants) are in
 
 ### The lineage keys
 
+- (Supersession note, 2026-08-29: the vetting register's Owed H clause
+  "every record's parent is an AgentId, never nil" is SUPERSEDED by this
+  document's nullable design — this doc wins.)
 - `StoreAgentUpdate.top_level` — the nearest NON-SYNC ancestor (the turn's
   main agent or a detached-work agent, never a sync subagent): which live
   stream carried the work. Copied from the PARENT'S row at insert — one
@@ -159,6 +168,10 @@ bounded streams, clock convention, validation/logging invariants) are in
   SET = catch-up, only newer items; a gap wider than page_size is walked older
   via ReadAgentPage until the caller meets its own mark. The store tracks
   NOTHING about what it previously served.
+- BACKPRESSURE (ruled 2026-08-29): per-subscriber buffering is the
+  lead's call; if bounded, the bound must be SUBSTANTIALLY higher than
+  ~1k frames (daemon bounces produce bursts); a dropped watcher recovers
+  by re-opening with known_through catch-up.
 - `WatchAgentSession { token }` → a STANDING stream of `StoreLineAt` (one
   frame per written line, upserts included; every line carries its pointer so
   the caller always holds a current mark). Pure tail; creates nothing, ends
@@ -241,3 +254,15 @@ bounded streams, clock convention, validation/logging invariants) are in
   (identity per THING, not per arrival). `AgentBash` / `AgentWorkflow` are
   the detached-run frame families; `SessionUpdate` is the session-scoped
   fact stream. The store never opens any of these beyond routing by arm.
+
+### Additional rulings (final-audit triage, 2026-08-29)
+
+- PPROF: an opt-in, LOCAL-ONLY profiling surface (unix socket or
+  loopback; wildcard refused), opened BEFORE the database so a wedged
+  migration/boot is still diagnosable.
+- LOG CORRELATION: consolidated with the project lead under the
+  /debug-emacs-agent-repl logging contract (retired addressing keys die
+  with the schema).
+- KEEP-ALIVE OWNERSHIP: the keep-alive stamp on turns is written by the
+  SHIM at submission; the store's never-served index rides that stamp —
+  the daemon holds no keep-alive knowledge.
