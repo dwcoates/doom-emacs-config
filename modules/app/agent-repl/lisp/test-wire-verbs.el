@@ -696,6 +696,236 @@ persisting, and the suite asserts the SIGNAL, not the log file."
                   :type 'agent-repl-wire-error)))
 
 
+;;;; ---- UpdateShutdownSchedule ------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-at-ms-integer ()
+  "An int64 instant supplied as an integer rides the wire as a number."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-shutdown-schedule-request
+                     '(:action (:arm :schedule
+                                :value (:at-ms 1756400000000
+                                        :reason (:arm :deploy :value nil))))))
+                   "{\"schedule\":{\"atMs\":1756400000000,\"reason\":{\"reason\":\":deploy\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-at-ms-decimal-string ()
+  "protojson's own int64 spelling — a decimal string — is accepted and normalized."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (cdr (assq 'atMs
+                              (cdr (assq 'schedule
+                                         (agent-repl-wire-encode-update-shutdown-schedule-request
+                                          '(:action (:arm :schedule
+                                                     :value (:at-ms "1756400000000"
+                                                             :reason (:arm :deploy :value nil)))))))))
+                   1756400000000))))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-at-ms-not-int64 ()
+  "A non-int64 instant is a malformed request and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-shutdown-schedule-request
+                   '(:action (:arm :schedule
+                              :value (:at-ms "soon" :reason (:arm :deploy :value nil)))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-without-at-ms ()
+  "A schedule with no instant is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-shutdown-schedule-request
+                   '(:action (:arm :schedule :value (:reason (:arm :deploy :value nil)))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-without-reason ()
+  "The drain reason is REQUIRED on schedule: every client's banner names it."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-shutdown-schedule-request
+                   '(:action (:arm :schedule :value (:at-ms 1))))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-cancel ()
+  "Cancel is the whole action, so its arm is the empty message."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-shutdown-schedule-request
+                     '(:action (:arm :cancel :value nil))))
+                   "{\"cancel\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-now ()
+  "An immediate exit carries its reason, which rides the announcement."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-shutdown-schedule-request
+                     '(:action (:arm :now :value (:reason (:arm :operator :value nil))))))
+                   "{\"now\":{\"reason\":{\"reason\":\":operator\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-now-without-reason ()
+  "The drain reason is REQUIRED on now as well."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-shutdown-schedule-request
+                   '(:action (:arm :now :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-action-unset ()
+  "The arm IS the action, so a request without one is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-shutdown-schedule-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-schedule-response-success ()
+  "An armed schedule decodes to the empty success arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-shutdown-schedule-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                   '(:arm :success :value nil)))))
+
+
+;;;; ---- UpdateMergeQueue ------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-pause ()
+  "Pause is the whole action, so its arm is the empty message."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
+                                    '(:action (:arm :pause :value nil))))
+                   "{\"pause\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-resume ()
+  "Resume is the whole action, so its arm is the empty message."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
+                                    '(:action (:arm :resume :value nil))))
+                   "{\"resume\":{}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-evict ()
+  "An eviction names whose merge to take off the queue."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action (list :arm :evict
+                                         :value (list :workspace
+                                                      agent-repl-test-wire-verbs--ref)))))
+                   "{\"evict\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-evict-without-workspace ()
+  "An eviction with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request
+                   '(:action (:arm :evict :value nil)))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-action-unset ()
+  "The arm IS the action, so a request without one is refused."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-update-merge-queue-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-response-error ()
+  "A refused queue change decodes to the empty error arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                   '(:arm :error :value nil)))))
+
+
+;;;; ---- DaemonHealth ----------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-request-empty ()
+  "There is nothing to ask beyond \"you?\", so the request is the empty message."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize (agent-repl-wire-encode-daemon-health-request)) "{}"))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-healthy ()
+  "A healthy verdict decodes to the healthy arm with no payload."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-health-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"healthy\":{}}}"))
+                   '(:arm :success :value (:arm :healthy :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-unhealthy-faults ()
+  "UNHEALTHY IS AN ANSWER: the faults arrive inside success, each with its detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-health-response
+                    (agent-repl-test-wire-verbs--parse
+                     (concat "{\"success\":{\"unhealthy\":{\"faults\":"
+                             "[{\"detail\":\"store down\"},{\"detail\":\"queue stuck\"}]}}}")))
+                   '(:arm :success
+                     :value (:arm :unhealthy
+                             :value (:faults ((:detail "store down")
+                                              (:detail "queue stuck")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-unhealthy-no-faults ()
+  "An omitted repeated field is the empty list, protojson's `no elements'."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-health-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"unhealthy\":{}}}"))
+                   '(:arm :success :value (:arm :unhealthy :value (:faults nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-detail-default ()
+  "An omitted fault detail is the proto3 default, never a missing-field breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{}"))
+                   '(:detail "")))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-unknown-field ()
+  "A DaemonFault kind arm added upstream arrives as an unknown key and is loud."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-daemon-fault
+                   (agent-repl-test-wire-verbs--parse "{\"storeUnreachable\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-verdict-unset ()
+  "A health success with no verdict arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-daemon-health-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-error ()
+  "An unanswerable health question decodes to the empty error arm."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-health-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                   '(:arm :error :value nil)))))
+
+
+;;;; ---- SessionHealth ---------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-request ()
+  "SessionHealthRequest echoes the WorkspaceRef verbatim."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-session-health-request
+                    (list :workspace agent-repl-test-wire-verbs--ref))
+                   '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-request-without-workspace ()
+  "A session-health pull with no workspace is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-session-health-request nil)
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-healthy ()
+  "A healthy session decodes to the healthy arm with no payload."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-health-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"healthy\":{}}}"))
+                   '(:arm :success :value (:arm :healthy :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-unhealthy-faults ()
+  "SessionFault carries the session controller's own dynamic detail."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-health-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"unhealthy\":{\"faults\":[{\"detail\":\"shim gone\"}]}}}"))
+                   '(:arm :success
+                     :value (:arm :unhealthy :value (:faults ((:detail "shim gone")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-unknown-field ()
+  "A SessionFault kind arm added upstream arrives as an unknown key and is loud."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-session-fault
+                   (agent-repl-test-wire-verbs--parse "{\"shimDead\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+
 ;;;; ---- Logging -----------------------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-breach-logs-error ()
@@ -711,6 +941,13 @@ persisting, and the suite asserts the SIGNAL, not the log file."
 
 
 ;;;; ---- Arm lists pinned against the generated Go bindings --------------
+
+(ert-deftest agent-repl-test-wire-verbs-result-arms-pinned ()
+  "Every response's result oneof has exactly the two arms this codec decodes."
+  (dolist (entry agent-repl-test-wire-verbs--result-oneofs)
+    (should (equal (sort (agent-repl-test--generated-oneof-arms (nth 0 entry) (nth 1 entry))
+                         #'string<)
+                   '("error" "success")))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-form-arms-pinned ()
   "CreateWorkspaceRequest's form oneof has exactly the two arms encoded here."
@@ -757,6 +994,38 @@ persisting, and the suite asserts the SIGNAL, not the log file."
                   "agentrepl/v1/endpoint_submit_prompt.pb.go"
                   "SubmitPromptError")
                  '("merging"))))
+
+(ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
+  "UpdateShutdownScheduleRequest's action oneof has exactly the three arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_shutdown_schedule.pb.go"
+                        "UpdateShutdownScheduleRequest")
+                       #'string<)
+                 '("cancel" "now" "schedule"))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
+  "UpdateMergeQueueRequest's action oneof has exactly the three arms encoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_merge_queue.pb.go"
+                        "UpdateMergeQueueRequest")
+                       #'string<)
+                 '("evict" "pause" "resume"))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
+  "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_daemon_health.pb.go"
+                        "DaemonHealthSuccess")
+                       #'string<)
+                 '("healthy" "unhealthy"))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-arms-pinned ()
+  "SessionHealthSuccess's health oneof has exactly the two verdict arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_session_health.pb.go"
+                        "SessionHealthSuccess")
+                       #'string<)
+                 '("healthy" "unhealthy"))))
 
 (provide 'test-wire-verbs)
 
