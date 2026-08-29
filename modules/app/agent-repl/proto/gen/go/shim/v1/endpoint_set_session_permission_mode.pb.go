@@ -193,12 +193,16 @@ func (*SetSessionPermissionModeSuccess) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_set_session_permission_mode_proto_rawDescGZIP(), []int{2}
 }
 
-// Not set. `kind` arms are DERIVED at the wave from the shim's real refusal
-// sites (no session, a mode the vendor refused).
+// Not set. THE ARM IS WHY.
 type SetSessionPermissionModeFailure struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The shim's account, for a human and for logs; never switched on.
-	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*SetSessionPermissionModeFailure_NoSession
+	//	*SetSessionPermissionModeFailure_VendorRefused
+	Kind          isSetSessionPermissionModeFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -240,6 +244,121 @@ func (x *SetSessionPermissionModeFailure) GetDetail() string {
 	return ""
 }
 
+func (x *SetSessionPermissionModeFailure) GetKind() isSetSessionPermissionModeFailure_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *SetSessionPermissionModeFailure) GetNoSession() *SetSessionPermissionModeNoSession {
+	if x != nil {
+		if x, ok := x.Kind.(*SetSessionPermissionModeFailure_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *SetSessionPermissionModeFailure) GetVendorRefused() *SetSessionPermissionModeVendorRefused {
+	if x != nil {
+		if x, ok := x.Kind.(*SetSessionPermissionModeFailure_VendorRefused); ok {
+			return x.VendorRefused
+		}
+	}
+	return nil
+}
+
+type isSetSessionPermissionModeFailure_Kind interface {
+	isSetSessionPermissionModeFailure_Kind()
+}
+
+type SetSessionPermissionModeFailure_NoSession struct {
+	// No session is open on this shim.
+	NoSession *SetSessionPermissionModeNoSession `protobuf:"bytes,2,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type SetSessionPermissionModeFailure_VendorRefused struct {
+	// The vendor refused the mode; `detail` carries its wording.
+	VendorRefused *SetSessionPermissionModeVendorRefused `protobuf:"bytes,3,opt,name=vendor_refused,json=vendorRefused,proto3,oneof"`
+}
+
+func (*SetSessionPermissionModeFailure_NoSession) isSetSessionPermissionModeFailure_Kind() {}
+
+func (*SetSessionPermissionModeFailure_VendorRefused) isSetSessionPermissionModeFailure_Kind() {}
+
+type SetSessionPermissionModeNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSessionPermissionModeNoSession) Reset() {
+	*x = SetSessionPermissionModeNoSession{}
+	mi := &file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionPermissionModeNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionPermissionModeNoSession) ProtoMessage() {}
+
+func (x *SetSessionPermissionModeNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionPermissionModeNoSession.ProtoReflect.Descriptor instead.
+func (*SetSessionPermissionModeNoSession) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_set_session_permission_mode_proto_rawDescGZIP(), []int{4}
+}
+
+type SetSessionPermissionModeVendorRefused struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSessionPermissionModeVendorRefused) Reset() {
+	*x = SetSessionPermissionModeVendorRefused{}
+	mi := &file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionPermissionModeVendorRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionPermissionModeVendorRefused) ProtoMessage() {}
+
+func (x *SetSessionPermissionModeVendorRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionPermissionModeVendorRefused.ProtoReflect.Descriptor instead.
+func (*SetSessionPermissionModeVendorRefused) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_set_session_permission_mode_proto_rawDescGZIP(), []int{5}
+}
+
 var File_shim_v1_endpoint_set_session_permission_mode_proto protoreflect.FileDescriptor
 
 const file_shim_v1_endpoint_set_session_permission_mode_proto_rawDesc = "" +
@@ -251,9 +370,15 @@ const file_shim_v1_endpoint_set_session_permission_mode_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2(.shim.v1.SetSessionPermissionModeSuccessH\x00R\asuccess\x12D\n" +
 	"\afailure\x18\x02 \x01(\v2(.shim.v1.SetSessionPermissionModeFailureH\x00R\afailureB\b\n" +
 	"\x06result\"!\n" +
-	"\x1fSetSessionPermissionModeSuccess\"9\n" +
+	"\x1fSetSessionPermissionModeSuccess\"\xe7\x01\n" +
 	"\x1fSetSessionPermissionModeFailure\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detailB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x06detail\x18\x01 \x01(\tR\x06detail\x12K\n" +
+	"\n" +
+	"no_session\x18\x02 \x01(\v2*.shim.v1.SetSessionPermissionModeNoSessionH\x00R\tnoSession\x12W\n" +
+	"\x0evendor_refused\x18\x03 \x01(\v2..shim.v1.SetSessionPermissionModeVendorRefusedH\x00R\rvendorRefusedB\x06\n" +
+	"\x04kind\"#\n" +
+	"!SetSessionPermissionModeNoSession\"'\n" +
+	"%SetSessionPermissionModeVendorRefusedB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_set_session_permission_mode_proto_rawDescOnce sync.Once
@@ -267,23 +392,27 @@ func file_shim_v1_endpoint_set_session_permission_mode_proto_rawDescGZIP() []byt
 	return file_shim_v1_endpoint_set_session_permission_mode_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_shim_v1_endpoint_set_session_permission_mode_proto_goTypes = []any{
-	(*SetSessionPermissionModeRequest)(nil),  // 0: shim.v1.SetSessionPermissionModeRequest
-	(*SetSessionPermissionModeResponse)(nil), // 1: shim.v1.SetSessionPermissionModeResponse
-	(*SetSessionPermissionModeSuccess)(nil),  // 2: shim.v1.SetSessionPermissionModeSuccess
-	(*SetSessionPermissionModeFailure)(nil),  // 3: shim.v1.SetSessionPermissionModeFailure
-	(*v1.AgentPermissionMode)(nil),           // 4: conversation.v1.AgentPermissionMode
+	(*SetSessionPermissionModeRequest)(nil),       // 0: shim.v1.SetSessionPermissionModeRequest
+	(*SetSessionPermissionModeResponse)(nil),      // 1: shim.v1.SetSessionPermissionModeResponse
+	(*SetSessionPermissionModeSuccess)(nil),       // 2: shim.v1.SetSessionPermissionModeSuccess
+	(*SetSessionPermissionModeFailure)(nil),       // 3: shim.v1.SetSessionPermissionModeFailure
+	(*SetSessionPermissionModeNoSession)(nil),     // 4: shim.v1.SetSessionPermissionModeNoSession
+	(*SetSessionPermissionModeVendorRefused)(nil), // 5: shim.v1.SetSessionPermissionModeVendorRefused
+	(*v1.AgentPermissionMode)(nil),                // 6: conversation.v1.AgentPermissionMode
 }
 var file_shim_v1_endpoint_set_session_permission_mode_proto_depIdxs = []int32{
-	4, // 0: shim.v1.SetSessionPermissionModeRequest.permission_mode:type_name -> conversation.v1.AgentPermissionMode
+	6, // 0: shim.v1.SetSessionPermissionModeRequest.permission_mode:type_name -> conversation.v1.AgentPermissionMode
 	2, // 1: shim.v1.SetSessionPermissionModeResponse.success:type_name -> shim.v1.SetSessionPermissionModeSuccess
 	3, // 2: shim.v1.SetSessionPermissionModeResponse.failure:type_name -> shim.v1.SetSessionPermissionModeFailure
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: shim.v1.SetSessionPermissionModeFailure.no_session:type_name -> shim.v1.SetSessionPermissionModeNoSession
+	5, // 4: shim.v1.SetSessionPermissionModeFailure.vendor_refused:type_name -> shim.v1.SetSessionPermissionModeVendorRefused
+	5, // [5:5] is the sub-list for method output_type
+	5, // [5:5] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_set_session_permission_mode_proto_init() }
@@ -295,13 +424,17 @@ func file_shim_v1_endpoint_set_session_permission_mode_proto_init() {
 		(*SetSessionPermissionModeResponse_Success)(nil),
 		(*SetSessionPermissionModeResponse_Failure)(nil),
 	}
+	file_shim_v1_endpoint_set_session_permission_mode_proto_msgTypes[3].OneofWrappers = []any{
+		(*SetSessionPermissionModeFailure_NoSession)(nil),
+		(*SetSessionPermissionModeFailure_VendorRefused)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_set_session_permission_mode_proto_rawDesc), len(file_shim_v1_endpoint_set_session_permission_mode_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
