@@ -139,17 +139,27 @@ func storeRefusal(err error) *refusal {
 	}
 }
 
-// logStoreFailure records a storage failure at error level. A refused request
-// (ErrInvalid, ErrStalePointer) is the caller's fault and is warned about; a
-// database failure is the store's own and is an error.
+// logStoreFailure records that a request ended in the failure arm BECAUSE of
+// the storage layer.
+//
+// EVERY ERROR IS LOGGED EXACTLY ONCE BY ITS OWNING LAYER, and internal/db
+// already logged this one with its own statement and table context — so this
+// is a VERBOSE trace that ties the rpc to it, not a second error record. The
+// refusals this layer owns (validation, tokens, overflow) go through
+// logRefusal at warn instead.
 func (s *Server) logStoreFailure(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
 	fields.Operation = operation
 	fields.RefusalSite = ref.site
-	if ref.site == SiteDatabaseFailure {
-		fields.Level = "error"
-	} else {
-		fields.Level = "warn"
-	}
+	fields.Level = "debug"
+	log.LogVerbose(fields, "answering the failure arm: %s", ref.detail)
+}
+
+// logOwnFailure records a failure this layer OWNS — one no lower layer saw, so
+// nothing else will record it.
+func (s *Server) logOwnFailure(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
+	fields.Operation = operation
+	fields.RefusalSite = ref.site
+	fields.Level = "error"
 	log.Log(fields, "failed: %s", ref.detail)
 }
 
@@ -226,14 +236,14 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 	}
 	if opened.Page == nil {
 		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no page for this open"}
-		s.logStoreFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
 
 	token, err := s.tokens.mint(agentID, opened.PinSeq)
 	if err != nil {
 		ref := &refusal{site: SiteDatabaseFailure, detail: err.Error()}
-		s.logStoreFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
 	log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WatchTokenHash: tokenHash(token), WriteSeq: opened.PinSeq},
@@ -373,7 +383,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 	}
 	if page == nil {
 		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no page for this read"}
-		s.logStoreFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
+		s.logOwnFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
 		return readPageFailure(ref), nil
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID}, "page served lines=%d", len(page.GetLines()))
@@ -416,7 +426,7 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 	}
 	if live == nil {
 		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no live-work answer"}
-		s.logStoreFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		s.logOwnFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
 		return liveWorkFailure(ref), nil
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"},
