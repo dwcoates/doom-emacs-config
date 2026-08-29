@@ -397,7 +397,7 @@ Signals an error if no supported notification tool is found."
     (agent-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'agent-repl--notify-backend-terminal-notifier)
    (t
-    (agent-repl--error
+    (agent-repl--fatal
      nil "select-notification-backend FAILED alerter=%s osascript=%s terminal-notifier=%s"
      agent-repl-alerter-executable agent-repl-osascript-executable
      agent-repl-terminal-notifier-executable))))
