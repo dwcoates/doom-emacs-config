@@ -31,3 +31,7 @@ Final-audit triage, 2026-08-29. Absence is silence, not prohibition.
 - The watch-stream slow-consumer DISCONNECT policy details: only the
   raise-the-bound guidance was carried; the disconnect-vs-block policy
   is the lead's.
+- (Prohibition audit, later 2026-08-29) The held-spool NEVER-DROP rule
+  was STRIPPED back to silence — an aged unowned spool's fate is the
+  implementer's (the general unconvertible-material-is-never-dropped
+  line from before the triage still stands on its own).

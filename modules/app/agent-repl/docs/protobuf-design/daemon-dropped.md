@@ -47,3 +47,5 @@ implementing lead is free to reinvent the mechanism if it proves needed.
   call lives in the store.
 - The footer Status×SubStatus coverage review (a pre-freeze gate by
   earlier ruling): WAIVED outright.
+- (Prohibition audit, later 2026-08-29) The WSM retention clause (live
+  never pruned, capped terminals) was STRIPPED back to silence.
