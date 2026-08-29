@@ -1059,11 +1059,31 @@
     {
       "name": "turn-stop-max-structured-output-retries",
       "covers": "turn-stop failure arm: error_max_structured_output_retries",
-      "prompt": "Answer with a structured output that does not satisfy the schema.",
+      "prompt": "Answer with a structured output that satisfies the session's output schema. The schema requires an integer property `impossible` that is at once >= 10 and <= 5. Do your best and keep trying.",
       "expect": [
-        "result:error_max_structured_output_retries"
+        "result:error_max_structured_output_retries",
+        "result.terminal_reason \"structured_output_retry_exhausted\"",
+        "the vendor's retry attempts visible in the stream"
       ],
-      "manual": "Requires an outputFormat/structured-output schema the model repeatedly fails to satisfy. Set `options.outputFormat` to a schema with an impossible constraint at capture time; there is no prompt-only provocation."
+      "options": {
+        "outputFormat": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "impossible": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 5
+              }
+            },
+            "required": [
+              "impossible"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
     },
     {
       "name": "turn-stop-error-during-execution",

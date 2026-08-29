@@ -359,6 +359,33 @@ describe("the MCP scenarios point at the real echo server", () => {
   });
 });
 
+describe("the structured-output scenario carries an unsatisfiable schema", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const scenario = doc.scenarios.find((s) => s.name === "turn-stop-max-structured-output-retries");
+
+  it("declares a json_schema output format", () => {
+    expect(scenario.options.outputFormat.type).toBe("json_schema");
+  });
+
+  it("requires the impossible property, so the model cannot omit it", () => {
+    expect(scenario.options.outputFormat.schema.required).toEqual(["impossible"]);
+  });
+
+  it("makes that property UNSATISFIABLE: minimum above maximum admits no integer", () => {
+    const field = scenario.options.outputFormat.schema.properties.impossible;
+    expect(field.minimum).toBeGreaterThan(field.maximum);
+  });
+
+  it("forbids additional properties, so no other key can satisfy the schema instead", () => {
+    expect(scenario.options.outputFormat.schema.additionalProperties).toBe(false);
+  });
+
+  it("is now prompt-driven rather than an operator instruction", () => {
+    expect(scenario.manual).toBeUndefined();
+    expect(isPromptDriven(scenario)).toBe(true);
+  });
+});
+
 describe("cwdSlug", () => {
   it("replaces every slash and dot, matching the observed vendor spelling", () => {
     expect(cwdSlug("/Users/x/.config/y")).toBe("-Users-x--config-y");
