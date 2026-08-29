@@ -588,6 +588,16 @@ them).
 Keybindings.el is shared: each owner edits only its own commands' lines; the
 teamlead resolves merge seams.
 
+WAVE-2 REGROUP (project-lead concurrency cap: at most three running agents per
+lead): the seven wave-2 rows above are dispatched as THREE briefs, in this
+critical-path order — W2-A "stream core" = link + host (+ notifications
+adaptation) + cold-start; W2-B "tabs and views" = roster (+ status,
+workspace, session finish reactions) + webview (frontend, webview-recovery,
+open-progress, panels, window, popup); W2-C "user commands" = composer +
+verbs (+ worktree slimming, doctor, deleting merge-handlers.el and
+workspace-create-client.el). Seams between the three are exactly the §6–§12
+names; each brief owns every file listed for its constituent rows.
+
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 
 - E1 RESOLVED: SubmitPromptRequest.origin landed, REQUIRED.
