@@ -86,7 +86,17 @@ message HostNotificationKind {
   oneof kind {
     HostNotificationAgentAddressed agent_addressed = 1;
     HostNotificationPermissionRequested permission_requested = 2;
+    // A question batch arrived and blocks the agent — the same attention
+    // treatment as a permission ask; the daemon also sets the attention
+    // marker.
+    HostNotificationQuestionAsked question_asked = 3;
   }
+}
+
+// A question blocks the agent on the user's choice.
+message HostNotificationQuestionAsked {
+  // The first question's chip label, for the banner line.
+  string header = 1;
 }
 
 // The agent addressed the user directly.
