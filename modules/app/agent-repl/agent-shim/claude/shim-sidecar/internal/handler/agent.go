@@ -36,11 +36,11 @@ func (h *AgentTranscriptHandler) SetObserver(o convert.Observer) { h.conv.SetObs
 
 // Handle implements tail.Handler.
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Task: ctx.TaskID}).
+	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 	out := convertFrames(h.conv, h.log, frames, ctx)
 	logResidue(h.log, ctx, out)
-	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Task: ctx.TaskID}).
+	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }

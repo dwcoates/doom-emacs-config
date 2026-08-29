@@ -146,15 +146,15 @@ const KeepaliveMarker = "<!--agent-repl:keepalive-->"
 // reason to leave a record out of the database.
 func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
 	kind := str(record["type"])
-	c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Task: at.TaskID}).
-		LogVerbose("converting line type=%q offset=%d vendor_session_id=%s agent_id=%s", kind, at.Offset, at.VendorSessionID, at.AgentID)
+	c.log.With(at.ctxFor("convert-line")).
+		LogVerbose("converting line type=%q", kind)
 
 	switch kind {
 	case "":
 		// It PARSED, so it is not unparsed; we simply cannot say what it is,
 		// which is exactly what the unknown arm means.
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Level: "warn"}).
-			Log("transcript line at offset=%d carries no %q field; stored as unknown residue with no path to a page", at.Offset, "type")
+		c.log.With(at.ctxWarn("convert-line")).
+			Log("transcript line carries no %q field; stored as unknown residue with no path to a page", "type")
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "type", record)}
 	case "user":
 		return c.userLine(record, at)
@@ -169,12 +169,12 @@ func (c *Converter) Line(record map[string]any, at Attribution, next map[string]
 			// CLI bookkeeping the harness writes about itself. We know exactly
 			// what each one is and have decided not to carry it, which is a
 			// different situation from not knowing.
-			c.log.With(logging.Context{Operation: "withhold", Path: at.Path}).
-				LogVerbose("line type=%q at offset=%d withheld as vendor_specific", kind, at.Offset)
+			c.log.With(at.ctxFor("withhold")).
+				LogVerbose("line type=%q withheld as vendor_specific", kind)
 			return []*storev1.StoreEntry{VendorSpecificEntry(at, kind, record)}
 		}
-		c.log.With(logging.Context{Operation: "convert-line", Path: at.Path, Level: "warn"}).
-			Log("transcript line type=%q at offset=%d is not modeled; stored as unknown residue", kind, at.Offset)
+		c.log.With(at.ctxWarn("convert-line")).
+			Log("transcript line type=%q is not modeled; stored as unknown residue", kind)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
