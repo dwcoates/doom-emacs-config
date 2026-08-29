@@ -2161,6 +2161,14 @@ export const AgentToolCallProgressSchema: GenMessage<AgentToolCallProgress> = /*
  * consumer asking "whose work is this" reads this and never the enclosing unit's
  * identity.
  *
+ * CROSS-PLANE MINTING RULE (binding on every producer, so the stream plane and
+ * the file plane agree on one id for one agent): the MAIN agent's id is the
+ * ORIGINAL vendor session id (a resume, rotation or fork keeps it); a SUBAGENT's
+ * id is the `tool_use_id` of the call that SPAWNED it, as the vendor's stream
+ * carries it and as the file plane records it in the agent's meta.json. The
+ * space stays the agent's own — consumers never derive the spawning unit's
+ * identity from it, even though the bytes coincide.
+ *
  * @generated from message conversation.v1.AgentId
  */
 export type AgentId = Message<"conversation.v1.AgentId"> & {
