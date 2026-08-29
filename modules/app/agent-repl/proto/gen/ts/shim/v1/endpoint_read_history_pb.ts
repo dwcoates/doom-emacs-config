@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_read_history.proto.
  */
 export const file_shim_v1_endpoint_read_history: GenFile = /*@__PURE__*/
-  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3JlYWRfaGlzdG9yeS5wcm90bxIHc2hpbS52MSLLAQoSUmVhZEhpc3RvcnlSZXF1ZXN0Ei0KBnRhcmdldBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESEQoJcGFnZV9zaXplGAIgASgNEioKBWZpcnN0GAMgASgLMhkuc2hpbS52MS5SZWFkSGlzdG9yeUZpcnN0SAASMAoFYWZ0ZXIYBCABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIAEIKCghwb3NpdGlvbkIJCgdfdGFyZ2V0IhIKEFJlYWRIaXN0b3J5Rmlyc3QifwoTUmVhZEhpc3RvcnlSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeVN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeUZhaWx1cmVIAEIICgZyZXN1bHQiQAoSUmVhZEhpc3RvcnlTdWNjZXNzEioKBHBhZ2UYASABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2UiJAoSUmVhZEhpc3RvcnlGYWlsdXJlEg4KBmRldGFpbBgBIAEoCUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
+  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3JlYWRfaGlzdG9yeS5wcm90bxIHc2hpbS52MSLLAQoSUmVhZEhpc3RvcnlSZXF1ZXN0Ei0KBnRhcmdldBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkSAGIAQESEQoJcGFnZV9zaXplGAIgASgNEioKBWZpcnN0GAMgASgLMhkuc2hpbS52MS5SZWFkSGlzdG9yeUZpcnN0SAASMAoFYWZ0ZXIYBCABKAsyHy5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBvaW50ZXJIAEIKCghwb3NpdGlvbkIJCgdfdGFyZ2V0IhIKEFJlYWRIaXN0b3J5Rmlyc3QifwoTUmVhZEhpc3RvcnlSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeVN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5SZWFkSGlzdG9yeUZhaWx1cmVIAEIICgZyZXN1bHQiQAoSUmVhZEhpc3RvcnlTdWNjZXNzEioKBHBhZ2UYASABKAsyHC5jb252ZXJzYXRpb24udjEuSGlzdG9yeVBhZ2Ui5QEKElJlYWRIaXN0b3J5RmFpbHVyZRIOCgZkZXRhaWwYASABKAkSOQoNdW5rbm93bl9hZ2VudBgCIAEoCzIgLnNoaW0udjEuUmVhZEhpc3RvcnlVbmtub3duQWdlbnRIABI5Cg1zdGFsZV9wb2ludGVyGAMgASgLMiAuc2hpbS52MS5SZWFkSGlzdG9yeVN0YWxlUG9pbnRlckgAEkEKEXN0b3JlX3VuYXZhaWxhYmxlGAQgASgLMiQuc2hpbS52MS5SZWFkSGlzdG9yeVN0b3JlVW5hdmFpbGFibGVIAEIGCgRraW5kIhkKF1JlYWRIaXN0b3J5VW5rbm93bkFnZW50IhkKF1JlYWRIaXN0b3J5U3RhbGVQb2ludGVyIh0KG1JlYWRIaXN0b3J5U3RvcmVVbmF2YWlsYWJsZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity, file_conversation_v1_history]);
 
 /**
  * Which agent's history, and where in it.
@@ -144,9 +144,7 @@ export const ReadHistorySuccessSchema: GenMessage<ReadHistorySuccess> = /*@__PUR
   messageDesc(file_shim_v1_endpoint_read_history, 3);
 
 /**
- * Not served. `kind` arms are DERIVED at the wave from the shim's real
- * refusal sites: an unknown agent, a continuation the store no longer
- * honors, the store unavailable.
+ * Not served. THE ARM IS WHY.
  *
  * @generated from message shim.v1.ReadHistoryFailure
  */
@@ -157,6 +155,35 @@ export type ReadHistoryFailure = Message<"shim.v1.ReadHistoryFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof shim.v1.ReadHistoryFailure.kind
+   */
+  kind: {
+    /**
+     * The addressed agent is not known.
+     *
+     * @generated from field: shim.v1.ReadHistoryUnknownAgent unknown_agent = 2;
+     */
+    value: ReadHistoryUnknownAgent;
+    case: "unknownAgent";
+  } | {
+    /**
+     * The echoed pointer names a position the store no longer honors.
+     *
+     * @generated from field: shim.v1.ReadHistoryStalePointer stale_pointer = 3;
+     */
+    value: ReadHistoryStalePointer;
+    case: "stalePointer";
+  } | {
+    /**
+     * The store could not be reached.
+     *
+     * @generated from field: shim.v1.ReadHistoryStoreUnavailable store_unavailable = 4;
+     */
+    value: ReadHistoryStoreUnavailable;
+    case: "storeUnavailable";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -165,4 +192,43 @@ export type ReadHistoryFailure = Message<"shim.v1.ReadHistoryFailure"> & {
  */
 export const ReadHistoryFailureSchema: GenMessage<ReadHistoryFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_read_history, 4);
+
+/**
+ * @generated from message shim.v1.ReadHistoryUnknownAgent
+ */
+export type ReadHistoryUnknownAgent = Message<"shim.v1.ReadHistoryUnknownAgent"> & {
+};
+
+/**
+ * Describes the message shim.v1.ReadHistoryUnknownAgent.
+ * Use `create(ReadHistoryUnknownAgentSchema)` to create a new message.
+ */
+export const ReadHistoryUnknownAgentSchema: GenMessage<ReadHistoryUnknownAgent> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_read_history, 5);
+
+/**
+ * @generated from message shim.v1.ReadHistoryStalePointer
+ */
+export type ReadHistoryStalePointer = Message<"shim.v1.ReadHistoryStalePointer"> & {
+};
+
+/**
+ * Describes the message shim.v1.ReadHistoryStalePointer.
+ * Use `create(ReadHistoryStalePointerSchema)` to create a new message.
+ */
+export const ReadHistoryStalePointerSchema: GenMessage<ReadHistoryStalePointer> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_read_history, 6);
+
+/**
+ * @generated from message shim.v1.ReadHistoryStoreUnavailable
+ */
+export type ReadHistoryStoreUnavailable = Message<"shim.v1.ReadHistoryStoreUnavailable"> & {
+};
+
+/**
+ * Describes the message shim.v1.ReadHistoryStoreUnavailable.
+ * Use `create(ReadHistoryStoreUnavailableSchema)` to create a new message.
+ */
+export const ReadHistoryStoreUnavailableSchema: GenMessage<ReadHistoryStoreUnavailable> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_read_history, 7);
 
