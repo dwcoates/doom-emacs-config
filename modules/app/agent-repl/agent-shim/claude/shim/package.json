@@ -11,6 +11,8 @@
     "build": "node build.mjs",
     "pretest": "npm run ensure-deps",
     "test": "vitest run",
+    "pretest:integration": "npm run build",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "precoverage": "npm run ensure-deps",
     "coverage": "vitest run --coverage",
     "pretypecheck": "npm run ensure-deps",
