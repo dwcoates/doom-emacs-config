@@ -169,3 +169,22 @@ func cleanGitEnv(env []string) []string {
 	}
 	return out
 }
+
+// AddWorktree creates a branch off the default branch and checks it out into a
+// sibling worktree directory, answering that directory.
+func (r *Repo) AddWorktree(name string) string {
+	r.t.Helper()
+	dir := filepath.Join(filepath.Dir(r.Dir), filepath.Base(r.Dir)+"-"+name)
+	r.git("worktree", "add", "-b", name, dir, DefaultBranch)
+	return dir
+}
+
+// CommitIn writes and commits a file inside one of the repository's worktrees.
+func (r *Repo) CommitIn(worktree, file, content string) string {
+	r.t.Helper()
+	writeFile(r.t, filepath.Join(worktree, file), content)
+	sub := &Repo{Dir: worktree, t: r.t}
+	sub.git("add", file)
+	sub.git("commit", "-m", "add "+file)
+	return strings.TrimSpace(sub.gitOut("rev-parse", "HEAD"))
+}
