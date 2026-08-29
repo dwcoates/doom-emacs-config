@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_update_agent.proto.
  */
 export const file_shim_v1_endpoint_update_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3VwZGF0ZV9hZ2VudC5wcm90bxIHc2hpbS52MSJ6ChJVcGRhdGVBZ2VudFJlcXVlc3QSLQoGdGFyZ2V0GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWRIAIgBARIqCgVpbnB1dBgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudElucHV0QgkKB190YXJnZXQifwoTVXBkYXRlQWdlbnRSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudEZhaWx1cmVIAEIICgZyZXN1bHQiFAoSVXBkYXRlQWdlbnRTdWNjZXNzIiQKElVwZGF0ZUFnZW50RmFpbHVyZRIOCgZkZXRhaWwYASABKAlCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_agent_activity]);
+  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3VwZGF0ZV9hZ2VudC5wcm90bxIHc2hpbS52MSJ6ChJVcGRhdGVBZ2VudFJlcXVlc3QSLQoGdGFyZ2V0GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWRIAIgBARIqCgVpbnB1dBgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudElucHV0QgkKB190YXJnZXQifwoTVXBkYXRlQWdlbnRSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudEZhaWx1cmVIAEIICgZyZXN1bHQiFAoSVXBkYXRlQWdlbnRTdWNjZXNzItACChJVcGRhdGVBZ2VudEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjkKDXVua25vd25fYWdlbnQYAiABKAsyIC5zaGltLnYxLlVwZGF0ZUFnZW50VW5rbm93bkFnZW50SAASNAoLbm9fb3Blbl9hc2sYAyABKAsyHS5zaGltLnYxLlVwZGF0ZUFnZW50Tm9PcGVuQXNrSAASPQoPYW5zd2VyX21pc21hdGNoGAQgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudEFuc3dlck1pc21hdGNoSAASPQoPbm90aGluZ19ydW5uaW5nGAUgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudE5vdGhpbmdSdW5uaW5nSAASMwoKbm9fc2Vzc2lvbhgGIAEoCzIdLnNoaW0udjEuVXBkYXRlQWdlbnROb1Nlc3Npb25IAEIGCgRraW5kIhkKF1VwZGF0ZUFnZW50VW5rbm93bkFnZW50IhYKFFVwZGF0ZUFnZW50Tm9PcGVuQXNrIhsKGVVwZGF0ZUFnZW50QW5zd2VyTWlzbWF0Y2giGwoZVXBkYXRlQWdlbnROb3RoaW5nUnVubmluZyIWChRVcGRhdGVBZ2VudE5vU2Vzc2lvbkIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent, file_conversation_v1_agent_activity]);
 
 /**
  * The input and its address.
@@ -96,8 +96,7 @@ export const UpdateAgentSuccessSchema: GenMessage<UpdateAgentSuccess> = /*@__PUR
   messageDesc(file_shim_v1_endpoint_update_agent, 2);
 
 /**
- * Not delivered: unknown agent, no open ask, a stop with nothing running.
- * `kind` arms are DERIVED at the wave from the shim's real refusal sites.
+ * Not delivered. THE ARM IS WHY.
  *
  * @generated from message shim.v1.UpdateAgentFailure
  */
@@ -108,6 +107,51 @@ export type UpdateAgentFailure = Message<"shim.v1.UpdateAgentFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof shim.v1.UpdateAgentFailure.kind
+   */
+  kind: {
+    /**
+     * The addressed agent is not known to this shim.
+     *
+     * @generated from field: shim.v1.UpdateAgentUnknownAgent unknown_agent = 2;
+     */
+    value: UpdateAgentUnknownAgent;
+    case: "unknownAgent";
+  } | {
+    /**
+     * An answer was sent but the agent has no open ask.
+     *
+     * @generated from field: shim.v1.UpdateAgentNoOpenAsk no_open_ask = 3;
+     */
+    value: UpdateAgentNoOpenAsk;
+    case: "noOpenAsk";
+  } | {
+    /**
+     * The answer's echoed values do not match the pending ask.
+     *
+     * @generated from field: shim.v1.UpdateAgentAnswerMismatch answer_mismatch = 4;
+     */
+    value: UpdateAgentAnswerMismatch;
+    case: "answerMismatch";
+  } | {
+    /**
+     * A stop was sent but nothing is running on the agent.
+     *
+     * @generated from field: shim.v1.UpdateAgentNothingRunning nothing_running = 5;
+     */
+    value: UpdateAgentNothingRunning;
+    case: "nothingRunning";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.UpdateAgentNoSession no_session = 6;
+     */
+    value: UpdateAgentNoSession;
+    case: "noSession";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -116,4 +160,69 @@ export type UpdateAgentFailure = Message<"shim.v1.UpdateAgentFailure"> & {
  */
 export const UpdateAgentFailureSchema: GenMessage<UpdateAgentFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_update_agent, 3);
+
+/**
+ * @generated from message shim.v1.UpdateAgentUnknownAgent
+ */
+export type UpdateAgentUnknownAgent = Message<"shim.v1.UpdateAgentUnknownAgent"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentUnknownAgent.
+ * Use `create(UpdateAgentUnknownAgentSchema)` to create a new message.
+ */
+export const UpdateAgentUnknownAgentSchema: GenMessage<UpdateAgentUnknownAgent> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 4);
+
+/**
+ * @generated from message shim.v1.UpdateAgentNoOpenAsk
+ */
+export type UpdateAgentNoOpenAsk = Message<"shim.v1.UpdateAgentNoOpenAsk"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentNoOpenAsk.
+ * Use `create(UpdateAgentNoOpenAskSchema)` to create a new message.
+ */
+export const UpdateAgentNoOpenAskSchema: GenMessage<UpdateAgentNoOpenAsk> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 5);
+
+/**
+ * @generated from message shim.v1.UpdateAgentAnswerMismatch
+ */
+export type UpdateAgentAnswerMismatch = Message<"shim.v1.UpdateAgentAnswerMismatch"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentAnswerMismatch.
+ * Use `create(UpdateAgentAnswerMismatchSchema)` to create a new message.
+ */
+export const UpdateAgentAnswerMismatchSchema: GenMessage<UpdateAgentAnswerMismatch> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 6);
+
+/**
+ * @generated from message shim.v1.UpdateAgentNothingRunning
+ */
+export type UpdateAgentNothingRunning = Message<"shim.v1.UpdateAgentNothingRunning"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentNothingRunning.
+ * Use `create(UpdateAgentNothingRunningSchema)` to create a new message.
+ */
+export const UpdateAgentNothingRunningSchema: GenMessage<UpdateAgentNothingRunning> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 7);
+
+/**
+ * @generated from message shim.v1.UpdateAgentNoSession
+ */
+export type UpdateAgentNoSession = Message<"shim.v1.UpdateAgentNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentNoSession.
+ * Use `create(UpdateAgentNoSessionSchema)` to create a new message.
+ */
+export const UpdateAgentNoSessionSchema: GenMessage<UpdateAgentNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 8);
 
