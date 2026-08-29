@@ -8170,3 +8170,15 @@ Three WEB LINK rpcs carry the verified pty mechanism: `OpenLogin
 replay first), concluding with the `closed` terminal frame when the login
 child exits; `CloseLogin` (absent login = success). Daemon owns default
 geometry (no OAuth URL wrap); nothing parses the TUI.
+
+## 2026-08-29 — small verbs + typed notification (landed)
+
+`OpenExternal {workspace, url}` (WEB LINK; the pinned-profile launch).
+`HostWorkspaceNotification` gains a REQUIRED typed `HostNotificationKind
+{ agent_addressed | permission_requested{tool_name} }` — semantics ride
+the arm, never the text; a permission ask now fires the push and sets the
+attention marker. Task plane: `task.proto` (`TaskRef`, daemon-minted echo
+token) + `CreateTask{title}`, `UpdateTask{task, set_title|set_done|
+set_open}`, `AssignWorkspaceTask{workspace, optional task}` (UNSET =
+unassign) on the SIDEBAR section; WSM stores tasks + assignments, the
+roster's task view renders them.
