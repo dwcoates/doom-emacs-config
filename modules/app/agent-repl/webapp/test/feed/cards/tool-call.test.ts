@@ -380,6 +380,90 @@ describe("the returned state", () => {
   });
 });
 
+describe("the no-output form", () => {
+  it("omits the output section whole", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-output")).toBeNull();
+  });
+
+  it("draws no omitted line in place of the missing output", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-omitted")).toBeNull();
+  });
+
+  it("still draws the verdict badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".badge.ok")?.textContent).toBe("done");
+  });
+
+  it("still draws the settled runtime beside the badge", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+            runtime: { text: "ran 0.1 s" },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-head .tool-runtime")?.textContent).toBe("ran 0.1 s");
+  });
+
+  it("still draws the diagnostics an edit with no output raised", () => {
+    const el = drawFeedSimpleToolCall(
+      card({
+        outcome: {
+          case: "returned",
+          value: {
+            verdict: { case: "succeeded", value: {} },
+            form: { case: "none", value: {} },
+            diagnostics: { lines: ["render.ts:1 · error · nope"] },
+          },
+        },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".tool-diagnostic")?.textContent).toBe("render.ts:1 · error · nope");
+  });
+});
+
 describe("the text output form", () => {
   it("draws the text verbatim in the capped box", () => {
     const el = drawFeedSimpleToolCall(
