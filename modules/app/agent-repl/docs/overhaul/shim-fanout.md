@@ -376,3 +376,19 @@ every UX or contract gap you surfaced instead of improvising.
   (5) ACCOUNT USAGE with every window populated plus one scenario per
   unavailable reason (`!usage-full`, `!usage-service-unavailable`,
   `!usage-window-unavailable`, `!usage-utilization-unavailable`).
+- SESSIONWATCHER RULINGS (project lead, binding; landing 4 carries the
+  proto comments): (1) `SessionStarted.live_work` re-adoption announces
+  EVERY live item with the `created` origin — `work_created` states the kind
+  and description — never `detached{...}`; the description is sourced from
+  the shim's own record (the `detached:<work id>` page line when it was
+  created-origin, else the unit's start: its `activity:<id>` page line in
+  the announcing agent's book, the bash run's start row via WatchBashRun, or
+  the subagent's own book opening); an unreadable case is REPORTED, never
+  restated as `detached{requested}`. (2) `DetachedWorkId.value ==
+  AgentActivityId.value` — the spawning call's tool_use_id (for a subagent
+  also its AgentId); the vendor task_id is an internal lookup (task_started
+  maps it) used only for stopTask/level signals, never on the wire.
+  (3) `SessionUpdate.context_budget_warning` (24) is retired in landing 4;
+  the warning becomes `AgentUpdate.context_budget_warning = 7 {text}`, a
+  page line the SIDECAR produces from the transcript attachment; the shim's
+  converter maps to that arm and never emits it live.
