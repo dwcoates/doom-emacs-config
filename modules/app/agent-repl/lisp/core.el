@@ -2396,14 +2396,11 @@ introducing a sibling raw `make-process' site."
     agent-repl--async-gh
     agent-repl--signal-process
     agent-repl--frontend-run-build-script
-    agent-repl--frontend-spawn-run-script
-    agent-repl--frontend-run-listener-probe
-    agent-repl--frontend-run-daemon-pgrep
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
-    agent-repl--frontend-read-daemon-output-sink
     agent-repl--launchctl-call
     agent-repl--shim-service-file-sha256
+    agent-repl--shim-service-read-stamp
     agent-repl--shim-service-write-stamp
     agent-repl--shim-store-socket-present-p
     agent-repl--runtime-pump-events
