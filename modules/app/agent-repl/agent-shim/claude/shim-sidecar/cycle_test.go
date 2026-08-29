@@ -1,11 +1,16 @@
 package main
 
 import (
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/stale"
 )
 
 func TestCycleBeginsOnlyAfterASuccessfulCursorRead(t *testing.T) {
@@ -413,5 +418,121 @@ func TestNoHeartbeatPathRemains(t *testing.T) {
 		if strings.Contains(strings.ToLower(h.logText()), retired) {
 			t.Fatalf("the retired %q path is still exercised; got %s", retired, h.logText())
 		}
+	}
+}
+
+// TestTheConfiguredLostWindowsReachTheTracker asserts the flag wiring lands:
+// a window that never reaches internal/stale is a flag that does nothing.
+func TestTheConfiguredLostWindowsReachTheTracker(t *testing.T) {
+	// Arrange: windows no production default could be confused with.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
+	options := Options{
+		StoreSocket: filepath.Join(os.TempDir(), "ar-unused.sock"),
+		Stale: stale.Options{
+			Grace:           11 * time.Millisecond,
+			ShellSilence:    22 * time.Millisecond,
+			AgentSilence:    33 * time.Millisecond,
+			WorkflowSilence: 44 * time.Millisecond,
+		},
+	}
+
+	// Act.
+	sc := newSidecar(options, log)
+
+	// Assert.
+	if got := sc.tracker.Windows(); got != options.Stale {
+		t.Fatalf("the tracker runs with %+v, want the configured %+v", got, options.Stale)
+	}
+}
+
+// TestTheConfiguredHoldWindowReachesTheHeldIndex asserts the same wiring for the
+// unclaimed-spool wait, which is the other wall-clock window a caller sits out.
+func TestTheConfiguredHoldWindowReachesTheHeldIndex(t *testing.T) {
+	// Arrange.
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "sidecar-test"})
+	options := Options{
+		StoreSocket:        filepath.Join(os.TempDir(), "ar-unused.sock"),
+		UnownedSpoolWindow: 12 * time.Millisecond,
+	}
+
+	// Act.
+	sc := newSidecar(options, log)
+
+	// Assert.
+	if sc.held.window != options.UnownedSpoolWindow {
+		t.Fatalf("the held index runs with %s, want the configured %s", sc.held.window, options.UnownedSpoolWindow)
+	}
+}
+
+func TestFileActivityMsReportsWhenTheFileLastGrew(t *testing.T) {
+	// Arrange: our own read is not activity — the file's mtime is.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+
+	// Act.
+	got := fileActivityMs(spool, h.clock.Add(time.Hour).UnixMilli())
+
+	// Assert.
+	if got != h.clock.UnixMilli() {
+		t.Fatalf("activity = %d, want the file's mtime %d rather than the caller's clock", got, h.clock.UnixMilli())
+	}
+}
+
+func TestFileActivityMsFallsBackWhenTheFileCannotBeStatted(t *testing.T) {
+	// Arrange.
+	fallback := int64(1234)
+
+	// Act.
+	got := fileActivityMs(filepath.Join(os.TempDir(), "ar-no-such-file.output"), fallback)
+
+	// Assert.
+	if got != fallback {
+		t.Fatalf("activity = %d, want the fallback %d", got, fallback)
+	}
+}
+
+func TestAVanishedFileKeepsItsTailerSoItsTerminalCanBeSpelled(t *testing.T) {
+	// Arrange: a claimed spool being tailed.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.TaskSpawned("b1", "call-1", "", "")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	if err := os.Remove(spool); err != nil {
+		t.Fatalf("remove %s: %v", spool, err)
+	}
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert: the handler is the only converter that can spell this run's
+	// terminal, so it must outlive the file.
+	if _, ok := h.sc.watchers[spool]; !ok {
+		t.Fatal("the vanished file's tailer was dropped, so its LOST terminal could never be spelled")
+	}
+}
+
+func TestAVanishedFileIsStatedOnce(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	h.sc.TaskSpawned("b1", "call-1", "", "")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	if err := os.Remove(spool); err != nil {
+		t.Fatalf("remove %s: %v", spool, err)
+	}
+
+	// Act: the poll loop keeps running while the grace window decides.
+	h.sc.pollAll()
+	h.sc.pollAll()
+
+	// Assert.
+	if got := strings.Count(h.logText(), "the watched file vanished"); got != 1 {
+		t.Fatalf("the disappearance is stated %d time(s), want exactly 1", got)
 	}
 }

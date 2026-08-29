@@ -51,6 +51,33 @@ upgrade is involved.
   explicit flag beats it. Default when unset:
   `~/.cache/agent-repl/sock/store.sock` (`XDG_CACHE_HOME` honored).
 
+## Flags
+
+The launchd plists reference these; every one has an env var standing in for
+it, and AN EXPLICIT FLAG ALWAYS BEATS THE ENV.
+
+| flag | env | default |
+| --- | --- | --- |
+| `--store-socket` | `AGENT_REPL_STORE_SOCKET` | `~/.cache/agent-repl/sock/store.sock` |
+| `--config-roots` | — | `~/.claude,~/.claude-chesscom` |
+| `--spool-root` | — | `/tmp` |
+| `--log` | — | `~/.cache/agent-repl/log/shim-claude-sidecar.log` |
+| `--poll-interval` | — | `1s` |
+| `--rescan-interval` | — | `30s` |
+| `--stale-grace` | `AGENT_REPL_STALE_GRACE` | `30s` |
+| `--stale-shell-silence` | `AGENT_REPL_STALE_SHELL_SILENCE` | `30m` |
+| `--stale-agent-silence` | `AGENT_REPL_STALE_AGENT_SILENCE` | `60m` |
+| `--stale-workflow-silence` | `AGENT_REPL_STALE_WORKFLOW_SILENCE` | `60m` |
+| `--unowned-spool-window` | `AGENT_REPL_UNOWNED_SPOOL_WINDOW` | `60s` |
+
+The five windows take GO DURATION SYNTAX (`250ms`, `1m30s`). UNSET KEEPS THE
+PACKAGE DEFAULT — zero is the only meaning "unset" has, and `internal/stale`
+and `held.go` fill their own defaults, so there is one place that knows each.
+A MALFORMED OR NEGATIVE VALUE IS A BOOTSTRAP ERROR: the process states it once
+on stderr and exits non-zero rather than starting on a window the operator did
+not choose. They exist so the integration suite can exercise a policy that is
+otherwise measured in half-hours; nothing in production passes them.
+
 ## The cursor-first production cycle, and the store-unreachable invariant
 
 `cycle.go`. EVERY PRODUCTION CYCLE BEGINS WITH A SUCCESSFUL
@@ -194,7 +221,8 @@ NOTHING (ERROR record): guessing between two claims is how one run's output
 lands in another run's card.
 
 - An unclaimed spool is HELD: discovered, re-checked every rescan, not tailed.
-- AN AGED UNOWNED SPOOL IS NEVER DROPPED. Past `UnownedSpoolWindow` its bytes
+- AN AGED UNOWNED SPOOL IS NEVER DROPPED. Past the hold window
+  (`UnownedSpoolWindow`, replaceable with `--unowned-spool-window`) its bytes
   are INGESTED as unparsed residue naming the spool as their source (one
   WARNING), and IT KEEPS BEING TAILED so nothing appended later is lost either.
 
@@ -208,8 +236,24 @@ loudly rather than dropping the run or spelling it as a completion.
   window absorbed the ordinary rename/replace race first.
 - `went_silent` — the file is still there and has not grown for longer than its
   kind's silence window.
-- `swept_up` — at boot, the file has not been touched since before the machine
-  booted. Nothing survives a reboot.
+- `swept_up` — the file has not been touched since before the machine booted.
+  Nothing survives a reboot. CHECKED AT BOOT AND ON EVERY SWEEP: a run
+  discovered after the boot pass (a spool whose hold expired, say) is exactly as
+  dead as one that was open during it, and it ranks ahead of `went_silent`
+  because it says HOW we know rather than merely that the file is quiet.
+
+ACTIVITY MEANS THE FILE GREW, and the clock is the file's MTIME rather than the
+instant we read it. Our own read is not evidence of life: a spool full of
+pre-reboot bytes is not alive because we got round to reading it, and stamping
+the read time onto it would make `swept_up` unreachable for exactly the runs it
+exists to conclude.
+
+A VANISHED FILE KEEPS ITS TAILER until its terminal has been stated. The
+converter that spells the terminal is reached through the watcher entry, so
+dropping the tailer the moment the file disappears turns every `file_vanished`
+conclusion into "no terminal for the LOST run". It is dropped in `lostEntries`,
+after the statement. A run that merely went quiet keeps its tailer for good: the
+file is still there and anything appended later must still land.
 
 It RE-DERIVES FROM FILES AND CURSORS because there is nothing else: the store
 holds no open-task snapshot for the sidecar. A run is keyed by its resolved
@@ -371,8 +415,11 @@ go build ./... && go vet ./... && go test -race ./...
   `filepath.Join(os.TempDir(), "ar-"+<8 random hex>+".sock")` and remove it in
   cleanup.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1` in `TestMain`.
-- A fixture whose mtime matters (the LOST policy seeds a run's activity clock
-  from it) must be stamped on the harness clock with `os.Chtimes`.
+- A fixture whose mtime matters (the LOST policy's activity clock IS the file's
+  mtime) must be stamped on the harness clock with `os.Chtimes`.
+- The integration suite exercises the LOST arms through the window flags above
+  (`integration/lost_policy_test.go`), with every wait a bounded receive on a
+  real signal — a cursor advance, a store read, a log line — never a sleep.
 - `make coverage` reports per-function and aggregate statement coverage for this
   module, and `modules/app/agent-repl/bin/test-all.sh` runs every tracked suite
   across the module. Both are available for a review pass; neither is a gate.

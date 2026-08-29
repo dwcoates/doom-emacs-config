@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/stale"
 )
 
 func TestDefaultStoreSocketPrefersTheSharedEnv(t *testing.T) {
@@ -248,5 +249,130 @@ func TestOpenLoggerFailureIsABootstrapError(t *testing.T) {
 	// Assert.
 	if !isBootstrapError(err) {
 		t.Fatalf("openLogger error = %v, want a bootstrap error", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The LOST policy's windows: flag, env, refusal.
+// ---------------------------------------------------------------------------
+
+func TestAStaleWindowFallsBackToItsEnvVar(t *testing.T) {
+	// Arrange: the operator set only the env var, which is how the integration
+	// suite shrinks a production window without editing a launchd plist.
+	t.Setenv(StaleShellSilenceEnv, "250ms")
+	source := durationSource{flagName: "stale-shell-silence", envName: StaleShellSilenceEnv, raw: ""}
+
+	// Act.
+	got, err := source.resolve()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != 250*time.Millisecond {
+		t.Fatalf("shell silence = %s, want the env value 250ms", got)
+	}
+}
+
+func TestAnExplicitStaleWindowBeatsItsEnvVar(t *testing.T) {
+	// Arrange.
+	t.Setenv(StaleGraceEnv, "9s")
+	source := durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: "40ms"}
+
+	// Act.
+	got, err := source.resolve()
+
+	// Assert.
+	if got != 40*time.Millisecond || err != nil {
+		t.Fatalf("grace = %s (err %v), want the flag value 40ms to beat the env", got, err)
+	}
+}
+
+func TestAnUnsetStaleWindowResolvesToZeroSoThePackageDefaultStands(t *testing.T) {
+	// Arrange: neither spelling is present.
+	t.Setenv(StaleAgentSilenceEnv, "")
+	source := durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: ""}
+
+	// Act.
+	got, err := source.resolve()
+
+	// Assert: zero is the ONLY meaning of "unset" here — internal/stale fills it.
+	if got != 0 || err != nil {
+		t.Fatalf("agent silence = %s (err %v), want 0 so internal/stale's default stands", got, err)
+	}
+}
+
+func TestAMalformedStaleWindowIsABootstrapErrorRatherThanADefault(t *testing.T) {
+	// Arrange: a value the operator meant, spelled wrongly.
+	source := durationSource{flagName: "stale-workflow-silence", envName: StaleWorkflowSilenceEnv, raw: "30 minutes"}
+
+	// Act.
+	_, err := source.resolve()
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("a malformed window was accepted; it must refuse rather than start on a window nobody chose")
+	}
+	if !isBootstrapError(err) {
+		t.Fatalf("refusal %v is not a bootstrap error, so the process would not state it once and exit non-zero", err)
+	}
+}
+
+func TestANegativeStaleWindowIsRefused(t *testing.T) {
+	// Arrange: a negative silence window concludes every tracked run LOST at once.
+	source := durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: "-1s"}
+
+	// Act.
+	_, err := source.resolve()
+
+	// Assert.
+	if !isBootstrapError(err) {
+		t.Fatalf("a negative window resolved to %v, want a bootstrap refusal", err)
+	}
+}
+
+func TestTheFirstUnusableWindowStopsBootstrap(t *testing.T) {
+	// Arrange: the third of four windows is unusable.
+	good := durationSource{flagName: "stale-grace", envName: StaleGraceEnv, raw: "10ms"}
+	bad := durationSource{flagName: "stale-agent-silence", envName: StaleAgentSilenceEnv, raw: "nonsense"}
+
+	// Act.
+	got, err := resolveStaleOptions(good, good, bad, good)
+
+	// Assert: nothing partially applied.
+	if !isBootstrapError(err) {
+		t.Fatalf("resolveStaleOptions returned %v, want a bootstrap refusal", err)
+	}
+	if got != (stale.Options{}) {
+		t.Fatalf("resolveStaleOptions returned %+v alongside a refusal; a refused bootstrap configures nothing", got)
+	}
+}
+
+func TestEveryResolvedWindowLandsOnItsOwnField(t *testing.T) {
+	// Arrange: four distinct values, so a crossed wire is visible.
+	source := func(name, env, raw string) durationSource {
+		return durationSource{flagName: name, envName: env, raw: raw}
+	}
+
+	// Act.
+	got, err := resolveStaleOptions(
+		source("stale-grace", StaleGraceEnv, "1ms"),
+		source("stale-shell-silence", StaleShellSilenceEnv, "2ms"),
+		source("stale-agent-silence", StaleAgentSilenceEnv, "3ms"),
+		source("stale-workflow-silence", StaleWorkflowSilenceEnv, "4ms"),
+	)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveStaleOptions: %v", err)
+	}
+	want := stale.Options{
+		Grace:           time.Millisecond,
+		ShellSilence:    2 * time.Millisecond,
+		AgentSilence:    3 * time.Millisecond,
+		WorkflowSilence: 4 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("resolved windows = %+v, want %+v", got, want)
 	}
 }

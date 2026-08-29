@@ -33,6 +33,9 @@ func tracker(t *testing.T, opt Options) (*Tracker, *[]string) {
 const (
 	nowMs   = int64(1_000_000)
 	shellMs = int64(30 * 60 * 1000)
+	// bootMs is before the fixtures' activity, so the sweep's boot arm is inert
+	// in every test that is not about it.
+	bootMs = nowMs - int64(500_000)
 )
 
 func shellRun(path string, lastActivityMs int64) Work {
@@ -73,7 +76,7 @@ func TestReObserveLearnsTheOwner(t *testing.T) {
 
 	// Act.
 	tr.Observe(Work{Path: "/private/tmp/b1.output", OwnerAgentID: "agent-1"}, nowMs)
-	lost := tr.Sweep(nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].OwnerAgentID != "agent-1" {
@@ -87,7 +90,7 @@ func TestSilentRunIsLost(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonWentSilent {
@@ -102,7 +105,7 @@ func TestActivityKeepsARunAlive(t *testing.T) {
 
 	// Act: the file grew just before the window would have expired.
 	tr.Activity("/private/tmp/b1.output", nowMs+shellMs-1)
-	lost := tr.Sweep(nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -117,7 +120,7 @@ func TestVanishedRunIsLostAfterGrace(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs)
 
 	// Act.
-	lost := tr.Sweep(nowMs + 1000)
+	lost := tr.Sweep(bootMs, nowMs+1000)
 
 	// Assert.
 	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished {
@@ -132,7 +135,7 @@ func TestVanishedRunSurvivesInsideGrace(t *testing.T) {
 	tr.MarkVanished("/private/tmp/b1.output", nowMs)
 
 	// Act.
-	lost := tr.Sweep(nowMs + 999)
+	lost := tr.Sweep(bootMs, nowMs+999)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -148,7 +151,7 @@ func TestAReturningFileClearsTheVanish(t *testing.T) {
 
 	// Act.
 	tr.Activity("/private/tmp/b1.output", nowMs+500)
-	lost := tr.Sweep(nowMs + 1000)
+	lost := tr.Sweep(bootMs, nowMs+1000)
 
 	// Assert.
 	if len(lost) != 0 {
@@ -163,7 +166,7 @@ func TestSettledRunIsNeverSwept(t *testing.T) {
 
 	// Act.
 	tr.Settle("/private/tmp/b1.output")
-	lost := tr.Sweep(nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert: LOST is only ever the answer for a run we stopped seeing.
 	if len(lost) != 0 {
@@ -222,7 +225,7 @@ func TestSweepStopsTrackingWhatItConcluded(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.Sweep(nowMs + shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert: a run is concluded once, never on every later sweep.
 	if tr.Open("/private/tmp/b1.output") {
@@ -236,7 +239,7 @@ func TestConclusionIsLoggedAsAWarning(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	tr.Sweep(nowMs + shellMs)
+	tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
 	joined := strings.Join(*logs, "\n")
@@ -266,7 +269,7 @@ func TestSilenceWindowIsPerKind(t *testing.T) {
 			tr.Observe(Work{Path: "/private/tmp/x.output", TaskID: "x", Kind: tc.kind, LastActivityMs: nowMs}, nowMs)
 
 			// Act.
-			lost := tr.Sweep(nowMs + tc.elapsed)
+			lost := tr.Sweep(bootMs, nowMs+tc.elapsed)
 
 			// Assert.
 			if len(lost) != tc.want {
@@ -283,7 +286,7 @@ func TestSweepOrdersConclusionsByPath(t *testing.T) {
 	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
 
 	// Act.
-	lost := tr.Sweep(nowMs + shellMs)
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert: a sweep's records must be stable across runs.
 	if len(lost) != 2 || lost[0].Path != "/private/tmp/b1.output" {
@@ -301,5 +304,133 @@ func TestActivityForAnUntrackedPathIsANoOp(t *testing.T) {
 	// Assert.
 	if tr.Open("/private/tmp/unknown.output") {
 		t.Fatal("activity on an untracked path started tracking it")
+	}
+}
+
+func TestWindowsReportsTheDefaultsWhenOptionsAreZero(t *testing.T) {
+	// Arrange.
+	tr, _ := tracker(t, Options{})
+
+	// Act.
+	got := tr.Windows()
+
+	// Assert.
+	want := Options{
+		Grace:           DefaultGrace,
+		ShellSilence:    DefaultShellSilence,
+		AgentSilence:    DefaultAgentSilence,
+		WorkflowSilence: DefaultWorkflowSilence,
+	}
+	if got != want {
+		t.Fatalf("windows = %+v, want the package defaults %+v", got, want)
+	}
+}
+
+func TestWindowsReportsTheOptionsTheCallerChose(t *testing.T) {
+	// Arrange: the four windows the sidecar's flags carry, all distinct.
+	opt := Options{
+		Grace:           10 * time.Millisecond,
+		ShellSilence:    20 * time.Millisecond,
+		AgentSilence:    30 * time.Millisecond,
+		WorkflowSilence: 40 * time.Millisecond,
+	}
+	tr, _ := tracker(t, opt)
+
+	// Act.
+	got := tr.Windows()
+
+	// Assert.
+	if got != opt {
+		t.Fatalf("windows = %+v, want the caller's %+v", got, opt)
+	}
+}
+
+func TestSweepConcludesAPreBootRunSweptUp(t *testing.T) {
+	// Arrange: a run whose file was last written before the machine booted, and
+	// which the boot pass never saw because it was discovered afterwards.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
+
+	// Act.
+	lost := tr.Sweep(bootMs, nowMs)
+
+	// Assert.
+	if len(lost) != 1 || lost[0].Reason != ReasonSweptUp {
+		t.Fatalf("sweep concluded %+v, want one swept_up run", lost)
+	}
+}
+
+func TestSweepPrefersSweptUpOverWentSilentForAPreBootRun(t *testing.T) {
+	// Arrange: the run is both pre-boot and long silent; swept_up says HOW we
+	// know, which is the more informative statement.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
+
+	// Act.
+	lost := tr.Sweep(bootMs, nowMs+shellMs)
+
+	// Assert.
+	if len(lost) != 1 || lost[0].Reason != ReasonSweptUp {
+		t.Fatalf("sweep concluded %+v, want swept_up rather than went_silent", lost)
+	}
+}
+
+func TestSweepLeavesAPostBootRunToItsSilenceWindow(t *testing.T) {
+	// Arrange: the file was written after boot and is still inside its window.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", nowMs), nowMs)
+
+	// Act.
+	lost := tr.Sweep(bootMs, nowMs+1)
+
+	// Assert.
+	if len(lost) != 0 {
+		t.Fatalf("sweep concluded %+v, want nothing for a post-boot run inside its window", lost)
+	}
+}
+
+func TestSweepWithoutABootTimeCannotConcludeSweptUp(t *testing.T) {
+	// Arrange: no boot time, and a run whose file predates any plausible one.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", 1), nowMs)
+
+	// Act.
+	lost := tr.Sweep(0, nowMs+shellMs)
+
+	// Assert: it is concluded by its SILENCE, never by a boot rule that has no
+	// boot time to apply.
+	if len(lost) != 1 || lost[0].Reason != ReasonWentSilent {
+		t.Fatalf("sweep concluded %+v, want went_silent when no boot time is known", lost)
+	}
+}
+
+func TestSweepStatesAnUnknownBootTimeOnce(t *testing.T) {
+	// Arrange: the statement is verbose, so verbose emission is on.
+	t.Setenv("AGENT_REPL_LOG_VERBOSE", "1")
+	tr, logs := tracker(t, Options{})
+
+	// Act: the sweep runs on a timer, so the statement must not repeat.
+	tr.Sweep(0, nowMs)
+	tr.Sweep(0, nowMs)
+
+	// Assert.
+	if got := strings.Count(strings.Join(*logs, "\n"), "boot time unavailable"); got != 1 {
+		t.Fatalf("the unknown-boot-time statement appears %d time(s), want exactly 1", got)
+	}
+}
+
+func TestAVanishedRunIsStillJudgedByItsGraceWindowWhenItPredatesBoot(t *testing.T) {
+	// Arrange: watching the file disappear is a better statement than the boot
+	// rule, so the grace window keeps deciding.
+	tr, _ := tracker(t, Options{})
+	tr.Observe(shellRun("/private/tmp/b1.output", bootMs-1), nowMs)
+	tr.MarkVanished("/private/tmp/b1.output", nowMs)
+
+	// Act.
+	lost := tr.Sweep(bootMs, nowMs+DefaultGrace.Milliseconds())
+
+	// Assert.
+	if len(lost) != 1 || lost[0].Reason != ReasonFileVanished {
+		t.Fatalf("sweep concluded %+v, want file_vanished", lost)
 	}
 }

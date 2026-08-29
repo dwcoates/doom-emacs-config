@@ -179,3 +179,40 @@ func TestATranscriptIsNeverLostSwept(t *testing.T) {
 		t.Fatal("a session transcript was armed for a LOST conclusion")
 	}
 }
+
+func TestTheVanishedFilesTailerIsDroppedOnceItsTerminalIsStated(t *testing.T) {
+	// Arrange: a run whose file is gone, still holding the converter that spells
+	// its terminal.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	watchWith(h, spool, &lostCapable{})
+
+	// Act.
+	h.sc.lostEntries([]stale.Lost{{
+		Work:   stale.Work{Path: spool, TaskID: "b1", RunActivityID: "call-1", Kind: tail.KindShellSpool},
+		Reason: stale.ReasonFileVanished,
+	}})
+
+	// Assert: nothing will ever be read from it again.
+	if _, ok := h.sc.watchers[spool]; ok {
+		t.Fatal("the vanished file is still being tailed after its terminal was stated")
+	}
+}
+
+func TestASilentRunKeepsItsTailer(t *testing.T) {
+	// Arrange: the file is still there, so anything appended later must land.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "b1", "hello\n")
+	watchWith(h, spool, &lostCapable{})
+
+	// Act.
+	h.sc.lostEntries([]stale.Lost{{
+		Work:   stale.Work{Path: spool, TaskID: "b1", RunActivityID: "call-1", Kind: tail.KindShellSpool},
+		Reason: stale.ReasonWentSilent,
+	}})
+
+	// Assert.
+	if _, ok := h.sc.watchers[spool]; !ok {
+		t.Fatal("a run that merely went quiet lost its tailer, so later bytes would be dropped")
+	}
+}
