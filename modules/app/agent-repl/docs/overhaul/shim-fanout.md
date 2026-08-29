@@ -321,6 +321,8 @@ every UX or contract gap you surfaced instead of improvising.
   versions in package.json.
 - LOCK DIR OVERRIDE: env `AGENT_REPL_LOCK_DIR` overrides the lock directory
   (default `~/.cache/agent-repl/run/`); the real shim honors it.
+- STALE BINDINGS: the three stale generated files under proto/gen/ts/shim/v1
+  are deleted on overhaul/integration; nothing depends on them.
 - FANOUT REGROUPED under the session-wide subagent cap (at most three
   implementation agents running at once): wave 1 is four briefs — ENGINE
   (engine/*), RECORD PLANE (convert/* + store/*), MOCK VENDOR (fake/* +
@@ -329,14 +331,17 @@ every UX or contract gap you surfaced instead of improvising.
   slot, auditors after.
 - RPC COUNT: shim.v1 has SEVENTEEN rpcs (shim.md's "16" undercounts;
   ReadHistory is the seventeenth); audits count 17.
-- PAGE SIZE ZERO IS LEGAL: a `page_size` of 0 on StartTurn/WatchAgent/
-  ReadHistory means an empty page (no entries; `more` when any entry exists,
-  else `floor`) — the caller only wants the tail. The validator must not
-  refuse it.
-- LOG SESSION ID: the shim names its own log correlation id
-  `shim-<workspace-md5-8>-<pid>` (no daemon id reaches it at spawn); the
-  vendor session id attaches once known. Daemon-side correlation is by
-  workspace_dir + pid.
+- PAGE SIZE ZERO IS REFUSED (project lead ruling, supersedes an interim
+  lead ruling): `page_size` 0 on StartTurn/WatchAgent/ReadHistory is
+  InvalidArgument — presence, never sentinels; the daemon always passes an
+  explicit size. The scaffold's validator stands.
+- LOG SESSION ID (project lead ruling): the daemon exports
+  `AGENT_REPL_SESSION_ID=<HostSessionId>` in the shim's spawn env for LOG
+  CORRELATION ONLY (never a session fact; StartSession stays the only
+  carrier of session facts). main.ts passes it to configureLog as
+  `agent_repl_session_id` when present and falls back to the self-name
+  `shim-<workspace-md5-8>-<pid>` otherwise; the vendor session id attaches
+  once known.
 - LEFTOVER MODULES: src/api-usage.ts, subscription-usage.ts, usage-log.ts,
   model.ts survive from the old shim; the record-plane agent adopts (as
   harvest for TokenUsage / account-usage mapping) or retires each, with a
