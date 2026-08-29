@@ -125,6 +125,20 @@ OWN ACCORD:
   `<Rpc>Error` in agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
   DaemonFault/SessionFault/HostFault kind oneofs).
 
+## Landing 4 — STAGED on overhaul/landing-4 (e226e9d4f; not yet landed)
+
+OWN ACCORD:
+- AgentUpdate.context_budget_warning = 7 (ContextBudgetWarning{text}) and
+  SessionUpdate tag 24 RETIRED — the warning is a transcript attachment with
+  no live-stream producer; a SessionUpdate arm had no home on the agent plane
+  where the sidecar delivers it.
+- Comment-only: DetachedWorkId carries the MINTING RULE (value == the unit's
+  AgentActivityId, i.e. the spawning call's tool_use_id) so a `created`-origin
+  monitor/bash/subagent is retired by its own terminal frame.
+- PENDING: the daemon's derived error arms (every empty `<Rpc>Error` in
+  agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
+  DaemonFault/SessionFault/HostFault kind oneofs).
+
 ## Explicitly NOT changed (rulings recorded instead)
 
 - WatchAgentSession / WatchFeed refusals: no failure frame — a refused open
