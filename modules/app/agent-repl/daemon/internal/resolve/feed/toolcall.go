@@ -18,6 +18,12 @@ import (
 
 // toolRow finishes a tool card: the shared shell around whatever outcome the
 // family resolved, with the unit's carried facts folded back in.
+//
+// THE INPUT LINE'S TEXT IS BARE (ruled 2026-08-29): a command line carries no
+// "$ " prefix, a path no verb, a query no "grep: " label. The daemon states the
+// FORM and the client draws that form's chrome — a decorated text would be the
+// daemon drawing, which is the client's job, and would double the chrome
+// wherever the client drew its own.
 func (r *resolver) toolRow(s *wsState, at placement, unitID, name string, outcome toolOutcome) *frontendv1.FeedRow {
 	u := s.unit(unitID)
 	input := &frontendv1.FeedToolCallInput{Text: u.input}
@@ -232,13 +238,10 @@ func (r *resolver) drawWrite(s *wsState, at placement, act *conversationv1.Agent
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Write", runningOutcome(u)), nil
 	case *conversationv1.AgentWrite_Success:
-		// A CREATION IS NOT A REWRITE OF NOTHING: the daemon words the input
-		// line for what actually happened, which is the outcome's fact.
-		verb := "wrote"
-		if _, created := state.Success.GetOutcome().(*conversationv1.AgentWriteSuccess_Created); created {
-			verb = "created"
-		}
-		u.input = verb + " " + state.Success.GetPath().GetPath()
+		// The path form's text is the PATH, bare. Whether the write created or
+		// replaced the file is the diff's story (a creation's every hunk line
+		// is an addition), not the input line's.
+		u.input = state.Success.GetPath().GetPath()
 		u.inputForm = inputFormPath
 		return r.toolRow(s, at, unitID, "Write",
 			returnedOutcome(u, true, diffForm(state.Success.GetPatch()),
@@ -413,7 +416,7 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := grep.GetResult().(type) {
 	case *conversationv1.AgentGrep_Start:
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
-		u.input = "grep: " + state.Start.GetQuery().GetPattern()
+		u.input = state.Start.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		if u.denied {
 			return r.toolRow(s, at, unitID, "Grep", deniedOutcome()), nil
@@ -423,7 +426,7 @@ func (r *resolver) drawGrep(s *wsState, at placement, act *conversationv1.AgentA
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Grep", runningOutcome(u)), nil
 	case *conversationv1.AgentGrep_Success:
-		u.input = "grep: " + state.Success.GetQuery().GetPattern()
+		u.input = state.Success.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Grep",
 			returnedOutcome(u, true, grepForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
@@ -476,7 +479,7 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := glob.GetResult().(type) {
 	case *conversationv1.AgentGlob_Start:
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
-		u.input = "glob: " + state.Start.GetQuery().GetPattern()
+		u.input = state.Start.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		if u.denied {
 			return r.toolRow(s, at, unitID, "Glob", deniedOutcome()), nil
@@ -486,7 +489,7 @@ func (r *resolver) drawGlob(s *wsState, at placement, act *conversationv1.AgentA
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "Glob", runningOutcome(u)), nil
 	case *conversationv1.AgentGlob_Success:
-		u.input = "glob: " + state.Success.GetQuery().GetPattern()
+		u.input = state.Success.GetQuery().GetPattern()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "Glob",
 			returnedOutcome(u, true, globForm(state.Success), state.Success.GetSettledAt().GetAtMs())), nil
@@ -548,7 +551,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 	switch state := bash.GetResult().(type) {
 	case *conversationv1.AgentBash_Start:
 		u.startedAtMs = state.Start.GetStartedAt().GetAtMs()
-		u.input = "$ " + state.Start.GetCommand().GetLine()
+		u.input = state.Start.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
 		if u.denied {
 			return r.toolRow(s, at, unitID, "Bash", deniedOutcome()), nil
@@ -562,7 +565,7 @@ func (r *resolver) drawBash(s *wsState, at placement, act *conversationv1.AgentA
 		// work's own detached stream and is drawn there.
 		return nil, errNotARow
 	case *conversationv1.AgentBash_Success:
-		u.input = "$ " + state.Success.GetCommand().GetLine()
+		u.input = state.Success.GetCommand().GetLine()
 		u.inputForm = inputFormCommand
 		ok, text := bashOutcomeText(state.Success)
 		return r.toolRow(s, at, unitID, "Bash",
@@ -689,14 +692,14 @@ func (r *resolver) drawWebSearch(s *wsState, at placement, act *conversationv1.A
 	switch state := search.GetResult().(type) {
 	case *conversationv1.AgentWebSearch_Start:
 		u.startedAtMs = state.Start.GetStartedAtMs()
-		u.input = "search: " + state.Start.GetQuery().GetTerms()
+		u.input = state.Start.GetQuery().GetTerms()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "WebSearch", runningOutcome(u)), nil
 	case *conversationv1.AgentWebSearch_Progress:
 		u.lastProgressMs = state.Progress.GetLastProgressAtMs()
 		return r.toolRow(s, at, unitID, "WebSearch", runningOutcome(u)), nil
 	case *conversationv1.AgentWebSearch_Success:
-		u.input = "search: " + state.Success.GetQuery().GetTerms()
+		u.input = state.Success.GetQuery().GetTerms()
 		u.inputForm = inputFormQuery
 		return r.toolRow(s, at, unitID, "WebSearch",
 			returnedOutcome(u, true, linksForm(state.Success.GetResults()), 0)), nil
