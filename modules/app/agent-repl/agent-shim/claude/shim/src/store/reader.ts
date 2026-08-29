@@ -281,6 +281,10 @@ export function createReader(options: ReaderOptions): Reader {
         page.entries[0]?.at ?? knownThrough;
       let token: storev1.AgentSessionToken = opened.watch;
       let stopped = false;
+      // CANCELLING THE CALL IS HOW A STANDING TAIL ENDS. Connect's stream close
+      // drains the body, which on a standing stream never completes — so
+      // `close()` aborts the call rather than merely leaving the loop.
+      let abort = new AbortController();
 
       const tail: AsyncIterable<conversationv1.HistoryEntryAt> = {
         async *[Symbol.asyncIterator]() {
@@ -289,6 +293,7 @@ export function createReader(options: ReaderOptions): Reader {
             try {
               for await (const push of client.watchAgentSession(
                 create(storev1.WatchAgentSessionRequestSchema, { watch: token }),
+                abort.signal,
               )) {
                 if (stopped) return;
                 if (push.line === undefined) {
@@ -331,6 +336,8 @@ export function createReader(options: ReaderOptions): Reader {
                 yield entry;
               }
               token = reopened.watch;
+              // A fresh controller per attempt: the aborted one stays aborted.
+              abort = new AbortController();
             }
           }
         },
@@ -340,7 +347,9 @@ export function createReader(options: ReaderOptions): Reader {
         page,
         tail,
         close: () => {
+          if (stopped) return;
           stopped = true;
+          abort.abort();
         },
       };
     },
