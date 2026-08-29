@@ -133,7 +133,7 @@ placement is recorded rather than performed."
     (agent-repl--open-progress-note "alpha-ws" :acked)
     ;; Assert
     (should (string-match-p
-             "▸ Acknowledged; bringing the session up"
+             "▸ The daemon answered"
              (agent-repl-test--open-progress-text "alpha-ws")))))
 
 (ert-deftest agent-repl-test-open-progress-note-refuses-a-regression ()
@@ -141,12 +141,12 @@ placement is recorded rather than performed."
   ;; Arrange
   (agent-repl-test--with-open-progress
     (agent-repl--open-progress-start "alpha-ws")
-    (agent-repl--open-progress-note "alpha-ws" :rendering)
+    (agent-repl--open-progress-note "alpha-ws" :host-state)
     ;; Act
-    (agent-repl--open-progress-note "alpha-ws" :daemon-ready)
+    (agent-repl--open-progress-note "alpha-ws" :acked)
     ;; Assert
-    (should (eq :rendering (plist-get (agent-repl--open-progress-entry "alpha-ws")
-                                      :phase)))))
+    (should (eq :host-state (plist-get (agent-repl--open-progress-entry "alpha-ws")
+                                       :phase)))))
 
 (ert-deftest agent-repl-test-open-progress-note-refuses-an-unknown-phase ()
   "A phase that is not on the ladder moves nothing."
@@ -210,16 +210,28 @@ placement is recorded rather than performed."
     (should (string-match-p "Still opening alpha-ws"
                             (agent-repl-test--open-progress-text "alpha-ws")))))
 
-(ert-deftest agent-repl-test-open-progress-escalation-names-the-last-stage ()
-  "The escalation says which stage the open was still sitting on."
+(ert-deftest agent-repl-test-open-progress-escalation-names-the-first-missing-stage ()
+  "The diagnosis names what has NOT happened — that is what is wrong."
   ;; Arrange
   (agent-repl-test--with-open-progress
     (agent-repl--open-progress-start "alpha-ws")
-    (agent-repl--open-progress-note "alpha-ws" :opening)
+    (agent-repl--open-progress-note "alpha-ws" :acked)
     ;; Act
     (agent-repl--open-progress-escalate "alpha-ws")
     ;; Assert
-    (should (string-match-p "openWorkspace sent"
+    (should (string-match-p "stalled waiting for: The workspace's host state arrived"
+                            (agent-repl-test--open-progress-text "alpha-ws")))))
+
+(ert-deftest agent-repl-test-open-progress-escalation-also-names-the-stage-reached ()
+  "How far the open got is reported beside what it is waiting for."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-note "alpha-ws" :acked)
+    ;; Act
+    (agent-repl--open-progress-escalate "alpha-ws")
+    ;; Assert
+    (should (string-match-p "reached: The daemon answered"
                             (agent-repl-test--open-progress-text "alpha-ws")))))
 
 (ert-deftest agent-repl-test-open-progress-escalation-suggests-a-remedy ()
@@ -306,143 +318,60 @@ placement is recorded rather than performed."
     ;; Assert
     (should (agent-repl--open-progress-active-p "beta-ws"))))
 
-;;;; ---- Pushed-state subscription ---------------------------------------
+;;;; ---- The host stream and the webview ------------------------------
 
-(ert-deftest agent-repl-test-open-progress-pushed-init-reports-bring-up ()
-  "A pushed `:init' moves the placeholder onto the bring-up stage."
+(ert-deftest agent-repl-test-open-progress-a-host-push-advances-the-ladder ()
+  "The FIRST host push for the workspace is the `:host-state' stage."
   ;; Arrange
   (agent-repl-test--with-open-progress
     (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-note "alpha-ws" :acked)
     ;; Act
-    (agent-repl--open-progress-react-to-pushed-state "alpha-ws" :init nil)
+    (agent-repl--open-progress-note-host-state "alpha-ws" nil)
     ;; Assert
-    (should (eq :acked (plist-get (agent-repl--open-progress-entry "alpha-ws")
-                                  :phase)))))
-
-(ert-deftest agent-repl-test-open-progress-pushed-live-state-reports-backfill ()
-  "A live session whose transcript has not landed reports the backfill."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ws-command-key)
-               (lambda (_ws) "/tmp/alpha"))
-              ((symbol-function 'agent-repl--frontend-backfill-settled-p)
-               (lambda (_key) nil)))
-      ;; Act
-      (agent-repl--open-progress-react-to-pushed-state "alpha-ws" :idle :init))
-    ;; Assert
-    (should (eq :backfilling (plist-get (agent-repl--open-progress-entry "alpha-ws")
-                                        :phase)))))
-
-(ert-deftest agent-repl-test-open-progress-pushed-live-settled-reports-rendering ()
-  "A live session with its transcript in hand reports the render stage."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ws-command-key)
-               (lambda (_ws) "/tmp/alpha"))
-              ((symbol-function 'agent-repl--frontend-backfill-settled-p)
-               (lambda (_key) t)))
-      ;; Act
-      (agent-repl--open-progress-react-to-pushed-state "alpha-ws" :idle :init))
-    ;; Assert
-    (should (eq :rendering (plist-get (agent-repl--open-progress-entry "alpha-ws")
-                                      :phase)))))
-
-(ert-deftest agent-repl-test-open-progress-pushed-severed-fails-the-open ()
-  "A pushed `:severed' resolves the pending open as failed."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    ;; Act
-    (agent-repl--open-progress-react-to-pushed-state "alpha-ws" :severed :init)
-    ;; Assert
-    (should (eq :failed (plist-get (agent-repl--open-progress-entry "alpha-ws")
-                                   :phase)))))
-
-(ert-deftest agent-repl-test-open-progress-pushed-hibernated-holds-the-ladder ()
-  "A pushed `:hibernated' is what the open is about to wake, so it moves nothing."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    ;; Act
-    (agent-repl--open-progress-react-to-pushed-state "alpha-ws" :hibernated nil)
-    ;; Assert
-    (should (eq :dispatched (plist-get (agent-repl--open-progress-entry "alpha-ws")
+    (should (eq :host-state (plist-get (agent-repl--open-progress-entry "alpha-ws")
                                        :phase)))))
 
-(ert-deftest agent-repl-test-open-progress-pushed-state-ignores-idle-workspaces ()
-  "A workspace with no pending open raises no placeholder from a pushed state."
-  ;; Arrange / Act
+(ert-deftest agent-repl-test-open-progress-a-later-host-push-moves-nothing ()
+  "The stage is \"a host state ARRIVED\", not \"the newest one\"."
+  ;; Arrange
   (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-react-to-pushed-state "alpha-ws" :init nil)
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-note "alpha-ws" :acked)
+    (agent-repl--open-progress-note-host-state "alpha-ws" nil)
+    (agent-repl-open-progress-note-loaded "alpha-ws")
+    ;; Act
+    (agent-repl--open-progress-note-host-state "alpha-ws" nil)
+    ;; Assert
+    (should (eq :loaded (plist-get (agent-repl--open-progress-entry "alpha-ws")
+                                   :phase)))))
+
+(ert-deftest agent-repl-test-open-progress-the-webviews-load-completes-the-ladder ()
+  "`:loaded' comes from the xwidget's own load-finished event."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    (agent-repl--open-progress-start "alpha-ws")
+    (agent-repl--open-progress-note "alpha-ws" :host-state)
+    ;; Act
+    (agent-repl-open-progress-note-loaded "alpha-ws")
+    ;; Assert
+    (should (eq :loaded (plist-get (agent-repl--open-progress-entry "alpha-ws")
+                                   :phase)))))
+
+(ert-deftest agent-repl-test-open-progress-a-host-push-for-an-idle-workspace-is-ignored ()
+  "A workspace with no open in flight raises no placeholder to advance."
+  ;; Arrange
+  (agent-repl-test--with-open-progress
+    ;; Act
+    (agent-repl--open-progress-note-host-state "alpha-ws" nil)
     ;; Assert
     (should-not (agent-repl--open-progress-active-p "alpha-ws"))))
 
-(ert-deftest agent-repl-test-open-progress-is-subscribed-to-pushed-state ()
-  "The reactor is registered on the pushed-state hook, so phases arrive at all."
-  ;; Arrange / Act / Assert
-  (should (memq #'agent-repl--open-progress-react-to-pushed-state
-                agent-repl-ws-state-transition-functions)))
-
-;;;; ---- Teardown when the workspace itself goes away ----------------------
-
-(ert-deftest agent-repl-test-open-progress-abandon-cancels-the-escalation ()
-  "Closing a workspace mid-open disarms its escalation timer.
-Regression: the timer outlived the workspace and later emitted a record
-against a name the registry no longer resolved."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    (let ((timer (plist-get (agent-repl--open-progress-entry "alpha-ws") :timer)))
-      ;; Act
-      (agent-repl--open-progress-abandon "alpha-ws")
-      ;; Assert
-      (should-not (memq timer timer-list)))))
-
-(ert-deftest agent-repl-test-open-progress-abandon-drops-the-entry ()
-  "An abandoned placeholder leaves no registry entry behind."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    ;; Act
-    (agent-repl--open-progress-abandon "alpha-ws")
-    ;; Assert
-    (should-not (agent-repl--open-progress-active-p "alpha-ws"))))
-
-(ert-deftest agent-repl-test-open-progress-abandon-kills-the-buffer ()
-  "An abandoned placeholder leaves no standing buffer: there is no workspace
-left for the user to read a verdict about."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    (let ((buf (plist-get (agent-repl--open-progress-entry "alpha-ws") :buffer)))
-      ;; Act
-      (agent-repl--open-progress-abandon "alpha-ws")
-      ;; Assert
-      (should-not (buffer-live-p buf)))))
-
-(ert-deftest agent-repl-test-open-progress-abandon-without-a-placeholder-is-nil ()
-  "A workspace closed with no open in flight tears nothing down."
-  ;; Arrange / Act / Assert
-  (agent-repl-test--with-open-progress
-    (should-not (agent-repl--open-progress-abandon "alpha-ws"))))
-
-(ert-deftest agent-repl-test-open-progress-abandon-leaves-peers-alone ()
-  "Closing one workspace must not tear down another workspace's placeholder."
-  ;; Arrange
-  (agent-repl-test--with-open-progress
-    (agent-repl--open-progress-start "alpha-ws")
-    (agent-repl--open-progress-start "beta-ws")
-    ;; Act
-    (agent-repl--open-progress-abandon "alpha-ws")
-    ;; Assert
-    (should (agent-repl--open-progress-active-p "beta-ws"))))
-
-(ert-deftest agent-repl-test-open-progress-subscribes-to-ws-del ()
-  "The teardown is wired to workspace deletion, not merely available."
-  ;; Arrange / Act / Assert
-  (should (memq #'agent-repl--open-progress-abandon agent-repl-ws-del-hook)))
+(ert-deftest agent-repl-test-open-progress-is-subscribed-to-the-host-stream ()
+  "The ladder rides the host stream's own push hook, and polls nothing."
+  ;; Act / Assert
+  (should (memq #'agent-repl--open-progress-note-host-state
+                agent-repl-host-update-functions)))
 
 (provide 'test-open-progress)
 ;;; test-open-progress.el ends here

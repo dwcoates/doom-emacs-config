@@ -45,7 +45,16 @@
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
-(declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
+(defun agent-repl--ws-backend-name (_ws)
+  "Return the backend WS runs under: `claude', always.
+
+backend.el and codex.el are DEAD — a second vendor is a future shim, not
+a second Emacs backend — so this axis has exactly one value.  It survives
+as a function rather than being deleted because the frontend registry's
+capability check is genuinely two-axis and the vendor oneof stays
+extensible in the contract; the day a second vendor lands, the daemon
+tells us which one a workspace runs and this reads it from there."
+  'claude)
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 
 ;;;; ---- Struct ---------------------------------------------------------------
