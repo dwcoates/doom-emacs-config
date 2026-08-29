@@ -256,6 +256,12 @@ func handleUnary[Req any, Res any](ctx context.Context, s *fakeServer, method st
 	}
 	s.record(method, reqMsg)
 
+	if err := validateRequest(reqMsg); err != nil {
+		logError("fakedaemon.rpc.invalid-request", "refused a request that breaches the validation invariant",
+			map[string]any{"method": method, "error": err.Error()})
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
 	out := new(Res)
 	outMsg, ok := any(out).(proto.Message)
 	if !ok {

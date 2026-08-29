@@ -174,13 +174,14 @@ func (s *fakeServer) SelectWorkspace(ctx context.Context, req *connect.Request[v
 
 func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest], stream *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
 	s.record("WatchHostWorkspace", req.Msg)
-	ws := req.Msg.GetWorkspace()
-	if ws == nil {
-		// The request's non-optional workspace field is missing: an illegal
-		// request on this contract, answered at once.
-		logError("fakedaemon.stream.host-missing-workspace", "WatchHostWorkspace without a workspace ref", nil)
-		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("WatchHostWorkspace requires a workspace ref"))
+	if err := validateRequest(req.Msg); err != nil {
+		// An unset non-optional field is illegal, immediately — the stream is
+		// refused rather than standing on a request nobody filled in.
+		logError("fakedaemon.stream.invalid-request", "refused a stream request that breaches the validation invariant",
+			map[string]any{"method": "WatchHostWorkspace", "error": err.Error()})
+		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	ws := req.Msg.GetWorkspace()
 	return serveStream[v1.WatchHostWorkspaceResponse](ctx, s, streamHost, ws.GetId(), stream)
 }
 
