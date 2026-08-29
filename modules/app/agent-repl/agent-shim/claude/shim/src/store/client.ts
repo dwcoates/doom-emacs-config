@@ -51,9 +51,17 @@ export interface StoreClient {
   openAgentSession(
     request: storev1.OpenAgentSessionRequest,
   ): Promise<storev1.OpenAgentSessionResponse>;
-  /** The pure tail of an opened reading session. Throws NotFound on a refused open. */
+  /**
+   * The pure tail of an opened reading session. Throws NotFound on a refused open.
+   *
+   * `signal` IS HOW A TAIL ENDS, and it is not optional in practice: Connect's
+   * stream close DRAINS the response body, which never completes on a STANDING
+   * stream — so a reader that merely stopped iterating would block forever.
+   * Cancelling the call is the only way out, and every teardown path takes it.
+   */
   watchAgentSession(
     request: storev1.WatchAgentSessionRequest,
+    signal?: AbortSignal,
   ): AsyncIterable<storev1.WatchAgentSessionResponse>;
   /** An OLDER page of one book, walking down from a served pointer. */
   readAgentPage(request: storev1.ReadAgentPageRequest): Promise<storev1.ReadAgentPageResponse>;
@@ -99,7 +107,7 @@ export function createStoreClient(socketPath: string): StoreClient {
   const client = createStoreTransportClient(socketPath);
   return {
     openAgentSession: (request) => client.openAgentSession(request),
-    watchAgentSession: (request) => client.watchAgentSession(request),
+    watchAgentSession: (request, signal) => client.watchAgentSession(request, { signal }),
     readAgentPage: (request) => client.readAgentPage(request),
     getWorkflow: (request) => client.getWorkflow(request),
     getSidecarCursors: (request) => client.getSidecarCursors(request),

@@ -1,103 +1,320 @@
 /**
- * convert/fold.ts — the seam every converter plugs into.
+ * convert/fold.ts — the seam every converter plugs into, and the dispatcher.
  *
  * # What the fold IS
  *
  * The vendor's stream is a FLAT LOG of records. `conversation.v1` is a model of
  * UNITS WITH IDENTITY that are upserted whole. The fold is the mapping between
  * them, and it is the shim's central act: one SDK message in, zero or more
- * self-describing frames out.
+ * self-describing rows out.
  *
  * It ACCUMULATES NOTHING beyond constant-size joins. That is not an efficiency
  * preference, it is the statelessness the whole architecture rests on: a shim
  * that grew state per turn would be a second, divergent copy of the record the
  * store already owns, and a bounce would lose it. The joins it is allowed are
- * each ONE lookup of a remembered value — a tool result to its call by
- * `tool_use_id`, a skill document to its call by `sourceToolUseID`, a spawned
- * agent to its spawn — never a scan and never a history.
+ * each ONE remembered value or one bounded, self-emptying table:
+ *
+ *   - the per-message BLOCK COUNTER (so `<message.id>:<block_index>` is stable
+ *     across the lines the vendor splits one message into), cleared at
+ *     `message_stop`;
+ *   - the CALLS IN FLIGHT, so a tool result can restate its call's own facts —
+ *     each entry dropped the moment its unit settles, and the table capped;
+ *   - the HOOK FIRINGS in flight, for the same reason and on the same terms;
+ *   - ONE pending COMPACTION, because `ContextCompacted.summary` is not optional
+ *     and the vendor states the boundary before the summary;
+ *   - the LAST TOP-LEVEL RESPONSE unit, because `AgentCompleted.answer` names it
+ *     and only the fold has seen which one it was.
+ *
+ * # Why the output is PersistEntry and not frames
+ *
+ * Every frame the fold produces is going to ONE place: a store row. Which book
+ * it belongs to, which row it replaces and where in the vendor's record it came
+ * from are facts only the fold has seen, so it mints them here rather than
+ * making a second pass re-derive them from a frame that no longer says.
  *
  * # The rules every converter obeys
  *
  *   - Units upsert BY IDENTITY, and every frame of a unit is self-describing.
  *   - `update` frames are DELTAS, never cumulative; terminals carry wholes.
- *   - Usage and effort ride the FIRST content block's unit of each API
- *     response, and no other.
+ *   - Usage and effort ride the FIRST content block's unit of each API response,
+ *     and no other.
  *   - The EXEMPT SET is dropped silently and never becomes `AgentUnmodeled`;
  *     `AgentUnmodeled` means a genuinely unknown tool, and a recognizable
  *     built-in arriving there is a producer defect.
  *   - Anything unconvertible becomes RESIDUE rather than being dropped or
- *     crashing. Residue is the reason the fold can be eager: nothing is lost by
- *     failing to understand it.
- *   - Every converter LOGS its branch, so a wrong conversion is diagnosable
- *     from the record of what was chosen rather than by re-deriving it.
- *
- * # Ownership
- *
- * OWNER: the fold agent (`convert/`). This file declares the seam and the
- * output shape and deliberately implements NO conversion: the dispatcher, the
- * stream-event converters, the per-tool files, the terminals and the residue
- * are that agent's, and they attach here.
+ *     crashing.
+ *   - A record MISSING A FIELD the proto requires produces NO frame at all and a
+ *     logged converter defect — never a partial message.
+ *   - Every converter LOGS its branch.
  */
-import type { conversationv1, storev1 } from "../proto.js";
+import { bindLog } from "../log.js";
+import type { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
+import type { PersistEntry } from "../store/persistence.js";
+import { convertDetached } from "./detached.js";
+import type { FoldContext } from "./fold-context.js";
+import {
+  convertHookResponse,
+  convertHookStarted,
+  createHookRegistry,
+  type HookRegistry,
+} from "./hooks.js";
+import { convertPermissionDenied } from "./permission.js";
+import { residueEntry, residueForMessage } from "./residue.js";
+import {
+  compactionEntry,
+  convertSessionMessage,
+  type PendingCompaction,
+} from "./session-updates.js";
+import {
+  createBlockState,
+  convertAssistantMessage,
+  convertStreamEvent,
+  convertThinkingTokens,
+  type BlockState,
+} from "./stream-events.js";
+import { convertResult } from "./terminals.js";
+import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
+import { createCallRegistry, type CallRegistry } from "./tool-calls.js";
+import { TOOL_CONVERTERS } from "./tools/registry.js";
+
+const LOGGER = bindLog({ component: "shim-convert-fold", operation: "shim.convert.fold" });
 
 /**
  * Everything ONE SDK message produced.
  *
- * Three lists rather than one union, because the three go to three different
- * places and a consumer must not have to re-derive which is which:
- *
- *   - `frames` are the agent's own record. They route by
- *     `AgentFrame.agent_id` and land as page lines (an `update`), as a page
- *     line PLUS the agent's terminal state (a `success`/`failure`), or as the
- *     lifecycle record for their kind (a `detached_work`).
- *   - `sessionUpdates` are facts about the SESSION, not about any agent. They
- *     ride WatchSession, and the vendor-sourced ones are written to the store.
- *     The shim-SYNTHESIZED ones (`diagnostics`, `context_usage`) are pushed and
- *     never written — they are the shim's report about itself, not vendor
- *     conversation.
- *   - `residue` is what could not be converted. Never dropped, never a crash.
- *
- * All three are empty for a message that produced nothing, which is a normal
- * and frequent outcome — every exempt tool call yields exactly this.
+ * `turnEnded` is present EXACTLY when the message was the turn's `result` — the
+ * only source of a turn terminal. Its frame is ALSO in `entries`: the terminal
+ * is both a page line (the feed's stop notice has no other source) and the
+ * engine's signal that the main thread can accept a prompt again, and making the
+ * engine dig it back out of the list would be a second parse of a fact the fold
+ * already resolved.
  */
 export interface FoldOutput {
-  /**
-   * Conversation frames, in the order the vendor stated them.
-   *
-   * `AgentUpdate` carries five page-line arms the shim can produce: `activity`,
-   * `question`, `permission`, `context_cut` (a /clear, a compaction, or a
-   * compaction that failed) and `api_error` (a failed API request as MID-TURN
-   * evidence — a turn TERMINAL is still `AgentFailure.api_request_failed`, and
-   * the two must not be confused: one says the turn is over, the other says it
-   * is not).
-   */
-  readonly frames: readonly conversationv1.AgentFrame[];
-  /** Session-level facts this message stated. */
-  readonly sessionUpdates: readonly conversationv1.SessionUpdate[];
-  /** What this message carried that no converter could model. */
-  readonly residue: readonly storev1.StoreUnservedItem[];
+  /** The rows this message produced, in the order the vendor stated them. */
+  readonly entries: readonly PersistEntry[];
+  /** Set only for the turn's `result` message. */
+  readonly turnEnded?: { readonly frame: conversationv1.AgentFrame };
 }
 
-/** An output that produced nothing — the exempt set's answer, and the common case. */
-export const EMPTY_FOLD_OUTPUT: FoldOutput = { frames: [], sessionUpdates: [], residue: [] };
+/** An output that produced nothing — the exempt set's answer, and common. */
+export const EMPTY_FOLD_OUTPUT: FoldOutput = { entries: [] };
+
+/**
+ * SDK message types that carry no conversation fact at all.
+ *
+ * DISTINCT FROM RESIDUE: residue means "we could not model this", and these are
+ * transport bookkeeping we HAVE modelled, as meaning nothing. Recording them
+ * would fill the unserved table with keep-alive frames.
+ */
+export const SILENTLY_IGNORED_TYPES: ReadonlySet<string> = new Set(["keep_alive"]);
 
 /**
  * The fold, as the engine drives it.
  *
- * ONE method, called once per SDK message in arrival order. It is synchronous
- * on purpose: a fold that could await would be able to interleave two messages
- * and break the ordering every upsert depends on. Anything that must be awaited
- * (a store write) is the caller's, after the fold has answered.
+ * ONE method, called once per SDK message in arrival order. Synchronous on
+ * purpose: a fold that could await would be able to interleave two messages and
+ * break the ordering every upsert depends on.
  */
 export interface Fold {
   /**
    * Convert one SDK message.
    *
-   * NEVER THROWS for an unrecognized record: that is what `residue` is for. It
-   * may throw for a BROKEN one — a record missing a field the contract says is
-   * always present — because that is a producer defect the session must surface
-   * as a `SessionFault` rather than quietly convert around.
+   * NEVER THROWS: an unrecognized record is residue, and a malformed one is
+   * residue plus a logged converter defect — a fold that threw would take the
+   * session down over one bad vendor line.
    */
-  onSdkMessage(message: SdkMessage): FoldOutput;
+  onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput;
+}
+
+/** Everything the fold remembers. Each field is named in this file's header. */
+interface FoldState {
+  readonly blocks: BlockState;
+  readonly calls: CallRegistry;
+  readonly hooks: HookRegistry;
+  pendingCompaction?: PendingCompaction;
+  lastAnswer?: conversationv1.AgentActivityId;
+}
+
+/**
+ * Build a fold.
+ *
+ * The returned object holds ONLY the joins named in this file's header. Nothing
+ * else survives a message.
+ */
+export function createFold(): Fold {
+  const state: FoldState = {
+    blocks: createBlockState(),
+    calls: createCallRegistry(),
+    hooks: createHookRegistry(),
+  };
+
+  return {
+    onSdkMessage(message: SdkMessage, context: FoldContext): FoldOutput {
+      try {
+        return dispatch(message, context, state);
+      } catch (error) {
+        // A converter that throws is a DEFECT, and the honest answer to a defect
+        // is residue plus a loud log — never a dead session, and never a
+        // half-built message on the wire.
+        const detail = error instanceof Error ? error.message : String(error);
+        LOGGER.log(
+          { level: "error", sdk_message_type: (message as { type?: string }).type, detail },
+          "converter defect: the message produced no frame and lands as residue",
+        );
+        return {
+          entries: [
+            residueEntry(
+              context,
+              message,
+              residueForMessage(message, `converter defect: ${detail}`),
+              "residue.unparsed",
+            ),
+          ],
+        };
+      }
+    },
+  };
+}
+
+/** The one switch over the vendor's message vocabulary. */
+function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): FoldOutput {
+  const type = message.type;
+  if (SILENTLY_IGNORED_TYPES.has(type)) {
+    LOGGER.logVerbose({ sdk_message_type: type }, "message carries no conversation fact; ignored");
+    return EMPTY_FOLD_OUTPUT;
+  }
+
+  switch (type) {
+    case "stream_event":
+      return { entries: convertStreamEvent(message, context, state.blocks) };
+
+    case "assistant": {
+      const entries = [
+        ...settleCompaction(message, context, state),
+        ...convertAssistantMessage(message, context, state.blocks, state.calls, TOOL_CONVERTERS),
+      ];
+      rememberAnswer(message, entries, state);
+      return { entries };
+    }
+
+    case "user":
+      return { entries: convertUserRecord(message, context, state.calls, TOOL_CONVERTERS) };
+
+    case "result":
+      return convertResult(message, context, state.lastAnswer);
+
+    case "tool_progress":
+      return {
+        entries: convertToolProgressMessage(message, context, state.calls, TOOL_CONVERTERS),
+      };
+
+    case "system":
+      return { entries: convertSystemMessage(message, context, state) };
+
+    case "rate_limit_event":
+    case "conversation_reset":
+      return { entries: convertSessionMessage(message, context) };
+
+    default:
+      LOGGER.log(
+        { level: "warn", sdk_message_type: type },
+        "no converter owns this SDK message type; it lands as residue",
+      );
+      return {
+        entries: [
+          residueEntry(context, message, residueForMessage(message), `unknown.${String(type)}`),
+        ],
+      };
+  }
+}
+
+/** `type: "system"` fans out by subtype across five converter families. */
+function convertSystemMessage(
+  message: Extract<SdkMessage, { type: "system" }>,
+  context: FoldContext,
+  state: FoldState,
+): readonly PersistEntry[] {
+  switch (message.subtype) {
+    case "permission_denied":
+      return convertPermissionDenied(message, context);
+    case "task_started":
+    case "task_updated":
+    case "task_notification":
+    case "task_progress":
+    case "background_tasks_changed":
+      return convertDetached(message, context);
+    case "hook_started":
+      return convertHookStarted(message, context, state.hooks);
+    case "hook_response":
+      return convertHookResponse(message, context, state.hooks);
+    case "thinking_tokens":
+      return convertThinkingTokens(message, context, state.blocks);
+    default:
+      return convertSessionMessage(message, context, (pending) => {
+        state.pendingCompaction = pending;
+      });
+  }
+}
+
+/**
+ * The compaction row, once the assistant message carrying its summary arrives.
+ *
+ * `ContextCompacted.summary` is not optional — the feed shows the summary in the
+ * cut's place, so the cut is not a hole — and the vendor states the boundary
+ * FIRST. One boundary is held, and it is released by the very next assistant
+ * prose, which is what that prose IS.
+ */
+function settleCompaction(
+  message: Extract<SdkMessage, { type: "assistant" }>,
+  context: FoldContext,
+  state: FoldState,
+): readonly PersistEntry[] {
+  const pending = state.pendingCompaction;
+  if (pending === undefined) return [];
+  const content = (message.message as { content?: unknown } | undefined)?.content;
+  const summary = Array.isArray(content)
+    ? content
+        .filter((block) => (block as { type?: unknown }).type === "text")
+        .map((block) => (block as { text?: unknown }).text)
+        .filter((text): text is string => typeof text === "string")
+        .join("")
+    : typeof content === "string"
+      ? content
+      : "";
+  if (summary === "") {
+    LOGGER.log(
+      { level: "warn" },
+      "the assistant message after a compaction boundary carried no prose; the cut is still held",
+    );
+    return [];
+  }
+  state.pendingCompaction = undefined;
+  return [compactionEntry(context, pending, summary)];
+}
+
+/**
+ * Remember which unit is the agent's ANSWER.
+ *
+ * `AgentCompleted.answer` names the LAST TOP-LEVEL prose the agent produced, so
+ * a consumer marks it final without deriving finality from position. Only the
+ * fold has seen which one that was, and only a TOP-LEVEL one qualifies: a
+ * subagent's prose is that agent's answer, not this one's.
+ */
+function rememberAnswer(
+  message: Extract<SdkMessage, { type: "assistant" }>,
+  entries: readonly PersistEntry[],
+  state: FoldState,
+): void {
+  if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== "") return;
+  for (const entry of entries) {
+    if (entry.item.kind !== "frame") continue;
+    const result = entry.item.frame.result;
+    if (result.case !== "update") continue;
+    const update = result.value.update;
+    if (update.case !== "activity") continue;
+    if (update.value.item.case !== "response") continue;
+    if (update.value.item.value.result.case !== "success") continue;
+    state.lastAnswer = update.value.activityId;
+  }
 }

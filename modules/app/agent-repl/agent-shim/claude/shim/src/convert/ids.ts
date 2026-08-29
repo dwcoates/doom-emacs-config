@@ -90,6 +90,20 @@ export function blockActivityId(
 }
 
 /**
+ * A hook firing's unit: the vendor's `hook_id`, verbatim.
+ *
+ * A hook is an activity unit like any other — it starts and it settles — but it
+ * is not a tool call, so it has no `tool_use_id` to borrow. The vendor's own
+ * firing id is the only thing stable across its two records, which is exactly
+ * what an activity id has to be.
+ */
+export function hookActivityId(hookId: string): conversationv1.AgentActivityId {
+  return create(conversationv1.AgentActivityIdSchema, {
+    value: requireVendorValue(hookId, "the hook firing id"),
+  });
+}
+
+/**
  * An open question: the AskUserQuestion call's `tool_use_id`, verbatim.
  *
  * It never collides with a permission id even though both are tool-use ids: a
