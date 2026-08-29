@@ -45,6 +45,7 @@ import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import {
   bashUpsertKey,
+  producerId,
   writeId,
   type SourceCoordinates as KeySourceCoordinates,
 } from "./keys.js";
@@ -203,7 +204,24 @@ const defaultSleep = (ms: number): Promise<void> =>
 export function createPersistence(options: PersistenceOptions): Persistence {
   const retry: PersistenceRetryPolicy = options.retry ?? DEFAULT_RETRY_POLICY;
   const sleep = options.sleep ?? defaultSleep;
-  const producer = options.producer;
+  /**
+   * This writer's name — UNSET until StartSession names the conversation.
+   *
+   * A write before then is a LIFETIME-SEQUENCING DEFECT, not a condition to
+   * survive: rows landed under a placeholder name would have write ids in a
+   * namespace no later replay could ever absorb against, so they would double on
+   * the first retry after the real name arrived.
+   */
+  let producer = options.producer;
+  const requireProducer = (): string => {
+    if (producer === undefined || producer === "") {
+      const message =
+        "shim store writer: a row was produced before StartSession named the conversation; write ids would land in a namespace no replay can absorb";
+      LOGGER.log({ level: "error" }, message);
+      throw new PersistenceError("store_unavailable", message);
+    }
+    return producer;
+  };
 
   const faultListeners = new Set<(fault: conversationv1.SessionFault) => void>();
   const windowListeners = new Set<(window: conversationv1.SessionDegradedWindow) => void>();
@@ -292,7 +310,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const attempt = async (entries: readonly PersistEntry[]): Promise<string | null> => {
     let response: storev1.WriteBatchResponse;
     try {
-      response = await options.client.writeBatch(toWriteBatchRequest(producer, entries));
+      response = await options.client.writeBatch(toWriteBatchRequest(requireProducer(), entries));
     } catch (error) {
       return error instanceof Error ? error.message : String(error);
     }
@@ -398,6 +416,25 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   };
 
   return {
+    setProducer(originalVendorSessionId: string): void {
+      const next = producerId(originalVendorSessionId);
+      if (producer !== undefined && producer !== next) {
+        // THE ORIGINAL ID NEVER CHANGES. A second, different name means the
+        // caller mistook a ROTATED id for the original one, which would split
+        // this conversation's write-id namespace at the rotation.
+        LOGGER.log(
+          { level: "error", producer, next },
+          "refusing to re-key the producer: a conversation has exactly one original vendor session id",
+        );
+        throw new PersistenceError(
+          "store_unavailable",
+          `the producer is already ${JSON.stringify(producer)} and cannot become ${JSON.stringify(next)}`,
+        );
+      }
+      producer = next;
+      LOGGER.log({ producer: next }, "named this writer from the conversation's original vendor session id");
+    },
+
     async writeDurable(entries: PersistEntry[]): Promise<void> {
       if (entries.length === 0) return;
       noteShellRuns(entries);

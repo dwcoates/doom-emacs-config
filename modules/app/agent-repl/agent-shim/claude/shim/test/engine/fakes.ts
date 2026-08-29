@@ -206,6 +206,12 @@ export class RecordingPersistence implements Persistence {
   liveWorkError: PersistenceError | undefined;
   closedPages = 0;
 
+  /** The producer name StartSession handed it, if it did. */
+  producer: string | undefined;
+
+  setProducer(originalVendorSessionId: string): void {
+    this.producer = originalVendorSessionId;
+  }
   writeDurable(entries: PersistEntry[]): Promise<void> {
     this.durable.push(...entries);
     return Promise.resolve();
