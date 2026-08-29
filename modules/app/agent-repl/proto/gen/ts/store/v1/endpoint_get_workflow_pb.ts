@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_get_workflow.proto.
  */
 export const file_store_v1_endpoint_get_workflow: GenFile = /*@__PURE__*/
-  fileDesc("CiRzdG9yZS92MS9lbmRwb2ludF9nZXRfd29ya2Zsb3cucHJvdG8SCHN0b3JlLnYxIkMKEkdldFdvcmtmbG93UmVxdWVzdBItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkIoEBChNHZXRXb3JrZmxvd1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRXb3JrZmxvd1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0V29ya2Zsb3dGYWlsdXJlSABCCAoGcmVzdWx0IqwBChJHZXRXb3JrZmxvd1N1Y2Nlc3MSMgoFc3RhcnQYASABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N0YXJ0EikKBGxpdmUYAiABKAsyGS5zdG9yZS52MS5HZXRXb3JrZmxvd0xpdmVIABIrCgVlbmRlZBgDIAEoCzIaLnN0b3JlLnYxLkdldFdvcmtmbG93RW5kZWRIAEIKCghzdGFuZGluZyJKCg9HZXRXb3JrZmxvd0xpdmUSNwoJc3ViYWdlbnRzGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dVcGRhdGUikQEKEEdldFdvcmtmbG93RW5kZWQSOAoHc3VjY2VzcxgBIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3VjY2Vzc0gAEjgKB2ZhaWx1cmUYAiABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd0ZhaWx1cmVIAEIJCgdvdXRjb21lIiQKEkdldFdvcmtmbG93RmFpbHVyZRIOCgZkZXRhaWwYASABKAlCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent, file_conversation_v1_detached_work, file_conversation_v1_workflow]);
+  fileDesc("CiRzdG9yZS92MS9lbmRwb2ludF9nZXRfd29ya2Zsb3cucHJvdG8SCHN0b3JlLnYxIkMKEkdldFdvcmtmbG93UmVxdWVzdBItCgR3b3JrGAEgASgLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkIoEBChNHZXRXb3JrZmxvd1Jlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zdG9yZS52MS5HZXRXb3JrZmxvd1N1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc3RvcmUudjEuR2V0V29ya2Zsb3dGYWlsdXJlSABCCAoGcmVzdWx0IqwBChJHZXRXb3JrZmxvd1N1Y2Nlc3MSMgoFc3RhcnQYASABKAsyIy5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd1N0YXJ0EikKBGxpdmUYAiABKAsyGS5zdG9yZS52MS5HZXRXb3JrZmxvd0xpdmVIABIrCgVlbmRlZBgDIAEoCzIaLnN0b3JlLnYxLkdldFdvcmtmbG93RW5kZWRIAEIKCghzdGFuZGluZyJKCg9HZXRXb3JrZmxvd0xpdmUSNwoJc3ViYWdlbnRzGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50V29ya2Zsb3dVcGRhdGUikQEKEEdldFdvcmtmbG93RW5kZWQSOAoHc3VjY2VzcxgBIAEoCzIlLmNvbnZlcnNhdGlvbi52MS5BZ2VudFdvcmtmbG93U3VjY2Vzc0gAEjgKB2ZhaWx1cmUYAiABKAsyJS5jb252ZXJzYXRpb24udjEuQWdlbnRXb3JrZmxvd0ZhaWx1cmVIAEIJCgdvdXRjb21lIuQBChJHZXRXb3JrZmxvd0ZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEj4KD25vdF9pbXBsZW1lbnRlZBgCIAEoCzIjLnN0b3JlLnYxLkdldFdvcmtmbG93Tm90SW1wbGVtZW50ZWRIABI+Cg9pbnZhbGlkX3JlcXVlc3QYAyABKAsyIy5zdG9yZS52MS5HZXRXb3JrZmxvd0ludmFsaWRSZXF1ZXN0SAASNgoLdW5rbm93bl9ydW4YBCABKAsyHy5zdG9yZS52MS5HZXRXb3JrZmxvd1Vua25vd25SdW5IAEIGCgRraW5kIhsKGUdldFdvcmtmbG93Tm90SW1wbGVtZW50ZWQiKgoZR2V0V29ya2Zsb3dJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIXChVHZXRXb3JrZmxvd1Vua25vd25SdW5CIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_conversation_v1_agent, file_conversation_v1_detached_work, file_conversation_v1_workflow]);
 
 /**
  * Which run: the announced handle, the workflow table's key.
@@ -167,8 +167,7 @@ export const GetWorkflowEndedSchema: GenMessage<GetWorkflowEnded> = /*@__PURE__*
   messageDesc(file_store_v1_endpoint_get_workflow, 4);
 
 /**
- * The run is not known to this store. `kind` arms are DERIVED at the wave
- * from the store's real refusal sites.
+ * The run could not be served. THE ARM IS WHY.
  *
  * @generated from message store.v1.GetWorkflowFailure
  */
@@ -179,6 +178,35 @@ export type GetWorkflowFailure = Message<"store.v1.GetWorkflowFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof store.v1.GetWorkflowFailure.kind
+   */
+  kind: {
+    /**
+     * Workflow is not implemented this wave — the only arm produced today.
+     *
+     * @generated from field: store.v1.GetWorkflowNotImplemented not_implemented = 2;
+     */
+    value: GetWorkflowNotImplemented;
+    case: "notImplemented";
+  } | {
+    /**
+     * `work` empty. Reserved for the workflow wave.
+     *
+     * @generated from field: store.v1.GetWorkflowInvalidRequest invalid_request = 3;
+     */
+    value: GetWorkflowInvalidRequest;
+    case: "invalidRequest";
+  } | {
+    /**
+     * No run is known under this handle. Reserved for the workflow wave.
+     *
+     * @generated from field: store.v1.GetWorkflowUnknownRun unknown_run = 4;
+     */
+    value: GetWorkflowUnknownRun;
+    case: "unknownRun";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -187,4 +215,47 @@ export type GetWorkflowFailure = Message<"store.v1.GetWorkflowFailure"> & {
  */
 export const GetWorkflowFailureSchema: GenMessage<GetWorkflowFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_get_workflow, 5);
+
+/**
+ * @generated from message store.v1.GetWorkflowNotImplemented
+ */
+export type GetWorkflowNotImplemented = Message<"store.v1.GetWorkflowNotImplemented"> & {
+};
+
+/**
+ * Describes the message store.v1.GetWorkflowNotImplemented.
+ * Use `create(GetWorkflowNotImplementedSchema)` to create a new message.
+ */
+export const GetWorkflowNotImplementedSchema: GenMessage<GetWorkflowNotImplemented> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_workflow, 6);
+
+/**
+ * @generated from message store.v1.GetWorkflowInvalidRequest
+ */
+export type GetWorkflowInvalidRequest = Message<"store.v1.GetWorkflowInvalidRequest"> & {
+  /**
+   * @generated from field: string field = 1;
+   */
+  field: string;
+};
+
+/**
+ * Describes the message store.v1.GetWorkflowInvalidRequest.
+ * Use `create(GetWorkflowInvalidRequestSchema)` to create a new message.
+ */
+export const GetWorkflowInvalidRequestSchema: GenMessage<GetWorkflowInvalidRequest> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_workflow, 7);
+
+/**
+ * @generated from message store.v1.GetWorkflowUnknownRun
+ */
+export type GetWorkflowUnknownRun = Message<"store.v1.GetWorkflowUnknownRun"> & {
+};
+
+/**
+ * Describes the message store.v1.GetWorkflowUnknownRun.
+ * Use `create(GetWorkflowUnknownRunSchema)` to create a new message.
+ */
+export const GetWorkflowUnknownRunSchema: GenMessage<GetWorkflowUnknownRun> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_workflow, 8);
 
