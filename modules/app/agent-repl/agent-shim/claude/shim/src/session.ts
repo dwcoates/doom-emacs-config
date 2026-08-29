@@ -7,7 +7,7 @@
  * scripted fake query.
  */
 import { AsyncQueue } from "./input-queue.js";
-import { bindLog } from "./uds/log.js";
+import { bindLog } from "./log.js";
 import {
   AssistantMessageError,
   ContentBlock,

@@ -10,7 +10,7 @@
  * every counter the vendor reported, verbatim, so the evidence behind the
  * daemon's verdict is on disk beside it.
  */
-import { bindLog, type LogFields } from "./uds/log.js";
+import { bindLog, type LogFields } from "./log.js";
 import { type NormalizedApiUsage } from "./api-usage.js";
 
 const LOGGER = bindLog({ component: "claude-shim-usage", operation: "shim.usage.assistant_api_response" });

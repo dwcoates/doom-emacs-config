@@ -1,7 +1,7 @@
 /** Canonical JSONL logging owned by the Claude shim runtime. */
 import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
-import { logTimestamp } from "../../../../logging/ts/timestamp.js";
+import { logTimestamp } from "../../../logging/ts/timestamp.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
