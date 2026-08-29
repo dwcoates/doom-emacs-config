@@ -213,6 +213,8 @@ type KillSessionFailure struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*KillSessionFailure_Live
+	//	*KillSessionFailure_NoSession
+	//	*KillSessionFailure_QueryRefusedToEnd
 	Cause isKillSessionFailure_Cause `protobuf_oneof:"cause"`
 	// The shim's account, for a human and for logs; never switched on.
 	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
@@ -266,6 +268,24 @@ func (x *KillSessionFailure) GetLive() *v1.SessionLive {
 	return nil
 }
 
+func (x *KillSessionFailure) GetNoSession() *KillSessionNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*KillSessionFailure_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *KillSessionFailure) GetQueryRefusedToEnd() *KillSessionQueryRefusedToEnd {
+	if x != nil {
+		if x, ok := x.Cause.(*KillSessionFailure_QueryRefusedToEnd); ok {
+			return x.QueryRefusedToEnd
+		}
+	}
+	return nil
+}
+
 func (x *KillSessionFailure) GetDetail() string {
 	if x != nil {
 		return x.Detail
@@ -279,10 +299,96 @@ type isKillSessionFailure_Cause interface {
 
 type KillSessionFailure_Live struct {
 	// Work is live and force was not asked: here is what is live.
-	Live *v1.SessionLive `protobuf:"bytes,1,opt,name=live,proto3,oneof"` // Further arms DERIVED at the wave (the query refusing to end).
+	Live *v1.SessionLive `protobuf:"bytes,1,opt,name=live,proto3,oneof"`
+}
+
+type KillSessionFailure_NoSession struct {
+	// No session is open on this shim.
+	NoSession *KillSessionNoSession `protobuf:"bytes,3,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type KillSessionFailure_QueryRefusedToEnd struct {
+	// The vendor query refused to end in the stand-down window.
+	QueryRefusedToEnd *KillSessionQueryRefusedToEnd `protobuf:"bytes,4,opt,name=query_refused_to_end,json=queryRefusedToEnd,proto3,oneof"`
 }
 
 func (*KillSessionFailure_Live) isKillSessionFailure_Cause() {}
+
+func (*KillSessionFailure_NoSession) isKillSessionFailure_Cause() {}
+
+func (*KillSessionFailure_QueryRefusedToEnd) isKillSessionFailure_Cause() {}
+
+type KillSessionNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillSessionNoSession) Reset() {
+	*x = KillSessionNoSession{}
+	mi := &file_shim_v1_endpoint_kill_session_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillSessionNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillSessionNoSession) ProtoMessage() {}
+
+func (x *KillSessionNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_kill_session_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillSessionNoSession.ProtoReflect.Descriptor instead.
+func (*KillSessionNoSession) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_kill_session_proto_rawDescGZIP(), []int{4}
+}
+
+type KillSessionQueryRefusedToEnd struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillSessionQueryRefusedToEnd) Reset() {
+	*x = KillSessionQueryRefusedToEnd{}
+	mi := &file_shim_v1_endpoint_kill_session_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillSessionQueryRefusedToEnd) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillSessionQueryRefusedToEnd) ProtoMessage() {}
+
+func (x *KillSessionQueryRefusedToEnd) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_kill_session_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillSessionQueryRefusedToEnd.ProtoReflect.Descriptor instead.
+func (*KillSessionQueryRefusedToEnd) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_kill_session_proto_rawDescGZIP(), []int{5}
+}
 
 var File_shim_v1_endpoint_kill_session_proto protoreflect.FileDescriptor
 
@@ -296,11 +402,16 @@ const file_shim_v1_endpoint_kill_session_proto_rawDesc = "" +
 	"\afailure\x18\x02 \x01(\v2\x1b.shim.v1.KillSessionFailureH\x00R\afailureB\b\n" +
 	"\x06result\"L\n" +
 	"\x12KillSessionSuccess\x126\n" +
-	"\x06closed\x18\x01 \x01(\v2\x1e.conversation.v1.SessionKilledR\x06closed\"i\n" +
+	"\x06closed\x18\x01 \x01(\v2\x1e.conversation.v1.SessionKilledR\x06closed\"\x83\x02\n" +
 	"\x12KillSessionFailure\x122\n" +
-	"\x04live\x18\x01 \x01(\v2\x1c.conversation.v1.SessionLiveH\x00R\x04live\x12\x16\n" +
+	"\x04live\x18\x01 \x01(\v2\x1c.conversation.v1.SessionLiveH\x00R\x04live\x12>\n" +
+	"\n" +
+	"no_session\x18\x03 \x01(\v2\x1d.shim.v1.KillSessionNoSessionH\x00R\tnoSession\x12X\n" +
+	"\x14query_refused_to_end\x18\x04 \x01(\v2%.shim.v1.KillSessionQueryRefusedToEndH\x00R\x11queryRefusedToEnd\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detailB\a\n" +
-	"\x05causeB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x05cause\"\x16\n" +
+	"\x14KillSessionNoSession\"\x1e\n" +
+	"\x1cKillSessionQueryRefusedToEndB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_kill_session_proto_rawDescOnce sync.Once
@@ -314,25 +425,29 @@ func file_shim_v1_endpoint_kill_session_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_kill_session_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_kill_session_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_shim_v1_endpoint_kill_session_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_shim_v1_endpoint_kill_session_proto_goTypes = []any{
-	(*KillSessionRequest)(nil),  // 0: shim.v1.KillSessionRequest
-	(*KillSessionResponse)(nil), // 1: shim.v1.KillSessionResponse
-	(*KillSessionSuccess)(nil),  // 2: shim.v1.KillSessionSuccess
-	(*KillSessionFailure)(nil),  // 3: shim.v1.KillSessionFailure
-	(*v1.SessionKilled)(nil),    // 4: conversation.v1.SessionKilled
-	(*v1.SessionLive)(nil),      // 5: conversation.v1.SessionLive
+	(*KillSessionRequest)(nil),           // 0: shim.v1.KillSessionRequest
+	(*KillSessionResponse)(nil),          // 1: shim.v1.KillSessionResponse
+	(*KillSessionSuccess)(nil),           // 2: shim.v1.KillSessionSuccess
+	(*KillSessionFailure)(nil),           // 3: shim.v1.KillSessionFailure
+	(*KillSessionNoSession)(nil),         // 4: shim.v1.KillSessionNoSession
+	(*KillSessionQueryRefusedToEnd)(nil), // 5: shim.v1.KillSessionQueryRefusedToEnd
+	(*v1.SessionKilled)(nil),             // 6: conversation.v1.SessionKilled
+	(*v1.SessionLive)(nil),               // 7: conversation.v1.SessionLive
 }
 var file_shim_v1_endpoint_kill_session_proto_depIdxs = []int32{
 	2, // 0: shim.v1.KillSessionResponse.success:type_name -> shim.v1.KillSessionSuccess
 	3, // 1: shim.v1.KillSessionResponse.failure:type_name -> shim.v1.KillSessionFailure
-	4, // 2: shim.v1.KillSessionSuccess.closed:type_name -> conversation.v1.SessionKilled
-	5, // 3: shim.v1.KillSessionFailure.live:type_name -> conversation.v1.SessionLive
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	6, // 2: shim.v1.KillSessionSuccess.closed:type_name -> conversation.v1.SessionKilled
+	7, // 3: shim.v1.KillSessionFailure.live:type_name -> conversation.v1.SessionLive
+	4, // 4: shim.v1.KillSessionFailure.no_session:type_name -> shim.v1.KillSessionNoSession
+	5, // 5: shim.v1.KillSessionFailure.query_refused_to_end:type_name -> shim.v1.KillSessionQueryRefusedToEnd
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_kill_session_proto_init() }
@@ -346,6 +461,8 @@ func file_shim_v1_endpoint_kill_session_proto_init() {
 	}
 	file_shim_v1_endpoint_kill_session_proto_msgTypes[3].OneofWrappers = []any{
 		(*KillSessionFailure_Live)(nil),
+		(*KillSessionFailure_NoSession)(nil),
+		(*KillSessionFailure_QueryRefusedToEnd)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -353,7 +470,7 @@ func file_shim_v1_endpoint_kill_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_kill_session_proto_rawDesc), len(file_shim_v1_endpoint_kill_session_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
