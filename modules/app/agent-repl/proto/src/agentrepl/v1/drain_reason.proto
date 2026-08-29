@@ -1,0 +1,33 @@
+// drain_reason.proto — the typed drain-reason vocabulary, shared by
+// UpdateShutdownSchedule (the request states why), the WatchDaemon
+// drain-scheduled push (clients draw the standing banner from it), and
+// the shutdown announcement's cause arms. THE ARM IS THE REASON — never a
+// bare string; detail strings live only inside the arm that owns them.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message DrainReason {
+  oneof kind {
+    DrainReasonDeploy deploy = 1;
+    DrainReasonMaintenance maintenance = 2;
+    DrainReasonOperator operator = 3;
+  }
+}
+
+// Deploy tooling driving a rollout.
+message DrainReasonDeploy {
+}
+
+// Operator maintenance with no free-text note.
+message DrainReasonMaintenance {
+}
+
+// An operator-supplied reason. The note is REQUIRED non-blank — a blank
+// note is refused at the request.
+message DrainReasonOperator {
+  string note = 1;
+}
