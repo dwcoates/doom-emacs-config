@@ -67,6 +67,19 @@ export interface FoldContext {
   /** What the vendor's task id names, from the `task_started` join. */
   liveTask(taskId: string): LiveTask | undefined;
   /**
+   * WHICH AGENT a spawning call created, by that call's `tool_use_id`.
+   *
+   * THE SDK STATES NO AGENT ID ON A SUBAGENT'S OWN MESSAGES. An assistant
+   * message produced inside a subagent carries `parent_tool_use_id` — the CALL
+   * that spawned it — and nothing else, so the only way to attribute its prose
+   * to the subagent's own book is this lookup, which the engine holds from the
+   * spawn's result and from `task_started`. UNSET while the spawn has not
+   * reported an agent id, and the frames then attribute to the MAIN agent
+   * rather than to an agent that has not been named — a wrong id would be
+   * silently wrong attribution, and this is merely coarse.
+   */
+  subagentFor(toolUseId: string): conversationv1.AgentId | undefined;
+  /**
    * The last write or edit unit this agent produced.
    *
    * The vendor's IDE-diagnostics record carries NO tool-call id, so the join to
