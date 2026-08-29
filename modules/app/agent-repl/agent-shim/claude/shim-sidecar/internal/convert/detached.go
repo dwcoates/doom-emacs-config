@@ -39,9 +39,10 @@ const (
 // means bytes were lost and the consumer refuses the frame rather than
 // concatenating across a hole.
 func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int64) *storev1.StoreEntry {
-	c.log.With(at.ctxFor("bash-delta")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
-		LogVerbose("spool delta bytes=%d from_offset=%d", len(output), fromOffset)
-	return BashRun(at, "bash_delta:"+itoa(int(fromOffset)), BashKey(run), run, &conversationv1.AgentBash{
+	c.log.With(at.ctxFor("bash-delta")).With(logging.Context{
+		ActivityID: run, UpsertKey: BashDeltaKey(run, fromOffset), Offset: logging.Off(fromOffset),
+	}).LogVerbose("spool delta bytes=%d from_offset=%d", len(output), fromOffset)
+	return BashRun(at, "bash_delta:"+itoa(int(fromOffset)), BashDeltaKey(run, fromOffset), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Update{Update: &conversationv1.AgentBashUpdate{
 			NewOutput:  output,
 			FromOffset: uint64(fromOffset),
@@ -57,9 +58,9 @@ func (c *Converter) BashDelta(at Attribution, run, output string, fromOffset int
 // also what keeps a task that plainly finished from sitting open until a
 // staleness sweep eventually — and wrongly — calls it LOST.
 func (c *Converter) BashExited(at Attribution, run, output string, omitted uint64, code int) *storev1.StoreEntry {
-	c.log.With(at.ctxFor("bash-exit")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
+	c.log.With(at.ctxFor("bash-exit")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
 		Log("EXIT=%d observed on disk; the run ends on evidence rather than on a silence timeout", code)
-	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
+	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
@@ -74,13 +75,15 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 
 // BashLost converts a run we STOPPED BEING ABLE TO SEE into its terminal.
 //
-// NO CAUSE ARM IS SET. AgentBashInterrupted's causes are `by_user` and
-// `timed_out`, and neither is what happened: we simply stopped observing. Setting
-// either would be an accusation with no evidence, so the cause stays UNSET and
-// the reason is stated loudly in the log instead.
+// THE CAUSE IS `lost`, AND THE ARM IS HOW WE CONCLUDED IT. Landing 3 gave
+// DetachedLost a home on AgentBashInterrupted.cause, so "we stopped seeing it"
+// is now a statement the wire carries rather than a fact that survived only in
+// this reader's log. It is deliberately NOT `by_user` or `timed_out`: those name
+// decisions, and no decision was observed — which is exactly why `lost` draws as
+// its own word downstream and never as a cancel or a failure.
 func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason) *storev1.StoreEntry {
-	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{ActivityID: run, UpsertKey: BashKey(run)}).
-		Log("the detached run is LOST (%s); it resolves interrupted with no cause because the wire carries no DetachedLost this wave", reason)
+	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
+		Log("the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm", reason)
 	return BashLostEntry(at, run, output, omitted, reason)
 }
 
@@ -91,22 +94,72 @@ func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64,
 // sweeps observe it, so a re-emission is absorbed at the store rather than
 // appending a second terminal.
 func BashLostEntry(at Attribution, run, output string, omitted uint64, reason LostReason) *storev1.StoreEntry {
-	return BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
+	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
 				Output: spoolOutput(output, omitted),
+				Cause:  &conversationv1.AgentBashInterrupted_Lost{Lost: DetachedLostArm(reason)},
 			}},
 		}},
 	})
 }
 
+// BashCancelled converts a person's stop into the run's terminal, carrying what
+// the run had said by the time it was cut.
+//
+// A CANCEL IS A DECISION AND SAYS SO: `by_user` is the one cause here that IS
+// evidence — a TaskStop result is a person's act, recorded by the vendor. It is
+// deliberately not `lost`: we did not stop seeing this run, we were told it was
+// stopped.
+func (c *Converter) BashCancelled(at Attribution, run, output string, omitted uint64, settledAtMs int64) *storev1.StoreEntry {
+	c.log.With(at.ctxFor("bash-cancelled")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
+		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user carrying the %d byte(s) it had produced", len(output))
+	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command:   &conversationv1.AgentBashCommand{Line: at.TaskID},
+			SettledAt: settledAt(settledAtMs),
+			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+				Output: spoolOutput(output, omitted),
+				Cause:  &conversationv1.AgentBashInterrupted_ByUser{ByUser: &conversationv1.AgentBashInterruptedByUser{}},
+			}},
+		}},
+	})
+}
+
+// DetachedLostArm spells a reader's LOST vocabulary as the wire's arm.
+//
+// AN UNRECOGNIZED REASON IS A PROGRAMMING ERROR, NOT A DEFAULT. The three arms
+// ARE the reader's three ways of stopping seeing a run, so a fourth string means
+// this package and the staleness policy have drifted apart — and picking an arm
+// to keep going would have the wire assert something nobody observed. It fails
+// hard instead.
+func DetachedLostArm(reason LostReason) *conversationv1.DetachedLost {
+	switch reason {
+	case LostFileVanished:
+		return &conversationv1.DetachedLost{
+			How: &conversationv1.DetachedLost_FileVanished{FileVanished: &conversationv1.DetachedLostFileVanished{}},
+		}
+	case LostWentSilent:
+		return &conversationv1.DetachedLost{
+			How: &conversationv1.DetachedLost_WentSilent{WentSilent: &conversationv1.DetachedLostWentSilent{}},
+		}
+	case LostSweptUp:
+		return &conversationv1.DetachedLost{
+			How: &conversationv1.DetachedLost_SweptUp{SweptUp: &conversationv1.DetachedLostSweptUp{}},
+		}
+	default:
+		panic("convert: unknown LostReason " + string(reason) + " — DetachedLost's arms are the reader's whole vocabulary and an unset oneof is illegal")
+	}
+}
+
 // taskStopTerminal consumes a TaskStop RESULT as the owning task's CANCELLED
 // terminal, before the call itself is dropped.
 //
-// DELIBERATELY-STOPPED WORK MUST RESOLVE CANCELLED, NEVER LOST. A bash task
-// becomes the run's interrupted-by-user terminal; an agent task becomes the
-// spawn unit's stopped-by-user failure.
+// DELIBERATELY-STOPPED WORK MUST RESOLVE CANCELLED, NEVER LOST. An AGENT task
+// settles here, because the spawn unit is a line in THIS stream's book and this
+// converter owns it. A SHELL task does not: its terminal owes the output the
+// spool holds, so the fact is reported and the spool's reader mints it.
 func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env envelope, agent string) []*storev1.StoreEntry {
 	taskID := str(pick(result, "task_id", "taskId"))
 	taskType := str(pick(result, "task_type", "taskType"))
@@ -118,38 +171,35 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 
 	switch taskType {
 	case "agent":
-		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: taskID, UpsertKey: ActivityKey(taskID)}).
+		// THE SPAWN UNIT IS KEYED BY THE CALL THAT SPAWNED IT, never by the
+		// vendor task id: the unit being settled is the Agent CALL in this
+		// stream's book, and the task id names the harness's bookkeeping for it.
+		run, launched := c.spawnedRuns[taskID]
+		if !launched {
+			c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
+				Log("TaskStop names an agent task no launch on this stream opened; the spawn unit it settles cannot be identified and the record is stored as vendor_specific")
+			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
+		}
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: run, UpsertKey: ActivityKey(run)}).
 			Log("TaskStop consumed as the CANCELLED terminal of an agent task")
 		activity := item(&conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
 			Result: &conversationv1.AgentSubagent_Failure{Failure: &conversationv1.AgentSubagentFailure{
 				Cause: &conversationv1.AgentSubagentFailure_StoppedByUser{StoppedByUser: &conversationv1.AgentSubagentStoppedByUser{}},
 			}},
 		}})
-		activity.ActivityId = activityID(taskID)
-		return []*storev1.StoreEntry{c.settledEntry(at, agent, taskID, activity)}
+		activity.ActivityId = activityID(run)
+		return []*storev1.StoreEntry{c.settledEntry(at, agent, run, activity)}
 	default:
-		// THE RUN IS THE SPAWNING CALL. A TaskStop result names only the vendor
-		// task, so the cancelled terminal is keyed by the call this file's own
-		// launch result recorded for it; without that launch the stop names no
-		// unit at all and is stored whole rather than keyed on a guess.
-		run, launched := c.spawnedRuns[taskID]
-		if !launched {
-			c.log.With(at.ctxWarn("task-stop")).With(logging.Context{TaskID: taskID}).
-				Log("TaskStop names a task no launch on this stream opened; the run it cancelled cannot be identified and the record is stored as vendor_specific")
-			return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unlaunched", result)}
-		}
-		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID, ActivityID: run, UpsertKey: BashKey(run)}).
-			Log("TaskStop consumed as the CANCELLED terminal of a shell run")
-		return []*storev1.StoreEntry{BashRun(at, "bash_terminal", BashKey(run), run, &conversationv1.AgentBash{
-			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
-				Command:   &conversationv1.AgentBashCommand{Line: taskID},
-				SettledAt: settledAt(env.timestampMs),
-				Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
-					Output: wholeStdout(""),
-					Cause:  &conversationv1.AgentBashInterrupted_ByUser{ByUser: &conversationv1.AgentBashInterruptedByUser{}},
-				}},
-			}},
-		})}
+		// A SHELL TASK'S CANCELLED TERMINAL IS MINTED BY THE SPOOL'S READER, not
+		// here. The terminal must carry what the run had said, and those bytes
+		// are in the spool this converter never reads — so the fact is reported
+		// and the reader mints the terminal through the spool handler, exactly as
+		// it does for a LOST conclusion. Reporting is the whole conversion: the
+		// TaskStop call is dropped either way, so this record produces no entry.
+		c.log.With(at.ctxFor("task-stop")).With(logging.Context{TaskID: taskID}).
+			Log("TaskStop reported to owner resolution as the CANCELLED terminal of a shell run; the spool's reader mints it with the output it holds")
+		c.observer.TaskStopped(taskID)
+		return nil
 	}
 }
 

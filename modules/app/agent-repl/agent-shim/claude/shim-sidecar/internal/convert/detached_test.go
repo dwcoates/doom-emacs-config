@@ -3,7 +3,11 @@ package convert
 // detached_test.go — spool deltas, the exit marker, and the LOST verdict's
 // stability.
 
-import "testing"
+import (
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+)
 
 func TestBashDeltaFromOffsetIsAGapDetector(t *testing.T) {
 	// Arrange. from_offset MUST equal the bytes the consumer already holds;
@@ -27,23 +31,72 @@ func TestBashDeltaFromOffsetIsAGapDetector(t *testing.T) {
 	}
 }
 
-func TestBashFramesUpsertTheRunsOneRow(t *testing.T) {
-	// Arrange. A delta and the terminal are frames of ONE unit, not two rows.
+func TestEverySpoolDerivedWriteIsItsOwnRow(t *testing.T) {
+	// Arrange. THE STORE SUPERSEDES A ROW WHOLE, so one key for the whole run
+	// would leave it holding only its most recent delta — every earlier chunk of
+	// output erased by the next. store.v1 WatchBashRun replays a run's rows in
+	// write order, which is only possible if each write IS a row.
 	c := newTestConverter(t)
 	at := testAttribution(0)
 	at.TaskID = "b1"
 
 	// Act.
-	delta := c.BashDelta(at, "toolu_run", "out", 0)
-	terminal := c.BashExited(at, "toolu_run", "out", 0, 0)
+	first := c.BashDelta(at, "toolu_run", "out", 0)
+	second := c.BashDelta(at, "toolu_run", "more", 3)
+	terminal := c.BashExited(at, "toolu_run", "outmore", 0, 0)
 
 	// Assert.
-	if delta.GetUpsertKey() != terminal.GetUpsertKey() {
-		t.Fatalf("keys differ: %q vs %q; the terminal must upsert the run's own row",
-			delta.GetUpsertKey(), terminal.GetUpsertKey())
+	keys := []string{first.GetUpsertKey(), second.GetUpsertKey(), terminal.GetUpsertKey()}
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if seen[key] {
+			t.Fatalf("two spool-derived writes share the key %q; the later would erase the earlier", key)
+		}
+		seen[key] = true
 	}
-	if delta.GetWriteId() == terminal.GetWriteId() {
-		t.Fatal("two frames of one unit must have DIFFERENT write ids, or the store absorbs one as a replay of the other")
+	if got := terminal.GetUpsertKey(); got != BashTerminalKey("toolu_run") {
+		t.Fatalf("terminal key = %q, want the run's single terminal key", got)
+	}
+}
+
+func TestARereadDeltaSupersedesItsOwnRowRatherThanAppendingACopy(t *testing.T) {
+	// Arrange. The delta's key is its from_offset, which IS the delta's identity:
+	// the same bytes re-read after a restart must land on the row they already
+	// own, or a replay grows a second copy of the run's output.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	first := c.BashDelta(at, "toolu_run", "out", 512)
+	replayed := c.BashDelta(at, "toolu_run", "out", 512)
+
+	// Assert.
+	if first.GetUpsertKey() != replayed.GetUpsertKey() {
+		t.Fatalf("a re-read delta keyed %q vs %q; it must supersede its own row",
+			first.GetUpsertKey(), replayed.GetUpsertKey())
+	}
+	if first.GetWriteId() != replayed.GetWriteId() {
+		t.Fatalf("a re-read delta minted write_ids %q and %q; the digest is of file coordinates and must be identical",
+			first.GetWriteId(), replayed.GetWriteId())
+	}
+}
+
+func TestATerminalAndADeltaAtTheSameOffsetDoNotCollide(t *testing.T) {
+	// Arrange. A command that produced no output at all settles from offset 0,
+	// where its only delta also lives — so the terminal's key must not be
+	// derivable from an offset at all.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	delta := c.BashDelta(at, "toolu_run", "EXIT=0\n", 0)
+	terminal := c.BashExited(at, "toolu_run", "EXIT=0\n", 0, 0)
+
+	// Assert.
+	if delta.GetUpsertKey() == terminal.GetUpsertKey() {
+		t.Fatalf("the terminal and the offset-0 delta share the key %q", delta.GetUpsertKey())
 	}
 }
 
@@ -177,5 +230,107 @@ func TestATerminalThatDroppedNothingStatesWhole(t *testing.T) {
 	text := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetCompleted().GetOutput().GetText()
 	if text.GetWhole() == nil {
 		t.Fatalf("a terminal that dropped nothing must state whole: %v", text.GetExtent())
+	}
+}
+
+func TestALostRunStatesTheArmItConcludedOn(t *testing.T) {
+	// Arrange. Landing 3 gave DetachedLost a home on the interrupted cause, so
+	// HOW the reader stopped seeing a run is a statement the WIRE carries rather
+	// than a fact surviving only in this reader's log.
+	tests := []struct {
+		name   string
+		reason LostReason
+		want   func(*conversationv1.DetachedLost) bool
+	}{
+		{
+			name:   "the file disappeared",
+			reason: LostFileVanished,
+			want:   func(l *conversationv1.DetachedLost) bool { return l.GetFileVanished() != nil },
+		},
+		{
+			name:   "the file stopped growing",
+			reason: LostWentSilent,
+			want:   func(l *conversationv1.DetachedLost) bool { return l.GetWentSilent() != nil },
+		},
+		{
+			name:   "a boot sweep found it open",
+			reason: LostSweptUp,
+			want:   func(l *conversationv1.DetachedLost) bool { return l.GetSweptUp() != nil },
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange.
+			c := newTestConverter(t)
+			at := testAttribution(0)
+
+			// Act.
+			entry := c.BashLost(at, "toolu_run", "so far", 0, test.reason)
+
+			// Assert.
+			cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
+			if cut.GetLost() == nil {
+				t.Fatalf("a LOST run must state the lost cause: %v", cut.GetCause())
+			}
+			if !test.want(cut.GetLost()) {
+				t.Fatalf("the lost cause names the wrong arm: %v", cut.GetLost().GetHow())
+			}
+		})
+	}
+}
+
+func TestALostRunIsNeverBlamedOnAPersonOrATimeout(t *testing.T) {
+	// Arrange. by_user and timed_out name DECISIONS, and no decision was
+	// observed — the reader merely stopped seeing the file.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashLost(at, "toolu_run", "so far", 0, LostWentSilent)
+
+	// Assert.
+	cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
+	if cut.GetByUser() != nil {
+		t.Fatal("a LOST run must not be drawn as a person's cancel")
+	}
+	if cut.GetTimedOut() != nil {
+		t.Fatal("a LOST run must not be drawn as a timeout")
+	}
+}
+
+func TestAnUnknownLostReasonFailsRatherThanPickingAnArm(t *testing.T) {
+	// Arrange. The three arms ARE the reader's vocabulary, so a fourth string
+	// means this package and the staleness policy have drifted — and choosing an
+	// arm to keep going would have the wire assert something nobody observed.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("an unknown LOST reason must fail hard, not resolve to an arm")
+		}
+	}()
+
+	// Act.
+	DetachedLostArm(LostReason("invented"))
+}
+
+func TestACancelledRunCarriesTheOutputItHadProducedAndBlamesThePerson(t *testing.T) {
+	// Arrange. A TaskStop result IS evidence of a decision, which is the one
+	// thing `by_user` may be set on — and the terminal owes what the run said.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "b1"
+
+	// Act.
+	entry := c.BashCancelled(at, "toolu_run", "partial work\n", 0, 1700000000000)
+
+	// Assert.
+	cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
+	if cut.GetByUser() == nil {
+		t.Fatalf("a stop is a person's decision and must state by_user: %v", cut.GetCause())
+	}
+	if got := cut.GetOutput().GetText().GetStdout(); got != "partial work\n" {
+		t.Fatalf("cancelled stdout = %q, want the output the run had produced", got)
+	}
+	if got := entry.GetUpsertKey(); got != BashTerminalKey("toolu_run") {
+		t.Fatalf("cancelled terminal keyed %q, want the run's terminal key", got)
 	}
 }

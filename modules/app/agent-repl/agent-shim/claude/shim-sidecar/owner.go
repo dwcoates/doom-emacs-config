@@ -14,6 +14,7 @@
 package main
 
 import (
+	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -31,6 +32,11 @@ type Observer interface {
 	// a shell run, which creates no agent), and outputPath the spool the task
 	// writes to when the vendor named one (empty when it did not).
 	TaskSpawned(taskID, toolUseID, agentID, outputPath string)
+
+	// TaskStopped reports that a person stopped a task. The reader owns what
+	// that means: the terminal is minted by the spool's handler, which is the
+	// only thing holding the output the terminal owes.
+	TaskStopped(taskID string)
 }
 
 var _ Observer = (*sidecar)(nil)
@@ -43,6 +49,86 @@ func (s *sidecar) TaskSpawned(taskID, toolUseID, agentID, outputPath string) {
 		agentID:    agentID,
 		outputPath: discover.Normalize(outputPath),
 	})
+}
+
+// TaskStopped implements Observer for the sidecar.
+//
+// A STOP IS A FACT ABOUT A RUN, AND A RUN IS A FILE HERE. So the stop is routed
+// to that file's reader if it has one, and REMEMBERED against the task if it
+// does not: a spool is frequently written before the transcript line naming it,
+// and a stop arriving in that window must not be dropped just because the spool
+// is still held. One pending value per task, applied when the spool is claimed.
+func (s *sidecar) TaskStopped(taskID string) {
+	if taskID == "" {
+		s.log.With(logging.Context{Operation: "task-stopped", Level: "error"}).
+			Log("task stop reported with no task id; it names no run and cannot be attributed")
+		return
+	}
+	s.stopped[taskID] = s.now().UnixMilli()
+	s.log.With(logging.Context{Operation: "task-stopped", TaskID: taskID}).
+		Log("task stop recorded; the run's terminal is minted by its spool's reader")
+	s.applyStop(taskID)
+}
+
+// applyStop mints and writes the cancelled terminal for a stopped task, if its
+// spool is being read. A task whose spool is not watched yet keeps its pending
+// stop and is retried when the spool is claimed.
+//
+// THE PENDING STOP IS RETIRED ONLY ON A DURABLE WRITE, and the run is untracked
+// at the same moment: a cancelled run must never be restated LOST, and a stop
+// forgotten against a refused write would be a run that is neither.
+func (s *sidecar) applyStop(taskID string) {
+	stoppedAt, pending := s.stopped[taskID]
+	if !pending {
+		return
+	}
+	path, watched := s.spoolForTask(taskID)
+	if !watched {
+		s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID}).
+			LogVerbose("the stopped task's spool is not being read yet; the stop is held until it is claimed")
+		return
+	}
+	bound := s.log.With(logging.Context{Operation: "cancel-terminal", TaskID: taskID, Path: path})
+	sink, ok := s.watchers[path].tailer.Handler().(cancelTerminalSink)
+	if !ok {
+		bound.With(logging.Context{Level: "error"}).Log(
+			"no terminal for the stopped run: the %s converter implements no CancelTerminal, so a run a person stopped stays open in every reader downstream",
+			s.watchers[path].target.Kind)
+		return
+	}
+	run := s.owners.activityFor(taskID)
+	entries := sink.CancelTerminal(taskID, run, s.owners.agentFor(taskID), stoppedAt)
+	if len(entries) == 0 {
+		// CancelTerminal already stated why it refused.
+		return
+	}
+	if err := s.storeWrite("cancelled terminal", &storev1.EntryBatch{Entries: entries}); err != nil {
+		bound.With(logging.Context{Level: "error"}).Log(
+			"the cancelled terminal was not committed; the stop stays pending and is restated on the next cycle: %v", err)
+		return
+	}
+	delete(s.stopped, taskID)
+	s.tracker.Settle(path)
+	bound.With(logging.Context{ActivityID: run}).Log("cancelled terminal minted and committed entries=%d", len(entries))
+}
+
+// spoolForTask answers the watched file that IS a task's run.
+//
+// BY THE OWNER'S AUTHORITATIVE OUTPUT PATH FIRST, and by the watcher's own task
+// id otherwise — both single indexed lookups, and neither of them a guess from
+// filename similarity, which owner.go's header rules out as evidence.
+func (s *sidecar) spoolForTask(taskID string) (string, bool) {
+	if path := s.owners.outputFor(taskID); path != "" {
+		if _, ok := s.watchers[path]; ok {
+			return path, true
+		}
+	}
+	for path, w := range s.watchers {
+		if w.target.TaskID == taskID && w.target.SessionID == "" {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // observation is one authoritative spawn, as reported by the converter.
@@ -145,6 +231,10 @@ func (o *ownerIndex) agentFor(taskID string) string { return o.byTask[taskID].ag
 
 // activityFor returns the spawning call's activity id, when one is known.
 func (o *ownerIndex) activityFor(taskID string) string { return o.byTask[taskID].activityID }
+
+// outputFor returns the authoritative output path the vendor named for a task,
+// when it named one.
+func (o *ownerIndex) outputFor(taskID string) string { return o.byTask[taskID].outputPath }
 
 // spawnBackgrounded reports whether a task's spawn ran in the background.
 func (o *ownerIndex) spawnBackgrounded(taskID string) bool { return o.byTask[taskID].backgrounded }

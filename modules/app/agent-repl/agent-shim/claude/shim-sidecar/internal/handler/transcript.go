@@ -23,12 +23,19 @@ import (
 type SessionTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
+	// obs is the reader's callbacks, adopted one at a time and installed on the
+	// converter once, at construction: a converter has exactly one observer, and
+	// two independent adoptions must not overwrite each other.
+	obs *seamObserver
 }
 
 // NewSessionTranscriptHandler builds a handler with its own converter.
 func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 	log.With(logging.Context{Operation: "transcript-handler-new"}).LogVerbose("constructing session transcript handler")
-	return &SessionTranscriptHandler{conv: convert.New(log), log: log}
+	obs := &seamObserver{}
+	conv := convert.New(log)
+	conv.SetObserver(obs)
+	return &SessionTranscriptHandler{conv: conv, log: log, obs: obs}
 }
 
 // SetObserver installs the owner-resolution listener on this handler's converter,
