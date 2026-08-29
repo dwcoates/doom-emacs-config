@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { OpenExternalResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import {
   FeedCodeSpanSchema,
+  FeedToolCallInputSchema,
+  FeedToolCallNameSchema,
   FeedDiffLineSchema,
   FeedIdSchema,
   FeedRowSchema,
@@ -52,13 +54,21 @@ function rowContext(): RowContext {
   };
 }
 
-/** A card with NAME, the composed line TEXT, and the outcome ARM. */
-function card(init: Partial<FeedSimpleToolCall>): FeedSimpleToolCall {
-  return create(FeedSimpleToolCallSchema, {
-    name: { text: "Bash" },
-    input: { text: "$ go test ./..." },
-    ...init,
-  });
+/**
+ * A card built from INIT, with a name and an input line filled in when the
+ * case under test does not care which they are.
+ *
+ * The defaults are applied to the CREATED message rather than spread into the
+ * initializer, so a test that deliberately leaves a field unset (the malformed
+ * cases) builds its own message and this helper never re-supplies it.
+ */
+function card(init: MessageInitShape<typeof FeedSimpleToolCallSchema>): FeedSimpleToolCall {
+  const built = create(FeedSimpleToolCallSchema, init);
+  if (built.name === undefined) built.name = create(FeedToolCallNameSchema, { text: "Bash" });
+  if (built.input === undefined) {
+    built.input = create(FeedToolCallInputSchema, { text: "$ go test ./..." });
+  }
+  return built;
 }
 
 /** The proto field names of one oneof, as generated arm case names. */
