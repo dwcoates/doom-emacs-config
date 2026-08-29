@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_get_sidecar_cursors.proto.
  */
 export const file_store_v1_endpoint_get_sidecar_cursors: GenFile = /*@__PURE__*/
-  fileDesc("CitzdG9yZS92MS9lbmRwb2ludF9nZXRfc2lkZWNhcl9jdXJzb3JzLnByb3RvEghzdG9yZS52MSI8ChhHZXRTaWRlY2FyQ3Vyc29yc1JlcXVlc3QSFAoHZmlsZV9pZBgBIAEoCUgAiAEBQgoKCF9maWxlX2lkIpMBChlHZXRTaWRlY2FyQ3Vyc29yc1Jlc3BvbnNlEjUKB3N1Y2Nlc3MYASABKAsyIi5zdG9yZS52MS5HZXRTaWRlY2FyQ3Vyc29yc1N1Y2Nlc3NIABI1CgdmYWlsdXJlGAIgASgLMiIuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNGYWlsdXJlSABCCAoGcmVzdWx0IkIKGEdldFNpZGVjYXJDdXJzb3JzU3VjY2VzcxImCgdjdXJzb3JzGAEgAygLMhUuc3RvcmUudjEuQ3Vyc29yU3RhdGUiKgoYR2V0U2lkZWNhckN1cnNvcnNGYWlsdXJlEg4KBmRldGFpbBgBIAEoCUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_store_v1_store]);
+  fileDesc("CitzdG9yZS92MS9lbmRwb2ludF9nZXRfc2lkZWNhcl9jdXJzb3JzLnByb3RvEghzdG9yZS52MSI8ChhHZXRTaWRlY2FyQ3Vyc29yc1JlcXVlc3QSFAoHZmlsZV9pZBgBIAEoCUgAiAEBQgoKCF9maWxlX2lkIpMBChlHZXRTaWRlY2FyQ3Vyc29yc1Jlc3BvbnNlEjUKB3N1Y2Nlc3MYASABKAsyIi5zdG9yZS52MS5HZXRTaWRlY2FyQ3Vyc29yc1N1Y2Nlc3NIABI1CgdmYWlsdXJlGAIgASgLMiIuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNGYWlsdXJlSABCCAoGcmVzdWx0IkIKGEdldFNpZGVjYXJDdXJzb3JzU3VjY2VzcxImCgdjdXJzb3JzGAEgAygLMhUuc3RvcmUudjEuQ3Vyc29yU3RhdGUivgEKGEdldFNpZGVjYXJDdXJzb3JzRmFpbHVyZRIOCgZkZXRhaWwYASABKAkSRAoPaW52YWxpZF9yZXF1ZXN0GAIgASgLMikuc3RvcmUudjEuR2V0U2lkZWNhckN1cnNvcnNJbnZhbGlkUmVxdWVzdEgAEkQKD3N0b3JhZ2VfZmFpbHVyZRgDIAEoCzIpLnN0b3JlLnYxLkdldFNpZGVjYXJDdXJzb3JzU3RvcmFnZUZhaWx1cmVIAEIGCgRraW5kIjAKH0dldFNpZGVjYXJDdXJzb3JzSW52YWxpZFJlcXVlc3QSDQoFZmllbGQYASABKAkiIQofR2V0U2lkZWNhckN1cnNvcnNTdG9yYWdlRmFpbHVyZUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_store_v1_store]);
 
 /**
  * Startup recovery: the sidecar asks the store for its persisted cursors.
@@ -90,8 +90,7 @@ export const GetSidecarCursorsSuccessSchema: GenMessage<GetSidecarCursorsSuccess
   messageDesc(file_store_v1_endpoint_get_sidecar_cursors, 2);
 
 /**
- * The cursors could not be read. `kind` arms are DERIVED at the wave from the
- * store's real failure sites.
+ * The cursors could not be read. THE ARM IS WHY.
  *
  * @generated from message store.v1.GetSidecarCursorsFailure
  */
@@ -102,6 +101,25 @@ export type GetSidecarCursorsFailure = Message<"store.v1.GetSidecarCursorsFailur
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof store.v1.GetSidecarCursorsFailure.kind
+   */
+  kind: {
+    /**
+     * file_id present but empty.
+     *
+     * @generated from field: store.v1.GetSidecarCursorsInvalidRequest invalid_request = 2;
+     */
+    value: GetSidecarCursorsInvalidRequest;
+    case: "invalidRequest";
+  } | {
+    /**
+     * @generated from field: store.v1.GetSidecarCursorsStorageFailure storage_failure = 3;
+     */
+    value: GetSidecarCursorsStorageFailure;
+    case: "storageFailure";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -110,4 +128,41 @@ export type GetSidecarCursorsFailure = Message<"store.v1.GetSidecarCursorsFailur
  */
 export const GetSidecarCursorsFailureSchema: GenMessage<GetSidecarCursorsFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_get_sidecar_cursors, 3);
+
+/**
+ * The request was malformed or violated the validation invariant.
+ *
+ * @generated from message store.v1.GetSidecarCursorsInvalidRequest
+ */
+export type GetSidecarCursorsInvalidRequest = Message<"store.v1.GetSidecarCursorsInvalidRequest"> & {
+  /**
+   * Which field (with the offending entry's index where one applies), as
+   * the store names it — for the producer's logs, never switched on.
+   *
+   * @generated from field: string field = 1;
+   */
+  field: string;
+};
+
+/**
+ * Describes the message store.v1.GetSidecarCursorsInvalidRequest.
+ * Use `create(GetSidecarCursorsInvalidRequestSchema)` to create a new message.
+ */
+export const GetSidecarCursorsInvalidRequestSchema: GenMessage<GetSidecarCursorsInvalidRequest> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_sidecar_cursors, 4);
+
+/**
+ * The database failed; `detail` carries the driver's text.
+ *
+ * @generated from message store.v1.GetSidecarCursorsStorageFailure
+ */
+export type GetSidecarCursorsStorageFailure = Message<"store.v1.GetSidecarCursorsStorageFailure"> & {
+};
+
+/**
+ * Describes the message store.v1.GetSidecarCursorsStorageFailure.
+ * Use `create(GetSidecarCursorsStorageFailureSchema)` to create a new message.
+ */
+export const GetSidecarCursorsStorageFailureSchema: GenMessage<GetSidecarCursorsStorageFailure> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_sidecar_cursors, 5);
 
