@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_kill_session.proto.
  */
 export const file_shim_v1_endpoint_kill_session: GenFile = /*@__PURE__*/
-  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X2tpbGxfc2Vzc2lvbi5wcm90bxIHc2hpbS52MSIjChJLaWxsU2Vzc2lvblJlcXVlc3QSDQoFZm9yY2UYASABKAgifwoTS2lsbFNlc3Npb25SZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5LaWxsU2Vzc2lvblN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5LaWxsU2Vzc2lvbkZhaWx1cmVIAEIICgZyZXN1bHQiRAoSS2lsbFNlc3Npb25TdWNjZXNzEi4KBmNsb3NlZBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkIlsKEktpbGxTZXNzaW9uRmFpbHVyZRIsCgRsaXZlGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25MaXZlSAASDgoGZGV0YWlsGAIgASgJQgcKBWNhdXNlQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_session]);
+  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X2tpbGxfc2Vzc2lvbi5wcm90bxIHc2hpbS52MSIjChJLaWxsU2Vzc2lvblJlcXVlc3QSDQoFZm9yY2UYASABKAgifwoTS2lsbFNlc3Npb25SZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5LaWxsU2Vzc2lvblN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5LaWxsU2Vzc2lvbkZhaWx1cmVIAEIICgZyZXN1bHQiRAoSS2lsbFNlc3Npb25TdWNjZXNzEi4KBmNsb3NlZBgBIAEoCzIeLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkItcBChJLaWxsU2Vzc2lvbkZhaWx1cmUSLAoEbGl2ZRgBIAEoCzIcLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTGl2ZUgAEjMKCm5vX3Nlc3Npb24YAyABKAsyHS5zaGltLnYxLktpbGxTZXNzaW9uTm9TZXNzaW9uSAASRQoUcXVlcnlfcmVmdXNlZF90b19lbmQYBCABKAsyJS5zaGltLnYxLktpbGxTZXNzaW9uUXVlcnlSZWZ1c2VkVG9FbmRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2UiFgoUS2lsbFNlc3Npb25Ob1Nlc3Npb24iHgocS2lsbFNlc3Npb25RdWVyeVJlZnVzZWRUb0VuZEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
 
 /**
  * Whether live work may be killed to end the session.
@@ -110,12 +110,26 @@ export type KillSessionFailure = Message<"shim.v1.KillSessionFailure"> & {
     /**
      * Work is live and force was not asked: here is what is live.
      *
-     * Further arms DERIVED at the wave (the query refusing to end).
-     *
      * @generated from field: conversation.v1.SessionLive live = 1;
      */
     value: SessionLive;
     case: "live";
+  } | {
+    /**
+     * No session is open on this shim.
+     *
+     * @generated from field: shim.v1.KillSessionNoSession no_session = 3;
+     */
+    value: KillSessionNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The vendor query refused to end in the stand-down window.
+     *
+     * @generated from field: shim.v1.KillSessionQueryRefusedToEnd query_refused_to_end = 4;
+     */
+    value: KillSessionQueryRefusedToEnd;
+    case: "queryRefusedToEnd";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -132,4 +146,30 @@ export type KillSessionFailure = Message<"shim.v1.KillSessionFailure"> & {
  */
 export const KillSessionFailureSchema: GenMessage<KillSessionFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_kill_session, 3);
+
+/**
+ * @generated from message shim.v1.KillSessionNoSession
+ */
+export type KillSessionNoSession = Message<"shim.v1.KillSessionNoSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.KillSessionNoSession.
+ * Use `create(KillSessionNoSessionSchema)` to create a new message.
+ */
+export const KillSessionNoSessionSchema: GenMessage<KillSessionNoSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_kill_session, 4);
+
+/**
+ * @generated from message shim.v1.KillSessionQueryRefusedToEnd
+ */
+export type KillSessionQueryRefusedToEnd = Message<"shim.v1.KillSessionQueryRefusedToEnd"> & {
+};
+
+/**
+ * Describes the message shim.v1.KillSessionQueryRefusedToEnd.
+ * Use `create(KillSessionQueryRefusedToEndSchema)` to create a new message.
+ */
+export const KillSessionQueryRefusedToEndSchema: GenMessage<KillSessionQueryRefusedToEnd> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_kill_session, 5);
 

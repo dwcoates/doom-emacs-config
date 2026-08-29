@@ -13,6 +13,7 @@ import "conversation/v1/api.proto";
 import "conversation/v1/detached_work.proto";
 import "conversation/v1/permission.proto";
 import "conversation/v1/question.proto";
+import "conversation/v1/slash_command.proto";
 import "conversation/v1/user.proto";
 import "conversation/v1/workflow.proto";
 
@@ -111,6 +112,16 @@ message AgentUpdate {
     AgentQuestion question = 3;
     // The agent is blocked on the user's CONSENT to run a tool it called.
     AgentPermission permission = 4;
+    // THE CONVERSATION WAS CUT HERE — /clear, a compaction (manual or the
+    // vendor's automatic one), or a compaction that failed. A page line of
+    // the main agent's book; the feed draws it as the separation divider.
+    // Instantaneous: one frame, no lifecycle (ruled 2026-08-29).
+    ContextCut context_cut = 5;
+    // A vendor API request FAILED MID-TURN and the turn went on (a retried
+    // request, an error the vendor recorded and recovered from). EVIDENCE,
+    // never a terminal: the turn's end is the frame-level failure arm
+    // (AgentFailure.api_request_failed) and nothing else. A page line.
+    ApiRequestFailed api_error = 6;
   }
 }
 

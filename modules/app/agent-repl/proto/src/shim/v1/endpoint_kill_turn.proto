@@ -42,8 +42,16 @@ message KillTurnFailure {
   oneof cause {
     // Work this turn spawned is live and force was not asked: here it is.
     conversation.v1.TurnLive live = 1;
-    // Further arms DERIVED at the wave (not the open turn, no session).
+    // The named turn is not the open one.
+    KillTurnNotTheOpenTurn not_the_open_turn = 3;
+    // No turn is open.
+    KillTurnNoTurnOpen no_turn_open = 4;
+    // No session is open on this shim.
+    KillTurnNoSession no_session = 5;
   }
   // The shim's account, for a human and for logs; never switched on.
   string detail = 2;
 }
+message KillTurnNotTheOpenTurn {}
+message KillTurnNoTurnOpen {}
+message KillTurnNoSession {}
