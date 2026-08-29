@@ -91,6 +91,17 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 			Operation: "lost-terminal", Path: lost.Path, TaskID: lost.TaskID,
 			AgentID: lost.OwnerAgentID, ActivityID: lost.RunActivityID,
 		})
+		// A run concluded LOST because its FILE IS GONE is never read again, so
+		// its tailer goes as soon as its terminal has been stated (or refused).
+		// A run that merely went quiet keeps its tailer: the file is still
+		// there, and anything appended to it later must still land.
+		if lost.Reason == stale.ReasonFileVanished {
+			defer func(path string) {
+				delete(s.watchers, path)
+				s.log.With(logging.Context{Operation: "lost-terminal", Path: path}).
+					LogVerbose("the vanished file's tailer is dropped now that its terminal has been stated")
+			}(lost.Path)
+		}
 		w, watched := s.watchers[lost.Path]
 		if !watched {
 			bound.With(logging.Context{Level: "warn"}).Log(
