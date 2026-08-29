@@ -30,6 +30,7 @@ import {
   messageMatches,
   parseArgv,
   patternMatches,
+  resolveTokens,
   runCwdInit,
   permissionResultFor,
   resolvePermissionDecision,
@@ -302,6 +303,59 @@ describe("the corpus uses the features that retired its manual_setup notes", () 
   it("drives the cold-resume scenario's resume from the harness", () => {
     const turns = by["cold-resume"].prompts;
     expect(turns[turns.length - 1].resume).toBe(true);
+  });
+});
+
+describe("resolveTokens — how a static corpus names a file on disk", () => {
+  it("substitutes the capture directory into a string", () => {
+    expect(resolveTokens("{{CAPTURE_DIR}}/mcp-echo.mjs", "/x")).toBe("/x/mcp-echo.mjs");
+  });
+
+  it("substitutes deep inside an options object", () => {
+    const resolved = resolveTokens(
+      { mcpServers: { p: { command: "node", args: ["{{CAPTURE_DIR}}/mcp-echo.mjs"] } } },
+      "/x",
+    );
+    expect(resolved.mcpServers.p.args[0]).toBe("/x/mcp-echo.mjs");
+  });
+
+  it("leaves non-string values alone", () => {
+    expect(resolveTokens({ n: 5, b: true, z: null }, "/x")).toEqual({ n: 5, b: true, z: null });
+  });
+
+  it("leaves a string with no token unchanged", () => {
+    expect(resolveTokens("plain", "/x")).toBe("plain");
+  });
+});
+
+describe("the MCP scenarios point at the real echo server", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const by = Object.fromEntries(doc.scenarios.map((s) => [s.name, s]));
+
+  it("wires capture-probe into mcp-unmodeled-tool's options", () => {
+    const resolved = resolveTokens(by["mcp-unmodeled-tool"].options, HERE);
+    expect(resolved.mcpServers["capture-probe"].args[0]).toBe(path.join(HERE, "mcp-echo.mjs"));
+  });
+
+  it("resolves to a server file that actually exists", () => {
+    const resolved = resolveTokens(by["mcp-unmodeled-tool"].options, HERE);
+    expect(existsSync(resolved.mcpServers["capture-probe"].args[0])).toBe(true);
+  });
+
+  it("no longer asks the operator to supply an MCP server", () => {
+    expect(by["mcp-unmodeled-tool"].manual).toBeUndefined();
+  });
+
+  it("gives mcp-server-healths both a healthy and a broken server", () => {
+    const servers = by["mcp-server-healths"].options.mcpServers;
+    expect(Object.keys(servers)).toEqual(["capture-ok", "capture-broken"]);
+  });
+
+  it("no longer ships a comment-only mcp-echo.mjs stub in any cwd_setup", () => {
+    const stubs = doc.scenarios.flatMap((s) =>
+      (s.cwd_setup ?? []).filter((f) => f.path === "mcp-echo.mjs"),
+    );
+    expect(stubs).toEqual([]);
   });
 });
 

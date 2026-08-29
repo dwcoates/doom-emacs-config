@@ -434,6 +434,27 @@ export function materializeCwd(cwd, setup) {
 }
 
 /**
+ * The placeholder a corpus entry uses for this directory's absolute path.
+ *
+ * `prompts.json` is static and cannot know where the checkout lives, but
+ * `options.mcpServers` has to name `mcp-echo.mjs` by absolute path. One
+ * substitution token beats teaching the corpus about the filesystem.
+ */
+export const CAPTURE_DIR_TOKEN = "{{CAPTURE_DIR}}";
+
+/** Substitute {@link CAPTURE_DIR_TOKEN} throughout a scenario's options. */
+export function resolveTokens(value, captureDir = HERE) {
+  if (typeof value === "string") return value.split(CAPTURE_DIR_TOKEN).join(captureDir);
+  if (Array.isArray(value)) return value.map((item) => resolveTokens(item, captureDir));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, resolveTokens(child, captureDir)]),
+    );
+  }
+  return value;
+}
+
+/**
  * Run a scenario's `cwd_init` shell command in the scratch cwd.
  *
  * WHY IT EXISTS: `worktree-enter-exit-kept-and-removed` shipped a
@@ -614,7 +635,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
       AGENT_REPL_OWNED: "1",
       ...sdkEnvFor(auth, process.env),
     },
-    ...(scenario.options ?? {}),
+    ...resolveTokens(scenario.options ?? {}),
   };
   if (typeof scenario.model === "string") options.model = scenario.model;
   if (typeof scenario.permission_mode === "string") {
