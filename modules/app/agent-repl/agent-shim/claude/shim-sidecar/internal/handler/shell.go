@@ -23,6 +23,12 @@ import (
 // when the wrapped command exits: `EXIT=<code>` on its own line.
 var exitMarkerPrefix = []byte("EXIT=")
 
+// maxRememberedOutput bounds what one spool handler holds of its run's output.
+// A terminal has to carry the run's output, so SOMETHING must be held; this is
+// how much, and everything past it is reported as omitted rather than silently
+// dropped or unboundedly accumulated.
+const maxRememberedOutput = 1 << 20
+
 // maxExitMarkerDigits bounds the digits accepted after `EXIT=`. A shell exit code
 // is 0-255, so anything longer is not the harness's marker.
 const maxExitMarkerDigits = 3
@@ -31,6 +37,32 @@ const maxExitMarkerDigits = 3
 type ShellOutputHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
+	// seen is what this run has said SO FAR, bounded by maxRememberedOutput, and
+	// omitted counts the bytes past that bound.
+	//
+	// A TERMINAL STATES THE RUN'S OUTPUT, and the only place the whole of it
+	// exists is the spool this handler is the sole reader of. The deltas the
+	// consumer accumulates are not available to a terminal minted from a
+	// staleness conclusion, so without this a LOST or EXITed run settled with an
+	// EMPTY output claiming to be `whole` — which erases what the run actually
+	// said. The bound is what keeps the cost constant; past it the extent is
+	// stated as partial rather than misreported as whole.
+	seen    []byte
+	omitted uint64
+	// read reports that this handler has already converted a batch of this
+	// spool, and endedOnNewline whether that batch's last byte was one. Together
+	// they answer the only question the EXIT-marker parser cannot answer from
+	// one batch: whether the batch BEGINS a line.
+	//
+	// THE RAW CODEC CARRIES NOTHING (a spool has no record structure to carry
+	// on), so a batch may start mid-line — which is why a marker at the very
+	// start of a mid-file batch cannot be trusted on its own. It can be trusted
+	// when the previous batch ended on a newline, and only this handler knows
+	// that. Without it a spool whose `EXIT=` line simply arrived on its own poll
+	// -- the ordinary case for a command that finishes between two polls --
+	// never settled on evidence at all and waited out a staleness window.
+	read           bool
+	endedOnNewline bool
 	// onTerminal reports that this handler READ the run's own terminal off the
 	// file. The reader owns what that means for the LOST policy; all this side
 	// states is that the run ended on evidence rather than on silence.
@@ -83,17 +115,23 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	for _, frame := range frames {
 		output.Write(frame.Raw)
 	}
+	atLineStart := h.atLineStart(frames[0].Offset)
+	h.observe(output.Bytes())
+	h.remember(ctx, output.Bytes())
 	// The delta's from_offset is the file position these bytes START at, which is
 	// exactly the count the consumer must already hold for this run.
 	entries := []*storev1.StoreEntry{h.conv.BashDelta(at, run, output.String(), frames[0].Offset)}
 
-	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
+	code, ok := trailingExitCode(frames[0].Raw, atLineStart)
 	if !ok {
 		h.log.With(handleCtx("shell-handle", ctx)).
 			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
 		return entries
 	}
-	entries = append(entries, h.conv.BashExited(at, run, output.String(), code))
+	// The terminal states the RUN's output, not this batch's: a spool whose
+	// marker arrives on a later poll than its output would otherwise settle
+	// carrying only the last chunk while claiming to carry the whole.
+	entries = append(entries, h.conv.BashExited(at, run, string(h.seen), h.omitted, code))
 	if h.onTerminal != nil {
 		// A RUN THAT ENDED ON ITS OWN MARKER CAN NEVER BE LOST. Telling the
 		// reader here is what stops the staleness policy restating a finished
@@ -107,7 +145,42 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 // staleness policy in the root package, never inferred here.
 func (h *ShellOutputHandler) Lost(ctx *Context, reason convert.LostReason) *storev1.StoreEntry {
 	at := attribute(ctx, ctx.BytesObserved)
-	return h.conv.BashLost(at, ctx.RunActivityID, "", reason)
+	return h.conv.BashLost(at, ctx.RunActivityID, string(h.seen), h.omitted, reason)
+}
+
+// atLineStart answers whether a batch beginning at offset starts a line.
+func (h *ShellOutputHandler) atLineStart(offset int64) bool {
+	if !h.read {
+		// A first batch at the file's start begins a line by construction; one
+		// that begins mid-file is a resumed cursor, and nothing here knows what
+		// preceded it.
+		return offset == 0
+	}
+	return h.endedOnNewline
+}
+
+// observe records what the batch says about the NEXT batch's line alignment.
+func (h *ShellOutputHandler) observe(raw []byte) {
+	h.read = true
+	h.endedOnNewline = len(raw) > 0 && raw[len(raw)-1] == '\n'
+}
+
+// remember accumulates the run's output up to the bound, counting the rest.
+func (h *ShellOutputHandler) remember(ctx *Context, raw []byte) {
+	room := maxRememberedOutput - len(h.seen)
+	if room <= 0 {
+		h.omitted += uint64(len(raw))
+		return
+	}
+	if len(raw) <= room {
+		h.seen = append(h.seen, raw...)
+		return
+	}
+	h.seen = append(h.seen, raw[:room]...)
+	h.omitted += uint64(len(raw) - room)
+	h.log.With(handleWarn("shell-output-bound", ctx)).Log(
+		"the run has said more than %d bytes; its terminal will state the first %d and report %d omitted rather than claiming to carry the whole",
+		maxRememberedOutput, maxRememberedOutput, h.omitted)
 }
 
 // trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw spool
@@ -130,14 +203,15 @@ func (h *ShellOutputHandler) Lost(ctx *Context, reason convert.LostReason) *stor
 //   - Between `EXIT=` and the newline there must be ONLY digits, at most
 //     maxExitMarkerDigits of them. A stray `EXIT=abc` fails here.
 //   - The marker must start a LINE, which is what rejects `BUILD_EXIT=0`: either
-//     the preceding byte in the batch is a newline, or the batch begins at file
-//     offset 0 — a command that produced no output at all, which is a real
-//     observed case (a 7-byte spool that is exactly `EXIT=0\n`).
+//     the preceding byte in the batch is a newline, or the BATCH ITSELF begins a
+//     line — which it does at file offset 0 (a command that produced no output
+//     at all, a real observed case: a 7-byte spool that is exactly `EXIT=0\n`)
+//     and whenever the previous batch this handler read ended on a newline.
 //
 // A marker split across two polls is NOT matched and is left to the staleness
 // policy, which is the pre-existing behavior of the ~91% of shell spools carrying
 // no marker at all — not a new silent failure mode.
-func trailingExitCode(raw []byte, batchOffset int64) (int, bool) {
+func trailingExitCode(raw []byte, batchAtLineStart bool) (int, bool) {
 	if !bytes.HasSuffix(raw, []byte("\n")) {
 		return 0, false
 	}
@@ -145,9 +219,9 @@ func trailingExitCode(raw []byte, batchOffset int64) (int, bool) {
 
 	// Locate the final line's start, and require it to genuinely BE one.
 	start := bytes.LastIndexByte(line, '\n') + 1
-	if start == 0 && batchOffset != 0 {
-		// The batch begins mid-file with no newline before this text, so it may
-		// be the tail of a line that began in an earlier batch.
+	if start == 0 && !batchAtLineStart {
+		// The batch does not begin a line and holds no newline before this text,
+		// so this may be the tail of a line that began in an earlier batch.
 		return 0, false
 	}
 	line = line[start:]

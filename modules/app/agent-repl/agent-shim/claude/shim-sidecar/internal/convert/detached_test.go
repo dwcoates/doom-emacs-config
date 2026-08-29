@@ -35,7 +35,7 @@ func TestBashFramesUpsertTheRunsOneRow(t *testing.T) {
 
 	// Act.
 	delta := c.BashDelta(at, "toolu_run", "out", 0)
-	terminal := c.BashExited(at, "toolu_run", "out", 0)
+	terminal := c.BashExited(at, "toolu_run", "out", 0, 0)
 
 	// Assert.
 	if delta.GetUpsertKey() != terminal.GetUpsertKey() {
@@ -56,8 +56,8 @@ func TestLostVerdictIsStableSoAReEmissionIsANoOp(t *testing.T) {
 	at.TaskID = "b1"
 
 	// Act.
-	first := c.BashLost(at, "toolu_run", "", LostWentSilent)
-	second := c.BashLost(at, "toolu_run", "", LostWentSilent)
+	first := c.BashLost(at, "toolu_run", "", 0, LostWentSilent)
+	second := c.BashLost(at, "toolu_run", "", 0, LostWentSilent)
 
 	// Assert.
 	if first.GetWriteId() != second.GetWriteId() {
@@ -74,8 +74,8 @@ func TestLostAndExitedShareTheTerminalDiscriminator(t *testing.T) {
 	at.TaskID = "b1"
 
 	// Act.
-	exited := c.BashExited(at, "toolu_run", "out", 0)
-	lost := c.BashLost(at, "toolu_run", "out", LostSweptUp)
+	exited := c.BashExited(at, "toolu_run", "out", 0, 0)
+	lost := c.BashLost(at, "toolu_run", "out", 0, LostSweptUp)
 
 	// Assert.
 	if exited.GetWriteId() != lost.GetWriteId() {
@@ -91,7 +91,7 @@ func TestBashOutputIsAlwaysSetEvenWhenSilent(t *testing.T) {
 	at.TaskID = "b1"
 
 	// Act.
-	entry := c.BashExited(at, "toolu_run", "", 0)
+	entry := c.BashExited(at, "toolu_run", "", 0, 0)
 
 	// Assert.
 	completed := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetCompleted()
@@ -141,5 +141,41 @@ func TestUnknownJournalShapeIsUnknownResidue(t *testing.T) {
 	unknown := entries[0].GetAgentUpdate().GetUnservedItem().GetUnknown()
 	if unknown == nil || unknown.GetDiscriminator() != "something-else" {
 		t.Fatalf("want unknown naming the shape, got %v", unknown)
+	}
+}
+
+func TestATerminalOverTheOutputBoundStatesPartialRatherThanWhole(t *testing.T) {
+	// Arrange. A producer that kept only part of what a run said must SAY so:
+	// a consumer handed `whole` over a prefix has no way to find out it was
+	// lied to, and the count is what makes the loss investigable.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashExited(at, "toolu_run", "the first megabyte", 4096, 0)
+
+	// Assert.
+	text := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetCompleted().GetOutput().GetText()
+	if text.GetWhole() != nil {
+		t.Fatal("a terminal that dropped bytes must not claim to carry the whole output")
+	}
+	if got := text.GetPartial().GetBytesOmitted(); got != 4096 {
+		t.Fatalf("bytes_omitted = %d, want 4096", got)
+	}
+}
+
+func TestATerminalThatDroppedNothingStatesWhole(t *testing.T) {
+	// Arrange. The other half: a run inside the bound is carried entire, and
+	// saying so is what saves a consumer from comparing lengths against totals.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashExited(at, "toolu_run", "all of it", 0, 0)
+
+	// Assert.
+	text := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetCompleted().GetOutput().GetText()
+	if text.GetWhole() == nil {
+		t.Fatalf("a terminal that dropped nothing must state whole: %v", text.GetExtent())
 	}
 }

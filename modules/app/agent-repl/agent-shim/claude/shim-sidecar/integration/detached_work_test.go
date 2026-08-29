@@ -258,6 +258,7 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	defer cancel()
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/detached-stop-probe",
 		"dddddddd-dddd-4ddd-8ddd-dddddddddddd")
 
@@ -265,6 +266,14 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	stop = retargetSession(t, stop, fx.Session, "/Users/dodgecoates/detached-stop-probe")
 	stop = setNested(t, stop, "toolUseResult", "task_id", fx.TaskID)
 	stop = setNested(t, stop, "toolUseResult", "task_type", "local_bash")
+	// THE CALL COMES FIRST, as the vendor writes it. An exempt tool's call is
+	// DROPPED but still remembered, because this one result has to find the call
+	// it belongs to; a fixture that supplies only the result is a transcript no
+	// vendor ever wrote, and it exercises the orphan path instead of the
+	// carve-out.
+	stopCall := retargetSession(t, decodeRecord(t, captured.Lines[8]), fx.Session, "/Users/dodgecoates/detached-stop-probe")
+	stopCall = renameToolUse(t, stopCall, "TaskStop")
+	stopCall = setToolUseID(t, stopCall, toolUseIDOfResult(t, stop))
 
 	// Act.
 	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
@@ -272,6 +281,7 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	spool := newGrowingFile(t, fx.SpoolPath)
 	spool.AppendRaw([]byte("partial work\n"))
 	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
+	fx.Parent.AppendLine(encodeRecord(t, stopCall))
 	fx.Parent.AppendLine(encodeRecord(t, stop))
 	awaitCursorInBatches(ctx, t, fake, fx.Parent.Path(), fx.Parent.Offset())
 
@@ -381,4 +391,31 @@ func renameToolUse(t *testing.T, obj map[string]any, name string) map[string]any
 	}
 	newMsg["content"] = newBlocks
 	return withFields(t, obj, map[string]any{"message": newMsg})
+}
+
+// toolUseIDOfResult reads the call id a tool_result record names, so a fixture's
+// call can be built to match a fixture's result rather than guessed.
+func toolUseIDOfResult(t *testing.T, obj map[string]any) string {
+	t.Helper()
+	msg, ok := obj["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("record carries no message object: %v", obj)
+	}
+	blocks, ok := msg["content"].([]any)
+	if !ok {
+		t.Fatalf("record's message carries no content blocks: %v", msg)
+	}
+	for _, raw := range blocks {
+		b, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if b["type"] == "tool_result" {
+			if id, ok := b["tool_use_id"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+	t.Fatalf("record carries no tool_result naming a call: %v", msg)
+	return ""
 }
