@@ -97,7 +97,14 @@ Escalate — never guess through — anything that is:
   teamlead), and every implementation subagent you dispatch works in a
   worktree of its own. Part of your job is MERGING each subagent's branch
   into your teamlead branch as it resolves, and DELETING the merged
-  subagent's worktree afterward.
+  subagent's worktree afterward — worktree cleanup is ALWAYS the
+  dispatching orchestrator's job, at every level.
+- COMMUNICATION: SendMessage is the channel between agents — you reach
+  the project lead with it and it reaches you; report what you judge
+  pertinent at completion, and expect to be resumed with questions if
+  your report leaves gaps.
+- BUILD/TEST COMMANDS are yours to discover and choose; nothing is
+  prescribed.
 - SEQUENCING VS PARALLELISM: organize your fanout TARGETING PARALLELISM.
   You are free to sequence components that truly, entirely depend on
   other components — and free to parallelize, in separate worktrees,
