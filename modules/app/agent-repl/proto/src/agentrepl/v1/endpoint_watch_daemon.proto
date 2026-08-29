@@ -3,12 +3,14 @@
 // exactly one, alongside its per-workspace WatchHostWorkspace streams; it
 // carries facts about the DAEMON ITSELF, never any workspace's state (the
 // channel-separation ruling: workspace-dependent and workspace-independent
-// channels are distinct types). It exists for the first daemon-level pushed
-// fact: the graceful-rollout shutdown announcement.
+// channels are distinct types). Its pushed facts: the graceful-rollout
+// shutdown announcement, and the standing drain schedule.
 
 syntax = "proto3";
 
 package agentrepl.v1;
+
+import "agentrepl/v1/drain_reason.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -18,18 +20,64 @@ message WatchDaemonRequest {}
 
 message WatchDaemonResponse {
   oneof push {
-    // DAEMON HANDOVER: this daemon is retiring; a rebuilt daemon is up in
-    // joining mode at `address`. Emacs's obligation: open a SECOND
-    // connection to that address while keeping this one — each workspace's
-    // updates keep flowing from the daemon that currently owns it — and
-    // await per-workspace `transferred` pushes on the old connection's
-    // WatchHostWorkspace streams.
+    // This daemon is retiring — a handover (address set) or a plain
+    // bounce (address unset). See the message.
     DaemonShutdownAnnounced shutdown_announced = 1;
+    // A drain is scheduled and standing: clients draw the page-wide
+    // restart banner from it until cancelled or the shutdown fires.
+    DaemonDrainScheduled drain_scheduled = 2;
+    // The standing drain schedule was cancelled; take the banner down.
+    DaemonDrainCancelled drain_cancelled = 3;
   }
 }
 
 message DaemonShutdownAnnounced {
   // The new daemon's socket address, verbatim — what Emacs dials for the
-  // second connection.
-  string address = 1;
+  // second connection. UNSET = a PLAIN BOUNCE: no successor is up; the
+  // client waits out the outage instead of dual-attaching.
+  optional string address = 1;
+  // THE ARM IS THE CAUSE — why this daemon is going away.
+  DaemonShutdownCause cause = 2;
+  // The bounded expected outage — clients size their quiet window from
+  // it instead of treating the link death as unexplained.
+  int64 expected_outage_ms = 3;
+  // When the announcement was minted. A late receiver SHORTENS its quiet
+  // window by the time already elapsed rather than restarting it.
+  int64 minted_at_ms = 4;
+}
+
+// THE ARM IS THE CAUSE.
+message DaemonShutdownCause {
+  oneof kind {
+    DaemonShutdownSelfMergeRollout self_merge_rollout = 1;
+    DaemonShutdownScheduledDrain scheduled_drain = 2;
+    DaemonShutdownImmediate immediate = 3;
+  }
+}
+
+// The doom self-merge triggered the blue-green rollout.
+message DaemonShutdownSelfMergeRollout {
+}
+
+// A scheduled drain reached its instant.
+message DaemonShutdownScheduledDrain {
+  DrainReason reason = 1;
+}
+
+// UpdateShutdownSchedule{now}: an immediate operator shutdown.
+message DaemonShutdownImmediate {
+  DrainReason reason = 1;
+}
+
+// The standing drain schedule, pushed when armed (and re-pushed to late
+// subscribers per the subscription invariant).
+message DaemonDrainScheduled {
+  // The drain-then-exit instant.
+  int64 at_ms = 1;
+  // Why — what every client's banner names.
+  DrainReason reason = 2;
+}
+
+// Presence is the fact: the schedule was cancelled.
+message DaemonDrainCancelled {
 }

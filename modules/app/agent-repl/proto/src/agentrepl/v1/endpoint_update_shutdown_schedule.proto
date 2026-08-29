@@ -1,13 +1,16 @@
 // endpoint_update_shutdown_schedule.proto — UpdateShutdownSchedule: the
-// deploy tooling's drain-and-exit control. DAEMON ADMIN section. Purely
-// inbound — no schedule information is pushed anywhere on this verb; the
-// user-visible consequences arrive on the existing surfaces (held prompts in
-// the tray during the drain, footer status). Consolidates the old
+// deploy tooling's drain-and-exit control. DAEMON ADMIN section. The
+// schedule is ANNOUNCED: WatchDaemon pushes drain_scheduled /
+// drain_cancelled so every client draws the standing banner; the other
+// consequences arrive on the existing surfaces (held prompts in the tray
+// during the drain, footer status). Consolidates the old
 // ScheduleShutdown / CancelScheduledShutdown / Shutdown trio.
 
 syntax = "proto3";
 
 package agentrepl.v1;
+
+import "agentrepl/v1/drain_reason.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -23,11 +26,17 @@ message UpdateShutdownScheduleRequest {
 // prompts (tray-visible), exit when quiet.
 message UpdateShutdownScheduleSchedule {
   int64 at_ms = 1;
+  // Why — REQUIRED; typed, never a bare string. Every client's drain
+  // banner names it (the drain_scheduled push carries it verbatim).
+  DrainReason reason = 2;
 }
 // Drop the standing schedule; resume normal intake.
 message UpdateShutdownScheduleCancel {}
 // Exit now: stop accepting work, flush in-flight writes, go.
-message UpdateShutdownScheduleNow {}
+message UpdateShutdownScheduleNow {
+  // Why — REQUIRED; rides the shutdown announcement's immediate cause.
+  DrainReason reason = 1;
+}
 
 // THE ARM IS THE OUTCOME.
 message UpdateShutdownScheduleResponse {
