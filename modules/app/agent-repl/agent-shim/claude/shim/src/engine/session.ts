@@ -285,6 +285,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * A vendor number as an int64 field.
+   *
+   * The vendor reports some of these as FRACTIONS (`percentage` arrives as
+   * 0.85), and `BigInt()` throws outright on a non-integer — which would turn
+   * one fractional field into a lost context-usage push and a spurious fault.
+   * A fraction is rounded and RECORDED, so a token count that should never have
+   * been fractional is visible rather than quietly absorbed.
+   */
+  function asInt64(value: number, field: string): bigint {
+    if (Number.isInteger(value)) return BigInt(value);
+    LOGGER.log(
+      { level: "warn", field, value },
+      "the vendor reported a fractional value for an integer field; rounding it",
+    );
+    return BigInt(Math.round(value));
+  }
+
+  /**
    * Context usage, mapped field by field from the vendor's own answer.
    *
    * NEVER DERIVED FROM USAGE FRAMES: the vendor knows what its context holds
@@ -297,16 +315,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       update: {
         case: "contextUsage",
         value: create(conversationv1.SessionContextUsageSchema, {
-          totalTokens: BigInt(usage.totalTokens),
-          maxTokens: BigInt(usage.maxTokens),
-          rawMaxTokens: BigInt(usage.rawMaxTokens),
-          percentage: BigInt(Math.round(usage.percentage)),
+          totalTokens: asInt64(usage.totalTokens, "usage.totalTokens"),
+          maxTokens: asInt64(usage.maxTokens, "usage.maxTokens"),
+          rawMaxTokens: asInt64(usage.rawMaxTokens, "usage.rawMaxTokens"),
+          percentage: asInt64(usage.percentage, "usage.percentage"),
           model: usage.model,
           isAutoCompactEnabled: usage.isAutoCompactEnabled,
           categories: usage.categories.map((category) =>
             create(conversationv1.SessionContextCategorySchema, {
               label: category.name,
-              tokens: BigInt(category.tokens),
+              tokens: asInt64(category.tokens, "category.tokens"),
               color: category.color,
               ...(category.isDeferred === undefined ? {} : { isDeferred: category.isDeferred }),
             }),
@@ -315,93 +333,93 @@ export function createEngine(deps: EngineDeps): SessionEngine {
             create(conversationv1.SessionContextMemoryFileSchema, {
               path: file.path,
               type: file.type,
-              tokens: BigInt(file.tokens),
+              tokens: asInt64(file.tokens, "file.tokens"),
             }),
           ),
           mcpTools: usage.mcpTools.map((tool) =>
             create(conversationv1.SessionContextMcpToolSchema, {
               name: tool.name,
               serverName: tool.serverName,
-              tokens: BigInt(tool.tokens),
+              tokens: asInt64(tool.tokens, "tool.tokens"),
               ...(tool.isLoaded === undefined ? {} : { isLoaded: tool.isLoaded }),
             }),
           ),
           deferredBuiltinTools: (usage.deferredBuiltinTools ?? []).map((tool) =>
             create(conversationv1.SessionContextDeferredBuiltinToolSchema, {
               name: tool.name,
-              tokens: BigInt(tool.tokens),
+              tokens: asInt64(tool.tokens, "tool.tokens"),
               isLoaded: tool.isLoaded,
             }),
           ),
           systemTools: (usage.systemTools ?? []).map((tool) =>
             create(conversationv1.SessionContextSystemToolSchema, {
               name: tool.name,
-              tokens: BigInt(tool.tokens),
+              tokens: asInt64(tool.tokens, "tool.tokens"),
             }),
           ),
           systemPromptSections: (usage.systemPromptSections ?? []).map((section) =>
             create(conversationv1.SessionContextSystemPromptSectionSchema, {
               name: section.name,
-              tokens: BigInt(section.tokens),
+              tokens: asInt64(section.tokens, "section.tokens"),
             }),
           ),
           agents: usage.agents.map((agent) =>
             create(conversationv1.SessionContextAgentSchema, {
               agentType: agent.agentType,
               source: agent.source,
-              tokens: BigInt(agent.tokens),
+              tokens: asInt64(agent.tokens, "agent.tokens"),
             }),
           ),
           ...(usage.slashCommands === undefined
             ? {}
             : {
                 slashCommands: create(conversationv1.SessionContextSlashCommandsSchema, {
-                  totalCommands: BigInt(usage.slashCommands.totalCommands),
-                  includedCommands: BigInt(usage.slashCommands.includedCommands),
-                  tokens: BigInt(usage.slashCommands.tokens),
+                  totalCommands: asInt64(usage.slashCommands.totalCommands, "usage.slashCommands.totalCommands"),
+                  includedCommands: asInt64(usage.slashCommands.includedCommands, "usage.slashCommands.includedCommands"),
+                  tokens: asInt64(usage.slashCommands.tokens, "usage.slashCommands.tokens"),
                 }),
               }),
           ...(usage.skills === undefined
             ? {}
             : {
                 skills: create(conversationv1.SessionContextSkillsSchema, {
-                  totalSkills: BigInt(usage.skills.totalSkills),
-                  includedSkills: BigInt(usage.skills.includedSkills),
-                  tokens: BigInt(usage.skills.tokens),
+                  totalSkills: asInt64(usage.skills.totalSkills, "usage.skills.totalSkills"),
+                  includedSkills: asInt64(usage.skills.includedSkills, "usage.skills.includedSkills"),
+                  tokens: asInt64(usage.skills.tokens, "usage.skills.tokens"),
                   skillFrontmatter: usage.skills.skillFrontmatter.map((skill) =>
                     create(conversationv1.SessionContextSkillFrontmatterSchema, {
                       name: skill.name,
                       source: skill.source,
-                      tokens: BigInt(skill.tokens),
+                      tokens: asInt64(skill.tokens, "skill.tokens"),
                     }),
                   ),
                 }),
               }),
           ...(usage.autoCompactThreshold === undefined
             ? {}
-            : { autoCompactThreshold: BigInt(usage.autoCompactThreshold) }),
+            : { autoCompactThreshold: asInt64(usage.autoCompactThreshold, "usage.autoCompactThreshold") }),
           ...(usage.messageBreakdown === undefined
             ? {}
             : {
                 messageBreakdown: create(conversationv1.SessionContextMessageBreakdownSchema, {
-                  toolCallTokens: BigInt(usage.messageBreakdown.toolCallTokens),
-                  toolResultTokens: BigInt(usage.messageBreakdown.toolResultTokens),
-                  attachmentTokens: BigInt(usage.messageBreakdown.attachmentTokens),
-                  assistantMessageTokens: BigInt(usage.messageBreakdown.assistantMessageTokens),
-                  userMessageTokens: BigInt(usage.messageBreakdown.userMessageTokens),
-                  redirectedContextTokens: BigInt(usage.messageBreakdown.redirectedContextTokens),
-                  unattributedTokens: BigInt(usage.messageBreakdown.unattributedTokens),
+                  toolCallTokens: asInt64(usage.messageBreakdown.toolCallTokens, "usage.messageBreakdown.toolCallTokens"),
+                  toolResultTokens: asInt64(usage.messageBreakdown.toolResultTokens, "usage.messageBreakdown.toolResultTokens"),
+                  attachmentTokens: asInt64(usage.messageBreakdown.attachmentTokens, "usage.messageBreakdown.attachmentTokens"),
+                  assistantMessageTokens: asInt64(usage.messageBreakdown.assistantMessageTokens, "usage.messageBreakdown.assistantMessageTokens"),
+                  userMessageTokens: asInt64(usage.messageBreakdown.userMessageTokens, "usage.messageBreakdown.userMessageTokens"),
+                  redirectedContextTokens: asInt64(usage.messageBreakdown.redirectedContextTokens, "usage.messageBreakdown.redirectedContextTokens"),
+                  unattributedTokens: asInt64(usage.messageBreakdown.unattributedTokens, "usage.messageBreakdown.unattributedTokens"),
                   toolCallsByType: usage.messageBreakdown.toolCallsByType.map((entry) =>
                     create(conversationv1.SessionContextToolCallsByTypeSchema, {
                       name: entry.name,
-                      callTokens: BigInt(entry.callTokens),
-                      resultTokens: BigInt(entry.resultTokens),
+                      callTokens: asInt64(entry.callTokens, "entry.callTokens"),
+                      resultTokens: asInt64(entry.resultTokens, "entry.resultTokens"),
                     }),
                   ),
                   attachmentsByType: usage.messageBreakdown.attachmentsByType.map((entry) =>
                     create(conversationv1.SessionContextAttachmentsByTypeSchema, {
                       name: entry.name,
-                      tokens: BigInt(entry.tokens),
+                      tokens: asInt64(entry.tokens, "entry.tokens"),
                     }),
                   ),
                 }),
@@ -410,10 +428,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
             ? {}
             : {
                 apiUsage: create(conversationv1.SessionContextApiUsageSchema, {
-                  inputTokens: BigInt(usage.apiUsage.input_tokens),
-                  outputTokens: BigInt(usage.apiUsage.output_tokens),
-                  cacheCreationInputTokens: BigInt(usage.apiUsage.cache_creation_input_tokens),
-                  cacheReadInputTokens: BigInt(usage.apiUsage.cache_read_input_tokens),
+                  inputTokens: asInt64(usage.apiUsage.input_tokens, "usage.apiUsage.input_tokens"),
+                  outputTokens: asInt64(usage.apiUsage.output_tokens, "usage.apiUsage.output_tokens"),
+                  cacheCreationInputTokens: asInt64(usage.apiUsage.cache_creation_input_tokens, "usage.apiUsage.cache_creation_input_tokens"),
+                  cacheReadInputTokens: asInt64(usage.apiUsage.cache_read_input_tokens, "usage.apiUsage.cache_read_input_tokens"),
                 }),
               }),
         }),
@@ -684,12 +702,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       void rotate(message.new_conversation_id);
       return;
     }
-    if (message.type === "system" && message.subtype === "status" && message.status === "compacting") {
-      pushes.push(
-        create(conversationv1.SessionUpdateSchema, {
-          update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
-        }),
-      );
+    if (message.type === "system" && message.subtype === "status") {
+      if (message.status === "compacting") {
+        // The vendor compacts on its own when the window fills. The status
+        // message is the START signal so a surface can draw the in-progress
+        // state; the ContextCut page line below is the end.
+        pushes.push(
+          create(conversationv1.SessionUpdateSchema, {
+            update: { case: "compacting", value: create(conversationv1.SessionCompactingSchema, {}) },
+          }),
+        );
+      }
+      // `compact_result`/`compact_error` ride the STATUS message, not init.
+      //
+      // A SUCCESS is deliberately NOT reported from here: the figures a
+      // `ContextCompacted` needs (the summary, the token delta, the duration)
+      // are on the vendor's own `compact_boundary` record, which the fold maps,
+      // and a page line built here would have to state them as zeroes — a
+      // sentinel the contract forbids. A FAILURE has no boundary record at all,
+      // so this is its only producer, and its one field is fully stated.
+      if (message.compact_result === "failed") {
+        writeContextCut(contextCutFailed(message.compact_error ?? "the vendor's compaction failed"));
+      }
     }
   }
 
