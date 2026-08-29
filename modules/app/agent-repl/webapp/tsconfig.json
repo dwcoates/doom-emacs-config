@@ -17,5 +17,10 @@
     "forceConsistentCasingInFileNames": true,
     "useDefineForClassFields": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  // `legacy/` holds the pre-Connect renderers as READ-ONLY reference for the
+  // look the new components port. It does not compile (it imports the deleted
+  // transport and store modules) and is never imported, so it is excluded here
+  // as well as from vitest and the vite build. The final seam agent deletes it.
+  "exclude": ["legacy", "node_modules", "dist"]
 }
