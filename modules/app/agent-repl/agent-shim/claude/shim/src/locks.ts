@@ -75,8 +75,21 @@ const LOGGER = bindLog({ component: COMPONENT, operation: "shim.session-lock.lif
 const O_EXLOCK: number | undefined =
   process.platform === "darwin" || process.platform.endsWith("bsd") ? 0x20 : undefined;
 
-/** The directory session locks live in: a sibling of sock/ and store/. */
+/**
+ * The environment variable that relocates the kernel-lock directory.
+ *
+ * It exists because the lock directory is a CROSS-SYSTEM rendezvous: the daemon
+ * probes the workspace lock by path, so a test that wants isolated locks cannot
+ * simply point the shim somewhere else — both sides must agree. One variable
+ * both processes read is that agreement. Unset (or empty) keeps the default,
+ * which is the convention the deployed daemon probes.
+ */
+export const LOCK_DIR_ENV = "AGENT_REPL_LOCK_DIR";
+
+/** The directory the kernel locks live in: a sibling of sock/ and store/. */
 export function lockDir(): string {
+  const override = process.env[LOCK_DIR_ENV];
+  if (override !== undefined && override !== "") return override;
   return path.join(os.homedir(), ".cache", "agent-repl", "run");
 }
 
