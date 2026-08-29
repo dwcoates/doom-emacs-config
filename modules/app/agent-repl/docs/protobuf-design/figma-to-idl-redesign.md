@@ -8131,3 +8131,12 @@ UNSET clears; roster push carries the state) and `SetPermissionMode
 {workspace, mode string}` (TOPBAR, SetModel's sibling; mode spelled as the
 session facts spell it, validated against the switchable set; new mode
 arrives on the pushed surfaces). Both empty-success, empty derived-error.
+
+## 2026-08-29 — the shim trio (landed with Hibernate)
+
+`shim.v1 Hibernate` (SESSION): the daemon's pre-hibernation directive —
+shim compacts, acks, and only then is stood down (revival never pays a
+cold context). `SessionUpdate.compacting = 27` (empty arm): vendor
+auto-compaction began; the ContextCut record is the end. Build identity
+needed NO new field — `SessionRuntime.shim_build_sha` already rides
+SessionStarted; its comment now names the staleness-bounce use.
