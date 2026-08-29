@@ -742,6 +742,144 @@ Empty: the roster push carries the new state."
    #'agent-repl-wire-decode-set-workspace-priority-response-error))
 
 
+;;;; ---- SubmitPrompt: encode -------------------------------------------
+
+(defun agent-repl-wire-encode-submit-prompt-request-said (said)
+  "Encode SubmitPromptRequest's `said' use site from SAID."
+  (agent-repl-wire-encode-user-said said))
+
+(defun agent-repl-wire-encode-submit-prompt-request-origin (origin)
+  "Encode SubmitPromptRequest's `origin' use site from ORIGIN."
+  (agent-repl-wire-encode-prompt-origin origin))
+
+(defun agent-repl-wire-encode-submit-prompt-request (request)
+  "Encode SubmitPromptRequest from plist REQUEST.
+REQUEST is (:said SAID :idempotency-key STRING :origin KEYWORD).  All
+three are required: an empty idempotency key defeats the duplicate refusal
+that makes a retry safe, and the origin is REQUIRED and never UNSPECIFIED
+because a stored turn must trace back to the exact send site.  `feed' is
+never set — Emacs composes into the workspace's root feed only, so the
+absent field IS that fact."
+  (let ((message "SubmitPromptRequest"))
+    (agent-repl--log nil "elisp.wire.verbs-encode-submit-prompt-request origin=%s"
+                      (plist-get request :origin))
+    (list (cons 'said (agent-repl-wire-encode-submit-prompt-request-said
+                       (agent-repl-wire-verbs--require message "said"
+                                                        (plist-get request :said))))
+          (cons 'idempotencyKey
+                (agent-repl-wire-verbs--require-string message "idempotency_key"
+                                                        (plist-get request :idempotency-key)))
+          (cons 'origin (agent-repl-wire-encode-submit-prompt-request-origin
+                         (agent-repl-wire-verbs--require message "origin"
+                                                          (plist-get request :origin)))))))
+
+
+;;;; ---- SubmitPrompt: decode -------------------------------------------
+
+(defun agent-repl-wire-decode-submit-prompt-turn-turn (json)
+  "Decode SubmitPromptTurn's `turn' use site from JSON."
+  (agent-repl-wire-decode-turn-id json))
+
+(defun agent-repl-wire-decode-submit-prompt-turn (json)
+  "Decode SubmitPromptTurn from JSON into (:turn TURN-ID).
+The minted turn is what the client matches against FeedRow.turn, so it is
+non-optional: a turn arm without it is a contract breach."
+  (let ((message "SubmitPromptTurn"))
+    (agent-repl-wire-verbs--check-keys message json '(turn))
+    (list :turn (agent-repl-wire-decode-submit-prompt-turn-turn
+                 (agent-repl-wire-verbs--require message "turn" (cdr (assq 'turn json)))))))
+
+(defun agent-repl-wire-verbs--decode-panel-payload (json)
+  "Return the panel arm's payload JSON verbatim.
+The panels are frontend.v1 views the WEBAPP draws; Emacs learns only WHICH
+command was recognized, so the payload is kept as the raw decoded alist
+rather than modeled here."
+  json)
+
+(defun agent-repl-wire-decode-submit-prompt-command-panel (json)
+  "Decode SubmitPromptCommandPanel from JSON into (:arm ARM :value RAW).
+ARM is the recognized command; RAW is the panel payload verbatim.  Tags 2
+and 3 are RETIRED in the proto, so `cost' and `usage' are not arms and
+arrive here as unknown fields."
+  (let ((message "SubmitPromptCommandPanel")
+        (panels '(status todos agents mcp context help)))
+    (agent-repl-wire-verbs--check-keys message json panels)
+    (agent-repl-wire-verbs--decode-oneof
+     message "panel" json
+     (mapcar (lambda (name)
+               (list name (intern (concat ":" (symbol-name name)))
+                     #'agent-repl-wire-verbs--decode-panel-payload))
+             panels))))
+
+(defun agent-repl-wire-decode-submit-prompt-command-refused (json)
+  "Decode SubmitPromptCommandRefused from JSON into (:command STRING)."
+  (let ((message "SubmitPromptCommandRefused"))
+    (agent-repl-wire-verbs--check-keys message json '(command))
+    (list :command (agent-repl-wire-verbs--decode-string message 'command json))))
+
+(defun agent-repl-wire-decode-submit-prompt-success-turn (json)
+  "Decode SubmitPromptSuccess's `turn' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-turn json))
+
+(defun agent-repl-wire-decode-submit-prompt-success-command-panel (json)
+  "Decode SubmitPromptSuccess's `command_panel' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-command-panel json))
+
+(defun agent-repl-wire-decode-submit-prompt-success-command-refused (json)
+  "Decode SubmitPromptSuccess's `command_refused' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-command-refused json))
+
+(defun agent-repl-wire-decode-submit-prompt-success (json)
+  "Decode SubmitPromptSuccess from JSON into (:arm ARM :value V).
+All three arms are ANSWERS: a minted turn, a resolved panel, or a
+recognized-but-unsupported command.  Only the turn arm means there is
+anything to await."
+  (let ((message "SubmitPromptSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused))
+    (agent-repl-wire-verbs--decode-oneof
+     message "outcome" json
+     (list (list 'turn :turn #'agent-repl-wire-decode-submit-prompt-success-turn)
+           (list 'commandPanel :command-panel
+                 #'agent-repl-wire-decode-submit-prompt-success-command-panel)
+           (list 'commandRefused :command-refused
+                 #'agent-repl-wire-decode-submit-prompt-success-command-refused)))))
+
+(defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
+  "Decode SubmitPromptRefusedMerging from JSON.
+Empty: the set arm IS the whole assertion — the footer and the merge
+bubble already show which merge."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptRefusedMerging" json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-merging (json)
+  "Decode SubmitPromptError's `merging' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-refused-merging json))
+
+(defun agent-repl-wire-decode-submit-prompt-error (json)
+  "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V))."
+  (let ((message "SubmitPromptError"))
+    (agent-repl-wire-verbs--check-keys message json '(merging))
+    (list :reason
+          (agent-repl-wire-verbs--decode-oneof
+           message "reason" json
+           (list (list 'merging :merging
+                       #'agent-repl-wire-decode-submit-prompt-error-merging))))))
+
+(defun agent-repl-wire-decode-submit-prompt-response-success (json)
+  "Decode SubmitPromptResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-success json))
+
+(defun agent-repl-wire-decode-submit-prompt-response-error (json)
+  "Decode SubmitPromptResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-error json))
+
+(defun agent-repl-wire-decode-submit-prompt-response (json)
+  "Decode SubmitPromptResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "SubmitPromptResponse" json
+   #'agent-repl-wire-decode-submit-prompt-response-success
+   #'agent-repl-wire-decode-submit-prompt-response-error))
+
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here
