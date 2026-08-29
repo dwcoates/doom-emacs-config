@@ -103,11 +103,7 @@ func TestDefaultSubmitPromptCarriesATurnId(t *testing.T) {
 	client := newTestClient(t, baseURL)
 
 	// Act.
-	resp, err := client.SubmitPrompt(context.Background(),
-		connect.NewRequest(&agentreplv1.SubmitPromptRequest{
-			Said:           nil,
-			IdempotencyKey: "abc",
-		}))
+	resp, err := client.SubmitPrompt(context.Background(), connect.NewRequest(completeSubmit("abc")))
 	if err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
@@ -263,5 +259,76 @@ func TestWebappStreamIsRefusedAsUnimplemented(t *testing.T) {
 	// Assert.
 	if connect.CodeOf(stream.Err()) != connect.CodeUnimplemented {
 		t.Fatalf("WatchFooter error = %v, want unimplemented", stream.Err())
+	}
+}
+
+func TestSubmitPromptRefusedWithoutAWorkspace(t *testing.T) {
+	// Arrange: everything but the ref (landing 2 made it REQUIRED).
+	_, baseURL := newTestServer(t)
+
+	// Act.
+	status, body := rawUnary(t, baseURL, "SubmitPrompt",
+		`{"said":{"content":{}},"idempotencyKey":"k","origin":"PROMPT_ORIGIN_USER_SENT"}`)
+
+	// Assert: protojson accepts the body (a missing message field is legal
+	// JSON), so the fake enforces the validation invariant itself.
+	if status != http.StatusBadRequest || !strings.Contains(body, "workspace") {
+		t.Fatalf("SubmitPrompt without a workspace = %d %s, want 400 naming workspace", status, body)
+	}
+}
+
+func TestSubmitPromptRefusedWithAnUnspecifiedOrigin(t *testing.T) {
+	// Arrange: origin omitted, so it decodes to the UNSPECIFIED zero.
+	_, baseURL := newTestServer(t)
+
+	// Act.
+	status, body := rawUnary(t, baseURL, "SubmitPrompt",
+		`{"workspace":{"id":"ws-test","dir":"/tmp/ws-test"},"said":{"content":{}},"idempotencyKey":"k"}`)
+
+	// Assert: SubmitPromptRequest.origin is REQUIRED and never UNSPECIFIED.
+	if status != http.StatusBadRequest || !strings.Contains(body, "UNSPECIFIED") {
+		t.Fatalf("SubmitPrompt with no origin = %d %s, want 400 naming UNSPECIFIED", status, body)
+	}
+}
+
+func TestSubmitPromptAcceptedWithoutAFeed(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act: `feed` is optional — the ROOT composer omits it.
+	status, body := rawUnary(t, baseURL, "SubmitPrompt",
+		`{"workspace":{"id":"ws-test","dir":"/tmp/ws-test"},"said":{"content":{}},"idempotencyKey":"k","origin":"PROMPT_ORIGIN_USER_SENT"}`)
+
+	// Assert.
+	if status != http.StatusOK {
+		t.Fatalf("root-composer SubmitPrompt = %d %s, want 200", status, body)
+	}
+}
+
+func TestRequestRefusedForAnUnsetOneof(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act: UpdateShutdownScheduleRequest.action has no arm set.
+	status, body := rawUnary(t, baseURL, "UpdateShutdownSchedule", `{}`)
+
+	// Assert: an unset oneof is an error by default.
+	if status != http.StatusBadRequest || !strings.Contains(body, "action") {
+		t.Fatalf("UpdateShutdownSchedule with no action = %d %s, want 400 naming action", status, body)
+	}
+}
+
+func TestRequestRefusedForAnUnsetNestedField(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act: the schedule arm is set but its own reason is missing (the reason
+	// is REQUIRED on schedule per the 2026-08-29 increment).
+	status, body := rawUnary(t, baseURL, "UpdateShutdownSchedule",
+		`{"schedule":{"atMs":"1735689600000"}}`)
+
+	// Assert: validation is recursive, so a hole one level down is still loud.
+	if status != http.StatusBadRequest || !strings.Contains(body, "reason") {
+		t.Fatalf("schedule without a reason = %d %s, want 400 naming reason", status, body)
 	}
 }
