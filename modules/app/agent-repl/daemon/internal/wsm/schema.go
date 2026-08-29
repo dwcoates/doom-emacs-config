@@ -62,6 +62,7 @@ CREATE TABLE creation_jobs (
   base_ref               TEXT NOT NULL,
   materialized           INTEGER NOT NULL,
   one_shot               INTEGER NOT NULL,
+  one_shot_finish        TEXT NOT NULL,
   initial_prompt         TEXT NOT NULL,
   consented_ungated_mode TEXT NOT NULL,
   created_at             INTEGER NOT NULL

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -841,31 +840,6 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct{ topbar.Resolver }
 type stubHolds struct{ holds.Resolver }
-
-// initGitRepo creates a real git repository, which the naming rule's worktree
-// derivation stats. It skips the test when git is unavailable rather than
-// asserting on the state of the machine.
-func initGitRepo(t *testing.T) string {
-	t.Helper()
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git is not on PATH")
-	}
-	dir := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "test@example.invalid"},
-		{"config", "user.name", "test"},
-		{"commit", "-q", "--allow-empty", "-m", "root"},
-	} {
-		cmd := exec.Command(git, args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	return dir
-}
 
 // asRefusal fails the test unless err is a refusal naming arm.
 func asRefusal(t *testing.T, err error, arm string) *Refusal {
