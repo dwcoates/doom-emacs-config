@@ -124,7 +124,16 @@ func resolveLayout() (layout, error) {
 var (
 	repo       layout
 	sidecarBin string
-	storeBin   string
+
+	// The store binary is built LAZILY, on the first test that needs it.
+	//
+	// Most subjects run against the in-process fake store and never touch the
+	// real one, so a store module that does not compile must fail only the tests
+	// that actually compose the two systems — not the whole suite, and not the
+	// harness's own self-tests.
+	storeBinOnce sync.Once
+	storeBinPath string
+	storeBinErr  error
 )
 
 func TestMain(m *testing.M) {
@@ -146,16 +155,13 @@ func runSuite(m *testing.M) int {
 	}
 	defer os.RemoveAll(binDir)
 
-	sidecarBin = filepath.Join(binDir, "shim-claude-sidecar")
-	storeBin = filepath.Join(binDir, "shim-store")
-	if err := goBuild(repo.sidecarDir, sidecarBin); err != nil {
+	binPath := filepath.Join(binDir, "shim-claude-sidecar")
+	if err := goBuild(repo.sidecarDir, binPath); err != nil {
 		fmt.Fprintf(os.Stderr, "integration: building the sidecar: %v\n", err)
 		return 1
 	}
-	if err := goBuild(repo.storeDir, storeBin); err != nil {
-		fmt.Fprintf(os.Stderr, "integration: building the store: %v\n", err)
-		return 1
-	}
+	sidecarBin = binPath
+	storeBinPath = filepath.Join(binDir, "shim-store")
 
 	// Nothing here ever reaches a vendor; the guard is stated so a regression
 	// that tried would fail loudly rather than silently make a call.
@@ -613,6 +619,20 @@ type realStore struct {
 	stopped bool
 }
 
+// storeBinary builds the real store on first use and answers its path. A store
+// module that does not compile fails exactly the tests that compose the two
+// systems, and says why.
+func storeBinary(t *testing.T) string {
+	t.Helper()
+	storeBinOnce.Do(func() {
+		storeBinErr = goBuild(repo.storeDir, storeBinPath)
+	})
+	if storeBinErr != nil {
+		t.Fatalf("this subject runs against the REAL store, which does not build: %v", storeBinErr)
+	}
+	return storeBinPath
+}
+
 func startRealStore(t *testing.T) *realStore {
 	t.Helper()
 	return startRealStoreAt(t, shortSocketPath(t, "store"), filepath.Join(t.TempDir(), "store.db"))
@@ -624,7 +644,7 @@ func startRealStoreAt(t *testing.T, socket, dbPath string) *realStore {
 	t.Helper()
 	mustMkdirAll(t, filepath.Dir(dbPath))
 	logPath := filepath.Join(t.TempDir(), "store.log")
-	cmd := exec.Command(storeBin,
+	cmd := exec.Command(storeBinary(t),
 		"--socket", socket,
 		"--db", dbPath,
 		"--log", logPath,
@@ -1739,4 +1759,91 @@ func setMessageID(t *testing.T, obj map[string]any, id string) map[string]any {
 	}
 	newMsg["id"] = id
 	return withFields(t, obj, map[string]any{"message": newMsg})
+}
+
+// TestVendorTreeMatchesTheDiscoveredPathShapes pins the harness's fixture layout
+// against the four shapes discovery globs for. Stated as literals rather than by
+// importing internal/discover, so the suite stays black-box: if the production
+// layout moves, this fails in the harness instead of as a mystifying "no page
+// line was ever written" in every subject.
+//
+// The shapes (internal/discover/discover.go's header):
+//
+//	<config root>/projects/<project>/<session>.jsonl
+//	<config root>/projects/<project>/<session>/subagents/agent-<id>.jsonl
+//	<config root>/projects/<project>/<session>/subagents/agent-<id>.meta.json
+//	<spool root>/claude-<uid>/<project>/<session>/tasks/<task>.output
+//
+// --spool-root is the PARENT of claude-<uid>, so the real tree is
+// /tmp/claude-<uid>/<project>/<session>/tasks/.
+func TestVendorTreeMatchesTheDiscoveredPathShapes(t *testing.T) {
+	// Arrange.
+	tree := newVendorTree(t)
+	slug := cwdSlug("/Users/dodgecoates/layout-probe")
+	session := "0e0e0e0e-0e0e-40e0-80e0-0e0e0e0e0e0e"
+	agent := "aef975b7bc3422d4b"
+	task := "b17"
+
+	// Act + Assert.
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{
+			name: "session transcript",
+			got:  tree.sessionPath(slug, session),
+			want: filepath.Join(tree.Root, "projects", slug, session+".jsonl"),
+		},
+		{
+			name: "subagent transcript",
+			got:  tree.subagentPath(slug, session, agent),
+			want: filepath.Join(tree.Root, "projects", slug, session, "subagents", "agent-"+agent+".jsonl"),
+		},
+		{
+			name: "subagent meta companion",
+			got:  tree.subagentMetaPath(slug, session, agent),
+			want: filepath.Join(tree.Root, "projects", slug, session, "subagents", "agent-"+agent+".meta.json"),
+		},
+		{
+			name: "task spool",
+			got:  tree.spoolPath(slug, session, task),
+			want: filepath.Join(tree.SpoolRoot, "claude-"+spoolUID, slug, session, "tasks", task+".output"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Fatalf("the harness writes a %s at\n  %s\nbut discovery globs for\n  %s", tc.name, tc.got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheSpoolRootIsTheParentOfTheUidSegment guards the one layout detail that
+// is easy to get wrong: --spool-root does NOT include claude-<uid>; the sidecar
+// resolves that segment itself.
+func TestTheSpoolRootIsTheParentOfTheUidSegment(t *testing.T) {
+	// Arrange.
+	tree := newVendorTree(t)
+	slug := cwdSlug("/Users/dodgecoates/spool-root-probe")
+	session := "0f0f0f0f-0f0f-40f0-80f0-0f0f0f0f0f0f"
+
+	// Act.
+	got := tree.spoolDir(slug, session)
+	rel, err := filepath.Rel(tree.SpoolRoot, got)
+	if err != nil {
+		t.Fatalf("spool dir %s is not under the spool root %s: %v", got, tree.SpoolRoot, err)
+	}
+
+	// Assert.
+	segs := strings.Split(filepath.ToSlash(rel), "/")
+	want := []string{"claude-" + spoolUID, slug, session, "tasks"}
+	if len(segs) != len(want) {
+		t.Fatalf("spool dir is %d segments below the spool root (%v), wanted %d (%v)", len(segs), segs, len(want), want)
+	}
+	for i := range want {
+		if segs[i] != want[i] {
+			t.Fatalf("spool path segment %d is %q, wanted %q", i, segs[i], want[i])
+		}
+	}
 }
