@@ -392,3 +392,12 @@ every UX or contract gap you surfaced instead of improvising.
   the warning becomes `AgentUpdate.context_budget_warning = 7 {text}`, a
   page line the SIDECAR produces from the transcript attachment; the shim's
   converter maps to that arm and never emits it live.
+- DISPATCH TIERS (user ruling): every NEW implementation dispatch is
+  `opus-low` (Opus at LOW effort); agents already running or being resumed
+  keep their tier. Implementers MAY offload mechanical, fully-specified
+  writes (boilerplate, tests from a settled table, rote conversions, doc
+  sections) to `sonnet-medium` at their judgment; the offloading agent stays
+  accountable — it reviews the output, runs the suites, and reports the
+  offload. Both statements ride every brief. If the types are not offered,
+  `subagent_type: "claude"` with `model: "opus"` / `"sonnet"` and the effort
+  stated in the brief.
