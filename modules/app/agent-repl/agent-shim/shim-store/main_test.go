@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"agentrepl/shim-store/internal/logging"
+	"agentrepl/shim-store/internal/pprofsurface"
 	"agentrepl/shim-store/internal/server"
 )
 
@@ -159,6 +161,74 @@ func TestOpenLoggerCreatesTheDurableSink(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"operation":"test"`) {
 		t.Fatalf("log = %q, want the record persisted", body)
+	}
+}
+
+func TestOpenLoggerLeavesTheDatabaseDirectoryToTheDatabase(t *testing.T) {
+	// Arrange. Creating the --db parent here would make an unopenable database
+	// a BOOTSTRAP failure, ahead of the profiling surface that exists to make
+	// exactly that failure diagnosable.
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "store", "events.db")
+
+	// Act.
+	_, closeLog, err := openLogger(filepath.Join(root, "sock", "store.sock"), dbPath, filepath.Join(root, "log", "shim-store.log"))
+	if err != nil {
+		t.Fatalf("openLogger = %v, want nil", err)
+	}
+	defer closeLog()
+
+	// Assert.
+	if _, statErr := os.Stat(filepath.Dir(dbPath)); !os.IsNotExist(statErr) {
+		t.Fatalf("stat %q = %v, want the database directory left uncreated", filepath.Dir(dbPath), statErr)
+	}
+}
+
+func TestHoldPprofForDiagnosisReturnsWhenTheFailedBootIsProfiled(t *testing.T) {
+	// Arrange. The surface outlives the boot failure it exists to explain.
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+	surface, err := pprofsurface.Open("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("opening the surface: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- surface.Serve() }()
+	defer func() {
+		if closeErr := surface.Close(); closeErr != nil {
+			t.Errorf("close surface: %v", closeErr)
+		}
+		if serveErr := <-served; serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			t.Errorf("serve: %v", serveErr)
+		}
+	}()
+
+	// Act. The profile request is the signal; nothing waits on elapsed time.
+	response, err := http.Get("http://" + surface.Address() + pprofsurface.Path)
+	if err != nil {
+		t.Fatalf("GET the profiling index: %v", err)
+	}
+	response.Body.Close()
+	holdPprofForDiagnosis(surface, log)
+
+	// Assert.
+	if !strings.Contains(sink.String(), "the failed boot was profiled") {
+		t.Fatalf("log = %q, want the profiled-then-exiting record", sink.String())
+	}
+}
+
+func TestHoldPprofForDiagnosisHoldsNothingWhenTheSurfaceIsOff(t *testing.T) {
+	// Arrange. Off is the shipped state, and an ordinary failed boot may not
+	// pay a grace for a surface nobody asked for.
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+
+	// Act.
+	holdPprofForDiagnosis(nil, log)
+
+	// Assert.
+	if strings.Contains(sink.String(), "holding the profiling surface open") {
+		t.Fatalf("log = %q, want no hold recorded", sink.String())
 	}
 }
 

@@ -24,6 +24,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +94,16 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		panic("shim-store db: nil logger")
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.db.open", DatabasePath: path}, "opening SQLite database")
+
+	// THE LAYER THAT OWNS THE FILE OWNS ITS DIRECTORY. Nothing upstream may
+	// create it: doing so would move an unwritable --db path's failure ahead of
+	// the profiling surface the boot order opens first, exactly so a wedged or
+	// doomed database step stays diagnosable.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+			"creating the database directory failed: %v", err)
+		return nil, storagef(err, "creating the directory for %q", path)
+	}
 
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
 	// concurrent readers during a live tail; NORMAL sync is durable under WAL;
