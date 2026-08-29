@@ -354,3 +354,18 @@ every UX or contract gap you surfaced instead of improvising.
   CANCELLING its context (an AbortSignal on the call) — connect's stream
   Close drains the body and blocks forever on a standing stream; never Close
   alone. The store flushes on accept too.
+- E2E MOCK ADDITIONS (project lead, for the e2e suite): three scenarios
+  join the mock and the table — (1) a `get_context_usage` driver whose
+  answer CHANGES between turns so a distinct `context_usage` push is
+  observable (cadence rule, engine-side: context_usage is pushed at session
+  start and at every turn end regardless of scenario); (2) a session FAULT
+  with a degraded window on `diagnostics` (a vendor message missing a
+  required field → converter_defect) and a recovery (healthy again, the
+  window closed with a dropped_count); (3) an UNSOLICITED `model_changed`
+  (the vendor's own fallback — the model_refusal_fallback / session state
+  path), distinct from SetSessionModel's confirmation.
+- LANDING 3: `DetachedLost {file_vanished | went_silent | swept_up}` is
+  threaded as `lost` arms on AgentBashInterrupted.cause,
+  AgentSubagentFailure.cause and AgentFailure.failure; the stream plane
+  produces them from its own LOST judgments (a spool the store stops
+  feeding, a task that vanished from the level signal without a terminal).
