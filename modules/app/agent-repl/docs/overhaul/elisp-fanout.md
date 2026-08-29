@@ -160,7 +160,8 @@ are deleted by the verbs agent once verbs.el replaces them.
   standing live|terminal; live: generation, shim_attached, vendor_info
   claude, backfill 4 arms, composer 5 arms, faults; naming), Host
   WorkspaceNotification + HostNotificationKind arms, Transferred,
-  ReloadWebapp; AdoptHostWorkspace{...}; WatchDaemonRequest,
+  ReloadWebapp, and the Q2 arm `open_in_editor {path, optional line}`
+  (decoded to `(:path P :line L-or-nil)`); AdoptHostWorkspace{...}; WatchDaemonRequest,
   WatchDaemonResponse (shutdown_announced with cause arms, drain_scheduled,
   drain_cancelled).
 - wire-roster.el: WatchWorkspaceRosterRequest/Response and the whole
@@ -177,7 +178,8 @@ are deleted by the verbs agent once verbs.el replaces them.
   Restart(force)/SetWorkspacePriority (absent priority = clear); SubmitPrompt
   (request said + idempotency_key, feed omitted; response: success turn
   {TurnId} | command_panel — decode only the ARM KEYWORD and keep the
-  panel payload as the raw alist, since Q3 ignores it | error merging);
+  panel payload as the raw alist | command_refused (Q3 ruling; decode the
+  arm keyword, keep the payload raw) | error merging);
   UpdateShutdownSchedule (3 arms); UpdateMergeQueue (3 arms);
   DaemonHealth (healthy | unhealthy{faults[{detail}]}); SessionHealth.
 - Empty error messages decode to `(:arm :error :value nil)`; a future arm
@@ -250,6 +252,8 @@ are deleted by the verbs agent once verbs.el replaces them.
   AdoptHostWorkspace on NEW; success → cancel the old stream, subscribe on
   NEW, update `:conn`; error arm → ERROR log, keep the old stream.
 - `reload_webapp` → `(agent-repl-frontend-reload-webview WS)`.
+- `open_in_editor` (Q2 ruling) → `(agent-repl-popup-open PATH LINE)` — the
+  ONE shared subroutine; a directory opens in dired. Log INFO with the path.
 - On `agent-repl-link-up-functions`: for every live workspace
   (`agent-repl--live-ws-names`) register its dir, then subscribe. On link
   down: mark streams gone; keep the last host state.
@@ -273,12 +277,14 @@ are deleted by the verbs agent once verbs.el replaces them.
   the resulting SelectWorkspace is idempotent, no loop).
 - Paint: `(agent-repl-status-tab-state WS)` → the row's status arm keyword.
   `agent-repl-status-color-table` maps every one of the 23 arms to exactly
-  one of blue/purple/red/yellow/green/none: init, severed, dead, degraded,
-  start-failed → blue; vendor-blocked → purple; submitting, thinking,
-  clearing, compacting → red; idle-async → yellow; ready, done,
-  interrupted, permission → green; merge-enqueuing, merging, merge-queued,
-  merge-conflict, merge-failed → none with the recycle glyph; merged → none;
-  none → none; inactive → none with a "?" glyph. Attention present → blink
+  one of blue/purple/red/yellow/green/none and is ASSERTED row for row
+  against `proto/vocab/render-colors.json` (landed on this branch):
+  `roster_status` (arm → color) composed with
+  `surface_overrides.emacs_tab_bar` (merge_enqueuing, merge_queued, merging
+  → purple; vendor_blocked → blue), `merge_glyphs` (queue / recycle /
+  conflict / failed / check → the tab glyph), and `precedence` (blue purple
+  red yellow green). Teal and RENDER_STATE_* are gone from the file and
+  from elisp. inactive → none with a "?" glyph. Attention present → blink
   once (below) then a steady marker until the marker leaves the row.
   Priority badge label draws before the name. Teal, hibernated, the local
   state machine, poll timers, git ticks, spread and stale thresholds are
@@ -295,9 +301,8 @@ are deleted by the verbs agent once verbs.el replaces them.
   (2) cross-workspace echo `message` when WS is not the selected tab;
   (3) magit-status refresh for the dir; (4) deferred-prompt drain
   (prompt-queue.el registers this one).
-- The render-colors.json assertion test is added when the daemon lead's
-  trimmed vocabulary file lands (SHA relayed by the project lead); until
-  then the table is tested against the proto arm list (every arm, one row).
+- The render-colors.json assertion test reads the file at test time and
+  fails on any row divergence or any arm missing on either side.
 
 ## 9. verbs.el
 
@@ -349,8 +354,9 @@ are deleted by the verbs agent once verbs.el replaces them.
   `agent-repl-rpc-submit-prompt` with `(:said SAID :idempotency-key
   (agent-repl--uuid))` (RFC 4122 v4 from `random`) → success `:turn` →
   clear the input, push history, run `agent-repl-send-posthooks`; success
-  `:command-panel` → log INFO `elisp.input.command-panel-ignored` (Q3),
-  clear the input; error `:merging` → keep the text, `message` + a
+  `:command-panel` or `:command-refused` → "answered, nothing to await":
+  log INFO (`elisp.input.command-answered` with the arm), clear the input
+  (the webapp draws the panel or refusal as feed rows; Q3 ruling); error `:merging` → keep the text, `message` + a
   mode-line flash "refused: merge in flight"; transport failure → keep the
   text and offer it to prompt-queue.el (drained on link-up).
 - Prompt origins are per-send-site constants `agent-repl-prompt-origin-<site>`
@@ -406,8 +412,10 @@ are deleted by the verbs agent once verbs.el replaces them.
 ## 12. frontend.el, webview-recovery.el, open-progress.el, panels.el, popup.el
 
 - `(agent-repl-frontend-webview-url WS)` =
-  `http://<address of (agent-repl-host-conn WS)>/?workspace=<url-hexify id>`.
-  Nothing else rides the URL (no composer flag).
+  `http://<address of (agent-repl-host-conn WS)>/?workspace=<url-hexify
+  id>&dir=<url-hexify dir>` — both values verbatim from the WorkspaceRef
+  (RegisterWorkspace's answer / the roster). Nothing else rides the URL
+  (no composer flag).
 - The pool: pre-creation and staggering stay (`agent-repl-webview-precreate-
   stagger-seconds`), scheduled after link-up; each webview is bound to its
   workspace buffer for life; `agent-repl-frontend-rescue-webview` (SPC o L)
@@ -547,8 +555,8 @@ teamlead resolves merge seams.
 
 - E1 SubmitPromptRequest carries no PromptOrigin (UserSaid tag 2 retired):
   default = origin as a local per-site constant, logged, off the wire.
-- E2 render-colors.json is still the old table: default = the §8 table;
-  the vocab assertion test lands when the trimmed file's SHA is relayed.
+- E2 RESOLVED: the trimmed vocabulary landed (cherry-pick of 24740ae4f);
+  §8 keys from it.
 - E3 Daemon launch contract (binary, argv, foreign/stale handling):
   default = `daemon/bin/claude-repld`, no argv, env only; never kill an
   answering daemon.
