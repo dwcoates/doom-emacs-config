@@ -55,13 +55,17 @@ type Fields struct {
 	// capability and is never logged.
 	WatchTokenHash string
 	// RPC is the Connect procedure name, e.g. "/store.v1.ShimStore/WriteBatch".
-	RPC        string
-	FileID     string
-	Path       string
-	Offset     int64
-	TaskID     string
-	ActivityID string
-	TurnID     string
+	RPC string
+	// RefusalSite names WHICH refusal the store issued — the derived `kind`
+	// vocabulary — so a refusal is counted by site rather than grepped out of
+	// a human detail string.
+	RefusalSite string
+	FileID      string
+	Path        string
+	Offset      int64
+	TaskID      string
+	ActivityID  string
+	TurnID      string
 	// Statement is a SQL statement FAMILY — "replay", "ingest", "open_tasks" —
 	// never rendered SQL and never bound values. The store's payloads are
 	// opaque to it by design, and a slow-query record that quoted a statement
@@ -374,6 +378,9 @@ func merge(base, extra Fields) Fields {
 	}
 	if extra.RPC != "" {
 		base.RPC = extra.RPC
+	}
+	if extra.RefusalSite != "" {
+		base.RefusalSite = extra.RefusalSite
 	}
 	if extra.FileID != "" {
 		base.FileID = extra.FileID

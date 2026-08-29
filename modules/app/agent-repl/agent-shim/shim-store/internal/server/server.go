@@ -1,0 +1,466 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"sync"
+	"time"
+
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-store/internal/logging"
+
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+)
+
+// RequestIDHeader carries a caller's correlation id. When present it is logged
+// as `request_id` on every record the request produces.
+const RequestIDHeader = "X-Agent-Repl-Request-Id"
+
+// Server serves store.v1.ShimStore.
+//
+// It implements storev1connect.ShimStoreHandler, so the same object answers
+// Connect, gRPC and gRPC-Web with both the binary and JSON codecs; wrapping the
+// mux in h2c means an HTTP/1.1 caller and a prior-knowledge HTTP/2 caller reach
+// it over the one unix socket with no TLS anywhere.
+type Server struct {
+	store  Store
+	log    *logging.Logger
+	tokens *tokenRegistry
+	fan    *fanout
+	http   *http.Server
+
+	// done is CLOSED by Shutdown before the HTTP server is drained. Standing
+	// watch streams select on it and return cleanly, which is what lets
+	// http.Server.Shutdown finish: it waits for handlers, and a pure tail would
+	// otherwise never return.
+	//
+	// THIS IS THE OLD Serve/Close RACE'S REPLACEMENT. Nothing tracks
+	// connections by hand any more (the old trackConn-after-Accept snapshot
+	// raced with Close); http.Server owns connection lifetime and Shutdown is
+	// the only stop.
+	done     chan struct{}
+	stopOnce sync.Once
+}
+
+var _ storev1connect.ShimStoreHandler = (*Server)(nil)
+
+// New builds the service over store, logging through log, giving every watch a
+// buffer of watchBuffer frames (non-positive selects DefaultWatchBuffer).
+func New(store Store, log *logging.Logger, watchBuffer int) *Server {
+	if store == nil {
+		panic("shim-store server: nil store")
+	}
+	if log == nil {
+		panic("shim-store server: nil logger")
+	}
+	s := &Server{
+		store:  store,
+		log:    log,
+		tokens: newTokenRegistry(),
+		fan:    newFanout(watchBuffer),
+		done:   make(chan struct{}),
+	}
+	s.http = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
+	log.Log(logging.Fields{Operation: "store.server.new"}, "store.v1.ShimStore ready watch_buffer=%d", s.fan.buffer)
+	return s
+}
+
+func (s *Server) handler() http.Handler {
+	mux := http.NewServeMux()
+	path, connectHandler := storev1connect.NewShimStoreHandler(s)
+	mux.Handle(path, connectHandler)
+	return h2c.NewHandler(mux, &http2.Server{})
+}
+
+// Handler exposes the routed handler so an in-process test can mount it on an
+// httptest server instead of a socket.
+func (s *Server) Handler() http.Handler { return s.http.Handler }
+
+// Serve runs until Shutdown. It returns http.ErrServerClosed after an orderly
+// stop, exactly as http.Server does.
+func (s *Server) Serve(ln net.Listener) error {
+	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving store.v1.ShimStore")
+	err := s.http.Serve(ln)
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		s.log.Log(logging.Fields{Operation: "store.serve", Level: "error"}, "serving ended: %v", err)
+		return err
+	}
+	s.log.Log(logging.Fields{Operation: "store.serve"}, "serving stopped")
+	return err
+}
+
+// Shutdown ends every standing watch, then drains the HTTP server within ctx.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.stopOnce.Do(func() {
+		close(s.done)
+		s.log.Log(logging.Fields{Operation: "store.shutdown"}, "ending standing watches watchers=%d outstanding_tokens=%d", s.fan.subscribers(), s.tokens.outstanding())
+	})
+	if err := s.http.Shutdown(ctx); err != nil {
+		s.log.Log(logging.Fields{Operation: "store.shutdown", Level: "error"}, "draining the HTTP server failed: %v", err)
+		return err
+	}
+	s.log.Log(logging.Fields{Operation: "store.shutdown"}, "store.v1.ShimStore stopped")
+	return nil
+}
+
+// ---- correlation and refusal plumbing ----
+
+// rpcLogger binds the procedure and the caller's correlation id to every record
+// one request produces.
+func (s *Server) rpcLogger(procedure string, header http.Header) *logging.Logger {
+	return s.log.With(logging.Fields{RPC: procedure, RequestID: header.Get(RequestIDHeader)})
+}
+
+// logRefusal records a refusal exactly once, at its owning layer, with the site
+// in its own context key.
+func (s *Server) logRefusal(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
+	fields.Operation = operation
+	fields.Level = "warn"
+	fields.RefusalSite = ref.site
+	log.Log(fields, "refused: %s", ref.detail)
+}
+
+// storeRefusal maps a storage-layer error onto a refusal site. A failure the
+// storage layer did not classify is a database failure: it is never softened
+// into a success, and never guessed at.
+func storeRefusal(err error) *refusal {
+	switch {
+	case errors.Is(err, ErrStalePointer):
+		return &refusal{site: SiteStalePointer, detail: err.Error()}
+	case errors.Is(err, ErrInvalid):
+		return &refusal{site: SiteStoreRefusedRequest, detail: err.Error()}
+	default:
+		return &refusal{site: SiteDatabaseFailure, detail: err.Error()}
+	}
+}
+
+// logStoreFailure records a storage failure at error level. A refused request
+// (ErrInvalid, ErrStalePointer) is the caller's fault and is warned about; a
+// database failure is the store's own and is an error.
+func (s *Server) logStoreFailure(log *logging.Logger, operation string, ref *refusal, fields logging.Fields) {
+	fields.Operation = operation
+	fields.RefusalSite = ref.site
+	if ref.site == SiteDatabaseFailure {
+		fields.Level = "error"
+	} else {
+		fields.Level = "warn"
+	}
+	log.Log(fields, "failed: %s", ref.detail)
+}
+
+// ---- WriteBatch ----
+
+func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.WriteBatchRequest]) (*connect.Response[storev1.WriteBatchResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreWriteBatchProcedure, req.Header())
+	msg := req.Msg
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
+		"write batch entries=%d cursor_advance=%t", len(msg.GetBatch().GetEntries()), msg.GetBatch().GetCursorAdvance() != nil)
+
+	if ref := validateWriteBatchRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.write-batch", ref, logging.Fields{Producer: msg.GetProducer()})
+		return writeBatchFailure(ref), nil
+	}
+
+	result, err := s.store.WriteBatch(ctx, msg.GetProducer(), msg.GetBatch())
+	if err != nil {
+		ref := storeRefusal(err)
+		s.logStoreFailure(log, "store.rpc.write-batch", ref, logging.Fields{Producer: msg.GetProducer()})
+		return writeBatchFailure(ref), nil
+	}
+
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.write-batch", Producer: msg.GetProducer()},
+		"batch durable written=%d absorbed=%d page_lines=%d", result.Written, result.Absorbed, len(result.Lines))
+	s.publish(log, msg.GetProducer(), result.Lines)
+	return connect.NewResponse(&storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{}},
+	}), nil
+}
+
+func writeBatchFailure(ref *refusal) *connect.Response[storev1.WriteBatchResponse] {
+	return connect.NewResponse(&storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{Failure: &storev1.WriteBatchFailure{Detail: ref.detail}},
+	})
+}
+
+// publish fans the committed page lines out and warns for every watcher that
+// could not keep up. It runs AFTER the commit: nothing is ever published that
+// is not already durable.
+func (s *Server) publish(log *logging.Logger, producer string, lines []LineWritten) {
+	if len(lines) == 0 {
+		log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer}, "batch produced no page lines")
+		return
+	}
+	overflowed := s.fan.publish(lines)
+	log.LogVerbose(logging.Fields{Operation: "store.fanout.publish", Producer: producer},
+		"published lines=%d watchers=%d", len(lines), s.fan.subscribers())
+	for _, sub := range overflowed {
+		log.Log(logging.Fields{Operation: "store.fanout.overflow", Level: "warn", BookAgentID: sub.agentID, WatchTokenHash: sub.tokenHash},
+			"watch buffer overflowed; ending this subscriber's stream buffer=%d dropped=%d", s.fan.buffer, sub.dropped)
+	}
+}
+
+// ---- OpenAgentSession ----
+
+func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[storev1.OpenAgentSessionRequest]) (*connect.Response[storev1.OpenAgentSessionResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreOpenAgentSessionProcedure, req.Header())
+	msg := req.Msg
+	agentID := msg.GetAgent().GetValue()
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID},
+		"open page_size=%d known_through=%t", msg.GetPageSize(), msg.KnownThrough != nil)
+
+	if ref := validateOpenAgentSessionRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+
+	opened, err := s.store.OpenPage(ctx, agentID, msg.GetPageSize(), msg.GetKnownThrough())
+	if err != nil {
+		ref := storeRefusal(err)
+		s.logStoreFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+	if opened.Page == nil {
+		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no page for this open"}
+		s.logStoreFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+
+	token, err := s.tokens.mint(agentID, opened.PinSeq)
+	if err != nil {
+		ref := &refusal{site: SiteDatabaseFailure, detail: err.Error()}
+		s.logStoreFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
+		return openFailure(ref), nil
+	}
+	log.Log(logging.Fields{Operation: "store.rpc.open-agent-session", AgentID: agentID, WatchTokenHash: tokenHash(token), WriteSeq: opened.PinSeq},
+		"reading session opened lines=%d", len(opened.Page.GetLines()))
+	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
+		Result: &storev1.OpenAgentSessionResponse_Success{Success: &storev1.OpenAgentSessionSuccess{
+			Page:  opened.Page,
+			Watch: &storev1.AgentSessionToken{Value: token},
+		}},
+	}), nil
+}
+
+func openFailure(ref *refusal) *connect.Response[storev1.OpenAgentSessionResponse] {
+	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
+		Result: &storev1.OpenAgentSessionResponse_Failure{Failure: &storev1.OpenAgentSessionFailure{Detail: ref.detail}},
+	})
+}
+
+// ---- WatchAgentSession ----
+
+// WatchAgentSession is the pure tail of one opened reading session.
+//
+// THERE IS NO FAILURE ARM BY DESIGN (project lead, 2026-08-29): a refused watch
+// — a token never minted, a token already spent, a token from a store that has
+// since restarted — closes at the TRANSPORT with connect.CodeNotFound, and the
+// caller re-opens. That is the contract's refused-open convention.
+func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[storev1.WatchAgentSessionRequest], stream *connect.ServerStream[storev1.WatchAgentSessionResponse]) error {
+	log := s.rpcLogger(storev1connect.ShimStoreWatchAgentSessionProcedure, req.Header())
+	if ref := validateWatchAgentSessionRequest(req.Msg); ref != nil {
+		s.logRefusal(log, "store.rpc.watch-agent-session", ref, logging.Fields{})
+		return connect.NewError(connect.CodeNotFound, ref)
+	}
+
+	token := req.Msg.GetWatch().GetValue()
+	hash := tokenHash(token)
+	entry, ok := s.tokens.consume(token)
+	if !ok {
+		ref := refuse(SiteUnknownWatchToken, "watch: this token was never minted by this store, or has already been spent")
+		s.logRefusal(log, "store.rpc.watch-agent-session", ref, logging.Fields{WatchTokenHash: hash})
+		return connect.NewError(connect.CodeNotFound, ref)
+	}
+	log = log.With(logging.Fields{AgentID: entry.agentID, BookAgentID: entry.agentID, WatchTokenHash: hash})
+
+	// SUBSCRIBE BEFORE THE REPLAY QUERY. Everything committed from this instant
+	// on reaches the channel, so the replay can only overlap the live stream,
+	// never leave a hole in it; the overlap is removed below by write ordinal.
+	sub := s.fan.subscribe(entry.agentID, hash)
+	defer s.fan.unsubscribe(sub)
+
+	replay, err := s.store.LinesSince(ctx, entry.agentID, entry.pinSeq)
+	if err != nil {
+		ref := storeRefusal(err)
+		s.logStoreFailure(log, "store.rpc.watch-agent-session", ref, logging.Fields{WriteSeq: entry.pinSeq})
+		return connect.NewError(connect.CodeInternal, ref)
+	}
+	replayed := make(map[uint64]struct{}, len(replay))
+	for _, line := range replay {
+		if err := s.send(log, stream, line); err != nil {
+			return err
+		}
+		replayed[line.WriteSeq] = struct{}{}
+	}
+	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: entry.pinSeq},
+		"watch live after replay replayed=%d", len(replay))
+
+	for {
+		// Overflow is checked FIRST and on its own, so a subscriber that has
+		// already been dropped ends deterministically instead of racing the
+		// frames still sitting in its buffer.
+		select {
+		case <-sub.overflow:
+			return s.endOverflowed(log, sub)
+		default:
+		}
+		select {
+		case <-sub.overflow:
+			return s.endOverflowed(log, sub)
+		case <-s.done:
+			log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the store is shutting down")
+			return nil
+		case <-ctx.Done():
+			log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session"}, "watch ended: the caller went away")
+			return nil
+		case line := <-sub.lines:
+			if line.WriteSeq <= entry.pinSeq {
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line at or below the pin")
+				continue
+			}
+			if _, duplicate := replayed[line.WriteSeq]; duplicate {
+				delete(replayed, line.WriteSeq)
+				log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq}, "dropping a line the replay already delivered")
+				continue
+			}
+			if err := s.send(log, stream, line); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.WatchAgentSessionResponse], line LineWritten) error {
+	if err := stream.Send(&storev1.WatchAgentSessionResponse{Line: line.Line}); err != nil {
+		log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()},
+			"sending a line to the watcher failed: %v", err)
+		return err
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.watch-agent-session", WriteSeq: line.WriteSeq, Position: line.Line.GetAt().GetValue()}, "line delivered")
+	return nil
+}
+
+func (s *Server) endOverflowed(log *logging.Logger, sub *subscriber) error {
+	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn"},
+		"watch ended: this subscriber overflowed its buffer and must re-open with known_through dropped=%d", sub.dropped)
+	return connect.NewError(connect.CodeResourceExhausted, refuse("watch_buffer_overflow",
+		"watch: the subscriber fell too far behind its buffer; re-open with known_through"))
+}
+
+// ---- ReadAgentPage ----
+
+func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1.ReadAgentPageRequest]) (*connect.Response[storev1.ReadAgentPageResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreReadAgentPageProcedure, req.Header())
+	msg := req.Msg
+	agentID := msg.GetBook().GetValue()
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID, BookAgentID: agentID, Position: msg.GetAfter().GetValue()},
+		"read page page_size=%d", msg.GetPageSize())
+
+	if ref := validateReadAgentPageRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
+		return readPageFailure(ref), nil
+	}
+
+	page, err := s.store.ReadPage(ctx, agentID, msg.GetPageSize(), msg.GetAfter())
+	if err != nil {
+		ref := storeRefusal(err)
+		s.logStoreFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})
+		return readPageFailure(ref), nil
+	}
+	if page == nil {
+		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no page for this read"}
+		s.logStoreFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
+		return readPageFailure(ref), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.read-agent-page", AgentID: agentID}, "page served lines=%d", len(page.GetLines()))
+	return connect.NewResponse(&storev1.ReadAgentPageResponse{
+		Result: &storev1.ReadAgentPageResponse_Success{Success: page},
+	}), nil
+}
+
+func readPageFailure(ref *refusal) *connect.Response[storev1.ReadAgentPageResponse] {
+	return connect.NewResponse(&storev1.ReadAgentPageResponse{
+		Result: &storev1.ReadAgentPageResponse_Failure{Failure: &storev1.ReadAgentPageFailure{Detail: ref.detail}},
+	})
+}
+
+// ---- GetWorkflow ----
+
+// GetWorkflow is NOT IMPLEMENTED THIS WAVE and says so in the typed failure
+// arm. The workflow table exists and nothing routes into it, so serving a
+// synthesized answer would be an invention; the refusal is the honest reply.
+func (s *Server) GetWorkflow(_ context.Context, req *connect.Request[storev1.GetWorkflowRequest]) (*connect.Response[storev1.GetWorkflowResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetWorkflowProcedure, req.Header())
+	ref := refuse(SiteWorkflowNotImplemented, "workflow is not implemented this wave")
+	s.logRefusal(log, "store.rpc.get-workflow", ref, logging.Fields{TaskID: req.Msg.GetWork().GetValue()})
+	return connect.NewResponse(&storev1.GetWorkflowResponse{
+		Result: &storev1.GetWorkflowResponse_Failure{Failure: &storev1.GetWorkflowFailure{Detail: ref.detail}},
+	}), nil
+}
+
+// ---- GetLiveWork ----
+
+func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.GetLiveWorkRequest]) (*connect.Response[storev1.GetLiveWorkResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetLiveWorkProcedure, req.Header())
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"}, "reading the open obligations")
+
+	live, err := s.store.LiveWork(ctx)
+	if err != nil {
+		ref := storeRefusal(err)
+		s.logStoreFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		return liveWorkFailure(ref), nil
+	}
+	if live == nil {
+		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no live-work answer"}
+		s.logStoreFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
+		return liveWorkFailure(ref), nil
+	}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"},
+		"open obligations served agents=%d workflows=%d detached=%d", len(live.GetLiveAgents()), len(live.GetLiveWorkflows()), len(live.GetLiveDetached()))
+	return connect.NewResponse(&storev1.GetLiveWorkResponse{
+		Result: &storev1.GetLiveWorkResponse_Success{Success: live},
+	}), nil
+}
+
+func liveWorkFailure(ref *refusal) *connect.Response[storev1.GetLiveWorkResponse] {
+	return connect.NewResponse(&storev1.GetLiveWorkResponse{
+		Result: &storev1.GetLiveWorkResponse_Failure{Failure: &storev1.GetLiveWorkFailure{Detail: ref.detail}},
+	})
+}
+
+// ---- GetSidecarCursors ----
+
+func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
+	log := s.rpcLogger(storev1connect.ShimStoreGetSidecarCursorsProcedure, req.Header())
+	msg := req.Msg
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()},
+		"reading cursors scoped=%t", msg.FileId != nil)
+
+	if ref := validateGetSidecarCursorsRequest(msg); ref != nil {
+		s.logRefusal(log, "store.rpc.get-sidecar-cursors", ref, logging.Fields{})
+		return cursorsFailure(ref), nil
+	}
+
+	cursors, err := s.store.Cursors(ctx, msg.FileId)
+	if err != nil {
+		ref := storeRefusal(err)
+		s.logStoreFailure(log, "store.rpc.get-sidecar-cursors", ref, logging.Fields{FileID: msg.GetFileId()})
+		return cursorsFailure(ref), nil
+	}
+	// An empty answer is the fresh-store answer, not a failure: every tailed
+	// file starts from zero.
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-sidecar-cursors", FileID: msg.GetFileId()}, "cursors served cursors=%d", len(cursors))
+	return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Success{Success: &storev1.GetSidecarCursorsSuccess{Cursors: cursors}},
+	}), nil
+}
+
+func cursorsFailure(ref *refusal) *connect.Response[storev1.GetSidecarCursorsResponse] {
+	return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
+		Result: &storev1.GetSidecarCursorsResponse_Failure{Failure: &storev1.GetSidecarCursorsFailure{Detail: ref.detail}},
+	})
+}
