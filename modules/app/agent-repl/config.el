@@ -161,6 +161,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
     version))
 
 (agent-repl--load-module "core")
+;; WHY: wire-verbs.el is the protojson codec for the agentrepl.v1 workspace
+;; and daemon-admin VERBS.  It needs nothing but core.el's logging ladder
+;; and the shared leaf codecs it reaches by name, so it loads with the rest
+;; of the wire layer, ahead of every module that sends or receives a verb.
+(agent-repl--load-module "wire-verbs")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
