@@ -550,6 +550,166 @@ persisting, and the suite asserts the SIGNAL, not the log file."
                    '(:arm :error :value nil)))))
 
 
+;;;; ---- SubmitPromptRequest ---------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-submit-request-shape ()
+  "A submission carries said, the idempotency key and the origin."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-submit-prompt-request
+                    '(:said (:text "hi") :idempotency-key "k-1" :origin :user-sent))
+                   '((said . ((said . "hi")))
+                     (idempotencyKey . "k-1")
+                     (origin . "ORIGIN::user-sent"))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-request-omits-feed ()
+  "Emacs never addresses a subagent feed, so `feed' is never spelled."
+  (agent-repl-test-wire-verbs--with-common
+    (should-not (assq 'feed (agent-repl-wire-encode-submit-prompt-request
+                             '(:said (:text "hi") :idempotency-key "k-1"
+                               :origin :user-sent))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-empty-idempotency-key-refused ()
+  "An empty idempotency key defeats duplicate refusal and is refused here."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-request
+                   '(:said (:text "hi") :idempotency-key "" :origin :user-sent))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-missing-idempotency-key-refused ()
+  "An absent idempotency key is refused before the submission can be sent."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-request
+                   '(:said (:text "hi") :origin :user-sent))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-missing-origin-refused ()
+  "The origin is REQUIRED, so a submission without one never reaches the wire."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-request
+                   '(:said (:text "hi") :idempotency-key "k-1"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-missing-said-refused ()
+  "A submission with nothing said is incomplete and errors before send."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-encode-submit-prompt-request
+                   '(:idempotency-key "k-1" :origin :user-sent))
+                  :type 'agent-repl-wire-error)))
+
+
+;;;; ---- SubmitPromptResponse --------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-turn ()
+  "A minted turn decodes through the TurnId codec."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"turn\":{\"turn\":{\"value\":\"t-1\"}}}}"))
+                   '(:arm :success :value (:arm :turn :value (:turn (:value "t-1"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-turn-without-turn-id ()
+  "A turn arm without the minted TurnId is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{\"turn\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-command-panel-raw ()
+  "A command panel decodes to its arm keyword, keeping the payload raw."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"commandPanel\":{\"status\":{\"model\":\"opus\"}}}}"))
+                   '(:arm :success
+                     :value (:arm :command-panel
+                             :value (:arm :status :value ((model . "opus")))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-command-panel-todos ()
+  "Every declared panel arm decodes, not only the first."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"commandPanel\":{\"todos\":{}}}}"))
+                   '(:arm :success
+                     :value (:arm :command-panel :value (:arm :todos :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-command-panel-retired-arm ()
+  "The retired /cost and /usage tags are not arms and arrive as unknown keys."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"commandPanel\":{\"cost\":{}}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-command-refused ()
+  "A recognized-but-unsupported command decodes with the command as typed."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"commandRefused\":{\"command\":\"/agents\"}}}"))
+                   '(:arm :success
+                     :value (:arm :command-refused :value (:command "/agents")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-command-refused-default ()
+  "protojson omits a default-valued scalar, so an absent command is the empty string."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-response
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"success\":{\"commandRefused\":{}}}"))
+                   '(:arm :success
+                     :value (:arm :command-refused :value (:command "")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-outcome-unset ()
+  "A success with no outcome arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-response
+                   (agent-repl-test-wire-verbs--parse "{\"success\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-outcome-two-arms ()
+  "A success with two outcome arms set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-response
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"success\":{\"turn\":{\"turn\":{\"value\":\"t\"}},\"commandRefused\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-merging ()
+  "A merge in flight refuses the submission through the reason oneof."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-response
+                    (agent-repl-test-wire-verbs--parse "{\"error\":{\"merging\":{}}}"))
+                   '(:arm :error :value (:reason (:arm :merging :value nil)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-reason-unset ()
+  "A submit error with no reason arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-response-unknown-reason ()
+  "A future submit-refusal arm arrives as an unknown key and is loud."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{\"draining\":{}}}"))
+                  :type 'agent-repl-wire-error)))
+
+
+;;;; ---- Logging -----------------------------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-breach-logs-error ()
+  "Every contract breach logs at ERROR before the typed signal leaves."
+  (agent-repl-test-wire-verbs--with-common
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (&rest args) (push args calls) (error "logged"))))
+        (should-error (agent-repl-wire-encode-submit-prompt-request
+                       '(:said (:text "hi") :idempotency-key "" :origin :user-sent))
+                      :type 'agent-repl-wire-error))
+      (should (= (length calls) 1)))))
+
+
 ;;;; ---- Arm lists pinned against the generated Go bindings --------------
 
 (ert-deftest agent-repl-test-wire-verbs-create-form-arms-pinned ()
@@ -574,6 +734,29 @@ persisting, and the suite asserts the SIGNAL, not the log file."
                   "agentrepl/v1/endpoint_close_workspace.pb.go"
                   "CloseWorkspaceError")
                  '("blocked"))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
+  "SubmitPromptSuccess's outcome oneof has exactly the three arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_submit_prompt.pb.go"
+                        "SubmitPromptSuccess")
+                       #'string<)
+                 '("commandPanel" "commandRefused" "turn"))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-panel-arms-pinned ()
+  "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_submit_prompt.pb.go"
+                        "SubmitPromptCommandPanel")
+                       #'string<)
+                 '("agents" "context" "help" "mcp" "status" "todos"))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-reason-arms-pinned ()
+  "SubmitPromptError's reason oneof has exactly the arm this codec decodes."
+  (should (equal (agent-repl-test--generated-oneof-arms
+                  "agentrepl/v1/endpoint_submit_prompt.pb.go"
+                  "SubmitPromptError")
+                 '("merging"))))
 
 (provide 'test-wire-verbs)
 
