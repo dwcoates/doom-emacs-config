@@ -16,6 +16,8 @@ import type { UserSaid } from "../../conversation/v1/user_pb";
 import { file_conversation_v1_user } from "../../conversation/v1/user_pb";
 import type { PromptOrigin } from "../../conversation/v1/prompt_origin_pb";
 import { file_conversation_v1_prompt_origin } from "../../conversation/v1/prompt_origin_pb";
+import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
+import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { StatusPanelView } from "../../frontend/v1/status_panel_pb";
 import { file_frontend_v1_status_panel } from "../../frontend/v1/status_panel_pb";
 import type { TodosPanelView } from "../../frontend/v1/todos_panel_pb";
@@ -36,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_submit_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIrcBChNTdWJtaXRQcm9tcHRSZXF1ZXN0EicKBHNhaWQYASABKAsyGS5jb252ZXJzYXRpb24udjEuVXNlclNhaWQSFwoPaWRlbXBvdGVuY3lfa2V5GAIgASgJEiYKBGZlZWQYAyABKAsyEy5mcm9udGVuZC52MS5GZWVkSWRIAIgBARItCgZvcmlnaW4YBCABKA4yHS5jb252ZXJzYXRpb24udjEuUHJvbXB0T3JpZ2luQgcKBV9mZWVkIogBChRTdWJtaXRQcm9tcHRSZXNwb25zZRI0CgdzdWNjZXNzGAEgASgLMiEuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFN1Y2Nlc3NIABIwCgVlcnJvchgCIAEoCzIfLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCLWAQoTU3VibWl0UHJvbXB0U3VjY2VzcxIuCgR0dXJuGAEgASgLMh4uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFR1cm5IABI/Cg1jb21tYW5kX3BhbmVsGAIgASgLMiYuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRQYW5lbEgAEkMKD2NvbW1hbmRfcmVmdXNlZBgDIAEoCzIoLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZEgAQgkKB291dGNvbWUiLQoaU3VibWl0UHJvbXB0Q29tbWFuZFJlZnVzZWQSDwoHY29tbWFuZBgBIAEoCSI5ChBTdWJtaXRQcm9tcHRUdXJuEiUKBHR1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkIrkCChhTdWJtaXRQcm9tcHRDb21tYW5kUGFuZWwSLgoGc3RhdHVzGAEgASgLMhwuZnJvbnRlbmQudjEuU3RhdHVzUGFuZWxWaWV3SAASLAoFdG9kb3MYBCABKAsyGy5mcm9udGVuZC52MS5Ub2Rvc1BhbmVsVmlld0gAEi4KBmFnZW50cxgFIAEoCzIcLmZyb250ZW5kLnYxLkFnZW50c1BhbmVsVmlld0gAEigKA21jcBgGIAEoCzIZLmZyb250ZW5kLnYxLk1jcFBhbmVsVmlld0gAEjAKB2NvbnRleHQYByABKAsyHS5mcm9udGVuZC52MS5Db250ZXh0UGFuZWxWaWV3SAASKgoEaGVscBgIIAEoCzIaLmZyb250ZW5kLnYxLkhlbHBQYW5lbFZpZXdIAEIHCgVwYW5lbCJaChFTdWJtaXRQcm9tcHRFcnJvchI7CgdtZXJnaW5nGAEgASgLMiguYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nSABCCAoGcmVhc29uIhwKGlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIuYBChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW5CBwoFX2ZlZWQiiAEKFFN1Ym1pdFByb21wdFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0U3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEVycm9ySABCCAoGcmVzdWx0ItYBChNTdWJtaXRQcm9tcHRTdWNjZXNzEi4KBHR1cm4YASABKAsyHi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0VHVybkgAEj8KDWNvbW1hbmRfcGFuZWwYAiABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZFBhbmVsSAASQwoPY29tbWFuZF9yZWZ1c2VkGAMgASgLMiguYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRSZWZ1c2VkSABCCQoHb3V0Y29tZSItChpTdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZBIPCgdjb21tYW5kGAEgASgJIjkKEFN1Ym1pdFByb21wdFR1cm4SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiuQIKGFN1Ym1pdFByb21wdENvbW1hbmRQYW5lbBIuCgZzdGF0dXMYASABKAsyHC5mcm9udGVuZC52MS5TdGF0dXNQYW5lbFZpZXdIABIsCgV0b2RvcxgEIAEoCzIbLmZyb250ZW5kLnYxLlRvZG9zUGFuZWxWaWV3SAASLgoGYWdlbnRzGAUgASgLMhwuZnJvbnRlbmQudjEuQWdlbnRzUGFuZWxWaWV3SAASKAoDbWNwGAYgASgLMhkuZnJvbnRlbmQudjEuTWNwUGFuZWxWaWV3SAASMAoHY29udGV4dBgHIAEoCzIdLmZyb250ZW5kLnYxLkNvbnRleHRQYW5lbFZpZXdIABIqCgRoZWxwGAggASgLMhouZnJvbnRlbmQudjEuSGVscFBhbmVsVmlld0gAQgcKBXBhbmVsIloKEVN1Ym1pdFByb21wdEVycm9yEjsKB21lcmdpbmcYASABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdIAEIICgZyZWFzb24iHAoaU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
 
 /**
  * What the user typed, submitted whole.
@@ -44,6 +46,17 @@ export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
  * @generated from message agentrepl.v1.SubmitPromptRequest
  */
 export type SubmitPromptRequest = Message<"agentrepl.v1.SubmitPromptRequest"> & {
+  /**
+   * The workspace this submission belongs to — the daemon-minted ref,
+   * echoed verbatim like every per-workspace request. Names the workspace
+   * even when `feed` is unset (the root feed has no id of its own); when
+   * `feed` is set it must belong to this workspace, else the submission is
+   * refused.
+   *
+   * @generated from field: workspace.v1.WorkspaceRef workspace = 5;
+   */
+  workspace?: WorkspaceRef | undefined;
+
   /**
    * The composed prompt — one canonical form client → daemon → tray → shim →
    * record (a held prompt IS a UserSaid).
