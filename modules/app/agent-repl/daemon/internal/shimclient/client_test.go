@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os/exec"
 	"syscall"
 	"testing"
 	"time"
@@ -456,5 +457,97 @@ func TestSessionStreamRaisesOnAnUnsetPush(t *testing.T) {
 	var invalidErr *InvalidRequestError
 	if !errors.As(err, &invalidErr) {
 		t.Fatalf("Recv() error = %v, want *InvalidRequestError", err)
+	}
+}
+
+// TestAdoptedDeathIsWitnessedByTheWorkspaceLock asserts an adopted shim — one
+// with no child process to reap — is declared dead only on EVIDENCE: the
+// socket is gone AND the workspace lock reads free.
+func TestAdoptedDeathIsWitnessedByTheWorkspaceLock(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds, WithLockProbe(func(string) (bool, error) { return true, nil }))
+	if got := collectStates(t, client, 2); got[0] != LinkDialing || got[1] != LinkConnected {
+		t.Fatalf("states = %v, want dialing then connected", got)
+	}
+
+	// Act: the shim's socket goes away under a client that never spawned it.
+	f.stop()
+
+	// Assert.
+	got := collectStates(t, client, 2)
+	if got[0] != LinkRedialing || got[1] != LinkDead {
+		t.Fatalf("states = %v, want redialing then dead", got)
+	}
+	info := <-client.Exited()
+	if info.Attribution != nil {
+		t.Fatalf("attribution = %+v, want nil: nobody asked for this stop", info.Attribution)
+	}
+}
+
+// TestAdoptedDeathIsNotConcludedWhileTheLockIsHeld asserts a held lock is not
+// death: the client keeps redialing.
+func TestAdoptedDeathIsNotConcludedWhileTheLockIsHeld(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return false, nil }
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true while the lock is held")
+	}
+}
+
+// TestAdoptedDeathIsNotConcludedFromAnUnreadableLock asserts a probe that
+// could not tell is never read as death.
+func TestAdoptedDeathIsNotConcludedFromAnUnreadableLock(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return false, errors.New("permission denied") }
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true from a probe that could not tell")
+	}
+}
+
+// TestAdoptedDeathNeedsTheSocketToBeGone asserts a link break that is not the
+// socket disappearing is never death, however free the lock reads.
+func TestAdoptedDeathNeedsTheSocketToBeGone(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return true, nil }
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(io.ErrUnexpectedEOF)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true without the socket being gone")
+	}
+}
+
+// TestSpawnedClientNeverWitnessesDeathFromTheLock asserts a SPAWNED shim's
+// death comes from its exit, never from a lock probe: the reaper is the only
+// authority when a child exists.
+func TestSpawnedClientNeverWitnessesDeathFromTheLock(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return true, nil }
+	c.cmd = &exec.Cmd{}
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true for a spawned shim")
 	}
 }
