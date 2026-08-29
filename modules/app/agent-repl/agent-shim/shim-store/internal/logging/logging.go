@@ -189,6 +189,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		"position":          merged.Position,
 		"watch_token_hash":  merged.WatchTokenHash,
 		"rpc":               merged.RPC,
+		"refusal_site":      merged.RefusalSite,
 		"file_id":           merged.FileID,
 		"path":              merged.Path,
 		"task_id":           merged.TaskID,
