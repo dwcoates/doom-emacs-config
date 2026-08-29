@@ -17,6 +17,18 @@
 // MULTI-ROOT IS NOT OPTIONAL: the second account's config dir holds real
 // transcripts, and a single-root scan simply cannot see them.
 //
+// NOTHING IS EVER DECODED FROM THE <cwd-slug> DIRECTORY NAME. The vendor builds
+// it by replacing every byte of the absolute cwd outside [A-Za-z0-9] with `-`
+// (underscores included, case preserved), so `/private/var/folders/_m/x`
+// becomes `-private-var-folders--m-x`. THAT MAPPING IS LOSSY AND NOT
+// INVERTIBLE: two different directories can produce one slug, so a slug read
+// back as a workspace path would be a guess. This package therefore treats the
+// slug as an opaque directory name and reads its POSITION only — never its
+// content. Every identity comes from what is INSIDE it: the session uuid file
+// names, `subagents/`, `wf_*`, `agent-<id>`, and the `tasks/` basenames. Do not
+// add a slug-to-path decoder, and never compare slugs across roots as though
+// they were paths.
+//
 // A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY. The spool layout embeds a
 // session-shaped segment, and this package used to read it as the owning
 // session. It is not one: the harness names that directory with its RUNTIME
@@ -189,7 +201,10 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 			continue
 		}
 		segs := strings.Split(filepath.ToSlash(path[len(prefix):]), "/")
-		// segs[0] is the project dir.
+		// segs[0] is the <cwd-slug> directory. It is matched POSITIONALLY and
+		// never read: the vendor's slug is a lossy, non-invertible rendering of
+		// the cwd (see the package comment), so anything decoded from it is a
+		// guess. Every identity below comes from a segment INSIDE it.
 		switch {
 		case len(segs) == 2 && strings.HasSuffix(segs[1], ".jsonl"):
 			// projects/<project>/<session>.jsonl
@@ -284,9 +299,10 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	//	claude-<uid>/<cwd-slug>/<vendor session>/tasks/<task>.output   (root = /tmp)
 	//	<cwd-slug>/<vendor session>/tasks/<task>.output                (root = the uid dir)
 	//
-	// The <vendor session> segment is deliberately NOT read: it is the
-	// harness's RUNTIME session id, which disagrees with the transcript's
-	// whenever a session was resumed.
+	// NEITHER MIDDLE SEGMENT IS READ. <cwd-slug> is the vendor's lossy,
+	// non-invertible rendering of the cwd; <vendor session> is the harness's
+	// RUNTIME session id, which disagrees with the transcript's whenever a
+	// session was resumed. Only the task basename below carries an identity.
 	switch {
 	case len(segs) == 5 && strings.HasPrefix(segs[0], "claude-"):
 		segs = segs[1:]
