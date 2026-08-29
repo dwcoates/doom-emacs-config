@@ -70,11 +70,14 @@ import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl
 import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
 import { CloseLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_login_pb";
 import { OpenExternalResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import { RequestCommandSupportResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_command_support_pb";
+import { OpenInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import { SendLoginInputResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_send_login_input_pb";
 import {
   LoginTerminalOutputSchema,
-  type LoginTerminalInput,
   type LoginTerminalOutput,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
+import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 import type { WatchHostWorkspaceResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_host_workspace_pb";
 import {
   emptyFeedPage,
@@ -198,6 +201,14 @@ export interface FakeDaemon {
   scheduleDrain(atMs: bigint, reason: DrainReason): void;
   cancelDrain(): void;
 
+  // --- the login pty -------------------------------------------------------
+  /** The buffer WatchLoginTerminal replays before any live byte. */
+  setLoginScrollback(workspace: string, chunks: Uint8Array[]): void;
+  /** Deliver live pty bytes on every attached WatchLoginTerminal. */
+  pushLoginBytes(workspace: string, data: Uint8Array): void;
+  /** Conclude the pty with the terminal `closed` frame (a legal stream end). */
+  closeLoginTerminal(workspace: string): void;
+
   // --- scripted unary answers ---------------------------------------------
   /** Serve `response` for every later call of `rpc` (replaces the default). */
   answer(rpc: RpcName, response: unknown): void;
@@ -246,6 +257,8 @@ export function createFakeDaemon(): FakeDaemon {
   const tokens = new Map<string, string[]>();
   /** token value -> the feed it was minted for. WatchFeed refuses anything else. */
   const tokenFeeds = new Map<string, { workspace: string; feed: FeedKey }>();
+  /** The pty buffer WatchLoginTerminal replays to a newly attached viewer. */
+  const loginScrollback = new Map<string, Uint8Array[]>();
   let roster: WorkspaceRoster = emptyRoster();
 
   const scripted = new Map<RpcName, unknown>();
@@ -356,6 +369,16 @@ export function createFakeDaemon(): FakeDaemon {
       // ---- the feed -------------------------------------------------------
       submitPrompt(request) {
         record("submitPrompt", request);
+        // `origin` is REQUIRED by the contract, and an unset enum is the one
+        // shape a proto3 client can send without noticing. The real daemon
+        // rejects it, so the fake does too: a suite that forgets the field
+        // fails here rather than passing against a lenient stub.
+        if (request.origin === PromptOrigin.UNSPECIFIED) {
+          throw new ConnectError(
+            "SubmitPromptRequest.origin is required and was PROMPT_ORIGIN_UNSPECIFIED",
+            Code.InvalidArgument,
+          );
+        }
         return answerFor("submitPrompt", SubmitPromptResponseSchema, {
           result: {
             case: "success",
@@ -664,24 +687,40 @@ export function createFakeDaemon(): FakeDaemon {
           result: { case: "success", value: { configDir: "/tmp/config" } },
         });
       },
-      async *watchLoginTerminal(requests: AsyncIterable<LoginTerminalInput>, context) {
+      async *watchLoginTerminal(request, context) {
+        record("watchLoginTerminal", request);
         consumeFailure("watchLoginTerminal");
-        const { channel, iterate } = openStream("watchLoginTerminal", "", context.signal);
-        void (async () => {
-          for await (const input of requests) {
-            record("watchLoginTerminal", input);
-            if (input.input.case === "attach") {
-              channel.push(
-                create(LoginTerminalOutputSchema, {
-                  output: { case: "bytes", value: { data: new TextEncoder().encode("login") } },
-                }),
-              );
-            }
-          }
-          channel.push(create(LoginTerminalOutputSchema, { output: { case: "closed", value: {} } }));
-          channel.end();
-        })();
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchLoginTerminal", workspace, context.signal);
+        // The scrollback replays FIRST, exactly as the daemon replays the pty's
+        // buffer to a newly attached viewer, before any live byte arrives.
+        for (const chunk of loginScrollback.get(workspace) ?? []) {
+          channel.push(
+            create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data: chunk } } }),
+          );
+        }
         yield* iterate() as AsyncGenerator<LoginTerminalOutput>;
+      },
+      sendLoginInput(request) {
+        record("sendLoginInput", request);
+        return answerFor("sendLoginInput", SendLoginInputResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      requestCommandSupport(request) {
+        record("requestCommandSupport", request);
+        return answerFor("requestCommandSupport", RequestCommandSupportResponseSchema, {
+          result: {
+            case: "success",
+            value: { workspace: { id: "ws-support", dir: "/tmp/ws-support" } },
+          },
+        });
+      },
+      openInEditor(request) {
+        record("openInEditor", request);
+        return answerFor("openInEditor", OpenInEditorResponseSchema, {
+          result: { case: "success", value: {} },
+        });
       },
       closeLogin(request) {
         record("closeLogin", request);
@@ -809,6 +848,31 @@ export function createFakeDaemon(): FakeDaemon {
         undefined,
         create(WatchDaemonResponseSchema, { push: { case: "drainCancelled", value: {} } }),
       );
+    },
+
+    setLoginScrollback(workspace, chunks) {
+      loginScrollback.set(workspace, chunks);
+    },
+    pushLoginBytes(workspace, data) {
+      broadcast(
+        "watchLoginTerminal",
+        workspace,
+        undefined,
+        create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data } } }),
+      );
+    },
+    closeLoginTerminal(workspace) {
+      broadcast(
+        "watchLoginTerminal",
+        workspace,
+        undefined,
+        create(LoginTerminalOutputSchema, { output: { case: "closed", value: {} } }),
+      );
+      for (const reg of [...registrations]) {
+        if (reg.rpc !== "watchLoginTerminal" || reg.workspace !== workspace) continue;
+        registrations.delete(reg);
+        reg.channel.end();
+      }
     },
 
     answer(rpc, response) {
