@@ -207,12 +207,23 @@ func shortSocketPath(t *testing.T, tag string) string {
 // ---------------------------------------------------------------------------
 
 // cwdSlug spells a working directory the way the vendor names its project
-// directory: every '/' and '.' becomes '-'. Verified against the captured
-// projects/ fixture, whose slug is
-// "-Users-dodgecoates--config-doom-worktrees-bounce-continuity-probe-hhj" for
-// "/Users/dodgecoates/.config/doom-worktrees/bounce-continuity-probe-hhj".
+// directory: EVERY byte outside [A-Za-z0-9] becomes '-', with case preserved.
+// Underscores included — so "/private/var/folders/_m/x" is
+// "-private-var-folders--m-x", not "-private-var-folders-_m-x".
+//
+// THE MAPPING IS LOSSY AND NOTHING HERE EVER INVERTS IT: '/', '.', '-' and '_'
+// all collapse onto '-', so a slug names a directory and can never be decoded
+// back into one. Every fixture tree is built from a cwd the test already holds.
 func cwdSlug(dir string) string {
-	return strings.NewReplacer("/", "-", ".", "-").Replace(dir)
+	out := []byte(dir)
+	for i, b := range out {
+		switch {
+		case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		default:
+			out[i] = '-'
+		}
+	}
+	return string(out)
 }
 
 type vendorTree struct {
@@ -1699,6 +1710,37 @@ func TestCwdSlugMatchesTheCapturedProjectDirectory(t *testing.T) {
 	// Assert.
 	if got != captured.Slug {
 		t.Fatalf("cwdSlug(%q) = %q, wanted the captured project directory %q", cwd, got, captured.Slug)
+	}
+}
+
+// TestCwdSlugReplacesEveryNonAlphanumericByte pins the project lead's rule at
+// the example that distinguishes it from the narrower "/ and . only" reading:
+// the underscore collapses onto '-' like every other non-alphanumeric byte.
+func TestCwdSlugReplacesEveryNonAlphanumericByte(t *testing.T) {
+	// Arrange.
+	cwd := "/private/var/folders/_m/x"
+
+	// Act.
+	got := cwdSlug(cwd)
+
+	// Assert.
+	if want := "-private-var-folders--m-x"; got != want {
+		t.Fatalf("cwdSlug(%q) = %q, wanted %q", cwd, got, want)
+	}
+}
+
+// TestCwdSlugPreservesCase asserts the mapping touches only the bytes outside
+// [A-Za-z0-9]; a capital stays capital.
+func TestCwdSlugPreservesCase(t *testing.T) {
+	// Arrange.
+	cwd := "/Users/DodgeCoates/Repo9"
+
+	// Act.
+	got := cwdSlug(cwd)
+
+	// Assert.
+	if want := "-Users-DodgeCoates-Repo9"; got != want {
+		t.Fatalf("cwdSlug(%q) = %q, wanted %q", cwd, got, want)
 	}
 }
 
