@@ -1,0 +1,39 @@
+// endpoint_set_permission_mode.proto — SetPermissionMode: the session's
+// permission-mode switch, SetModel's sibling. TOPBAR section. The daemon
+// validates switchability and relays to the shim's
+// SetSessionPermissionMode; the authoritative new mode arrives on the
+// ordinary pushed surfaces (WatchSession's permission_mode_changed relayed
+// into the views).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message SetPermissionModeRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The requested mode, in the same spelling the session facts use (the
+  // shim's mode vocabulary); the daemon validates it against the
+  // switchable set. A client offers only modes it was served.
+  string mode = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message SetPermissionModeResponse {
+  oneof result {
+    SetPermissionModeSuccess success = 1;
+    SetPermissionModeError error = 2;
+  }
+}
+
+// Done; the new mode arrives on the pushed surfaces.
+message SetPermissionModeSuccess {}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown mode,
+// unswitchable mode, ungated mode without consent, no session, …),
+// spelled per 3b.
+message SetPermissionModeError {
+}

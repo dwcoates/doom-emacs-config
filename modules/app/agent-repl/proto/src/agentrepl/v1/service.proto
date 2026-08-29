@@ -29,6 +29,8 @@ import "agentrepl/v1/endpoint_merge_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
+import "agentrepl/v1/endpoint_set_permission_mode.proto";
+import "agentrepl/v1/endpoint_set_workspace_priority.proto";
 import "agentrepl/v1/endpoint_watch_footer.proto";
 import "agentrepl/v1/endpoint_watch_daemon_holds.proto";
 import "agentrepl/v1/endpoint_update_held_prompt.proto";
@@ -107,6 +109,10 @@ service AgentRepl {
   // See endpoint_restart_workspace.proto.
   rpc RestartWorkspace(RestartWorkspaceRequest) returns (RestartWorkspaceResponse);
 
+  // Set or clear a workspace's priority; the roster orders by it. See
+  // endpoint_set_workspace_priority.proto.
+  rpc SetWorkspacePriority(SetWorkspacePriorityRequest) returns (SetWorkspacePriorityResponse);
+
   // ---- TOPBAR ----
 
   // The topbar's stream: the view, whole (the token-breakdown menu inside).
@@ -115,6 +121,10 @@ service AgentRepl {
   // The selector's pick: the typed echo token handed back. See
   // endpoint_set_model.proto.
   rpc SetModel(SetModelRequest) returns (SetModelResponse);
+
+  // The permission-mode switch, SetModel's sibling. See
+  // endpoint_set_permission_mode.proto.
+  rpc SetPermissionMode(SetPermissionModeRequest) returns (SetPermissionModeResponse);
 
   // ---- FOOTER ----
 
