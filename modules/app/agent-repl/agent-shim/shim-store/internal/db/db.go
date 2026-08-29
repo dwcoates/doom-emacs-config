@@ -24,6 +24,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +94,16 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		panic("shim-store db: nil logger")
 	}
 	log.LogVerbose(logging.Fields{Operation: "store.db.open", DatabasePath: path}, "opening SQLite database")
+
+	// THE LAYER THAT OWNS THE FILE OWNS ITS DIRECTORY. Nothing upstream may
+	// create it: doing so would move an unwritable --db path's failure ahead of
+	// the profiling surface the boot order opens first, exactly so a wedged or
+	// doomed database step stays diagnosable.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+			"creating the database directory failed: %v", err)
+		return nil, storagef(err, "creating the directory for %q", path)
+	}
 
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
 	// concurrent readers during a live tail; NORMAL sync is durable under WAL;
@@ -265,9 +277,19 @@ func (d *DB) ensureSchema(ctx context.Context, path string) error {
 			"schema already current version=%d", current)
 		return nil
 	}
-	d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn"},
-		"on-disk schema does not match this binary (found version=%d tables=%v, want version=%d tables=%v) — dropping and recreating; the store is nuked, never migrated",
-		current, tables, SchemaVersion, schemaTables)
+	// AN EMPTY FILE IS A FIRST CREATE, NOT A NUKE. Every fresh store — every
+	// launch on a new machine, every test process — arrives here with no
+	// tables at all, and warning about it would bury the one case that
+	// genuinely deserves the weight: a shape this binary did not create being
+	// DROPPED with whatever was in it.
+	if len(tables) == 0 {
+		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
+			"no schema on disk; creating it at version=%d tables=%v", SchemaVersion, schemaTables)
+	} else {
+		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn"},
+			"on-disk schema does not match this binary (found version=%d tables=%v, want version=%d tables=%v) — dropping and recreating; the store is nuked, never migrated",
+			current, tables, SchemaVersion, schemaTables)
+	}
 	if err := d.nukeAndCreate(ctx, tables); err != nil {
 		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
 			"recreating the schema failed: %v", err)
