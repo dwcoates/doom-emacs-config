@@ -153,7 +153,7 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 		SocketPath: func(ws ids.WorkspaceID) string { return "/sock/" + string(ws) + ".sock" },
 		LockDir:    t.TempDir(),
 		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
-		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
+		StartWatcher: func(context.Context, ids.WorkspaceID, shimclient.Client, sessionwatcher.Session, sessionwatcher.Sinks, dlog.Logger) (sessionwatcher.Watcher, error) {
 			return f.watcher, nil
 		},
 		Now: func() time.Time { return fixedNow },
