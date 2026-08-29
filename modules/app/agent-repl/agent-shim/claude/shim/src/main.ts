@@ -445,10 +445,14 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
   return (spec: QuerySpec) =>
     Promise.resolve(
       createFakeQuery(spec.prompt, spec.canUseTool, {
+        cwd,
+        configDir: environment.claudeConfigDir,
         sessionId:
           spec.binding.kind === "fresh" ? spec.binding.sessionId : spec.binding.resumeSessionId,
         newUuid: () => randomUUID(),
         abortSignal: spec.abortController.signal,
+        permissionMode: spec.permissionMode,
+        ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.binding.kind === "resume" ? { resume: spec.binding.resumeSessionId } : {}),
       }),
     );
