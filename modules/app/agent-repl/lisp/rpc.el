@@ -44,7 +44,7 @@
 (declare-function agent-repl-connect-unary-sync "connect"
                   (conn method json-string &optional timeout))
 (declare-function agent-repl-connect-stream "connect"
-                  (conn method json-string on-push on-close))
+                  (conn method json-string on-push on-close &optional on-open))
 
 ;; The codec.  Defined in wire-*.el; named, never implemented, here.
 (declare-function agent-repl-wire-encode-register-workspace-request "wire-host" (request))
@@ -141,13 +141,17 @@ failure in its own stack, not in a callback."
                        method (plist-get decoded :arm))
       decoded)))
 
-(defun agent-repl-rpc--stream (conn method encoder decoder request on-push on-close)
+(defun agent-repl-rpc--stream (conn method encoder decoder request on-push on-close
+                                    &optional on-open)
   "Open server-streaming METHOD on CONN and decode each push.
 A push that fails to decode is logged at ERROR (`elisp.rpc.push-invalid')
 with the raw JSON in the context and DROPPED — the subscription survives,
 because the daemon is the authority and the next push may well be sound.
 An ON-PUSH that itself signals is contained by connect.el at the filter
-boundary, which likewise keeps the stream open."
+boundary, which likewise keeps the stream open.
+ON-OPEN, when given, is handed through UNTOUCHED: it is the transport's
+acceptance instant (the HTTP 200 header block), which carries no message
+and so needs no codec."
   (let ((json (agent-repl-rpc--serialize encoder request)))
     (agent-repl--info nil "elisp.rpc.stream-open method=%S" method)
     (agent-repl-connect-stream
@@ -160,7 +164,11 @@ boundary, which likewise keeps the stream open."
                              method err alist))))
      (lambda (outcome)
        (agent-repl--info nil "elisp.rpc.stream-close method=%S outcome=%S" method (car outcome))
-       (when on-close (funcall on-close outcome))))))
+       (when on-close (funcall on-close outcome)))
+     (when on-open
+       (lambda ()
+         (agent-repl--info nil "elisp.rpc.stream-accepted method=%S" method)
+         (funcall on-open))))))
 
 ;;;; ---- Unary verbs ----
 ;;
@@ -311,44 +319,49 @@ transport failure means there is not one.")
 
 ;;;; ---- Streams ----
 
-(defun agent-repl-rpc-watch-host-workspace (conn ref on-push on-close)
+(defun agent-repl-rpc-watch-host-workspace (conn ref on-push on-close &optional on-open)
   "Subscribe to the host view of the workspace named by REF on CONN.
 REF is the decoded `WorkspaceRef' plist `(:id ... :dir ...)', echoed
 verbatim from registration or the roster and never built from a path.  The
 daemon sends a snapshot first, then whole-replaces per push.  ON-PUSH
 receives the decoded push plist (the `host' / `notification' /
 `transferred' / `reload_webapp' / `open_in_editor' oneof).  Cancelling the
-returned stream IS the graceful unsubscribe."
+returned stream IS the graceful unsubscribe.  ON-OPEN, when given, runs
+once the subscription is ACCEPTED (the HTTP 200 header block), before any
+push."
   (agent-repl-rpc--stream
    conn "WatchHostWorkspace"
    #'agent-repl-wire-encode-watch-host-workspace-request
    #'agent-repl-wire-decode-watch-host-workspace-response
    (list :workspace ref)
-   on-push on-close))
+   on-push on-close on-open))
 
-(defun agent-repl-rpc-watch-daemon (conn on-push on-close)
+(defun agent-repl-rpc-watch-daemon (conn on-push on-close &optional on-open)
   "Subscribe to CONN's daemon-scoped host stream.
 Carries the graceful-shutdown announcement and the drain schedule, and
 nothing workspace-scoped.  The request message is empty.  ON-PUSH receives
-the decoded push plist."
+the decoded push plist; ON-OPEN, when given, runs once the stream is
+ACCEPTED — which is what the link keys its up hooks on, since a healthy
+daemon may send no daemon-scoped push for hours."
   (agent-repl-rpc--stream
    conn "WatchDaemon"
    #'agent-repl-wire-encode-watch-daemon-request
    #'agent-repl-wire-decode-watch-daemon-response
    nil
-   on-push on-close))
+   on-push on-close on-open))
 
-(defun agent-repl-rpc-watch-workspace-roster (conn on-push on-close)
+(defun agent-repl-rpc-watch-workspace-roster (conn on-push on-close &optional on-open)
   "Subscribe to the whole workspace roster on CONN.
 The roster is the one source of Emacs's tabs and their paint; the request
 message is empty and each push is the whole view.  ON-PUSH receives the
-decoded roster push plist."
+decoded roster push plist; ON-OPEN, when given, runs once the stream is
+ACCEPTED."
   (agent-repl-rpc--stream
    conn "WatchWorkspaceRoster"
    #'agent-repl-wire-encode-watch-workspace-roster-request
    #'agent-repl-wire-decode-watch-workspace-roster-response
    nil
-   on-push on-close))
+   on-push on-close on-open))
 
 (provide 'rpc)
 
