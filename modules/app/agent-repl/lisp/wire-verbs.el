@@ -880,6 +880,304 @@ bubble already show which merge."
    #'agent-repl-wire-decode-submit-prompt-response-error))
 
 
+;;;; ---- UpdateShutdownSchedule -----------------------------------------
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-schedule-reason (reason)
+  "Encode UpdateShutdownScheduleSchedule's `reason' use site from REASON."
+  (agent-repl-wire-encode-drain-reason reason))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-schedule (value)
+  "Encode UpdateShutdownScheduleSchedule from plist VALUE (:at-ms N :reason R).
+The reason is REQUIRED: every client's drain banner names it, and the
+drain_scheduled push carries it verbatim."
+  (let ((message "UpdateShutdownScheduleSchedule"))
+    (list (cons 'atMs (agent-repl-wire-verbs--encode-int64
+                       message "at_ms"
+                       (agent-repl-wire-verbs--require message "at_ms"
+                                                        (plist-get value :at-ms))))
+          (cons 'reason (agent-repl-wire-encode-update-shutdown-schedule-schedule-reason
+                         (agent-repl-wire-verbs--require message "reason"
+                                                          (plist-get value :reason)))))))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-cancel (_value)
+  "Encode UpdateShutdownScheduleCancel.  Empty: the arm is the whole action."
+  nil)
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-now-reason (reason)
+  "Encode UpdateShutdownScheduleNow's `reason' use site from REASON."
+  (agent-repl-wire-encode-drain-reason reason))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-now (value)
+  "Encode UpdateShutdownScheduleNow from plist VALUE (:reason R).
+The reason is REQUIRED: it rides the shutdown announcement's immediate
+cause."
+  (let ((message "UpdateShutdownScheduleNow"))
+    (list (cons 'reason (agent-repl-wire-encode-update-shutdown-schedule-now-reason
+                         (agent-repl-wire-verbs--require message "reason"
+                                                          (plist-get value :reason)))))))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-request-schedule (value)
+  "Encode UpdateShutdownScheduleRequest's `schedule' action arm from VALUE."
+  (agent-repl-wire-encode-update-shutdown-schedule-schedule value))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-request-cancel (value)
+  "Encode UpdateShutdownScheduleRequest's `cancel' action arm from VALUE."
+  (agent-repl-wire-encode-update-shutdown-schedule-cancel value))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-request-now (value)
+  "Encode UpdateShutdownScheduleRequest's `now' action arm from VALUE."
+  (agent-repl-wire-encode-update-shutdown-schedule-now value))
+
+(defun agent-repl-wire-encode-update-shutdown-schedule-request (request)
+  "Encode UpdateShutdownScheduleRequest from plist REQUEST (:action ONEOF)."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "UpdateShutdownScheduleRequest" "action" (plist-get request :action)
+         (list (list :schedule 'schedule
+                     #'agent-repl-wire-encode-update-shutdown-schedule-request-schedule)
+               (list :cancel 'cancel
+                     #'agent-repl-wire-encode-update-shutdown-schedule-request-cancel)
+               (list :now 'now
+                     #'agent-repl-wire-encode-update-shutdown-schedule-request-now)))))
+
+(defun agent-repl-wire-decode-update-shutdown-schedule-success (json)
+  "Decode UpdateShutdownScheduleSuccess from JSON.  Empty: the action is armed."
+  (agent-repl-wire-verbs--decode-empty "UpdateShutdownScheduleSuccess" json))
+
+(defun agent-repl-wire-decode-update-shutdown-schedule-error (json)
+  "Decode UpdateShutdownScheduleError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "UpdateShutdownScheduleError" json))
+
+(defun agent-repl-wire-decode-update-shutdown-schedule-response-success (json)
+  "Decode UpdateShutdownScheduleResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-update-shutdown-schedule-success json))
+
+(defun agent-repl-wire-decode-update-shutdown-schedule-response-error (json)
+  "Decode UpdateShutdownScheduleResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-update-shutdown-schedule-error json))
+
+(defun agent-repl-wire-decode-update-shutdown-schedule-response (json)
+  "Decode UpdateShutdownScheduleResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "UpdateShutdownScheduleResponse" json
+   #'agent-repl-wire-decode-update-shutdown-schedule-response-success
+   #'agent-repl-wire-decode-update-shutdown-schedule-response-error))
+
+
+;;;; ---- UpdateMergeQueue -----------------------------------------------
+
+(defun agent-repl-wire-encode-update-merge-queue-pause (_value)
+  "Encode UpdateMergeQueuePause.  Empty: the arm is the whole action."
+  nil)
+
+(defun agent-repl-wire-encode-update-merge-queue-resume (_value)
+  "Encode UpdateMergeQueueResume.  Empty: the arm is the whole action."
+  nil)
+
+(defun agent-repl-wire-encode-update-merge-queue-evict-workspace (ref)
+  "Encode UpdateMergeQueueEvict's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-evict (value)
+  "Encode UpdateMergeQueueEvict from plist VALUE (:workspace REF)."
+  (list (cons 'workspace
+              (agent-repl-wire-encode-update-merge-queue-evict-workspace
+               (agent-repl-wire-verbs--require "UpdateMergeQueueEvict" "workspace"
+                                                (plist-get value :workspace))))))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-pause (value)
+  "Encode UpdateMergeQueueRequest's `pause' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-pause value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-resume (value)
+  "Encode UpdateMergeQueueRequest's `resume' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-resume value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request-evict (value)
+  "Encode UpdateMergeQueueRequest's `evict' action arm from VALUE."
+  (agent-repl-wire-encode-update-merge-queue-evict value))
+
+(defun agent-repl-wire-encode-update-merge-queue-request (request)
+  "Encode UpdateMergeQueueRequest from plist REQUEST (:action ONEOF)."
+  (list (agent-repl-wire-verbs--encode-oneof
+         "UpdateMergeQueueRequest" "action" (plist-get request :action)
+         (list (list :pause 'pause #'agent-repl-wire-encode-update-merge-queue-request-pause)
+               (list :resume 'resume #'agent-repl-wire-encode-update-merge-queue-request-resume)
+               (list :evict 'evict #'agent-repl-wire-encode-update-merge-queue-request-evict)))))
+
+(defun agent-repl-wire-decode-update-merge-queue-success (json)
+  "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueSuccess" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error (json)
+  "Decode UpdateMergeQueueError from JSON.  Empty until its arms are derived."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueError" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-response-success (json)
+  "Decode UpdateMergeQueueResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-success json))
+
+(defun agent-repl-wire-decode-update-merge-queue-response-error (json)
+  "Decode UpdateMergeQueueResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-error json))
+
+(defun agent-repl-wire-decode-update-merge-queue-response (json)
+  "Decode UpdateMergeQueueResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "UpdateMergeQueueResponse" json
+   #'agent-repl-wire-decode-update-merge-queue-response-success
+   #'agent-repl-wire-decode-update-merge-queue-response-error))
+
+
+;;;; ---- DaemonHealth ---------------------------------------------------
+
+(defun agent-repl-wire-encode-daemon-health-request (&optional _request)
+  "Encode DaemonHealthRequest.  Nothing to ask beyond \"you?\"."
+  (agent-repl--log nil "elisp.wire.verbs-encode-daemon-health-request")
+  nil)
+
+(defun agent-repl-wire-decode-daemon-fault (json)
+  "Decode DaemonFault from JSON into (:detail STRING).
+The kind oneof is not declared yet — it lands with its first derived arms
+— so `detail' is the whole message today."
+  (let ((message "DaemonFault"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-daemon-unhealthy-faults (json)
+  "Decode one element of DaemonUnhealthy's repeated `faults' use site from JSON."
+  (agent-repl-wire-decode-daemon-fault json))
+
+(defun agent-repl-wire-decode-daemon-unhealthy (json)
+  "Decode DaemonUnhealthy from JSON into (:faults LIST)."
+  (let ((message "DaemonUnhealthy"))
+    (agent-repl-wire-verbs--check-keys message json '(faults))
+    (list :faults (agent-repl-wire-verbs--decode-repeated
+                   message 'faults json
+                   #'agent-repl-wire-decode-daemon-unhealthy-faults))))
+
+(defun agent-repl-wire-decode-daemon-healthy (json)
+  "Decode DaemonHealthy from JSON.  Empty: the arm is the whole verdict."
+  (agent-repl-wire-verbs--decode-empty "DaemonHealthy" json))
+
+(defun agent-repl-wire-decode-daemon-health-success-healthy (json)
+  "Decode DaemonHealthSuccess's `healthy' verdict arm from JSON."
+  (agent-repl-wire-decode-daemon-healthy json))
+
+(defun agent-repl-wire-decode-daemon-health-success-unhealthy (json)
+  "Decode DaemonHealthSuccess's `unhealthy' verdict arm from JSON."
+  (agent-repl-wire-decode-daemon-unhealthy json))
+
+(defun agent-repl-wire-decode-daemon-health-success (json)
+  "Decode DaemonHealthSuccess from JSON into (:arm ARM :value V).
+UNHEALTHY IS AN ANSWER: it arrives inside success, never as an error."
+  (let ((message "DaemonHealthSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(healthy unhealthy))
+    (agent-repl-wire-verbs--decode-oneof
+     message "health" json
+     (list (list 'healthy :healthy #'agent-repl-wire-decode-daemon-health-success-healthy)
+           (list 'unhealthy :unhealthy
+                 #'agent-repl-wire-decode-daemon-health-success-unhealthy)))))
+
+(defun agent-repl-wire-decode-daemon-health-error (json)
+  "Decode DaemonHealthError from JSON.
+Empty until its arms are derived; error means the question could not be
+ANSWERED at all."
+  (agent-repl-wire-verbs--decode-empty "DaemonHealthError" json))
+
+(defun agent-repl-wire-decode-daemon-health-response-success (json)
+  "Decode DaemonHealthResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-daemon-health-success json))
+
+(defun agent-repl-wire-decode-daemon-health-response-error (json)
+  "Decode DaemonHealthResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-daemon-health-error json))
+
+(defun agent-repl-wire-decode-daemon-health-response (json)
+  "Decode DaemonHealthResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "DaemonHealthResponse" json
+   #'agent-repl-wire-decode-daemon-health-response-success
+   #'agent-repl-wire-decode-daemon-health-response-error))
+
+
+;;;; ---- SessionHealth --------------------------------------------------
+
+(defun agent-repl-wire-encode-session-health-request-workspace (ref)
+  "Encode SessionHealthRequest's `workspace' use site from REF."
+  (agent-repl-wire-encode-workspace-ref ref))
+
+(defun agent-repl-wire-encode-session-health-request (request)
+  "Encode SessionHealthRequest from plist REQUEST (:workspace REF)."
+  (agent-repl--log nil "elisp.wire.verbs-encode-session-health-request")
+  (list (cons 'workspace
+              (agent-repl-wire-encode-session-health-request-workspace
+               (agent-repl-wire-verbs--require "SessionHealthRequest" "workspace"
+                                                (plist-get request :workspace))))))
+
+(defun agent-repl-wire-decode-session-fault (json)
+  "Decode SessionFault from JSON into (:detail STRING).
+Deliberately NOT DaemonFault: a session's fault classes are the session
+controller's own vocabulary."
+  (let ((message "SessionFault"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-session-unhealthy-faults (json)
+  "Decode one element of SessionUnhealthy's repeated `faults' use site from JSON."
+  (agent-repl-wire-decode-session-fault json))
+
+(defun agent-repl-wire-decode-session-unhealthy (json)
+  "Decode SessionUnhealthy from JSON into (:faults LIST)."
+  (let ((message "SessionUnhealthy"))
+    (agent-repl-wire-verbs--check-keys message json '(faults))
+    (list :faults (agent-repl-wire-verbs--decode-repeated
+                   message 'faults json
+                   #'agent-repl-wire-decode-session-unhealthy-faults))))
+
+(defun agent-repl-wire-decode-session-healthy (json)
+  "Decode SessionHealthy from JSON.  Empty: the arm is the whole verdict."
+  (agent-repl-wire-verbs--decode-empty "SessionHealthy" json))
+
+(defun agent-repl-wire-decode-session-health-success-healthy (json)
+  "Decode SessionHealthSuccess's `healthy' verdict arm from JSON."
+  (agent-repl-wire-decode-session-healthy json))
+
+(defun agent-repl-wire-decode-session-health-success-unhealthy (json)
+  "Decode SessionHealthSuccess's `unhealthy' verdict arm from JSON."
+  (agent-repl-wire-decode-session-unhealthy json))
+
+(defun agent-repl-wire-decode-session-health-success (json)
+  "Decode SessionHealthSuccess from JSON into (:arm ARM :value V).
+UNHEALTHY IS AN ANSWER: it arrives inside success, never as an error."
+  (let ((message "SessionHealthSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(healthy unhealthy))
+    (agent-repl-wire-verbs--decode-oneof
+     message "health" json
+     (list (list 'healthy :healthy #'agent-repl-wire-decode-session-health-success-healthy)
+           (list 'unhealthy :unhealthy
+                 #'agent-repl-wire-decode-session-health-success-unhealthy)))))
+
+(defun agent-repl-wire-decode-session-health-error (json)
+  "Decode SessionHealthError from JSON.
+Empty until its arms are derived; error means the question could not be
+ANSWERED (an unknown workspace), never that the session is unhealthy."
+  (agent-repl-wire-verbs--decode-empty "SessionHealthError" json))
+
+(defun agent-repl-wire-decode-session-health-response-success (json)
+  "Decode SessionHealthResponse's `success' arm from JSON."
+  (agent-repl-wire-decode-session-health-success json))
+
+(defun agent-repl-wire-decode-session-health-response-error (json)
+  "Decode SessionHealthResponse's `error' arm from JSON."
+  (agent-repl-wire-decode-session-health-error json))
+
+(defun agent-repl-wire-decode-session-health-response (json)
+  "Decode SessionHealthResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "SessionHealthResponse" json
+   #'agent-repl-wire-decode-session-health-response-success
+   #'agent-repl-wire-decode-session-health-response-error))
+
 (provide 'agent-repl-wire-verbs)
 
 ;;; wire-verbs.el ends here
