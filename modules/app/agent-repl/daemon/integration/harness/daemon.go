@@ -472,3 +472,27 @@ func (d *Daemon) WriteDefaultShimProfile(profile any) {
 }
 
 func (d *Daemon) String() string { return fmt.Sprintf("daemon(%s)", d.Addr) }
+
+// ExpectFileUnchanged asserts a file still holds exactly `want` after the
+// probe window. It is a negative assertion, so it necessarily waits out a
+// bound rather than synchronizing on an event.
+func (d *Daemon) ExpectFileUnchanged(path, want string, probe time.Duration) {
+	d.t.Helper()
+	deadline := time.Now().Add(probe)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			if want == "" {
+				<-ticker.C
+				continue
+			}
+			d.t.Fatalf("read %s: %v, want it to still hold %q", path, err, want)
+		}
+		if string(body) != want {
+			d.t.Fatalf("%s = %q, want it unchanged at %q", path, body, want)
+		}
+		<-ticker.C
+	}
+}
