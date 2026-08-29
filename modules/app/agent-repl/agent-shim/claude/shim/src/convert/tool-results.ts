@@ -174,7 +174,14 @@ function skillDocumentEntry(
       },
       agentActivity(
         toolCallActivityId(call.toolUseId),
-        skillDocumentSettle(call, markdown, context.nowMs()),
+        skillDocumentSettle(
+          call,
+          markdown,
+          // The document record states no tool allowances of its own; the
+          // skill's declared set is not on this record, so it stays unset.
+          undefined,
+          context.nowMs(),
+        ),
       ),
     ),
   ];
