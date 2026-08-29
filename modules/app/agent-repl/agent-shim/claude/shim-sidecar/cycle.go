@@ -136,7 +136,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		bootTimeMs: bootTimeMillis,
 	}
 	s.owners = newOwnerIndex(log.With(logging.Context{Component: "owner"}))
-	s.held = newHeldSpools(UnownedSpoolWindow, log.With(logging.Context{Component: "held"}))
+	s.held = newHeldSpools(options.UnownedSpoolWindow, log.With(logging.Context{Component: "held"}))
 	s.suspendedSince = s.now()
 	s.nextAttemptAt = s.now()
 	return s
