@@ -161,6 +161,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
     version))
 
 (agent-repl--load-module "core")
+;; WHY: connect.el is the Connect-over-HTTP/1.1 transport every daemon
+;; exchange rides.  It loads immediately after core.el, whose logging ladder
+;; and state-dir resolver it uses, and before any consumer of the daemon.
+(agent-repl--load-module "connect")
 ;; WHY: external-browser.el pins `browse-url-browser-function' so every
 ;; hyperlink lands in the external Chrome profile instead of an Emacs
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
