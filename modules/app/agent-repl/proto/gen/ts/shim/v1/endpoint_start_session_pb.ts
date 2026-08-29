@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_start_session.proto.
  */
 export const file_shim_v1_endpoint_start_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSJ+ChFTdGFydFNlc3Npb25GcmVzaBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlIowBChJTdGFydFNlc3Npb25SZXN1bWUSGQoRdmVuZG9yX3Nlc3Npb25faWQYASABKAkSRgoQY29sZF9yZW1lZGlhdGlvbhgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZFJlbWVkaWF0aW9uSACIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb24iggEKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLlN0YXJ0U2Vzc2lvblN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0IkcKE1N0YXJ0U2Vzc2lvblN1Y2Nlc3MSMAoHc2Vzc2lvbhgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uU3RhcnRlZCJcChNTdGFydFNlc3Npb25GYWlsdXJlEiwKBGNvbGQYASABKAsyHC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbGRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2VCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3N0YXJ0X3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiewoTU3RhcnRTZXNzaW9uUmVxdWVzdBIrCgVmcmVzaBgBIAEoCzIaLnNoaW0udjEuU3RhcnRTZXNzaW9uRnJlc2hIABItCgZyZXN1bWUYAiABKAsyGy5zaGltLnYxLlN0YXJ0U2Vzc2lvblJlc3VtZUgAQggKBnNvdXJjZSJ+ChFTdGFydFNlc3Npb25GcmVzaBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEj0KD3Blcm1pc3Npb25fbW9kZRgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlIowBChJTdGFydFNlc3Npb25SZXN1bWUSGQoRdmVuZG9yX3Nlc3Npb25faWQYASABKAkSRgoQY29sZF9yZW1lZGlhdGlvbhgCIAEoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZFJlbWVkaWF0aW9uSACIAQFCEwoRX2NvbGRfcmVtZWRpYXRpb24iggEKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEi8KB3N1Y2Nlc3MYASABKAsyHC5zaGltLnYxLlN0YXJ0U2Vzc2lvblN1Y2Nlc3NIABIvCgdmYWlsdXJlGAIgASgLMhwuc2hpbS52MS5TdGFydFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0IkcKE1N0YXJ0U2Vzc2lvblN1Y2Nlc3MSMAoHc2Vzc2lvbhgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uU3RhcnRlZCLpAgoTU3RhcnRTZXNzaW9uRmFpbHVyZRIsCgRjb2xkGAEgASgLMhwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkSAASRQoTdmVuZG9yX3N0YXJ0X2ZhaWxlZBgDIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWRIABI+Cg91bmtub3duX3Nlc3Npb24YBCABKAsyIy5zaGltLnYxLlN0YXJ0U2Vzc2lvblVua25vd25TZXNzaW9uSAASPgoPYWxyZWFkeV9zdGFydGVkGAUgASgLMiMuc2hpbS52MS5TdGFydFNlc3Npb25BbHJlYWR5U3RhcnRlZEgAEkQKEmNvbnZlcnNhdGlvbl9vd25lZBgGIAEoCzImLnNoaW0udjEuU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRIABIOCgZkZXRhaWwYAiABKAlCBwoFY2F1c2UiHwodU3RhcnRTZXNzaW9uVmVuZG9yU3RhcnRGYWlsZWQiHAoaU3RhcnRTZXNzaW9uVW5rbm93blNlc3Npb24iHAoaU3RhcnRTZXNzaW9uQWxyZWFkeVN0YXJ0ZWQiHwodU3RhcnRTZXNzaW9uQ29udmVyc2F0aW9uT3duZWRCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_permission, file_conversation_v1_session]);
 
 /**
  * What the daemon wants driven, and how. UNARY: the daemon persists the
@@ -207,13 +207,44 @@ export type StartSessionFailure = Message<"shim.v1.StartSessionFailure"> & {
      * The context is cold and no remediation was named: here is what
      * resuming would cost, so a remediation can be chosen.
      *
-     * Further arms DERIVED at the wave from the shim's real sites (the agent
-     * binary failing to start, an unknown session id).
-     *
      * @generated from field: conversation.v1.SessionCold cold = 1;
      */
     value: SessionCold;
     case: "cold";
+  } | {
+    /**
+     * The agent binary (or the SDK query) failed to start; `detail` carries
+     * the cause.
+     *
+     * @generated from field: shim.v1.StartSessionVendorStartFailed vendor_start_failed = 3;
+     */
+    value: StartSessionVendorStartFailed;
+    case: "vendorStartFailed";
+  } | {
+    /**
+     * A resume named a session id with no transcript on disk — refused
+     * BEFORE any process spawns (a vanished file yields no death evidence).
+     *
+     * @generated from field: shim.v1.StartSessionUnknownSession unknown_session = 4;
+     */
+    value: StartSessionUnknownSession;
+    case: "unknownSession";
+  } | {
+    /**
+     * A second StartSession on a shim that already holds a session.
+     *
+     * @generated from field: shim.v1.StartSessionAlreadyStarted already_started = 5;
+     */
+    value: StartSessionAlreadyStarted;
+    case: "alreadyStarted";
+  } | {
+    /**
+     * Another shim holds this conversation's kernel lock.
+     *
+     * @generated from field: shim.v1.StartSessionConversationOwned conversation_owned = 6;
+     */
+    value: StartSessionConversationOwned;
+    case: "conversationOwned";
   } | { case: undefined; value?: undefined };
 
   /**
@@ -230,4 +261,56 @@ export type StartSessionFailure = Message<"shim.v1.StartSessionFailure"> & {
  */
 export const StartSessionFailureSchema: GenMessage<StartSessionFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_start_session, 5);
+
+/**
+ * @generated from message shim.v1.StartSessionVendorStartFailed
+ */
+export type StartSessionVendorStartFailed = Message<"shim.v1.StartSessionVendorStartFailed"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionVendorStartFailed.
+ * Use `create(StartSessionVendorStartFailedSchema)` to create a new message.
+ */
+export const StartSessionVendorStartFailedSchema: GenMessage<StartSessionVendorStartFailed> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 6);
+
+/**
+ * @generated from message shim.v1.StartSessionUnknownSession
+ */
+export type StartSessionUnknownSession = Message<"shim.v1.StartSessionUnknownSession"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionUnknownSession.
+ * Use `create(StartSessionUnknownSessionSchema)` to create a new message.
+ */
+export const StartSessionUnknownSessionSchema: GenMessage<StartSessionUnknownSession> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 7);
+
+/**
+ * @generated from message shim.v1.StartSessionAlreadyStarted
+ */
+export type StartSessionAlreadyStarted = Message<"shim.v1.StartSessionAlreadyStarted"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionAlreadyStarted.
+ * Use `create(StartSessionAlreadyStartedSchema)` to create a new message.
+ */
+export const StartSessionAlreadyStartedSchema: GenMessage<StartSessionAlreadyStarted> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 8);
+
+/**
+ * @generated from message shim.v1.StartSessionConversationOwned
+ */
+export type StartSessionConversationOwned = Message<"shim.v1.StartSessionConversationOwned"> & {
+};
+
+/**
+ * Describes the message shim.v1.StartSessionConversationOwned.
+ * Use `create(StartSessionConversationOwnedSchema)` to create a new message.
+ */
+export const StartSessionConversationOwnedSchema: GenMessage<StartSessionConversationOwned> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_start_session, 9);
 
