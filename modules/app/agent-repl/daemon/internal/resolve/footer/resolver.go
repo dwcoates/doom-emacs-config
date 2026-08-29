@@ -470,7 +470,7 @@ func linkName(link sessionwatcher.LinkState) string {
 // too large, which is exactly what the context-budget line says, so the
 // producer's account rides there as the idle status's activity evidence and is
 // recorded at WARN.
-func (r *resolver) OnContextCut(ws ids.WorkspaceID, cut *conversationv1.ContextCut) {
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
 	if cut == nil {
 		return
 	}

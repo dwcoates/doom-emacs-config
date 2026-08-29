@@ -604,3 +604,43 @@ generated arms when the landing merges (one place each):
   modules/app/agent-repl/lisp/testsupport/fakedaemon/accept.go (+ test).
   Verify in the integration suite: a Watch* open on a workspace with no
   published view returns headers before any frame.
+- Live-work items restored from `SessionStarted.live_work` have NO
+  announcing agent: the feed/footer/sidebar sinks receive a nil agent and
+  MUST place such items on the ROOT feed (root-feed fallback), never drop
+  them (ruled by the daemon lead; a shim-side re-announce with the
+  `created` origin is requested upstream).
+
+## Cross-system literals the daemon consumes (pinned)
+
+- METAPROMPT SENTINELS (Emacs `agent-repl--meta-wrap`, lisp/core.el): an
+  injected span is `<!--agent-repl:meta-->` + text + `<!--/agent-repl:meta-->`.
+  `prompts.StripSentinels` removes every such span (and the whitespace it
+  leaves) from the DRAWN prompt text only; the record keeps the full text.
+  The daemon wraps its own injected spans (one-shot decoration, add-support
+  briefs, merge briefs) with the same markers.
+- `.claude.json` (per account root): the daemon READS only
+  `oauthAccount.emailAddress` (absent → logged out; malformed file → error)
+  and NEVER writes the file; the project entry the CLI keeps under
+  `projects.<cwd>` is not read or written by the daemon — transcript porting
+  moves files under `<root>/projects/<encoded cwd>/` only.
+
+## Landing 4 (staged on overhaul/landing-4; lands with the ERROR-ARMS batch)
+
+Rulings already binding; code swaps to the generated arms when it lands:
+- `SessionStarted.live_work` items are ALWAYS `created`-origin on
+  re-adoption (ruled on the shim); the sessionwatcher's ERROR + skip on a
+  `detached`-origin live item is the correct contract-violation handling.
+- `DetachedWorkId.value == the unit's AgentActivityId.value` (same bytes; a
+  subagent's is also its AgentId) — so a `created`-origin MONITOR is retired
+  by the monitor's own `ended`/`failure` frame whose activity id equals the
+  handle. Monitors stay in freeness. (Sessionwatcher remediation at landing
+  4: key the created-monitor reap by that equality.)
+- `SessionUpdate.context_budget_warning` (tag 24) is RETIRED; the arm becomes
+  `AgentUpdate.context_budget_warning = 7 {text}` — a page line, sidecar-
+  produced, arriving via WatchAgent. Route it to the footer from the agent
+  plane (sessionwatcher: new AgentUpdate arm → FooterSink; delete the
+  WatchSession routing; footer: unchanged consumer).
+- Restored live-work items route to the root feed (agreed).
+- The landing-4 batch also carries the ERROR-ARMS.md arms and the four e2e
+  seam answers (arm names; the merge test-gate invocation; the .claude.json
+  key path; the metaprompt sentinels — the last two are pinned above).
