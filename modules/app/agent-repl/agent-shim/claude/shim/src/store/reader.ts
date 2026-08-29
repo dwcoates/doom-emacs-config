@@ -52,16 +52,6 @@ export function toStorePointer(pointer: conversationv1.HistoryPointer): storev1.
   if (pointer.value === "") {
     throw new PersistenceError("stale_pointer", "a history pointer is never the empty string");
   }
-  if (pointer.value.startsWith(UNPOINTERED_PREFIX)) {
-    // See `readAgentPage`: an older page's per-entry pointers are shim-minted
-    // because store.v1 does not serve them, and one handed back would name a
-    // position the store has never heard of. Refusing it LOUDLY is the only
-    // honest answer; silently accepting it would page from the wrong place.
-    throw new PersistenceError(
-      "stale_pointer",
-      `the pointer ${JSON.stringify(pointer.value)} was minted for an older page's entry and cannot address the store`,
-    );
-  }
   return create(storev1.StoreItemPointerSchema, { value: pointer.value });
 }
 
@@ -137,19 +127,6 @@ export function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.Hi
     boundary: toHistoryBoundary(page.boundary),
   });
 }
-
-/**
- * The prefix every shim-minted older-page pointer carries.
- *
- * CONTRACT GAP, surfaced rather than hidden: `ReadAgentPageSuccess.lines` is
- * `repeated StorePageLine` — the lines arrive WITHOUT their pointers, while
- * `HistoryEntryAt.at` is non-optional. The boundary's `more.last_item` is a real
- * store pointer, so WALKING older pages is correct; only the per-entry marks on
- * an older page are synthetic, and {@link toStorePointer} refuses one loudly if
- * a caller ever echoes it. The fix is a proto change (`lines` → `repeated
- * StoreLineAt`), requested in the record-plane report.
- */
-export const UNPOINTERED_PREFIX = "shim-unpointered:";
 
 /**
  * The budget a REFUSED-OPEN recovery re-opens with.
@@ -236,7 +213,6 @@ export function createReader(options: ReaderOptions): Reader {
   /** The newest frame per run, so a late watcher opens with the original start. */
   const lastFrameByRun = new Map<string, conversationv1.AgentBash>();
   const subscribers = new Set<BashSubscriber>();
-  let unpointeredCounter = 0;
 
   const openSession = async (
     agent: conversationv1.AgentId,
@@ -404,21 +380,15 @@ export function createReader(options: ReaderOptions): Reader {
           "the store answered ReadAgentPage with no result arm set",
         );
       }
-      if (result.value.lines.length > 0) {
-        LOGGER.log(
-          { level: "warn", agent: agent.value, entries: result.value.lines.length },
-          "ReadAgentPage serves lines without pointers; this page's per-entry marks are shim-minted and cannot address the store",
-        );
-      }
+      LOGGER.log(
+        { agent: agent.value, entries: result.value.lines.length },
+        "served an older page of an agent's book",
+      );
+      // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page is
+      // a reconnect mark like any other, so nothing here is minted and nothing
+      // has to be refused if a caller echoes one back.
       return create(conversationv1.HistoryPageSchema, {
-        entries: result.value.lines.map((line) =>
-          create(conversationv1.HistoryEntryAtSchema, {
-            at: create(conversationv1.HistoryPointerSchema, {
-              value: `${UNPOINTERED_PREFIX}${++unpointeredCounter}`,
-            }),
-            entry: toHistoryEntry(line),
-          }),
-        ),
+        entries: result.value.lines.map(toHistoryEntryAt),
         boundary: toHistoryBoundary(result.value.boundary),
       });
     },
