@@ -17,7 +17,6 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/notimpl"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
 )
@@ -43,10 +42,37 @@ type LiveWorkSet struct {
 	Agents []*conversationv1.AgentId
 	// Shells are the live detached shells.
 	Shells []*conversationv1.DetachedWorkId
+	// Monitors are the live background watchers. FOOTER-ONLY — a monitor
+	// opens no stream of its own (the contract gives it none), so the watcher
+	// tracks its liveness from the announcement and from the monitor
+	// activity's own terminal. It counts toward freeness like any other
+	// detached item: a session with a live monitor is not free.
+	Monitors []*conversationv1.DetachedWorkId
 }
 
 // Empty reports whether any detached work is live.
-func (s LiveWorkSet) Empty() bool { return len(s.Agents) == 0 && len(s.Shells) == 0 }
+func (s LiveWorkSet) Empty() bool {
+	return len(s.Agents) == 0 && len(s.Shells) == 0 && len(s.Monitors) == 0
+}
+
+// NotificationKind names what a host notification is about. A typed spelling
+// rather than a bare string so a new kind is a compiler-visible addition
+// rather than a literal invented at a call site.
+type NotificationKind string
+
+// The notification kinds.
+const (
+	// NotificationAgentAddressed is an agent addressing the user — today a
+	// blocked question, whose header is the notification's text.
+	NotificationAgentAddressed NotificationKind = "agent_addressed"
+	// NotificationPermissionRequested is an agent blocked on consent, with the
+	// gated call's tool named.
+	NotificationPermissionRequested NotificationKind = "permission_requested"
+	// NotificationQuestionAsked is a question batch blocking the agent, which
+	// gets a permission ask's attention treatment. It carries the first
+	// question's chip label, as HostNotificationQuestionAsked.header does.
+	NotificationQuestionAsked NotificationKind = "question_asked"
+)
 
 // HostNotification is a notification bound for the workspace's host stream:
 // what raises the roster's attention marker.
@@ -55,11 +81,14 @@ type HostNotification struct {
 	Text string
 	// At is when it was raised.
 	At time.Time
-	// Kind names it: "agent_addressed", or "permission_requested" with the
-	// tool named.
-	Kind string
-	// ToolName is set for a permission notification, empty otherwise.
+	// Kind names it.
+	Kind NotificationKind
+	// ToolName is set for a permission notification, empty otherwise. It is
+	// HostNotificationPermissionRequested.tool_name.
 	ToolName string
+	// Header is set for a question notification, empty otherwise. It is
+	// HostNotificationQuestionAsked.header: the first question's chip label.
+	Header string
 }
 
 // FeedSink receives everything the feed resolver draws a row from. Every
@@ -108,13 +137,14 @@ type FooterSink interface {
 	OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission)
 	// OnApiError is mid-turn evidence the footer draws as a retry notice.
 	OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed)
-	// OnContextCut is the AgentUpdate.context_cut page line. It is what ENDS
-	// `thinking · clearing` and `thinking · compacting`: SessionUpdate.compacting
-	// only STARTS the compaction, and the cut record is the only end signal
-	// there is. A failed compaction ends the status too — nothing was cut, so
-	// the session is idle again — and carries its account as the footer's
-	// evidence rather than passing silently.
-	OnContextCut(ws ids.WorkspaceID, cut *conversationv1.ContextCut)
+	// OnContextCut is the cut's END SIGNAL. SessionUpdate.compacting says a
+	// compaction BEGAN and nothing upstream says it finished, so this record
+	// is what clears the footer's compacting and clearing states — which is
+	// why the footer sees a page line the feed also draws. A FAILED compaction
+	// ends the status too: nothing was cut, so the session is idle again, and
+	// the producer's account becomes the footer's evidence rather than passing
+	// silently.
+	OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut)
 	// OnAgentTerminal retires an agent from the status tree.
 	OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure)
 	// OnDetachedWork adds or updates a live-work chip.
@@ -207,11 +237,48 @@ type Watcher interface {
 	// SetOutputAddress installs the address a lease holder wants this
 	// session's rows stamped with; nil restores the root feed.
 	SetOutputAddress(addr *OutputAddress)
+	// SetMainAgent names the session's main agent — the WatchAgent address the
+	// turn runs under. The prompt queue calls it with
+	// StartTurnSuccess.prompt.agent after every accepted turn; it is the
+	// AUTHORITATIVE source, and the only other one is the main watch's opening
+	// history page (an AgentPrompt names its recipient), which is what an
+	// adoption with a turn already in flight has to go on. Until one of the
+	// two has named it, a terminal cannot be attributed to the main agent and
+	// OnTurnEnded is withheld rather than guessed.
+	SetMainAgent(agent *conversationv1.AgentId)
+	// OnTurnOpened is the prompt queue handing over an accepted turn: the
+	// prompt as StartTurn delivered it, and the opening page
+	// StartTurnSuccess now carries. It is the ONE entry point for a turn the
+	// watcher did not see opened on a stream — it names the main agent,
+	// records the turn a terminal will be attributed to, and feeds the page
+	// through the same history-page path a watch's own opening page takes.
+	//
+	// IT DOES NOT MIRROR THE PROMPT: the queue draws the accepted prompt's
+	// row itself, and the prompt also arrives as a history entry on the main
+	// watch. Two feed rows for one prompt is what routing it here would cost.
+	OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentPrompt, page *conversationv1.HistoryPage)
 	// Close tears down every watch this workspace owns.
 	Close() error
 }
 
+// Session is what the caller learned when it opened the session, plus the
+// history pointers it persisted. The watcher needs both: the SessionStarted
+// states the LEVEL it must open watches for (the turn in flight and every live
+// detached item), and the pointers are the known_through marks that make each
+// opening page a catch-up rather than a repaint.
+type Session struct {
+	// Started is StartSession's success, whole.
+	Started *conversationv1.SessionStarted
+	// MainKnownThrough is the caller's persisted pointer for the MAIN agent,
+	// whose watch is addressed by an unset target and so has no key below.
+	// Nil asks for a full first page.
+	MainKnownThrough *conversationv1.HistoryPointer
+	// KnownThrough is the caller's persisted pointer per detached agent, keyed
+	// by AgentId.value. A missing key asks for a full first page.
+	KnownThrough map[string]*conversationv1.HistoryPointer
+}
+
 // Start builds and starts one workspace's watcher against its shim client.
-func Start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, sinks Sinks, log dlog.Logger) (Watcher, error) {
-	return nil, notimpl.Err
+func Start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, session Session, sinks Sinks, log dlog.Logger) (Watcher, error) {
+	return start(ctx, ws, client, session, sinks, log)
 }

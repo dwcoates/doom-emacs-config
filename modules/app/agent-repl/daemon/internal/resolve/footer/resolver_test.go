@@ -263,7 +263,7 @@ func TestAContextCutEndsTheCompaction(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 
 	// Act
-	h.r.OnContextCut(testWS, &conversationv1.ContextCut{
+	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Compacted{Compacted: &conversationv1.ContextCompacted{}},
 	})
 
@@ -279,7 +279,7 @@ func TestAContextCutEndsTheClear(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActClear})
 
 	// Act
-	h.r.OnContextCut(testWS, &conversationv1.ContextCut{
+	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
 	})
 
@@ -295,7 +295,7 @@ func TestAFailedCompactionDrawsItsAccountAsEvidence(t *testing.T) {
 	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
 
 	// Act
-	h.r.OnContextCut(testWS, &conversationv1.ContextCut{
+	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_CompactionFailed{
 			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "summary model refused"},
 		},
@@ -314,7 +314,7 @@ func TestAFailedCompactionIsRecordedAtWarn(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	h.r.OnContextCut(testWS, &conversationv1.ContextCut{
+	h.r.OnContextCut(testWS, mainAgent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_CompactionFailed{
 			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "boom"},
 		},
