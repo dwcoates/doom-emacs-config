@@ -153,9 +153,22 @@ is told explicitly that its system is lightly specified, and that it
 should surface any soft spots to you that it cannot work through
 itself or that it judges to be genuine toss-ups).
 
-- DAEMON: a FULL REWRITE from scratch — the old daemon tree is
-  untouched reference material only, its build knowingly red; nothing
-  is adapted, everything is built against the new contract.
+REWRITE VS ADAPTATION — the load-bearing split, relayed to every lead:
+
+- DAEMON: a TOTAL REWRITE. Everything is built from the docs and the
+  contract; NOTHING is carried over and NO inspiration is taken from
+  the existing design at all. The daemon teamlead MAY (and should)
+  DELETE the old daemon code outright so its implementers start from a
+  fresh plate and cannot be misled by the existing implementation (git
+  history keeps it; nobody needs it on disk).
+- ALL OTHER SYSTEMS (emacs, shim, store, sidecar, webapp): ADAPTATIONS,
+  not rewrites. WHEN IN DOUBT, EXISTING BEHAVIOR IS KEPT; when existing
+  behavior is in contention with an overhaul prescription, the overhaul
+  prescription ALWAYS wins. Their leads adapt the living code to the
+  new contract rather than rebuilding it.
+
+Per-system notes:
+
 - EMACS: relatively loosely specified in UX terms — expect MORE HOLES
   in the UX requirements than elsewhere; the API-is-king gap-filling
   will carry more weight here, and more escalations are normal.
