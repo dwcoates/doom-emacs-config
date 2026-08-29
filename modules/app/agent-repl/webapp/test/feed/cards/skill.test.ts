@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   FeedRowSchema,
   FeedSkillSchema,
@@ -11,6 +11,13 @@ import { drawFeedSkill, SKILL_OUTCOME_ARMS } from "../../../src/feed/cards/skill
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { harness, rowContext } from "../harness.js";
 
+/**
+ * The oneof as an INIT shape rather than a built message: the fixtures below
+ * hand plain object literals to `create`, which is what protobuf-es accepts,
+ * while the built message type would demand a `$typeName` on every arm.
+ */
+type InitOfFeedSkill = MessageInitShape<typeof FeedSkillSchema>["outcome"];
+
 /** A row context for a card drawn on its own, optionally over a previous draw. */
 function rc(previous?: HTMLElement): RowContext {
   return rowContext(harness().ctx, create(FeedRowSchema, {}), { previous }) as RowContext;
@@ -19,12 +26,12 @@ function rc(previous?: HTMLElement): RowContext {
 const INVOCATION = "/graphify";
 
 /** A skill card with the composed invocation line and one OUTCOME. */
-function skill(outcome: FeedSkill["outcome"]): FeedSkill {
+function skill(outcome: InitOfFeedSkill): FeedSkill {
   return create(FeedSkillSchema, { invocation: { text: INVOCATION }, outcome });
 }
 
 /** The loaded arm, with a document and optionally an allowances sentence. */
-function loaded(markdown: string, allowances?: string): FeedSkill["outcome"] {
+function loaded(markdown: string, allowances?: string): InitOfFeedSkill {
   return {
     case: "loaded",
     value: {
@@ -59,12 +66,12 @@ describe("drawFeedSkill", () => {
 
   for (const c of states) {
     it(`carries ${c.arm} as the card's state`, () => {
-      const el = drawFeedSkill(skill(c.outcome as FeedSkill["outcome"]), rc());
+      const el = drawFeedSkill(skill(c.outcome as InitOfFeedSkill), rc());
       expect(el.getAttribute("data-state")).toBe(c.arm);
     });
 
     it(`badges the ${c.arm} arm`, () => {
-      const el = drawFeedSkill(skill(c.outcome as FeedSkill["outcome"]), rc());
+      const el = drawFeedSkill(skill(c.outcome as InitOfFeedSkill), rc());
       expect(el.querySelector(".tool-head .badge")?.textContent).toBe(c.badge);
     });
   }
