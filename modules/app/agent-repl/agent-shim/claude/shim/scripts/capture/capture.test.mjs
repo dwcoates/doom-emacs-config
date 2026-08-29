@@ -8,11 +8,15 @@
  * the gate.
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { TOKEN_ENV_VARS } from "./auth.mjs";
+import { isPromptDriven } from "./worlds.mjs";
 import {
   CAPTURE_FLAG,
   CaptureRefusedError,
@@ -26,6 +30,8 @@ import {
   messageMatches,
   parseArgv,
   patternMatches,
+  resolveTokens,
+  runCwdInit,
   permissionResultFor,
   resolvePermissionDecision,
 } from "./capture.mjs";
@@ -33,11 +39,22 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.join(HERE, "capture.mjs");
 
-/** Spawn the script with a controlled environment, never inheriting the suite's. */
+/**
+ * Spawn the script with a controlled environment, never inheriting the suite's.
+ *
+ * The operator's own credentials are stripped from every spawn: a machine with
+ * ANTHROPIC_API_KEY exported would otherwise satisfy the auth preflight and the
+ * child would go on to run a REAL scenario against the vendor. The tests here
+ * are about refusals, and a refusal test that can accidentally succeed at
+ * calling the API is a bug in the test.
+ */
 function runScript(args, extraEnv = {}) {
   const env = { ...process.env, ...extraEnv };
   if (extraEnv[FORBID_VENDOR_CALLS_ENV] === undefined) {
     delete env[FORBID_VENDOR_CALLS_ENV];
+  }
+  for (const tokenVar of TOKEN_ENV_VARS) {
+    if (extraEnv[tokenVar] === undefined) delete env[tokenVar];
   }
   return spawnSync(process.execPath, [SCRIPT, ...args], { env, encoding: "utf8" });
 }
@@ -76,6 +93,43 @@ describe("the refusal gate, by spawn", () => {
   it("still checks the corpus without either key", () => {
     const run = runScript(["--check"], { [FORBID_VENDOR_CALLS_ENV]: "1" });
     expect(run.status).toBe(0);
+  });
+});
+
+describe("the authentication preflight, by spawn", () => {
+  it("refuses a run with no authentication mechanism, before any scenario", () => {
+    const run = runScript([CAPTURE_FLAG]);
+    expect(run.status).toBe(EXIT_REFUSED);
+  });
+
+  it("explains the logged-out capture it is preventing", () => {
+    expect(runScript([CAPTURE_FLAG]).stderr).toContain("Not logged in");
+  });
+
+  it("refuses a --config-root that does not exist", () => {
+    const run = runScript([CAPTURE_FLAG, "--config-root", "/no/such/account/root"]);
+    expect(run.status).toBe(EXIT_REFUSED);
+  });
+
+  it("refuses two mechanisms at once as ambiguous", () => {
+    const run = runScript([CAPTURE_FLAG, "--config-root", "/tmp", "--seed-credentials"]);
+    expect(run.stderr).toMatch(/mechanisms are in effect at once/);
+  });
+
+  it("refuses a config root that is ambiguous with an inherited token", () => {
+    const run = runScript([CAPTURE_FLAG, "--config-root", "/tmp"], {
+      ANTHROPIC_API_KEY: "not-a-real-key",
+    });
+    expect(run.status).toBe(EXIT_REFUSED);
+  });
+
+  it("still refuses on the two-key gate before it ever reaches authentication", () => {
+    const run = runScript(["--config-root", "/tmp"], { [FORBID_VENDOR_CALLS_ENV]: "1" });
+    expect(run.stderr).toContain(CAPTURE_FLAG);
+  });
+
+  it("lists the corpus without authenticating, because listing calls nothing", () => {
+    expect(runScript(["--list"]).status).toBe(0);
   });
 });
 
@@ -120,6 +174,28 @@ describe("parseArgv", () => {
     expect(parseArgv([CAPTURE_FLAG]).authorized).toBe(true);
   });
 
+  it("reads --config-root as an absolute path", () => {
+    expect(path.isAbsolute(parseArgv(["--config-root", "root"]).configRoot)).toBe(true);
+  });
+
+  it("reads --config-root=<dir> in the equals spelling", () => {
+    expect(parseArgv(["--config-root=/tmp/x"]).configRoot).toBe("/tmp/x");
+  });
+
+  it("reads --seed-credentials", () => {
+    expect(parseArgv(["--seed-credentials"]).seedCredentials).toBe(true);
+  });
+
+  it("reads --credentials-from", () => {
+    expect(parseArgv(["--credentials-from=/tmp/root"]).credentialsFrom).toBe("/tmp/root");
+  });
+
+  it("defaults to no authentication mechanism, so a bare run must refuse", () => {
+    const opts = parseArgv([]);
+    expect(opts.configRoot).toBeNull();
+    expect(opts.seedCredentials).toBe(false);
+  });
+
   it("refuses an unrecognized argument rather than ignoring it", () => {
     expect(() => parseArgv(["--wat"])).toThrow(/unrecognized argument/);
   });
@@ -131,10 +207,10 @@ describe("loadPrompts", () => {
     expect(doc.scenarios.length).toBeGreaterThan(0);
   });
 
-  it("gives every scenario either a prompt or a manual procedure", () => {
+  it("gives every scenario either prompt turns or a manual procedure", () => {
     const doc = loadPrompts(path.join(HERE, "prompts.json"));
-    const orphans = doc.scenarios.filter((s) => !s.prompt && !s.manual);
-    expect(orphans).toEqual([]);
+    const orphans = doc.scenarios.filter((s) => !isPromptDriven(s) && !s.manual);
+    expect(orphans.map((s) => s.name)).toEqual([]);
   });
 
   it("gives every scenario a coverage-list item", () => {
@@ -153,6 +229,160 @@ describe("loadPrompts", () => {
     const doc = loadPrompts(path.join(HERE, "prompts.json"));
     const names = doc.scenarios.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+describe("runCwdInit — the setup file that used to be written and never run", () => {
+  it("does nothing when a scenario declares no init command", () => {
+    expect(runCwdInit(HERE, undefined)).toBeNull();
+  });
+
+  it("does nothing for an empty command", () => {
+    expect(runCwdInit(HERE, "")).toBeNull();
+  });
+
+  it("runs the command IN the scratch cwd", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-"));
+    runCwdInit(dir, "touch marker-from-init");
+    expect(existsSync(path.join(dir, "marker-from-init"))).toBe(true);
+  });
+
+  it("initializes a real git repository, which the worktree scenario needs", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-git-"));
+    writeFileSync(path.join(dir, "README.md"), "# fixture\n", "utf8");
+    runCwdInit(
+      dir,
+      "git init -q . && git add -A && git -c user.email=c@e.invalid -c user.name=c commit -qm init",
+    );
+    expect(existsSync(path.join(dir, ".git"))).toBe(true);
+  });
+
+  it("THROWS on a non-zero exit rather than capturing a golden of the wrong situation", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-fail-"));
+    expect(() => runCwdInit(dir, "exit 3")).toThrow(/cwd_init failed \(exit 3\)/);
+  });
+
+  it("includes the failing command's stderr in the error", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "capture-cwdinit-fail2-"));
+    expect(() => runCwdInit(dir, "echo boom >&2; exit 1")).toThrow(/boom/);
+  });
+});
+
+describe("the corpus uses the features that retired its manual_setup notes", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const by = Object.fromEntries(doc.scenarios.map((s) => [s.name, s]));
+
+  it("has no scenario left carrying a manual_setup note", () => {
+    const remaining = doc.scenarios.filter((s) => s.manual_setup !== undefined);
+    expect(remaining.map((s) => s.name)).toEqual([]);
+  });
+
+  it("gives the worktree scenario a cwd_init that makes a real git repository", () => {
+    expect(by["worktree-enter-exit-kept-and-removed"].cwd_init).toMatch(/git init/);
+  });
+
+  it("no longer ships the worktree init script that was never executed", () => {
+    const paths = by["worktree-enter-exit-kept-and-removed"].cwd_setup.map((f) => f.path);
+    expect(paths).not.toContain(".capture-init.sh");
+  });
+
+  it("puts identity-rotation-clear in a world with prior conversation", () => {
+    expect(by["identity-rotation-clear"].config_root).toBe(by["prose-streamed"].config_root);
+  });
+
+  it("puts compaction-directed in that same world", () => {
+    expect(by["compaction-directed"].config_root).toBe(by["prose-streamed"].config_root);
+  });
+
+  it("gives identity-rotation-clear a turn before the /clear and one after", () => {
+    const turns = by["identity-rotation-clear"].prompts;
+    expect(turns).toHaveLength(3);
+    expect(turns[1]).toBe("/clear");
+  });
+
+  it("drives the cold-resume scenario's resume from the harness", () => {
+    const turns = by["cold-resume"].prompts;
+    expect(turns[turns.length - 1].resume).toBe(true);
+  });
+});
+
+describe("resolveTokens — how a static corpus names a file on disk", () => {
+  it("substitutes the capture directory into a string", () => {
+    expect(resolveTokens("{{CAPTURE_DIR}}/mcp-echo.mjs", "/x")).toBe("/x/mcp-echo.mjs");
+  });
+
+  it("substitutes deep inside an options object", () => {
+    const resolved = resolveTokens(
+      { mcpServers: { p: { command: "node", args: ["{{CAPTURE_DIR}}/mcp-echo.mjs"] } } },
+      "/x",
+    );
+    expect(resolved.mcpServers.p.args[0]).toBe("/x/mcp-echo.mjs");
+  });
+
+  it("leaves non-string values alone", () => {
+    expect(resolveTokens({ n: 5, b: true, z: null }, "/x")).toEqual({ n: 5, b: true, z: null });
+  });
+
+  it("leaves a string with no token unchanged", () => {
+    expect(resolveTokens("plain", "/x")).toBe("plain");
+  });
+});
+
+describe("the MCP scenarios point at the real echo server", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const by = Object.fromEntries(doc.scenarios.map((s) => [s.name, s]));
+
+  it("wires capture-probe into mcp-unmodeled-tool's options", () => {
+    const resolved = resolveTokens(by["mcp-unmodeled-tool"].options, HERE);
+    expect(resolved.mcpServers["capture-probe"].args[0]).toBe(path.join(HERE, "mcp-echo.mjs"));
+  });
+
+  it("resolves to a server file that actually exists", () => {
+    const resolved = resolveTokens(by["mcp-unmodeled-tool"].options, HERE);
+    expect(existsSync(resolved.mcpServers["capture-probe"].args[0])).toBe(true);
+  });
+
+  it("no longer asks the operator to supply an MCP server", () => {
+    expect(by["mcp-unmodeled-tool"].manual).toBeUndefined();
+  });
+
+  it("gives mcp-server-healths both a healthy and a broken server", () => {
+    const servers = by["mcp-server-healths"].options.mcpServers;
+    expect(Object.keys(servers)).toEqual(["capture-ok", "capture-broken"]);
+  });
+
+  it("no longer ships a comment-only mcp-echo.mjs stub in any cwd_setup", () => {
+    const stubs = doc.scenarios.flatMap((s) =>
+      (s.cwd_setup ?? []).filter((f) => f.path === "mcp-echo.mjs"),
+    );
+    expect(stubs).toEqual([]);
+  });
+});
+
+describe("the structured-output scenario carries an unsatisfiable schema", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const scenario = doc.scenarios.find((s) => s.name === "turn-stop-max-structured-output-retries");
+
+  it("declares a json_schema output format", () => {
+    expect(scenario.options.outputFormat.type).toBe("json_schema");
+  });
+
+  it("requires the impossible property, so the model cannot omit it", () => {
+    expect(scenario.options.outputFormat.schema.required).toEqual(["impossible"]);
+  });
+
+  it("makes that property UNSATISFIABLE: minimum above maximum admits no integer", () => {
+    const field = scenario.options.outputFormat.schema.properties.impossible;
+    expect(field.minimum).toBeGreaterThan(field.maximum);
+  });
+
+  it("forbids additional properties, so no other key can satisfy the schema instead", () => {
+    expect(scenario.options.outputFormat.schema.additionalProperties).toBe(false);
+  });
+
+  it("is now prompt-driven rather than an operator instruction", () => {
+    expect(scenario.manual).toBeUndefined();
+    expect(isPromptDriven(scenario)).toBe(true);
   });
 });
 
