@@ -38,7 +38,7 @@
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
-(declare-function agent-repl-input-attach-image "agent-repl-input" (ws path media-type))
+(declare-function agent-repl-input-attach-image "agent-repl-input" (path media-type))
 (declare-function agent-repl--input-buffer "agent-repl-input" (ws))
 (defvar agent-repl-input-mode-map)
 
@@ -215,7 +215,7 @@ no image."
          (dir (agent-repl--image-dir ws))
          (path (agent-repl--image-new-path dir ws))
          (dest (agent-repl--image-capture-clipboard path ws)))
-    (agent-repl-input-attach-image ws dest agent-repl--image-media-type)
+    (agent-repl-input-attach-image dest agent-repl--image-media-type)
     (agent-repl--image-insert-marker dest ws)
     (agent-repl--info ws "clipboard-image: attached ws=%s path=%s media-type=%s"
                       ws dest agent-repl--image-media-type)
