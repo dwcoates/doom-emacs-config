@@ -380,8 +380,8 @@ THIS SETTING CONTROLS VISIBILITY ONLY.  It does not gate the durable
 sinks and never has: records still persist whenever they clear
 `agent-repl-log-file-level' and `agent-repl-log-to-file' is non-nil.  If
 what you want is a smaller LOG FILE, this is the wrong knob — set
-`agent-repl-log-file-level'.  `setq' this variable to flip at runtime;
-`verbose' is the third rung."
+`agent-repl-log-file-level'.  Use \\[agent-repl-toggle-debug] (with a
+`C-u' prefix for verbose) to flip at runtime."
   :type '(choice (const :tag "Off" nil)
                  (const :tag "On" t)
                  (const :tag "Verbose" verbose))
@@ -397,8 +397,8 @@ workspace-agnostic, REGARDLESS of `agent-repl-debug'.
 `agent-repl--log-verbose' persists as well; `agent-repl-debug' controls
 only *Messages* visibility.  This is the ALL-OR-NOTHING switch; for a
 threshold that keeps warnings and errors while dropping chatter, use
-`agent-repl-log-file-level'.  `setq' this variable
-to flip the kill-switch at runtime."
+`agent-repl-log-file-level'.  `setq' this variable to flip the
+kill-switch at runtime."
   :type 'boolean
   :group 'agent-repl)
 
@@ -418,8 +418,10 @@ working day of it runs to ~350k records and well over a hundred megabytes
 — so it is opt-IN, turned on for the stretch of an investigation that
 needs it and turned back off after.
 
-`setq' this variable to name any rung.  It takes effect on the very next
-record, with no restart and no reload.
+Use \\[agent-repl-toggle-verbose-to-disk] for the common
+verbose-on/verbose-off flip, or \\[agent-repl-set-log-file-level] to name
+any rung.  Both take effect on the very next record, with no restart and
+no reload.
 
 This does NOT control the per-workspace log BUFFERS; see
 `agent-repl-log-buffer-level'."
@@ -1674,6 +1676,90 @@ state.  Returns non-nil exactly when a record was emitted."
       (puthash key state agent-repl--log-transition-states)
       (apply #'agent-repl--log-verbose ws fmt args)
       t)))
+
+;;;; ---- Runtime log-verbosity controls ----
+;;
+;; The three knobs a reader reaches for mid-investigation, as ordinary
+;; commands.  They live here, beside the variables they set, rather than in
+;; keybindings.el: `agent-repl-debug' governs *Messages* visibility and
+;; `agent-repl-log-file-level' governs durable volume, and both are defined
+;; above.  keybindings.el only binds them (SPC j D / L / V).
+
+(defun agent-repl-toggle-debug (&optional verbose)
+  "Toggle debug logging VISIBILITY in *Messages*.
+Without a prefix argument: cycle nil -> t -> nil.  With a prefix argument
+\(\\[universal-argument]): cycle nil -> verbose -> nil.  Verbose
+additionally SHOWS the hot-path rung (timer ticks, window changes, and the
+rest of `agent-repl--log-verbose').
+
+This changes NOTHING about what is written to the log file, and turning it
+off will not shrink one — that is `agent-repl-set-log-file-level'."
+  (interactive "P")
+  (setq agent-repl-debug
+        (if verbose
+            (if (eq agent-repl-debug 'verbose) nil 'verbose)
+          (if agent-repl-debug nil t)))
+  (let ((label (pcase agent-repl-debug
+                 ('nil "OFF")
+                 ('t "ON")
+                 ('verbose "ON (verbose)")
+                 (_ (agent-repl--fatal
+                     nil "elisp.core.toggle-debug: agent-repl-debug has unexpected value=%S"
+                     agent-repl-debug)))))
+    ;; Emitted through `message' unconditionally: this is synchronous feedback
+    ;; from a command the user just ran, and it must be visible in exactly the
+    ;; case where the ladder has just been turned OFF.
+    (message "[agent-repl] debug logging: %s" label)
+    (if agent-repl-debug
+        (agent-repl--info nil "elisp.core.toggle-debug: visibility=%s" label)
+      ;; The turn-OFF record cannot ride `--info' honestly once visibility is
+      ;; gone from *Messages*, but the durable sink still wants the boundary.
+      (agent-repl--log nil "elisp.core.toggle-debug: visibility=%s" label))))
+
+(defun agent-repl-set-log-file-level (level)
+  "Set `agent-repl-log-file-level' to LEVEL for the rest of this session.
+This is the control for LOG FILE volume, which `agent-repl-debug' has
+never governed.  It takes effect on the very next record — no restart and
+no reload — so a log can be turned down while it is actively being flooded
+and back up before a reproduction is captured."
+  (interactive
+   (list (intern
+          (completing-read
+           (format "Durable log level (currently %s): " agent-repl-log-file-level)
+           '("verbose" "debug" "info" "warn" "error")
+           nil t nil nil (symbol-name agent-repl-log-file-level)))))
+  (unless (assoc (symbol-name level) agent-repl--log-level-rank)
+    (agent-repl--error
+     nil "elisp.core.set-log-file-level: rejected level=%S reason=not-a-log-level" level)
+    (error "agent-repl: %S is not a log level; expected one of verbose debug info warn error"
+           level))
+  (setq agent-repl-log-file-level level)
+  ;; Announced through the durable sink as well as the echo area: the record
+  ;; saying the threshold moved is itself the boundary a later reader needs to
+  ;; explain why the surrounding volume changed.
+  (agent-repl--info nil "elisp.core.set-log-file-level: durable log level now %s" level)
+  (message "[agent-repl] durable log level: %s" level)
+  level)
+
+(defun agent-repl-toggle-verbose-to-disk ()
+  "Toggle whether the verbose rung is written to the LOG FILE.
+Flips `agent-repl-log-file-level' between `verbose' (write the hot-path
+chatter) and `debug' (write everything else).  This is the knob for a log
+growing faster than it is worth: turn it off, and turn it back on before
+provoking the reproduction it is needed for.
+
+Affects the FILE only.  The per-workspace log buffers follow
+`agent-repl-log-buffer-level' and *Messages* follows `agent-repl-debug'."
+  (interactive)
+  (setq agent-repl-log-file-level
+        (if (eq agent-repl-log-file-level 'verbose) 'debug 'verbose))
+  (let ((on (eq agent-repl-log-file-level 'verbose)))
+    (agent-repl--info nil "elisp.core.toggle-verbose-to-disk: verbose-to-file=%s"
+                      (if on "ON" "OFF"))
+    (message "[agent-repl] verbose logging to disk: %s%s"
+             (if on "ON" "OFF")
+             (if on "" " (warnings and errors still recorded)"))
+    agent-repl-log-file-level))
 
 ;;;; ---- Quit deferral around asynchronous critical sections ----------------
 ;;
