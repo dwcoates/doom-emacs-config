@@ -15,7 +15,6 @@ import (
 func testLog(t *testing.T) *logging.Bound {
 	t.Helper()
 	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(func(logging.Diagnostic) {})
 	return log
 }
 
