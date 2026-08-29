@@ -291,10 +291,35 @@ export function startTurnRefused(cause: StartTurnKind, detail: string): shimv1.S
   });
 }
 
-/** The prompt was delivered; the record that comes back IS the turn's prompt. */
-export function startTurnAccepted(prompt: conversationv1.AgentPrompt): shimv1.StartTurnResponse {
+/**
+ * The prompt was delivered; the record that comes back IS the turn's prompt.
+ *
+ * ONE CALL SUBMITS AND PAINTS, so the opening page rides the answer. The page is
+ * REQUIRED: an empty page is a page with no entries and a `floor`, never an
+ * absent one — a consumer handed no page cannot tell "nothing to paint" from
+ * "the shim forgot", and would draw a blank feed either way.
+ */
+export function startTurnAccepted(
+  prompt: conversationv1.AgentPrompt,
+  page: conversationv1.HistoryPage,
+): shimv1.StartTurnResponse {
   return create(shimv1.StartTurnResponseSchema, {
-    result: { case: "success", value: create(shimv1.StartTurnSuccessSchema, { prompt }) },
+    result: { case: "success", value: create(shimv1.StartTurnSuccessSchema, { prompt, page }) },
+  });
+}
+
+/**
+ * The page a StartTurn answers with when the record could not be read.
+ *
+ * A REFUSAL IS NOT AN OPTION HERE: the prompt is already durable and already
+ * delivered by the time the page is read, so answering `failure` would tell the
+ * daemon a turn did not start that is running. An empty page with a `floor` is
+ * the honest shape — "there is nothing to paint from here" — and the caller's
+ * own WatchAgent tail carries everything the turn produces.
+ */
+export function emptyOpeningPage(): conversationv1.HistoryPage {
+  return create(conversationv1.HistoryPageSchema, {
+    boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
   });
 }
 
@@ -314,7 +339,16 @@ export type UpdateAgentKind =
   | { readonly kind: "noOpenAsk" }
   | { readonly kind: "answerMismatch" }
   | { readonly kind: "nothingRunning" }
-  | { readonly kind: "noSession" };
+  | { readonly kind: "noSession" }
+  /**
+   * The input is well-formed and the agent is known, but the VENDOR OFFERS NO
+   * ROUTE to deliver it to this agent kind.
+   *
+   * NOT `nothingRunning`, which is a claim about the agent's STATE and would
+   * send a caller looking for a live agent that was live all along. The same
+   * input to the main agent would deliver; the gap is the SDK's.
+   */
+  | { readonly kind: "notDeliverable" };
 
 /** The base constructor for `shim.v1.UpdateAgentFailure`. */
 export function updateAgentFailure(
@@ -332,7 +366,12 @@ export function updateAgentFailure(
             ? { case: "answerMismatch", value: create(shimv1.UpdateAgentAnswerMismatchSchema, {}) }
             : cause.kind === "nothingRunning"
               ? { case: "nothingRunning", value: create(shimv1.UpdateAgentNothingRunningSchema, {}) }
-              : { case: "noSession", value: create(shimv1.UpdateAgentNoSessionSchema, {}) },
+              : cause.kind === "noSession"
+                ? { case: "noSession", value: create(shimv1.UpdateAgentNoSessionSchema, {}) }
+                : {
+                    case: "notDeliverable",
+                    value: create(shimv1.UpdateAgentNotDeliverableSchema, {}),
+                  },
   });
 }
 
@@ -434,7 +473,17 @@ export type DetachForegroundKind =
   | { readonly kind: "unknownUnit" }
   | { readonly kind: "alreadyConcluded" }
   | { readonly kind: "notDetachable" }
-  | { readonly kind: "noSession" };
+  | { readonly kind: "noSession" }
+  /**
+   * The unit is detachable IN KIND and still in flight, but the pinned SDK
+   * offers NO VERB to initiate a detachment.
+   *
+   * NOT `notDetachable`, which says the unit's KIND cannot detach — a claim
+   * that is false for a shell or a subagent and would tell a caller to stop
+   * offering the affordance for work that detaches on its own all the time.
+   * The shim can only OBSERVE detachments the vendor made.
+   */
+  | { readonly kind: "unsupported" };
 
 /** The base constructor for `shim.v1.DetachForegroundFailure`. */
 export function detachForegroundFailure(
@@ -450,7 +499,12 @@ export function detachForegroundFailure(
           ? { case: "alreadyConcluded", value: create(shimv1.DetachForegroundAlreadyConcludedSchema, {}) }
           : cause.kind === "notDetachable"
             ? { case: "notDetachable", value: create(shimv1.DetachForegroundNotDetachableSchema, {}) }
-            : { case: "noSession", value: create(shimv1.DetachForegroundNoSessionSchema, {}) },
+            : cause.kind === "noSession"
+              ? { case: "noSession", value: create(shimv1.DetachForegroundNoSessionSchema, {}) }
+              : {
+                  case: "unsupported",
+                  value: create(shimv1.DetachForegroundUnsupportedSchema, {}),
+                },
   });
 }
 
