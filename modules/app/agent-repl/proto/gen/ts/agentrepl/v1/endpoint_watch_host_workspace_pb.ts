@@ -140,7 +140,7 @@ export const HostWorkspaceReloadWebappSchema: GenMessage<HostWorkspaceReloadWeba
 /**
  * A notification for this workspace's user. THE KIND IS TYPED — the
  * composed text is presentation; the kind arm is the programmatic
- * semantics (never differentiate by parsing the text).
+ * semantics.
  *
  * @generated from message agentrepl.v1.HostWorkspaceNotification
  */

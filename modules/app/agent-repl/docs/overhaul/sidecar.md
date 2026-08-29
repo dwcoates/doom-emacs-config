@@ -153,10 +153,6 @@ orchestration chain. Cross-cutting conventions are in
 
 ### Owner resolution and the LOST/staleness policy
 
-- TOTAL INGESTION IS ABSOLUTE (ruled 2026-08-29): an unattributed spool is
-  held untailed while ownership is unresolved, but it is NEVER permanently
-  dropped — an aged unowned spool ingests as residue with unknown
-  ownership rather than being retired terminal.
 - PATH NORMALIZATION (ruled 2026-08-29): resolve the macOS /tmp →
   /private/tmp symlink before comparing spool paths — the same file must
   not read as two.
