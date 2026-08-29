@@ -50,6 +50,8 @@ const (
 	ShimStoreWatchAgentSessionProcedure = "/store.v1.ShimStore/WatchAgentSession"
 	// ShimStoreReadAgentPageProcedure is the fully-qualified name of the ShimStore's ReadAgentPage RPC.
 	ShimStoreReadAgentPageProcedure = "/store.v1.ShimStore/ReadAgentPage"
+	// ShimStoreWatchBashRunProcedure is the fully-qualified name of the ShimStore's WatchBashRun RPC.
+	ShimStoreWatchBashRunProcedure = "/store.v1.ShimStore/WatchBashRun"
 	// ShimStoreGetWorkflowProcedure is the fully-qualified name of the ShimStore's GetWorkflow RPC.
 	ShimStoreGetWorkflowProcedure = "/store.v1.ShimStore/GetWorkflow"
 	// ShimStoreGetSidecarCursorsProcedure is the fully-qualified name of the ShimStore's
@@ -67,6 +69,7 @@ var (
 	shimStoreOpenAgentSessionMethodDescriptor  = shimStoreServiceDescriptor.Methods().ByName("OpenAgentSession")
 	shimStoreWatchAgentSessionMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("WatchAgentSession")
 	shimStoreReadAgentPageMethodDescriptor     = shimStoreServiceDescriptor.Methods().ByName("ReadAgentPage")
+	shimStoreWatchBashRunMethodDescriptor      = shimStoreServiceDescriptor.Methods().ByName("WatchBashRun")
 	shimStoreGetWorkflowMethodDescriptor       = shimStoreServiceDescriptor.Methods().ByName("GetWorkflow")
 	shimStoreGetSidecarCursorsMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
 	shimStoreGetLiveWorkMethodDescriptor       = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
@@ -82,6 +85,10 @@ type ShimStoreClient interface {
 	// An OLDER page of one book, walking down from a served pointer. The first
 	// page is OpenAgentSession's answer; this verb only continues.
 	ReadAgentPage(context.Context, *connect.Request[v1.ReadAgentPageRequest]) (*connect.Response[v1.ReadAgentPageResponse], error)
+	// One detached shell run's lifecycle rows, replayed then followed, ending
+	// after the terminal. Serves the shim's own WatchBash for runs whose bytes
+	// the sidecar wrote.
+	WatchBashRun(context.Context, *connect.Request[v1.WatchBashRunRequest]) (*connect.ServerStreamForClient[v1.WatchBashRunResponse], error)
 	// One workflow run's stored state: description, derived agent level,
 	// terminal if ended. Serves the shim's own GetWorkflow endpoint.
 	GetWorkflow(context.Context, *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error)
@@ -123,6 +130,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreReadAgentPageMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		watchBashRun: connect.NewClient[v1.WatchBashRunRequest, v1.WatchBashRunResponse](
+			httpClient,
+			baseURL+ShimStoreWatchBashRunProcedure,
+			connect.WithSchema(shimStoreWatchBashRunMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		getWorkflow: connect.NewClient[v1.GetWorkflowRequest, v1.GetWorkflowResponse](
 			httpClient,
 			baseURL+ShimStoreGetWorkflowProcedure,
@@ -155,6 +168,7 @@ type shimStoreClient struct {
 	openAgentSession  *connect.Client[v1.OpenAgentSessionRequest, v1.OpenAgentSessionResponse]
 	watchAgentSession *connect.Client[v1.WatchAgentSessionRequest, v1.WatchAgentSessionResponse]
 	readAgentPage     *connect.Client[v1.ReadAgentPageRequest, v1.ReadAgentPageResponse]
+	watchBashRun      *connect.Client[v1.WatchBashRunRequest, v1.WatchBashRunResponse]
 	getWorkflow       *connect.Client[v1.GetWorkflowRequest, v1.GetWorkflowResponse]
 	getSidecarCursors *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
 	getLiveWork       *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
@@ -174,6 +188,11 @@ func (c *shimStoreClient) WatchAgentSession(ctx context.Context, req *connect.Re
 // ReadAgentPage calls store.v1.ShimStore.ReadAgentPage.
 func (c *shimStoreClient) ReadAgentPage(ctx context.Context, req *connect.Request[v1.ReadAgentPageRequest]) (*connect.Response[v1.ReadAgentPageResponse], error) {
 	return c.readAgentPage.CallUnary(ctx, req)
+}
+
+// WatchBashRun calls store.v1.ShimStore.WatchBashRun.
+func (c *shimStoreClient) WatchBashRun(ctx context.Context, req *connect.Request[v1.WatchBashRunRequest]) (*connect.ServerStreamForClient[v1.WatchBashRunResponse], error) {
+	return c.watchBashRun.CallServerStream(ctx, req)
 }
 
 // GetWorkflow calls store.v1.ShimStore.GetWorkflow.
@@ -205,6 +224,10 @@ type ShimStoreHandler interface {
 	// An OLDER page of one book, walking down from a served pointer. The first
 	// page is OpenAgentSession's answer; this verb only continues.
 	ReadAgentPage(context.Context, *connect.Request[v1.ReadAgentPageRequest]) (*connect.Response[v1.ReadAgentPageResponse], error)
+	// One detached shell run's lifecycle rows, replayed then followed, ending
+	// after the terminal. Serves the shim's own WatchBash for runs whose bytes
+	// the sidecar wrote.
+	WatchBashRun(context.Context, *connect.Request[v1.WatchBashRunRequest], *connect.ServerStream[v1.WatchBashRunResponse]) error
 	// One workflow run's stored state: description, derived agent level,
 	// terminal if ended. Serves the shim's own GetWorkflow endpoint.
 	GetWorkflow(context.Context, *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error)
@@ -242,6 +265,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreReadAgentPageMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreWatchBashRunHandler := connect.NewServerStreamHandler(
+		ShimStoreWatchBashRunProcedure,
+		svc.WatchBashRun,
+		connect.WithSchema(shimStoreWatchBashRunMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreGetWorkflowHandler := connect.NewUnaryHandler(
 		ShimStoreGetWorkflowProcedure,
 		svc.GetWorkflow,
@@ -274,6 +303,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreWatchAgentSessionHandler.ServeHTTP(w, r)
 		case ShimStoreReadAgentPageProcedure:
 			shimStoreReadAgentPageHandler.ServeHTTP(w, r)
+		case ShimStoreWatchBashRunProcedure:
+			shimStoreWatchBashRunHandler.ServeHTTP(w, r)
 		case ShimStoreGetWorkflowProcedure:
 			shimStoreGetWorkflowHandler.ServeHTTP(w, r)
 		case ShimStoreGetSidecarCursorsProcedure:
@@ -301,6 +332,10 @@ func (UnimplementedShimStoreHandler) WatchAgentSession(context.Context, *connect
 
 func (UnimplementedShimStoreHandler) ReadAgentPage(context.Context, *connect.Request[v1.ReadAgentPageRequest]) (*connect.Response[v1.ReadAgentPageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.ReadAgentPage is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) WatchBashRun(context.Context, *connect.Request[v1.WatchBashRunRequest], *connect.ServerStream[v1.WatchBashRunResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.WatchBashRun is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) GetWorkflow(context.Context, *connect.Request[v1.GetWorkflowRequest]) (*connect.Response[v1.GetWorkflowResponse], error) {
