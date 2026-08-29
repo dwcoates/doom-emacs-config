@@ -320,6 +320,37 @@ at build time and is not a vendor import site.
   pre-logger bootstrap failure and logger-sink emergency paths.
 - The full contract is `modules/app/agent-repl/logging-contract.md`.
 
+### Standing streams
+
+Two rules exist because a Go client cannot tell a QUIET stream from a REFUSED
+one: connect-go surfaces a server-stream refusal only at the first `Receive`,
+so a stream that accepted and has not spoken yet blocks the caller exactly the
+way a refusal does.
+
+1. **The response head is flushed ON ACCEPT.** connect-node writes a stream's
+   head lazily — for a stream that has pushed nothing it fires only when the
+   stream ENDS — so `service/server.ts` writes it first: a streaming request
+   content type (`application/connect+proto|json`,
+   `application/grpc-web+proto|json`, `application/grpc+proto`,
+   `application/grpc`) gets `200` with its own content type echoed back,
+   `flushHeaders()`, and then `writeHead` rebound to a no-op so the adapter's
+   later call cannot raise `ERR_HTTP_HEADERS_SENT`. It is applied on BOTH
+   dialects (the HTTP/1.1 server and the h2 server behind the preface sniffer).
+   Unary requests are untouched — they have a real status to report. A refused
+   streaming verb still reports its refusal, because the Connect protocol
+   carries a stream's error in its END-OF-STREAM frame, not in the head.
+2. **`WatchSession` pushes `diagnostics` immediately, on every open.** The
+   frame is seeded into the subscriber's queue synchronously by
+   `SessionPushes.subscribe()`, before the iterable is returned, so the first
+   `next()` resolves without waiting on anything. That push IS the daemon's
+   readiness signal, and there is no other. A late joiner is then caught up on
+   the current `context_usage`, `model_changed` and `permission_mode_changed`;
+   after that, arms are pushed on CHANGE only.
+3. **The store client ends `WatchAgentSession` by CANCELLING its context**
+   (an `AbortSignal`), never by a bare close: a bare close leaves the store
+   holding a reading session nobody will ever pull, and the store has no other
+   signal that the reader is gone.
+
 ## Validation and errors
 
 - **One base validate function per request message** (`service/validate/
