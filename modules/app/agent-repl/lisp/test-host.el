@@ -164,9 +164,10 @@ unary rpc can produce, which the contract never collapses into one."
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-watch-host-workspace)
-                (lambda (conn ref on-push on-close)
+                (lambda (conn ref on-push on-close &optional on-open)
                   (let ((record (list :conn conn :ref ref
-                                      :on-push on-push :on-close on-close)))
+                                      :on-push on-push :on-close on-close
+                                      :on-open on-open)))
                     (push record agent-repl-test-host--streams)
                     record)))
                ((symbol-function 'agent-repl-connect-stream-cancel)
@@ -990,6 +991,37 @@ unary rpc can produce, which the contract never collapses into one."
     (agent-repl-host-forget "ws-1")
     ;; Assert
     (should (null (agent-repl-host-ref "ws-1")))))
+
+
+;;;; ---- Subscription acceptance ----
+
+(ert-deftest agent-repl-test-host-subscribe-alone-is-not-subscribed ()
+  "A spawn is not an acceptance: nothing may claim the watch stands yet."
+  (agent-repl-test-host--with-harness
+    ;; Arrange / Act
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Assert
+    (should (null (agent-repl-test-host--logged-p :info "elisp.host.subscribed")))))
+
+(ert-deftest agent-repl-test-host-acceptance-logs-subscribed ()
+  "The daemon accepting the watch is what puts `subscribed' on the record."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((record (agent-repl-test-host--subscribe "ws-1")))
+      ;; Act
+      (funcall (plist-get record :on-open))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "elisp.host.subscribed")))))
+
+(ert-deftest agent-repl-test-host-acceptance-names-the-method ()
+  "The subscribed record says WHICH subscription was accepted."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((record (agent-repl-test-host--subscribe "ws-1")))
+      ;; Act
+      (funcall (plist-get record :on-open))
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "method=\"WatchHostWorkspace\"")))))
 
 (provide 'test-host)
 
