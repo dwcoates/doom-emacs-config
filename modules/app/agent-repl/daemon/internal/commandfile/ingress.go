@@ -1,0 +1,302 @@
+package commandfile
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/workspace"
+	"claude-repld/internal/wsm"
+)
+
+// The operation names this package's records carry.
+const (
+	opRun        = "daemon.commandfile.run"
+	opApply      = "daemon.commandfile.apply_file"
+	opClaim      = "daemon.commandfile.claim"
+	opQuarantine = "daemon.commandfile.quarantine"
+	opEntry      = "daemon.commandfile.entry"
+)
+
+// commandFileOrigin is the prompt origin every command-file prompt carries: the
+// channel is a host-written file, not a composer, and the origin says so on the
+// durable turn record.
+const commandFileOrigin = conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT
+
+// ingress is the command-file ingress. It owns no verb of its own: every entry
+// is mapped onto THE SAME internal path as the equivalent rpc, so there is
+// never a second implementation of a verb to keep in step.
+type ingress struct {
+	deps Deps
+}
+
+// Run polls the ingress directory until ctx is cancelled.
+//
+// The directory is POLLED rather than watched: it holds small files written by
+// shell scripts, a poll cannot miss one the way a dropped inotify watch can,
+// and the poll interval doubles as the settling window a half-written file is
+// judged against.
+func (i *ingress) Run(ctx context.Context) error {
+	log := i.deps.Log.Global().With(dlog.Context{"dir": i.deps.Dir})
+	ticker := time.NewTicker(i.deps.Interval)
+	defer ticker.Stop()
+	log.Info(opRun, "watching the command-file ingress", dlog.Context{
+		"glob": i.deps.Glob, "interval_ms": i.deps.Interval.Milliseconds(),
+	})
+	for {
+		if err := i.sweep(ctx, log); err != nil {
+			// A sweep that fails is logged and retried: the directory is an
+			// ingress, and one unreadable pass is not a reason to stop
+			// draining it.
+			log.Error(opRun, "a sweep of the ingress failed", dlog.Context{"cause": err.Error()})
+		}
+		select {
+		case <-ctx.Done():
+			log.Info(opRun, "stopped watching the command-file ingress", nil)
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// sweep applies every claimable file once, oldest name first so a producer that
+// drops two files gets them in the order it wrote them.
+func (i *ingress) sweep(ctx context.Context, log dlog.Logger) error {
+	matches, err := filepath.Glob(filepath.Join(i.deps.Dir, i.deps.Glob))
+	if err != nil {
+		return fmt.Errorf("glob %q: %w", i.deps.Glob, err)
+	}
+	sort.Strings(matches)
+	for _, path := range matches {
+		if settled, err := i.settled(path); err != nil {
+			log.Warn(opRun, "could not judge whether a command file has settled", dlog.Context{
+				"path": path, "cause": err.Error(),
+			})
+			continue
+		} else if !settled {
+			log.Debug(opRun, "leaving a command file that is still being written", dlog.Context{"path": path})
+			continue
+		}
+		if err := i.ApplyFile(ctx, path); err != nil {
+			log.Error(opRun, "a command file did not apply", dlog.Context{"path": path, "cause": err.Error()})
+		}
+	}
+	return nil
+}
+
+// settled reports whether a file may be claimed. A file older than one poll
+// interval has settled by age; a YOUNGER one has settled only if it already
+// parses as a complete document, which is what keeps a half-written file — one
+// still mid-token — out of the daemon.
+func (i *ingress) settled(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	if i.deps.Now().Sub(info.ModTime()) >= i.deps.Interval {
+		return true, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if _, err := parse(data); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// ApplyFile claims one command file, applies it, and retires it.
+//
+// The claim is a RENAME into the claimed directory, which is atomic and
+// exclusive: two daemons sweeping one ingress cannot both apply a file, and a
+// producer cannot rewrite a file out from under an application in progress.
+//
+// A file that does not parse APPLIES NOTHING and is quarantined with a WARNING:
+// the array is one request, and half of it is not a smaller request.
+func (i *ingress) ApplyFile(ctx context.Context, path string) error {
+	log := i.deps.Log.Global().With(dlog.Context{"path": path})
+
+	claimed, err := i.claim(path)
+	if err != nil {
+		log.Error(opClaim, "could not claim the command file", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("claim %q: %w", path, err)
+	}
+	log.Debug(opClaim, "claimed the command file", dlog.Context{"claimed": claimed})
+
+	data, err := os.ReadFile(claimed)
+	if err != nil {
+		log.Error(opApply, "could not read the claimed command file", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("read %q: %w", claimed, err)
+	}
+	entries, err := parse(data)
+	if err != nil {
+		log.Warn(opQuarantine, "quarantining a malformed command file", dlog.Context{"cause": err.Error()})
+		if qErr := i.quarantine(claimed); qErr != nil {
+			log.Error(opQuarantine, "could not quarantine the command file", dlog.Context{"cause": qErr.Error()})
+			return errors.Join(err, qErr)
+		}
+		return fmt.Errorf("parse %q: %w", path, err)
+	}
+
+	base := filepath.Base(path)
+	var failures []error
+	for index, entry := range entries {
+		if err := i.apply(ctx, log, base, index, entry); err != nil {
+			log.Error(opEntry, "a command-file entry failed", dlog.Context{
+				"index": index, "type": entry.Type, "cause": err.Error(),
+			})
+			failures = append(failures, fmt.Errorf("entry %d (%s): %w", index, entry.Type, err))
+			continue
+		}
+		log.Debug(opEntry, "applied a command-file entry", dlog.Context{"index": index, "type": entry.Type})
+	}
+	if len(failures) > 0 {
+		return errors.Join(failures...)
+	}
+	log.Info(opApply, "applied a command file", dlog.Context{"entries": len(entries)})
+	return nil
+}
+
+// claim renames the file into the claimed directory. The rename is the claim:
+// nothing else marks a file as taken, so there is no window in which two
+// sweepers both believe they own it.
+func (i *ingress) claim(path string) (string, error) {
+	if err := os.MkdirAll(i.deps.ClaimedDir, 0o755); err != nil {
+		return "", fmt.Errorf("create %q: %w", i.deps.ClaimedDir, err)
+	}
+	claimed := filepath.Join(i.deps.ClaimedDir, filepath.Base(path))
+	if err := os.Rename(path, claimed); err != nil {
+		return "", err
+	}
+	return claimed, nil
+}
+
+// quarantine moves a malformed file aside so the sweep does not meet it again
+// and a human can still read what was written.
+func (i *ingress) quarantine(claimed string) error {
+	if err := os.MkdirAll(i.deps.QuarantineDir, 0o755); err != nil {
+		return fmt.Errorf("create %q: %w", i.deps.QuarantineDir, err)
+	}
+	return os.Rename(claimed, filepath.Join(i.deps.QuarantineDir, filepath.Base(claimed)))
+}
+
+// apply maps ONE entry onto the same internal path as the equivalent rpc.
+func (i *ingress) apply(ctx context.Context, log dlog.Logger, file string, index int, entry Entry) error {
+	switch entry.Type {
+	case TypeCreate:
+		return i.applyCreate(ctx, entry)
+	case TypePrompt, TypeSend:
+		return i.applyPrompt(ctx, file, index, entry)
+	case TypeMerge:
+		ws, err := i.target(ctx, entry)
+		if err != nil {
+			return err
+		}
+		return i.deps.Merge.Enqueue(ctx, ws)
+	case TypeClose:
+		ws, err := i.target(ctx, entry)
+		if err != nil {
+			return err
+		}
+		return i.deps.Verbs.Close(ctx, ws)
+	case TypeOpen:
+		ws, err := i.target(ctx, entry)
+		if err != nil {
+			return err
+		}
+		return i.deps.Verbs.Open(ctx, ws)
+	case TypeSwitch:
+		ws, err := i.target(ctx, entry)
+		if err != nil {
+			return err
+		}
+		return i.deps.Verbs.Select(ctx, ws)
+	case TypeTaskCreate:
+		task, err := i.deps.Verbs.CreateTask(ctx, entry.Title)
+		if err != nil {
+			return err
+		}
+		log.Debug(opEntry, "created a task from a command file", dlog.Context{"task": string(task.ID)})
+		return nil
+	case TypeTaskToggleDone:
+		return i.deps.Verbs.UpdateTask(ctx, ids.TaskID(entry.ID), wsm.TaskChange{Done: entry.Done})
+	case TypeTaskAddWorkspace:
+		ws, err := i.target(ctx, entry)
+		if err != nil {
+			return err
+		}
+		task := ids.TaskID(entry.ID)
+		return i.deps.Verbs.AssignTask(ctx, ws, &task)
+	default:
+		// Validate already refused every unknown type, so reaching here means
+		// the two disagree — which is a defect, not a bad input.
+		return fmt.Errorf("entry type %q passed validation but has no mapping", entry.Type)
+	}
+}
+
+// applyCreate maps a create entry onto the ordinary creation verb. A one-shot
+// create from this channel is the SELF-MERGE form: the channel carries no
+// finish field, and the self-merge one-shot is the flow this channel has always
+// dispatched.
+func (i *ingress) applyCreate(ctx context.Context, entry Entry) error {
+	spec := workspace.CreateSpec{
+		RepoDir:       entry.GitRoot,
+		InitialPrompt: entry.Prompt,
+		Name:          entry.Name,
+		BaseRef:       entry.BaseRef,
+		OneShot:       entry.OneShot,
+	}
+	if entry.OneShot {
+		spec.Finish = &workspace.OneShotFinish{SelfMerge: true}
+	}
+	_, err := i.deps.Verbs.Create(ctx, spec)
+	return err
+}
+
+// applyPrompt maps a prompt entry onto SubmitPrompt's own body, so a
+// command-file prompt is recognized, mirrored and queued exactly as a typed one
+// is. The idempotency key is the file and the entry's index, so a file dropped
+// twice cannot run one prompt twice.
+func (i *ingress) applyPrompt(ctx context.Context, file string, index int, entry Entry) error {
+	ws, err := i.target(ctx, entry)
+	if err != nil {
+		return err
+	}
+	key := fmt.Sprintf("%s:%d", file, index)
+	_, err = i.deps.Prompts.Submit(ctx, ws, workspace.SaidText(entry.Prompt), key, commandFileOrigin, nil)
+	return err
+}
+
+// target resolves an entry's workspace. An entry naming BOTH an id and a dir
+// goes through the verbs' own ref resolution, so the command-file channel is
+// held to the same dir-mismatch refusal as the wire.
+func (i *ingress) target(ctx context.Context, entry Entry) (ids.WorkspaceID, error) {
+	if entry.Workspace != "" {
+		record, err := i.deps.Verbs.Resolve(ctx, &workspacev1.WorkspaceRef{
+			Id:  entry.Workspace,
+			Dir: entry.Dir,
+		})
+		if err != nil {
+			return "", err
+		}
+		return record.ID, nil
+	}
+	if i.deps.DB == nil {
+		return "", fmt.Errorf("this entry names only a dir and the ingress has no state client to resolve it with")
+	}
+	record, err := i.deps.DB.WorkspaceByDir(ctx, entry.Dir)
+	if err != nil {
+		return "", fmt.Errorf("no workspace is registered at %q: %w", entry.Dir, err)
+	}
+	return record.ID, nil
+}
