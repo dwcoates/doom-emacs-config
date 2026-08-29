@@ -843,6 +843,156 @@ frames begin."
     (should (equal agent-repl-test-connect--closes '((:cancelled))))
     (should-not (agent-repl-connect-connection-alive-p conn))))
 
+
+;;;; ---- Tests: stream acceptance (ON-OPEN) ----
+
+(defvar agent-repl-test-connect--opens 0
+  "How many times a stream test's ON-OPEN was called.")
+
+(defvar agent-repl-test-connect--order nil
+  "Callback order captured by an acceptance test, oldest first.")
+
+(defun agent-repl-test-connect--open-accepting-stream (conn)
+  "Open a stream on CONN counting ON-OPEN calls and recording callback order."
+  (agent-repl-connect-stream
+   conn "WatchDaemon" "{}"
+   (lambda (_alist) (setq agent-repl-test-connect--order
+                          (append agent-repl-test-connect--order '(:push))))
+   (lambda (_outcome) (setq agent-repl-test-connect--order
+                            (append agent-repl-test-connect--order '(:close))))
+   (lambda ()
+     (setq agent-repl-test-connect--opens (1+ agent-repl-test-connect--opens)
+           agent-repl-test-connect--order
+           (append agent-repl-test-connect--order '(:open))))))
+
+(ert-deftest agent-repl-test-connect-stream-on-open-fires-on-a-200 ()
+  "ACCEPTANCE IS THE HEADER BLOCK: a 200 status calls ON-OPEN."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((agent-repl-test-connect--opens 0)
+          (agent-repl-test-connect--order nil)
+          (conn (agent-repl-test-connect--conn)))
+      (agent-repl-test-connect--open-accepting-stream conn)
+      ;; Act
+      (agent-repl-test-connect--feed (agent-repl-test-connect--last-spawn)
+                                     (agent-repl-test-connect--http 200 ""))
+      ;; Assert
+      (should (= agent-repl-test-connect--opens 1)))))
+
+(ert-deftest agent-repl-test-connect-stream-on-open-fires-exactly-once ()
+  "Further body chunks are not further acceptances."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((agent-repl-test-connect--opens 0)
+          (agent-repl-test-connect--order nil)
+          (conn (agent-repl-test-connect--conn)))
+      (agent-repl-test-connect--open-accepting-stream conn)
+      (agent-repl-test-connect--feed (agent-repl-test-connect--last-spawn)
+                                     (agent-repl-test-connect--http 200 ""))
+      ;; Act
+      (agent-repl-test-connect--feed
+       (agent-repl-test-connect--last-spawn)
+       (agent-repl-connect-envelope-encode 0 "{\"n\":1}"))
+      ;; Assert
+      (should (= agent-repl-test-connect--opens 1)))))
+
+(ert-deftest agent-repl-test-connect-stream-on-open-precedes-the-first-push ()
+  "A subscriber is told it is subscribed BEFORE it is told anything else."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((agent-repl-test-connect--opens 0)
+          (agent-repl-test-connect--order nil)
+          (conn (agent-repl-test-connect--conn)))
+      (agent-repl-test-connect--open-accepting-stream conn)
+      ;; Act — headers and the first frame in ONE chunk, the tightest race
+      (agent-repl-test-connect--feed
+       (agent-repl-test-connect--last-spawn)
+       (concat (agent-repl-test-connect--http 200 "")
+               (agent-repl-connect-envelope-encode 0 "{\"n\":1}")))
+      ;; Assert
+      (should (equal agent-repl-test-connect--order '(:open :push))))))
+
+(ert-deftest agent-repl-test-connect-stream-on-open-does-not-fire-on-a-non-200 ()
+  "A refused stream was never accepted, so nothing may claim it was."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((agent-repl-test-connect--opens 0)
+          (agent-repl-test-connect--order nil)
+          (conn (agent-repl-test-connect--conn)))
+      (agent-repl-test-connect--open-accepting-stream conn)
+      ;; Act
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (agent-repl-test-connect--feed
+         record (agent-repl-test-connect--http
+                 503 "{\"code\":\"unavailable\",\"message\":\"down\"}"))
+        (agent-repl-test-connect--exit record))
+      ;; Assert
+      (should (= agent-repl-test-connect--opens 0)))))
+
+(ert-deftest agent-repl-test-connect-stream-on-open-does-not-fire-on-death-before-headers ()
+  "A curl that dies before any header block never accepted anything."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((agent-repl-test-connect--opens 0)
+          (agent-repl-test-connect--order nil)
+          (conn (agent-repl-test-connect--conn)))
+      (agent-repl-test-connect--open-accepting-stream conn)
+      ;; Act
+      (agent-repl-test-connect--exit (agent-repl-test-connect--last-spawn))
+      ;; Assert
+      (should (= agent-repl-test-connect--opens 0)))))
+
+(ert-deftest agent-repl-test-connect-stream-contains-an-on-open-exception ()
+  "A subscriber whose acceptance reaction signals must not kill the stream."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let* ((agent-repl-test-connect--pushes nil)
+           (agent-repl-test-connect--closes nil)
+           (conn (agent-repl-test-connect--conn)))
+      (agent-repl-connect-stream
+       conn "WatchDaemon" "{}"
+       (lambda (alist) (push alist agent-repl-test-connect--pushes))
+       (lambda (outcome) (push outcome agent-repl-test-connect--closes))
+       (lambda () (error "acceptance reaction blew up")))
+      ;; Act
+      (let ((record (agent-repl-test-connect--last-spawn)))
+        (agent-repl-test-connect--feed record (agent-repl-test-connect--http 200 ""))
+        (agent-repl-test-connect--feed
+         record (agent-repl-connect-envelope-encode 0 "{\"n\":1}")))
+      ;; Assert
+      (should (equal agent-repl-test-connect--pushes '(((n . 1))))))))
+
+(ert-deftest agent-repl-test-connect-stream-logs-an-on-open-exception ()
+  "The contained acceptance exception is on the record at ERROR."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let ((conn (agent-repl-test-connect--conn)))
+      (agent-repl-connect-stream
+       conn "WatchDaemon" "{}" #'ignore #'ignore
+       (lambda () (error "acceptance reaction blew up")))
+      ;; Act
+      (agent-repl-test-connect--feed (agent-repl-test-connect--last-spawn)
+                                     (agent-repl-test-connect--http 200 ""))
+      ;; Assert
+      (should (agent-repl-test-connect--logs-matching
+               'error "elisp\\.connect\\.open-handler-error")))))
+
+(ert-deftest agent-repl-test-connect-stream-without-an-on-open-still-accepts ()
+  "ON-OPEN is optional; a caller that does not want it is not an error."
+  ;; Arrange
+  (agent-repl-test-connect--with-transport
+    (let* ((agent-repl-test-connect--pushes nil)
+           (agent-repl-test-connect--closes nil)
+           (conn (agent-repl-test-connect--conn))
+           (stream (agent-repl-test-connect--open-stream
+                    conn 'agent-repl-test-connect--pushes
+                    'agent-repl-test-connect--closes)))
+      ;; Act
+      (agent-repl-test-connect--feed (agent-repl-test-connect--last-spawn)
+                                     (agent-repl-test-connect--http 200 ""))
+      ;; Assert
+      (should (agent-repl-connect-stream-opened-p stream)))))
+
 (provide 'test-connect)
 
 ;;; test-connect.el ends here
