@@ -8182,3 +8182,12 @@ token) + `CreateTask{title}`, `UpdateTask{task, set_title|set_done|
 set_open}`, `AssignWorkspaceTask{workspace, optional task}` (UNSET =
 unassign) on the SIDEBAR section; WSM stores tasks + assignments, the
 roster's task view renders them.
+
+## 2026-08-29 — durable prompt origin + roster badge (landed)
+
+`PromptOrigin` MOVED shim/v1 → conversation/v1 (layering: the durable
+record may not import shim.v1; shim.v1 imports it back for StartTurn) and
+`AgentPrompt` gains `origin = 4` — persisted with every delivered prompt,
+so replay routes merge-born rows and labels restart re-drives.
+`RosterRow.priority = 33` (optional `RosterRowPriorityBadge{label}`,
+resolver-composed): the drawn badge; ordering stays the resolver's.
