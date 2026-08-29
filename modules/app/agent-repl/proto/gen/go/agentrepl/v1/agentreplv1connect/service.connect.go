@@ -132,6 +132,13 @@ const (
 	// AgentReplWatchWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchWebWorkspace RPC.
 	AgentReplWatchWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchWebWorkspace"
+	// AgentReplOpenLoginProcedure is the fully-qualified name of the AgentRepl's OpenLogin RPC.
+	AgentReplOpenLoginProcedure = "/agentrepl.v1.AgentRepl/OpenLogin"
+	// AgentReplWatchLoginTerminalProcedure is the fully-qualified name of the AgentRepl's
+	// WatchLoginTerminal RPC.
+	AgentReplWatchLoginTerminalProcedure = "/agentrepl.v1.AgentRepl/WatchLoginTerminal"
+	// AgentReplCloseLoginProcedure is the fully-qualified name of the AgentRepl's CloseLogin RPC.
+	AgentReplCloseLoginProcedure = "/agentrepl.v1.AgentRepl/CloseLogin"
 	// AgentReplAdoptWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptWebWorkspace RPC.
 	AgentReplAdoptWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptWebWorkspace"
@@ -175,6 +182,9 @@ var (
 	agentReplWatchDaemonMethodDescriptor            = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplAdoptHostWorkspaceMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
 	agentReplWatchWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
+	agentReplOpenLoginMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
+	agentReplWatchLoginTerminalMethodDescriptor     = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
+	agentReplCloseLoginMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("CloseLogin")
 	agentReplAdoptWebWorkspaceMethodDescriptor      = agentReplServiceDescriptor.Methods().ByName("AdoptWebWorkspace")
 )
 
@@ -275,6 +285,15 @@ type AgentReplClient interface {
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error)
+	// Begin (or join) the account login flow — the daemon-owned pty running
+	// the vendor's login TUI. See endpoint_open_login.proto.
+	OpenLogin(context.Context, *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error)
+	// The login pty's duplex stream: keystrokes/resize in, raw bytes out,
+	// scrollback replayed on attach. See endpoint_watch_login_terminal.proto.
+	WatchLoginTerminal(context.Context) *connect.BidiStreamForClient[v1.LoginTerminalInput, v1.LoginTerminalOutput]
+	// End the login session; closing an absent one is success. See
+	// endpoint_close_login.proto.
+	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -500,6 +519,24 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplWatchWebWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		openLogin: connect.NewClient[v1.OpenLoginRequest, v1.OpenLoginResponse](
+			httpClient,
+			baseURL+AgentReplOpenLoginProcedure,
+			connect.WithSchema(agentReplOpenLoginMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		watchLoginTerminal: connect.NewClient[v1.LoginTerminalInput, v1.LoginTerminalOutput](
+			httpClient,
+			baseURL+AgentReplWatchLoginTerminalProcedure,
+			connect.WithSchema(agentReplWatchLoginTerminalMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		closeLogin: connect.NewClient[v1.CloseLoginRequest, v1.CloseLoginResponse](
+			httpClient,
+			baseURL+AgentReplCloseLoginProcedure,
+			connect.WithSchema(agentReplCloseLoginMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		adoptWebWorkspace: connect.NewClient[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplAdoptWebWorkspaceProcedure,
@@ -546,6 +583,9 @@ type agentReplClient struct {
 	watchDaemon            *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	adoptHostWorkspace     *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
 	watchWebWorkspace      *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
+	openLogin              *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
+	watchLoginTerminal     *connect.Client[v1.LoginTerminalInput, v1.LoginTerminalOutput]
+	closeLogin             *connect.Client[v1.CloseLoginRequest, v1.CloseLoginResponse]
 	adoptWebWorkspace      *connect.Client[v1.AdoptWebWorkspaceRequest, v1.AdoptWebWorkspaceResponse]
 }
 
@@ -724,6 +764,21 @@ func (c *agentReplClient) WatchWebWorkspace(ctx context.Context, req *connect.Re
 	return c.watchWebWorkspace.CallServerStream(ctx, req)
 }
 
+// OpenLogin calls agentrepl.v1.AgentRepl.OpenLogin.
+func (c *agentReplClient) OpenLogin(ctx context.Context, req *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error) {
+	return c.openLogin.CallUnary(ctx, req)
+}
+
+// WatchLoginTerminal calls agentrepl.v1.AgentRepl.WatchLoginTerminal.
+func (c *agentReplClient) WatchLoginTerminal(ctx context.Context) *connect.BidiStreamForClient[v1.LoginTerminalInput, v1.LoginTerminalOutput] {
+	return c.watchLoginTerminal.CallBidiStream(ctx)
+}
+
+// CloseLogin calls agentrepl.v1.AgentRepl.CloseLogin.
+func (c *agentReplClient) CloseLogin(ctx context.Context, req *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error) {
+	return c.closeLogin.CallUnary(ctx, req)
+}
+
 // AdoptWebWorkspace calls agentrepl.v1.AgentRepl.AdoptWebWorkspace.
 func (c *agentReplClient) AdoptWebWorkspace(ctx context.Context, req *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
 	return c.adoptWebWorkspace.CallUnary(ctx, req)
@@ -826,6 +881,15 @@ type AgentReplHandler interface {
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error
+	// Begin (or join) the account login flow — the daemon-owned pty running
+	// the vendor's login TUI. See endpoint_open_login.proto.
+	OpenLogin(context.Context, *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error)
+	// The login pty's duplex stream: keystrokes/resize in, raw bytes out,
+	// scrollback replayed on attach. See endpoint_watch_login_terminal.proto.
+	WatchLoginTerminal(context.Context, *connect.BidiStream[v1.LoginTerminalInput, v1.LoginTerminalOutput]) error
+	// End the login session; closing an absent one is success. See
+	// endpoint_close_login.proto.
+	CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error)
 	// The webview's half of the handover rendezvous, called on the NEW
 	// daemon. See endpoint_adopt_web_workspace.proto.
 	AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error)
@@ -1047,6 +1111,24 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplWatchWebWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplOpenLoginHandler := connect.NewUnaryHandler(
+		AgentReplOpenLoginProcedure,
+		svc.OpenLogin,
+		connect.WithSchema(agentReplOpenLoginMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplWatchLoginTerminalHandler := connect.NewBidiStreamHandler(
+		AgentReplWatchLoginTerminalProcedure,
+		svc.WatchLoginTerminal,
+		connect.WithSchema(agentReplWatchLoginTerminalMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplCloseLoginHandler := connect.NewUnaryHandler(
+		AgentReplCloseLoginProcedure,
+		svc.CloseLogin,
+		connect.WithSchema(agentReplCloseLoginMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplAdoptWebWorkspaceHandler := connect.NewUnaryHandler(
 		AgentReplAdoptWebWorkspaceProcedure,
 		svc.AdoptWebWorkspace,
@@ -1125,6 +1207,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAdoptHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchWebWorkspaceProcedure:
 			agentReplWatchWebWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplOpenLoginProcedure:
+			agentReplOpenLoginHandler.ServeHTTP(w, r)
+		case AgentReplWatchLoginTerminalProcedure:
+			agentReplWatchLoginTerminalHandler.ServeHTTP(w, r)
+		case AgentReplCloseLoginProcedure:
+			agentReplCloseLoginHandler.ServeHTTP(w, r)
 		case AgentReplAdoptWebWorkspaceProcedure:
 			agentReplAdoptWebWorkspaceHandler.ServeHTTP(w, r)
 		default:
@@ -1274,6 +1362,18 @@ func (UnimplementedAgentReplHandler) AdoptHostWorkspace(context.Context, *connec
 
 func (UnimplementedAgentReplHandler) WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchWebWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) OpenLogin(context.Context, *connect.Request[v1.OpenLoginRequest]) (*connect.Response[v1.OpenLoginResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.OpenLogin is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) WatchLoginTerminal(context.Context, *connect.BidiStream[v1.LoginTerminalInput, v1.LoginTerminalOutput]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.WatchLoginTerminal is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) CloseLogin(context.Context, *connect.Request[v1.CloseLoginRequest]) (*connect.Response[v1.CloseLoginResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.CloseLogin is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) AdoptWebWorkspace(context.Context, *connect.Request[v1.AdoptWebWorkspaceRequest]) (*connect.Response[v1.AdoptWebWorkspaceResponse], error) {
