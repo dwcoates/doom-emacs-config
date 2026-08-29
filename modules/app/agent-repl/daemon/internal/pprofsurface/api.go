@@ -9,7 +9,6 @@ import (
 	"context"
 
 	"claude-repld/internal/dlog"
-	"claude-repld/internal/notimpl"
 )
 
 // Surface is a running profiling listener.
@@ -31,6 +30,8 @@ type Surface interface {
 // wildcard or routable bind is refused here rather than opened; the enabled
 // case records daemon.pprof.enabled at WARN with the resolved network,
 // address and url.
+// The caller opens this BEFORE booting any dependency, so a boot wedged on a
+// dependency is still diagnosable through it.
 func Open(ctx context.Context, addr string, log dlog.Logger) (Surface, error) {
-	return nil, notimpl.Err
+	return open(ctx, addr, log)
 }
