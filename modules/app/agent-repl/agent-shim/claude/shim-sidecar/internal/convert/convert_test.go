@@ -19,7 +19,6 @@ import (
 func testConverter(t *testing.T) *Converter {
 	t.Helper()
 	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
-	log.SetDiagnosticSink(func(logging.Diagnostic) {})
 	return New(log)
 }
 

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -43,7 +44,7 @@ const shutdownGrace = 5 * time.Second
 
 func main() {
 	base := defaultCacheDir()
-	socketPath := flag.String("socket", envStr(server.EnvSocket, filepath.Join(base, "sock", "store.sock")), "UDS path to serve store.v1.ShimStore on; defaults to $"+server.EnvSocket+" when set")
+	socketPath := flag.String("socket", socketDefault(base), "UDS path to serve store.v1.ShimStore on; defaults to $"+server.EnvSocket+" when set")
 	dbPath := flag.String("db", filepath.Join(base, "store", "events.db"), "SQLite database path")
 	logPath := flag.String("log", filepath.Join(base, "log", "shim-store.log"), "log file path (also mirrored to stderr)")
 	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
@@ -58,7 +59,7 @@ func main() {
 
 // reportFatal writes only bootstrap failures because all post-bootstrap errors
 // have already reached the canonical logger and its stderr sink.
-func reportFatal(err error, stderr *os.File) {
+func reportFatal(err error, stderr io.Writer) {
 	if !isBootstrapError(err) {
 		return
 	}
@@ -114,7 +115,7 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 	if err != nil {
 		return err
 	}
-	srv := server.New(storeAdapter{database}, log.With(logging.Fields{Component: "server"}), watchBuffer)
+	srv := server.New(database, log.With(logging.Fields{Component: "server"}), watchBuffer)
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
@@ -173,6 +174,16 @@ func openPprofSurface(addr string, log *logging.Logger) (*pprofsurface.Surface, 
 		}
 	}()
 	return surface, nil
+}
+
+// socketDefault is the --socket flag's default: $AGENT_REPL_STORE_SOCKET when
+// it is set, else the cache-dir path.
+//
+// AN EXPLICIT FLAG STILL BEATS THE ENVIRONMENT, because this only ever supplies
+// flag.String's default value. The variable exists so a test harness can point
+// every participant at a private store without editing a command line.
+func socketDefault(base string) string {
+	return envStr(server.EnvSocket, filepath.Join(base, "sock", "store.sock"))
 }
 
 // envStr returns the environment variable's value, or def when it is unset or

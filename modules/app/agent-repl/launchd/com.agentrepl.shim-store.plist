@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  com.agentrepl.shim-store — launchd user agent for the shim-store service
-  (§6.1, §13 of design-agent-shim-architecture.md).
+  com.agentrepl.shim-store — launchd user agent for the shim-store service.
+  The binding design is docs/overhaul/store.md (store.v1 served with Connect
+  over a UNIX domain socket; there is deliberately no health verb — the
+  doctor probes the Connect endpoints directly).
 
   TEMPLATE: this checked-in copy uses ~-relative paths so it reads portably
   and resolves on any machine. launchd does NOT expand `~`, so
@@ -9,9 +11,17 @@
   to the invoking user's absolute $HOME when copying this file into
   ~/Library/LaunchAgents/. Do not load this template file directly.
 
-  Flag contract (must match agent-shim/shim-store/main.go, §14.1 G2):
-    --socket  UDS server path       (~/.cache/agent-repl/sock/store.sock)
-    --db      SQLite/WAL event db    (~/.cache/agent-repl/store/events.db)
+  Flag contract (must match agent-shim/shim-store/main.go):
+    --socket  Connect-over-UDS server path (~/.cache/agent-repl/sock/store.sock)
+    --db      SQLite/WAL event db          (~/.cache/agent-repl/store/events.db)
+
+  Nothing else is passed: --log, --pprof and --watch-buffer keep their
+  defaults, and this service needs no other flag.
+
+  AGENT_REPL_STORE_SOCKET is the TEST-ONLY override of the --socket default
+  (an explicit --socket always beats it). It is deliberately NOT set here:
+  the OS-managed service is pinned to the real socket path by the explicit
+  --socket argument above, so no environment can move it.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
