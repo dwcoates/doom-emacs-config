@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ClientLogThrottle, type ClientLogSend } from "../src/clientlog-throttle.js";
-import type { ClientLogContext } from "../src/protocol.js";
+import type { ClientLogContext } from "../src/log.js";
 import type { ClientLogLevel } from "../src/log.js";
 
 interface SentRecord {
