@@ -212,3 +212,17 @@ export async function awaitSpoolExit(
     }
   });
 }
+
+/** Where one subagent's transcript lives, for existence assertions. */
+export function subagentTranscriptPathFor(
+  dirs: ShimDirectories,
+  vendorSessionId: string,
+  agentId: string,
+): string {
+  return subagentTranscriptPath(
+    dirs.configDir,
+    workspaceRealPath(dirs),
+    vendorSessionId,
+    agentId,
+  );
+}
