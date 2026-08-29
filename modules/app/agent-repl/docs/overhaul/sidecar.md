@@ -288,3 +288,45 @@ orchestration chain. Cross-cutting conventions are in
 - WORKFLOW IS KICKED: workflow journal/transcript ingestion vocabulary
   stays in the contract but the workflow feature is NOT implemented in
   this wave.
+
+## Kickoff increments and rulings (2026-08-29, project lead)
+
+- LANDED: the sidecar produces `AgentUpdate.context_cut` (upsert key
+  `session:context_cut:<record uuid>`, a page line of the main agent's book;
+  boundary + summary coalesced into one row) and `AgentUpdate.api_error`
+  (`session:api_error:<record uuid>`, never a terminal).
+- R15: file-plane user prompts are NEVER page lines — classified as unserved
+  vendor_specific{kind "user_prompt"}; the shim's AgentPrompt is the one
+  served form (subagent commissions ride AgentSubagentStart.prompt).
+- R10: session attribution is the agent-keyed spine; self-diagnostics are
+  logs only; no open-task snapshot — re-derive; always read
+  WriteBatchResponse. Restart correctness: on boot each tailer resumes from
+  the store's cursor REWOUND to the in-progress turn's first record (one
+  bounded backward scan per file per boot); the re-emitted records mint
+  identical write_ids and absorb as success. The mock vendor's files live
+  under `$AGENT_REPL_FAKE_SPOOL_ROOT` and `$CLAUDE_CONFIG_DIR/projects/
+  <cwd-slug>/`.
+
+- CROSS-SYSTEM PROCESS CONTRACTS (project lead, kickoff): one state root
+  `$AGENT_REPL_STATE_DIR` (default ~/.claude-emacs); the daemon binds ONE
+  loopback TCP listener serving Connect (HTTP/1.1 + h2c, binary + JSON) and
+  the webapp assets on one origin, writes `127.0.0.1:<port>` to
+  `$AGENT_REPL_STATE_DIR/daemon.addr` (atomic replace; removed on orderly
+  exit; a joining successor writes it only after it owns every workspace);
+  the webview URL is `http://<daemon.addr>/?workspace=<id>&dir=<dir>`
+  (`&composer=1` only in dev mode); the shim is spawned as `node
+  agent-shim/claude/shim/dist/main.js --listen <uds> --store-socket <uds>
+  --log-fd 3 [--fake]` with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED=1,
+  AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA (tests add
+  AGENT_REPL_FORBID_VENDOR_CALLS=1), cwd = the workspace; session facts
+  travel only in StartSession; readiness = the first healthy `diagnostics`
+  push on WatchSession; the store serves on ~/.cache/agent-repl/sock/
+  store.sock (tests: env AGENT_REPL_STORE_SOCKET, a flag beats it); kernel
+  locks live in ~/.cache/agent-repl/run/ — `workspace-<md5hex(clean abs
+  dir)[:8]>.lock` (shim-held from startup; the daemon probes ONLY this one,
+  flock LOCK_EX|LOCK_NB) and `session-<vendor session id>.lock` (taken
+  inside StartSession; pre-minted on a fresh start); proto/vocab/
+  render-colors.json + paint-classes.json are the daemon's, consumed by
+  webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
+  golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
+  `go 1.23`).

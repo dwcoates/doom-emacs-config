@@ -240,6 +240,9 @@ type SetSessionModelFailure struct {
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*SetSessionModelFailure_Cold
+	//	*SetSessionModelFailure_ModelNotInCatalog
+	//	*SetSessionModelFailure_NoSession
+	//	*SetSessionModelFailure_VendorRefused
 	Cause isSetSessionModelFailure_Cause `protobuf_oneof:"cause"`
 	// The shim's account, for a human and for logs; never switched on.
 	Detail        string `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
@@ -293,6 +296,33 @@ func (x *SetSessionModelFailure) GetCold() *v1.SessionCold {
 	return nil
 }
 
+func (x *SetSessionModelFailure) GetModelNotInCatalog() *SetSessionModelNotInCatalog {
+	if x != nil {
+		if x, ok := x.Cause.(*SetSessionModelFailure_ModelNotInCatalog); ok {
+			return x.ModelNotInCatalog
+		}
+	}
+	return nil
+}
+
+func (x *SetSessionModelFailure) GetNoSession() *SetSessionModelNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*SetSessionModelFailure_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *SetSessionModelFailure) GetVendorRefused() *SetSessionModelVendorRefused {
+	if x != nil {
+		if x, ok := x.Cause.(*SetSessionModelFailure_VendorRefused); ok {
+			return x.VendorRefused
+		}
+	}
+	return nil
+}
+
 func (x *SetSessionModelFailure) GetDetail() string {
 	if x != nil {
 		return x.Detail
@@ -310,7 +340,136 @@ type SetSessionModelFailure_Cold struct {
 	Cold *v1.SessionCold `protobuf:"bytes,1,opt,name=cold,proto3,oneof"`
 }
 
+type SetSessionModelFailure_ModelNotInCatalog struct {
+	// The model is not one of the catalog's served options.
+	ModelNotInCatalog *SetSessionModelNotInCatalog `protobuf:"bytes,3,opt,name=model_not_in_catalog,json=modelNotInCatalog,proto3,oneof"`
+}
+
+type SetSessionModelFailure_NoSession struct {
+	// No session is open on this shim.
+	NoSession *SetSessionModelNoSession `protobuf:"bytes,4,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type SetSessionModelFailure_VendorRefused struct {
+	// The vendor refused the switch; `detail` carries its wording.
+	VendorRefused *SetSessionModelVendorRefused `protobuf:"bytes,5,opt,name=vendor_refused,json=vendorRefused,proto3,oneof"`
+}
+
 func (*SetSessionModelFailure_Cold) isSetSessionModelFailure_Cause() {}
+
+func (*SetSessionModelFailure_ModelNotInCatalog) isSetSessionModelFailure_Cause() {}
+
+func (*SetSessionModelFailure_NoSession) isSetSessionModelFailure_Cause() {}
+
+func (*SetSessionModelFailure_VendorRefused) isSetSessionModelFailure_Cause() {}
+
+type SetSessionModelNotInCatalog struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSessionModelNotInCatalog) Reset() {
+	*x = SetSessionModelNotInCatalog{}
+	mi := &file_shim_v1_endpoint_set_session_model_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionModelNotInCatalog) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionModelNotInCatalog) ProtoMessage() {}
+
+func (x *SetSessionModelNotInCatalog) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_set_session_model_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionModelNotInCatalog.ProtoReflect.Descriptor instead.
+func (*SetSessionModelNotInCatalog) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_set_session_model_proto_rawDescGZIP(), []int{4}
+}
+
+type SetSessionModelNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSessionModelNoSession) Reset() {
+	*x = SetSessionModelNoSession{}
+	mi := &file_shim_v1_endpoint_set_session_model_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionModelNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionModelNoSession) ProtoMessage() {}
+
+func (x *SetSessionModelNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_set_session_model_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionModelNoSession.ProtoReflect.Descriptor instead.
+func (*SetSessionModelNoSession) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_set_session_model_proto_rawDescGZIP(), []int{5}
+}
+
+type SetSessionModelVendorRefused struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSessionModelVendorRefused) Reset() {
+	*x = SetSessionModelVendorRefused{}
+	mi := &file_shim_v1_endpoint_set_session_model_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSessionModelVendorRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSessionModelVendorRefused) ProtoMessage() {}
+
+func (x *SetSessionModelVendorRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_set_session_model_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSessionModelVendorRefused.ProtoReflect.Descriptor instead.
+func (*SetSessionModelVendorRefused) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_set_session_model_proto_rawDescGZIP(), []int{6}
+}
 
 var File_shim_v1_endpoint_set_session_model_proto protoreflect.FileDescriptor
 
@@ -327,11 +486,18 @@ const file_shim_v1_endpoint_set_session_model_proto_rawDesc = "" +
 	"\afailure\x18\x02 \x01(\v2\x1f.shim.v1.SetSessionModelFailureH\x00R\afailureB\b\n" +
 	"\x06result\"c\n" +
 	"\x16SetSessionModelSuccess\x12I\n" +
-	"\rmodel_changed\x18\x01 \x01(\v2$.conversation.v1.SessionModelChangedR\fmodelChanged\"m\n" +
+	"\rmodel_changed\x18\x01 \x01(\v2$.conversation.v1.SessionModelChangedR\fmodelChanged\"\xda\x02\n" +
 	"\x16SetSessionModelFailure\x122\n" +
-	"\x04cold\x18\x01 \x01(\v2\x1c.conversation.v1.SessionColdH\x00R\x04cold\x12\x16\n" +
+	"\x04cold\x18\x01 \x01(\v2\x1c.conversation.v1.SessionColdH\x00R\x04cold\x12W\n" +
+	"\x14model_not_in_catalog\x18\x03 \x01(\v2$.shim.v1.SetSessionModelNotInCatalogH\x00R\x11modelNotInCatalog\x12B\n" +
+	"\n" +
+	"no_session\x18\x04 \x01(\v2!.shim.v1.SetSessionModelNoSessionH\x00R\tnoSession\x12N\n" +
+	"\x0evendor_refused\x18\x05 \x01(\v2%.shim.v1.SetSessionModelVendorRefusedH\x00R\rvendorRefused\x12\x16\n" +
 	"\x06detail\x18\x02 \x01(\tR\x06detailB\a\n" +
-	"\x05causeB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
+	"\x05cause\"\x1d\n" +
+	"\x1bSetSessionModelNotInCatalog\"\x1a\n" +
+	"\x18SetSessionModelNoSession\"\x1e\n" +
+	"\x1cSetSessionModelVendorRefusedB Z\x1eagentrepl/proto/shim/v1;shimv1b\x06proto3"
 
 var (
 	file_shim_v1_endpoint_set_session_model_proto_rawDescOnce sync.Once
@@ -345,29 +511,35 @@ func file_shim_v1_endpoint_set_session_model_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_set_session_model_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_set_session_model_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_shim_v1_endpoint_set_session_model_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_shim_v1_endpoint_set_session_model_proto_goTypes = []any{
-	(*SetSessionModelRequest)(nil),    // 0: shim.v1.SetSessionModelRequest
-	(*SetSessionModelResponse)(nil),   // 1: shim.v1.SetSessionModelResponse
-	(*SetSessionModelSuccess)(nil),    // 2: shim.v1.SetSessionModelSuccess
-	(*SetSessionModelFailure)(nil),    // 3: shim.v1.SetSessionModelFailure
-	(*v1.AgentModel)(nil),             // 4: conversation.v1.AgentModel
-	(*v1.SessionColdRemediation)(nil), // 5: conversation.v1.SessionColdRemediation
-	(*v1.SessionModelChanged)(nil),    // 6: conversation.v1.SessionModelChanged
-	(*v1.SessionCold)(nil),            // 7: conversation.v1.SessionCold
+	(*SetSessionModelRequest)(nil),       // 0: shim.v1.SetSessionModelRequest
+	(*SetSessionModelResponse)(nil),      // 1: shim.v1.SetSessionModelResponse
+	(*SetSessionModelSuccess)(nil),       // 2: shim.v1.SetSessionModelSuccess
+	(*SetSessionModelFailure)(nil),       // 3: shim.v1.SetSessionModelFailure
+	(*SetSessionModelNotInCatalog)(nil),  // 4: shim.v1.SetSessionModelNotInCatalog
+	(*SetSessionModelNoSession)(nil),     // 5: shim.v1.SetSessionModelNoSession
+	(*SetSessionModelVendorRefused)(nil), // 6: shim.v1.SetSessionModelVendorRefused
+	(*v1.AgentModel)(nil),                // 7: conversation.v1.AgentModel
+	(*v1.SessionColdRemediation)(nil),    // 8: conversation.v1.SessionColdRemediation
+	(*v1.SessionModelChanged)(nil),       // 9: conversation.v1.SessionModelChanged
+	(*v1.SessionCold)(nil),               // 10: conversation.v1.SessionCold
 }
 var file_shim_v1_endpoint_set_session_model_proto_depIdxs = []int32{
-	4, // 0: shim.v1.SetSessionModelRequest.model:type_name -> conversation.v1.AgentModel
-	5, // 1: shim.v1.SetSessionModelRequest.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
-	2, // 2: shim.v1.SetSessionModelResponse.success:type_name -> shim.v1.SetSessionModelSuccess
-	3, // 3: shim.v1.SetSessionModelResponse.failure:type_name -> shim.v1.SetSessionModelFailure
-	6, // 4: shim.v1.SetSessionModelSuccess.model_changed:type_name -> conversation.v1.SessionModelChanged
-	7, // 5: shim.v1.SetSessionModelFailure.cold:type_name -> conversation.v1.SessionCold
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	7,  // 0: shim.v1.SetSessionModelRequest.model:type_name -> conversation.v1.AgentModel
+	8,  // 1: shim.v1.SetSessionModelRequest.cold_remediation:type_name -> conversation.v1.SessionColdRemediation
+	2,  // 2: shim.v1.SetSessionModelResponse.success:type_name -> shim.v1.SetSessionModelSuccess
+	3,  // 3: shim.v1.SetSessionModelResponse.failure:type_name -> shim.v1.SetSessionModelFailure
+	9,  // 4: shim.v1.SetSessionModelSuccess.model_changed:type_name -> conversation.v1.SessionModelChanged
+	10, // 5: shim.v1.SetSessionModelFailure.cold:type_name -> conversation.v1.SessionCold
+	4,  // 6: shim.v1.SetSessionModelFailure.model_not_in_catalog:type_name -> shim.v1.SetSessionModelNotInCatalog
+	5,  // 7: shim.v1.SetSessionModelFailure.no_session:type_name -> shim.v1.SetSessionModelNoSession
+	6,  // 8: shim.v1.SetSessionModelFailure.vendor_refused:type_name -> shim.v1.SetSessionModelVendorRefused
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_set_session_model_proto_init() }
@@ -382,6 +554,9 @@ func file_shim_v1_endpoint_set_session_model_proto_init() {
 	}
 	file_shim_v1_endpoint_set_session_model_proto_msgTypes[3].OneofWrappers = []any{
 		(*SetSessionModelFailure_Cold)(nil),
+		(*SetSessionModelFailure_ModelNotInCatalog)(nil),
+		(*SetSessionModelFailure_NoSession)(nil),
+		(*SetSessionModelFailure_VendorRefused)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -389,7 +564,7 @@ func file_shim_v1_endpoint_set_session_model_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_set_session_model_proto_rawDesc), len(file_shim_v1_endpoint_set_session_model_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
