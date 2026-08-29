@@ -66,8 +66,12 @@ owed before landing.
 
 ## Daemon coverage
 
-1. Login — INV: the CURRENT implementation solves login without the TUI;
-   investigate how and land THAT mechanism (do not port the TUI).
+1. Login — RULED (post-investigation): the pty TUI IS the only current
+   mechanism (nothing parses the TUI or opens a browser; detection is a
+   .claude.json email read). PORT THE PTY PATH: an OpenLogin verb + one
+   duplex byte stream (pty bytes out, keystrokes in, resize control) +
+   close, per-account idempotent; webapp renders it xterm-style
+   full-screen; logged-out detection stays the .claude.json probe.
 2. Fresh-conversation gate — DOC: daemon.md INVARIANT — StartSession(fresh)
    only with proof the workspace never had a conversation; else resume or
    refuse loudly.
@@ -240,7 +244,8 @@ owed before landing.
 
 ## Webapp coverage
 
-1. Login — INV (rides daemon #1: land the current non-TUI mechanism).
+1. Login — RULED with daemon #1: the pty path is ported; the webapp
+   keeps its xterm-style login overlay over the new duplex stream.
 2. Chess widget — DEAD (with daemon #26).
 3. Host hooks — DEAD: NO window.agentRepl* surface at all; the webview is
    purely daemon-driven.
@@ -332,9 +337,8 @@ owed before landing.
 
 ## Owed follow-ups
 
-- INV login: read the current daemon/webapp code to find the non-TUI
-  login mechanism; land that design (daemon.md + webapp.md + any verb).
-- PROTO increments to land: /context rich schema (orchestrator-designed
+- PROTO increments to land: login (OpenLogin verb + duplex pty stream
+  with resize + close), /context rich schema (orchestrator-designed
   from the vendor's get_context_usage), durable prompt origin, creation
   facts (merge actions, priority, fork-from, consent, name?, parentage,
   model, one-shot arm — note elisp #4 "All three" includes NAME),
