@@ -1,0 +1,159 @@
+package workspace
+
+import (
+	"errors"
+	"fmt"
+
+	shimv1 "agentrepl/proto/shim/v1"
+)
+
+// The shim's own refusal arm names, spelled exactly as the shim.v1 failure
+// oneofs spell them. They are constants because each one becomes a row in
+// daemon/ERROR-ARMS.md and a verb's answer to the caller, and the three must
+// not drift.
+const (
+	// ArmShimUnknownAgent is an agent the shim does not know: the addressed row
+	// is stale.
+	ArmShimUnknownAgent = "unknown_agent"
+	// ArmShimNoOpenAsk is an answer to an ask the shim has already closed.
+	ArmShimNoOpenAsk = "no_open_ask"
+	// ArmShimAnswerMismatch is an answer whose shape the shim rejected.
+	ArmShimAnswerMismatch = "answer_mismatch"
+	// ArmShimNothingRunning is a stop with nothing to stop.
+	ArmShimNothingRunning = "nothing_running"
+	// ArmShimNoSession is a shim verb against a session that is not up.
+	ArmShimNoSession = "no_session"
+	// ArmShimNotDeliverable is the SDK limit landed in landing 3: a prompt
+	// addressed to a subagent has NO SDK ROUTE. It is answered honestly rather
+	// than swallowed — the control is not hidden this wave, so the caller is
+	// told the route does not exist.
+	ArmShimNotDeliverable = "not_deliverable"
+	// ArmShimUnknownWork is a detached shell the shim does not know.
+	ArmShimUnknownWork = "unknown_work"
+	// ArmShimAlreadyEnded is a detached shell that has already finished.
+	ArmShimAlreadyEnded = "already_ended"
+	// ArmShimTurnLive is a kill the shim refused because the turn is still
+	// live.
+	ArmShimTurnLive = "live"
+	// ArmShimNotTheOpenTurn is a kill naming a turn that is not the open one.
+	ArmShimNotTheOpenTurn = "not_the_open_turn"
+	// ArmShimNoTurnOpen is a kill with no turn open.
+	ArmShimNoTurnOpen = "no_turn_open"
+	// ArmShimQueryRefusedToEnd is a session kill the vendor query would not
+	// honor.
+	ArmShimQueryRefusedToEnd = "query_refused_to_end"
+	// ArmShimUnspecified is a failure whose kind oneof is unset, which is
+	// illegal on the wire and is surfaced rather than guessed at.
+	ArmShimUnspecified = "unspecified"
+)
+
+// ShimRefusal is one shim verb's TYPED refusal, carried up to the verb that
+// asked so the caller learns WHICH refusal it was rather than a sentence.
+//
+// It exists because the shim's failure oneofs are the only place that
+// distinguishes "the row you clicked is stale" from "the SDK has no route for
+// this at all", and collapsing both into one error string would have the verbs
+// answer every shim refusal identically.
+type ShimRefusal struct {
+	// Verb is the shim verb that refused.
+	Verb string
+	// Arm is the failure oneof's arm name.
+	Arm string
+	// Detail is the shim's own sentence, kept as evidence.
+	Detail string
+}
+
+// Error renders the verb, the arm and the shim's own words, because the
+// evidence is the point.
+func (r *ShimRefusal) Error() string {
+	if r.Detail == "" {
+		return fmt.Sprintf("shim %s refused: %s", r.Verb, r.Arm)
+	}
+	return fmt.Sprintf("shim %s refused: %s: %s", r.Verb, r.Arm, r.Detail)
+}
+
+// AsShimRefusal reports whether err is a typed shim refusal, which is how a
+// verb decides between propagating a named arm and reporting a transport
+// failure.
+func AsShimRefusal(err error) (*ShimRefusal, bool) {
+	var refusal *ShimRefusal
+	if errors.As(err, &refusal) {
+		return refusal, true
+	}
+	return nil, false
+}
+
+// Benign reports whether this refusal is a DOMAIN OUTCOME rather than a
+// failure: the thing the caller asked to stop was already not running. Those
+// answer as success — "nothing running" is an answer — so a verb never turns
+// one into a refusal.
+func (r *ShimRefusal) Benign() bool {
+	switch r.Arm {
+	case ArmShimNothingRunning, ArmShimAlreadyEnded, ArmShimNoTurnOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// updateAgentArm names an UpdateAgent failure's arm.
+func updateAgentArm(failure *shimv1.UpdateAgentFailure) string {
+	switch failure.GetKind().(type) {
+	case *shimv1.UpdateAgentFailure_UnknownAgent:
+		return ArmShimUnknownAgent
+	case *shimv1.UpdateAgentFailure_NoOpenAsk:
+		return ArmShimNoOpenAsk
+	case *shimv1.UpdateAgentFailure_AnswerMismatch:
+		return ArmShimAnswerMismatch
+	case *shimv1.UpdateAgentFailure_NothingRunning:
+		return ArmShimNothingRunning
+	case *shimv1.UpdateAgentFailure_NoSession:
+		return ArmShimNoSession
+	case *shimv1.UpdateAgentFailure_NotDeliverable:
+		return ArmShimNotDeliverable
+	default:
+		return ArmShimUnspecified
+	}
+}
+
+// stopBashArm names a StopBash failure's arm.
+func stopBashArm(failure *shimv1.StopBashFailure) string {
+	switch failure.GetKind().(type) {
+	case *shimv1.StopBashFailure_UnknownWork:
+		return ArmShimUnknownWork
+	case *shimv1.StopBashFailure_AlreadyEnded:
+		return ArmShimAlreadyEnded
+	default:
+		return ArmShimUnspecified
+	}
+}
+
+// killTurnArm names a KillTurn failure's cause.
+func killTurnArm(failure *shimv1.KillTurnFailure) string {
+	switch failure.GetCause().(type) {
+	case *shimv1.KillTurnFailure_Live:
+		return ArmShimTurnLive
+	case *shimv1.KillTurnFailure_NotTheOpenTurn:
+		return ArmShimNotTheOpenTurn
+	case *shimv1.KillTurnFailure_NoTurnOpen:
+		return ArmShimNoTurnOpen
+	case *shimv1.KillTurnFailure_NoSession:
+		return ArmShimNoSession
+	default:
+		return ArmShimUnspecified
+	}
+}
+
+// killSessionArm names a KillSession failure's cause.
+func killSessionArm(failure *shimv1.KillSessionFailure) string {
+	switch failure.GetCause().(type) {
+	case *shimv1.KillSessionFailure_Live:
+		return ArmShimTurnLive
+	case *shimv1.KillSessionFailure_NoSession:
+		return ArmShimNoSession
+	case *shimv1.KillSessionFailure_QueryRefusedToEnd:
+		return ArmShimQueryRefusedToEnd
+	default:
+		return ArmShimUnspecified
+	}
+}
