@@ -285,6 +285,26 @@ func TestOpenRefusesADatabaseDirectoryItCannotCreate(t *testing.T) {
 	s.assertLogged(t, "error", "creating the database directory failed")
 }
 
+func TestOpenRecordsAFirstCreateWithoutWarning(t *testing.T) {
+	// Arrange: an empty database, which is what every fresh store starts from.
+	s, log := newSink(t)
+	path := filepath.Join(t.TempDir(), "store.db")
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert: creating a schema where there was none is not a degraded state.
+	for _, record := range s.records(t) {
+		if record["level"] == "warn" {
+			t.Fatalf("a first create logged a warning: %v", record)
+		}
+	}
+}
+
 func TestOpenNukesADatabaseStampedAtAnotherVersion(t *testing.T) {
 	// Arrange: a store with a row in it, re-stamped at a foreign version.
 	path := filepath.Join(t.TempDir(), "store.db")
