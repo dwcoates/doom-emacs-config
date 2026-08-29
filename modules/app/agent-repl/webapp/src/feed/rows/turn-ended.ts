@@ -10,9 +10,10 @@
  *    FINAL-ANSWER TREATMENT on the response row it NAMES — the green border,
  *    applied to that row and to no other. Absence of a name draws no border
  *    anywhere, because a turn can conclude with no answering prose.
- *  - `errored` draws the cause, one distinct line per arm. The vendor's own
- *    sentence rides above it when the record carried one; the arm is what says
- *    what happened, and this end never re-words one arm as another.
+ *  - `errored` draws THE DAEMON'S HEADLINE, verbatim. The cause is named by the
+ *    arm and worded by the producer, so there is no sentence table here to keep
+ *    in step with the schema and no arm this end can re-word as another. The
+ *    vendor's own sentence rides below it when the record carried one.
  *  - `interrupted` draws the stop as the stop it was — the user's act, never a
  *    failure.
  *
@@ -23,13 +24,14 @@
  */
 import { formatDurationCeil } from "../../duration.js";
 import { log } from "../../log.js";
-import { msOf, requireCase, unreachableArm } from "../../rpc/strict.js";
+import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedId,
   FeedTurnEnded,
   FeedTurnEndedConcluded,
   FeedTurnEndedErrored,
   FeedTurnEndedInterrupted,
+  FeedTurnErrorHeadline,
   FeedTurnErrorMessage,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
@@ -46,37 +48,14 @@ const PATH = "FeedTurnEnded";
 export const FINAL_RESPONSE_CLASS = "final-response";
 
 /**
- * The sentence each error arm draws.
+ * The error arms that CARRY A WAIT, which is the only per-arm knowledge left in
+ * this module now that the wording is the daemon's.
  *
- * A TOTAL RECORD OVER THE ARM CASES, so a cause added to the contract fails to
- * compile here until someone decides what it says — the alternative is an arm
- * silently rendering as the field name, or worse as a neighbouring cause. Two
- * of these wordings are load-bearing distinctions the schema draws explicitly:
- * `max_tokens` is a response that WAS CUT at the ceiling, `max_output_tokens` is
- * a request refused outright for asking for more than the model produces, and
- * retrying the second unchanged cannot succeed.
+ * Held as data so the suite can hold it against the schema: an arm that grows a
+ * `retry_after_ms` without being listed here would silently stop counting down,
+ * which is the one failure a verbatim headline cannot make loud on its own.
  */
-const ERROR_SENTENCES = {
-  rateLimited: "rate limited",
-  overloaded: "the API is overloaded",
-  authenticationFailed: "authentication failed — the credential was rejected",
-  permissionDenied: "the credential lacks permission for this request",
-  invalidRequest: "the request was refused as malformed",
-  requestTooLarge: "the request exceeded the size limit",
-  notFound: "the model or resource does not exist",
-  internal: "the API hit an internal error",
-  vendorUnmodeled: "an API error this build does not model",
-  maxTokens: "cut short at the output ceiling",
-  refusal: "the model refused to continue",
-  queryDied: "the query process died out from under the turn",
-  billingError: "the account cannot be charged — act on the billing",
-  modelNotFound: "this account has no such model — pick another",
-  oauthOrgNotAllowed: "this organization does not allow this OAuth access",
-  maxOutputTokens: "refused: asked for more output than the model produces",
-} as const satisfies Record<string, string>;
-
-/** Every error arm this build words, for the suite to hold against the schema. */
-export const TURN_ERROR_ARMS: readonly string[] = Object.keys(ERROR_SENTENCES);
+export const TURN_ERROR_WAIT_ARMS: readonly string[] = ["rateLimited", "overloaded"];
 
 /** The terminal row. */
 export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLElement {
@@ -165,10 +144,9 @@ export function drawFeedTurnEndedErrored(
   el.setAttribute("data-arm", error.case);
   el.setAttribute("data-turn-error", error.case);
 
-  const cause = document.createElement("div");
-  cause.className = "turn-ended-cause";
-  cause.textContent = errorSentence(error);
-  el.append(cause);
+  el.append(
+    drawFeedTurnErrorHeadline(requireMessage(errored.headline, `${PATH}.errored.headline`)),
+  );
 
   if (errored.message !== undefined) {
     el.append(drawFeedTurnErrorMessage(errored.message));
@@ -187,13 +165,20 @@ export function drawFeedTurnEndedErrored(
   return el;
 }
 
-/** The arm's own sentence, with the unmodeled arm's vendor type named. */
-function errorSentence(error: { case: keyof typeof ERROR_SENTENCES; value: unknown }): string {
-  const sentence = ERROR_SENTENCES[error.case];
-  if (error.case === "vendorUnmodeled") {
-    return `${sentence}: ${(error.value as { type: string }).type}`;
-  }
-  return sentence;
+/**
+ * THE DAEMON'S HEADLINE, drawn verbatim.
+ *
+ * The producer composes it from the arm — it is the one place the cause is
+ * turned into words, including the unmodeled arm's vendor type — so this
+ * function states the sentence and never inspects, appends to, or re-words it.
+ * The field is REQUIRED: an errored row with no headline is a malformed view,
+ * not a row to draw a stand-in sentence on.
+ */
+export function drawFeedTurnErrorHeadline(headline: FeedTurnErrorHeadline): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "turn-ended-cause";
+  el.textContent = headline.text;
+  return el;
 }
 
 /**
@@ -203,11 +188,8 @@ function errorSentence(error: { case: keyof typeof ERROR_SENTENCES; value: unkno
  * carries one and the vendor left it unset — which is a different fact, and the
  * countdown words it differently.
  */
-function retryWait(error: {
-  case: keyof typeof ERROR_SENTENCES;
-  value: unknown;
-}): bigint | undefined | null {
-  if (error.case !== "rateLimited" && error.case !== "overloaded") return null;
+function retryWait(error: { case: string; value: unknown }): bigint | undefined | null {
+  if (!TURN_ERROR_WAIT_ARMS.includes(error.case)) return null;
   return (error.value as { retryAfterMs?: bigint }).retryAfterMs;
 }
 
