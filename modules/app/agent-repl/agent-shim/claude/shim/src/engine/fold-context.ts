@@ -23,7 +23,8 @@
  * two can be built in parallel and the dependency is stated rather than
  * implied. The record plane's `Fold` satisfies this structurally.
  */
-import type { conversationv1 } from "../proto.js";
+import { create } from "@bufbuild/protobuf";
+import { conversationv1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
 import type { SdkMessage } from "../sdk/types.js";
 
@@ -72,4 +73,32 @@ export interface EngineFoldOutput {
 /** The fold, as the engine drives it: one call per message, in arrival order. */
 export interface EngineFold {
   onSdkMessage(message: SdkMessage, context: FoldContext): EngineFoldOutput;
+}
+
+/**
+ * The fold before there is a fold.
+ *
+ * SCAFFOLD, replaced by the record-plane agent's `convert/fold.ts`. It converts
+ * NOTHING — producing frames is that agent's whole brief — but it does report
+ * the turn's end, because the turn's end is a CONTROL-PLANE fact the engine
+ * needs to close the turn, resolve a pending model change and push context
+ * usage. Wiring an engine to a fold that never ended a turn would leave every
+ * session permanently mid-turn, which is a worse lie than producing no records.
+ *
+ * `turnEnded.frame` carries the agent id and nothing else: the terminal's own
+ * taxonomy is the record plane's to map, and stating an arm here would be this
+ * file inventing a conversation fact.
+ */
+export function turnBoundaryOnlyFold(): EngineFold {
+  return {
+    onSdkMessage: (message, context): EngineFoldOutput =>
+      message.type === "result"
+        ? {
+            entries: [],
+            turnEnded: {
+              frame: create(conversationv1.AgentFrameSchema, { agentId: context.mainAgentId }),
+            },
+          }
+        : { entries: [] },
+  };
 }
