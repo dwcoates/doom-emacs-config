@@ -13,8 +13,9 @@
 package agentreplv1
 
 import (
-	v1 "agentrepl/proto/conversation/v1"
-	v11 "agentrepl/proto/frontend/v1"
+	v11 "agentrepl/proto/conversation/v1"
+	v12 "agentrepl/proto/frontend/v1"
+	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -32,9 +33,15 @@ const (
 // What the user typed, submitted whole.
 type SubmitPromptRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
+	// The workspace this submission belongs to — the daemon-minted ref,
+	// echoed verbatim like every per-workspace request. Names the workspace
+	// even when `feed` is unset (the root feed has no id of its own); when
+	// `feed` is set it must belong to this workspace, else the submission is
+	// refused.
+	Workspace *v1.WorkspaceRef `protobuf:"bytes,5,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// The composed prompt — one canonical form client → daemon → tray → shim →
 	// record (a held prompt IS a UserSaid).
-	Said *v1.UserSaid `protobuf:"bytes,1,opt,name=said,proto3" json:"said,omitempty"`
+	Said *v11.UserSaid `protobuf:"bytes,1,opt,name=said,proto3" json:"said,omitempty"`
 	// Client-minted; the daemon refuses duplicates by it, so a retried request
 	// is not a second turn (3b: SubmitPrompt is the one verb where a duplicate
 	// is costly and undetectable).
@@ -45,12 +52,12 @@ type SubmitPromptRequest struct {
 	// prompt is addressed to THAT agent, and the daemon delivers it through
 	// the same hold-and-deliver machinery (the shim's UpdateAgent.prompt
 	// underneath). Command recognition is unchanged either way.
-	Feed *v11.FeedId `protobuf:"bytes,3,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
+	Feed *v12.FeedId `protobuf:"bytes,3,opt,name=feed,proto3,oneof" json:"feed,omitempty"`
 	// WHICH SEND SITE caused this prompt — the closed attribution vocabulary
 	// every Emacs send site chooses its own value from; the daemon persists
 	// it onto the turn's durable record (StartTurn.origin → AgentPrompt).
 	// Never UNSPECIFIED: a submission carrying it is refused at once.
-	Origin        v1.PromptOrigin `protobuf:"varint,4,opt,name=origin,proto3,enum=conversation.v1.PromptOrigin" json:"origin,omitempty"`
+	Origin        v11.PromptOrigin `protobuf:"varint,4,opt,name=origin,proto3,enum=conversation.v1.PromptOrigin" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -85,7 +92,14 @@ func (*SubmitPromptRequest) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SubmitPromptRequest) GetSaid() *v1.UserSaid {
+func (x *SubmitPromptRequest) GetWorkspace() *v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+func (x *SubmitPromptRequest) GetSaid() *v11.UserSaid {
 	if x != nil {
 		return x.Said
 	}
@@ -99,18 +113,18 @@ func (x *SubmitPromptRequest) GetIdempotencyKey() string {
 	return ""
 }
 
-func (x *SubmitPromptRequest) GetFeed() *v11.FeedId {
+func (x *SubmitPromptRequest) GetFeed() *v12.FeedId {
 	if x != nil {
 		return x.Feed
 	}
 	return nil
 }
 
-func (x *SubmitPromptRequest) GetOrigin() v1.PromptOrigin {
+func (x *SubmitPromptRequest) GetOrigin() v11.PromptOrigin {
 	if x != nil {
 		return x.Origin
 	}
-	return v1.PromptOrigin(0)
+	return v11.PromptOrigin(0)
 }
 
 // THE ARM IS THE OUTCOME.
@@ -354,7 +368,7 @@ func (x *SubmitPromptCommandRefused) GetCommand() string {
 // component streams.
 type SubmitPromptTurn struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Turn          *v1.TurnId             `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
+	Turn          *v11.TurnId            `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -389,7 +403,7 @@ func (*SubmitPromptTurn) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *SubmitPromptTurn) GetTurn() *v1.TurnId {
+func (x *SubmitPromptTurn) GetTurn() *v11.TurnId {
 	if x != nil {
 		return x.Turn
 	}
@@ -451,7 +465,7 @@ func (x *SubmitPromptCommandPanel) GetPanel() isSubmitPromptCommandPanel_Panel {
 	return nil
 }
 
-func (x *SubmitPromptCommandPanel) GetStatus() *v11.StatusPanelView {
+func (x *SubmitPromptCommandPanel) GetStatus() *v12.StatusPanelView {
 	if x != nil {
 		if x, ok := x.Panel.(*SubmitPromptCommandPanel_Status); ok {
 			return x.Status
@@ -460,7 +474,7 @@ func (x *SubmitPromptCommandPanel) GetStatus() *v11.StatusPanelView {
 	return nil
 }
 
-func (x *SubmitPromptCommandPanel) GetTodos() *v11.TodosPanelView {
+func (x *SubmitPromptCommandPanel) GetTodos() *v12.TodosPanelView {
 	if x != nil {
 		if x, ok := x.Panel.(*SubmitPromptCommandPanel_Todos); ok {
 			return x.Todos
@@ -469,7 +483,7 @@ func (x *SubmitPromptCommandPanel) GetTodos() *v11.TodosPanelView {
 	return nil
 }
 
-func (x *SubmitPromptCommandPanel) GetAgents() *v11.AgentsPanelView {
+func (x *SubmitPromptCommandPanel) GetAgents() *v12.AgentsPanelView {
 	if x != nil {
 		if x, ok := x.Panel.(*SubmitPromptCommandPanel_Agents); ok {
 			return x.Agents
@@ -478,7 +492,7 @@ func (x *SubmitPromptCommandPanel) GetAgents() *v11.AgentsPanelView {
 	return nil
 }
 
-func (x *SubmitPromptCommandPanel) GetMcp() *v11.McpPanelView {
+func (x *SubmitPromptCommandPanel) GetMcp() *v12.McpPanelView {
 	if x != nil {
 		if x, ok := x.Panel.(*SubmitPromptCommandPanel_Mcp); ok {
 			return x.Mcp
@@ -487,7 +501,7 @@ func (x *SubmitPromptCommandPanel) GetMcp() *v11.McpPanelView {
 	return nil
 }
 
-func (x *SubmitPromptCommandPanel) GetContext() *v11.ContextPanelView {
+func (x *SubmitPromptCommandPanel) GetContext() *v12.ContextPanelView {
 	if x != nil {
 		if x, ok := x.Panel.(*SubmitPromptCommandPanel_Context); ok {
 			return x.Context
@@ -496,7 +510,7 @@ func (x *SubmitPromptCommandPanel) GetContext() *v11.ContextPanelView {
 	return nil
 }
 
-func (x *SubmitPromptCommandPanel) GetHelp() *v11.HelpPanelView {
+func (x *SubmitPromptCommandPanel) GetHelp() *v12.HelpPanelView {
 	if x != nil {
 		if x, ok := x.Panel.(*SubmitPromptCommandPanel_Help); ok {
 			return x.Help
@@ -511,7 +525,7 @@ type isSubmitPromptCommandPanel_Panel interface {
 
 type SubmitPromptCommandPanel_Status struct {
 	// The /status panel.
-	Status *v11.StatusPanelView `protobuf:"bytes,1,opt,name=status,proto3,oneof"`
+	Status *v12.StatusPanelView `protobuf:"bytes,1,opt,name=status,proto3,oneof"`
 }
 
 type SubmitPromptCommandPanel_Todos struct {
@@ -522,27 +536,27 @@ type SubmitPromptCommandPanel_Todos struct {
 	// unrecognized command.
 	// The /todos panel: the tracker's checklist, printed from the daemon's
 	// own state.
-	Todos *v11.TodosPanelView `protobuf:"bytes,4,opt,name=todos,proto3,oneof"`
+	Todos *v12.TodosPanelView `protobuf:"bytes,4,opt,name=todos,proto3,oneof"`
 }
 
 type SubmitPromptCommandPanel_Agents struct {
 	// The /agents panel: the configured agent types.
-	Agents *v11.AgentsPanelView `protobuf:"bytes,5,opt,name=agents,proto3,oneof"`
+	Agents *v12.AgentsPanelView `protobuf:"bytes,5,opt,name=agents,proto3,oneof"`
 }
 
 type SubmitPromptCommandPanel_Mcp struct {
 	// The /mcp panel: each MCP server and where it stands.
-	Mcp *v11.McpPanelView `protobuf:"bytes,6,opt,name=mcp,proto3,oneof"`
+	Mcp *v12.McpPanelView `protobuf:"bytes,6,opt,name=mcp,proto3,oneof"`
 }
 
 type SubmitPromptCommandPanel_Context struct {
 	// The /context panel: the context-fill tree.
-	Context *v11.ContextPanelView `protobuf:"bytes,7,opt,name=context,proto3,oneof"`
+	Context *v12.ContextPanelView `protobuf:"bytes,7,opt,name=context,proto3,oneof"`
 }
 
 type SubmitPromptCommandPanel_Help struct {
 	// The /help panel: the command list.
-	Help *v11.HelpPanelView `protobuf:"bytes,8,opt,name=help,proto3,oneof"`
+	Help *v12.HelpPanelView `protobuf:"bytes,8,opt,name=help,proto3,oneof"`
 }
 
 func (*SubmitPromptCommandPanel_Status) isSubmitPromptCommandPanel_Panel() {}
@@ -676,8 +690,9 @@ var File_agentrepl_v1_endpoint_submit_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\n" +
-	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\xdb\x01\n" +
-	"\x13SubmitPromptRequest\x12-\n" +
+	")agentrepl/v1/endpoint_submit_prompt.proto\x12\fagentrepl.v1\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a#conversation/v1/prompt_origin.proto\x1a\x1cworkspace/v1/workspace.proto\x1a\x1efrontend/v1/status_panel.proto\x1a\x1dfrontend/v1/todos_panel.proto\x1a\x1efrontend/v1/agents_panel.proto\x1a\x1bfrontend/v1/mcp_panel.proto\x1a\x1ffrontend/v1/context_panel.proto\x1a\x1cfrontend/v1/help_panel.proto\x1a\x16frontend/v1/feed.proto\"\x95\x02\n" +
+	"\x13SubmitPromptRequest\x128\n" +
+	"\tworkspace\x18\x05 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12-\n" +
 	"\x04said\x18\x01 \x01(\v2\x19.conversation.v1.UserSaidR\x04said\x12'\n" +
 	"\x0fidempotency_key\x18\x02 \x01(\tR\x0eidempotencyKey\x12,\n" +
 	"\x04feed\x18\x03 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x04feed\x88\x01\x01\x125\n" +
@@ -731,39 +746,41 @@ var file_agentrepl_v1_endpoint_submit_prompt_proto_goTypes = []any{
 	(*SubmitPromptCommandPanel)(nil),   // 5: agentrepl.v1.SubmitPromptCommandPanel
 	(*SubmitPromptError)(nil),          // 6: agentrepl.v1.SubmitPromptError
 	(*SubmitPromptRefusedMerging)(nil), // 7: agentrepl.v1.SubmitPromptRefusedMerging
-	(*v1.UserSaid)(nil),                // 8: conversation.v1.UserSaid
-	(*v11.FeedId)(nil),                 // 9: frontend.v1.FeedId
-	(v1.PromptOrigin)(0),               // 10: conversation.v1.PromptOrigin
-	(*v1.TurnId)(nil),                  // 11: conversation.v1.TurnId
-	(*v11.StatusPanelView)(nil),        // 12: frontend.v1.StatusPanelView
-	(*v11.TodosPanelView)(nil),         // 13: frontend.v1.TodosPanelView
-	(*v11.AgentsPanelView)(nil),        // 14: frontend.v1.AgentsPanelView
-	(*v11.McpPanelView)(nil),           // 15: frontend.v1.McpPanelView
-	(*v11.ContextPanelView)(nil),       // 16: frontend.v1.ContextPanelView
-	(*v11.HelpPanelView)(nil),          // 17: frontend.v1.HelpPanelView
+	(*v1.WorkspaceRef)(nil),            // 8: workspace.v1.WorkspaceRef
+	(*v11.UserSaid)(nil),               // 9: conversation.v1.UserSaid
+	(*v12.FeedId)(nil),                 // 10: frontend.v1.FeedId
+	(v11.PromptOrigin)(0),              // 11: conversation.v1.PromptOrigin
+	(*v11.TurnId)(nil),                 // 12: conversation.v1.TurnId
+	(*v12.StatusPanelView)(nil),        // 13: frontend.v1.StatusPanelView
+	(*v12.TodosPanelView)(nil),         // 14: frontend.v1.TodosPanelView
+	(*v12.AgentsPanelView)(nil),        // 15: frontend.v1.AgentsPanelView
+	(*v12.McpPanelView)(nil),           // 16: frontend.v1.McpPanelView
+	(*v12.ContextPanelView)(nil),       // 17: frontend.v1.ContextPanelView
+	(*v12.HelpPanelView)(nil),          // 18: frontend.v1.HelpPanelView
 }
 var file_agentrepl_v1_endpoint_submit_prompt_proto_depIdxs = []int32{
-	8,  // 0: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
-	9,  // 1: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
-	10, // 2: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
-	2,  // 3: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
-	6,  // 4: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
-	4,  // 5: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
-	5,  // 6: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
-	3,  // 7: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
-	11, // 8: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
-	12, // 9: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
-	13, // 10: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
-	14, // 11: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
-	15, // 12: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
-	16, // 13: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
-	17, // 14: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
-	7,  // 15: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	8,  // 0: agentrepl.v1.SubmitPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 1: agentrepl.v1.SubmitPromptRequest.said:type_name -> conversation.v1.UserSaid
+	10, // 2: agentrepl.v1.SubmitPromptRequest.feed:type_name -> frontend.v1.FeedId
+	11, // 3: agentrepl.v1.SubmitPromptRequest.origin:type_name -> conversation.v1.PromptOrigin
+	2,  // 4: agentrepl.v1.SubmitPromptResponse.success:type_name -> agentrepl.v1.SubmitPromptSuccess
+	6,  // 5: agentrepl.v1.SubmitPromptResponse.error:type_name -> agentrepl.v1.SubmitPromptError
+	4,  // 6: agentrepl.v1.SubmitPromptSuccess.turn:type_name -> agentrepl.v1.SubmitPromptTurn
+	5,  // 7: agentrepl.v1.SubmitPromptSuccess.command_panel:type_name -> agentrepl.v1.SubmitPromptCommandPanel
+	3,  // 8: agentrepl.v1.SubmitPromptSuccess.command_refused:type_name -> agentrepl.v1.SubmitPromptCommandRefused
+	12, // 9: agentrepl.v1.SubmitPromptTurn.turn:type_name -> conversation.v1.TurnId
+	13, // 10: agentrepl.v1.SubmitPromptCommandPanel.status:type_name -> frontend.v1.StatusPanelView
+	14, // 11: agentrepl.v1.SubmitPromptCommandPanel.todos:type_name -> frontend.v1.TodosPanelView
+	15, // 12: agentrepl.v1.SubmitPromptCommandPanel.agents:type_name -> frontend.v1.AgentsPanelView
+	16, // 13: agentrepl.v1.SubmitPromptCommandPanel.mcp:type_name -> frontend.v1.McpPanelView
+	17, // 14: agentrepl.v1.SubmitPromptCommandPanel.context:type_name -> frontend.v1.ContextPanelView
+	18, // 15: agentrepl.v1.SubmitPromptCommandPanel.help:type_name -> frontend.v1.HelpPanelView
+	7,  // 16: agentrepl.v1.SubmitPromptError.merging:type_name -> agentrepl.v1.SubmitPromptRefusedMerging
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_submit_prompt_proto_init() }

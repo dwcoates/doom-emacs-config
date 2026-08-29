@@ -10,26 +10,28 @@ import (
 	"time"
 
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
 )
 
-// WorkspaceID is the daemon-minted, opaque workspace identity. Never derived
-// from a path, never parsed, compared byte-wise.
-type WorkspaceID string
-
-// RepoID is the daemon-minted identity of a repository (one per canonicalized
-// common dir), shared by every workspace cut from it.
-type RepoID string
-
-// InstanceID identifies one daemon process, for serving ownership during a
-// handover.
-type InstanceID string
-
-// LeaseID identifies one acquisition of a workspace's occupancy lease.
-type LeaseID string
-
-// TurnID is the daemon-minted turn identity. Distinct from every vendor
-// identifier; identifier spaces are never conflated.
-type TurnID string
+// The identity newtypes are aliases of internal/ids, the leaf that holds one
+// spelling of each. Aliasing rather than redeclaring is what lets feedid —
+// which sits below wsm and may not import it — name the same types.
+type (
+	// WorkspaceID is the daemon-minted, opaque workspace identity.
+	WorkspaceID = ids.WorkspaceID
+	// RepoID is the daemon-minted repository identity.
+	RepoID = ids.RepoID
+	// InstanceID identifies one daemon process.
+	InstanceID = ids.InstanceID
+	// LeaseID identifies one acquisition of a workspace's occupancy lease.
+	LeaseID = ids.LeaseID
+	// TurnID is the daemon-minted turn identity.
+	TurnID = ids.TurnID
+	// TaskID identifies one user task.
+	TaskID = ids.TaskID
+	// FaultID identifies one recorded fault.
+	FaultID = ids.FaultID
+)
 
 // Workspace is one registered workspace's durable record.
 type Workspace struct {
@@ -342,9 +344,6 @@ type OrphanReport struct {
 	At time.Time
 }
 
-// TaskID identifies one user task.
-type TaskID string
-
 // Task is one user task the roster's task view renders.
 type Task struct {
 	ID TaskID
@@ -390,9 +389,6 @@ type MergeLedgerEntry struct {
 	// OpenedAt is when the ledger was opened.
 	OpenedAt time.Time
 }
-
-// FaultID identifies one fault record.
-type FaultID string
 
 // FaultScope narrows an OpenFaults query.
 type FaultScope struct {
