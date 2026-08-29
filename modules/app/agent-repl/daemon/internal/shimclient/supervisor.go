@@ -164,6 +164,7 @@ func (c *client) abandonBringUp(cause error) {
 			"pid": c.PID(), "error": err.Error(),
 		})
 	}
+	c.cancelMonitor()
 }
 
 // shimArgs is the shim's argv after the node binary, per the common spawn
@@ -275,9 +276,10 @@ func (c *client) bringUp(parent context.Context) error {
 		}
 		c.link.publish(LinkConnected)
 
-		err = c.awaitHealthy(parent, stream)
+		frames, errs := recvLoop(stream, c.monitorCtx.Done())
+		err = c.awaitHealthy(parent, frames, errs)
 		if err == nil {
-			go c.monitor(stream)
+			go c.monitor(stream, frames, errs)
 			return nil
 		}
 		stream.Close()

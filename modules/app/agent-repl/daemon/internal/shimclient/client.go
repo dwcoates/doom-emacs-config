@@ -295,48 +295,39 @@ func (c *client) exitedAlready() bool {
 // Connect's server-stream open blocks until the shim's first frame and a dead
 // process must end the wait at once.
 func (c *client) openSupervisedSession(parent context.Context) (Stream[*conversationv1.SessionUpdate], error) {
-	ctx, cancel := context.WithCancel(parent)
-
 	type opened struct {
 		stream Stream[*conversationv1.SessionUpdate]
 		err    error
 	}
 	result := make(chan opened, 1)
 	go func() {
-		stream, err := c.watchSession(ctx)
+		stream, err := c.watchSession(parent)
 		result <- opened{stream: stream, err: err}
 	}()
 
+	// An abandoned open still has to be closed when it eventually lands, or the
+	// stream it opened would outlive the supervisor that abandoned it.
+	abandon := func() {
+		go func() {
+			if r := <-result; r.err == nil {
+				r.stream.Close()
+			}
+		}()
+	}
+
 	select {
 	case <-parent.Done():
-		cancel()
+		abandon()
 		return nil, parent.Err()
 	case <-c.dead:
-		cancel()
+		abandon()
 		return nil, c.deathError()
 	case r := <-result:
 		if r.err != nil {
-			cancel()
 			return nil, r.err
 		}
-		return &cancelingStream[*conversationv1.SessionUpdate]{inner: r.stream, cancel: cancel}, nil
+		return r.stream, nil
 	}
-}
-
-// cancelingStream ties a stream's lifetime to the context that opened it, so
-// closing the stream also releases the request.
-type cancelingStream[T any] struct {
-	inner  Stream[T]
-	cancel context.CancelFunc
-}
-
-// Recv blocks for the next frame.
-func (s *cancelingStream[T]) Recv() (T, error) { return s.inner.Recv() }
-
-// Close ends the stream and cancels its request.
-func (s *cancelingStream[T]) Close() {
-	s.inner.Close()
-	s.cancel()
 }
 
 // redial re-establishes the link to a still-running shim, FOREVER with capped
@@ -364,8 +355,9 @@ func (c *client) redial(ctx context.Context) (Stream[*conversationv1.SessionUpda
 
 // awaitHealthy consumes session frames until the first diagnostics arm says
 // healthy. Unhealthy is an ANSWER, not readiness: the client keeps waiting.
-func (c *client) awaitHealthy(ctx context.Context, stream Stream[*conversationv1.SessionUpdate]) error {
-	frames, errs := recvLoop(stream)
+// The frames come from the ONE receive loop the stream has; a second loop on
+// the same stream would be two concurrent receivers.
+func (c *client) awaitHealthy(ctx context.Context, frames <-chan *conversationv1.SessionUpdate, errs <-chan error) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -395,10 +387,9 @@ func (c *client) awaitHealthy(ctx context.Context, stream Stream[*conversationv1
 // monitor holds the session stream as the link's liveness evidence. A break
 // while the process still lives is a REDIAL, forever, with capped backoff; a
 // break with the process gone stops, because the evidence decided.
-func (c *client) monitor(stream Stream[*conversationv1.SessionUpdate]) {
+func (c *client) monitor(stream Stream[*conversationv1.SessionUpdate], frames <-chan *conversationv1.SessionUpdate, errs <-chan error) {
 	ctx := c.monitorCtx
 	for {
-		frames, errs := recvLoop(stream)
 		var broke error
 	consume:
 		for {
@@ -432,6 +423,7 @@ func (c *client) monitor(stream Stream[*conversationv1.SessionUpdate]) {
 			return
 		}
 		stream = next
+		frames, errs = recvLoop(stream, ctx.Done())
 	}
 }
 
@@ -492,7 +484,7 @@ func (c *client) deathError() error {
 
 // recvLoop pumps one stream into a frame channel and a one-shot error channel,
 // so a blocking Recv can be SELECTED against process death.
-func recvLoop[T any](stream Stream[T]) (<-chan T, <-chan error) {
+func recvLoop[T any](stream Stream[T], done <-chan struct{}) (<-chan T, <-chan error) {
 	frames := make(chan T)
 	errs := make(chan error, 1)
 	go func() {
@@ -502,7 +494,11 @@ func recvLoop[T any](stream Stream[T]) (<-chan T, <-chan error) {
 				errs <- err
 				return
 			}
-			frames <- frame
+			select {
+			case frames <- frame:
+			case <-done:
+				return
+			}
 		}
 	}()
 	return frames, errs
@@ -691,8 +687,10 @@ func openStream[Req any, W any, T any](
 		}
 	}
 	c.log.Debug(operation, "opening shim stream", dlog.Context{"workspace_id": string(c.ws)})
+	ctx, cancel := context.WithCancel(ctx)
 	stream, err := open(ctx, connect.NewRequest(req))
 	if err != nil {
+		cancel()
 		c.log.Error(operation, "shim stream refused", dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
 		})
@@ -703,6 +701,7 @@ func openStream[Req any, W any, T any](
 	// refused open IS an error from this call.
 	if !stream.Receive() {
 		err := stream.Err()
+		cancel()
 		_ = stream.Close()
 		if err == nil {
 			err = io.EOF
@@ -714,6 +713,7 @@ func openStream[Req any, W any, T any](
 	}
 	first, err := project(stream.Msg())
 	if err != nil {
+		cancel()
 		_ = stream.Close()
 		c.log.Error(operation, "shim stream opened with an illegal frame", dlog.Context{
 			"workspace_id": string(c.ws), "error": err.Error(),
@@ -723,7 +723,7 @@ func openStream[Req any, W any, T any](
 	c.log.Debug(operation, "shim stream opened", dlog.Context{"workspace_id": string(c.ws)})
 	return &firstFrameStream[W, T]{
 		first: first,
-		inner: &mappedStream[W, T]{procedure: verb, stream: stream, project: project},
+		inner: &mappedStream[W, T]{procedure: verb, stream: stream, project: project, cancel: cancel},
 	}, nil
 }
 

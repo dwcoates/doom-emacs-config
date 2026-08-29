@@ -1,6 +1,7 @@
 package shimclient
 
 import (
+	"context"
 	"io"
 	"sync"
 
@@ -15,6 +16,10 @@ type mappedStream[W any, T any] struct {
 	procedure string
 	stream    *connect.ServerStreamForClient[W]
 	project   func(*W) (T, error)
+	// cancel ends the underlying request. Closing a still-live server stream
+	// must never block draining a producer that has not finished, so the
+	// request is canceled BEFORE the connection is closed.
+	cancel    context.CancelFunc
 	closeOnce sync.Once
 }
 
@@ -33,5 +38,8 @@ func (m *mappedStream[W, T]) Recv() (T, error) {
 // Close ends the stream from this side. Closing twice is harmless: a consumer
 // that closes on its own and a supervisor tearing the link down both do it.
 func (m *mappedStream[W, T]) Close() {
-	m.closeOnce.Do(func() { _ = m.stream.Close() })
+	m.closeOnce.Do(func() {
+		m.cancel()
+		_ = m.stream.Close()
+	})
 }
