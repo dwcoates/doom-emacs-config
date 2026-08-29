@@ -273,3 +273,6 @@ func verbNames(calls []verbCall) []string {
 	}
 	return out
 }
+
+// Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
+func (s *fakeSurfaces) Evict(_ string) error { return nil }
