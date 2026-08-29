@@ -11,6 +11,10 @@ package server
 import (
 	"net/http"
 
+	"connectrpc.com/connect"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
 	"claude-repld/internal/commandfile"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
@@ -102,11 +106,20 @@ func New(deps Deps) (Server, error) {
 }
 
 // UnlandedArm is the standard refusal for a state whose typed error arm does
-// not exist in the contract yet. It answers a Connect error — FailedPrecondition
-// for a state refusal, NotFound for an unknown id — whose message is exactly
-// "intended arm: <RpcName>Error.<arm_name>: <reason>", and logs the intended
-// arm at WARN with operation "daemon.refusal.unlanded_arm". Every call site is
-// recorded in daemon/ERROR-ARMS.md.
-func UnlandedArm(rpc, arm, reason string, notFound bool) error {
-	return notimpl.Err
+// not exist in the contract yet. It answers a Connect error —
+// CodeFailedPrecondition for a state refusal, CodeNotFound for an unknown id —
+// whose message is exactly "intended arm: <RpcName>Error.<arm_name>: <reason>",
+// and logs the intended arm at WARN with operation
+// "daemon.refusal.unlanded_arm". Every call site is recorded in
+// daemon/ERROR-ARMS.md.
+func UnlandedArm(log dlog.Logger, rpc, arm, reason string, notFound bool) *connect.Error {
+	return connect.NewError(connect.CodeInternal, notimpl.Err)
+}
+
+// H2C wraps the Connect handler so ONE loopback listener serves both HTTP/1.1
+// and cleartext HTTP/2. The daemon binds one listener and serves the rpcs and
+// the webapp assets on one origin, which is what makes the webview URL and the
+// Connect endpoint the same host.
+func H2C(h http.Handler) http.Handler {
+	return h2c.NewHandler(h, &http2.Server{})
 }

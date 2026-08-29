@@ -11,6 +11,8 @@ package login
 import (
 	"context"
 
+	"github.com/creack/pty"
+
 	"claude-repld/internal/envc"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/notimpl"
@@ -25,10 +27,16 @@ type Output struct {
 	Closed bool
 }
 
-// Resize is a terminal geometry change.
+// Resize is a terminal geometry change, as SendLoginInput carries it.
 type Resize struct {
 	Rows int32
 	Cols int32
+}
+
+// Winsize renders the resize in the form the pty takes. It exists so the wire
+// shape is converted in exactly one place.
+func (r Resize) Winsize() *pty.Winsize {
+	return &pty.Winsize{Rows: uint16(r.Rows), Cols: uint16(r.Cols)}
 }
 
 // Manager owns the fleet of login ptys, one per account config dir.
