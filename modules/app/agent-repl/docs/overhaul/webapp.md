@@ -38,6 +38,46 @@ submitter's own — no pushed view carries it.
   replaces computing per the server-driven-UI move.
 - render-colors.json RENDER_STATE_* trim (CROSS-SYSTEM with elisp+daemon).
 
+## Removals ruled 2026-08-29 (final-audit triage)
+- The chess-board widget (chess-game.ts) and its marker-splitting: DEAD
+  with the daemon's widget surface; /show-chess-game degrades to text.
+- The ENTIRE window.agentRepl* host-hook surface (host.ts, nav.ts hooks,
+  search.ts hook, recovery-probe.ts hook): DEAD — the webview is purely
+  daemon-driven; Emacs never drives it by JS eval.
+- Incremental in-feed search (search.ts, 857 lines): DEAD.
+- Bubble navigation (nav.ts data-nav tokens and cycling): DEAD.
+- Copy key chords (copy.ts): DEAD.
+- The topbar subagent/task counter chips and turn-aged retention
+  (counter-menu.ts, agents.ts, tasks.ts, turn-clock.ts): DEAD — the
+  footer's live-work chips are the successor, live work only.
+- The client-side outage prompt queue (prompt-queue.ts): DEAD — the
+  composer-less webview submits nothing; the Emacs composer's
+  hold-and-replay is the outage absorber.
+- The gns-sockets bridge fold (gns.ts): DEAD — bridge subagents draw as
+  ordinary subagent bubbles.
+- The standalone element catalogue page (catalogue.html/catalogue.ts):
+  DEAD — the project lead may recreate something similar at its choice.
+- Metaprompt-span stripping (meta.ts): DEAD client-side — the DAEMON's
+  feed resolver strips the sentinel-marked spans from the drawn prompt
+  row.
+- The ungated-session standing banner (ungated.ts): DEAD — the mode is
+  visible in the permission-mode picker itself.
+- Document-title model tracking and the localStorage verbose-log toggle:
+  DEAD.
+
+## Kept behaviors blessed 2026-08-29
+- The metaprompt TLDR-tree re-render (metaprompt-tree.ts): KEPT — a
+  rendering-layer nicety (interpreting prose is the renderer's job).
+- Capped sections: click-to-expand N-line previews, edge-gated inner
+  scroll, and tail-follow while streaming: all three KEPT as rendering
+  strategy.
+- The LOGIN overlay: KEPT — the pty login path is ported (OpenLogin verb
+  + duplex byte stream with resize + close); the webapp renders it
+  xterm-style full-screen over the new stream, per-account idempotent,
+  and re-probes the account chip on close.
+- The permission-mode PICKER: KEPT, over the new SetPermissionMode verb
+  (mirrors SetModel).
+
 ## Early correctness items (live behavior changes made at reconciliation)
 - local-failure.ts's three loud-throw stubs (commandUnsentFailure,
   heldPromptUnsentFailure, commandRejectionUnclassifiedFailure) sit on LIVE
@@ -91,7 +131,10 @@ submitter's own — no pushed view carries it.
 - Every reveal renders BELOW the strip, clamped in-viewport.
 - The context chip renders the current context size as a YELLOW number;
   hover shows the session-scoped breakdown (no turn figures — footer's).
-- The account label draws the email, or "logged out" as a warning state.
+- The account label draws the email, or "logged out" as a warning state;
+  clicking the logged-out entry opens the ported LOGIN overlay (above).
+- A drain-scheduled WatchDaemon push (reason + at_ms) draws the standing
+  page-wide restart banner (ruled 2026-08-29).
 
 ## Code-level consistency requirements (from the conventions walk)
 - ONE renderer subroutine draws EVERY FeedSessionSeparation arm; the
@@ -285,3 +328,19 @@ One file per drawn component; each file's header comment is its spec.
 - Vendor identities (uuids, message ids, tool_use ids) never reach the webapp; the one typed
   survivor on feed rows is `TurnId`, matched against the client's own submission.
 - Money/cost figures appear nowhere in the contract.
+
+## Additional rulings (final-audit triage, 2026-08-29)
+- /CONTEXT PANEL IS CUSTOM: the contract's rich context schema
+  (orchestrator-designed from the vendor's full get_context_usage answer)
+  is rendered CUSTOM in the panel bubble — tool calls in an automatically
+  folded foldable render; the rest of the presentation is the
+  implementer's.
+- /STATUS DEGRADES BY DESIGN: version + spliced account/model/mode rows
+  only (the handshake fields are deferred) — a thin panel is the settled
+  consequence, not a bug.
+- WORKFLOW IS KICKED: no workflow feed row, bubble, or chip exists,
+  deliberately; a workflow's constituent agents draw as ordinary subagent
+  bubbles. Do not invent a surface.
+- ADD-SUPPORT SURVIVES: the unsupported-command refusal card carries the
+  "engineer support for it" offer, spawning a support workspace through
+  the ordinary creation verb.
