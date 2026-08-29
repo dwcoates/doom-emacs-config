@@ -93,6 +93,8 @@ OWN ACCORD:
 - FeedTurnEndedErrored.headline (FeedTurnErrorHeadline, required) — the
   client owned sixteen per-arm sentences, a server-driven-UI violation.
 - Comment-only: FeedPageErrorHeadline.tone cites render-colors.json's colors.
+- FeedColdGateResolvedCompact.scope — the resolved trace named the summarizer
+  but not the chosen scope, which the answer verb carries.
 - PENDING before landing: the daemon's derived error arms (every empty
   `<Rpc>Error` in agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
   DaemonFault/SessionFault/HostFault kind oneofs).
