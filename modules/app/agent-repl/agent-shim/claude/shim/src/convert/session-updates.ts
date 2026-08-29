@@ -324,36 +324,11 @@ export function convertSessionMessage(
 
     case "status": {
       const status = record.status;
-      const compactResult = record.compact_result;
-      if (compactResult === "failed") {
-        const error = typeof record.compact_error === "string" ? record.compact_error : "";
-        LOGGER.log(
-          { level: "warn", uuid, error },
-          "a compaction failed; the context is unchanged and still too large",
-        );
-        return [
-          pageLineEntry(
-            context,
-            {
-              agentId: context.mainAgentId,
-              vendorUuid: uuid,
-              discriminator: "agent_update.context_cut.compaction_failed",
-            },
-            contextCutUpsertKey(uuid),
-            create(conversationv1.AgentUpdateSchema, {
-              update: {
-                case: "contextCut",
-                value: create(conversationv1.ContextCutSchema, {
-                  cut: {
-                    case: "compactionFailed",
-                    value: create(conversationv1.ContextCompactionFailedSchema, { error }),
-                  },
-                }),
-              },
-            }),
-          ),
-        ];
-      }
+      // THE FAILED CUT IS THE ENGINE'S. It holds the compaction it asked for,
+      // so it produces `context_cut.compaction_failed` from this same
+      // `compact_result: "failed"` record and the fold must not double-produce
+      // it. What stays here is the SUCCESS cut, which needs the boundary's real
+      // figures and the summary that follows — facts only the fold sees.
       if (status === "compacting") {
         LOGGER.log({ uuid }, "the vendor began compacting the context");
         return [

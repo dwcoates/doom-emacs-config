@@ -35,7 +35,7 @@ import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
 import { activityEntry, agentActivity, prose, type FrameOrigin } from "./entries.js";
-import type { FoldContext } from "./fold-context.js";
+import { subagentBook, type FoldContext } from "./fold-context.js";
 import { blockActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
 import { convertToolUse, type CallRegistry, type PendingCall, type ToolConverter } from "./tool-calls.js";
@@ -161,22 +161,13 @@ export function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefine
 /**
  * The book a vendor message's frames belong to.
  *
- * `parent_tool_use_id` names the CALL that spawned the agent, never the agent —
- * so the resolution is the engine's lookup, and a spawn that has not yet
- * reported an agent id attributes to the main agent rather than to an invented
- * one.
+ * `parent_tool_use_id` names the CALL that spawned the agent, never the agent,
+ * and the pinned SDK stream states no agent id anywhere — so the resolution is
+ * {@link subagentBook}, the ONE function that mints it.
  */
 export function bookFor(context: FoldContext, parentToolUseId: string | null): conversationv1.AgentId {
   if (parentToolUseId === null || parentToolUseId === "") return context.mainAgentId;
-  const subagent = context.subagentFor(parentToolUseId);
-  if (subagent === undefined) {
-    LOGGER.log(
-      { level: "warn", parent_tool_use_id: parentToolUseId },
-      "no agent id is known for this spawning call; the frames attribute to the main agent",
-    );
-    return context.mainAgentId;
-  }
-  return subagent;
+  return subagentBook(context, parentToolUseId);
 }
 
 // ---------------------------------------------------------------------------

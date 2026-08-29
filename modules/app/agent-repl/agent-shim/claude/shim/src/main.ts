@@ -54,7 +54,15 @@ import path from "node:path";
 import { bindLog, configureLog, emergencyStderr } from "./log.js";
 import { acquireWorkspaceLock, lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
-import { NotImplementedEngine, type Engine } from "./engine/engine.js";
+import { type Engine } from "./engine/engine.js";
+import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
+import { createFold } from "./convert/fold.js";
+import { createStoreClient } from "./store/client.js";
+import { producerId } from "./store/keys.js";
+import { createPersistence } from "./store/persistence.js";
+import { createRealQuery } from "./sdk/real-query.js";
+import { createFakeQuery } from "./fake/index.js";
+import { randomUUID } from "node:crypto";
 import { shimRoutes } from "./service/routes.js";
 import { serve, type ShimServer } from "./service/server.js";
 
@@ -193,6 +201,15 @@ export const STORE_SOCKET_ENV = "AGENT_REPL_STORE_SOCKET";
 /** The env var the daemon sets to prove it spawned us. */
 export const OWNED_ENV = "AGENT_REPL_OWNED";
 
+/**
+ * The daemon's own correlation id for this shim, for LOGGING ONLY.
+ *
+ * It is never a session fact: `StartSession` remains the one carrier of those.
+ * It exists so a daemon log line and a shim log line about the same host
+ * session can be joined without either side inferring the other's identity.
+ */
+export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
+
 /** Everything the process reads from its environment, resolved and checked. */
 export interface ShimEnvironment {
   /** The vendor account root the agent binary must read. */
@@ -203,6 +220,8 @@ export interface ShimEnvironment {
   readonly shimBuildSha: string;
   /** Where the store is listening. */
   readonly storeSocket: string;
+  /** The daemon's correlation id, when it exported one. Logging only. */
+  readonly agentReplSessionId?: string;
 }
 
 /**
@@ -251,7 +270,16 @@ export function resolveEnvironment(
     env.AGENT_REPL_STATE_DIR === undefined || env.AGENT_REPL_STATE_DIR === ""
       ? path.join(home, DEFAULT_STATE_DIR_NAME)
       : env.AGENT_REPL_STATE_DIR;
-  return { claudeConfigDir, stateDir, shimBuildSha: buildSha, storeSocket };
+  const agentReplSessionId = env[SESSION_ID_ENV];
+  return {
+    claudeConfigDir,
+    stateDir,
+    shimBuildSha: buildSha,
+    storeSocket,
+    ...(agentReplSessionId === undefined || agentReplSessionId === ""
+      ? {}
+      : { agentReplSessionId }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +398,68 @@ export function processIdentity(cwd: string): string {
   return `shim-${workspaceLockKey(cwd)}-${process.pid}`;
 }
 
+/** Where the log's correlation id came from, so the record says which it used. */
+export interface LogCorrelation {
+  readonly agentReplSessionId: string;
+  readonly source: "daemon_env" | "self_named";
+}
+
+/**
+ * The correlation id every log record carries.
+ *
+ * The daemon's exported id WINS when it exported one, because a joinable record
+ * across two processes is worth more than a locally-derived name. Absent it the
+ * shim names itself — no daemon id reaches a shim at spawn in every deployment,
+ * and a record with no correlation id at all is the one outcome neither side
+ * can recover from.
+ */
+export function logCorrelation(environment: ShimEnvironment, cwd: string): LogCorrelation {
+  const exported = environment.agentReplSessionId;
+  return exported === undefined || exported === ""
+    ? { agentReplSessionId: processIdentity(cwd), source: "self_named" }
+    : { agentReplSessionId: exported, source: "daemon_env" };
+}
+
+/**
+ * The query factory the engine calls, real or mocked.
+ *
+ * `--fake` swaps THIS and nothing else: the real shim runs unchanged over the
+ * mocked vendor, which is what makes an offline test a test of the shim rather
+ * than of a second implementation of it.
+ */
+export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: string): CreateQuery {
+  if (!fake) {
+    return (spec: QuerySpec) =>
+      createRealQuery(
+        {
+          cwd,
+          claudeConfigDir: environment.claudeConfigDir,
+          binding: spec.binding,
+          permissionMode: spec.permissionMode,
+          canUseTool: spec.canUseTool,
+          abortController: spec.abortController,
+          ...(spec.model === undefined ? {} : { model: spec.model }),
+          ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
+        },
+        spec.prompt,
+      );
+  }
+  return (spec: QuerySpec) =>
+    Promise.resolve(
+      createFakeQuery(spec.prompt, spec.canUseTool, {
+        cwd,
+        configDir: environment.claudeConfigDir,
+        sessionId:
+          spec.binding.kind === "fresh" ? spec.binding.sessionId : spec.binding.resumeSessionId,
+        newUuid: () => randomUUID(),
+        abortSignal: spec.abortController.signal,
+        permissionMode: spec.permissionMode,
+        ...(spec.model === undefined ? {} : { model: spec.model }),
+        ...(spec.binding.kind === "resume" ? { resume: spec.binding.resumeSessionId } : {}),
+      }),
+    );
+}
+
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
@@ -385,7 +475,8 @@ export async function main(): Promise<void> {
   const environment = resolveEnvironment(process.env, args);
   const cwd = process.cwd();
 
-  configureLog({ fd: args.logFd, cwd, agentReplSessionId: processIdentity(cwd) });
+  const correlation = logCorrelation(environment, cwd);
+  configureLog({ fd: args.logFd, cwd, agentReplSessionId: correlation.agentReplSessionId });
 
   const identity = runtimeIdentity();
   logMainLifecycle(
@@ -401,6 +492,7 @@ export async function main(): Promise<void> {
       sdk_version: identity.sdkVersion,
       agent_binary_version: identity.agentBinaryVersion ?? "",
       fake: args.fake,
+      agent_repl_session_id_source: correlation.source,
       outcome: "startup_arguments_validated",
     },
     "validated the spawn contract and configured durable logging",
@@ -416,10 +508,24 @@ export async function main(): Promise<void> {
     "exclusive workspace lock acquired",
   );
 
-  // The engine the wave-1 agent replaces. Until then every verb answers
-  // Unimplemented, which is the honest statement that the transport is up and
-  // the session is not.
-  const engine: Engine = new NotImplementedEngine();
+  // THE SESSION ENGINE, with the real record plane behind it.
+  //
+  // The producer name is keyed by the workspace until the vendor names a
+  // session: write ids are `sha256(producer | coordinates | arm)`, so the name
+  // only has to be STABLE for one conversation's writes to share a namespace,
+  // and the workspace is the one identity that exists before StartSession.
+  const engine: Engine = createEngine({
+    persistence: createPersistence({
+      client: createStoreClient(environment.storeSocket),
+      producer: producerId(`workspace:${workspaceLockKey(cwd)}`),
+      nowMs: () => Date.now(),
+    }),
+    fold: createFold(),
+    createQuery: queryFactory(args.fake, environment, cwd),
+    runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
+    env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
+    nowMs: () => Date.now(),
+  });
 
   const server = await serve(args.listen, shimRoutes(engine));
   logMainLifecycle(
