@@ -27,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file conversation/v1/session.proto.
  */
 export const file_conversation_v1_session: GenFile = /*@__PURE__*/
-  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvc2Vzc2lvbi5wcm90bxIPY29udmVyc2F0aW9uLnYxIocDCg5TZXNzaW9uU3RhcnRlZBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIwCgdydW50aW1lGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25SdW50aW1lEjQKD2VmZmVjdGl2ZV9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEj0KD3Blcm1pc3Npb25fbW9kZRgHIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlEjMKDW1vZGVsX2NhdGFsb2cYBCADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb24SNAoOdHVybl9pbl9mbGlnaHQYBSABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoJbGl2ZV93b3JrGAYgAygLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50RGV0YWNoZWRXb3JrQhEKD190dXJuX2luX2ZsaWdodCJbCg5TZXNzaW9uUnVudGltZRIWCg5zaGltX2J1aWxkX3NoYRgBIAEoCRITCgtzZGtfdmVyc2lvbhgCIAEoCRIcChRhZ2VudF9iaW5hcnlfdmVyc2lvbhgDIAEoCSL4AQoLU2Vzc2lvbkNvbGQSFgoOY29udGV4dF90b2tlbnMYASABKAQSGgoSbGFzdF9yZXF1ZXN0X2F0X21zGAIgASgDEjQKD3JlcXVlc3RlZF9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjQKBmxhcHNlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZExhcHNlZEgAEj8KDG1vZGVsX3N3aXRjaBgFIAEoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZE1vZGVsU3dpdGNoSABCCAoGcmVhc29uIikKEVNlc3Npb25Db2xkTGFwc2VkEhQKDGNhY2hlX3R0bF9tcxgBIAEoAyIYChZTZXNzaW9uQ29sZE1vZGVsU3dpdGNoIsMBChZTZXNzaW9uQ29sZFJlbWVkaWF0aW9uEi4KA3BheRgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZFBheUgAEjIKBWNsZWFyGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ2xlYXJIABI2Cgdjb21wYWN0GAMgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ29tcGFjdEgAQg0KC3JlbWVkaWF0aW9uIhAKDlNlc3Npb25Db2xkUGF5IhIKEFNlc3Npb25Db2xkQ2xlYXIidQoSU2Vzc2lvbkNvbGRDb21wYWN0EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoFc2NvcGUYAiABKA4yJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbXBhY3RTY29wZSKiBQoNU2Vzc2lvblVwZGF0ZRJDChBpZGVudGl0eV9yb3RhdGVkGAEgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25JZGVudGl0eVJvdGF0ZWRIABI3CgpxdWVyeV9kaWVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeURpZWRIABI9Cg1tb2RlbF9jaGFuZ2VkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Nb2RlbENoYW5nZWRIABI1CglmYXN0X21vZGUYBCABKAsyIC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlSAASNwoKbWNwX3NlcnZlchgFIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVySAASPQoNYWNjb3VudF91c2FnZRgGIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQWNjb3VudFVzYWdlSAASUAoXcGVybWlzc2lvbl9tb2RlX2NoYW5nZWQYByABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblBlcm1pc3Npb25Nb2RlQ2hhbmdlZEgAEk4KFmNvbnRleHRfYnVkZ2V0X3dhcm5pbmcYGCABKAsyLC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRCdWRnZXRXYXJuaW5nSAASOgoLZGlhZ25vc3RpY3MYGSABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRpYWdub3N0aWNzSAASPQoNY29udGV4dF91c2FnZRgaIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dFVzYWdlSABCCAoGdXBkYXRlIisKG1Nlc3Npb25Db250ZXh0QnVkZ2V0V2FybmluZxIMCgR0ZXh0GAEgASgJIlcKFlNlc3Npb25JZGVudGl0eVJvdGF0ZWQSIgoacHJldmlvdXNfdmVuZG9yX3Nlc3Npb25faWQYASABKAkSGQoRdmVuZG9yX3Nlc3Npb25faWQYAiABKAkiqwEKEFNlc3Npb25RdWVyeURpZWQSRAoOdW5leHBlY3RlZF9lb2YYASABKAsyKi5jb252ZXJzYXRpb24udjEuU2Vzc2lvblF1ZXJ5VW5leHBlY3RlZEVvZkgAEkgKEGl0ZXJhdG9yX2ZhaWx1cmUYAiABKAsyLC5jb252ZXJzYXRpb24udjEuU2Vzc2lvblF1ZXJ5SXRlcmF0b3JGYWlsdXJlSABCBwoFY2F1c2UiGwoZU2Vzc2lvblF1ZXJ5VW5leHBlY3RlZEVvZiIsChtTZXNzaW9uUXVlcnlJdGVyYXRvckZhaWx1cmUSDQoFY2F1c2UYASABKAkiXQocU2Vzc2lvblBlcm1pc3Npb25Nb2RlQ2hhbmdlZBI9Cg9wZXJtaXNzaW9uX21vZGUYASABKAsyJC5jb252ZXJzYXRpb24udjEuQWdlbnRQZXJtaXNzaW9uTW9kZSJLChNTZXNzaW9uTW9kZWxDaGFuZ2VkEjQKD2VmZmVjdGl2ZV9tb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsIr4BCg9TZXNzaW9uRmFzdE1vZGUSMAoCb24YASABKAsyIi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlT25IABIyCgNvZmYYAiABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlT2ZmSAASPAoIY29vbGRvd24YAyABKAsyKC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlQ29vbGRvd25IAEIHCgVzdGF0ZSIZChdTZXNzaW9uRmFzdE1vZGVDb29sZG93biITChFTZXNzaW9uRmFzdE1vZGVPbiIkChJTZXNzaW9uRmFzdE1vZGVPZmYSDgoGcmVhc29uGAEgASgJIuQCChBTZXNzaW9uTWNwU2VydmVyEgwKBG5hbWUYASABKAkSPwoJY29ubmVjdGVkGAIgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJDb25uZWN0ZWRIABI5CgZmYWlsZWQYAyABKAsyJy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1jcFNlcnZlckZhaWxlZEgAEkAKCm5lZWRzX2F1dGgYBCABKAsyKi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1jcFNlcnZlck5lZWRzQXV0aEgAEjsKB3BlbmRpbmcYBSABKAsyKC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1jcFNlcnZlclBlbmRpbmdIABI9CghkaXNhYmxlZBgGIAEoCzIpLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVyRGlzYWJsZWRIAEIICgZoZWFsdGgiGwoZU2Vzc2lvbk1jcFNlcnZlck5lZWRzQXV0aCIZChdTZXNzaW9uTWNwU2VydmVyUGVuZGluZyIaChhTZXNzaW9uTWNwU2VydmVyRGlzYWJsZWQiGwoZU2Vzc2lvbk1jcFNlcnZlckNvbm5lY3RlZCInChZTZXNzaW9uTWNwU2VydmVyRmFpbGVkEg0KBWVycm9yGAEgASgJIt8BChNTZXNzaW9uQWNjb3VudFVzYWdlEhYKDm9ic2VydmVkX2F0X21zGAEgASgDEhkKEXN1YnNjcmlwdGlvbl90eXBlGAIgASgJEkIKCWF2YWlsYWJsZRgDIAEoCzItLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQWNjb3VudFVzYWdlQXZhaWxhYmxlSAASRgoLdW5hdmFpbGFibGUYBCABKAsyLy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkFjY291bnRVc2FnZVVuYXZhaWxhYmxlSABCCQoHb3V0Y29tZSLwAwocU2Vzc2lvbkFjY291bnRVc2FnZUF2YWlsYWJsZRI2CglmaXZlX2hvdXIYASABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93EjsKCXNldmVuX2RheRgCIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dIAIgBARJGChRzZXZlbl9kYXlfb2F1dGhfYXBwcxgDIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dIAYgBARJACg5zZXZlbl9kYXlfb3B1cxgEIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dIAogBARJCChBzZXZlbl9kYXlfc29ubmV0GAUgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvd0gDiAEBEj4KDG1vZGVsX3Njb3BlZBgGIAMoCzIoLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTW9kZWxVc2FnZVdpbmRvd0IMCgpfc2V2ZW5fZGF5QhcKFV9zZXZlbl9kYXlfb2F1dGhfYXBwc0IRCg9fc2V2ZW5fZGF5X29wdXNCEwoRX3NldmVuX2RheV9zb25uZXQiegoXU2Vzc2lvbk1vZGVsVXNhZ2VXaW5kb3cSKgoFbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbBIzCgZ3aW5kb3cYAiABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93IkcKElNlc3Npb25Vc2FnZVdpbmRvdxIbChN1dGlsaXphdGlvbl9wZXJjZW50GAEgASgBEhQKDHJlc2V0c19hdF9tcxgCIAEoAyLqAgoeU2Vzc2lvbkFjY291bnRVc2FnZVVuYXZhaWxhYmxlEk4KE3NlcnZpY2VfdW5hdmFpbGFibGUYASABKAsyLy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlU2VydmljZVVuYXZhaWxhYmxlSAASTAoSd2luZG93X3VuYXZhaWxhYmxlGAIgASgLMi4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvd1VuYXZhaWxhYmxlSAASVgoXdXRpbGl6YXRpb25fdW5hdmFpbGFibGUYAyABKAsyMy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlVXRpbGl6YXRpb25VbmF2YWlsYWJsZUgAEkgKEHNhbXBsaW5nX2ZhaWx1cmUYBCABKAsyLC5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlU2FtcGxpbmdGYWlsdXJlSABCCAoGcmVhc29uIiAKHlNlc3Npb25Vc2FnZVNlcnZpY2VVbmF2YWlsYWJsZSIfCh1TZXNzaW9uVXNhZ2VXaW5kb3dVbmF2YWlsYWJsZSIkCiJTZXNzaW9uVXNhZ2VVdGlsaXphdGlvblVuYXZhaWxhYmxlIiwKG1Nlc3Npb25Vc2FnZVNhbXBsaW5nRmFpbHVyZRINCgVjYXVzZRgBIAEoCSLMAQoSU2Vzc2lvbkRpYWdub3N0aWNzEjIKB2hlYWx0aHkYASABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkhlYWx0aHlIABI2Cgl1bmhlYWx0aHkYAiABKAsyIS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVuaGVhbHRoeUgAEkAKEGRlZ3JhZGVkX3dpbmRvd3MYAyADKAsyJi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRlZ3JhZGVkV2luZG93QggKBmhlYWx0aCIQCg5TZXNzaW9uSGVhbHRoeSJBChBTZXNzaW9uVW5oZWFsdGh5Ei0KBmZhdWx0cxgBIAMoCzIdLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uRmF1bHQiMQoMU2Vzc2lvbkZhdWx0EhEKCWNvbXBvbmVudBgBIAEoCRIOCgZkZXRhaWwYAiABKAkiyQEKFVNlc3Npb25EZWdyYWRlZFdpbmRvdxIRCgljb21wb25lbnQYASABKAkSDgoGcmVhc29uGAIgASgJEhMKC2JlZ2FuX2F0X21zGAMgASgDEjQKBG9wZW4YBCABKAsyJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRlZ3JhZGVkT3BlbkgAEjgKBmNsb3NlZBgFIAEoCzImLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uRGVncmFkZWRDbG9zZWRIAEIICgZleHRlbnQiFQoTU2Vzc2lvbkRlZ3JhZGVkT3BlbiJDChVTZXNzaW9uRGVncmFkZWRDbG9zZWQSEwoLZW5kZWRfYXRfbXMYASABKAMSFQoNZHJvcHBlZF9jb3VudBgCIAEoBCKCAQoNU2Vzc2lvbktpbGxlZBIyCgRpZGxlGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLlNlc3Npb25LaWxsZWRJZGxlSAASNgoGZm9yY2VkGAIgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25LaWxsZWRGb3JjZWRIAEIFCgNob3ciEwoRU2Vzc2lvbktpbGxlZElkbGUimQEKE1Nlc3Npb25LaWxsZWRGb3JjZWQSNgoQaW50ZXJydXB0ZWRfdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBARI1CgxzdG9wcGVkX3dvcmsYAiADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWRCEwoRX2ludGVycnVwdGVkX3R1cm4iigEKC1Nlc3Npb25MaXZlEjQKDnR1cm5faW5fZmxpZ2h0GAEgASgLMhcuY29udmVyc2F0aW9uLnYxLlR1cm5JZEgAiAEBEjIKCWxpdmVfd29yaxgCIAMoCzIfLmNvbnZlcnNhdGlvbi52MS5EZXRhY2hlZFdvcmtJZEIRCg9fdHVybl9pbl9mbGlnaHQifAoTU2Vzc2lvbkNvbnRleHRVc2FnZRIUCgx0b3RhbF90b2tlbnMYASABKAMSEgoKbWF4X3Rva2VucxgCIAEoAxI7CgpjYXRlZ29yaWVzGAMgAygLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db250ZXh0Q2F0ZWdvcnkiNwoWU2Vzc2lvbkNvbnRleHRDYXRlZ29yeRINCgVsYWJlbBgBIAEoCRIOCgZ0b2tlbnMYAiABKAMqowEKE1Nlc3Npb25Db21wYWN0U2NvcGUSJQohU0VTU0lPTl9DT01QQUNUX1NDT1BFX1VOU1BFQ0lGSUVEEAASHQoZU0VTU0lPTl9DT01QQUNUX1NDT1BFX0FMTBABEiEKHVNFU1NJT05fQ09NUEFDVF9TQ09QRV9QUk9NUFRTEAISIwofU0VTU0lPTl9DT01QQUNUX1NDT1BFX1JFU1BPTlNFUxADQjBaLmFnZW50cmVwbC9wcm90by9jb252ZXJzYXRpb24vdjE7Y29udmVyc2F0aW9udjFiBnByb3RvMw", [file_conversation_v1_api, file_conversation_v1_detached_work, file_conversation_v1_permission, file_conversation_v1_turn]);
+  fileDesc("Ch1jb252ZXJzYXRpb24vdjEvc2Vzc2lvbi5wcm90bxIPY29udmVyc2F0aW9uLnYxIocDCg5TZXNzaW9uU3RhcnRlZBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgBIAEoCRIwCgdydW50aW1lGAIgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25SdW50aW1lEjQKD2VmZmVjdGl2ZV9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEj0KD3Blcm1pc3Npb25fbW9kZRgHIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5BZ2VudFBlcm1pc3Npb25Nb2RlEjMKDW1vZGVsX2NhdGFsb2cYBCADKAsyHC5jb252ZXJzYXRpb24udjEuTW9kZWxPcHRpb24SNAoOdHVybl9pbl9mbGlnaHQYBSABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoJbGl2ZV93b3JrGAYgAygLMiIuY29udmVyc2F0aW9uLnYxLkFnZW50RGV0YWNoZWRXb3JrQhEKD190dXJuX2luX2ZsaWdodCJbCg5TZXNzaW9uUnVudGltZRIWCg5zaGltX2J1aWxkX3NoYRgBIAEoCRITCgtzZGtfdmVyc2lvbhgCIAEoCRIcChRhZ2VudF9iaW5hcnlfdmVyc2lvbhgDIAEoCSL4AQoLU2Vzc2lvbkNvbGQSFgoOY29udGV4dF90b2tlbnMYASABKAQSGgoSbGFzdF9yZXF1ZXN0X2F0X21zGAIgASgDEjQKD3JlcXVlc3RlZF9tb2RlbBgDIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjQKBmxhcHNlZBgEIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZExhcHNlZEgAEj8KDG1vZGVsX3N3aXRjaBgFIAEoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZE1vZGVsU3dpdGNoSABCCAoGcmVhc29uIikKEVNlc3Npb25Db2xkTGFwc2VkEhQKDGNhY2hlX3R0bF9tcxgBIAEoAyIYChZTZXNzaW9uQ29sZE1vZGVsU3dpdGNoIsMBChZTZXNzaW9uQ29sZFJlbWVkaWF0aW9uEi4KA3BheRgBIAEoCzIfLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29sZFBheUgAEjIKBWNsZWFyGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ2xlYXJIABI2Cgdjb21wYWN0GAMgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db2xkQ29tcGFjdEgAQg0KC3JlbWVkaWF0aW9uIhAKDlNlc3Npb25Db2xkUGF5IhIKEFNlc3Npb25Db2xkQ2xlYXIidQoSU2Vzc2lvbkNvbGRDb21wYWN0EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoFc2NvcGUYAiABKA4yJC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbXBhY3RTY29wZSLcBQoNU2Vzc2lvblVwZGF0ZRJDChBpZGVudGl0eV9yb3RhdGVkGAEgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25JZGVudGl0eVJvdGF0ZWRIABI3CgpxdWVyeV9kaWVkGAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeURpZWRIABI9Cg1tb2RlbF9jaGFuZ2VkGAMgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Nb2RlbENoYW5nZWRIABI1CglmYXN0X21vZGUYBCABKAsyIC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhc3RNb2RlSAASNwoKbWNwX3NlcnZlchgFIAEoCzIhLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVySAASPQoNYWNjb3VudF91c2FnZRgGIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQWNjb3VudFVzYWdlSAASUAoXcGVybWlzc2lvbl9tb2RlX2NoYW5nZWQYByABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvblBlcm1pc3Npb25Nb2RlQ2hhbmdlZEgAEk4KFmNvbnRleHRfYnVkZ2V0X3dhcm5pbmcYGCABKAsyLC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkNvbnRleHRCdWRnZXRXYXJuaW5nSAASOgoLZGlhZ25vc3RpY3MYGSABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRpYWdub3N0aWNzSAASPQoNY29udGV4dF91c2FnZRgaIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dFVzYWdlSAASOAoKY29tcGFjdGluZxgbIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29tcGFjdGluZ0gAQggKBnVwZGF0ZSITChFTZXNzaW9uQ29tcGFjdGluZyIrChtTZXNzaW9uQ29udGV4dEJ1ZGdldFdhcm5pbmcSDAoEdGV4dBgBIAEoCSJXChZTZXNzaW9uSWRlbnRpdHlSb3RhdGVkEiIKGnByZXZpb3VzX3ZlbmRvcl9zZXNzaW9uX2lkGAEgASgJEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAIgASgJIqsBChBTZXNzaW9uUXVlcnlEaWVkEkQKDnVuZXhwZWN0ZWRfZW9mGAEgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeVVuZXhwZWN0ZWRFb2ZIABJIChBpdGVyYXRvcl9mYWlsdXJlGAIgASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25RdWVyeUl0ZXJhdG9yRmFpbHVyZUgAQgcKBWNhdXNlIhsKGVNlc3Npb25RdWVyeVVuZXhwZWN0ZWRFb2YiLAobU2Vzc2lvblF1ZXJ5SXRlcmF0b3JGYWlsdXJlEg0KBWNhdXNlGAEgASgJIl0KHFNlc3Npb25QZXJtaXNzaW9uTW9kZUNoYW5nZWQSPQoPcGVybWlzc2lvbl9tb2RlGAEgASgLMiQuY29udmVyc2F0aW9uLnYxLkFnZW50UGVybWlzc2lvbk1vZGUiSwoTU2Vzc2lvbk1vZGVsQ2hhbmdlZBI0Cg9lZmZlY3RpdmVfbW9kZWwYASABKAsyGy5jb252ZXJzYXRpb24udjEuQWdlbnRNb2RlbCK+AQoPU2Vzc2lvbkZhc3RNb2RlEjAKAm9uGAEgASgLMiIuY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZU9uSAASMgoDb2ZmGAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZU9mZkgAEjwKCGNvb2xkb3duGAMgASgLMiguY29udmVyc2F0aW9uLnYxLlNlc3Npb25GYXN0TW9kZUNvb2xkb3duSABCBwoFc3RhdGUiGQoXU2Vzc2lvbkZhc3RNb2RlQ29vbGRvd24iEwoRU2Vzc2lvbkZhc3RNb2RlT24iJAoSU2Vzc2lvbkZhc3RNb2RlT2ZmEg4KBnJlYXNvbhgBIAEoCSLkAgoQU2Vzc2lvbk1jcFNlcnZlchIMCgRuYW1lGAEgASgJEj8KCWNvbm5lY3RlZBgCIAEoCzIqLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uTWNwU2VydmVyQ29ubmVjdGVkSAASOQoGZmFpbGVkGAMgASgLMicuY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJGYWlsZWRIABJACgpuZWVkc19hdXRoGAQgASgLMiouY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJOZWVkc0F1dGhIABI7CgdwZW5kaW5nGAUgASgLMiguY29udmVyc2F0aW9uLnYxLlNlc3Npb25NY3BTZXJ2ZXJQZW5kaW5nSAASPQoIZGlzYWJsZWQYBiABKAsyKS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1jcFNlcnZlckRpc2FibGVkSABCCAoGaGVhbHRoIhsKGVNlc3Npb25NY3BTZXJ2ZXJOZWVkc0F1dGgiGQoXU2Vzc2lvbk1jcFNlcnZlclBlbmRpbmciGgoYU2Vzc2lvbk1jcFNlcnZlckRpc2FibGVkIhsKGVNlc3Npb25NY3BTZXJ2ZXJDb25uZWN0ZWQiJwoWU2Vzc2lvbk1jcFNlcnZlckZhaWxlZBINCgVlcnJvchgBIAEoCSLfAQoTU2Vzc2lvbkFjY291bnRVc2FnZRIWCg5vYnNlcnZlZF9hdF9tcxgBIAEoAxIZChFzdWJzY3JpcHRpb25fdHlwZRgCIAEoCRJCCglhdmFpbGFibGUYAyABKAsyLS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkFjY291bnRVc2FnZUF2YWlsYWJsZUgAEkYKC3VuYXZhaWxhYmxlGAQgASgLMi8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZUgAQgkKB291dGNvbWUi8AMKHFNlc3Npb25BY2NvdW50VXNhZ2VBdmFpbGFibGUSNgoJZml2ZV9ob3VyGAEgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvdxI7CglzZXZlbl9kYXkYAiABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SACIAQESRgoUc2V2ZW5fZGF5X29hdXRoX2FwcHMYAyABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SAGIAQESQAoOc2V2ZW5fZGF5X29wdXMYBCABKAsyIy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVzYWdlV2luZG93SAKIAQESQgoQc2V2ZW5fZGF5X3Nvbm5ldBgFIAEoCzIjLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dIA4gBARI+Cgxtb2RlbF9zY29wZWQYBiADKAsyKC5jb252ZXJzYXRpb24udjEuU2Vzc2lvbk1vZGVsVXNhZ2VXaW5kb3dCDAoKX3NldmVuX2RheUIXChVfc2V2ZW5fZGF5X29hdXRoX2FwcHNCEQoPX3NldmVuX2RheV9vcHVzQhMKEV9zZXZlbl9kYXlfc29ubmV0InoKF1Nlc3Npb25Nb2RlbFVzYWdlV2luZG93EioKBW1vZGVsGAEgASgLMhsuY29udmVyc2F0aW9uLnYxLkFnZW50TW9kZWwSMwoGd2luZG93GAIgASgLMiMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVdpbmRvdyJHChJTZXNzaW9uVXNhZ2VXaW5kb3cSGwoTdXRpbGl6YXRpb25fcGVyY2VudBgBIAEoARIUCgxyZXNldHNfYXRfbXMYAiABKAMi6gIKHlNlc3Npb25BY2NvdW50VXNhZ2VVbmF2YWlsYWJsZRJOChNzZXJ2aWNlX3VuYXZhaWxhYmxlGAEgASgLMi8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVNlcnZpY2VVbmF2YWlsYWJsZUgAEkwKEndpbmRvd191bmF2YWlsYWJsZRgCIAEoCzIuLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uVXNhZ2VXaW5kb3dVbmF2YWlsYWJsZUgAElYKF3V0aWxpemF0aW9uX3VuYXZhaWxhYmxlGAMgASgLMjMuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVV0aWxpemF0aW9uVW5hdmFpbGFibGVIABJIChBzYW1wbGluZ19mYWlsdXJlGAQgASgLMiwuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Vc2FnZVNhbXBsaW5nRmFpbHVyZUgAQggKBnJlYXNvbiIgCh5TZXNzaW9uVXNhZ2VTZXJ2aWNlVW5hdmFpbGFibGUiHwodU2Vzc2lvblVzYWdlV2luZG93VW5hdmFpbGFibGUiJAoiU2Vzc2lvblVzYWdlVXRpbGl6YXRpb25VbmF2YWlsYWJsZSIsChtTZXNzaW9uVXNhZ2VTYW1wbGluZ0ZhaWx1cmUSDQoFY2F1c2UYASABKAkizAEKElNlc3Npb25EaWFnbm9zdGljcxIyCgdoZWFsdGh5GAEgASgLMh8uY29udmVyc2F0aW9uLnYxLlNlc3Npb25IZWFsdGh5SAASNgoJdW5oZWFsdGh5GAIgASgLMiEuY29udmVyc2F0aW9uLnYxLlNlc3Npb25VbmhlYWx0aHlIABJAChBkZWdyYWRlZF93aW5kb3dzGAMgAygLMiYuY29udmVyc2F0aW9uLnYxLlNlc3Npb25EZWdyYWRlZFdpbmRvd0IICgZoZWFsdGgiEAoOU2Vzc2lvbkhlYWx0aHkiQQoQU2Vzc2lvblVuaGVhbHRoeRItCgZmYXVsdHMYASADKAsyHS5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkZhdWx0IjEKDFNlc3Npb25GYXVsdBIRCgljb21wb25lbnQYASABKAkSDgoGZGV0YWlsGAIgASgJIskBChVTZXNzaW9uRGVncmFkZWRXaW5kb3cSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRITCgtiZWdhbl9hdF9tcxgDIAEoAxI0CgRvcGVuGAQgASgLMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25EZWdyYWRlZE9wZW5IABI4CgZjbG9zZWQYBSABKAsyJi5jb252ZXJzYXRpb24udjEuU2Vzc2lvbkRlZ3JhZGVkQ2xvc2VkSABCCAoGZXh0ZW50IhUKE1Nlc3Npb25EZWdyYWRlZE9wZW4iQwoVU2Vzc2lvbkRlZ3JhZGVkQ2xvc2VkEhMKC2VuZGVkX2F0X21zGAEgASgDEhUKDWRyb3BwZWRfY291bnQYAiABKAQiggEKDVNlc3Npb25LaWxsZWQSMgoEaWRsZRgBIAEoCzIiLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkSWRsZUgAEjYKBmZvcmNlZBgCIAEoCzIkLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uS2lsbGVkRm9yY2VkSABCBQoDaG93IhMKEVNlc3Npb25LaWxsZWRJZGxlIpkBChNTZXNzaW9uS2lsbGVkRm9yY2VkEjYKEGludGVycnVwdGVkX3R1cm4YASABKAsyFy5jb252ZXJzYXRpb24udjEuVHVybklkSACIAQESNQoMc3RvcHBlZF93b3JrGAIgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkQhMKEV9pbnRlcnJ1cHRlZF90dXJuIooBCgtTZXNzaW9uTGl2ZRI0Cg50dXJuX2luX2ZsaWdodBgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWRIAIgBARIyCglsaXZlX3dvcmsYAiADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWRCEQoPX3R1cm5faW5fZmxpZ2h0InwKE1Nlc3Npb25Db250ZXh0VXNhZ2USFAoMdG90YWxfdG9rZW5zGAEgASgDEhIKCm1heF90b2tlbnMYAiABKAMSOwoKY2F0ZWdvcmllcxgDIAMoCzInLmNvbnZlcnNhdGlvbi52MS5TZXNzaW9uQ29udGV4dENhdGVnb3J5IjcKFlNlc3Npb25Db250ZXh0Q2F0ZWdvcnkSDQoFbGFiZWwYASABKAkSDgoGdG9rZW5zGAIgASgDKqMBChNTZXNzaW9uQ29tcGFjdFNjb3BlEiUKIVNFU1NJT05fQ09NUEFDVF9TQ09QRV9VTlNQRUNJRklFRBAAEh0KGVNFU1NJT05fQ09NUEFDVF9TQ09QRV9BTEwQARIhCh1TRVNTSU9OX0NPTVBBQ1RfU0NPUEVfUFJPTVBUUxACEiMKH1NFU1NJT05fQ09NUEFDVF9TQ09QRV9SRVNQT05TRVMQA0IwWi5hZ2VudHJlcGwvcHJvdG8vY29udmVyc2F0aW9uL3YxO2NvbnZlcnNhdGlvbnYxYgZwcm90bzM", [file_conversation_v1_api, file_conversation_v1_detached_work, file_conversation_v1_permission, file_conversation_v1_turn]);
 
 /**
  * A session that can accept a prompt. Everything here is a FACT AT START;
@@ -114,7 +114,10 @@ export const SessionStartedSchema: GenMessage<SessionStarted> = /*@__PURE__*/
  */
 export type SessionRuntime = Message<"conversation.v1.SessionRuntime"> & {
   /**
-   * The shim's build commit.
+   * The shim's build commit. THE STALENESS-BOUNCE CARRIER: the daemon
+   * compares this against its current deploy stamp and relaunches a
+   * stale surviving shim at freeness (the rollout's build-staleness
+   * bounce).
    *
    * @generated from field: string shim_build_sha = 1;
    */
@@ -469,6 +472,16 @@ export type SessionUpdate = Message<"conversation.v1.SessionUpdate"> & {
      */
     value: SessionContextUsage;
     case: "contextUsage";
+  } | {
+    /**
+     * Vendor-initiated auto-compaction BEGAN (the vendor's system
+     * status:compacting signal, relayed). The ContextCut record that
+     * follows is the end signal — no progress figure exists upstream.
+     *
+     * @generated from field: conversation.v1.SessionCompacting compacting = 27;
+     */
+    value: SessionCompacting;
+    case: "compacting";
   } | { case: undefined; value?: undefined };
 };
 
@@ -478,6 +491,21 @@ export type SessionUpdate = Message<"conversation.v1.SessionUpdate"> & {
  */
 export const SessionUpdateSchema: GenMessage<SessionUpdate> = /*@__PURE__*/
   messageDesc(file_conversation_v1_session, 9);
+
+/**
+ * Presence is the fact: the vendor is compacting the context right now.
+ *
+ * @generated from message conversation.v1.SessionCompacting
+ */
+export type SessionCompacting = Message<"conversation.v1.SessionCompacting"> & {
+};
+
+/**
+ * Describes the message conversation.v1.SessionCompacting.
+ * Use `create(SessionCompactingSchema)` to create a new message.
+ */
+export const SessionCompactingSchema: GenMessage<SessionCompacting> = /*@__PURE__*/
+  messageDesc(file_conversation_v1_session, 10);
 
 /**
  * The vendor's context-budget warning: its own signal that the context
@@ -500,7 +528,7 @@ export type SessionContextBudgetWarning = Message<"conversation.v1.SessionContex
  * Use `create(SessionContextBudgetWarningSchema)` to create a new message.
  */
 export const SessionContextBudgetWarningSchema: GenMessage<SessionContextBudgetWarning> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 10);
+  messageDesc(file_conversation_v1_session, 11);
 
 /**
  * The vendor rotated the session's identity. The store scopes by this id, so
@@ -531,7 +559,7 @@ export type SessionIdentityRotated = Message<"conversation.v1.SessionIdentityRot
  * Use `create(SessionIdentityRotatedSchema)` to create a new message.
  */
 export const SessionIdentityRotatedSchema: GenMessage<SessionIdentityRotated> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 11);
+  messageDesc(file_conversation_v1_session, 12);
 
 /**
  * The query ended on its own. THE ARM IS HOW; an orderly close is
@@ -567,7 +595,7 @@ export type SessionQueryDied = Message<"conversation.v1.SessionQueryDied"> & {
  * Use `create(SessionQueryDiedSchema)` to create a new message.
  */
 export const SessionQueryDiedSchema: GenMessage<SessionQueryDied> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 12);
+  messageDesc(file_conversation_v1_session, 13);
 
 /**
  * The agent binary's stream ended without a close.
@@ -582,7 +610,7 @@ export type SessionQueryUnexpectedEof = Message<"conversation.v1.SessionQueryUne
  * Use `create(SessionQueryUnexpectedEofSchema)` to create a new message.
  */
 export const SessionQueryUnexpectedEofSchema: GenMessage<SessionQueryUnexpectedEof> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 13);
+  messageDesc(file_conversation_v1_session, 14);
 
 /**
  * The SDK's iterator threw.
@@ -603,7 +631,7 @@ export type SessionQueryIteratorFailure = Message<"conversation.v1.SessionQueryI
  * Use `create(SessionQueryIteratorFailureSchema)` to create a new message.
  */
 export const SessionQueryIteratorFailureSchema: GenMessage<SessionQueryIteratorFailure> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 14);
+  messageDesc(file_conversation_v1_session, 15);
 
 /**
  * The permission mode now in effect for the session.
@@ -624,7 +652,7 @@ export type SessionPermissionModeChanged = Message<"conversation.v1.SessionPermi
  * Use `create(SessionPermissionModeChangedSchema)` to create a new message.
  */
 export const SessionPermissionModeChangedSchema: GenMessage<SessionPermissionModeChanged> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 15);
+  messageDesc(file_conversation_v1_session, 16);
 
 /**
  * The model in effect for subsequent responses.
@@ -645,7 +673,7 @@ export type SessionModelChanged = Message<"conversation.v1.SessionModelChanged">
  * Use `create(SessionModelChangedSchema)` to create a new message.
  */
 export const SessionModelChangedSchema: GenMessage<SessionModelChanged> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 16);
+  messageDesc(file_conversation_v1_session, 17);
 
 /**
  * Fast mode. THE ARM IS THE STATE; off carries the vendor's reason.
@@ -686,7 +714,7 @@ export type SessionFastMode = Message<"conversation.v1.SessionFastMode"> & {
  * Use `create(SessionFastModeSchema)` to create a new message.
  */
 export const SessionFastModeSchema: GenMessage<SessionFastMode> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 17);
+  messageDesc(file_conversation_v1_session, 18);
 
 /**
  * Fast mode is temporarily unavailable and will return on its own.
@@ -701,7 +729,7 @@ export type SessionFastModeCooldown = Message<"conversation.v1.SessionFastModeCo
  * Use `create(SessionFastModeCooldownSchema)` to create a new message.
  */
 export const SessionFastModeCooldownSchema: GenMessage<SessionFastModeCooldown> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 18);
+  messageDesc(file_conversation_v1_session, 19);
 
 /**
  * Fast mode is in effect.
@@ -716,7 +744,7 @@ export type SessionFastModeOn = Message<"conversation.v1.SessionFastModeOn"> & {
  * Use `create(SessionFastModeOnSchema)` to create a new message.
  */
 export const SessionFastModeOnSchema: GenMessage<SessionFastModeOn> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 19);
+  messageDesc(file_conversation_v1_session, 20);
 
 /**
  * Fast mode is not in effect.
@@ -737,7 +765,7 @@ export type SessionFastModeOff = Message<"conversation.v1.SessionFastModeOff"> &
  * Use `create(SessionFastModeOffSchema)` to create a new message.
  */
 export const SessionFastModeOffSchema: GenMessage<SessionFastModeOff> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 20);
+  messageDesc(file_conversation_v1_session, 21);
 
 /**
  * One MCP server, by name, and its health now.
@@ -805,7 +833,7 @@ export type SessionMcpServer = Message<"conversation.v1.SessionMcpServer"> & {
  * Use `create(SessionMcpServerSchema)` to create a new message.
  */
 export const SessionMcpServerSchema: GenMessage<SessionMcpServer> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 21);
+  messageDesc(file_conversation_v1_session, 22);
 
 /**
  * The server needs someone to authenticate before it will serve.
@@ -820,7 +848,7 @@ export type SessionMcpServerNeedsAuth = Message<"conversation.v1.SessionMcpServe
  * Use `create(SessionMcpServerNeedsAuthSchema)` to create a new message.
  */
 export const SessionMcpServerNeedsAuthSchema: GenMessage<SessionMcpServerNeedsAuth> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 22);
+  messageDesc(file_conversation_v1_session, 23);
 
 /**
  * The server has not finished connecting.
@@ -835,7 +863,7 @@ export type SessionMcpServerPending = Message<"conversation.v1.SessionMcpServerP
  * Use `create(SessionMcpServerPendingSchema)` to create a new message.
  */
 export const SessionMcpServerPendingSchema: GenMessage<SessionMcpServerPending> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 23);
+  messageDesc(file_conversation_v1_session, 24);
 
 /**
  * The server is configured but switched off.
@@ -850,7 +878,7 @@ export type SessionMcpServerDisabled = Message<"conversation.v1.SessionMcpServer
  * Use `create(SessionMcpServerDisabledSchema)` to create a new message.
  */
 export const SessionMcpServerDisabledSchema: GenMessage<SessionMcpServerDisabled> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 24);
+  messageDesc(file_conversation_v1_session, 25);
 
 /**
  * The server is connected.
@@ -865,7 +893,7 @@ export type SessionMcpServerConnected = Message<"conversation.v1.SessionMcpServe
  * Use `create(SessionMcpServerConnectedSchema)` to create a new message.
  */
 export const SessionMcpServerConnectedSchema: GenMessage<SessionMcpServerConnected> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 25);
+  messageDesc(file_conversation_v1_session, 26);
 
 /**
  * The server failed to connect or dropped.
@@ -886,7 +914,7 @@ export type SessionMcpServerFailed = Message<"conversation.v1.SessionMcpServerFa
  * Use `create(SessionMcpServerFailedSchema)` to create a new message.
  */
 export const SessionMcpServerFailedSchema: GenMessage<SessionMcpServerFailed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 26);
+  messageDesc(file_conversation_v1_session, 27);
 
 /**
  * What the account's allowance looked like when sampled. LIVE, whenever the
@@ -935,7 +963,7 @@ export type SessionAccountUsage = Message<"conversation.v1.SessionAccountUsage">
  * Use `create(SessionAccountUsageSchema)` to create a new message.
  */
 export const SessionAccountUsageSchema: GenMessage<SessionAccountUsage> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 27);
+  messageDesc(file_conversation_v1_session, 28);
 
 /**
  * A figure was read.
@@ -1004,7 +1032,7 @@ export type SessionAccountUsageAvailable = Message<"conversation.v1.SessionAccou
  * Use `create(SessionAccountUsageAvailableSchema)` to create a new message.
  */
 export const SessionAccountUsageAvailableSchema: GenMessage<SessionAccountUsageAvailable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 28);
+  messageDesc(file_conversation_v1_session, 29);
 
 /**
  * One allowance window that applies to a single model.
@@ -1032,7 +1060,7 @@ export type SessionModelUsageWindow = Message<"conversation.v1.SessionModelUsage
  * Use `create(SessionModelUsageWindowSchema)` to create a new message.
  */
 export const SessionModelUsageWindowSchema: GenMessage<SessionModelUsageWindow> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 29);
+  messageDesc(file_conversation_v1_session, 30);
 
 /**
  * One allowance window's figures.
@@ -1060,7 +1088,7 @@ export type SessionUsageWindow = Message<"conversation.v1.SessionUsageWindow"> &
  * Use `create(SessionUsageWindowSchema)` to create a new message.
  */
 export const SessionUsageWindowSchema: GenMessage<SessionUsageWindow> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 30);
+  messageDesc(file_conversation_v1_session, 31);
 
 /**
  * Why no figure could be read. THE ARM IS THE REASON.
@@ -1111,7 +1139,7 @@ export type SessionAccountUsageUnavailable = Message<"conversation.v1.SessionAcc
  * Use `create(SessionAccountUsageUnavailableSchema)` to create a new message.
  */
 export const SessionAccountUsageUnavailableSchema: GenMessage<SessionAccountUsageUnavailable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 31);
+  messageDesc(file_conversation_v1_session, 32);
 
 /**
  * The usage service did not answer.
@@ -1126,7 +1154,7 @@ export type SessionUsageServiceUnavailable = Message<"conversation.v1.SessionUsa
  * Use `create(SessionUsageServiceUnavailableSchema)` to create a new message.
  */
 export const SessionUsageServiceUnavailableSchema: GenMessage<SessionUsageServiceUnavailable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 32);
+  messageDesc(file_conversation_v1_session, 33);
 
 /**
  * The service answered without a five-hour window.
@@ -1141,7 +1169,7 @@ export type SessionUsageWindowUnavailable = Message<"conversation.v1.SessionUsag
  * Use `create(SessionUsageWindowUnavailableSchema)` to create a new message.
  */
 export const SessionUsageWindowUnavailableSchema: GenMessage<SessionUsageWindowUnavailable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 33);
+  messageDesc(file_conversation_v1_session, 34);
 
 /**
  * The window carried no utilization figure.
@@ -1156,7 +1184,7 @@ export type SessionUsageUtilizationUnavailable = Message<"conversation.v1.Sessio
  * Use `create(SessionUsageUtilizationUnavailableSchema)` to create a new message.
  */
 export const SessionUsageUtilizationUnavailableSchema: GenMessage<SessionUsageUtilizationUnavailable> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 34);
+  messageDesc(file_conversation_v1_session, 35);
 
 /**
  * The shim's own sampling failed.
@@ -1177,7 +1205,7 @@ export type SessionUsageSamplingFailure = Message<"conversation.v1.SessionUsageS
  * Use `create(SessionUsageSamplingFailureSchema)` to create a new message.
  */
 export const SessionUsageSamplingFailureSchema: GenMessage<SessionUsageSamplingFailure> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 35);
+  messageDesc(file_conversation_v1_session, 36);
 
 /**
  * The shim's account of its own health at the instant it was asked. A
@@ -1223,7 +1251,7 @@ export type SessionDiagnostics = Message<"conversation.v1.SessionDiagnostics"> &
  * Use `create(SessionDiagnosticsSchema)` to create a new message.
  */
 export const SessionDiagnosticsSchema: GenMessage<SessionDiagnostics> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 36);
+  messageDesc(file_conversation_v1_session, 37);
 
 /**
  * Nothing is wrong with the shim itself.
@@ -1238,7 +1266,7 @@ export type SessionHealthy = Message<"conversation.v1.SessionHealthy"> & {
  * Use `create(SessionHealthySchema)` to create a new message.
  */
 export const SessionHealthySchema: GenMessage<SessionHealthy> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 37);
+  messageDesc(file_conversation_v1_session, 38);
 
 /**
  * Something is wrong with the shim itself.
@@ -1259,7 +1287,7 @@ export type SessionUnhealthy = Message<"conversation.v1.SessionUnhealthy"> & {
  * Use `create(SessionUnhealthySchema)` to create a new message.
  */
 export const SessionUnhealthySchema: GenMessage<SessionUnhealthy> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 38);
+  messageDesc(file_conversation_v1_session, 39);
 
 /**
  * One fault of the shim's own.
@@ -1289,7 +1317,7 @@ export type SessionFault = Message<"conversation.v1.SessionFault"> & {
  * Use `create(SessionFaultSchema)` to create a new message.
  */
 export const SessionFaultSchema: GenMessage<SessionFault> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 39);
+  messageDesc(file_conversation_v1_session, 40);
 
 /**
  * A window during which one component of the shim was degraded. THE ARM IS
@@ -1346,7 +1374,7 @@ export type SessionDegradedWindow = Message<"conversation.v1.SessionDegradedWind
  * Use `create(SessionDegradedWindowSchema)` to create a new message.
  */
 export const SessionDegradedWindowSchema: GenMessage<SessionDegradedWindow> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 40);
+  messageDesc(file_conversation_v1_session, 41);
 
 /**
  * The window is still open.
@@ -1361,7 +1389,7 @@ export type SessionDegradedOpen = Message<"conversation.v1.SessionDegradedOpen">
  * Use `create(SessionDegradedOpenSchema)` to create a new message.
  */
 export const SessionDegradedOpenSchema: GenMessage<SessionDegradedOpen> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 41);
+  messageDesc(file_conversation_v1_session, 42);
 
 /**
  * The window closed.
@@ -1390,7 +1418,7 @@ export type SessionDegradedClosed = Message<"conversation.v1.SessionDegradedClos
  * Use `create(SessionDegradedClosedSchema)` to create a new message.
  */
 export const SessionDegradedClosedSchema: GenMessage<SessionDegradedClosed> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 42);
+  messageDesc(file_conversation_v1_session, 43);
 
 /**
  * The session was killed. THE ARM IS HOW: idle, or by force over live work.
@@ -1427,7 +1455,7 @@ export type SessionKilled = Message<"conversation.v1.SessionKilled"> & {
  * Use `create(SessionKilledSchema)` to create a new message.
  */
 export const SessionKilledSchema: GenMessage<SessionKilled> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 43);
+  messageDesc(file_conversation_v1_session, 44);
 
 /**
  * Killed with nothing live.
@@ -1442,7 +1470,7 @@ export type SessionKilledIdle = Message<"conversation.v1.SessionKilledIdle"> & {
  * Use `create(SessionKilledIdleSchema)` to create a new message.
  */
 export const SessionKilledIdleSchema: GenMessage<SessionKilledIdle> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 44);
+  messageDesc(file_conversation_v1_session, 45);
 
 /**
  * Killed by force.
@@ -1472,7 +1500,7 @@ export type SessionKilledForced = Message<"conversation.v1.SessionKilledForced">
  * Use `create(SessionKilledForcedSchema)` to create a new message.
  */
 export const SessionKilledForcedSchema: GenMessage<SessionKilledForced> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 45);
+  messageDesc(file_conversation_v1_session, 46);
 
 /**
  * The session could not be killed because work is live and force was not
@@ -1503,7 +1531,7 @@ export type SessionLive = Message<"conversation.v1.SessionLive"> & {
  * Use `create(SessionLiveSchema)` to create a new message.
  */
 export const SessionLiveSchema: GenMessage<SessionLive> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 46);
+  messageDesc(file_conversation_v1_session, 47);
 
 /**
  * The session's CURRENT CONTEXT USAGE, as the vendor's own control answer
@@ -1543,7 +1571,7 @@ export type SessionContextUsage = Message<"conversation.v1.SessionContextUsage">
  * Use `create(SessionContextUsageSchema)` to create a new message.
  */
 export const SessionContextUsageSchema: GenMessage<SessionContextUsage> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 47);
+  messageDesc(file_conversation_v1_session, 48);
 
 /**
  * One category of the context breakdown.
@@ -1571,7 +1599,7 @@ export type SessionContextCategory = Message<"conversation.v1.SessionContextCate
  * Use `create(SessionContextCategorySchema)` to create a new message.
  */
 export const SessionContextCategorySchema: GenMessage<SessionContextCategory> = /*@__PURE__*/
-  messageDesc(file_conversation_v1_session, 48);
+  messageDesc(file_conversation_v1_session, 49);
 
 /**
  * The compaction scopes: a closed set of scalar choices (no state, no

@@ -30,12 +30,14 @@ var File_shim_v1_service_proto protoreflect.FileDescriptor
 
 const file_shim_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x15shim/v1/service.proto\x12\ashim.v1\x1a(shim/v1/endpoint_detach_foreground.proto\x1a#shim/v1/endpoint_kill_session.proto\x1a shim/v1/endpoint_kill_turn.proto\x1a#shim/v1/endpoint_read_history.proto\x1a(shim/v1/endpoint_set_session_model.proto\x1a2shim/v1/endpoint_set_session_permission_mode.proto\x1a$shim/v1/endpoint_start_session.proto\x1a!shim/v1/endpoint_start_turn.proto\x1a shim/v1/endpoint_stop_bash.proto\x1a\"shim/v1/endpoint_watch_agent.proto\x1a#shim/v1/endpoint_update_agent.proto\x1a#shim/v1/endpoint_get_workflow.proto\x1a$shim/v1/endpoint_stop_workflow.proto\x1a!shim/v1/endpoint_watch_bash.proto\x1a$shim/v1/endpoint_watch_session.proto\x1a%shim/v1/endpoint_watch_workflow.proto2\xde\t\n" +
+	"\x15shim/v1/service.proto\x12\ashim.v1\x1a(shim/v1/endpoint_detach_foreground.proto\x1a shim/v1/endpoint_hibernate.proto\x1a#shim/v1/endpoint_kill_session.proto\x1a shim/v1/endpoint_kill_turn.proto\x1a#shim/v1/endpoint_read_history.proto\x1a(shim/v1/endpoint_set_session_model.proto\x1a2shim/v1/endpoint_set_session_permission_mode.proto\x1a$shim/v1/endpoint_start_session.proto\x1a!shim/v1/endpoint_start_turn.proto\x1a shim/v1/endpoint_stop_bash.proto\x1a\"shim/v1/endpoint_watch_agent.proto\x1a#shim/v1/endpoint_update_agent.proto\x1a#shim/v1/endpoint_get_workflow.proto\x1a$shim/v1/endpoint_stop_workflow.proto\x1a!shim/v1/endpoint_watch_bash.proto\x1a$shim/v1/endpoint_watch_session.proto\x1a%shim/v1/endpoint_watch_workflow.proto2\xa2\n" +
+	"\n" +
 	"\x04Shim\x12K\n" +
 	"\fStartSession\x12\x1c.shim.v1.StartSessionRequest\x1a\x1d.shim.v1.StartSessionResponse\x12M\n" +
 	"\fWatchSession\x12\x1c.shim.v1.WatchSessionRequest\x1a\x1d.shim.v1.WatchSessionResponse0\x01\x12T\n" +
 	"\x0fSetSessionModel\x12\x1f.shim.v1.SetSessionModelRequest\x1a .shim.v1.SetSessionModelResponse\x12o\n" +
-	"\x18SetSessionPermissionMode\x12(.shim.v1.SetSessionPermissionModeRequest\x1a).shim.v1.SetSessionPermissionModeResponse\x12H\n" +
+	"\x18SetSessionPermissionMode\x12(.shim.v1.SetSessionPermissionModeRequest\x1a).shim.v1.SetSessionPermissionModeResponse\x12B\n" +
+	"\tHibernate\x12\x19.shim.v1.HibernateRequest\x1a\x1a.shim.v1.HibernateResponse\x12H\n" +
 	"\vKillSession\x12\x1b.shim.v1.KillSessionRequest\x1a\x1c.shim.v1.KillSessionResponse\x12B\n" +
 	"\tStartTurn\x12\x19.shim.v1.StartTurnRequest\x1a\x1a.shim.v1.StartTurnResponse\x12G\n" +
 	"\n" +
@@ -55,70 +57,74 @@ var file_shim_v1_service_proto_goTypes = []any{
 	(*WatchSessionRequest)(nil),              // 1: shim.v1.WatchSessionRequest
 	(*SetSessionModelRequest)(nil),           // 2: shim.v1.SetSessionModelRequest
 	(*SetSessionPermissionModeRequest)(nil),  // 3: shim.v1.SetSessionPermissionModeRequest
-	(*KillSessionRequest)(nil),               // 4: shim.v1.KillSessionRequest
-	(*StartTurnRequest)(nil),                 // 5: shim.v1.StartTurnRequest
-	(*WatchAgentRequest)(nil),                // 6: shim.v1.WatchAgentRequest
-	(*UpdateAgentRequest)(nil),               // 7: shim.v1.UpdateAgentRequest
-	(*KillTurnRequest)(nil),                  // 8: shim.v1.KillTurnRequest
-	(*WatchBashRequest)(nil),                 // 9: shim.v1.WatchBashRequest
-	(*StopBashRequest)(nil),                  // 10: shim.v1.StopBashRequest
-	(*GetWorkflowRequest)(nil),               // 11: shim.v1.GetWorkflowRequest
-	(*WatchWorkflowRequest)(nil),             // 12: shim.v1.WatchWorkflowRequest
-	(*StopWorkflowRequest)(nil),              // 13: shim.v1.StopWorkflowRequest
-	(*DetachForegroundRequest)(nil),          // 14: shim.v1.DetachForegroundRequest
-	(*ReadHistoryRequest)(nil),               // 15: shim.v1.ReadHistoryRequest
-	(*StartSessionResponse)(nil),             // 16: shim.v1.StartSessionResponse
-	(*WatchSessionResponse)(nil),             // 17: shim.v1.WatchSessionResponse
-	(*SetSessionModelResponse)(nil),          // 18: shim.v1.SetSessionModelResponse
-	(*SetSessionPermissionModeResponse)(nil), // 19: shim.v1.SetSessionPermissionModeResponse
-	(*KillSessionResponse)(nil),              // 20: shim.v1.KillSessionResponse
-	(*StartTurnResponse)(nil),                // 21: shim.v1.StartTurnResponse
-	(*WatchAgentResponse)(nil),               // 22: shim.v1.WatchAgentResponse
-	(*UpdateAgentResponse)(nil),              // 23: shim.v1.UpdateAgentResponse
-	(*KillTurnResponse)(nil),                 // 24: shim.v1.KillTurnResponse
-	(*WatchBashResponse)(nil),                // 25: shim.v1.WatchBashResponse
-	(*StopBashResponse)(nil),                 // 26: shim.v1.StopBashResponse
-	(*GetWorkflowResponse)(nil),              // 27: shim.v1.GetWorkflowResponse
-	(*WatchWorkflowResponse)(nil),            // 28: shim.v1.WatchWorkflowResponse
-	(*StopWorkflowResponse)(nil),             // 29: shim.v1.StopWorkflowResponse
-	(*DetachForegroundResponse)(nil),         // 30: shim.v1.DetachForegroundResponse
-	(*ReadHistoryResponse)(nil),              // 31: shim.v1.ReadHistoryResponse
+	(*HibernateRequest)(nil),                 // 4: shim.v1.HibernateRequest
+	(*KillSessionRequest)(nil),               // 5: shim.v1.KillSessionRequest
+	(*StartTurnRequest)(nil),                 // 6: shim.v1.StartTurnRequest
+	(*WatchAgentRequest)(nil),                // 7: shim.v1.WatchAgentRequest
+	(*UpdateAgentRequest)(nil),               // 8: shim.v1.UpdateAgentRequest
+	(*KillTurnRequest)(nil),                  // 9: shim.v1.KillTurnRequest
+	(*WatchBashRequest)(nil),                 // 10: shim.v1.WatchBashRequest
+	(*StopBashRequest)(nil),                  // 11: shim.v1.StopBashRequest
+	(*GetWorkflowRequest)(nil),               // 12: shim.v1.GetWorkflowRequest
+	(*WatchWorkflowRequest)(nil),             // 13: shim.v1.WatchWorkflowRequest
+	(*StopWorkflowRequest)(nil),              // 14: shim.v1.StopWorkflowRequest
+	(*DetachForegroundRequest)(nil),          // 15: shim.v1.DetachForegroundRequest
+	(*ReadHistoryRequest)(nil),               // 16: shim.v1.ReadHistoryRequest
+	(*StartSessionResponse)(nil),             // 17: shim.v1.StartSessionResponse
+	(*WatchSessionResponse)(nil),             // 18: shim.v1.WatchSessionResponse
+	(*SetSessionModelResponse)(nil),          // 19: shim.v1.SetSessionModelResponse
+	(*SetSessionPermissionModeResponse)(nil), // 20: shim.v1.SetSessionPermissionModeResponse
+	(*HibernateResponse)(nil),                // 21: shim.v1.HibernateResponse
+	(*KillSessionResponse)(nil),              // 22: shim.v1.KillSessionResponse
+	(*StartTurnResponse)(nil),                // 23: shim.v1.StartTurnResponse
+	(*WatchAgentResponse)(nil),               // 24: shim.v1.WatchAgentResponse
+	(*UpdateAgentResponse)(nil),              // 25: shim.v1.UpdateAgentResponse
+	(*KillTurnResponse)(nil),                 // 26: shim.v1.KillTurnResponse
+	(*WatchBashResponse)(nil),                // 27: shim.v1.WatchBashResponse
+	(*StopBashResponse)(nil),                 // 28: shim.v1.StopBashResponse
+	(*GetWorkflowResponse)(nil),              // 29: shim.v1.GetWorkflowResponse
+	(*WatchWorkflowResponse)(nil),            // 30: shim.v1.WatchWorkflowResponse
+	(*StopWorkflowResponse)(nil),             // 31: shim.v1.StopWorkflowResponse
+	(*DetachForegroundResponse)(nil),         // 32: shim.v1.DetachForegroundResponse
+	(*ReadHistoryResponse)(nil),              // 33: shim.v1.ReadHistoryResponse
 }
 var file_shim_v1_service_proto_depIdxs = []int32{
 	0,  // 0: shim.v1.Shim.StartSession:input_type -> shim.v1.StartSessionRequest
 	1,  // 1: shim.v1.Shim.WatchSession:input_type -> shim.v1.WatchSessionRequest
 	2,  // 2: shim.v1.Shim.SetSessionModel:input_type -> shim.v1.SetSessionModelRequest
 	3,  // 3: shim.v1.Shim.SetSessionPermissionMode:input_type -> shim.v1.SetSessionPermissionModeRequest
-	4,  // 4: shim.v1.Shim.KillSession:input_type -> shim.v1.KillSessionRequest
-	5,  // 5: shim.v1.Shim.StartTurn:input_type -> shim.v1.StartTurnRequest
-	6,  // 6: shim.v1.Shim.WatchAgent:input_type -> shim.v1.WatchAgentRequest
-	7,  // 7: shim.v1.Shim.UpdateAgent:input_type -> shim.v1.UpdateAgentRequest
-	8,  // 8: shim.v1.Shim.KillTurn:input_type -> shim.v1.KillTurnRequest
-	9,  // 9: shim.v1.Shim.WatchBash:input_type -> shim.v1.WatchBashRequest
-	10, // 10: shim.v1.Shim.StopBash:input_type -> shim.v1.StopBashRequest
-	11, // 11: shim.v1.Shim.GetWorkflow:input_type -> shim.v1.GetWorkflowRequest
-	12, // 12: shim.v1.Shim.WatchWorkflow:input_type -> shim.v1.WatchWorkflowRequest
-	13, // 13: shim.v1.Shim.StopWorkflow:input_type -> shim.v1.StopWorkflowRequest
-	14, // 14: shim.v1.Shim.DetachForeground:input_type -> shim.v1.DetachForegroundRequest
-	15, // 15: shim.v1.Shim.ReadHistory:input_type -> shim.v1.ReadHistoryRequest
-	16, // 16: shim.v1.Shim.StartSession:output_type -> shim.v1.StartSessionResponse
-	17, // 17: shim.v1.Shim.WatchSession:output_type -> shim.v1.WatchSessionResponse
-	18, // 18: shim.v1.Shim.SetSessionModel:output_type -> shim.v1.SetSessionModelResponse
-	19, // 19: shim.v1.Shim.SetSessionPermissionMode:output_type -> shim.v1.SetSessionPermissionModeResponse
-	20, // 20: shim.v1.Shim.KillSession:output_type -> shim.v1.KillSessionResponse
-	21, // 21: shim.v1.Shim.StartTurn:output_type -> shim.v1.StartTurnResponse
-	22, // 22: shim.v1.Shim.WatchAgent:output_type -> shim.v1.WatchAgentResponse
-	23, // 23: shim.v1.Shim.UpdateAgent:output_type -> shim.v1.UpdateAgentResponse
-	24, // 24: shim.v1.Shim.KillTurn:output_type -> shim.v1.KillTurnResponse
-	25, // 25: shim.v1.Shim.WatchBash:output_type -> shim.v1.WatchBashResponse
-	26, // 26: shim.v1.Shim.StopBash:output_type -> shim.v1.StopBashResponse
-	27, // 27: shim.v1.Shim.GetWorkflow:output_type -> shim.v1.GetWorkflowResponse
-	28, // 28: shim.v1.Shim.WatchWorkflow:output_type -> shim.v1.WatchWorkflowResponse
-	29, // 29: shim.v1.Shim.StopWorkflow:output_type -> shim.v1.StopWorkflowResponse
-	30, // 30: shim.v1.Shim.DetachForeground:output_type -> shim.v1.DetachForegroundResponse
-	31, // 31: shim.v1.Shim.ReadHistory:output_type -> shim.v1.ReadHistoryResponse
-	16, // [16:32] is the sub-list for method output_type
-	0,  // [0:16] is the sub-list for method input_type
+	4,  // 4: shim.v1.Shim.Hibernate:input_type -> shim.v1.HibernateRequest
+	5,  // 5: shim.v1.Shim.KillSession:input_type -> shim.v1.KillSessionRequest
+	6,  // 6: shim.v1.Shim.StartTurn:input_type -> shim.v1.StartTurnRequest
+	7,  // 7: shim.v1.Shim.WatchAgent:input_type -> shim.v1.WatchAgentRequest
+	8,  // 8: shim.v1.Shim.UpdateAgent:input_type -> shim.v1.UpdateAgentRequest
+	9,  // 9: shim.v1.Shim.KillTurn:input_type -> shim.v1.KillTurnRequest
+	10, // 10: shim.v1.Shim.WatchBash:input_type -> shim.v1.WatchBashRequest
+	11, // 11: shim.v1.Shim.StopBash:input_type -> shim.v1.StopBashRequest
+	12, // 12: shim.v1.Shim.GetWorkflow:input_type -> shim.v1.GetWorkflowRequest
+	13, // 13: shim.v1.Shim.WatchWorkflow:input_type -> shim.v1.WatchWorkflowRequest
+	14, // 14: shim.v1.Shim.StopWorkflow:input_type -> shim.v1.StopWorkflowRequest
+	15, // 15: shim.v1.Shim.DetachForeground:input_type -> shim.v1.DetachForegroundRequest
+	16, // 16: shim.v1.Shim.ReadHistory:input_type -> shim.v1.ReadHistoryRequest
+	17, // 17: shim.v1.Shim.StartSession:output_type -> shim.v1.StartSessionResponse
+	18, // 18: shim.v1.Shim.WatchSession:output_type -> shim.v1.WatchSessionResponse
+	19, // 19: shim.v1.Shim.SetSessionModel:output_type -> shim.v1.SetSessionModelResponse
+	20, // 20: shim.v1.Shim.SetSessionPermissionMode:output_type -> shim.v1.SetSessionPermissionModeResponse
+	21, // 21: shim.v1.Shim.Hibernate:output_type -> shim.v1.HibernateResponse
+	22, // 22: shim.v1.Shim.KillSession:output_type -> shim.v1.KillSessionResponse
+	23, // 23: shim.v1.Shim.StartTurn:output_type -> shim.v1.StartTurnResponse
+	24, // 24: shim.v1.Shim.WatchAgent:output_type -> shim.v1.WatchAgentResponse
+	25, // 25: shim.v1.Shim.UpdateAgent:output_type -> shim.v1.UpdateAgentResponse
+	26, // 26: shim.v1.Shim.KillTurn:output_type -> shim.v1.KillTurnResponse
+	27, // 27: shim.v1.Shim.WatchBash:output_type -> shim.v1.WatchBashResponse
+	28, // 28: shim.v1.Shim.StopBash:output_type -> shim.v1.StopBashResponse
+	29, // 29: shim.v1.Shim.GetWorkflow:output_type -> shim.v1.GetWorkflowResponse
+	30, // 30: shim.v1.Shim.WatchWorkflow:output_type -> shim.v1.WatchWorkflowResponse
+	31, // 31: shim.v1.Shim.StopWorkflow:output_type -> shim.v1.StopWorkflowResponse
+	32, // 32: shim.v1.Shim.DetachForeground:output_type -> shim.v1.DetachForegroundResponse
+	33, // 33: shim.v1.Shim.ReadHistory:output_type -> shim.v1.ReadHistoryResponse
+	17, // [17:34] is the sub-list for method output_type
+	0,  // [0:17] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name
@@ -130,6 +136,7 @@ func file_shim_v1_service_proto_init() {
 		return
 	}
 	file_shim_v1_endpoint_detach_foreground_proto_init()
+	file_shim_v1_endpoint_hibernate_proto_init()
 	file_shim_v1_endpoint_kill_session_proto_init()
 	file_shim_v1_endpoint_kill_turn_proto_init()
 	file_shim_v1_endpoint_read_history_proto_init()

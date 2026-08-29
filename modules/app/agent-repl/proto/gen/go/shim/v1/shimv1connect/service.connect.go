@@ -48,6 +48,8 @@ const (
 	// ShimSetSessionPermissionModeProcedure is the fully-qualified name of the Shim's
 	// SetSessionPermissionMode RPC.
 	ShimSetSessionPermissionModeProcedure = "/shim.v1.Shim/SetSessionPermissionMode"
+	// ShimHibernateProcedure is the fully-qualified name of the Shim's Hibernate RPC.
+	ShimHibernateProcedure = "/shim.v1.Shim/Hibernate"
 	// ShimKillSessionProcedure is the fully-qualified name of the Shim's KillSession RPC.
 	ShimKillSessionProcedure = "/shim.v1.Shim/KillSession"
 	// ShimStartTurnProcedure is the fully-qualified name of the Shim's StartTurn RPC.
@@ -81,6 +83,7 @@ var (
 	shimWatchSessionMethodDescriptor             = shimServiceDescriptor.Methods().ByName("WatchSession")
 	shimSetSessionModelMethodDescriptor          = shimServiceDescriptor.Methods().ByName("SetSessionModel")
 	shimSetSessionPermissionModeMethodDescriptor = shimServiceDescriptor.Methods().ByName("SetSessionPermissionMode")
+	shimHibernateMethodDescriptor                = shimServiceDescriptor.Methods().ByName("Hibernate")
 	shimKillSessionMethodDescriptor              = shimServiceDescriptor.Methods().ByName("KillSession")
 	shimStartTurnMethodDescriptor                = shimServiceDescriptor.Methods().ByName("StartTurn")
 	shimWatchAgentMethodDescriptor               = shimServiceDescriptor.Methods().ByName("WatchAgent")
@@ -114,6 +117,9 @@ type ShimClient interface {
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
+	// The pre-hibernation directive: the shim compacts, then acks; the daemon
+	// stands the shim down only after the ack. See endpoint_hibernate.proto.
+	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -184,6 +190,12 @@ func NewShimClient(httpClient connect.HTTPClient, baseURL string, opts ...connec
 			httpClient,
 			baseURL+ShimSetSessionPermissionModeProcedure,
 			connect.WithSchema(shimSetSessionPermissionModeMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		hibernate: connect.NewClient[v1.HibernateRequest, v1.HibernateResponse](
+			httpClient,
+			baseURL+ShimHibernateProcedure,
+			connect.WithSchema(shimHibernateMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		killSession: connect.NewClient[v1.KillSessionRequest, v1.KillSessionResponse](
@@ -267,6 +279,7 @@ type shimClient struct {
 	watchSession             *connect.Client[v1.WatchSessionRequest, v1.WatchSessionResponse]
 	setSessionModel          *connect.Client[v1.SetSessionModelRequest, v1.SetSessionModelResponse]
 	setSessionPermissionMode *connect.Client[v1.SetSessionPermissionModeRequest, v1.SetSessionPermissionModeResponse]
+	hibernate                *connect.Client[v1.HibernateRequest, v1.HibernateResponse]
 	killSession              *connect.Client[v1.KillSessionRequest, v1.KillSessionResponse]
 	startTurn                *connect.Client[v1.StartTurnRequest, v1.StartTurnResponse]
 	watchAgent               *connect.Client[v1.WatchAgentRequest, v1.WatchAgentResponse]
@@ -299,6 +312,11 @@ func (c *shimClient) SetSessionModel(ctx context.Context, req *connect.Request[v
 // SetSessionPermissionMode calls shim.v1.Shim.SetSessionPermissionMode.
 func (c *shimClient) SetSessionPermissionMode(ctx context.Context, req *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {
 	return c.setSessionPermissionMode.CallUnary(ctx, req)
+}
+
+// Hibernate calls shim.v1.Shim.Hibernate.
+func (c *shimClient) Hibernate(ctx context.Context, req *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error) {
+	return c.hibernate.CallUnary(ctx, req)
 }
 
 // KillSession calls shim.v1.Shim.KillSession.
@@ -380,6 +398,9 @@ type ShimHandler interface {
 	SetSessionModel(context.Context, *connect.Request[v1.SetSessionModelRequest]) (*connect.Response[v1.SetSessionModelResponse], error)
 	// Change the session's permission mode for every gate from now on.
 	SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error)
+	// The pre-hibernation directive: the shim compacts, then acks; the daemon
+	// stands the shim down only after the ack. See endpoint_hibernate.proto.
+	Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error)
 	// END: the session and EVERYTHING live in it — the turn if one is open and
 	// every live task, whichever turn spawned it. Refuses while anything is
 	// live unless forced; names what it killed.
@@ -446,6 +467,12 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 		ShimSetSessionPermissionModeProcedure,
 		svc.SetSessionPermissionMode,
 		connect.WithSchema(shimSetSessionPermissionModeMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	shimHibernateHandler := connect.NewUnaryHandler(
+		ShimHibernateProcedure,
+		svc.Hibernate,
+		connect.WithSchema(shimHibernateMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	shimKillSessionHandler := connect.NewUnaryHandler(
@@ -530,6 +557,8 @@ func NewShimHandler(svc ShimHandler, opts ...connect.HandlerOption) (string, htt
 			shimSetSessionModelHandler.ServeHTTP(w, r)
 		case ShimSetSessionPermissionModeProcedure:
 			shimSetSessionPermissionModeHandler.ServeHTTP(w, r)
+		case ShimHibernateProcedure:
+			shimHibernateHandler.ServeHTTP(w, r)
 		case ShimKillSessionProcedure:
 			shimKillSessionHandler.ServeHTTP(w, r)
 		case ShimStartTurnProcedure:
@@ -577,6 +606,10 @@ func (UnimplementedShimHandler) SetSessionModel(context.Context, *connect.Reques
 
 func (UnimplementedShimHandler) SetSessionPermissionMode(context.Context, *connect.Request[v1.SetSessionPermissionModeRequest]) (*connect.Response[v1.SetSessionPermissionModeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.SetSessionPermissionMode is not implemented"))
+}
+
+func (UnimplementedShimHandler) Hibernate(context.Context, *connect.Request[v1.HibernateRequest]) (*connect.Response[v1.HibernateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("shim.v1.Shim.Hibernate is not implemented"))
 }
 
 func (UnimplementedShimHandler) KillSession(context.Context, *connect.Request[v1.KillSessionRequest]) (*connect.Response[v1.KillSessionResponse], error) {
