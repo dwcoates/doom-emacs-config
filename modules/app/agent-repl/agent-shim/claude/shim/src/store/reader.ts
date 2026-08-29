@@ -198,21 +198,10 @@ export interface ReaderOptions {
   readonly client: StoreClient;
 }
 
-/** One live WatchBash subscription. */
-interface BashSubscriber {
-  readonly runValue: string;
-  readonly pending: conversationv1.AgentBash[];
-  readonly waiters: Array<(frame: conversationv1.AgentBash | null) => void>;
-  closed: boolean;
-}
-
 export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
   /** DetachedWorkId → the run's AgentActivityId, from the announcement. */
   const workToRun = new Map<string, string>();
-  /** The newest frame per run, so a late watcher opens with the original start. */
-  const lastFrameByRun = new Map<string, conversationv1.AgentBash>();
-  const subscribers = new Set<BashSubscriber>();
 
   const openSession = async (
     agent: conversationv1.AgentId,
@@ -405,45 +394,55 @@ export function createReader(options: ReaderOptions): Reader {
           `no announced shell run carries the detached-work handle ${JSON.stringify(work.value)}`,
         );
       }
-      // CONTRACT GAP, surfaced rather than papered over: store.v1 offers NO
-      // read verb for the bash lifecycle table, so the sidecar's spool-derived
-      // update frames — every byte of a detached shell's output — cannot be
-      // read back through this client at all. What is served here is what this
-      // shim itself observed: the announced start (replayed at its ORIGINAL
-      // instant, as a stream's first frame owes) and every later frame it
-      // writes. Requested proto change: a `ReadBashRun`/`WatchBashRun` verb.
-      LOGGER.log(
-        { run: runValue, work: work.value },
-        "serving a shell run's lifecycle from this shim's own frames; store.v1 has no bash read verb",
-      );
-      const subscriber: BashSubscriber = {
-        runValue,
-        pending: [],
-        waiters: [],
-        closed: false,
-      };
-      const opening = lastFrameByRun.get(runValue);
-      if (opening !== undefined) subscriber.pending.push(opening);
-      subscribers.add(subscriber);
+      // ONE PATH FOR EVERY RUN, and it is the STORE's. A detached shell's output
+      // is written by the SIDECAR as deltas — no SDK route carries a byte of it
+      // — so serving the run from what this shim happened to observe would show
+      // a command's start and its ending with the whole middle missing.
+      // `WatchBashRun` replays every stored row in write order and then follows,
+      // which is exactly what a watcher of a growing spool needs, and it is the
+      // same path whether this shim wrote the rows or the sidecar did.
+      const run = create(conversationv1.AgentActivityIdSchema, { value: runValue });
+      const abort = new AbortController();
+      LOGGER.log({ run: runValue, work: work.value }, "following a shell run's stored rows");
+      let opened = false;
       return {
         async *[Symbol.asyncIterator]() {
           try {
-            for (;;) {
-              const next = subscriber.pending.shift();
-              if (next !== undefined) {
-                yield next;
-                continue;
+            for await (const push of client.watchBashRun(
+              create(storev1.WatchBashRunRequestSchema, { run }),
+              abort.signal,
+            )) {
+              opened = true;
+              const frame = push.row?.frame;
+              if (frame === undefined) {
+                throw new PersistenceError(
+                  "store_unavailable",
+                  "the store pushed a bash row with no frame",
+                );
               }
-              if (subscriber.closed) return;
-              const awaited = await new Promise<conversationv1.AgentBash | null>((resolve) => {
-                subscriber.waiters.push(resolve);
-              });
-              if (awaited === null) return;
-              yield awaited;
+              yield frame;
             }
+          } catch (error) {
+            if (isNotFound(error)) {
+              // A REFUSED OPEN means the store holds no row for this run — the
+              // announcement reached us before the run's first row did. It is
+              // an `unknown_work` refusal, not a transport failure, so the
+              // caller can say so rather than reporting the store as broken.
+              LOGGER.log(
+                { level: "warn", run: runValue, work: work.value },
+                "the store holds no rows for this shell run yet",
+              );
+              throw new PersistenceError(
+                "unknown_work",
+                `the store holds no rows for shell run ${JSON.stringify(runValue)}`,
+              );
+            }
+            throw transportFailure(error);
           } finally {
-            subscriber.closed = true;
-            subscribers.delete(subscriber);
+            // CANCELLING THE CALL IS HOW A STREAM ENDS EARLY: a consumer that
+            // breaks out of the loop would otherwise leave the call draining a
+            // body that has not finished.
+            if (opened || !abort.signal.aborted) abort.abort();
           }
         },
       };
@@ -455,20 +454,14 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     noteBashFrame(runValue, frame) {
-      if (runValue === "") return;
-      lastFrameByRun.set(runValue, frame);
-      const terminal = frame.result.case === "success" || frame.result.case === "failure";
-      for (const subscriber of subscribers) {
-        if (subscriber.runValue !== runValue) continue;
-        const waiter = subscriber.waiters.shift();
-        if (waiter !== undefined) waiter(frame);
-        else subscriber.pending.push(frame);
-        if (!terminal) continue;
-        // EVERY BOUNDED STREAM ENDS WITH ITS TERMINAL FRAME, and a shell run's
-        // stream is bounded: once the terminal is delivered the watch is over.
-        subscriber.closed = true;
-        for (const parked of subscriber.waiters.splice(0)) parked(null);
-      }
+      // NOTHING TO RELAY ANY MORE. A run is served from the store's own rows,
+      // so a frame this shim wrote reaches a watcher the same way the sidecar's
+      // do — through `WatchBashRun`. Kept as the writer's one observation point
+      // so a frame that never reached the store is visible in the log.
+      LOGGER.logVerbose(
+        { run: runValue, arm: frame.result.case },
+        "wrote a shell run's lifecycle row; watchers read it back from the store",
+      );
     },
   };
 }

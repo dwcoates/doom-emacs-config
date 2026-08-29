@@ -12,16 +12,20 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { PersistenceError } from "../../src/store/persistence.js";
-import {
-  createReader,
-  readFailure,
-  toHistoryEntry,
-  toStorePointer,
-} from "../../src/store/reader.js";
+import { readFailure, toHistoryEntry, toStorePointer } from "../../src/store/reader.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { producerId } from "../../src/store/keys.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
-import { agent, promptEntry, readEntry, socketPathForTest } from "./persistence-fixtures.js";
+import {
+  agent,
+  bashAnnouncementEntry,
+  bashDeltaEntry,
+  bashStartEntry,
+  bashTerminalEntry,
+  promptEntry,
+  readEntry,
+  socketPathForTest,
+} from "./persistence-fixtures.js";
 
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
@@ -289,56 +293,53 @@ describe("openBashRun", () => {
     ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 
-  it("serves the announced start, then the run's later frames", async () => {
-    const started = await startFakeStore(socketPathForTest("bash-run"));
-    store = started;
-    const reader = createReader({ client: createStoreClient(started.socketPath) });
-    reader.linkWork("work-1", "run-1");
-    reader.noteBashFrame(
-      "run-1",
-      create(conversationv1.AgentBashSchema, {
-        result: {
-          case: "start",
-          value: create(conversationv1.AgentBashStartSchema, {
-            command: create(conversationv1.AgentBashCommandSchema, { line: "sleep 1" }),
-            startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: 5n }),
-          }),
-        },
-      }),
-    );
+  it("replays the run's stored rows, so a growing spool has no hole in the middle", async () => {
+    const { plane } = await seeded("bash-rows", 0);
+    plane.write([bashStartEntry(), bashDeltaEntry()]);
+    // The announcement is what carries the handle→run join.
+    plane.write([bashAnnouncementEntry()]);
+    await plane.flush();
 
-    const run = await reader.openBashRun(
+    const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "work-1" }),
     );
-    const iterator = run[Symbol.asyncIterator]();
-    const opening = await iterator.next();
+    const seen: string[] = [];
+    for await (const frame of run) {
+      seen.push(String(frame.result.case));
+      if (seen.length === 2) break;
+    }
 
-    expect((opening.value as conversationv1.AgentBash).result.case).toBe("start");
+    expect(seen).toEqual(["start", "update"]);
   });
 
-  it("ends the run's stream on its terminal frame, as a bounded stream owes", async () => {
-    const started = await startFakeStore(socketPathForTest("bash-terminal"));
-    store = started;
-    const reader = createReader({ client: createStoreClient(started.socketPath) });
-    reader.linkWork("work-1", "run-1");
+  it("ends the run's stream after the terminal row, as a bounded stream owes", async () => {
+    const { plane } = await seeded("bash-terminal", 0);
+    plane.write([bashStartEntry(), bashTerminalEntry(), bashAnnouncementEntry()]);
+    await plane.flush();
 
-    const run = await reader.openBashRun(
+    const run = await plane.openBashRun(
       create(conversationv1.DetachedWorkIdSchema, { value: "work-1" }),
     );
-    const iterator = run[Symbol.asyncIterator]();
-    const pending = iterator.next();
-    reader.noteBashFrame(
-      "run-1",
-      create(conversationv1.AgentBashSchema, {
-        result: {
-          case: "failure",
-          value: create(conversationv1.AgentBashFailureSchema, {}),
-        },
-      }),
-    );
-    await pending;
+    const arms: string[] = [];
+    for await (const frame of run) arms.push(String(frame.result.case));
 
-    await expect(iterator.next()).resolves.toMatchObject({ done: true });
+    expect(arms).toEqual(["start", "success"]);
+  });
+
+  it("refuses a run the store holds no row for", async () => {
+    const { plane } = await seeded("bash-no-rows", 0);
+    plane.write([bashAnnouncementEntry()]);
+    await plane.flush();
+
+    const run = await plane.openBashRun(
+      create(conversationv1.DetachedWorkIdSchema, { value: "work-1" }),
+    );
+
+    await expect(
+      (async () => {
+        for await (const frame of run) void frame;
+      })(),
+    ).rejects.toMatchObject({ kind: "unknown_work" });
   });
 });
 

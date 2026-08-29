@@ -101,6 +101,9 @@ describe("liveWork", () => {
       watchAgentSession: () => {
         throw new Error("unused");
       },
+      watchBashRun: () => {
+        throw new Error("unused");
+      },
       readAgentPage: async () => {
         throw new Error("unused");
       },
@@ -133,6 +136,9 @@ describe("liveWork", () => {
         throw new Error("unused");
       },
       watchAgentSession: () => {
+        throw new Error("unused");
+      },
+      watchBashRun: () => {
         throw new Error("unused");
       },
       readAgentPage: async () => {

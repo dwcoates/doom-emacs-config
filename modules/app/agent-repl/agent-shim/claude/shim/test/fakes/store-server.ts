@@ -32,6 +32,9 @@
  *   - AN UNKNOWN WATCH TOKEN IS A CONNECT `NotFound`. A refused stream open has
  *     no failure message to live in — the response type is the frame it
  *     streams — so the refusal closes the stream at the transport.
+ *   - `WatchBashRun` REPLAYS EVERY STORED ROW of a run in write order, then
+ *     follows, and ENDS after the terminal row. A run with no stored row is a
+ *     refused open — closed at the transport, like every other watch here.
  *   - WRITES CAN BE MADE TO FAIL ON DEMAND ({@link FakeStore.failWrites}), which
  *     is how the writer's retry buffer is testable at all.
  */
@@ -98,8 +101,21 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const unservedRows: storev1.StoreUnservedItem[] = [];
   /** Detached work ids that were announced, mapped to the run they detached from. */
   const detachedAnnounced = new Map<string, string | undefined>();
-  /** The newest bash lifecycle frame per run activity id. */
-  const bashByRun = new Map<string, conversationv1.AgentBash>();
+  /**
+   * Every bash lifecycle row per run, in write order.
+   *
+   * A LIST, NOT THE NEWEST ROW: `WatchBashRun` replays the run's whole history
+   * before it follows, because a detached shell's output arrives as DELTAS and a
+   * watcher handed only the newest one would have a hole where the output was.
+   */
+  const bashRowsByRun = new Map<string, storev1.StoreAgentBash[]>();
+  /** Tails following one run's rows. */
+  const bashWatchers = new Set<{
+    readonly run: string;
+    readonly pending: storev1.StoreAgentBash[];
+    readonly waiters: Array<(row: storev1.StoreAgentBash | null) => void>;
+    closed: boolean;
+  }>();
   let nextPointer = 1;
   let nextToken = 1;
   let writeFailure: string | null = null;
@@ -170,7 +186,16 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         return;
       case "bash": {
         const run = info.value.run?.value;
-        if (run !== undefined && info.value.frame !== undefined) bashByRun.set(run, info.value.frame);
+        if (run === undefined || run === "" || info.value.frame === undefined) return;
+        const rows = bashRowsByRun.get(run) ?? [];
+        rows.push(info.value);
+        bashRowsByRun.set(run, rows);
+        for (const watcher of bashWatchers) {
+          if (watcher.run !== run || watcher.closed) continue;
+          const waiter = watcher.waiters.shift();
+          if (waiter !== undefined) waiter(info.value);
+          else watcher.pending.push(info.value);
+        }
         return;
       }
       default:
@@ -253,6 +278,52 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         }
       },
 
+      async *watchBashRun(request) {
+        const run = request.run?.value ?? "";
+        const stored = bashRowsByRun.get(run);
+        if (stored === undefined || stored.length === 0) {
+          // A REFUSED OPEN closes at the transport: the response type is the
+          // row, so there is nowhere in the message to say "no such run".
+          throw new ConnectError(
+            `store: no stored rows for bash run ${JSON.stringify(run)}`,
+            Code.NotFound,
+          );
+        }
+        const watcher = {
+          run,
+          // REPLAY FIRST, in write order: a snapshot taken now, so a row written
+          // while the replay is being consumed lands in `pending` behind it.
+          pending: [...stored],
+          waiters: [] as Array<(row: storev1.StoreAgentBash | null) => void>,
+          closed: false,
+        };
+        bashWatchers.add(watcher);
+        try {
+          for (;;) {
+            const next = watcher.pending.shift();
+            if (next !== undefined) {
+              yield create(storev1.WatchBashRunResponseSchema, { row: next });
+              const arm = next.frame?.result.case;
+              // ENDS AFTER THE TERMINAL: the run's stream is bounded.
+              if (arm === "success" || arm === "failure") return;
+              continue;
+            }
+            if (watcher.closed) return;
+            const awaited = await new Promise<storev1.StoreAgentBash | null>((resolve) => {
+              watcher.waiters.push(resolve);
+              if (watcher.closed) resolve(null);
+            });
+            if (awaited === null) return;
+            yield create(storev1.WatchBashRunResponseSchema, { row: awaited });
+            const arm = awaited.frame?.result.case;
+            if (arm === "success" || arm === "failure") return;
+          }
+        } finally {
+          watcher.closed = true;
+          bashWatchers.delete(watcher);
+        }
+      },
+
       async readAgentPage(request) {
         const bookId = request.book?.value ?? "";
         const after = Number(request.after?.value ?? "0");
@@ -323,8 +394,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         }
         const liveDetached: conversationv1.DetachedWorkId[] = [];
         for (const [workId, runId] of detachedAnnounced) {
-          const bash = runId === undefined ? undefined : bashByRun.get(runId);
-          const ended = bash?.result.case === "success" || bash?.result.case === "failure";
+          const rows = runId === undefined ? undefined : bashRowsByRun.get(runId);
+          const newest = rows?.[rows.length - 1]?.frame;
+          const ended = newest?.result.case === "success" || newest?.result.case === "failure";
           if (!ended) {
             liveDetached.push(create(conversationv1.DetachedWorkIdSchema, { value: workId }));
           }
@@ -391,6 +463,10 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         for (const waiter of state.waiters.splice(0)) {
           (waiter as unknown as (line: storev1.StoreLineAt | null) => void)(null);
         }
+      }
+      for (const watcher of bashWatchers) {
+        watcher.closed = true;
+        for (const waiter of watcher.waiters.splice(0)) waiter(null);
       }
       await new Promise<void>((resolve) => {
         server.close(() => resolve());

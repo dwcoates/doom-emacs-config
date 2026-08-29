@@ -10,7 +10,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversationv1 } from "../../src/proto.js";
-import { activityUpsertKey, promptUpsertKey } from "../../src/store/keys.js";
+import { activityUpsertKey, detachedWorkUpsertKey, promptUpsertKey } from "../../src/store/keys.js";
 import type { PersistEntry } from "../../src/store/persistence.js";
 
 /** A private unix socket path for one test's fake store. */
@@ -136,4 +136,134 @@ export function bashRunEntry(
       }),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// A detached shell run: its announcement, and its lifecycle rows
+// ---------------------------------------------------------------------------
+
+/** The run every bash fixture below is about. */
+export const RUN_VALUE = "run-1";
+/** The handle the run is addressed by. */
+export const WORK_VALUE = "work-1";
+
+/**
+ * The announcement that carries the handle→run join.
+ *
+ * The reader learns which run a `DetachedWorkId` names from exactly this row, so
+ * a bash test that skips it is testing a watch nobody could have opened.
+ */
+export function bashAnnouncementEntry(book = agent("book-1")): PersistEntry {
+  const work = create(conversationv1.DetachedWorkIdSchema, { value: WORK_VALUE });
+  return {
+    agentId: book,
+    upsertKey: detachedWorkUpsertKey(work),
+    source: { vendorUuid: `uuid-${WORK_VALUE}`, discriminator: "agent_frame.detached_work" },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: book,
+        result: {
+          case: "detachedWork",
+          value: create(conversationv1.AgentDetachedWorkSchema, {
+            work,
+            origin: {
+              case: "detached",
+              value: create(conversationv1.DetachedWorkDetachedSchema, {
+                detachedFromId: unit(RUN_VALUE),
+                cause: {
+                  case: "requested",
+                  value: create(conversationv1.DetachedCauseRequestedSchema, {}),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    },
+  };
+}
+
+/** One lifecycle row of the run, keyed as every row of it is. */
+function bashRow(
+  frame: conversationv1.AgentBash,
+  discriminator: string,
+  book = agent("book-1"),
+): PersistEntry {
+  return {
+    agentId: book,
+    upsertKey: `bash:${RUN_VALUE}:${discriminator}`,
+    source: { vendorUuid: `uuid-${RUN_VALUE}-${discriminator}`, discriminator },
+    keepalive: false,
+    item: { kind: "bash_run", run: unit(RUN_VALUE), frame },
+  };
+}
+
+/** The run's announced start. */
+export function bashStartEntry(book = agent("book-1")): PersistEntry {
+  return bashRow(
+    create(conversationv1.AgentBashSchema, {
+      result: {
+        case: "start",
+        value: create(conversationv1.AgentBashStartSchema, {
+          command: create(conversationv1.AgentBashCommandSchema, { line: "sleep 100" }),
+          startedAt: create(conversationv1.AgentActivityStartedAtSchema, { atMs: 5_000n }),
+        }),
+      },
+    }),
+    "agent_bash.start",
+    book,
+  );
+}
+
+/** One delta of the run's output — the rows only the sidecar can write. */
+export function bashDeltaEntry(book = agent("book-1")): PersistEntry {
+  return bashRow(
+    create(conversationv1.AgentBashSchema, {
+      result: {
+        case: "update",
+        value: create(conversationv1.AgentBashUpdateSchema, {
+          newOutput: "working\n",
+          fromOffset: 0n,
+        }),
+      },
+    }),
+    "agent_bash.update",
+    book,
+  );
+}
+
+/** The run's terminal row. */
+export function bashTerminalEntry(book = agent("book-1")): PersistEntry {
+  return bashRow(
+    create(conversationv1.AgentBashSchema, {
+      result: {
+        case: "success",
+        value: create(conversationv1.AgentBashSuccessSchema, {
+          command: create(conversationv1.AgentBashCommandSchema, { line: "sleep 100" }),
+          outcome: {
+            case: "completed",
+            value: create(conversationv1.AgentBashCompletedSchema, {
+              output: create(conversationv1.AgentBashOutputSchema, {
+                form: {
+                  case: "text",
+                  value: create(conversationv1.AgentBashOutputTextSchema, {
+                    stdout: "working\n",
+                    stderr: "",
+                    extent: {
+                      case: "whole",
+                      value: create(conversationv1.AgentBashOutputWholeSchema, {}),
+                    },
+                  }),
+                },
+              }),
+            }),
+          },
+        }),
+      },
+    }),
+    "agent_bash.success",
+    book,
+  );
 }
