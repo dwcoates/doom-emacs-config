@@ -23,7 +23,7 @@ func newHandler(s *fakeServer, exit func()) http.Handler {
 	mux := http.NewServeMux()
 	path, handler := agentreplv1connect.NewAgentReplHandler(s, strictJSONOptions()...)
 	mux.Handle(path, handler)
-	_ = exit
+	s.registerControlPlane(mux, exit)
 	return h2c.NewHandler(mux, &http2.Server{})
 }
 
