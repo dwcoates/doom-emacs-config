@@ -335,3 +335,92 @@ func TestClassifyRejectsAnUnwatchedShape(t *testing.T) {
 		t.Fatal("a path matching none of the four shapes was classified")
 	}
 }
+
+// The relayed on-disk layout (shim lead): transcripts
+// <config root>/projects/<cwd-slug>/<vendor session>.jsonl, subagents
+// .../<vendor session>/subagents/agent-<id>.jsonl + meta.json, spools
+// <spool root>/[claude-<uid>/]<cwd-slug>/<vendor session>/tasks/<task>.output,
+// where <cwd-slug> maps both '/' and '.' to '-'.
+
+func TestScanAcceptsASlugWithDashesForPathSeparators(t *testing.T) {
+	// Arrange: the slug of /Users/me/work.dir is -Users-me-work-dir.
+	d, _, _, _ := fixture(t, "config-a/projects/-Users-me-work-dir/sess-1.jsonl")
+
+	// Act.
+	got := find(t, d.Scan(), "sess-1.jsonl")
+
+	// Assert.
+	if got.Kind != tail.KindSessionTranscript || got.SessionID != "sess-1" {
+		t.Fatalf("target = %+v, want the slugged project dir's session transcript", got)
+	}
+}
+
+func TestScanFindsASpoolWhenTheRootIsTheUIDDir(t *testing.T) {
+	// Arrange: a mock harness points --spool-root straight at claude-<uid>.
+	base := t.TempDir()
+	root := filepath.Join(base, "config-a")
+	spool := filepath.Join(base, "claude-501")
+	for _, dir := range []string{root, spool} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("creating %s: %v", dir, err)
+		}
+	}
+	write(t, filepath.Join(spool, "-Users-me-work", "sess-1", "tasks", "b1f.output"))
+	var logs []string
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "discover-test"})
+	d := New([]string{root}, spool, log)
+
+	// Act.
+	got := find(t, d.Scan(), "b1f.output")
+
+	// Assert: neither spelling of the root may make a spool invisible.
+	if got.Kind != tail.KindShellSpool || got.TaskID != "b1f" {
+		t.Fatalf("target = %+v, want the shell spool b1f", got)
+	}
+}
+
+func TestScanFindsASpoolWhenTheRootIsTheUIDDirsParent(t *testing.T) {
+	// Arrange: production points --spool-root at /tmp and lets discovery resolve
+	// claude-<uid> itself.
+	d, _, _, _ := fixture(t, "spool/claude-501/-Users-me-work/sess-1/tasks/a2c.output")
+
+	// Act.
+	got := find(t, d.Scan(), "a2c.output")
+
+	// Assert.
+	if got.Kind != tail.KindAgentTranscript || got.TaskID != "a2c" {
+		t.Fatalf("target = %+v, want the agent spool a2c", got)
+	}
+}
+
+func TestASpoolIsFoundOnlyOnceUnderEitherSpelling(t *testing.T) {
+	// Arrange: both globs match the same file when the root is the uid dir's
+	// parent, because claude-501/... is also <anything>/<...>.
+	d, _, _, _ := fixture(t, "spool/claude-501/-Users-me-work/sess-1/tasks/b1.output")
+
+	// Act.
+	var found int
+	for _, target := range d.Scan() {
+		if strings.HasSuffix(target.Path, "b1.output") {
+			found++
+		}
+	}
+
+	// Assert: one file must not enter the reader twice.
+	if found != 1 {
+		t.Fatalf("the spool was discovered %d times, want once", found)
+	}
+}
+
+func TestClassifyRejectsASpoolWithNoTasksSegment(t *testing.T) {
+	// Arrange.
+	d, base, _, _ := fixture(t)
+
+	// Act.
+	_, ok := d.Classify(filepath.Join(base, "spool", "claude-501", "proj", "sess-1", "notes", "b1.output"))
+
+	// Assert.
+	if ok {
+		t.Fatal("a path outside a tasks/ directory was classified as a spool")
+	}
+}
