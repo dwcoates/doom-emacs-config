@@ -8160,3 +8160,13 @@ via the existing interrupted_detached count arm), plus `confirm_agents`
 (bool, answers the challenge) and the landed refusal arm
 `InterruptError.confirm_required { live_agent_count }` — a turn stop with
 live agents is refused once, naming the count.
+
+## 2026-08-29 — the login port (landed; 42 rpcs)
+
+Three WEB LINK rpcs carry the verified pty mechanism: `OpenLogin
+{workspace}` → success{config_dir} (per-account idempotent open-or-join);
+`WatchLoginTerminal` — BIDI stream, first input frame is `attach
+{workspace}`, then keystrokes/resize in, raw pty bytes out (scrollback
+replay first), concluding with the `closed` terminal frame when the login
+child exits; `CloseLogin` (absent login = success). Daemon owns default
+geometry (no OAuth URL wrap); nothing parses the TUI.
