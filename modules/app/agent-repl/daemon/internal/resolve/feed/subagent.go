@@ -191,7 +191,7 @@ func (r *resolver) drawDetachedWork(s *wsState, agent *conversationv1.AgentId, w
 		}
 		if u, ok := s.units[unitID]; ok && u.input != "" {
 			sh := s.shell(workID)
-			sh.command = trimCommandPrefix(u.input)
+			sh.command = u.input
 			sh.startedAtMs = u.startedAtMs
 			sh.feed = at
 			r.publishShell(s, workID, sh, nil)
@@ -243,15 +243,6 @@ func (r *resolver) republishSubagent(s *wsState, unitID string, state *subagentS
 	}
 	r.stampTurn(s, row, nil)
 	r.upsert(s, state.feed, row, true)
-}
-
-// trimCommandPrefix removes the composed shell chrome from an input line so
-// the shell bubble draws the command itself ("$" is the client's chrome).
-func trimCommandPrefix(input string) string {
-	if len(input) > 2 && input[0] == '$' && input[1] == ' ' {
-		return input[2:]
-	}
-	return input
 }
 
 // drawDetachedShell draws one detached shell's bubble: the command head and

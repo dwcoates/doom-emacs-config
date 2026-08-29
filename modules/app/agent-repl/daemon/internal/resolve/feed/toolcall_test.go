@@ -214,7 +214,7 @@ func TestAFailedReadDrawsItsErrorTextWithTheFailedBadge(t *testing.T) {
 
 // ---- WRITE and EDIT ----
 
-func TestACreationIsWordedAsOneAndNotAsARewriteOfNothing(t *testing.T) {
+func TestAWriteDrawsTheBarePathAsItsInputLine(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.send(activityOf("unit-1", &conversationv1.AgentWrite{
@@ -226,8 +226,8 @@ func TestACreationIsWordedAsOneAndNotAsARewriteOfNothing(t *testing.T) {
 	}))
 
 	// Assert.
-	if got := h.card().GetInput().GetText(); got != "created new.go" {
-		t.Fatalf("input = %q, want the creation wording", got)
+	if got := h.card().GetInput().GetText(); got != "new.go" {
+		t.Fatalf("input = %q, want the bare path", got)
 	}
 }
 
@@ -333,7 +333,7 @@ func TestGrepContentDrawsItsMatchingLinesAndStatesTheOmitted(t *testing.T) {
 
 	// Assert.
 	card := h.card()
-	if got := card.GetInput().GetText(); got != "grep: FeedRow" {
+	if got := card.GetInput().GetText(); got != "FeedRow" {
 		t.Fatalf("input = %q", got)
 	}
 	if card.GetInput().GetQuery() == nil {
@@ -438,7 +438,7 @@ func TestGlobDistinguishesAnExactRemainderFromAFloor(t *testing.T) {
 
 // ---- BASH, in the FOREGROUND ----
 
-func TestAForegroundShellDrawsItsCommandAsACommandLine(t *testing.T) {
+func TestAForegroundShellsInputLineIsTheBareCommandInTheCommandForm(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
 	h.send(activityOf("unit-1", &conversationv1.AgentBash{
@@ -450,12 +450,109 @@ func TestAForegroundShellDrawsItsCommandAsACommandLine(t *testing.T) {
 
 	// Assert.
 	card := h.card()
-	if got := card.GetInput().GetText(); got != "$ go test ./..." {
+	if got := card.GetInput().GetText(); got != "go test ./..." {
 		t.Fatalf("input = %q", got)
 	}
 	if card.GetInput().GetCommand() == nil {
 		t.Fatalf("input form = %T, want the command form", card.GetInput().GetForm())
 	}
+}
+
+func TestTheInputLineCarriesNoChromeForAnyForm(t *testing.T) {
+	tests := []struct {
+		name     string
+		item     any
+		wantText string
+		wantForm string
+	}{
+		{
+			name: "a command line is the vendor's line, byte for byte",
+			item: &conversationv1.AgentBash{
+				Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+					Command:   &conversationv1.AgentBashCommand{Line: "go test ./..."},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "go test ./...",
+			wantForm: "command",
+		},
+		{
+			name: "a path is the path, with no verb",
+			item: &conversationv1.AgentRead{
+				Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+					Path:      &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "internal/feed/row.go",
+			wantForm: "path",
+		},
+		{
+			name: "a query is the terms, with no label",
+			item: &conversationv1.AgentGrep{
+				Result: &conversationv1.AgentGrep_Start{Start: &conversationv1.AgentGrepStart{
+					Query:     &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "FeedRow",
+			wantForm: "query",
+		},
+		{
+			name: "a glob pattern is the pattern",
+			item: &conversationv1.AgentGlob{
+				Result: &conversationv1.AgentGlob_Start{Start: &conversationv1.AgentGlobStart{
+					Query:     &conversationv1.AgentGlobQuery{Pattern: "**/*.go"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "**/*.go",
+			wantForm: "query",
+		},
+		{
+			name: "search terms are the terms",
+			item: &conversationv1.AgentWebSearch{
+				Result: &conversationv1.AgentWebSearch_Start{Start: &conversationv1.AgentWebSearchStart{
+					Query:       &conversationv1.AgentWebSearchQuery{Terms: "connect-go streaming"},
+					StartedAtMs: 1_000,
+				}},
+			},
+			wantText: "connect-go streaming",
+			wantForm: "query",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.send(activityOf("unit-1", tc.item))
+
+			// Assert: the DAEMON states the form and the CLIENT draws its
+			// chrome, so the wire text is never decorated.
+			input := h.card().GetInput()
+			if input.GetText() != tc.wantText {
+				t.Fatalf("input text = %q, want the bare %q", input.GetText(), tc.wantText)
+			}
+			if got := inputFormWord(input); got != tc.wantForm {
+				t.Fatalf("input form = %q, want %q", got, tc.wantForm)
+			}
+		})
+	}
+}
+
+// inputFormWord names the form arm an input line carries.
+func inputFormWord(input *frontendv1.FeedToolCallInput) string {
+	switch input.GetForm().(type) {
+	case *frontendv1.FeedToolCallInput_Command:
+		return "command"
+	case *frontendv1.FeedToolCallInput_Path:
+		return "path"
+	case *frontendv1.FeedToolCallInput_Query:
+		return "query"
+	}
+	return "none"
 }
 
 func TestANonZeroExitStillCompletedTheCall(t *testing.T) {
