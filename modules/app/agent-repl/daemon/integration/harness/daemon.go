@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,12 +40,17 @@ type Opts struct {
 	StateDir string
 	// Joining, when set, starts the daemon in joining mode against the address.
 	Joining string
-	// IdleCutoff sets the hibernation idle cutoff.
+	// IdleCutoff sets the hibernation idle cutoff via --idle-cutoff.
 	IdleCutoff time.Duration
+	// IdleCutoffMS compresses the same cutoff via
+	// AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS, the spelling the hibernation tests
+	// use so the cutoff can be a handful of milliseconds.
+	IdleCutoffMS int
 	// Pprof sets the profiling listener address; empty leaves it off.
 	Pprof string
-	// SelfRepo names the daemon's own checkout, so a merge target can be
-	// recognized as the emacs repo.
+	// SelfRepo names the daemon's own checkout via AGENT_REPL_SELF_REPO_DIR,
+	// so a merge target can be recognized as the emacs repo. The daemon keeps
+	// the self-reload trigger OFF under this override.
 	SelfRepo string
 	// MultiRepoRoot is the tree whose workspaces use the multi-repo account.
 	MultiRepoRoot string
@@ -157,7 +163,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	mainJS := filepath.Join(root, "main.js")
 	writeFile(t, mainJS, "// placeholder shim module\n")
 	fakeBin := filepath.Join(root, "bin")
-	NewFakeClaude(t, fakeBin)
+	fakeClaude := NewFakeClaude(t, fakeBin)
 
 	multiRoot := opts.MultiRepoRoot
 	if multiRoot == "" {
@@ -172,28 +178,24 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	d.ctx = ctx
 
 	args := []string{
-		"-fake",
-		"-node", FakeShimBinary(t),
-		"-shim", mainJS,
-		"-webapp", d.WebappDir,
-		"-store-socket", d.StoreSocket,
-		"-prompts-dir", d.PromptsDir,
-		"-default-config-dir", d.DefaultConfigDir,
-		"-multi-repo-config-dir", d.MultiRepoConfigDir,
-		"-browser", d.Browser.Path,
-		"-deploy-script", d.Deploy.Path,
-	}
-	if opts.SelfRepo != "" {
-		args = append(args, "-self-repo", opts.SelfRepo)
+		"--state-dir", d.StateDir,
+		"--fake",
+		"--node", FakeShimBinary(t),
+		"--shim-main", mainJS,
+		"--webapp-dist", d.WebappDir,
+		"--store-socket", d.StoreSocket,
+		"--prompts-dir", d.PromptsDir,
+		"--default-config-dir", d.DefaultConfigDir,
+		"--multi-repo-config-dir", d.MultiRepoConfigDir,
 	}
 	if opts.Joining != "" {
-		args = append(args, "-joining", opts.Joining)
+		args = append(args, "--joining", opts.Joining)
 	}
 	if opts.IdleCutoff > 0 {
-		args = append(args, "-idle-cutoff", opts.IdleCutoff.String())
+		args = append(args, "--idle-cutoff", opts.IdleCutoff.String())
 	}
 	if opts.Pprof != "" {
-		args = append(args, "-pprof", opts.Pprof)
+		args = append(args, "--pprof", opts.Pprof)
 	}
 	args = append(args, opts.ExtraArgs...)
 
@@ -203,10 +205,19 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"AGENT_REPL_LOCK_DIR="+d.LockDir,
 		"AGENT_REPL_STORE_SOCKET="+filepath.Join(root, "unused-store.sock"),
 		"MULTI_REPO_ROOT="+multiRoot,
+		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
+		"AGENT_REPL_DEPLOY_SCRIPT="+d.Deploy.Path,
+		"AGENT_REPL_CLAUDE_BIN="+fakeClaude,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
+	if opts.SelfRepo != "" {
+		env = append(env, "AGENT_REPL_SELF_REPO_DIR="+opts.SelfRepo)
+	}
+	if opts.IdleCutoffMS > 0 {
+		env = append(env, "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS="+strconv.Itoa(opts.IdleCutoffMS))
+	}
 	env = append(env, opts.ExtraEnv...)
 
 	cmd := exec.Command(binary, args...)

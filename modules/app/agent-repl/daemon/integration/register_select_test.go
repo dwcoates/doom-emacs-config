@@ -147,10 +147,10 @@ func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.selectWorkspace()
 
 	// Act
 	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
+		Workspace:      f.ws,
 		IdempotencyKey: "no-said",
 		Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
 	})
