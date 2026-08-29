@@ -124,6 +124,12 @@ func New(opt Options, log *logging.Bound) *Tracker {
 	return &Tracker{open: map[string]*entry{}, opt: opt, log: log}
 }
 
+// Windows reports the windows this tracker actually runs with, defaults filled
+// in. It exists so the flag wiring can be asserted where it lands rather than
+// where it is parsed: a window that never reached the tracker is a flag that
+// does nothing.
+func (t *Tracker) Windows() Options { return t.opt }
+
 // Observe records that a run's file is being watched. Re-observing a known run
 // refreshes what the reader has since learned about it (its owner, its run
 // handle) without disturbing its activity clock.
