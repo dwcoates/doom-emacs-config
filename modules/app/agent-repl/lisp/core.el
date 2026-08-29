@@ -380,9 +380,8 @@ THIS SETTING CONTROLS VISIBILITY ONLY.  It does not gate the durable
 sinks and never has: records still persist whenever they clear
 `agent-repl-log-file-level' and `agent-repl-log-to-file' is non-nil.  If
 what you want is a smaller LOG FILE, this is the wrong knob — set
-`agent-repl-log-file-level'.  Use
-\\[agent-repl-debug/toggle-logging] (with `C-u' prefix for verbose) to
-flip at runtime."
+`agent-repl-log-file-level'.  `setq' this variable to flip at runtime;
+`verbose' is the third rung."
   :type '(choice (const :tag "Off" nil)
                  (const :tag "On" t)
                  (const :tag "Verbose" verbose))
@@ -398,7 +397,7 @@ workspace-agnostic, REGARDLESS of `agent-repl-debug'.
 `agent-repl--log-verbose' persists as well; `agent-repl-debug' controls
 only *Messages* visibility.  This is the ALL-OR-NOTHING switch; for a
 threshold that keeps warnings and errors while dropping chatter, use
-`agent-repl-log-file-level'.  Use `agent-repl-debug/toggle-log-to-file'
+`agent-repl-log-file-level'.  `setq' this variable
 to flip the kill-switch at runtime."
   :type 'boolean
   :group 'agent-repl)
@@ -419,10 +418,8 @@ working day of it runs to ~350k records and well over a hundred megabytes
 — so it is opt-IN, turned on for the stretch of an investigation that
 needs it and turned back off after.
 
-Use \\[agent-repl-debug/toggle-verbose-to-disk] for the common
-verbose-on/verbose-off flip, or \\[agent-repl-debug/set-log-file-level]
-to name any rung.  Both take effect on the very next record, with no
-restart and no reload.
+`setq' this variable to name any rung.  It takes effect on the very next
+record, with no restart and no reload.
 
 This does NOT control the per-workspace log BUFFERS; see
 `agent-repl-log-buffer-level'."
