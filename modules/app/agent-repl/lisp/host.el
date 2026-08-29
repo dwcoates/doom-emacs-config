@@ -367,14 +367,18 @@ purpose."
 (defun agent-repl-host--notification-context (note)
   "Return a log-context string naming NOTE's typed kind.
 The composed text is PRESENTATION; the kind arm is the programmatic
-semantics, and a permission ask's gated tool name belongs in the log
-context rather than in any drawn line Emacs composes itself."
+semantics, and a permission ask's gated tool name — or a question batch's
+chip header — belongs in the log context rather than in any drawn line
+Emacs composes itself."
   (let* ((kind (plist-get note :kind))
          (arm (plist-get kind :arm)))
     (pcase arm
       (:permission-requested
        (format "kind=permission-requested tool=%S"
                (plist-get (plist-get kind :value) :tool-name)))
+      (:question-asked
+       (format "kind=question-asked header=%S"
+               (plist-get (plist-get kind :value) :header)))
       (:agent-addressed "kind=agent-addressed")
       (_ (format "kind=%S" arm)))))
 
