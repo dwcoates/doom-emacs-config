@@ -36,6 +36,19 @@ the proto wins and the agent reports the conflict.
   validation once; one dedicated function per non-primitive use site
   delegating to the child's base; primitives get no wrappers.
 
+## 0b. Dispatch policy (user ruling, binding from 2026-08-29 evening)
+
+- Every NEW implementation dispatch is Opus at LOW effort (`opus-low`; if
+  the type is not offered, `subagent_type: "claude"` with `model: "opus"`
+  and the effort stated in the brief). Agents already running or resumed
+  keep their tier.
+- Implementers MAY offload mechanical, fully specified writes (boilerplate,
+  tests from a settled table, rote conversions, doc sections) to Sonnet at
+  MEDIUM effort (`sonnet-medium`, or `claude` + `model: "sonnet"`). The
+  offloading agent stays accountable: it reviews the output, runs the
+  suites, and reports every offload in its completion report.
+- Adversarial auditors stay `claude` + `model: "fable"`, fresh context.
+
 ## 1. Module map (final tree of lisp/)
 
 New files:
