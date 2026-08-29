@@ -28,6 +28,9 @@ import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_merge_workspace.proto";
 import "agentrepl/v1/endpoint_restart_workspace.proto";
 import "agentrepl/v1/endpoint_watch_topbar.proto";
+import "agentrepl/v1/endpoint_open_login.proto";
+import "agentrepl/v1/endpoint_watch_login_terminal.proto";
+import "agentrepl/v1/endpoint_close_login.proto";
 import "agentrepl/v1/endpoint_set_model.proto";
 import "agentrepl/v1/endpoint_set_permission_mode.proto";
 import "agentrepl/v1/endpoint_set_workspace_priority.proto";
@@ -195,6 +198,16 @@ service AgentRepl {
   // The webview's standing daemon-link stream for one workspace. See
   // endpoint_watch_web_workspace.proto.
   rpc WatchWebWorkspace(WatchWebWorkspaceRequest) returns (stream WatchWebWorkspaceResponse);
+
+  // Begin (or join) the account login flow — the daemon-owned pty running
+  // the vendor's login TUI. See endpoint_open_login.proto.
+  rpc OpenLogin(OpenLoginRequest) returns (OpenLoginResponse);
+  // The login pty's duplex stream: keystrokes/resize in, raw bytes out,
+  // scrollback replayed on attach. See endpoint_watch_login_terminal.proto.
+  rpc WatchLoginTerminal(stream LoginTerminalInput) returns (stream LoginTerminalOutput);
+  // End the login session; closing an absent one is success. See
+  // endpoint_close_login.proto.
+  rpc CloseLogin(CloseLoginRequest) returns (CloseLoginResponse);
 
   // The webview's half of the handover rendezvous, called on the NEW
   // daemon. See endpoint_adopt_web_workspace.proto.

@@ -1,0 +1,31 @@
+// endpoint_close_login.proto — CloseLogin: end the account root's login
+// session (kill the pty child). WEB LINK section. Closing an absent login
+// is SUCCESS — the desired state already holds.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message CloseLoginRequest {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message CloseLoginResponse {
+  oneof result {
+    CloseLoginSuccess success = 1;
+    CloseLoginError error = 2;
+  }
+}
+
+// The login session is gone (or never was).
+message CloseLoginSuccess {
+}
+
+// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+message CloseLoginError {
+}

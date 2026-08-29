@@ -1,0 +1,58 @@
+// endpoint_watch_login_terminal.proto — WatchLoginTerminal: the login
+// pty's duplex stream. WEB LINK section. Bidirectional: the client sends
+// keystrokes and resize; the daemon streams raw pty bytes. Attach replays
+// the session's scrollback first, so a late viewer sees the whole TUI.
+// The stream CONCLUDES with `closed` when the login child exits — the
+// client re-probes the account state then (the topbar chip updates on its
+// own push).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message LoginTerminalInput {
+  oneof input {
+    // The FIRST frame, and only the first: which login session to attach.
+    LoginTerminalAttach attach = 1;
+    // Raw keystroke bytes, forwarded to the pty verbatim.
+    LoginTerminalKeystrokes keystrokes = 2;
+    // The viewer's terminal geometry changed.
+    LoginTerminalResize resize = 3;
+  }
+}
+
+// Addresses the login session by workspace (the daemon resolves the
+// account root exactly as OpenLogin did).
+message LoginTerminalAttach {
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+
+message LoginTerminalKeystrokes {
+  bytes data = 1;
+}
+
+message LoginTerminalResize {
+  int32 rows = 1;
+  int32 cols = 2;
+}
+
+message LoginTerminalOutput {
+  oneof output {
+    // Raw pty bytes (scrollback replay first, then live).
+    LoginTerminalBytes bytes = 1;
+    // TERMINAL FRAME: the login child exited; the stream ends after it.
+    LoginTerminalClosed closed = 2;
+  }
+}
+
+message LoginTerminalBytes {
+  bytes data = 1;
+}
+
+// Presence is the fact: the login session ended.
+message LoginTerminalClosed {
+}
