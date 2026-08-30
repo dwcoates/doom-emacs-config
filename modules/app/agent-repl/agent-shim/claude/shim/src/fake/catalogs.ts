@@ -166,13 +166,29 @@ export const FAKE_INITIALIZATION_RESULT: InitializationResultLike = {
  * skill rollups, the auto-compact threshold and switch, the message breakdown
  * with both by-type tables, and a non-null `apiUsage` — each is a field some
  * consumer renders, and each is unpopulated by every simpler fake.
+ *
+ * `growth` MOVES THE OCCUPANCY-DERIVED FIGURES, and nothing else. A drifting
+ * answer whose `totalTokens` grew while its `messageBreakdown` stood still
+ * would let a consumer that renders the breakdown pass against a mock that
+ * never changed it, so the breakdown and the message category are scaled by the
+ * same factor the total moved by. The FIXED costs stay fixed on purpose: a
+ * system prompt, a memory file and an MCP tool list do not grow because a
+ * conversation did, and a mock that grew them would be stating a falsehood the
+ * consumer could come to depend on.
  */
-export function fakeContextUsage(model: string, totalTokens: number): ContextUsageLike {
+export function fakeContextUsage(
+  model: string,
+  totalTokens: number,
+  growth = 0,
+): ContextUsageLike {
   const maxTokens = 200_000;
+  const scale = 1 + growth;
+  const scaled = (tokens: number): number => Math.round(tokens * scale);
+  const messageTokens = totalTokens - 9_400;
   return {
     categories: [
       { name: "System prompt", tokens: 3_200, color: "blue" },
-      { name: "Messages", tokens: totalTokens - 9_400, color: "green" },
+      { name: "Messages", tokens: messageTokens, color: "green" },
       { name: "Memory files", tokens: 1_200, color: "yellow" },
       { name: "MCP tools", tokens: 5_000, color: "magenta", isDeferred: true },
     ],
@@ -183,7 +199,14 @@ export function fakeContextUsage(model: string, totalTokens: number): ContextUsa
     gridRows: [
       [
         { color: "blue", isFilled: true, categoryName: "System prompt", tokens: 3_200, percentage: 2, squareFullness: 1 },
-        { color: "green", isFilled: true, categoryName: "Messages", tokens: totalTokens - 9_400, percentage: 20, squareFullness: 0.5 },
+        {
+          color: "green",
+          isFilled: true,
+          categoryName: "Messages",
+          tokens: messageTokens,
+          percentage: Math.round((messageTokens / maxTokens) * 100),
+          squareFullness: 0.5,
+        },
       ],
       [
         { color: "yellow", isFilled: false, categoryName: "Memory files", tokens: 1_200, percentage: 1, squareFullness: 0 },
@@ -207,15 +230,15 @@ export function fakeContextUsage(model: string, totalTokens: number): ContextUsa
     autoCompactThreshold: 0.85,
     isAutoCompactEnabled: true,
     messageBreakdown: {
-      toolCallTokens: 1_100,
-      toolResultTokens: 2_400,
-      attachmentTokens: 600,
-      assistantMessageTokens: 3_000,
-      userMessageTokens: 900,
-      redirectedContextTokens: 120,
-      unattributedTokens: 80,
-      toolCallsByType: [{ name: "Bash", callTokens: 400, resultTokens: 1_800 }],
-      attachmentsByType: [{ name: "nested_memory", tokens: 600 }],
+      toolCallTokens: scaled(1_100),
+      toolResultTokens: scaled(2_400),
+      attachmentTokens: scaled(600),
+      assistantMessageTokens: scaled(3_000),
+      userMessageTokens: scaled(900),
+      redirectedContextTokens: scaled(120),
+      unattributedTokens: scaled(80),
+      toolCallsByType: [{ name: "Bash", callTokens: scaled(400), resultTokens: scaled(1_800) }],
+      attachmentsByType: [{ name: "nested_memory", tokens: scaled(600) }],
     },
     apiUsage: {
       input_tokens: 12,
@@ -295,9 +318,17 @@ export function fakeAccountUsage(arm: AccountUsageArm): AccountUsageLike {
     case "service_unavailable":
       // The endpoint answered nothing at all.
       return { ...base, rate_limits_available: false, rate_limits: null };
-    case "window_unavailable":
-      // The service answered, but one window is simply absent.
+    case "opus_absent":
+      // An ABSENT OPTIONAL WINDOW, which is NOT an unavailability: the service
+      // answered in full and this account simply has no opus window, so the
+      // contract's arm is still `available` with `seven_day_opus` unset.
       return { ...base, rate_limits: { ...allWindows, seven_day_opus: null } };
+    case "window_unavailable":
+      // THE FIVE-HOUR WINDOW, specifically. `SessionUsageWindowUnavailable`
+      // means "the service answered without a five-hour window" and nothing
+      // else; nulling any other window would leave this reason unproducible
+      // while looking as though it had been covered.
+      return { ...base, rate_limits: { ...allWindows, five_hour: null } };
     case "utilization_unavailable":
       // The window exists and its utilization does not.
       return { ...base, rate_limits: { ...allWindows, five_hour: window(null, "2026-08-29T20:00:00.000Z") } };

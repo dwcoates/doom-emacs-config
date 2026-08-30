@@ -7,6 +7,9 @@
 import { describe, expect, it } from "vitest";
 
 import { FAILURE_SCENARIOS } from "../../../src/fake/scenarios/failures.js";
+import { createFold } from "../../../src/convert/fold.js";
+import type { SdkMessage } from "../../../src/sdk/types.js";
+import { foldContext, residueOf } from "../../convert/fold-harness.js";
 import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 
 const terminal = async (prompt: string): Promise<{ subtype: unknown; reason: unknown; error: boolean }> => {
@@ -290,5 +293,158 @@ describe("the family's own coverage", () => {
 
     // Assert
     expect(wanted.filter((r) => !reached.has(r))).toEqual([]);
+  });
+});
+
+/**
+ * The converter-fault pair, checked against the REAL fold.
+ *
+ * A scenario that claims to carry an unconvertible message is only as good as
+ * the converter's actual refusal, so these tests fold what the mock emitted
+ * rather than asserting the emission alone. `src/convert` is imported HERE and
+ * nowhere in `src/fake`: the mock never knows what the fold will do with a
+ * message, which is exactly why the mock cannot be the thing that decides a
+ * defect happened.
+ */
+const foldEverything = (
+  messages: readonly SdkMessage[],
+): { frames: number; residue: number } => {
+  const fold = createFold();
+  const context = foldContext();
+  let frames = 0;
+  let residue = 0;
+  for (const message of messages) {
+    for (const entry of fold.onSdkMessage(message, context).entries) {
+      if (entry.item.kind === "frame") frames++;
+      if (residueOf(entry) !== undefined) residue++;
+    }
+  }
+  return { frames, residue };
+};
+
+/** Every `hook_started` message one drive produced. */
+const hookStarts = (messages: readonly SdkMessage[]): Record<string, unknown>[] =>
+  (messages as unknown as Record<string, unknown>[]).filter(
+    (m) => m.type === "system" && m.subtype === "hook_started",
+  );
+
+describe("a converter fault", () => {
+  it("emits exactly ONE malformed message, and it is the hook announcement", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!fault-converter"]);
+
+    // Assert
+    expect(hookStarts(driven.messages).map((m) => m.hook_id)).toEqual([""]);
+  });
+
+  it("states the hook's other fields faithfully, so ONLY the identity is wrong", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!fault-converter"]);
+
+    // Assert. A message wrong in three ways would not tell us which one the
+    // converter refused.
+    expect(hookStarts(driven.messages)[0]).toMatchObject({
+      hook_name: "PreToolUse:Read",
+      hook_event: "PreToolUse",
+    });
+  });
+
+  it("really trips the fold's defect path: residue and NO frame", async () => {
+    // Arrange
+    const driven = await driveScenario(["!fault-converter"]);
+    const malformed = hookStarts(driven.messages)[0] as unknown as SdkMessage;
+
+    // Act
+    const folded = foldEverything([malformed]);
+
+    // Assert. `hook_id` IS the firing's activity identity, so an empty one is
+    // not a degraded frame — it is no frame.
+    expect(folded).toEqual({ frames: 0, residue: 1 });
+  });
+
+  it("lands as the DEFECT arm, not as a record no converter owns", async () => {
+    // Arrange
+    const driven = await driveScenario(["!fault-converter"]);
+    const malformed = hookStarts(driven.messages)[0] as unknown as SdkMessage;
+    const fold = createFold();
+
+    // Act
+    const [entry] = fold.onSdkMessage(malformed, foldContext()).entries;
+    const residue = residueOf(entry)?.unservedItem;
+
+    // Assert. `unknown` would mean a kind nobody models; `unparsed` naming a
+    // converter defect is a converter that refused a record it DOES own.
+    expect({
+      arm: residue?.case,
+      defect: residue?.case === "unparsed" ? residue.value.parseError.includes("converter defect") : false,
+      source: residue?.case === "unparsed" ? residue.value.source : "",
+    }).toEqual({ arm: "unparsed", defect: true, source: "system/hook_started" });
+  });
+
+  it("still ends the turn successfully, because a bad vendor line is not a stopped turn", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!fault-converter"]);
+
+    // Assert
+    expect(theResult(driven).subtype).toBe("success");
+  });
+
+  it("still produces the turn's ordinary prose after the malformed message", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!fault-converter"]);
+
+    // Assert
+    expect(theResult(driven).result).toBe(
+      "One vendor message was unconvertible; the rest of the turn was ordinary.",
+    );
+  });
+});
+
+describe("recovering from a converter fault", () => {
+  it("announces the SAME hook with a real identity", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!fault-recover"]);
+    const started = hookStarts(driven.messages)[0];
+
+    // Assert
+    expect({ empty: started?.hook_id === "", event: started?.hook_event }).toEqual({
+      empty: false,
+      event: "PreToolUse",
+    });
+  });
+
+  it("folds to the FRAME the malformed turn could not produce", async () => {
+    // Arrange
+    const driven = await driveScenario(["!fault-recover"]);
+    const started = hookStarts(driven.messages)[0] as unknown as SdkMessage;
+
+    // Act
+    const folded = foldEverything([started]);
+
+    // Assert
+    expect(folded).toEqual({ frames: 1, residue: 0 });
+  });
+
+  it("settles the hook, so the recovery is a whole unit and not half of one", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!fault-recover"]);
+    const responses = ofType(driven, "system", "hook_response");
+
+    // Assert
+    expect(responses.map((r) => r.outcome)).toEqual(["success"]);
+  });
+
+  it("converts every message of the turn, malformed or not", async () => {
+    // Arrange
+    const driven = await driveScenario(["!fault-recover"]);
+
+    // Act
+    const folded = foldEverything(
+      driven.messages.filter((m) => (m as { type?: string }).type === "system"),
+    );
+
+    // Assert. The init message contributes its own session rows; what matters is
+    // that NOTHING landed as residue.
+    expect(folded.residue).toBe(0);
   });
 });
