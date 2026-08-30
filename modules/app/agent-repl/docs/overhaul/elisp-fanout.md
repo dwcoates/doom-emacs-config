@@ -75,7 +75,16 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   {registry_dir} / transferring_away{address} / not_yet_adopted + per-rpc
   arms) and HostFault.kind's eight arms. The codec refuses them until
   R-ARMS lands (test-wire-verbs 109/111 by design).
-- PRE-CUT: elisp-agents/remed3 (overhaul/elisp-remed3) for R-ARMS.
+- R-DAEMON MERGED (e5fdae538): cold-start suite 12/12. Findings: the
+  integration log reader could not find warn/error records because
+  core.el derives `operation` from the severity-prefixed format string
+  (R-LOGOP, assigned to the R-ARMS agent, fixes core.el at the source);
+  cold-start boundary functions are restored per scenario by the harness;
+  daemon.el now logs own-/foreign-adopted and releases its in-flight flag
+  on a signal. AGENTS.md owes a line on restoring a boundary in
+  integration tests (R-SUITE-1 carries it). R-PUSHINVALID may be moot
+  after the reader fix — re-run host/roster before dispatching it.
+- RUNNING: R-ARMS + R-LOGOP (`opus-low`) in elisp-agents/remed3.
 - QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
   new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
   arm sets pinned against the regenerated Go bindings; unit tests only —
