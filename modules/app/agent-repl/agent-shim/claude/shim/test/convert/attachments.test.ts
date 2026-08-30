@@ -147,7 +147,10 @@ describe("vendor bookkeeping", () => {
 });
 
 describe("the context-budget warning", () => {
-  it("records the vendor's warning text as a session fact", () => {
+  it("records the vendor's warning as a PAGE LINE of the agent's book", () => {
+    // It exists only as a transcript attachment, so it is a file-plane fact
+    // with a position in the conversation — SessionUpdate tag 24 was retired
+    // because nothing on the live session stream ever produced one.
     const entries = convertAttachment(
       {
         type: "attachment",
@@ -158,8 +161,26 @@ describe("the context-budget warning", () => {
       UNIT,
     );
 
-    const update = entries[0]?.item.kind === "session_update" ? entries[0].item.update : undefined;
-    expect(update?.update.case).toBe("contextBudgetWarning");
+    const frame = entries[0]?.item.kind === "frame" ? entries[0].item.frame : undefined;
+    const update = (frame?.result.value as conversationv1.AgentUpdate).update;
+    expect(update.case).toBe("contextBudgetWarning");
+    expect((update.value as conversationv1.ContextBudgetWarning).text).toBe(
+      "the window is filling",
+    );
+  });
+
+  it("keys each warning by the record that stated it, so none overwrites the last", () => {
+    const entries = convertAttachment(
+      {
+        type: "attachment",
+        uuid: "uuid-tip",
+        attachment: { type: "context_tip", content: "the window is filling" },
+      },
+      foldContext(),
+      UNIT,
+    );
+
+    expect(entries[0]?.upsertKey).toBe("budget:uuid-tip");
   });
 
   it("produces no update at all when the record carried no text", () => {
