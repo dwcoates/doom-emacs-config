@@ -638,8 +638,9 @@ func (p *producer) writeWithCursor(ctx context.Context, t *testing.T, cursor *st
 }
 
 // writeExpectingFailure sends one batch and asserts the typed failure arm,
-// returning its detail for the caller's own assertions.
-func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, cursor *storev1.CursorState, entries ...*storev1.StoreEntry) string {
+// returning the whole failure so the caller can assert its KIND and its FIELD —
+// not only its human detail, which nothing may switch on.
+func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, cursor *storev1.CursorState, entries ...*storev1.StoreEntry) *storev1.WriteBatchFailure {
 	t.Helper()
 	resp, err := p.attempt(ctx, &storev1.EntryBatch{Entries: entries, CursorAdvance: cursor})
 	if err != nil {
@@ -649,7 +650,86 @@ func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, curs
 	if failure == nil {
 		t.Fatalf("WriteBatch accepted a batch it owed a typed failure for: %v", resp)
 	}
-	return failure.GetDetail()
+	return failure
+}
+
+// ---- failure-arm assertions ----
+//
+// A FAILURE WITH AN UNSET KIND IS ITSELF A DEFECT. `detail` is prose for a
+// human and is never switched on, so a caller that received no arm would have
+// to parse it to learn whether retrying the same bytes could ever help. Every
+// refusal subject therefore asserts the arm, and every invalid_request asserts
+// the FIELD the store blames.
+
+func assertDetail(t *testing.T, what, detail string) {
+	t.Helper()
+	if detail == "" {
+		t.Errorf("%s carried no detail", what)
+	}
+}
+
+func assertWriteInvalidRequest(t *testing.T, failure *storev1.WriteBatchFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the WriteBatch refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("WriteBatch failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("WriteBatch invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
+}
+
+func assertOpenInvalidRequest(t *testing.T, failure *storev1.OpenAgentSessionFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the OpenAgentSession refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("OpenAgentSession failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("OpenAgentSession invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
+}
+
+func assertOpenStalePointer(t *testing.T, failure *storev1.OpenAgentSessionFailure) {
+	t.Helper()
+	assertDetail(t, "the OpenAgentSession refusal", failure.GetDetail())
+	if failure.GetStalePointer() == nil {
+		t.Fatalf("OpenAgentSession failure kind = %v, want stale_pointer (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+}
+
+func assertReadInvalidRequest(t *testing.T, failure *storev1.ReadAgentPageFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the ReadAgentPage refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("ReadAgentPage failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("ReadAgentPage invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
+}
+
+func assertReadStalePointer(t *testing.T, failure *storev1.ReadAgentPageFailure) {
+	t.Helper()
+	assertDetail(t, "the ReadAgentPage refusal", failure.GetDetail())
+	if failure.GetStalePointer() == nil {
+		t.Fatalf("ReadAgentPage failure kind = %v, want stale_pointer (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+}
+
+func assertCursorsInvalidRequest(t *testing.T, failure *storev1.GetSidecarCursorsFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the GetSidecarCursors refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("GetSidecarCursors failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("GetSidecarCursors invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
 }
 
 // ---- conversation.v1 fact builders ----
@@ -1154,7 +1234,7 @@ func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStore
 	return success
 }
 
-func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest) string {
+func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest) *storev1.OpenAgentSessionFailure {
 	t.Helper()
 	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(req))
 	if err != nil {
@@ -1164,7 +1244,7 @@ func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1c
 	if failure == nil {
 		t.Fatalf("OpenAgentSession accepted a request it owed a typed failure for: %v", resp.Msg)
 	}
-	return failure.GetDetail()
+	return failure
 }
 
 func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, book string, pageSize uint32, after *storev1.StoreItemPointer) *storev1.ReadAgentPageSuccess {
@@ -1187,7 +1267,7 @@ func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreCli
 	return success
 }
 
-func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.ReadAgentPageRequest) string {
+func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.ReadAgentPageRequest) *storev1.ReadAgentPageFailure {
 	t.Helper()
 	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(req))
 	if err != nil {
@@ -1197,7 +1277,7 @@ func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1conn
 	if failure == nil {
 		t.Fatalf("ReadAgentPage accepted a request it owed a typed failure for: %v", resp.Msg)
 	}
-	return failure.GetDetail()
+	return failure
 }
 
 func liveWork(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient) *storev1.GetLiveWorkSuccess {
@@ -1230,6 +1310,20 @@ func sidecarCursors(ctx context.Context, t *testing.T, cli storev1connect.ShimSt
 		t.Fatalf("GetSidecarCursors answered neither arm: %v", resp.Msg)
 	}
 	return success.GetCursors()
+}
+
+// cursorsExpectingFailure asks for cursors with a request the store must refuse.
+func cursorsExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, fileID *string) *storev1.GetSidecarCursorsFailure {
+	t.Helper()
+	resp, err := cli.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: fileID}))
+	if err != nil {
+		t.Fatalf("GetSidecarCursors answered a transport error where a typed failure was owed: %v", err)
+	}
+	failure := resp.Msg.GetFailure()
+	if failure == nil {
+		t.Fatalf("GetSidecarCursors accepted a request it owed a typed failure for: %v", resp.Msg)
+	}
+	return failure
 }
 
 // watch is one open tail plus the cancellation that ends it.
@@ -1376,6 +1470,27 @@ func receiveBashRows(t *testing.T, stream *bashWatch, n int) []string {
 		return res.labels
 	case <-time.After(streamTimeout):
 		t.Fatalf("the bash run stream delivered fewer than %d rows within %s", n, streamTimeout)
+		return nil
+	}
+}
+
+// awaitBashRunEnd drains a run's stream and returns why it ended.
+func awaitBashRunEnd(t *testing.T, stream *bashWatch) error {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() {
+		for stream.Receive() {
+			// Drain: the subject is how the stream ENDS.
+		}
+		done <- stream.Err()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(streamTimeout):
+		t.Fatalf("the bash run stream did not end within %s", streamTimeout)
 		return nil
 	}
 }

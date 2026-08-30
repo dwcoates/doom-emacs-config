@@ -6,6 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-store/internal/db"
 )
 
 func siteOf(ref *refusal) string {
@@ -319,5 +320,177 @@ func TestValidateGetSidecarCursorsRequestAcceptsAnOmittedFileID(t *testing.T) {
 	// Assert.
 	if ref != nil {
 		t.Fatalf("refusal = %v, want nil", ref)
+	}
+}
+
+// ---- the failure arms ----
+
+func TestWriteBatchFailureAnswersInvalidRequestWithItsField(t *testing.T) {
+	// Arrange. A caller that received no arm would have to parse `detail` to
+	// learn whether retrying the same bytes could ever help.
+	ref := refuse(SiteEntryUpsertKeyEmpty, "entries[1].upsert_key", "upsert_key is empty")
+
+	// Act.
+	got := writeBatchFailure(ref).Msg.GetFailure()
+
+	// Assert.
+	if got.GetInvalidRequest() == nil {
+		t.Fatalf("kind = %v, want invalid_request", got.GetKind())
+	}
+	if field := got.GetInvalidRequest().GetField(); field != "entries[1].upsert_key" {
+		t.Fatalf("field = %q, want entries[1].upsert_key", field)
+	}
+}
+
+func TestWriteBatchFailureAnswersStorageFailureForADatabaseError(t *testing.T) {
+	// Arrange.
+	ref := refuseClass(classStorage, SiteDatabaseFailure, "", "disk is on fire")
+
+	// Act.
+	got := writeBatchFailure(ref).Msg.GetFailure()
+
+	// Assert.
+	if got.GetStorageFailure() == nil {
+		t.Fatalf("kind = %v, want storage_failure", got.GetKind())
+	}
+}
+
+func TestOpenAgentSessionFailureAnswersEachClassItsOwnArm(t *testing.T) {
+	// Arrange. Three classes, three arms: the caller's recovery differs for
+	// each — fix the request, repaint, or retry.
+	tests := []struct {
+		name string
+		ref  *refusal
+		want string
+	}{
+		{name: "invalid request", ref: refuse(SiteAgentIDEmpty, "agent", "empty"), want: "invalid_request"},
+		{name: "stale pointer", ref: refuseClass(classStalePointer, SiteStalePointer, "known_through", "gone"), want: "stale_pointer"},
+		{name: "storage failure", ref: refuseClass(classStorage, SiteDatabaseFailure, "", "disk"), want: "storage_failure"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := openFailure(tc.ref).Msg.GetFailure()
+
+			// Assert.
+			var arm string
+			switch {
+			case got.GetInvalidRequest() != nil:
+				arm = "invalid_request"
+			case got.GetStalePointer() != nil:
+				arm = "stale_pointer"
+			case got.GetStorageFailure() != nil:
+				arm = "storage_failure"
+			}
+			if arm != tc.want {
+				t.Fatalf("arm = %q, want %q", arm, tc.want)
+			}
+		})
+	}
+}
+
+func TestReadAgentPageFailureAnswersEachClassItsOwnArm(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name string
+		ref  *refusal
+		want string
+	}{
+		{name: "invalid request", ref: refuse(SitePointerEmpty, "after", "empty"), want: "invalid_request"},
+		{name: "stale pointer", ref: refuseClass(classStalePointer, SiteStalePointer, "after", "gone"), want: "stale_pointer"},
+		{name: "storage failure", ref: refuseClass(classStorage, SiteDatabaseFailure, "", "disk"), want: "storage_failure"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := readPageFailure(tc.ref).Msg.GetFailure()
+
+			// Assert.
+			var arm string
+			switch {
+			case got.GetInvalidRequest() != nil:
+				arm = "invalid_request"
+			case got.GetStalePointer() != nil:
+				arm = "stale_pointer"
+			case got.GetStorageFailure() != nil:
+				arm = "storage_failure"
+			}
+			if arm != tc.want {
+				t.Fatalf("arm = %q, want %q", arm, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetLiveWorkFailureHasOnlyTheStorageArm(t *testing.T) {
+	// Arrange. The verb takes no request fields, so there is nothing a caller
+	// can have sent wrong.
+	ref := refuseClass(classStorage, SiteDatabaseFailure, "", "disk")
+
+	// Act.
+	got := liveWorkFailure(ref).Msg.GetFailure()
+
+	// Assert.
+	if got.GetStorageFailure() == nil {
+		t.Fatalf("kind = %v, want storage_failure", got.GetKind())
+	}
+}
+
+func TestGetSidecarCursorsFailureAnswersInvalidRequestWithItsField(t *testing.T) {
+	// Arrange.
+	ref := refuse(SiteFileIDEmpty, "file_id", "present but empty")
+
+	// Act.
+	got := cursorsFailure(ref).Msg.GetFailure()
+
+	// Assert.
+	if field := got.GetInvalidRequest().GetField(); field != "file_id" {
+		t.Fatalf("field = %q, want file_id", field)
+	}
+}
+
+func TestStoreRefusalKeepsTheSiteTheStorageLayerNamed(t *testing.T) {
+	// Arrange. This layer never opens a frame, so it cannot know that an upsert
+	// changed a row's identity — only the storage layer can name that site.
+	err := db.ErrInvalid
+
+	// Act.
+	got := storeRefusal(err)
+
+	// Assert: an unclassified ErrInvalid still falls back to the generic site.
+	if got.site != SiteStoreRefusedRequest {
+		t.Fatalf("site = %q, want %q", got.site, SiteStoreRefusedRequest)
+	}
+	if got.class != classInvalid {
+		t.Fatalf("class = %v, want classInvalid", got.class)
+	}
+}
+
+func TestStoreRefusalClassifiesAStalePointer(t *testing.T) {
+	// Arrange.
+	err := db.ErrStalePointer
+
+	// Act.
+	got := storeRefusal(err)
+
+	// Assert.
+	if got.class != classStalePointer {
+		t.Fatalf("class = %v, want classStalePointer", got.class)
+	}
+}
+
+func TestStoreRefusalClassifiesAnythingElseAsStorage(t *testing.T) {
+	// Arrange. A failure the storage layer did not classify is never softened
+	// into a success and never guessed at.
+	err := db.ErrStorage
+
+	// Act.
+	got := storeRefusal(err)
+
+	// Assert.
+	if got.class != classStorage {
+		t.Fatalf("class = %v, want classStorage", got.class)
 	}
 }

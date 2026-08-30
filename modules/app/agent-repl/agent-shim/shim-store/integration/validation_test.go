@@ -19,23 +19,27 @@ import (
 // write envelope: one edge per case, all refused before any storage happens.
 func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 	tests := []struct {
-		name  string
-		entry func(*producer) *storev1.StoreEntry
+		name      string
+		entry     func(*producer) *storev1.StoreEntry
+		wantField string
 	}{
 		{
-			name: "missing write_id",
+			name:      "missing write_id",
+			wantField: "entries[0].write_id",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 			},
 		},
 		{
-			name: "missing upsert_key",
+			name:      "missing upsert_key",
+			wantField: "entries[0].upsert_key",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("w-valid", "", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 			},
 		},
 		{
-			name: "missing plane arm",
+			name:      "missing plane arm",
+			wantField: "entries[0].plane",
 			entry: func(p *producer) *storev1.StoreEntry {
 				e := p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 				e.Plane = &storev1.Plane{}
@@ -43,7 +47,8 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 			},
 		},
 		{
-			name: "missing plane message",
+			name:      "missing plane message",
+			wantField: "entries[0].plane",
 			entry: func(p *producer) *storev1.StoreEntry {
 				e := p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 				e.Plane = nil
@@ -51,19 +56,22 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 			},
 		},
 		{
-			name: "missing entry arm",
+			name:      "missing entry arm",
+			wantField: "entries[0].entry",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return &storev1.StoreEntry{Plane: p.plane(), WriteId: "w-valid", UpsertKey: "u-valid"}
 			},
 		},
 		{
-			name: "missing agent_info arm",
+			name:      "missing agent_info arm",
+			wantField: "entries[0].agent_update",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("w-valid", "u-valid", &storev1.StoreAgentUpdate{TopLevel: agentID("main")})
 			},
 		},
 		{
-			name: "page line naming no book",
+			name:      "page line naming no book",
+			wantField: "entries[0].agent_update.serveable_frame.page_agent_id",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("w-valid", "u-valid", &storev1.StoreAgentUpdate{
 					AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
@@ -87,12 +95,10 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 			mark := store.logMark()
 
 			// Act.
-			detail := shim.writeExpectingFailure(ctx, t, nil, tc.entry(shim))
+			failure := shim.writeExpectingFailure(ctx, t, nil, tc.entry(shim))
 
 			// Assert.
-			if detail == "" {
-				t.Errorf("the refusal carried no detail")
-			}
+			assertWriteInvalidRequest(t, failure, tc.wantField)
 			records := store.logRecordsAfter(mark)
 			assertNoDatabaseTouch(t, records)
 			if len(recordsWithContextKey(records, "rpc")) == 0 {
@@ -113,24 +119,23 @@ func TestWriteBatchRefusesAnEmptyBatch(t *testing.T) {
 	mark := store.logMark()
 
 	// Act.
-	detail := shim.writeExpectingFailure(ctx, t, nil)
+	failure := shim.writeExpectingFailure(ctx, t, nil)
 
 	// Assert.
-	if detail == "" {
-		t.Errorf("the empty-batch refusal carried no detail")
-	}
+	assertWriteInvalidRequest(t, failure, "batch")
 	assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
 }
 
 // TestOpenAgentSessionRefusesUnsetRequiredFields.
 func TestOpenAgentSessionRefusesUnsetRequiredFields(t *testing.T) {
 	tests := []struct {
-		name string
-		req  *storev1.OpenAgentSessionRequest
+		name      string
+		req       *storev1.OpenAgentSessionRequest
+		wantField string
 	}{
-		{name: "missing agent", req: &storev1.OpenAgentSessionRequest{PageSize: 10}},
-		{name: "empty agent value", req: &storev1.OpenAgentSessionRequest{Agent: agentID(""), PageSize: 10}},
-		{name: "zero page_size", req: &storev1.OpenAgentSessionRequest{Agent: agentID("main"), PageSize: 0}},
+		{name: "missing agent", req: &storev1.OpenAgentSessionRequest{PageSize: 10}, wantField: "agent"},
+		{name: "empty agent value", req: &storev1.OpenAgentSessionRequest{Agent: agentID(""), PageSize: 10}, wantField: "agent"},
+		{name: "zero page_size", req: &storev1.OpenAgentSessionRequest{Agent: agentID("main"), PageSize: 0}, wantField: "page_size"},
 		{
 			name: "empty known_through value",
 			req: &storev1.OpenAgentSessionRequest{
@@ -138,6 +143,7 @@ func TestOpenAgentSessionRefusesUnsetRequiredFields(t *testing.T) {
 				PageSize:     10,
 				KnownThrough: &storev1.StoreItemPointer{Value: ""},
 			},
+			wantField: "known_through",
 		},
 	}
 
@@ -150,12 +156,10 @@ func TestOpenAgentSessionRefusesUnsetRequiredFields(t *testing.T) {
 			mark := store.logMark()
 
 			// Act.
-			detail := openSessionExpectingFailure(ctx, t, store.client(), tc.req)
+			failure := openSessionExpectingFailure(ctx, t, store.client(), tc.req)
 
 			// Assert.
-			if detail == "" {
-				t.Errorf("the refusal carried no detail")
-			}
+			assertOpenInvalidRequest(t, failure, tc.wantField)
 			assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
 		})
 	}
@@ -164,28 +168,34 @@ func TestOpenAgentSessionRefusesUnsetRequiredFields(t *testing.T) {
 // TestReadAgentPageRefusesUnsetRequiredFields.
 func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 	tests := []struct {
-		name string
-		req  *storev1.ReadAgentPageRequest
+		name      string
+		req       *storev1.ReadAgentPageRequest
+		wantField string
 	}{
 		{
-			name: "missing book",
-			req:  &storev1.ReadAgentPageRequest{PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			name:      "missing book",
+			req:       &storev1.ReadAgentPageRequest{PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			wantField: "book",
 		},
 		{
-			name: "empty book value",
-			req:  &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			name:      "empty book value",
+			req:       &storev1.ReadAgentPageRequest{Book: agentID(""), PageSize: 10, After: &storev1.StoreItemPointer{Value: "p"}},
+			wantField: "book",
 		},
 		{
-			name: "zero page_size",
-			req:  &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, After: &storev1.StoreItemPointer{Value: "p"}},
+			name:      "zero page_size",
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 0, After: &storev1.StoreItemPointer{Value: "p"}},
+			wantField: "page_size",
 		},
 		{
-			name: "missing after pointer",
-			req:  &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10},
+			name:      "missing after pointer",
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10},
+			wantField: "after",
 		},
 		{
-			name: "empty after pointer value",
-			req:  &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, After: &storev1.StoreItemPointer{Value: ""}},
+			name:      "empty after pointer value",
+			req:       &storev1.ReadAgentPageRequest{Book: agentID("main"), PageSize: 10, After: &storev1.StoreItemPointer{Value: ""}},
+			wantField: "after",
 		},
 	}
 
@@ -198,12 +208,10 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 			mark := store.logMark()
 
 			// Act.
-			detail := readPageExpectingFailure(ctx, t, store.client(), tc.req)
+			failure := readPageExpectingFailure(ctx, t, store.client(), tc.req)
 
 			// Assert.
-			if detail == "" {
-				t.Errorf("the refusal carried no detail")
-			}
+			assertReadInvalidRequest(t, failure, tc.wantField)
 			assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
 		})
 	}
@@ -224,9 +232,14 @@ func TestGetWorkflowRefusesAnUnsetHandle(t *testing.T) {
 		t.Fatalf("GetWorkflow answered a transport error where a typed failure was owed: %v", err)
 	}
 
-	// Assert.
-	if resp.Msg.GetFailure() == nil {
+	// Assert: `not_implemented` is the ONE honest arm this wave — nothing routes
+	// into the workflow table, so `unknown_run` would be an invention.
+	failure := resp.Msg.GetFailure()
+	if failure == nil {
 		t.Fatalf("GetWorkflow accepted a request with no handle: %v", resp.Msg)
+	}
+	if failure.GetNotImplemented() == nil {
+		t.Fatalf("GetWorkflow failure kind = %v, want not_implemented", failure.GetKind())
 	}
 	assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
 }
@@ -256,5 +269,45 @@ func TestWatchAgentSessionRefusesAnUnsetToken(t *testing.T) {
 			// Assert.
 			assertWatchRefused(t, stream)
 		})
+	}
+}
+
+// TestGetSidecarCursorsRefusesAnEmptyFileID: absence is spelled with optional
+// PRESENCE, so a present-but-empty file_id is a sentinel standing in for
+// absence — the one thing it may not be.
+func TestGetSidecarCursorsRefusesAnEmptyFileID(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	mark := store.logMark()
+	empty := ""
+
+	// Act.
+	failure := cursorsExpectingFailure(ctx, t, store.client(), &empty)
+
+	// Assert.
+	assertCursorsInvalidRequest(t, failure, "file_id")
+	assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
+}
+
+// TestWatchBashRunRefusesAnEmptyRunAtTheTransport: this rpc has no failure arm,
+// so a malformed ADDRESS closes at the transport — and with CodeInvalidArgument
+// rather than CodeNotFound, because the caller must fix the request rather than
+// conclude the run does not exist.
+func TestWatchBashRunRefusesAnEmptyRunAtTheTransport(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+
+	// Act.
+	stream := watchBashRun(ctx, t, store.client(), "")
+	defer stream.Close()
+
+	// Assert.
+	err := awaitBashRunEnd(t, stream)
+	if code := connect.CodeOf(err); code != connect.CodeInvalidArgument {
+		t.Fatalf("an empty run ended with Connect code %v, want %v (error: %v)", code, connect.CodeInvalidArgument, err)
 	}
 }
