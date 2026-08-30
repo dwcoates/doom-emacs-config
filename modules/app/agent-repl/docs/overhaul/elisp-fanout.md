@@ -70,7 +70,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - PRE-CUT, unassigned: elisp-agents/suite2 (overhaul/elisp-suite2) for
   R-SUITE-1 (the 92 audit findings, docs/overhaul/reports/
   elisp-suite-audit-1.md) — dispatch as `opus-low` when a slot frees.
-- QUEUE, in order, one slot each, all `opus-low`: R-SUITE-1 →
+- LANDING 4 merged (41d7c3321): typed `<Rpc>Error` arms on every rpc
+  Emacs calls (cross-cutting unknown_workspace / workspace_ref_mismatch
+  {registry_dir} / transferring_away{address} / not_yet_adopted + per-rpc
+  arms) and HostFault.kind's eight arms. The codec refuses them until
+  R-ARMS lands (test-wire-verbs 109/111 by design).
+- PRE-CUT: elisp-agents/remed3 (overhaul/elisp-remed3) for R-ARMS.
+- QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
+  new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
+  arm sets pinned against the regenerated Go bindings; unit tests only —
+  treatments live in host.el (remediation-1) and verbs.el (W2-C)) →
+  R-SUITE-1 →
   R-PUSHINVALID → R-NOTIFY (incl. R-CLICK, gate `:unknown`) → R-HANDOVER
   (re-run link/host first; remediate the remainder) → second adversarial
   audit (fable, fresh context) → loop until green.
