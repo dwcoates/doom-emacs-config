@@ -240,10 +240,18 @@ func (*SendLoginInputSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no login session
-// standing, pty write failed, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type SendLoginInputError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*SendLoginInputError_UnknownWorkspace
+	//	*SendLoginInputError_WorkspaceRefMismatch
+	//	*SendLoginInputError_TransferringAway
+	//	*SendLoginInputError_NotYetAdopted
+	//	*SendLoginInputError_NoLoginOpen
+	Cause         isSendLoginInputError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -278,6 +286,295 @@ func (*SendLoginInputError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *SendLoginInputError) GetCause() isSendLoginInputError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *SendLoginInputError) GetUnknownWorkspace() *SendLoginInputUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*SendLoginInputError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *SendLoginInputError) GetWorkspaceRefMismatch() *SendLoginInputWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*SendLoginInputError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *SendLoginInputError) GetTransferringAway() *SendLoginInputTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*SendLoginInputError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *SendLoginInputError) GetNotYetAdopted() *SendLoginInputNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*SendLoginInputError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *SendLoginInputError) GetNoLoginOpen() *SendLoginInputNoLoginOpen {
+	if x != nil {
+		if x, ok := x.Cause.(*SendLoginInputError_NoLoginOpen); ok {
+			return x.NoLoginOpen
+		}
+	}
+	return nil
+}
+
+type isSendLoginInputError_Cause interface {
+	isSendLoginInputError_Cause()
+}
+
+type SendLoginInputError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *SendLoginInputUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type SendLoginInputError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *SendLoginInputWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type SendLoginInputError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *SendLoginInputTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type SendLoginInputError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *SendLoginInputNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type SendLoginInputError_NoLoginOpen struct {
+	// No login terminal is open for this workspace.
+	NoLoginOpen *SendLoginInputNoLoginOpen `protobuf:"bytes,5,opt,name=no_login_open,json=noLoginOpen,proto3,oneof"`
+}
+
+func (*SendLoginInputError_UnknownWorkspace) isSendLoginInputError_Cause() {}
+
+func (*SendLoginInputError_WorkspaceRefMismatch) isSendLoginInputError_Cause() {}
+
+func (*SendLoginInputError_TransferringAway) isSendLoginInputError_Cause() {}
+
+func (*SendLoginInputError_NotYetAdopted) isSendLoginInputError_Cause() {}
+
+func (*SendLoginInputError_NoLoginOpen) isSendLoginInputError_Cause() {}
+
+type SendLoginInputUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendLoginInputUnknownWorkspace) Reset() {
+	*x = SendLoginInputUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendLoginInputUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendLoginInputUnknownWorkspace) ProtoMessage() {}
+
+func (x *SendLoginInputUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendLoginInputUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*SendLoginInputUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{4}
+}
+
+type SendLoginInputWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendLoginInputWorkspaceRefMismatch) Reset() {
+	*x = SendLoginInputWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendLoginInputWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendLoginInputWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *SendLoginInputWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendLoginInputWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*SendLoginInputWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SendLoginInputWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type SendLoginInputTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendLoginInputTransferringAway) Reset() {
+	*x = SendLoginInputTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendLoginInputTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendLoginInputTransferringAway) ProtoMessage() {}
+
+func (x *SendLoginInputTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendLoginInputTransferringAway.ProtoReflect.Descriptor instead.
+func (*SendLoginInputTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SendLoginInputTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type SendLoginInputNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendLoginInputNotYetAdopted) Reset() {
+	*x = SendLoginInputNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendLoginInputNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendLoginInputNotYetAdopted) ProtoMessage() {}
+
+func (x *SendLoginInputNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendLoginInputNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*SendLoginInputNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{7}
+}
+
+type SendLoginInputNoLoginOpen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SendLoginInputNoLoginOpen) Reset() {
+	*x = SendLoginInputNoLoginOpen{}
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendLoginInputNoLoginOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendLoginInputNoLoginOpen) ProtoMessage() {}
+
+func (x *SendLoginInputNoLoginOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendLoginInputNoLoginOpen.ProtoReflect.Descriptor instead.
+func (*SendLoginInputNoLoginOpen) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP(), []int{8}
+}
+
 var File_agentrepl_v1_endpoint_send_login_input_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_send_login_input_proto_rawDesc = "" +
@@ -294,8 +591,21 @@ const file_agentrepl_v1_endpoint_send_login_input_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.SendLoginInputSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.SendLoginInputErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15SendLoginInputSuccess\"\x15\n" +
-	"\x13SendLoginInputErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x15SendLoginInputSuccess\"\xe6\x03\n" +
+	"\x13SendLoginInputError\x12[\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.SendLoginInputUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.SendLoginInputWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2,.agentrepl.v1.SendLoginInputTransferringAwayH\x00R\x10transferringAway\x12S\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2).agentrepl.v1.SendLoginInputNotYetAdoptedH\x00R\rnotYetAdopted\x12M\n" +
+	"\rno_login_open\x18\x05 \x01(\v2'.agentrepl.v1.SendLoginInputNoLoginOpenH\x00R\vnoLoginOpenB\a\n" +
+	"\x05cause\" \n" +
+	"\x1eSendLoginInputUnknownWorkspace\"G\n" +
+	"\"SendLoginInputWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
+	"\x1eSendLoginInputTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
+	"\x1bSendLoginInputNotYetAdopted\"\x1b\n" +
+	"\x19SendLoginInputNoLoginOpenB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_send_login_input_proto_rawDescOnce sync.Once
@@ -309,27 +619,37 @@ func file_agentrepl_v1_endpoint_send_login_input_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_send_login_input_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_send_login_input_proto_goTypes = []any{
-	(*SendLoginInputRequest)(nil),   // 0: agentrepl.v1.SendLoginInputRequest
-	(*SendLoginInputResponse)(nil),  // 1: agentrepl.v1.SendLoginInputResponse
-	(*SendLoginInputSuccess)(nil),   // 2: agentrepl.v1.SendLoginInputSuccess
-	(*SendLoginInputError)(nil),     // 3: agentrepl.v1.SendLoginInputError
-	(*v1.WorkspaceRef)(nil),         // 4: workspace.v1.WorkspaceRef
-	(*LoginTerminalKeystrokes)(nil), // 5: agentrepl.v1.LoginTerminalKeystrokes
-	(*LoginTerminalResize)(nil),     // 6: agentrepl.v1.LoginTerminalResize
+	(*SendLoginInputRequest)(nil),              // 0: agentrepl.v1.SendLoginInputRequest
+	(*SendLoginInputResponse)(nil),             // 1: agentrepl.v1.SendLoginInputResponse
+	(*SendLoginInputSuccess)(nil),              // 2: agentrepl.v1.SendLoginInputSuccess
+	(*SendLoginInputError)(nil),                // 3: agentrepl.v1.SendLoginInputError
+	(*SendLoginInputUnknownWorkspace)(nil),     // 4: agentrepl.v1.SendLoginInputUnknownWorkspace
+	(*SendLoginInputWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SendLoginInputWorkspaceRefMismatch
+	(*SendLoginInputTransferringAway)(nil),     // 6: agentrepl.v1.SendLoginInputTransferringAway
+	(*SendLoginInputNotYetAdopted)(nil),        // 7: agentrepl.v1.SendLoginInputNotYetAdopted
+	(*SendLoginInputNoLoginOpen)(nil),          // 8: agentrepl.v1.SendLoginInputNoLoginOpen
+	(*v1.WorkspaceRef)(nil),                    // 9: workspace.v1.WorkspaceRef
+	(*LoginTerminalKeystrokes)(nil),            // 10: agentrepl.v1.LoginTerminalKeystrokes
+	(*LoginTerminalResize)(nil),                // 11: agentrepl.v1.LoginTerminalResize
 }
 var file_agentrepl_v1_endpoint_send_login_input_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.SendLoginInputRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	5, // 1: agentrepl.v1.SendLoginInputRequest.keystrokes:type_name -> agentrepl.v1.LoginTerminalKeystrokes
-	6, // 2: agentrepl.v1.SendLoginInputRequest.resize:type_name -> agentrepl.v1.LoginTerminalResize
-	2, // 3: agentrepl.v1.SendLoginInputResponse.success:type_name -> agentrepl.v1.SendLoginInputSuccess
-	3, // 4: agentrepl.v1.SendLoginInputResponse.error:type_name -> agentrepl.v1.SendLoginInputError
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	9,  // 0: agentrepl.v1.SendLoginInputRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	10, // 1: agentrepl.v1.SendLoginInputRequest.keystrokes:type_name -> agentrepl.v1.LoginTerminalKeystrokes
+	11, // 2: agentrepl.v1.SendLoginInputRequest.resize:type_name -> agentrepl.v1.LoginTerminalResize
+	2,  // 3: agentrepl.v1.SendLoginInputResponse.success:type_name -> agentrepl.v1.SendLoginInputSuccess
+	3,  // 4: agentrepl.v1.SendLoginInputResponse.error:type_name -> agentrepl.v1.SendLoginInputError
+	4,  // 5: agentrepl.v1.SendLoginInputError.unknown_workspace:type_name -> agentrepl.v1.SendLoginInputUnknownWorkspace
+	5,  // 6: agentrepl.v1.SendLoginInputError.workspace_ref_mismatch:type_name -> agentrepl.v1.SendLoginInputWorkspaceRefMismatch
+	6,  // 7: agentrepl.v1.SendLoginInputError.transferring_away:type_name -> agentrepl.v1.SendLoginInputTransferringAway
+	7,  // 8: agentrepl.v1.SendLoginInputError.not_yet_adopted:type_name -> agentrepl.v1.SendLoginInputNotYetAdopted
+	8,  // 9: agentrepl.v1.SendLoginInputError.no_login_open:type_name -> agentrepl.v1.SendLoginInputNoLoginOpen
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_send_login_input_proto_init() }
@@ -346,13 +666,20 @@ func file_agentrepl_v1_endpoint_send_login_input_proto_init() {
 		(*SendLoginInputResponse_Success)(nil),
 		(*SendLoginInputResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_send_login_input_proto_msgTypes[3].OneofWrappers = []any{
+		(*SendLoginInputError_UnknownWorkspace)(nil),
+		(*SendLoginInputError_WorkspaceRefMismatch)(nil),
+		(*SendLoginInputError_TransferringAway)(nil),
+		(*SendLoginInputError_NotYetAdopted)(nil),
+		(*SendLoginInputError_NoLoginOpen)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_send_login_input_proto_rawDesc), len(file_agentrepl_v1_endpoint_send_login_input_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
