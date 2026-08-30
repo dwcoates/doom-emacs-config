@@ -4705,3 +4705,448 @@ body.ungated #mode-select {
 .footer-token-verdict.arm-complete { color: var(--muted); }
 .footer-token-verdict.arm-incomplete,
 .footer-token-verdict.arm-invalid { color: var(--err); }
+
+/* ---- feed cards: shared card furniture (src/feed/cards/controls.ts) ----- */
+
+/* THE FOLD every card in this wave uses: a caret toggle over a body that is
+   hidden rather than unmounted. One rule set, so a skill's document and a
+   finding's scenario cannot open and close looking like two different ideas.
+   The caret glyph itself is the same ▸/▾ pair the separation row and the
+   activity folds already draw — no new vocabulary. */
+.card-fold {
+  margin-top: 0.35rem;
+}
+.card-fold-toggle {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.card-fold-toggle:hover { color: var(--fg); }
+
+/* THE PURPLE AGENTIC BUBBLE: the response bubble's own treatment plus one
+   accent, shared by the artifact, plan and findings cards. The accent is a left
+   rail rather than a fill, because the bubble body underneath already carries
+   the assistant wash and a second background would fight it. The hue is the
+   --tool-title purple the tool cards title themselves with, which is the
+   register this page already spends on "the agent did something", so the three
+   cards read as siblings of the tool cards rather than as a fourth palette. */
+.bubble.assistant.agentic {
+  border-left: 2px solid var(--tool-title);
+}
+/* The heading line: the daemon's composed text, drawn verbatim (an artifact's
+   carries its own favicon emoji). Bold and full-width above whatever the state
+   draws under it. */
+.agentic-heading {
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+
+/* Two badge tones the existing .badge family did not carry: the warning
+   register a plausible-but-unreproduced verdict takes, and the neutral one for
+   an outcome that is neither a success nor a fault. */
+.badge.warn { color: var(--thinking); }
+.badge.muted { color: var(--muted); }
+
+/* ---- feed cards: skill (src/feed/cards/skill.ts) ------------------------ */
+
+/* THE CARD IS THE EXISTING TEAL SKILL CARD, unchanged: `.tool-card.tool-skill`
+   carries the async wash, `.tool-head`/`.tool-name` the head, and the document
+   box reuses `.skill-content`, which is where the shared cap and the
+   scrolled-not-clipped guarantee already live. Only the two lines the new
+   schema added are below. */
+
+/* "allows: Bash, Write" — the consent line, composed daemon-side. Muted,
+   because it qualifies the skill rather than announcing anything; ABSENT when
+   the skill declared none, so this rule never renders an empty row. */
+.skill-allowances {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+/* The invocation that failed: the daemon's reason, in the error register. */
+.skill-failed {
+  margin-top: 0.3rem;
+  color: var(--err);
+  font-size: 0.8rem;
+}
+/* WORK NESTED UNDER A SKILL. The slot is the feed core's (a direct child of the
+   row chrome), and this is the register it renders in: the teal card's
+   always-open nested section — no toggle, the SHARED line budget, and SCROLLED
+   rather than clipped, exactly the three guarantees AGENTS.md states for the
+   async teal wash. Keyed off the row's own `data-unit`, so the card body and
+   the slot cannot disagree about which row they belong to. */
+[data-row-kind="activity"][data-unit="skill"] > [data-nest] {
+  --cap-lines: var(--feed-cap-lines);
+  overflow-y: auto;
+  max-height: calc(var(--cap-lines) * var(--cap-line-h, 1.4em) + var(--cap-extra, 0px));
+  border-left: 2px solid var(--async-card);
+  padding-left: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+/* ---- feed cards: artifact (src/feed/cards/artifact.ts) ------------------ */
+
+/* The published page's line. The anchor inside is the shared external link
+   component, which carries its own treatment (and its own refusal), so this
+   only places it. Monospace, because a URL is a token to read character by
+   character rather than prose. */
+.artifact-url {
+  margin-top: 0.25rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+/* The reason a publish failed, drawn WHERE THE URL WOULD BE — that is the line
+   the reader is looking at for "where is my page". */
+.artifact-failed {
+  margin-top: 0.25rem;
+  color: var(--err);
+  font-size: 0.8rem;
+}
+
+/* ---- feed cards: plan (src/feed/cards/plan.ts) -------------------------- */
+
+/* The plan document renders as the response prose it is; the bubble's own body
+   cap applies, so nothing here restates a height. */
+.plan-prose > :first-child { margin-top: 0; }
+/* The still-planning face: the animated ellipsis every other live face on this
+   page wears, nudged off the badge it follows. */
+.plan-planning {
+  margin-left: 0.3rem;
+}
+/* The edit affordance: one row of its own under the plan, so it is never
+   mistaken for part of the document. The anchor is the shared editor link. */
+.plan-edit {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+}
+.plan-failed {
+  margin-top: 0.25rem;
+  color: var(--err);
+  font-size: 0.8rem;
+}
+
+/* ---- feed cards: findings (src/feed/cards/findings.ts) ------------------ */
+
+/* The list takes the ONE shared row delimiter, like every other list on this
+   page. */
+.findings-rows {
+  margin-top: 0.35rem;
+}
+.finding {
+  padding: 0.35rem 0;
+}
+/* Verdict badge, category chip, location and outcome badge on one line: the
+   scannable part. The summary and the fold sit under it. */
+.finding-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+/* SEVERITY IS A LEFT RAIL, not a fill: a list of ten findings with ten colored
+   backgrounds would be unreadable, while a rail scans down the list at a
+   glance. Confirmed takes the error hue (it was reproduced), plausible the
+   warning orange (it was not, and painting it red would overstate the review).
+   An unverified finding — no verdict arm — gets no rail, which is the honest
+   absence rather than a third color. */
+.finding[data-verdict] {
+  padding-left: 0.5rem;
+  border-left: 2px solid transparent;
+}
+.finding.verdict-confirmed { border-left-color: var(--err); }
+.finding.verdict-plausible { border-left-color: var(--thinking); }
+.finding-category {
+  color: var(--muted);
+}
+/* The location is a jump target; the anchor inside carries the link treatment.
+   Monospace, because "daemon/server.go:214" is a path and a number. */
+.finding-location {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.finding-summary {
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+}
+/* The scenario, inside its fold: preformatted, because a reproduction is steps
+   and output rather than prose. */
+.finding-scenario {
+  margin-top: 0.2rem;
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+/* A review that found nothing SAYS so. An empty bubble would read as a review
+   whose results had not arrived. */
+.findings-empty {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ---- feed cards: shell (src/feed/cards/shell.ts) ------------------------ */
+
+/* The detached shell's bubble body: the command head, then its spool. The box
+   itself reuses `.tool-output.bash-output`, which is where the shell output's
+   cap and its scrolling already live, so a detached shell's tail looks exactly
+   like a foreground one's. */
+.shell-bubble {
+  font-size: 0.8rem;
+}
+.shell-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+/* The `$` is CHROME — the client's, never the wire's — so it is muted and
+   unselectable-looking, and the command beside it is the thing being read. */
+.shell-prompt {
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+.shell-command {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.shell-clock {
+  color: var(--info-time);
+  font-variant-numeric: tabular-nums;
+}
+/* "quiet for 12s": the client's clock over the daemon's last observed append.
+   Muted and italic like every other aside, NOT an alarm hue — quietness is a
+   feedback, not a verdict. */
+.shell-quiet {
+  color: var(--muted);
+  font-style: italic;
+}
+.shell-spool {
+  margin-top: 0.3rem;
+}
+/* The truncation count sits ABOVE the box and outside it, so it stays put while
+   the box scrolls. */
+.shell-omitted {
+  margin-bottom: 0.15rem;
+}
+/* THE OUTCOME WORD. `lost` takes the muted register and never the error one:
+   "we stopped being able to see it" is not "it failed", and coloring the two
+   alike would state something the daemon deliberately refused to state. A
+   cancelled command is the interrupted yellow — a deliberate stop, not a
+   fault — and a completed one is plain, because whether its exit code is good
+   news is the chip's business and the reader's judgment. */
+.shell-outcome {
+  font-size: 0.75rem;
+}
+.shell-outcome-completed { color: var(--muted); }
+.shell-outcome-cancelled { color: var(--interrupted); }
+.shell-outcome-lost { color: var(--muted); font-style: italic; }
+.badge.shell-exit {
+  font-variant-numeric: tabular-nums;
+}
+/* The stop control, and the answer it draws in place. */
+.shell-stop-button {
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+.shell-stop-button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.shell-stop-outcome {
+  margin-left: 0.3rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+/* ---- feed asks: the consent card (src/feed/asks/permission.ts) ---------- */
+
+/* THE CARD IS THE EXISTING `.permission` PROMPT, unchanged: the blue ring while
+   it stands, the muted grey once it settles, the `.perm-head` title and the
+   `.perm-actions` button row. Below are only the elements the new schema added
+   — the vendor's subtitle, the trigger note, the argument preview, the waiting
+   clock and the verdict line. */
+
+.perm-subtitle {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+}
+/* WHY the gate fired. It is not muted into the subtitle's grey: an ask-rule
+   trigger is worded precisely so the reader knows the prompt was
+   user-configured and must not be waved through, and burying it would undo
+   that. Orange is this page's warning register. */
+.perm-trigger {
+  color: var(--thinking);
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+}
+/* One row per composed argument line, delimited by the ONE shared list rule.
+   Monospace, because these are paths, patterns and commands. */
+.perm-args {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.perm-arg {
+  padding: 0.1rem 0;
+  overflow-wrap: anywhere;
+}
+/* How long the turn has been blocked on this ask, ticking from the row's first
+   draw. Muted: it is a fact about the wait, not a deadline. */
+.perm-waiting {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+/* The deny reason field sits AFTER the buttons and grows to fill the row, so it
+   never pushes the decision the user came for off to the side. */
+.perm-reason {
+  font: inherit;
+  font-size: 0.8rem;
+  flex: 1 1 8rem;
+  min-width: 0;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.perm-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+/* The settled verdict: the badge says what was decided, the stamp when. A
+   DENIAL IS AN ANSWER, so the denied badge takes the error hue for legibility
+   and the row itself stays the settled grey rather than reading as a fault. */
+.perm-verdict {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.perm-when, .q-when, .cold-gate-when {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- feed asks: the question card (src/feed/asks/question.ts) ----------- */
+
+/* THE PICKER IS THE EXISTING AskUserQuestion PANEL: the yellow ring while it
+   awaits an answer, the `.q-chip` title, the italic `.q-text`, and the pill
+   `.q-opt` chips laid out in a wrapping row. What changed is that an option is
+   now a real radio or checkbox inside its chip — the batch submits once, so a
+   chip has to carry a selection rather than being a button that answers — and
+   that the free-text escape is always drawn. */
+
+/* The input sits inside the pill it belongs to. */
+.q-opt input {
+  margin-right: 0.4em;
+  vertical-align: middle;
+}
+.q-opt-description {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: 0.4em;
+}
+/* ALWAYS DRAWN, whether or not the agent asked for it: a person answering a
+   machine's multiple choice must always be able to say something it did not
+   think of. Full width under the chips, so it reads as another way to answer
+   rather than as one more option. */
+.q-other {
+  font: inherit;
+  font-size: 0.85em;
+  display: block;
+  width: 100%;
+  margin-top: 0.45em;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+/* The note a blocked submit leaves BESIDE THE QUESTION that is missing — not at
+   the button, because the button is not where the gap is. */
+.q-note {
+  margin-top: 0.3em;
+  color: var(--thinking);
+  font-size: 0.8rem;
+}
+.q-verdicts {
+  font-size: 0.85rem;
+}
+.q-verdict {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+}
+.q-chosen { font-weight: 600; }
+.q-other-given { color: var(--muted); font-style: italic; }
+
+/* ---- feed asks: the cold-context gate (src/feed/asks/cold-gate.ts) ------ */
+
+/* THE GATE'S VISUAL ANCESTOR IS THE REVIVAL GATE, and it takes that card's own
+   look: a SOLID yellow fill inside a SOLID orange frame. Solid rather than a
+   wash, because this is the only interaction available while it stands — a card
+   the conversation shows through reads as one more notice to scroll past. The
+   revival gate's rule was keyed to its `#revival-gate` host, so the fill and
+   frame are restated here for a row that lives in the feed; every element
+   inside reuses the revival gate's own classes, so the two gates are one
+   visual idea rather than two. */
+.cold-gate {
+  background: var(--revival-gate-bg);
+  border: 1px solid var(--revival-gate-border);
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--fg);
+}
+/* The submenu the compact row opens: the summarizer and the scope, each a small
+   list of radios, then the send. Inset and ruled off, so it reads as belonging
+   to the row above it rather than as a fourth choice. */
+.cold-gate-submenu {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0 0.2rem 0.9rem;
+  border-top: 1px solid var(--revival-gate-border);
+}
+.cold-gate-submenu-label {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.cold-gate-choice {
+  display: block;
+  padding: 0.1rem 0;
+  cursor: pointer;
+}
+.cold-gate-choice input {
+  margin-right: 0.4em;
+  vertical-align: middle;
+}
+/* The resolved trace: one line, no question. The gate has been answered, so it
+   keeps none of the standing card's ring — leaving a decided gate ringed would
+   read as still asking. */
+.cold-gate-resolved {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.cold-gate-trace { color: var(--fg); }
