@@ -467,3 +467,13 @@ every UX or contract gap you surfaced instead of improvising.
 - LEDGER: fable auditor #1 `aa66e99f6df4f018c` running read-only over the
   merged suite (04703c1c3) vs docs/overhaul specs; its critiques feed the
   first remediation dispatch together with the first integration run.
+- REMEDIATION PRIORITY (project lead): FIRST (a) fold converter defect →
+  SessionFault.converter_defect + degraded window on diagnostics, recovery
+  closes it (`!fault-converter` / `!fault-recover`); SECOND (b)
+  model_changed ALSO derived from the next assistant message's
+  message.model when it differs from the session's current model
+  (`!model-fallback`; RULING: the daemon must see unsolicited model changes —
+  the model chip is truth, not the last SetSessionModel); then (c) the
+  fast_mode producer, the keep-alive override, the fake-store read ledger,
+  the auditor's critiques, and the first integration run's failures. The
+  producer re-key (record plane step 4) is confirmed to the lead on landing.
