@@ -3,7 +3,10 @@ package convert
 // entry_test.go — the envelope duties: the deterministic write identity, the
 // plane, and the arms that decide pageability.
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestWriteIdIsTheRuledDigestOfItsSourceCoordinates(t *testing.T) {
 	// Arrange. THE RECIPE IS THE RULING: sha256 of
@@ -189,3 +192,94 @@ func TestBlockIndexIsLoadBearingInTheUnitIdentity(t *testing.T) {
 type errForTest string
 
 func (e errForTest) Error() string { return string(e) }
+
+func TestResidueIsKeyedByTheVendorsOwnRecordUuid(t *testing.T) {
+	// Arrange. BOTH PLANES SEE THE SAME VENDOR RECORD and either may store it as
+	// residue. Keyed by the vendor's uuid the two writes land on ONE row and the
+	// second supersedes the first; keyed by anything plane-local (a digest of a
+	// file position, say) they would stand beside each other as two copies of one
+	// unconvertible line, which nothing downstream could reconcile.
+	at := testAttribution(4096)
+	at.RecordUUID = "91f90641-c528-4a97-aad0-6936bdadea70"
+
+	// Act.
+	entry := VendorSpecificEntry(at, "queue-operation", map[string]any{"a": "b"})
+
+	// Assert.
+	if got := entry.GetUpsertKey(); got != "residue:91f90641-c528-4a97-aad0-6936bdadea70" {
+		t.Fatalf("upsert_key = %q, want the vendor's own record uuid", got)
+	}
+}
+
+func TestResidueKeysAgreeAcrossTheThreeArms(t *testing.T) {
+	// Arrange. vendor_specific, unknown and unparsed are three ACCOUNTS of one
+	// record, not three records: whichever arm a plane chose, the row is the
+	// same record's.
+	at := testAttribution(4096)
+	at.RecordUUID = "rec-1"
+
+	// Act.
+	vendor := VendorSpecificEntry(at, "queue-operation", map[string]any{})
+	unknown := UnknownEntry(at, "weird", "type", map[string]any{})
+
+	// Assert.
+	if vendor.GetUpsertKey() != unknown.GetUpsertKey() {
+		t.Fatalf("arms disagree on the record's key: %q vs %q", vendor.GetUpsertKey(), unknown.GetUpsertKey())
+	}
+}
+
+func TestResidueWithNoRecordUuidIsKeyedByItsFileCoordinates(t *testing.T) {
+	// Arrange. An unparsed line has no uuid — that is WHY it is unparsed — so
+	// there is nothing the other plane could agree on and it keys on where it
+	// lives instead.
+	at := testAttribution(4096)
+	at.Path = "/p/projects/proj/session-uuid.jsonl"
+	at.RecordUUID = ""
+
+	// Act.
+	entry := UnparsedEntry(at, []byte("{not json"), errTestParse)
+
+	// Assert.
+	if got := entry.GetUpsertKey(); got != "residue:file:/p/projects/proj/session-uuid.jsonl:4096" {
+		t.Fatalf("upsert_key = %q, want the file coordinates", got)
+	}
+}
+
+func TestTheFileResidueSpaceCannotCollideWithTheUuidSpace(t *testing.T) {
+	// Arrange. A path is arbitrary text and a uuid is arbitrary text; without a
+	// distinguishing segment a crafted path could name another record's row.
+	at := testAttribution(0)
+	at.RecordUUID = ""
+	at.Path = "rec-1"
+
+	// Act.
+	byPath := UnparsedEntry(at, nil, errTestParse)
+	at.RecordUUID = "rec-1"
+	byUUID := VendorSpecificEntry(at, "queue-operation", map[string]any{})
+
+	// Assert.
+	if byPath.GetUpsertKey() == byUUID.GetUpsertKey() {
+		t.Fatalf("a path and a uuid produced the same key %q", byPath.GetUpsertKey())
+	}
+}
+
+func TestAKeepAliveKeepsTheKeyOfTheItemItWouldHaveBeen(t *testing.T) {
+	// Arrange. A keep-alive turn's item is a WELL-FORMED conversation fact with
+	// no book — not residue — so it keeps its unit's identity and never falls
+	// into the residue space.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.RecordUUID = "rec-1"
+
+	// Act.
+	entry := Keepalive(at, "block:0", ActivityKey("toolu_call"), "agent-1", nil)
+
+	// Assert.
+	if got := entry.GetUpsertKey(); got != ActivityKey("toolu_call") {
+		t.Fatalf("upsert_key = %q, want the unit's own key", got)
+	}
+	_ = c
+}
+
+// errTestParse stands in for a decoder failure.
+var errTestParse = errors.New("invalid character 'n'")

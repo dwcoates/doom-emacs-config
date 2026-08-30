@@ -181,6 +181,17 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 				"no terminal for the LOST run: its file is no longer watched, so no converter is left to spell one (reason=%s)", lost.Reason)
 			continue
 		}
+		if lost.Kind == tail.KindResidueSpool {
+			// A RESIDUE SPOOL NAMES NO RUN. Its task-id prefix failed
+			// classification, or no spawning call ever claimed it, so its bytes
+			// were ingested as residue and NO unit was ever opened for it —
+			// there is nothing downstream holding it open and nothing a terminal
+			// could settle. The conclusion is still worth stating (the reader
+			// did stop seeing the file); minting a terminal for it would invent
+			// a run that never existed.
+			bound.Log("the LOST file was residue and named no run, so there is no unit to settle (reason=%s)", lost.Reason)
+			continue
+		}
 		sink, ok := w.tailer.Handler().(lostTerminalSink)
 		if !ok {
 			bound.With(logging.Context{Level: "error"}).Log(

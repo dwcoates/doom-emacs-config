@@ -234,3 +234,34 @@ func TestASpoolConverterReportingNoLaunchesIsNotADefect(t *testing.T) {
 		t.Fatalf("a spool converter's silence was recorded as a defect: %s", h.logText())
 	}
 }
+
+func TestAResidueSpoolConcludedLostNeedsNoTerminal(t *testing.T) {
+	// Arrange. A residue spool's task-id prefix failed classification, or nobody
+	// ever claimed it, so its bytes went to residue and NO unit was opened for
+	// it. Concluding it LOST is a fair statement about the file; demanding a
+	// terminal for it reports a hole that does not exist, because there is no
+	// run row downstream holding anything open.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "z0uncla551f1able", "bytes nobody can classify\n")
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	h.sc.pollAll()
+
+	// Act.
+	entries := h.sc.lostEntries([]stale.Lost{{
+		Work:   stale.Work{Path: spool, TaskID: "z0uncla551f1able", Kind: tail.KindResidueSpool},
+		Reason: stale.ReasonSweptUp,
+	}})
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want 0: a residue spool names no run to settle", len(entries))
+	}
+	if strings.Contains(h.logText(), "the run stays open in every reader downstream") {
+		t.Fatalf("a residue spool was reported as leaving a run open: %s", h.logText())
+	}
+	if !strings.Contains(h.logText(), "named no run, so there is no unit to settle") {
+		t.Fatalf("the conclusion about the residue spool was not stated: %s", h.logText())
+	}
+}
