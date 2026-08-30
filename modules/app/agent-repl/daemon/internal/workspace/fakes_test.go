@@ -288,7 +288,7 @@ type fakeAccounts struct {
 	account.Resolver
 
 	configDir     string
-	transcript    string
+	transcript    account.Transcript
 	transcriptErr error
 	ported        []portedTranscript
 	portErr       error
@@ -298,7 +298,7 @@ type portedTranscript struct{ Path, ConfigDir, WorkspaceDir string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
 
-func (a *fakeAccounts) FindTranscript(context.Context, string, string) (string, error) {
+func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.Transcript, error) {
 	return a.transcript, a.transcriptErr
 }
 
