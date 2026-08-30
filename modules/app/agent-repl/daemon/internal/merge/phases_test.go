@@ -647,3 +647,44 @@ func TestParkedMergeKeepsItsLease(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// TestFirstLineKeepsAComposedLineToOneLine covers the parked line's shape: it is
+// a line, whatever the agent wrote.
+func TestFirstLineKeepsAComposedLineToOneLine(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{name: "several lines", text: "the reason\nand more detail", want: "the reason"},
+		{name: "nothing at all", text: "   ", want: "no reason was given"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the agent's text.
+			text := tc.text
+
+			// Act.
+			got := firstLine(text)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("firstLine(%q) = %q, want %q", text, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShortRendersACommitTheWayNarrationNamesIt covers the merge tab's lines.
+func TestShortRendersACommitTheWayNarrationNamesIt(t *testing.T) {
+	// Arrange: a full sha.
+	sha := "abcdef0123456789abcdef0123456789abcdef01"
+
+	// Act.
+	got := short(sha)
+
+	// Assert.
+	if got != "abcdef012345" {
+		t.Fatalf("short(%q) = %q, want the narration's own length", sha, got)
+	}
+}

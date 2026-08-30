@@ -11,7 +11,6 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/ids"
-	"claude-repld/internal/paint"
 )
 
 // This file is the merge's TEST GATE: the run, its archive, and the parse that
@@ -246,7 +245,3 @@ func clampTail(output string, n int) string {
 	}
 	return tail
 }
-
-// assertPainter is the compile-time note that the gate's painter is the shared
-// one: the tests tab's spans come from the same inventory the code spans do.
-var _ paint.Painter = paint.Painter(nil)
