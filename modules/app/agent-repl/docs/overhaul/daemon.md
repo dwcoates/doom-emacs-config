@@ -1297,3 +1297,12 @@ its own file only when >1 endpoint needs it.
 - FooterAllowance is sourced from SessionUpdate.rate_limit_status (typed status); the verbatim string is gone.
 - context_budget_warning arrives on the agent plane (AgentUpdate); the WatchSession routing goes.
 - Re-adopted live work is always `created`-origin (shim ruling); DetachedWorkId == the unit's AgentActivityId, so `created`-origin monitors are retired by their own terminal.
+
+## Implementation overrides recorded by the daemon lead (2026-08-29)
+
+- MERGE RECOVERY: an in-flight merge found at boot (lease row present) is
+  re-queued at the FRONT of its repository's queue and re-run from the
+  queue tab rather than re-entered at its last recorded tab; the tab
+  history already published stays as feed content, the new run appends
+  its rounds. Rationale: the git state after a crash is only trustworthy
+  from a clean re-run; re-entering mid-tab would guess at partial state.
