@@ -323,3 +323,41 @@ describe("a component recovering", () => {
     expect(next?.update.case === "diagnostics" ? next.update.value.health.case : "").toBe("healthy");
   });
 });
+
+describe("fast mode", () => {
+  function fastMode(on: boolean): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "fastMode",
+        value: create(conversationv1.SessionFastModeSchema, {
+          state: on
+            ? { case: "on", value: create(conversationv1.SessionFastModeOnSchema, {}) }
+            : { case: "off", value: create(conversationv1.SessionFastModeOffSchema, { reason: "preference" }) },
+        }),
+      },
+    });
+  }
+
+  it("is replayed to a consumer that joins after the vendor stated it", async () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(fastMode(true));
+
+    const opening = await take(pushes.subscribe(), 2);
+
+    expect(opening[1]?.update.case).toBe("fastMode");
+  });
+
+  it("is dropped when the state did not change", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(fastMode(true));
+
+    expect(pushes.push(fastMode(true))).toBe(false);
+  });
+
+  it("goes out when the state changed", () => {
+    const pushes = new SessionPushes(() => 1);
+    pushes.push(fastMode(true));
+
+    expect(pushes.push(fastMode(false))).toBe(true);
+  });
+});
