@@ -435,10 +435,20 @@ func (*AnswerPermissionSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{6}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown card, already
-// answered, standing picked with none offered, no session).
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type AnswerPermissionError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*AnswerPermissionError_UnknownWorkspace
+	//	*AnswerPermissionError_WorkspaceRefMismatch
+	//	*AnswerPermissionError_TransferringAway
+	//	*AnswerPermissionError_NotYetAdopted
+	//	*AnswerPermissionError_AskNotStanding
+	//	*AnswerPermissionError_NoStandingOffer
+	//	*AnswerPermissionError_NoSession
+	Cause         isAnswerPermissionError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -473,6 +483,399 @@ func (*AnswerPermissionError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{7}
 }
 
+func (x *AnswerPermissionError) GetCause() isAnswerPermissionError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetUnknownWorkspace() *AnswerPermissionUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetWorkspaceRefMismatch() *AnswerPermissionWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetTransferringAway() *AnswerPermissionTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetNotYetAdopted() *AnswerPermissionNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetAskNotStanding() *AnswerPermissionAskNotStanding {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_AskNotStanding); ok {
+			return x.AskNotStanding
+		}
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetNoStandingOffer() *AnswerPermissionNoStandingOffer {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_NoStandingOffer); ok {
+			return x.NoStandingOffer
+		}
+	}
+	return nil
+}
+
+func (x *AnswerPermissionError) GetNoSession() *AnswerPermissionNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerPermissionError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+type isAnswerPermissionError_Cause interface {
+	isAnswerPermissionError_Cause()
+}
+
+type AnswerPermissionError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *AnswerPermissionUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type AnswerPermissionError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *AnswerPermissionWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type AnswerPermissionError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *AnswerPermissionTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type AnswerPermissionError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *AnswerPermissionNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type AnswerPermissionError_AskNotStanding struct {
+	// The permission card is no longer standing.
+	AskNotStanding *AnswerPermissionAskNotStanding `protobuf:"bytes,5,opt,name=ask_not_standing,json=askNotStanding,proto3,oneof"`
+}
+
+type AnswerPermissionError_NoStandingOffer struct {
+	// A standing allow was picked where none was offered.
+	NoStandingOffer *AnswerPermissionNoStandingOffer `protobuf:"bytes,6,opt,name=no_standing_offer,json=noStandingOffer,proto3,oneof"`
+}
+
+type AnswerPermissionError_NoSession struct {
+	// The workspace has no session to answer to.
+	NoSession *AnswerPermissionNoSession `protobuf:"bytes,7,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+func (*AnswerPermissionError_UnknownWorkspace) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_WorkspaceRefMismatch) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_TransferringAway) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_NotYetAdopted) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_AskNotStanding) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_NoStandingOffer) isAnswerPermissionError_Cause() {}
+
+func (*AnswerPermissionError_NoSession) isAnswerPermissionError_Cause() {}
+
+type AnswerPermissionUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionUnknownWorkspace) Reset() {
+	*x = AnswerPermissionUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionUnknownWorkspace) ProtoMessage() {}
+
+func (x *AnswerPermissionUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{8}
+}
+
+type AnswerPermissionWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionWorkspaceRefMismatch) Reset() {
+	*x = AnswerPermissionWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *AnswerPermissionWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AnswerPermissionWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type AnswerPermissionTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionTransferringAway) Reset() {
+	*x = AnswerPermissionTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionTransferringAway) ProtoMessage() {}
+
+func (x *AnswerPermissionTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionTransferringAway.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *AnswerPermissionTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type AnswerPermissionNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionNotYetAdopted) Reset() {
+	*x = AnswerPermissionNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionNotYetAdopted) ProtoMessage() {}
+
+func (x *AnswerPermissionNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{11}
+}
+
+type AnswerPermissionAskNotStanding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionAskNotStanding) Reset() {
+	*x = AnswerPermissionAskNotStanding{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionAskNotStanding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionAskNotStanding) ProtoMessage() {}
+
+func (x *AnswerPermissionAskNotStanding) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionAskNotStanding.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionAskNotStanding) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{12}
+}
+
+type AnswerPermissionNoStandingOffer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionNoStandingOffer) Reset() {
+	*x = AnswerPermissionNoStandingOffer{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionNoStandingOffer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionNoStandingOffer) ProtoMessage() {}
+
+func (x *AnswerPermissionNoStandingOffer) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionNoStandingOffer.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionNoStandingOffer) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{13}
+}
+
+type AnswerPermissionNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerPermissionNoSession) Reset() {
+	*x = AnswerPermissionNoSession{}
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerPermissionNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerPermissionNoSession) ProtoMessage() {}
+
+func (x *AnswerPermissionNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerPermissionNoSession.ProtoReflect.Descriptor instead.
+func (*AnswerPermissionNoSession) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP(), []int{14}
+}
+
 var File_agentrepl_v1_endpoint_answer_permission_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc = "" +
@@ -499,8 +902,26 @@ const file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.AnswerPermissionSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.AnswerPermissionErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17AnswerPermissionSuccess\"\x17\n" +
-	"\x15AnswerPermissionErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x17AnswerPermissionSuccess\"\xa2\x05\n" +
+	"\x15AnswerPermissionError\x12]\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.AnswerPermissionUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.AnswerPermissionWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2..agentrepl.v1.AnswerPermissionTransferringAwayH\x00R\x10transferringAway\x12U\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.AnswerPermissionNotYetAdoptedH\x00R\rnotYetAdopted\x12X\n" +
+	"\x10ask_not_standing\x18\x05 \x01(\v2,.agentrepl.v1.AnswerPermissionAskNotStandingH\x00R\x0easkNotStanding\x12[\n" +
+	"\x11no_standing_offer\x18\x06 \x01(\v2-.agentrepl.v1.AnswerPermissionNoStandingOfferH\x00R\x0fnoStandingOffer\x12H\n" +
+	"\n" +
+	"no_session\x18\a \x01(\v2'.agentrepl.v1.AnswerPermissionNoSessionH\x00R\tnoSessionB\a\n" +
+	"\x05cause\"\"\n" +
+	" AnswerPermissionUnknownWorkspace\"I\n" +
+	"$AnswerPermissionWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
+	" AnswerPermissionTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
+	"\x1dAnswerPermissionNotYetAdopted\" \n" +
+	"\x1eAnswerPermissionAskNotStanding\"!\n" +
+	"\x1fAnswerPermissionNoStandingOffer\"\x1b\n" +
+	"\x19AnswerPermissionNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_answer_permission_proto_rawDescOnce sync.Once
@@ -514,33 +935,47 @@ func file_agentrepl_v1_endpoint_answer_permission_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_answer_permission_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_answer_permission_proto_goTypes = []any{
-	(*AnswerPermissionRequest)(nil),       // 0: agentrepl.v1.AnswerPermissionRequest
-	(*AnswerPermissionAllowOnce)(nil),     // 1: agentrepl.v1.AnswerPermissionAllowOnce
-	(*AnswerPermissionAllowStanding)(nil), // 2: agentrepl.v1.AnswerPermissionAllowStanding
-	(*AnswerPermissionDeny)(nil),          // 3: agentrepl.v1.AnswerPermissionDeny
-	(*AnswerPermissionDenyReason)(nil),    // 4: agentrepl.v1.AnswerPermissionDenyReason
-	(*AnswerPermissionResponse)(nil),      // 5: agentrepl.v1.AnswerPermissionResponse
-	(*AnswerPermissionSuccess)(nil),       // 6: agentrepl.v1.AnswerPermissionSuccess
-	(*AnswerPermissionError)(nil),         // 7: agentrepl.v1.AnswerPermissionError
-	(*v1.WorkspaceRef)(nil),               // 8: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),                    // 9: frontend.v1.FeedId
+	(*AnswerPermissionRequest)(nil),              // 0: agentrepl.v1.AnswerPermissionRequest
+	(*AnswerPermissionAllowOnce)(nil),            // 1: agentrepl.v1.AnswerPermissionAllowOnce
+	(*AnswerPermissionAllowStanding)(nil),        // 2: agentrepl.v1.AnswerPermissionAllowStanding
+	(*AnswerPermissionDeny)(nil),                 // 3: agentrepl.v1.AnswerPermissionDeny
+	(*AnswerPermissionDenyReason)(nil),           // 4: agentrepl.v1.AnswerPermissionDenyReason
+	(*AnswerPermissionResponse)(nil),             // 5: agentrepl.v1.AnswerPermissionResponse
+	(*AnswerPermissionSuccess)(nil),              // 6: agentrepl.v1.AnswerPermissionSuccess
+	(*AnswerPermissionError)(nil),                // 7: agentrepl.v1.AnswerPermissionError
+	(*AnswerPermissionUnknownWorkspace)(nil),     // 8: agentrepl.v1.AnswerPermissionUnknownWorkspace
+	(*AnswerPermissionWorkspaceRefMismatch)(nil), // 9: agentrepl.v1.AnswerPermissionWorkspaceRefMismatch
+	(*AnswerPermissionTransferringAway)(nil),     // 10: agentrepl.v1.AnswerPermissionTransferringAway
+	(*AnswerPermissionNotYetAdopted)(nil),        // 11: agentrepl.v1.AnswerPermissionNotYetAdopted
+	(*AnswerPermissionAskNotStanding)(nil),       // 12: agentrepl.v1.AnswerPermissionAskNotStanding
+	(*AnswerPermissionNoStandingOffer)(nil),      // 13: agentrepl.v1.AnswerPermissionNoStandingOffer
+	(*AnswerPermissionNoSession)(nil),            // 14: agentrepl.v1.AnswerPermissionNoSession
+	(*v1.WorkspaceRef)(nil),                      // 15: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                           // 16: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_answer_permission_proto_depIdxs = []int32{
-	8, // 0: agentrepl.v1.AnswerPermissionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	9, // 1: agentrepl.v1.AnswerPermissionRequest.permission:type_name -> frontend.v1.FeedId
-	1, // 2: agentrepl.v1.AnswerPermissionRequest.allow_once:type_name -> agentrepl.v1.AnswerPermissionAllowOnce
-	2, // 3: agentrepl.v1.AnswerPermissionRequest.allow_standing:type_name -> agentrepl.v1.AnswerPermissionAllowStanding
-	3, // 4: agentrepl.v1.AnswerPermissionRequest.deny:type_name -> agentrepl.v1.AnswerPermissionDeny
-	4, // 5: agentrepl.v1.AnswerPermissionDeny.reason:type_name -> agentrepl.v1.AnswerPermissionDenyReason
-	6, // 6: agentrepl.v1.AnswerPermissionResponse.success:type_name -> agentrepl.v1.AnswerPermissionSuccess
-	7, // 7: agentrepl.v1.AnswerPermissionResponse.error:type_name -> agentrepl.v1.AnswerPermissionError
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	15, // 0: agentrepl.v1.AnswerPermissionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.AnswerPermissionRequest.permission:type_name -> frontend.v1.FeedId
+	1,  // 2: agentrepl.v1.AnswerPermissionRequest.allow_once:type_name -> agentrepl.v1.AnswerPermissionAllowOnce
+	2,  // 3: agentrepl.v1.AnswerPermissionRequest.allow_standing:type_name -> agentrepl.v1.AnswerPermissionAllowStanding
+	3,  // 4: agentrepl.v1.AnswerPermissionRequest.deny:type_name -> agentrepl.v1.AnswerPermissionDeny
+	4,  // 5: agentrepl.v1.AnswerPermissionDeny.reason:type_name -> agentrepl.v1.AnswerPermissionDenyReason
+	6,  // 6: agentrepl.v1.AnswerPermissionResponse.success:type_name -> agentrepl.v1.AnswerPermissionSuccess
+	7,  // 7: agentrepl.v1.AnswerPermissionResponse.error:type_name -> agentrepl.v1.AnswerPermissionError
+	8,  // 8: agentrepl.v1.AnswerPermissionError.unknown_workspace:type_name -> agentrepl.v1.AnswerPermissionUnknownWorkspace
+	9,  // 9: agentrepl.v1.AnswerPermissionError.workspace_ref_mismatch:type_name -> agentrepl.v1.AnswerPermissionWorkspaceRefMismatch
+	10, // 10: agentrepl.v1.AnswerPermissionError.transferring_away:type_name -> agentrepl.v1.AnswerPermissionTransferringAway
+	11, // 11: agentrepl.v1.AnswerPermissionError.not_yet_adopted:type_name -> agentrepl.v1.AnswerPermissionNotYetAdopted
+	12, // 12: agentrepl.v1.AnswerPermissionError.ask_not_standing:type_name -> agentrepl.v1.AnswerPermissionAskNotStanding
+	13, // 13: agentrepl.v1.AnswerPermissionError.no_standing_offer:type_name -> agentrepl.v1.AnswerPermissionNoStandingOffer
+	14, // 14: agentrepl.v1.AnswerPermissionError.no_session:type_name -> agentrepl.v1.AnswerPermissionNoSession
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_permission_proto_init() }
@@ -558,13 +993,22 @@ func file_agentrepl_v1_endpoint_answer_permission_proto_init() {
 		(*AnswerPermissionResponse_Success)(nil),
 		(*AnswerPermissionResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_answer_permission_proto_msgTypes[7].OneofWrappers = []any{
+		(*AnswerPermissionError_UnknownWorkspace)(nil),
+		(*AnswerPermissionError_WorkspaceRefMismatch)(nil),
+		(*AnswerPermissionError_TransferringAway)(nil),
+		(*AnswerPermissionError_NotYetAdopted)(nil),
+		(*AnswerPermissionError_AskNotStanding)(nil),
+		(*AnswerPermissionError_NoStandingOffer)(nil),
+		(*AnswerPermissionError_NoSession)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_permission_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

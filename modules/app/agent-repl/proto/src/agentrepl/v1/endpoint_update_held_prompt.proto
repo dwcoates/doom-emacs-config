@@ -49,7 +49,39 @@ message UpdateHeldPromptResponse {
 // Done; the tray's new state arrives on its stream.
 message UpdateHeldPromptSuccess {}
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no such hold, already
-// delivered), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message UpdateHeldPromptError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    UpdateHeldPromptUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    UpdateHeldPromptWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    UpdateHeldPromptTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    UpdateHeldPromptNotYetAdopted not_yet_adopted = 4;
+    // No hold by that id.
+    UpdateHeldPromptNoSuchHold no_such_hold = 5;
+    // The hold was already delivered.
+    UpdateHeldPromptAlreadyDelivered already_delivered = 6;
+    // An accept on a verdict other than hold_for_turn_end.
+    UpdateHeldPromptAcceptNotApplicable accept_not_applicable = 7;
+    // A force-through on an uninterruptible or session_starting hold.
+    UpdateHeldPromptReleaseRefused release_refused = 8;
+  }
 }
+message UpdateHeldPromptUnknownWorkspace {}
+message UpdateHeldPromptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message UpdateHeldPromptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message UpdateHeldPromptNotYetAdopted {}
+message UpdateHeldPromptNoSuchHold {}
+message UpdateHeldPromptAlreadyDelivered {}
+message UpdateHeldPromptAcceptNotApplicable {}
+message UpdateHeldPromptReleaseRefused {}
