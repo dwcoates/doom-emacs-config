@@ -93,8 +93,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   REVERSED deviation in flight (same agent, remed5): verb records must
   stay WORKSPACE-owned per logging-contract.md; the harness reader now
   searches the workspace sinks too; link teardown added to the fixture.
-- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-VERBS follow-up (remed5);
-  remediation-1 (opus-medium, remed1).
+- R-VERBS follow-up MERGED (33b3d2e81): workspace-owned verb records
+  restored; harness reader searches global + workspace sinks; fixture
+  tears the link down. integration-verbs 30/30, daemon 12/12.
+- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-NOTIFY (`opus-low`, remed4);
+  remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
+  remediation-1 merges (cut its worktree off that tip).
 - VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
   footer_allowance verbatim (f1132d3a7); merged, resolved to theirs; the
   files are identical on both branches. HostWorkspaceTransferred stays
