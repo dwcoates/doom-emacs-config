@@ -8,6 +8,7 @@ package integration
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -45,9 +46,63 @@ func TestSlowWatcherExceedingTheBufferIsEndedWithAnError(t *testing.T) {
 	// Assert: the stream ends loudly, and the store said so in its log.
 	assertWatchExhausted(t, awaitStreamEnd(t, stream))
 
-	warnings := recordsAtLevel(store.logRecordsAfter(mark), "warn")
-	if len(warnings) == 0 {
-		t.Errorf("ending an overrun watcher logged no warning")
+	// THE WARNING MUST BE THE RIGHT ONE. `len(warnings) != 0` accepted any warn
+	// the store happened to emit — a reclaimed socket, a slow query, the
+	// not-implemented workflow notice — so the assertion passed without the
+	// overflow record ever existing.
+	overflows := recordsAtOperation(store.logRecordsAfter(mark), "store.fanout.overflow")
+	if len(overflows) != 1 {
+		t.Fatalf("store.fanout.overflow records = %d, want exactly 1: %v", len(overflows), overflows)
+	}
+	rec := overflows[0]
+	if rec.Level != "warn" {
+		t.Errorf("the overflow record is level %q, want warn", rec.Level)
+	}
+	if rec.Context["book_agent_id"] != "main" {
+		t.Errorf("the overflow record names book %v, want main", rec.Context["book_agent_id"])
+	}
+	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
+		t.Errorf("the overflow record carries no watch_token_hash: %v", rec.Context)
+	}
+	if !strings.Contains(rec.Message, "dropped=") {
+		t.Errorf("the overflow record does not say how much was dropped: %q", rec.Message)
+	}
+}
+
+// TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher is the other side
+// of backpressure: the shipped buffer is SUBSTANTIALLY above what a daemon
+// bounce can burst, because the alternative to buffering a burst is ending a
+// healthy watch. A store that overflowed here would be dropping consumers
+// during ordinary catch-up.
+func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
+	// Arrange: the store's own default buffer, not a test-shrunk one.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	opened := openSession(ctx, t, cli, "main", 10, nil)
+	stream := watchStream(ctx, t, cli, opened.GetWatch())
+	defer stream.Close()
+	mark := store.logMark()
+
+	// Act
+	const burst = 4096
+	entries := make([]*storev1.StoreEntry, 0, burst)
+	for i := 0; i < burst; i++ {
+		label := fmt.Sprintf("burst-%d", i)
+		entries = append(entries, shim.agentEntry("w-"+label, "u-"+label,
+			frameLine(agentID("main"), responseFrame("main", "act-"+label, label))))
+	}
+	shim.write(ctx, t, entries...)
+
+	// Assert: every frame arrives, and the store never gave up on the watcher.
+	got := receiveLines(t, stream, burst)
+	if len(got) != burst {
+		t.Fatalf("the watcher received %d frames, want %d", len(got), burst)
+	}
+	if overflows := recordsAtOperation(store.logRecordsAfter(mark), "store.fanout.overflow"); len(overflows) != 0 {
+		t.Fatalf("the default buffer overflowed on a %d-line burst: %v", burst, overflows)
 	}
 }
 

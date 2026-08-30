@@ -119,14 +119,67 @@ func TestStaleKnownThroughPointerIsRefused(t *testing.T) {
 	pointerInAnotherBook := &storev1.StoreItemPointer{Value: pagePointers(otherBook.GetPage())[0]}
 
 	// Act.
-	detail := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
+	failure := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
 		Agent:        agentID("main"),
 		PageSize:     10,
 		KnownThrough: pointerInAnotherBook,
 	})
 
-	// Assert.
-	if detail == "" {
-		t.Errorf("the stale-pointer refusal carried no detail")
+	// Assert: a well-formed pointer naming no row of THIS book is stale, not
+	// malformed — the caller's recovery is a repaint, not a bug fix.
+	assertOpenStalePointer(t, failure)
+}
+
+// TestACatchUpGapExactlyThePageSizeReachesTheFloor is the off-by-one.
+//
+// `more` vs `floor` is decided by asking for ONE MORE ROW than the page holds,
+// so the boundary is observed rather than counted. The case that separates a
+// correct implementation from a `>=` is a gap of EXACTLY page_size: the page is
+// full, and there is nothing below it. Answering `more` there sends the caller
+// walking for a page that does not exist; answering `floor` is the truth.
+func TestACatchUpGapExactlyThePageSizeReachesTheFloor(t *testing.T) {
+	// Arrange: four lines, the caller holding L2, a budget of two — so the gap
+	// (L3, L4) is exactly the page size.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	writeNumberedLines(ctx, t, shim, "main", 4)
+	all := openSession(ctx, t, cli, "main", 4, nil)
+	pointers := pagePointers(all.GetPage())
+	knownThrough := &storev1.StoreItemPointer{Value: pointers[2]} // L2, newest-first
+
+	// Act
+	page := openSession(ctx, t, cli, "main", 2, knownThrough)
+
+	// Assert
+	assertTexts(t, "the catch-up page", pageTexts(page.GetPage()), []string{"L4", "L3"})
+	assertPageFloor(t, page.GetPage())
+	store.assertNoErrorRecords()
+}
+
+// TestACatchUpGapOneAboveThePageSizeReportsMore is the control for the subject
+// above: one more row in the gap, and the boundary must flip.
+func TestACatchUpGapOneAboveThePageSizeReportsMore(t *testing.T) {
+	// Arrange: five lines, the caller holding L2, a budget of two — the gap is
+	// L3, L4, L5.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	writeNumberedLines(ctx, t, shim, "main", 5)
+	all := openSession(ctx, t, cli, "main", 5, nil)
+	pointers := pagePointers(all.GetPage())
+	knownThrough := &storev1.StoreItemPointer{Value: pointers[3]} // L2
+
+	// Act
+	page := openSession(ctx, t, cli, "main", 2, knownThrough)
+
+	// Assert
+	assertTexts(t, "the catch-up page", pageTexts(page.GetPage()), []string{"L5", "L4"})
+	if assertPageMore(t, page.GetPage()).GetValue() != pointers[1] {
+		t.Fatalf("more.last_item = %q, want L4's pointer %q", assertPageMore(t, page.GetPage()).GetValue(), pointers[1])
 	}
 }

@@ -41,7 +41,7 @@ type BashRunReplay struct {
 func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	base := logging.Fields{Operation: "store.db.bash-run", Table: "entry", TaskID: runID}
 	if runID == "" {
-		return BashRunReplay{}, d.refuse(base, invalidf("run id value is empty"))
+		return BashRunReplay{}, d.refuse(base, invalidFieldf("run", "run id value is empty"))
 	}
 	started := time.Now()
 
@@ -87,6 +87,7 @@ func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 		return BashRunReplay{}, d.refuse(base, storagef(err, "reading the watch pin"))
 	}
 	d.observeQuery(StatementBashRun, "entry", base, started, int64(len(out)))
+	d.traceStatement(ctx, StatementBashRun, "entry", base, int64(len(out)))
 	verbose := base
 	verbose.WriteSeq = pinSeq
 	d.log.LogVerbose(verbose, "bash run read rows=%d", len(out))
