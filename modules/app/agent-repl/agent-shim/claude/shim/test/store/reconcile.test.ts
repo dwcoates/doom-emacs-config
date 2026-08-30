@@ -12,7 +12,12 @@ import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { producerId } from "../../src/store/keys.js";
 import { PersistenceError } from "../../src/store/persistence.js";
-import { createReconciler, findBashStart, reconciledCoordinate } from "../../src/store/reconcile.js";
+import {
+  announceLiveWork,
+  createReconciler,
+  findBashStart,
+  reconciledCoordinate,
+} from "../../src/store/reconcile.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
 import { agent, readEntry, socketPathForTest, unit } from "./persistence-fixtures.js";
@@ -258,5 +263,115 @@ describe("findBashStart", () => {
     const start = findBashStart([recordedBashStart("sleep 100")], unit("run-other"));
 
     expect(start).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What a restarted consumer is told about work that is still running
+// ---------------------------------------------------------------------------
+
+describe("announceLiveWork", () => {
+  /** One recorded shell run in a book, as the store holds it. */
+  function recordedRun(unit: string): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            agentId: BOOK,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item: {
+                      case: "bash",
+                      value: create(conversationv1.AgentBashSchema, {
+                        result: {
+                          case: "start",
+                          value: create(conversationv1.AgentBashStartSchema, {
+                            command: create(conversationv1.AgentBashCommandSchema, {
+                              line: "sleep 100",
+                            }),
+                            startedAt: create(conversationv1.AgentActivityStartedAtSchema, {
+                              atMs: 5n,
+                            }),
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
+  const HANDLE = create(conversationv1.DetachedWorkIdSchema, { value: "run-1" });
+
+  it("uses the CREATED arm: a restarted daemon has no element to continue", () => {
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE]);
+
+    // `detached` means "continue what you are drawing"; telling a fresh
+    // consumer that leaves the work undrawn and unreachable.
+    expect(announced[0]?.origin.case).toBe("created");
+  });
+
+  it("describes the work FROM THE STORE, by the unit the handle names", () => {
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE]);
+
+    const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
+    expect(created.workCreated?.work.case).toBe("bash");
+  });
+
+  it("carries the recorded start, so the description cannot disagree with the record", () => {
+    const announced = announceLiveWork([recordedRun("run-1")], [HANDLE]);
+
+    const created = announced[0]?.origin.value as conversationv1.DetachedWorkCreated;
+    const bash = created.workCreated?.work.value as conversationv1.AgentBash;
+    const start = bash.result.value as conversationv1.AgentBashStart;
+    expect(start.command?.line).toBe("sleep 100");
+  });
+
+  it("omits work the record cannot describe rather than announcing a bare handle", () => {
+    expect(announceLiveWork([], [HANDLE])).toEqual([]);
+  });
+
+  it("omits a unit whose kind cannot detach at all", () => {
+    const read = create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            agentId: BOOK,
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: "run-1" }),
+                    item: {
+                      case: "read",
+                      value: create(conversationv1.AgentReadSchema, {}),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+
+    // A kind absent from DetachableWork cannot claim to be detached.
+    expect(announceLiveWork([read], [HANDLE])).toEqual([]);
   });
 });

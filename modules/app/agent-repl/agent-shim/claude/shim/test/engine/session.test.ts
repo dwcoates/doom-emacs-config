@@ -984,7 +984,63 @@ describe("WatchSession", () => {
 });
 
 describe("GetLiveWork reconciliation", () => {
+  /** One recorded shell run in the main agent's book, as the store holds it. */
+  function recordedBashRun(unit: string): conversationv1.HistoryEntryAt {
+    return create(conversationv1.HistoryEntryAtSchema, {
+      at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+      entry: create(conversationv1.HistoryEntrySchema, {
+        entry: {
+          case: "agentFrame",
+          value: create(conversationv1.AgentFrameSchema, {
+            result: {
+              case: "update",
+              value: create(conversationv1.AgentUpdateSchema, {
+                update: {
+                  case: "activity",
+                  value: create(conversationv1.AgentActivitySchema, {
+                    activityId: create(conversationv1.AgentActivityIdSchema, { value: unit }),
+                    item: {
+                      case: "bash",
+                      value: create(conversationv1.AgentBashSchema, {
+                        result: {
+                          case: "start",
+                          value: create(conversationv1.AgentBashStartSchema, {
+                            command: create(conversationv1.AgentBashCommandSchema, {
+                              line: "sleep 100",
+                            }),
+                            startedAt: create(conversationv1.AgentActivityStartedAtSchema, {
+                              atMs: 5n,
+                            }),
+                          }),
+                        },
+                      }),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      }),
+    });
+  }
+
   it("writes a closing terminal for detached work the vendor no longer has", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
+  });
+
+  it("leaves work the record cannot describe OPEN rather than inventing its kind", async () => {
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
@@ -992,7 +1048,9 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
+    // Every terminal arm is kind-specific: closing an unknown unit as a shell
+    // would claim it ran a command, and as a spawn that it made an agent.
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey.includes("b01"))).toBe(false);
   });
 
   it("writes a closing terminal for a subagent that did not survive", async () => {
