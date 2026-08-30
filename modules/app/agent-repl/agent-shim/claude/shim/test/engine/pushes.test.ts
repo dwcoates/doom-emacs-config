@@ -245,3 +245,81 @@ describe("standing down", () => {
     expect(taken.map((update) => update.update.case)).toEqual(["diagnostics"]);
   });
 });
+
+describe("a component recovering", () => {
+  it("clears that component's standing faults", () => {
+    const pushes = new SessionPushes(() => 7);
+    pushes.fault(
+      create(conversationv1.SessionFaultSchema, {
+        component: "converter",
+        detail: "refused",
+        kind: {
+          case: "converterDefect",
+          value: create(conversationv1.SessionFaultConverterDefectSchema, {}),
+        },
+      }),
+    );
+
+    pushes.resolveComponent("converter", 1);
+
+    expect(pushes.faultCount).toBe(0);
+  });
+
+  it("leaves another component's fault standing", () => {
+    const pushes = new SessionPushes(() => 7);
+    pushes.fault(fault("the store is gone"));
+
+    pushes.resolveComponent("converter", 0);
+
+    expect(pushes.faultCount).toBe(1);
+  });
+
+  it("closes that component's open window with the dropped count", async () => {
+    const pushes = new SessionPushes(() => 7);
+    pushes.openDegradedWindow("converter", "the fold refused a message");
+
+    pushes.resolveComponent("converter", 3);
+
+    const diagnostics = pushes.diagnostics().update;
+    const window = diagnostics.case === "diagnostics" ? diagnostics.value.degradedWindows[0] : undefined;
+    expect(window?.extent.case === "closed" ? window.extent.value.droppedCount : -1n).toBe(3n);
+  });
+
+  it("stamps the close with the clock's instant", () => {
+    const pushes = new SessionPushes(() => 7);
+    pushes.openDegradedWindow("converter", "the fold refused a message");
+
+    pushes.resolveComponent("converter", 0);
+
+    const diagnostics = pushes.diagnostics().update;
+    const window = diagnostics.case === "diagnostics" ? diagnostics.value.degradedWindows[0] : undefined;
+    expect(window?.extent.case === "closed" ? window.extent.value.endedAtMs : -1n).toBe(7n);
+  });
+
+  it("answers false when nothing was standing for that component", () => {
+    const pushes = new SessionPushes(() => 7);
+
+    expect(pushes.resolveComponent("converter", 0)).toBe(false);
+  });
+
+  it("pushes the healthy diagnostics to a subscriber", async () => {
+    const pushes = new SessionPushes(() => 7);
+    pushes.fault(
+      create(conversationv1.SessionFaultSchema, {
+        component: "converter",
+        detail: "refused",
+        kind: {
+          case: "converterDefect",
+          value: create(conversationv1.SessionFaultConverterDefectSchema, {}),
+        },
+      }),
+    );
+    const read = reader(pushes.subscribe());
+    await read.next();
+
+    pushes.resolveComponent("converter", 1);
+
+    const next = await read.next();
+    expect(next?.update.case === "diagnostics" ? next.update.value.health.case : "").toBe("healthy");
+  });
+});
