@@ -49,6 +49,7 @@ import { MalformedView } from "../../rpc/malformed.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
 import { clearRefusals, refusal, whileInFlight } from "../cards/controls.js";
+import { refusalOf, type SentenceTable } from "../refusal-text.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
@@ -467,6 +468,13 @@ async function answer(
   drawAnswerOutcome(answered.value, actions, buttons);
 }
 
+/** The causes only AnswerColdGate can answer with; the four are shared. */
+const OWN_CAUSES = {
+  noColdGate: () => "no cold gate is standing for this workspace",
+  unservedRemediation: () => "the gate never offered that remediation",
+  noSession: () => "the workspace has no session to answer",
+} as unknown as SentenceTable;
+
 /** Nothing on success (the gate re-pushes resolved); the refusal on error. */
 function drawAnswerOutcome(
   response: AnswerColdGateResponse,
@@ -477,10 +485,12 @@ function drawAnswerOutcome(
   switch (result.case) {
     case "success":
       return;
-    case "error":
-      actions.append(refusal(result.case, "AnswerColdGate was refused"));
+    case "error": {
+      const said = refusalOf(result.value.cause, OWN_CAUSES, "AnswerColdGateError.cause");
+      actions.append(refusal(said.arm, said.text));
       for (const button of buttons) button.disabled = false;
       return;
+    }
     default:
       unreachableArm("AnswerColdGateResponse.result", armName(result));
   }

@@ -48,6 +48,7 @@ import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { stopTicking, tick } from "../ticking.js";
+import { refusalOf, type SentenceTable } from "../refusal-text.js";
 import { clearRefusals, refusal, release, whileInFlight } from "./controls.js";
 
 const PATH = "FeedShell";
@@ -296,6 +297,22 @@ async function stop(
   drawAnswer(answered.value, rc, wrap, button);
 }
 
+/**
+ * The causes only Interrupt can answer with; the four are shared.
+ *
+ * `confirm_required` is here because the ARM EXISTS on the wire, not because
+ * this control expects it: the daemon raises the challenge only for the TURN
+ * target, so on a shell it is a fact worth stating plainly rather than a
+ * challenge to offer a second button for.
+ */
+const OWN_CAUSES = {
+  confirmRequired: (value: { liveAgentCount: bigint }) =>
+    `stopping would also end ${value.liveAgentCount.toString()} live agent(s)`,
+  notDetachedWork: () => "this row names no detached work",
+  noSession: () => "the workspace has no session to interrupt",
+  shimRefused: (value: { detail: string }) => value.detail,
+} as unknown as SentenceTable;
+
 /** The stop's answer: a success arm's word, or this click's own refusal. */
 function drawAnswer(
   response: InterruptResponse,
@@ -331,8 +348,8 @@ function drawAnswer(
       // RULED: `confirm_required` is answered only to the TURN target, so this
       // control draws no confirm step — every arm is an ordinary refusal here,
       // and the button comes back so the user can try again.
-      const kind = requireCase(result.value.kind, "InterruptError.kind");
-      wrap.append(refusal(kind.case, "the shell could not be stopped"));
+      const said = refusalOf(result.value.kind, OWN_CAUSES, "InterruptError.kind");
+      wrap.append(refusal(said.arm, said.text));
       release([button]);
       return;
     }

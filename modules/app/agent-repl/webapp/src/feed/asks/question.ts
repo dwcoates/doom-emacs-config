@@ -50,6 +50,7 @@ import type {
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
 import { clearRefusals, refusal, whileInFlight } from "../cards/controls.js";
+import { refusalOf, type SentenceTable } from "../refusal-text.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
@@ -402,6 +403,14 @@ async function send(
   drawAnswerOutcome(answered.value, actions, submit);
 }
 
+/** The causes only AnswerQuestion can answer with; the four are shared. */
+const OWN_CAUSES = {
+  askNotStanding: () => "this ask is no longer standing",
+  unservedValue: (value: { text: string }) => `the batch never served "${value.text}"`,
+  multiPickOnSingleSelect: () => "several options were picked on a single-select question",
+  noSession: () => "the workspace has no session to answer",
+} as unknown as SentenceTable;
+
 /** Nothing on success (the row re-pushes); this click's refusal on error. */
 function drawAnswerOutcome(
   response: AnswerQuestionResponse,
@@ -412,10 +421,12 @@ function drawAnswerOutcome(
   switch (result.case) {
     case "success":
       return;
-    case "error":
-      actions.append(refusal(result.case, "AnswerQuestion was refused"));
+    case "error": {
+      const said = refusalOf(result.value.cause, OWN_CAUSES, "AnswerQuestionError.cause");
+      actions.append(refusal(said.arm, said.text));
       submit.disabled = false;
       return;
+    }
     default:
       unreachableArm("AnswerQuestionResponse.result", armName(result));
   }
