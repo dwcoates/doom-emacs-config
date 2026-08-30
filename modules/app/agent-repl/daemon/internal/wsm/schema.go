@@ -154,6 +154,7 @@ CREATE TABLE faults (
   workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
   kind         TEXT NOT NULL,
   detail       TEXT NOT NULL,
+  evidence     TEXT NOT NULL,
   opened_at    INTEGER NOT NULL,
   resolved_at  INTEGER
 );
