@@ -91,6 +91,16 @@ type Context struct {
 	Attempt *int
 	// BackoffMs is the delay armed before the NEXT attempt, in milliseconds.
 	BackoffMs *int64
+	// RefusalKind is a store failure's oneof arm (storage_failure /
+	// invalid_request). It is what says whether a retry can help, so it rides a
+	// dedicated key rather than the message text a reader would have to parse.
+	RefusalKind string
+	// Field is the offending field an invalid_request refusal names, so the
+	// producer defect can be found without reading prose.
+	Field string
+	// WriteIDs lists the write_ids of a whole refused batch. A batch is refused
+	// WHOLE, so naming one of its records would misreport what was rejected.
+	WriteIDs []string
 }
 
 // Off boxes a byte offset for Context.Offset, so an unset offset is genuinely
@@ -208,6 +218,8 @@ func contextMap(ctx Context) map[string]any {
 		"task_id":           ctx.TaskID,
 		"activity_id":       ctx.ActivityID,
 		"turn_id":           ctx.TurnID,
+		"refusal_kind":      ctx.RefusalKind,
+		"field":             ctx.Field,
 	} {
 		if value != "" {
 			out[key] = value
@@ -224,6 +236,9 @@ func contextMap(ctx Context) map[string]any {
 	}
 	if ctx.BackoffMs != nil {
 		out["backoff_ms"] = *ctx.BackoffMs
+	}
+	if len(ctx.WriteIDs) > 0 {
+		out["write_ids"] = append([]string(nil), ctx.WriteIDs...)
 	}
 	return out
 }
@@ -345,6 +360,8 @@ func mergeContext(base, add Context) Context {
 		{&base.ActivityID, &add.ActivityID},
 		{&base.TurnID, &add.TurnID},
 		{&base.StoreSocket, &add.StoreSocket},
+		{&base.RefusalKind, &add.RefusalKind},
+		{&base.Field, &add.Field},
 	} {
 		if *field.src != "" {
 			*field.dst = *field.src
@@ -355,6 +372,9 @@ func mergeContext(base, add Context) Context {
 	}
 	if add.WriteSeq != nil {
 		base.WriteSeq = add.WriteSeq
+	}
+	if len(add.WriteIDs) > 0 {
+		base.WriteIDs = add.WriteIDs
 	}
 	if add.Attempt != nil {
 		base.Attempt = add.Attempt

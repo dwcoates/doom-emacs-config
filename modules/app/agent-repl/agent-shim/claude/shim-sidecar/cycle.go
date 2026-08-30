@@ -120,6 +120,22 @@ type sidecar struct {
 	// cycle and dropped the moment production is suspended, so a tailer can
 	// never be built from a stale — or absent — recovery.
 	cursors map[string]*storev1.CursorState // by resolved path; nil while suspended
+	// parked holds the files the store REFUSED an invalid_request for (ruling
+	// R-S2), by resolved path. Nothing more is read from one for the LIFE OF
+	// THE PROCESS: the refusal is a PRODUCER DEFECT, so re-reading the same
+	// durable bytes re-mints the same rejected batch forever — a tight
+	// identical replay loop that makes no progress and drowns the log.
+	//
+	// IT IS ONE FILE, NEVER THE PLANE: a malformed conversion of one transcript
+	// says nothing about any other file, so every other tailer keeps reading.
+	// The parked file's cursor stays exactly where the store has it, so a fixed
+	// sidecar resumes from the same byte.
+	//
+	// IT IS PROCESS-SCOPED RATHER THAN CYCLE-SCOPED, unlike the tailers: an
+	// outage in between does not make the defect go away, so a suspension that
+	// drops every tailer must not quietly un-park the file the store already
+	// told us it cannot accept.
+	parked map[string]bool
 	// rewound remembers which files have had their one boot rewind, so the
 	// bounded backward scan happens once per file per process rather than on
 	// every reconnect.
@@ -157,6 +173,7 @@ func newSidecar(options Options, log *logging.Bound) *sidecar {
 		watchers: map[string]*watched{},
 		settling: map[string]string{},
 		stopped:  map[string]int64{},
+		parked:   map[string]bool{},
 		rewound:  map[string]bool{},
 		// A fresh sidecar is simply a sidecar whose first cycle has not begun
 		// yet, with its first attempt due immediately. That is all "boot" means.
@@ -336,7 +353,48 @@ func (s *sidecar) noteStoreErr(operation string, err error) {
 	if err == nil {
 		return
 	}
+	if _, invalid := storeclient.InvalidRequest(err); invalid {
+		// AN INVALID REQUEST IS NOT AN OUTAGE (ruling R-S2). The store was
+		// reachable, answered, and rejected THESE BYTES; suspending the whole
+		// file plane over one malformed batch would stop every other file for a
+		// defect in one, and the retry the suspension exists to arrange cannot
+		// help. The caller decides what to park; the error is still returned,
+		// never swallowed.
+		return
+	}
 	s.suspend(operation, err)
+}
+
+// park stops reading ONE file after the store refused its batch as an
+// invalid_request, and states the defect once.
+//
+// THE RECORD IS THE WHOLE POINT. A batch the store can never accept is a bug in
+// this producer, and the only way anyone finds it is the field the store named,
+// the write ids of the batch it rejected, and the file position they were read
+// at — so all three ride dedicated keys rather than prose.
+func (s *sidecar) park(path string, w *watched, result tail.PollResult, field string, cause error) {
+	s.parked[path] = true
+	s.log.With(logging.Context{
+		Operation: "producer-defect", Level: "error", Path: path,
+		FileID:      result.Next.GetFileId(),
+		TaskID:      w.target.TaskID,
+		Offset:      logging.Off(result.Next.GetOffset()),
+		RefusalKind: string(storeclient.RefusalInvalidRequest),
+		Field:       field,
+		WriteIDs:    writeIDsOf(result.Entries),
+	}).Log(
+		"the store refused %d record(s) from this file as an invalid_request; a retry of the same bytes cannot help, so THIS FILE is parked for the life of the process (its cursor stays where the store has it) while every other file keeps being read: %v",
+		len(result.Entries), cause)
+}
+
+// writeIDsOf names every record of a batch. A batch is refused WHOLE, so
+// naming one of its records would misreport what the store rejected.
+func writeIDsOf(entries []*storev1.StoreEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.GetWriteId())
+	}
+	return out
 }
 
 // reportResumed closes the outage window in the log. A cycle that began on its
@@ -477,6 +535,9 @@ func (s *sidecar) pollAll() {
 	s.requireCursors("pollAll")
 	nowMs := s.now().UnixMilli()
 	for path, w := range s.watchers {
+		if s.parked[path] {
+			continue
+		}
 		result, err := w.tailer.Poll()
 		if err != nil {
 			s.pollFailed(path, w, err, nowMs)
@@ -486,6 +547,15 @@ func (s *sidecar) pollAll() {
 			continue
 		}
 		if err := s.writeBatch(result); err != nil {
+			if field, invalid := storeclient.InvalidRequest(err); invalid {
+				// A PRODUCER DEFECT, NOT AN OUTAGE (ruling R-S2). The store can
+				// never accept these bytes, so retrying them is a tight
+				// identical loop; the file is parked and every other file
+				// keeps being read. Production is NOT suspended — nothing is
+				// wrong with the store.
+				s.park(path, w, result, field, err)
+				continue
+			}
 			// Honest sad path: nothing was committed, so the cursor does not
 			// move and the same durable bytes are re-read next cycle.
 			s.log.With(logging.Context{
@@ -611,6 +681,19 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 		return
 	}
 	if err := s.storeWrite(what, &storev1.EntryBatch{Entries: entries}); err != nil {
+		if field, invalid := storeclient.InvalidRequest(err); invalid {
+			// These conclusions name no file position — they were inferred, not
+			// read — so there is no tailer to park. The defect is stated and
+			// they are simply not restated, because re-minting the same
+			// rejected records on the next sweep is the identical loop R-S2
+			// forbids.
+			s.log.With(logging.Context{
+				Operation: "producer-defect", Level: "error",
+				RefusalKind: string(storeclient.RefusalInvalidRequest),
+				Field:       field, WriteIDs: writeIDsOf(entries),
+			}).Log("the store refused %d inferred %s record(s) as an invalid_request; a retry of the same records cannot help: %v", len(entries), what, err)
+			return
+		}
 		s.log.With(logging.Context{Operation: "store-write", Level: "error"}).
 			Log("%s write failed for %d record(s); production is suspended and the conclusions are restated on the next cycle: %v", what, len(entries), err)
 	}
