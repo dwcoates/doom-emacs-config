@@ -48,8 +48,28 @@
 (declare-function agent-repl--ws-switch "workspace")
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--emacs-focused-p "notifications")
+(declare-function agent-repl-link-connect "daemon-link")
+(declare-function agent-repl-link-teardown "daemon-link")
+(declare-function agent-repl-wire-decode-watch-host-workspace-response "wire-host")
+(declare-function agent-repl-status--set-marker "status")
+(declare-function agent-repl-session-health "verbs")
+(declare-function agent-repl--frontend-precreate-webview "frontend")
+(declare-function agent-repl--frontend-xwidget-available-p "frontend")
+(declare-function agent-repl--call-in-background-workspace "agent-repl-worktree")
 (defvar agent-repl-host-update-functions)
 (defvar agent-repl-host-last-selected-id)
+(defvar agent-repl-link-up-functions)
+(defvar agent-repl-link-down-functions)
+(defvar agent-repl-link-handover-functions)
+(defvar agent-repl-link-drain-functions)
+(defvar agent-repl-link-no-daemon-functions)
+(defvar agent-repl-link-drain)
+(defvar agent-repl-link-drain-segment)
+(defvar agent-repl-verbs-health-buffer)
+(defvar agent-repl-itest-webview-urls)
+(defvar dired-directory)
+
+(require 'url-util)
 
 ;;;; ---- Fixtures ----
 
@@ -100,6 +120,28 @@ always cancelled afterwards — a client cancel IS the graceful close."
            ,@body)
        (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-host--ws))
        (agent-repl-connect-close conn))))
+
+(defun agent-repl-itest-host--push-invalid-context-strings (daemon)
+  "Return every logged argument string from DAEMON's `elisp.rpc.push-invalid'
+entries.  `agent-repl-rpc--stream' logs the offending push's RAW parsed JSON
+alist in its context (fanout §4: \"with the raw JSON in context\"); the
+harness records that as `prin1-to-string' of each format argument under
+`context.arguments' (core.el's `agent-repl--log-record')."
+  (apply #'append
+         (mapcar (lambda (record) (alist-get 'arguments (alist-get 'context record)))
+                 (agent-repl-itest--log-entries daemon "elisp.rpc.push-invalid" "error"))))
+
+(defun agent-repl-itest-host--dired-buffer-for (dir)
+  "Return a live dired buffer visiting DIR, or nil.
+Used to observe `agent-repl-popup-open' UN-STUBBED: the shared subroutine
+opens a directory with `dired-noselect', which this walks the buffer list
+to find rather than assuming any particular buffer name."
+  (seq-find (lambda (buf)
+              (with-current-buffer buf
+                (and (eq major-mode 'dired-mode)
+                     (equal (file-name-as-directory (expand-file-name dired-directory))
+                            (file-name-as-directory (expand-file-name dir))))))
+            (buffer-list)))
 
 ;;;; ---- Scenario 3: the host stream ----
 
@@ -340,6 +382,184 @@ known gap is that a non-parse sidecar read error still shows as pending."
        nil "the failed backfill arm")
       (should (eq (agent-repl-host-backfill agent-repl-itest-host--ws) :failed)))))
 
+(ert-deftest agent-repl-itest-host-every-backfill-arm-resolves-to-its-keyword ()
+  "Each of `backfill''s four arms exposes its own keyword, not just `failed'.
+proto `HostBackfill': \"THE ARM IS THE STATE\" — none | pending | done |
+failed{detail} are four distinct facts and a suite that only ever drives
+`failed' cannot tell a decoder collapsing them apart from one that keeps
+them straight."
+  ;; Arrange: the four arms the proto declares.
+  (let ((cases '((none . :none) (pending . :pending) (done . :done)
+                 (failed . :failed))))
+    (agent-repl-itest--with-fake-daemon daemon
+      (agent-repl-itest-host--with-subscription daemon ref
+        (dolist (case cases)
+          (let* ((arm (car case))
+                 (expected (cdr case))
+                 (payload (if (eq arm 'failed) '((detail . "sidecar parse error")) '())))
+            ;; Act.
+            (agent-repl-itest-host--push-host
+             daemon (plist-get ref :id)
+             (agent-repl-itest-host--live 'open `(backfill . ((,arm . ,payload)))))
+            ;; Assert.
+            (agent-repl-itest--wait-until
+             (lambda () (eq (agent-repl-host-backfill agent-repl-itest-host--ws) expected))
+             nil (format "the %s backfill arm" arm))
+            (should (eq (agent-repl-host-backfill agent-repl-itest-host--ws) expected))))))))
+
+(ert-deftest agent-repl-itest-host-live-with-no-vendor-conversation-is-accepted ()
+  "A LIVE session with `vendor_info' entirely unset is a legal push, not a breach.
+proto `HostSessionLive.vendor_info': \"Unset while no vendor conversation
+exists yet.\"  A decoder treating this oneof as required would refuse every
+freshly-started session's very first host push."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act: a live push with no `claude' arm (or any other vendor arm) at all.
+      (agent-repl-itest-host--push-host
+       daemon (plist-get ref :id)
+       `((existing . ((id . ((value . "host-session-1")))
+                      (live . ((generation . ((value . "gen-1")))
+                               (shimAttached . t)
+                               (backfill . ((done . ())))
+                               (open . ())))))
+         (naming . ())))
+      ;; Assert: the gate resolves normally — this is an accepted push.
+      (agent-repl-itest--wait-until
+       (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :open))
+       nil "a vendorless live push to still gate :open")
+      (should (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :open))
+      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error")))))
+
+(ert-deftest agent-repl-itest-host-naming-absent-falls-back-to-the-row-name ()
+  "With `naming' entirely empty, buffers are named from the roster row name.
+fanout §7: \"buffer titles use `naming.title', else `naming.slug', else the
+row name\" — `agent-repl-itest-host--ws' stands in for that row name here,
+since the suite has no separate roster row of its own."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act: the fixture's `naming' is already the empty message.
+      (agent-repl-itest-host--push-host
+       daemon (plist-get ref :id) (agent-repl-itest-host--live 'open))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (equal (agent-repl-host-display-title agent-repl-itest-host--ws)
+                         agent-repl-itest-host--ws))
+       nil "absent naming to fall back to the row name")
+      (should (equal (agent-repl-host-display-title agent-repl-itest-host--ws)
+                     agent-repl-itest-host--ws)))))
+
+(ert-deftest agent-repl-itest-host-standing-faults-reach-the-health-buffer ()
+  "`agent-repl-session-health' prints the host stream's standing fault detail.
+fanout §14 scenario 3 / verbs.el §9: SessionHealth renders \"the host
+stream's standing faults for the workspace\" beside the pulled verdict — a
+doctor reading only the accessor, never the rendered buffer, would miss a
+regression that drops the fault from the printed report."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (agent-repl-itest--script daemon "SessionHealth" '((success . ((healthy . ())))))
+      (agent-repl-itest-host--push-host
+       daemon (plist-get ref :id)
+       (agent-repl-itest-host--live
+        'open '(faults . [((detail . "store socket unreachable")
+                           (openedAtMs . "1735689600000"))])))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-host-faults agent-repl-itest-host--ws))
+       nil "the standing fault to reach host state")
+      (when (get-buffer agent-repl-verbs-health-buffer) (kill-buffer agent-repl-verbs-health-buffer))
+      ;; Act.
+      (agent-repl-session-health agent-repl-itest-host--ws)
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda ()
+         (and (get-buffer agent-repl-verbs-health-buffer)
+              (with-current-buffer agent-repl-verbs-health-buffer
+                (string-match-p "store socket unreachable" (buffer-string)))))
+       nil "the standing fault's detail to reach the health buffer")
+      (should (with-current-buffer agent-repl-verbs-health-buffer
+                (string-match-p "store socket unreachable" (buffer-string)))))))
+
+(defun agent-repl-itest-host--composer-arm-of (host)
+  "Return HOST's live composer arm keyword, or nil.
+Mirrors host.el's own private walk (`agent-repl-host--live') so the hook
+test below can inspect the exact plist the hook was called with, rather
+than the accessor's CURRENT (possibly later) state."
+  (let ((session (plist-get host :session)))
+    (when (eq (plist-get session :arm) :existing)
+      (let ((standing (plist-get (plist-get session :value) :standing)))
+        (when (eq (plist-get standing :arm) :live)
+          (plist-get (plist-get (plist-get standing :value) :composer) :arm))))))
+
+(ert-deftest agent-repl-itest-host-update-functions-runs-after-every-host-push ()
+  "`agent-repl-host-update-functions' runs with (WS HOST-PLIST) after each push.
+fanout §7: \"`agent-repl-host-update-functions' (WS HOST-PLIST) runs after
+every host push.\""
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (let ((calls nil)
+            (agent-repl-host-update-functions nil))
+        (add-hook 'agent-repl-host-update-functions
+                  (lambda (ws host) (push (cons ws host) calls)))
+        ;; Act: two whole pushes, carrying different composer arms.
+        (agent-repl-itest-host--push-host
+         daemon (plist-get ref :id) (agent-repl-itest-host--live 'open))
+        (agent-repl-itest--wait-until (lambda () calls) nil "the first hook invocation")
+        (agent-repl-itest-host--push-host
+         daemon (plist-get ref :id) (agent-repl-itest-host--live 'merging))
+        (agent-repl-itest--wait-until (lambda () (= 2 (length calls))) nil
+                                      "the second hook invocation")
+        ;; Assert: two invocations, WS on both, carrying the decoded plists
+        ;; in push order.
+        (should (= 2 (length calls)))
+        (let ((ordered (reverse calls)))
+          (should (equal (mapcar #'car ordered)
+                         (list agent-repl-itest-host--ws agent-repl-itest-host--ws)))
+          (should (eq (agent-repl-itest-host--composer-arm-of (cdr (nth 0 ordered))) :open))
+          (should (eq (agent-repl-itest-host--composer-arm-of (cdr (nth 1 ordered))) :merging)))))))
+
+(ert-deftest agent-repl-itest-host-unsubscribe-cancels-the-daemon-side-subscriber ()
+  "`(agent-repl-host-unsubscribe WS)' empties the daemon's subscriber list.
+fanout §7: \"one WatchHostWorkspace per open workspace; unsubscribe
+cancels.\""
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (should (equal 1 (length (agent-repl-itest--subscribers
+                                daemon "host" (plist-get ref :id)))))
+      ;; Act.
+      (agent-repl-host-unsubscribe agent-repl-itest-host--ws)
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (null (agent-repl-itest--subscribers daemon "host" (plist-get ref :id))))
+       nil "the daemon to observe the unsubscribe")
+      (should (null (agent-repl-itest--subscribers daemon "host" (plist-get ref :id)))))))
+
+(ert-deftest agent-repl-itest-host-register-error-arm-answers-on-done-with-nil ()
+  "RegisterWorkspace's error arm calls ON-DONE with nil and logs ERROR.
+fanout §7: \"error arm → `agent-repl--error' and ON-DONE nil.\""
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "RegisterWorkspace" '((error . ())))
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon)))
+          (done-called nil)
+          (result :never))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put agent-repl-itest-host--ws :project-dir "/tmp/itest-host-ws")
+            ;; Act.
+            (agent-repl-host-register
+             conn "/tmp/itest-host-ws"
+             (lambda (ref) (setq done-called t result ref)))
+            (agent-repl-itest--wait-until (lambda () done-called) nil
+                                          "RegisterWorkspace to answer")
+            ;; Assert.
+            (should (null result))
+            (should (agent-repl-itest--logged-p daemon "elisp.host.register-refused" "error")))
+        (agent-repl-connect-close conn)))))
+
 (ert-deftest agent-repl-itest-host-select-sends-the-ref-and-records-it ()
   "A tab switch sends SelectWorkspace echoing the ref.
 The daemon stamps `current', records last-selected and CLEARS the
@@ -488,7 +708,11 @@ belong in the context, never only in the message."
 (ert-deftest agent-repl-itest-host-question-kind-carries-its-header ()
   "`question_asked' carries a `header', and it reaches the log context.
 The header is the question batch's own summary line; like a permission
-ask's tool name it is programmatic semantics beside the composed text."
+ask's tool name it is programmatic semantics beside the composed text.
+Asserting only the arm name (\"question-asked\") in the message would pass
+even if the HEADER ITSELF never made it anywhere — the dynamic value must
+actually appear on the record, per fanout §0: \"Dynamic values go in the
+context, never only in the message.\""
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
@@ -505,6 +729,12 @@ ask's tool name it is programmatic semantics beside the composed text."
           (should (seq-some
                    (lambda (record)
                      (string-match-p "question-asked" (or (alist-get 'message record) "")))
+                   entries))
+          (should (seq-some
+                   (lambda (record)
+                     (or (string-match-p "Which approach\\?" (or (alist-get 'message record) ""))
+                         (seq-some (lambda (arg) (string-match-p "Which approach\\?" arg))
+                                   (alist-get 'arguments (alist-get 'context record)))))
                    entries)))))))
 
 (ert-deftest agent-repl-itest-host-unfocused-notification-click-selects-the-tab ()
@@ -537,6 +767,82 @@ argument is threaded through, this passes without being rewritten."
           (funcall activate)
           ;; Assert.
           (should (equal switched agent-repl-itest-host--ws)))))))
+
+(ert-deftest agent-repl-itest-host-blink-cadence-fires-the-exact-schedule ()
+  "The blink cadence is EXACTLY 0/500/1000/1500/2000 ms, unstubbed end to end.
+elisp.md: \"THE CANONICAL BLINK CADENCE is specified ONCE, on `frontend.v1'
+`RosterRowAttention': two blinks — 500 ms on, 500 ms off, twice — then a
+steady marker until cleared.\"  Driven here by a REAL `notification' push
+through host.el's real `agent-repl-status-blink-tab' — every other test in
+this suite stubs that function away, so none of them can catch a divergent
+cadence; only `run-with-timer' is instrumented, to record what it is asked
+to schedule, and every call still runs for real."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (let ((captured nil)
+            (real-run-with-timer (symbol-function 'run-with-timer)))
+        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t))
+                  ((symbol-function 'agent-repl--ws-current-name) (lambda (&rest _) "some-other-ws"))
+                  ((symbol-function 'agent-repl--notify)
+                   (lambda (&rest _) (error "a focused Emacs must not post a banner")))
+                  ((symbol-function 'run-with-timer)
+                   (lambda (delay repeat fn &rest args)
+                     (when (eq fn #'agent-repl-status--set-marker)
+                       (push (cons delay (nth 1 args)) captured))
+                     (apply real-run-with-timer delay repeat fn args))))
+          ;; Act.
+          (agent-repl-itest-host--push-notification
+           daemon (plist-get ref :id) '((agentAddressed . ())))
+          ;; Assert.
+          (agent-repl-itest--wait-until (lambda () (= 5 (length captured))) nil
+                                        "all five blink steps to be scheduled")
+          (should (equal (reverse captured)
+                         '((0.0 . t) (0.5 . nil) (1.0 . t) (1.5 . nil) (2.0 . t)))))))))
+
+(ert-deftest agent-repl-itest-host-blink-re-entrant-push-restarts-the-cadence ()
+  "A second notification while a blink is in flight RESTARTS the cadence.
+status.el: \"a second call ... RESTART[s] the cadence rather than
+interleaving with it, because each step is armed under a deterministic
+per-workspace key that replaces its predecessor.\"  Two pushes back to
+back must leave exactly ONE five-step schedule standing, not ten steps."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (let ((captured nil)
+            (real-run-with-timer (symbol-function 'run-with-timer)))
+        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t))
+                  ((symbol-function 'agent-repl--ws-current-name) (lambda (&rest _) "some-other-ws"))
+                  ((symbol-function 'agent-repl--notify)
+                   (lambda (&rest _) (error "a focused Emacs must not post a banner")))
+                  ((symbol-function 'run-with-timer)
+                   (lambda (delay repeat fn &rest args)
+                     (let ((timer (apply real-run-with-timer delay repeat fn args)))
+                       (when (eq fn #'agent-repl-status--set-marker)
+                         (push (list delay timer) captured))
+                       timer))))
+          ;; Act: two notifications back to back.
+          (agent-repl-itest-host--push-notification
+           daemon (plist-get ref :id) '((agentAddressed . ())))
+          (agent-repl-itest--wait-until (lambda () (= 5 (length captured))) nil
+                                        "the first schedule's five timers")
+          (let ((first-schedule (copy-sequence captured)))
+            (agent-repl-itest-host--push-notification
+             daemon (plist-get ref :id) '((agentAddressed . ())))
+            ;; Assert.
+            (agent-repl-itest--wait-until (lambda () (= 10 (length captured))) nil
+                                          "the second schedule's five more timers")
+            (should (equal 10 (length captured)))
+            ;; The first schedule's own timer objects were cancelled by the
+            ;; second call's `agent-repl--register-timer', which replaces a
+            ;; key's held timer rather than stacking a second one beside it.
+            ;; The 0 ms step has almost certainly already FIRED by the time
+            ;; both pushes have landed, which also removes it from
+            ;; `timer-list' — that step is excluded, not asserted false.
+            (dolist (entry first-schedule)
+              (let ((delay (car entry)) (timer (cadr entry)))
+                (unless (= delay 0.0)
+                  (should-not (memq timer timer-list)))))))))))
 
 ;;;; ---- Scenario 7: reload_webapp ----
 
@@ -591,6 +897,61 @@ code-level, the same ruling as the blink cadence.  Nothing acks."
           ;; Assert: the uint32 line rides through as a number.
           (agent-repl-itest--wait-until (lambda () opened) nil "the editor popup")
           (should (equal (car opened) (list "/tmp/itest-host-ws/plan.md" 42))))))))
+
+(ert-deftest agent-repl-itest-host-open-in-editor-directory-with-no-line-opens-dired ()
+  "An `open_in_editor' push with a directory and no `line' opens it in dired.
+proto `HostOpenInEditor.line': \"UNSET = the file's top (or a directory).\"
+fanout §7: \"`open_in_editor' ... a directory opens in dired.  Log INFO
+with the path.\"  Runs the REAL `agent-repl-popup-open', not a stub — the
+sibling test above proves only that host.el calls the shared subroutine,
+never that the subroutine itself does the right thing with a directory."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (let ((dir (make-temp-file "agent-repl-itest-open-in-editor-" t)))
+        (unwind-protect
+            (progn
+              ;; Act: no `line' field at all, and the real popup subroutine.
+              (agent-repl-itest--push
+               daemon "host" `((openInEditor . ((path . ,dir))))
+               (plist-get ref :id))
+              ;; Assert: a dired buffer for DIR.
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-itest-host--dired-buffer-for dir))
+               nil "the directory to open in dired")
+              (should (agent-repl-itest-host--dired-buffer-for dir))
+              ;; Assert: the INFO log carries the path.
+              (agent-repl-itest--await-log daemon "elisp.host.open-in-editor" "info")
+              (should (seq-some
+                       (lambda (record)
+                         (string-match-p (regexp-quote dir) (or (alist-get 'message record) "")))
+                       (agent-repl-itest--log-entries daemon "elisp.host.open-in-editor" "info"))))
+          (let ((buf (agent-repl-itest-host--dired-buffer-for dir)))
+            (when (buffer-live-p buf) (kill-buffer buf)))
+          (delete-directory dir t))))))
+
+(ert-deftest agent-repl-itest-host-webview-url-carries-only-workspace-and-dir ()
+  "The webview URL is EXACTLY http://<owning daemon>/?workspace=<id>&dir=<dir>.
+Kickoff ruling: \"The webview URL is `http://<daemon.addr>/?workspace=<id>
+&dir=<dir>'.\"  fanout §12: \"Nothing else rides the URL\" — no `composer'
+flag and nothing else, ever, in this suite's non-dev-mode mount."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
+      (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
+                ((symbol-function 'agent-repl--call-in-background-workspace)
+                 (lambda (_ws fn) (funcall fn))))
+        ;; Act.
+        (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
+        ;; Assert.
+        (agent-repl-itest--wait-until (lambda () agent-repl-itest-webview-urls) nil
+                                      "the webview mount to record a URL")
+        (should (equal agent-repl-itest-webview-urls
+                       (list (format "http://%s/?workspace=%s&dir=%s"
+                                    (agent-repl-itest-daemon-address daemon)
+                                    (url-hexify-string (plist-get ref :id))
+                                    (url-hexify-string (plist-get ref :dir))))))))))
 
 ;;;; ---- Scenario 5, host half: the handover ----
 
@@ -685,6 +1046,147 @@ channel carrying this workspace's state."
         (should (equal 1 (length (agent-repl-itest--subscribers
                                   primary "host" (plist-get ref :id)))))))))
 
+(ert-deftest agent-repl-itest-host-transferred-adopts-before-cancelling-the-old-stream ()
+  "Ordering is enforced BY OBSERVING THE IN-FLIGHT ADOPT, not by convention.
+elisp.md: \"Emacs's obligation, in order: call `AdoptHostWorkspace' ... then
+cancel the old stream and re-subscribe on the new connection.\"  The gate
+withholds the adopt's ANSWER (the call is still recorded) so the scenario
+can assert the old stream is STILL standing and the new one has NO
+subscriber yet, then release it and assert the re-subscribe follows."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((successor-conn (agent-repl-connect-open
+                               (agent-repl-itest-daemon-address successor))))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl-link-successor)
+                         (lambda () successor-conn)))
+                (agent-repl-itest--gate successor "AdoptHostWorkspace")
+                ;; Act.
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                ;; Assert: the adopt is IN FLIGHT — the old stream still
+                ;; stands and the successor has not been subscribed yet.
+                (should (equal 1 (length (agent-repl-itest--subscribers
+                                          primary "host" (plist-get ref :id)))))
+                (should (equal 0 (length (agent-repl-itest--subscribers
+                                          successor "host" (plist-get ref :id)))))
+                ;; Act: let the adopt answer.
+                (agent-repl-itest--release-gate successor "AdoptHostWorkspace")
+                ;; Assert: the re-subscribe follows, and only then.
+                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
+                (agent-repl-itest--wait-until
+                 (lambda () (null (agent-repl-itest--subscribers
+                                   primary "host" (plist-get ref :id))))
+                 nil "the old stream to be cancelled after the adopt lands")
+                (should (null (agent-repl-itest--subscribers
+                               primary "host" (plist-get ref :id)))))
+            (agent-repl-connect-close successor-conn)))))))
+
+(ert-deftest agent-repl-itest-host-transferred-adopt-error-keeps-the-old-stream ()
+  "AdoptHostWorkspace's error arm logs ERROR and keeps the OLD stream standing.
+fanout §7: \"error arm → ERROR log, keep the old stream.\""
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((successor-conn (agent-repl-connect-open
+                               (agent-repl-itest-daemon-address successor))))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl-link-successor)
+                         (lambda () successor-conn)))
+                (agent-repl-itest--script successor "AdoptHostWorkspace" '((error . ())))
+                ;; Act.
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                ;; Assert.
+                (agent-repl-itest--await-log primary "elisp.host.adopt-refused" "error")
+                (should (agent-repl-itest--logged-p primary "elisp.host.adopt-refused" "error"))
+                (should (equal 1 (length (agent-repl-itest--subscribers
+                                          primary "host" (plist-get ref :id)))))
+                (should (equal 0 (length (agent-repl-itest--subscribers
+                                          successor "host" (plist-get ref :id))))))
+            (agent-repl-connect-close successor-conn)))))))
+
+(ert-deftest agent-repl-itest-host-transferred-updates-the-workspace-conn ()
+  "After a successful transfer, `agent-repl-host-conn' names the SUCCESSOR.
+fanout §7: \"success → cancel the old stream, subscribe on NEW, update
+`:conn'.\"  A verb sent afterwards (SelectWorkspace) must land on the
+successor's own recorded calls, never the old daemon's."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((successor-conn (agent-repl-connect-open
+                               (agent-repl-itest-daemon-address successor))))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl-link-successor)
+                         (lambda () successor-conn)))
+                ;; Act.
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
+                ;; Assert: `:conn' is the successor.
+                (should (eq (agent-repl-host-conn agent-repl-itest-host--ws) successor-conn))
+                ;; Act: a tab switch after the transfer.
+                (agent-repl-host-select agent-repl-itest-host--ws)
+                ;; Assert: it lands on the successor, never the old daemon.
+                (agent-repl-itest--await-call successor "SelectWorkspace")
+                (should (null (agent-repl-itest--calls primary "SelectWorkspace"))))
+            (agent-repl-connect-close successor-conn)))))))
+
+(ert-deftest agent-repl-itest-host-transferred-adopts-through-the-real-link ()
+  "The handover runs end to end through `daemon-link.el', with NO stub anywhere.
+elisp.md: \"there is no daemon<->daemon channel — coordination is CLIENT
+RELAY ... and Emacs is the relay.\"  The three tests above all stub
+`agent-repl-link-successor'; here `shutdown_announced{address}' dual-attaches
+for real over a genuine `WatchDaemon' stream, and the transfer adopts onto
+the resulting real successor connection."
+  ;; Arrange: connect the link for real, isolated from every OTHER global
+  ;; link hook so only this scenario's own reactions run.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-subscription primary ref
+      (let ((agent-repl-link-up-functions nil)
+            (agent-repl-link-down-functions nil)
+            (agent-repl-link-handover-functions nil)
+            (agent-repl-link-drain-functions nil)
+            (agent-repl-link-no-daemon-functions nil)
+            (agent-repl-link-drain nil)
+            (agent-repl-link-drain-segment nil))
+        (unwind-protect
+            (progn
+              (agent-repl-link-connect)
+              (agent-repl-itest--await-subscriber primary "daemon")
+              (agent-repl-itest--with-second-daemon primary successor
+                ;; Act: announce the successor for real, then release the
+                ;; workspace — no `agent-repl-link-successor' stub anywhere.
+                (agent-repl-itest--push
+                 primary "daemon"
+                 `((shutdownAnnounced
+                    . ((address . ,(agent-repl-itest-daemon-address successor))
+                       (cause . ((selfMergeRollout . ())))
+                       (expectedOutageMs . "1500")
+                       (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time)))))))))
+                (agent-repl-itest--wait-until
+                 (lambda () (agent-repl-link-successor)) nil
+                 "the real WatchDaemon dual-attach to open the successor connection")
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                ;; Assert: the adopt landed on the successor.
+                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                (should (equal (agent-repl-itest--body-field
+                                (car (agent-repl-itest--call-bodies successor "AdoptHostWorkspace"))
+                                'workspace 'id)
+                               (plist-get ref :id)))
+                (agent-repl-itest--wait-until
+                 (lambda () (null (agent-repl-itest--subscribers
+                                   primary "host" (plist-get ref :id))))
+                 nil "the old daemon to observe the cancel")
+                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))))
+          (agent-repl-link-teardown))))))
+
 ;;;; ---- Scenario 15: validation ----
 
 (ert-deftest agent-repl-itest-host-push-without-naming-is-refused ()
@@ -719,23 +1221,103 @@ every later fact about the workspace."
          nil "the push after the invalid one")
         (should (eq (agent-repl-host-composer-gate agent-repl-itest-host--ws) :open))))))
 
-(ert-deftest agent-repl-itest-host-unknown-push-arm-is-refused ()
-  "A push arm the schema does not declare never reaches Emacs at all.
-The fake validates every push against the GENERATED response type, so an
-invented arm is refused at the control plane — which is itself the pin
-that no such arm exists to be handled."
+(ert-deftest agent-repl-itest-host-push-with-unset-session-oneof-is-refused ()
+  "A HostWorkspace push with an unset `session' oneof is a contract breach.
+fanout §0: \"a push ... with an unset oneof ... is a contract breach: signal
+`agent-repl-wire-error' and log ERROR.\"  `/_fake/push' does not itself
+enforce this invariant (only unknown-field strictness), so this pins
+ELISP's own decoder, not the fake's."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-host--with-subscription daemon ref
-      ;; Act.
-      (let ((result (agent-repl-itest--control
-                     daemon "/_fake/push"
-                     (json-serialize
-                      `((stream . "host")
-                        (workspace_id . ,(plist-get ref :id))
-                        (message . ((hibernated . ()))))))))
-        ;; Assert: no `hibernated' arm exists anywhere on the wire.
-        (should (equal (car result) 400))))))
+      ;; Act: `naming' present, but neither `none' nor `existing' set.
+      (agent-repl-itest--push daemon "host" '((host . ((naming . ()))))
+                              (plist-get ref :id))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      ;; Assert (fanout §4): the context carries the RAW pushed JSON.
+      (should (seq-some (lambda (arg) (string-match-p "naming" arg))
+                        (agent-repl-itest-host--push-invalid-context-strings daemon))))))
+
+(ert-deftest agent-repl-itest-host-push-existing-without-id-is-refused ()
+  "`existing' without its non-optional `id' is a contract breach.
+proto `HostSessionExisting.id': a required message field; fanout §2: \"a
+non-optional MESSAGE field absent → `agent-repl-wire-error'.\""
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act: `existing.live' well-formed, but `existing.id' entirely absent.
+      (agent-repl-itest--push
+       daemon "host"
+       '((host . ((existing . ((live . ((generation . ((value . "gen-1")))
+                                        (shimAttached . t)
+                                        (backfill . ((done . ())))
+                                        (open . ())))))
+                  (naming . ()))))
+       (plist-get ref :id))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (seq-some (lambda (arg) (string-match-p "live" arg))
+                        (agent-repl-itest-host--push-invalid-context-strings daemon))))))
+
+(ert-deftest agent-repl-itest-host-push-existing-with-unset-standing-is-refused ()
+  "`existing' with neither `live' nor `terminal' set is a contract breach.
+proto `HostSessionExisting.standing': \"THE ARM IS THE STANDING\" — an
+unset oneof here is as much a breach as anywhere else in the contract."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      ;; Act: `existing.id' present, but its `standing' oneof is unset.
+      (agent-repl-itest--push
+       daemon "host"
+       '((host . ((existing . ((id . ((value . "host-session-1")))))
+                  (naming . ()))))
+       (plist-get ref :id))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (seq-some (lambda (arg) (string-match-p "host-session-1" arg))
+                        (agent-repl-itest-host--push-invalid-context-strings daemon))))))
+
+(ert-deftest agent-repl-itest-host-notification-without-kind-is-refused ()
+  "A `notification' push missing its non-optional `kind' is a contract breach.
+proto `HostWorkspaceNotification.kind': \"THE ARM IS THE KIND\" — `kind' is
+an ordinary required message field, not a oneof, so its absence is the
+required-message-field breach rather than an unset-oneof one."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-host--with-subscription daemon ref
+      (cl-letf (((symbol-function 'agent-repl--notify)
+                 (lambda (&rest _) (error "an unset `kind' must draw nothing")))
+                ((symbol-function 'agent-repl-status-blink-tab)
+                 (lambda (&rest _) (error "an unset `kind' must draw nothing"))))
+        ;; Act: `text' and `atMs' present, `kind' entirely absent.
+        (agent-repl-itest--push
+         daemon "host"
+         '((notification . ((text . "Agent needs you") (atMs . "1735689600000"))))
+         (plist-get ref :id))
+        ;; Assert: the log, no banner and no blink, and the stream standing.
+        (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+        (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+        (should (seq-some (lambda (arg) (string-match-p "Agent needs you" arg))
+                          (agent-repl-itest-host--push-invalid-context-strings daemon)))
+        (should (equal 1 (length (agent-repl-itest--subscribers
+                                  daemon "host" (plist-get ref :id)))))))))
+
+(ert-deftest agent-repl-itest-host-unknown-push-arm-is-refused ()
+  "The DECODER ALONE refuses any `WatchHostWorkspaceResponse' push arm the
+schema does not declare — a decoder pin, not a control-plane one.
+Asserting only that the fake's `/_fake/push' answers 400 for an unknown
+arm (the fake's own protojson strictness) would pass against ANY elisp,
+including one whose decoder has no such check at all; calling elisp's own
+`agent-repl-wire-decode-watch-host-workspace-response' directly is what
+actually pins IT."
+  ;; Arrange / Act / Assert.
+  (should-error
+   (agent-repl-wire-decode-watch-host-workspace-response '((hibernated . nil)))
+   :type 'agent-repl-wire-error))
 
 (provide 'test-integration-host)
 
