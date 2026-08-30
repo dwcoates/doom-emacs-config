@@ -251,3 +251,123 @@ func TestWriteBatchUnreachableStoreFails(t *testing.T) {
 		t.Fatal("an unreachable store accepted a batch")
 	}
 }
+
+// ---- ruling R-S2: the failure's KIND is what says whether a retry can help ----
+
+func TestAStorageFailureRefusalCarriesItsKind(t *testing.T) {
+	// Arrange. endpoint_write_batch.proto: the transaction failed in the
+	// database and a retry MAY succeed, which is the recoverable outage.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "database is locked",
+				Kind:   &storev1.WriteBatchFailure_StorageFailure{StorageFailure: &storev1.WriteBatchStorageFailure{}},
+			},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("WriteBatch error = %v, want a refusal", err)
+	}
+	if refusal.Kind != RefusalStorageFailure {
+		t.Fatalf("refusal kind = %q, want %q", refusal.Kind, RefusalStorageFailure)
+	}
+}
+
+func TestAnInvalidRequestRefusalNamesTheOffendingField(t *testing.T) {
+	// Arrange. A retry of the same bytes cannot help, so the caller must be able
+	// to tell this apart from an outage WITHOUT parsing the detail text, which
+	// the proto documents as never switched on.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "entry 3 carries no upsert_key",
+				Kind: &storev1.WriteBatchFailure_InvalidRequest{
+					InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: "batch.entries[3].upsert_key"},
+				},
+			},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	field, invalid := InvalidRequest(err)
+	if !invalid {
+		t.Fatalf("WriteBatch error = %v, want an invalid_request refusal", err)
+	}
+	if field != "batch.entries[3].upsert_key" {
+		t.Fatalf("refused field = %q, want the field the store named", field)
+	}
+}
+
+func TestAStorageFailureIsNotAnInvalidRequest(t *testing.T) {
+	// Arrange. The two arms drive opposite reactions — suspend and recover
+	// versus park the file — so confusing them either loops on bytes that can
+	// never land or abandons a file over a transient database error.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "database is locked",
+				Kind:   &storev1.WriteBatchFailure_StorageFailure{StorageFailure: &storev1.WriteBatchStorageFailure{}},
+			},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	if _, invalid := InvalidRequest(err); invalid {
+		t.Fatalf("a storage failure was read as an invalid request: %v", err)
+	}
+}
+
+func TestAKindLessFailureIsTreatedAsAStorageFailure(t *testing.T) {
+	// Arrange. An unset oneof is illegal on this contract — the kind is the arm
+	// that says whether a retry can help — so a store that omits it has told the
+	// producer nothing actionable. It is treated as the RECOVERABLE kind, so the
+	// sidecar keeps trying rather than parking a file on a verdict the store
+	// never actually gave.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{Detail: "something went wrong"},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("WriteBatch error = %v, want a refusal", err)
+	}
+	if refusal.Kind != RefusalStorageFailure {
+		t.Fatalf("a kind-less failure resolved to %q, want %q", refusal.Kind, RefusalStorageFailure)
+	}
+}
+
+func TestAKindLessFailureIsNeverAnInvalidRequest(t *testing.T) {
+	// Arrange. Parking a file for the life of the process on a verdict the store
+	// did not give would abandon a file the store may well accept next time.
+	client := serve(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{Detail: "something went wrong"},
+		},
+	}})
+
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
+
+	// Assert.
+	if _, invalid := InvalidRequest(err); invalid {
+		t.Fatalf("a kind-less failure was read as an invalid request: %v", err)
+	}
+}

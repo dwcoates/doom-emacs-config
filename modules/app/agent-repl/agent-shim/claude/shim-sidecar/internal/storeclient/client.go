@@ -61,12 +61,47 @@ const dialTimeout = 5 * time.Second
 // RefusalError is a store REFUSAL: the rpc completed and the store answered
 // with its failure arm. It is distinct from a transport error because the store
 // was reachable and said no, which is a different thing to investigate.
+//
+// THE KIND IS THE WHOLE POINT OF THE ARM (endpoint_write_batch.proto): a
+// storage_failure is a transaction that failed and a retry may succeed, while
+// an invalid_request is a batch the store can never accept — retrying the same
+// bytes is a tight identical loop that makes no progress and drowns the log.
+// The caller reacts differently to each, so the kind travels with the error
+// rather than being re-derived from the detail text, which is documented as
+// never switched on.
 type RefusalError struct {
 	RPC    string
 	Detail string
+	// Kind is the failure's oneof arm. It is empty ONLY for a store that sent
+	// no arm at all, which is itself a contract violation (see WriteBatch).
+	Kind RefusalKind
+	// Field is the offending field an invalid_request names, empty otherwise.
+	Field string
 }
 
+// RefusalKind names a WriteBatchFailure's oneof arm.
+type RefusalKind string
+
+const (
+	// RefusalStorageFailure: the transaction failed in the database. A retry may
+	// succeed, so it suspends production and is recovered like any outage.
+	RefusalStorageFailure RefusalKind = "storage_failure"
+	// RefusalInvalidRequest: the batch violated validation. Nothing was
+	// committed and a retry of the same bytes CANNOT help, so it is a producer
+	// defect rather than an outage.
+	RefusalInvalidRequest RefusalKind = "invalid_request"
+	// RefusalKindUnset is a failure carrying neither arm — illegal on this
+	// contract, and treated as a storage failure so the sidecar still recovers.
+	RefusalKindUnset RefusalKind = ""
+)
+
 func (e *RefusalError) Error() string {
+	if e.Kind == RefusalInvalidRequest && e.Field != "" {
+		return fmt.Sprintf("storeclient: store refused %s as invalid_request(field=%s): %s", e.RPC, e.Field, e.Detail)
+	}
+	if e.Kind != RefusalKindUnset {
+		return fmt.Sprintf("storeclient: store refused %s as %s: %s", e.RPC, e.Kind, e.Detail)
+	}
 	return fmt.Sprintf("storeclient: store refused %s: %s", e.RPC, e.Detail)
 }
 
@@ -75,6 +110,17 @@ func (e *RefusalError) Error() string {
 func IsRefusal(err error) bool {
 	var target *RefusalError
 	return errors.As(err, &target)
+}
+
+// InvalidRequest reports whether err is the refusal a RETRY CANNOT HELP WITH,
+// and answers the field the store named. It is what separates the producer
+// defect from the outage at every call site that has to choose.
+func InvalidRequest(err error) (string, bool) {
+	var target *RefusalError
+	if !errors.As(err, &target) || target.Kind != RefusalInvalidRequest {
+		return "", false
+	}
+	return target.Field, true
 }
 
 // Client is the sidecar's store surface. It is safe for concurrent use; the
@@ -179,13 +225,40 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) erro
 		bound.LogVerbose("write durable entries=%d", len(batch.GetEntries()))
 		return nil
 	case *storev1.WriteBatchResponse_Failure:
-		refusal := &RefusalError{RPC: rpcWriteBatch, Detail: result.Failure.GetDetail()}
-		bound.With(logging.Context{Level: "error"}).Log("write refused for %d entrie(s), nothing committed: %s", len(batch.GetEntries()), refusal.Detail)
+		refusal := writeRefusal(result.Failure)
+		if refusal.Kind == RefusalKindUnset {
+			// AN UNSET ONEOF IS ILLEGAL on this contract. The kind is the arm
+			// that says whether a retry can help, so a store that omits it has
+			// told the producer nothing actionable; that is a CONTRACT
+			// VIOLATION and is stated as one, then treated as the recoverable
+			// kind so the sidecar still tries rather than parking a file on a
+			// verdict the store never actually gave.
+			bound.With(logging.Context{Level: "error"}).Log(
+				"write refused with NO failure kind, which this contract forbids; treating it as %s so recovery still runs: %s",
+				RefusalStorageFailure, refusal.Detail)
+			refusal.Kind = RefusalStorageFailure
+			return refusal
+		}
+		bound.With(logging.Context{Level: "error", RefusalKind: string(refusal.Kind), Field: refusal.Field}).Log(
+			"write refused as %s for %d entrie(s), nothing committed: %s", refusal.Kind, len(batch.GetEntries()), refusal.Detail)
 		return refusal
 	default:
 		bound.With(logging.Context{Level: "error"}).Log("write answer carries neither success nor failure; the batch's durability is unknown")
 		return fmt.Errorf("storeclient: %s response carries neither success nor failure", rpcWriteBatch)
 	}
+}
+
+// writeRefusal reads a WriteBatchFailure's arm into the typed refusal.
+func writeRefusal(failure *storev1.WriteBatchFailure) *RefusalError {
+	out := &RefusalError{RPC: rpcWriteBatch, Detail: failure.GetDetail()}
+	switch kind := failure.GetKind().(type) {
+	case *storev1.WriteBatchFailure_InvalidRequest:
+		out.Kind = RefusalInvalidRequest
+		out.Field = kind.InvalidRequest.GetField()
+	case *storev1.WriteBatchFailure_StorageFailure:
+		out.Kind = RefusalStorageFailure
+	}
+	return out
 }
 
 // Close releases pooled connections to the store socket. There is no session to

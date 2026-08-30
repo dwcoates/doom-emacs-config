@@ -118,6 +118,43 @@ get wrong.
 - One WARNING opens a suspension, one normal record closes it
   (`production suspended` / `production resumed`), and each retry is verbose.
 
+### The refusal KIND decides what happens (ruling R-S2)
+
+`WriteBatchFailure` carries a `kind` oneof, and it is not decoration: it says
+whether a retry can help. The two arms drive OPPOSITE reactions, so the kind
+travels on the typed error (`storeclient.RefusalError.Kind`, and
+`storeclient.InvalidRequest(err)`) rather than being re-derived from `detail`,
+which the proto documents as never switched on.
+
+- `storage_failure` — the transaction failed in the DATABASE and a retry may
+  succeed. This is the ordinary outage: production suspends and the
+  recover-cursors-then-rescan cycle above runs until it comes back.
+- `invalid_request{field}` — the batch violated validation and the store can
+  NEVER accept these bytes. That is a PRODUCER DEFECT, so:
+  - production is NOT suspended (the store is reachable and answering, and
+    stopping the whole file plane over a defect in one file would be a lie
+    about the dependency);
+  - ONE ERROR record is written, `operation: "producer-defect"`, carrying the
+    store's `field`, the `write_ids` of the whole refused batch (a batch is
+    refused whole, so naming one record would misreport it), the `path`,
+    `file_id` and `offset`;
+  - THAT FILE's tailer is PARKED for the life of the process. Nothing more is
+    read from it, because re-reading the same durable bytes re-mints the same
+    rejected batch forever — a tight identical replay loop that makes no
+    progress and drowns the log. Its cursor stays exactly where the store has
+    it, so a fixed sidecar resumes from the same byte;
+  - every OTHER file keeps being read;
+  - parking is PROCESS-scoped, not cycle-scoped: an outage in between does not
+    make the defect go away, so a suspension that drops every tailer must not
+    quietly un-park the file.
+- A failure carrying NEITHER arm is illegal on this contract. It is stated at
+  ERROR as a contract violation and then treated as `storage_failure`, so the
+  sidecar keeps recovering rather than parking a file on a verdict the store
+  never actually gave.
+- Inferred records (the LOST sweep, a cancelled terminal) name no file
+  position, so there is no tailer to park; an `invalid_request` for one is
+  stated as the same producer defect and simply not restated.
+
 ## Restart correctness: the boot rewind
 
 Per file per BOOT, exactly once, `tail.RewindToTurnStart` moves the RESTORED
