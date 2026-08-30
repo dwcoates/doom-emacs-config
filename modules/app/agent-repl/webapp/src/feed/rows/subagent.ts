@@ -41,6 +41,11 @@ import type {
   FeedSubagentRuntime,
   FeedSubagentSettled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import {
+  interruptErrorSentence,
+  logInterruptRefusal,
+  type InterruptErrorKind,
+} from "../../interrupt-error.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -285,27 +290,21 @@ function successNote(
 /**
  * The refusal, at the control that made the call.
  *
+ * EVERY ARM DRAWS, and the wording is the shared one (`interrupt-error.ts`), so
+ * a detached stop and the footer's stops read identically about the same fact.
+ *
  * NO CONFIRM STEP LIVES HERE. `confirm_required` is the daemon's challenge to
  * the TURN target — interrupting a turn while detached agents are live — and
  * `confirm_agents` is meaningless on a detached target, so a detached stop that
- * receives it has been answered with an arm that cannot apply to it. It is
- * drawn as the ordinary refusal it is and logged at warn, rather than offering a
- * second click that would resend the identical request and be refused again.
+ * receives it has been answered with an arm that cannot apply to it. It draws
+ * as the ordinary refusal it is rather than offering a second click that would
+ * resend the identical request and be refused again.
  */
 function errorNote(error: { kind: { case?: string; value?: unknown } }): HTMLElement {
-  const kind = requireCase(error.kind, "InterruptError.kind");
-  switch (kind.case) {
-    case "confirmRequired": {
-      const count = (kind.value as { liveAgentCount: bigint }).liveAgentCount.toString();
-      log("warn", "a detached stop was answered with the turn target's confirm challenge", {
-        operation: "feed.subagent-stop-confirm-required",
-        context: { live_agent_count: count },
-      });
-      return refusal(kind.case, `refused: ${count} live agent(s) would also stop`);
-    }
-    default:
-      return unreachableArm("InterruptError.kind", armName(kind));
-  }
+  const kind = requireCase(error.kind, "InterruptError.kind") as InterruptErrorKind;
+  const sentence = interruptErrorSentence(kind, "InterruptError.kind");
+  logInterruptRefusal(kind, sentence, "feed.subagent-stop-refused");
+  return refusal(kind.case, sentence);
 }
 
 /** The shared refusal element every call site draws its own error into. */
