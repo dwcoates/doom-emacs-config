@@ -421,17 +421,45 @@ describe("identity rotation", () => {
 });
 
 describe("session facts with no message behind them", () => {
-  test("!rate-limit produces an account_usage arm", async () => {
+  test("!rate-limit produces a rate_limit_status arm with its typed status", async () => {
+    // LANDING 4: the vendor's `rate_limit_event` is its OWN arm now, not an
+    // account-usage sample. The two say different things — one is the window's
+    // verdict on this request, the other is the account's standing utilization —
+    // and folding the event into account_usage lost the verdict.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
 
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!rate-limit" }));
-    const usage = await watch.until(
-      (frame) => sessionUpdate(frame).update.case === "accountUsage",
+    const frame = await watch.until(
+      (f) => sessionUpdate(f).update.case === "rateLimitStatus",
     );
 
-    expect(sessionUpdate(usage).update.case).toBe("accountUsage");
+    const update = sessionUpdate(frame);
+    if (update.update.case !== "rateLimitStatus") throw new Error("expected rate_limit_status");
+    // The corpus shape: allowed_warning on the overage window with a threshold.
+    expect(update.update.value.status.case).toBe("allowedWarning");
+    expect(update.update.value.resetsAtMs).toBeDefined();
+    expect(update.update.value.utilizationPercent).toBeDefined();
+    expect(update.update.value.rateLimitType?.window.case).not.toBeUndefined();
+    watch.close();
+  });
+
+  test("the rate-limit event's threshold rides surpassed_threshold_percent", async () => {
+    // The threshold is the whole point of an `allowed_warning`: without it the
+    // warning states that something was surpassed and never says what.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!rate-limit" }));
+    const frame = await watch.until(
+      (f) => sessionUpdate(f).update.case === "rateLimitStatus",
+    );
+
+    const update = sessionUpdate(frame);
+    if (update.update.case !== "rateLimitStatus") throw new Error("expected rate_limit_status");
+    expect(update.update.value.surpassedThresholdPercent).toBeDefined();
     watch.close();
   });
 
@@ -527,14 +555,55 @@ describe("session facts with no message behind them", () => {
     watch.close();
   });
 
-  // RETIRED AT LANDING 4: the budget warning is no longer a SessionUpdate arm.
-  // It becomes a sidecar-produced page line (AgentUpdate.context_budget_warning
-  // {text}) read off the vendor's `context_tip` ATTACHMENT record, and the shim
-  // never emits it live — so there is nothing for a WatchSession test to assert,
-  // and the coverage belongs to whoever tests the file plane.
+  // RETIRED AT LANDING 4 (tag 24): the budget warning is no longer a
+  // SessionUpdate arm. It is a transcript ATTACHMENT the SIDECAR reads, served
+  // as the page line `AgentUpdate.context_budget_warning{text}`, and the shim
+  // never emits it live — so the WatchSession coverage becomes a NEGATIVE one,
+  // and the positive coverage belongs to whoever tests the file plane.
   test.todo(
-    "the context budget warning is a SIDECAR page line, not a WatchSession arm — the shim has no live producer for it after landing 4",
+    "the budget warning appears as AgentUpdate.context_budget_warning on the SIDECAR's page line — the shim has no live producer, so this belongs to the file-plane suite",
   );
+
+  test("!context-budget pushes NO session-level budget arm", async () => {
+    // A shim still emitting the retired tag 24 would push a frame whose oneof
+    // case the generated code cannot name, so an unrecognized arm is exactly
+    // the failure this asserts against.
+    const known = new Set([
+      "identityRotated",
+      "queryDied",
+      "modelChanged",
+      "fastMode",
+      "mcpServer",
+      "accountUsage",
+      "permissionModeChanged",
+      "rateLimitStatus",
+      "diagnostics",
+      "contextUsage",
+      "compacting",
+    ]);
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+    const agent = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await agent.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!context-budget" }));
+    // Drive to the turn's terminal so every frame this turn produces has been
+    // seen before the negative assertion below.
+    await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const inner = watchAgentEntry(frame).entry?.entry;
+      if (inner?.case !== "agentFrame") return false;
+      return inner.value.result.case === "success" || inner.value.result.case === "failure";
+    });
+
+    const arms = watch.frames().map((frame) => sessionUpdate(frame).update.case ?? "unset");
+    expect(arms.filter((arm) => !known.has(arm))).toEqual([]);
+    watch.close();
+    agent.close();
+  });
 
   test("!context-usage-drift pushes a NEW context_usage at the turn end", async () => {
     // Context usage is pushed at every turn end, so a drifting figure must
