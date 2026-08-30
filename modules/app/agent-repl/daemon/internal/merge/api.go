@@ -133,16 +133,6 @@ type Deps struct {
 	// StartSession starts a session for a workspace that has none, under the
 	// lease, because a configured prompt needs one (revival-is-implicit).
 	StartSession StartSessionFunc
-	// CommitMerge concludes a merge whose index the resolution agent finished
-	// staging, and commits a staged test fix as a follow-up commit.
-	//
-	// IT IS OWED TO gitclient.Git. MergeNoFF creates its own commit when the
-	// merge applies cleanly, but a CONFLICTED merge is left in progress with
-	// nothing to conclude it, and the git leaf exposes no commit verb — so the
-	// conflicts tab and the fixes loop have no way to land the work the agent
-	// staged. The seam belongs there as `Commit(ctx, dir, message) (Commit,
-	// error)`; it lives here until the leaf grows it.
-	CommitMerge CommitFunc
 	// Occupy takes the shim client's in-memory occupancy guard that backs the
 	// WSM lease row. The lock arbitrates; the row describes.
 	Occupy OccupancyFunc
@@ -197,11 +187,6 @@ type ScriptRunner interface {
 // StartSessionFunc starts a workspace's session under the merge lease, for a
 // workspace that has none but has a configured prompt to run.
 type StartSessionFunc func(ctx context.Context, ws ids.WorkspaceID) error
-
-// CommitFunc commits whatever is staged in a directory, answering with the
-// commit it produced. See Deps.CommitMerge for why it is not on the git leaf
-// yet.
-type CommitFunc func(ctx context.Context, dir, message string) (gitclient.Commit, error)
 
 // OccupancyFunc takes the shim client's occupancy guard for a workspace,
 // returning the release. It reports false when the workspace has no live shim,

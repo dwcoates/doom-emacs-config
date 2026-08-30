@@ -128,15 +128,15 @@ func (r *run) concludeConflict(ctx context.Context, round int, message string) (
 	if len(remaining) > 0 {
 		return "", false, nil
 	}
-	commit, err := r.o.deps.CommitMerge(ctx, r.job.Layout.TargetDir, message)
+	sha, err := r.o.deps.Git.Commit(ctx, r.job.Layout.TargetDir, message)
 	if err != nil {
 		return "", false, fmt.Errorf("merge: concluding the merge commit: %w", err)
 	}
 	r.upsert(TabConflicts, round, conflictsTabRow(nil, "", r.o.nowMS(), ""))
 	r.closeTab(ctx, TabConflicts, round, "succeeded")
 	r.o.log(ctx, r.ws).Debug("daemon.merge.conflicts", "the agent's resolution concluded the merge",
-		dlog.Context{"workspace": string(r.ws), "commit": commit.SHA})
-	return commit.SHA, true, nil
+		dlog.Context{"workspace": string(r.ws), "commit": sha})
+	return sha, true, nil
 }
 
 // conflictLine composes the parked merge's standing line. The footer draws it
@@ -238,7 +238,7 @@ func (r *run) fixes(ctx context.Context, failing GateResult) (bool, bool, error)
 		r.park(ctx, line)
 		return false, true, nil
 	}
-	if _, err := r.o.deps.CommitMerge(ctx, r.job.Layout.TargetDir,
+	if _, err := r.o.deps.Git.Commit(ctx, r.job.Layout.TargetDir,
 		fmt.Sprintf("fix(merge): repair the suite after merging %s", r.job.Layout.SourceBranch)); err != nil {
 		r.o.log(ctx, r.ws).Warn(op, "the fixes turn staged nothing to commit", dlog.Context{
 			"workspace": string(r.ws), "round": round, "error": err.Error()})
