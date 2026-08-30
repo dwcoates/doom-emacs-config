@@ -91,7 +91,8 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   treatments live in host.el (remediation-1) and verbs.el (W2-C)) →
   R-SUITE-1 →
   R-PUSHINVALID → R-NOTIFY (incl. R-CLICK, gate `:unknown`) → R-HANDOVER
-  (re-run link/host first; remediate the remainder) → second adversarial
+  (re-run link/host first; remediate the remainder; MUST cover the webview
+  redial after adoption per §7 HANDOVER REDIAL) → second adversarial
   audit (fable, fresh context) → loop until green.
 - PER-MERGE ROUTINE: `git merge overhaul/elisp-<slug>` into overhaul/elisp
   (worktree /Users/dodgecoates/.config/doom-overhaul/elisp); resolve
@@ -364,6 +365,15 @@ are deleted by the verbs agent once verbs.el replaces them.
   AdoptHostWorkspace on NEW; success → cancel the old stream, subscribe on
   NEW, update `:conn`; error arm → ERROR log, keep the old stream.
 - `reload_webapp` → `(agent-repl-frontend-reload-webview WS)`.
+- HANDOVER REDIAL (project-lead ruling): on every successful adoption —
+  the `transferred` push and the `transferring_away{address}` refusal
+  (`agent-repl-host-handle-refusal WS ARM-PLIST`) — host.el updates the
+  workspace's `:conn` to the successor FIRST and then calls
+  `(agent-repl-frontend-reload-webview WS)`, so the webview navigates to
+  `http://<successor address>/?workspace=<id>&dir=<dir>`. The webapp only
+  draws a "moved" notice and stops its streams; it never reconnects
+  itself — the host owns the redial. `not_yet_adopted` → INFO, retry the
+  adopt once the successor's WatchDaemon is accepted.
 - `open_in_editor` (Q2 ruling) → `(agent-repl-popup-open PATH LINE)` — the
   ONE shared subroutine; a directory opens in dired. Log INFO with the path.
 - On `agent-repl-link-up-functions`: for every live workspace
