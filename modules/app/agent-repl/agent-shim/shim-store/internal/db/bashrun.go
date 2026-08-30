@@ -41,7 +41,7 @@ type BashRunReplay struct {
 func (d *DB) BashRun(ctx context.Context, runID string) (BashRunReplay, error) {
 	base := logging.Fields{Operation: "store.db.bash-run", Table: "entry", TaskID: runID}
 	if runID == "" {
-		return BashRunReplay{}, d.refuse(base, invalidf("run id value is empty"))
+		return BashRunReplay{}, d.refuse(base, invalidFieldf("run", "run id value is empty"))
 	}
 	started := time.Now()
 

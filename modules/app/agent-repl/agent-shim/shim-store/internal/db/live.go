@@ -64,7 +64,7 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 	base := logging.Fields{Operation: "store.db.cursors", Table: "cursor"}
 	if fileID != nil {
 		if *fileID == "" {
-			return nil, d.refuse(base, invalidf("file_id is present with an empty value — asking for every cursor is expressed by absence, never by an empty identifier"))
+			return nil, d.refuse(base, invalidFieldf("file_id", "file_id is present with an empty value — asking for every cursor is expressed by absence, never by an empty identifier"))
 		}
 		base.FileID = *fileID
 	}

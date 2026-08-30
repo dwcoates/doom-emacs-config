@@ -53,15 +53,15 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	base := logging.Fields{Operation: "store.db.write-batch", Table: "entry", Producer: producer}
 
 	if producer == "" {
-		return result, d.refuse(base, invalidf("producer is empty — every write is attributed"))
+		return result, d.refuse(base, invalidFieldf("producer", "producer is empty — every write is attributed"))
 	}
 	if batch == nil {
-		return result, d.refuse(base, invalidf("batch is unset"))
+		return result, d.refuse(base, invalidFieldf("batch", "batch is unset"))
 	}
 	entries := batch.GetEntries()
 	cursor := batch.GetCursorAdvance()
 	if len(entries) == 0 && cursor == nil {
-		return result, d.refuse(base, invalidf("batch carries neither entries nor a cursor advance"))
+		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance"))
 	}
 
 	// Validation first and whole, so a refusal names the offending entry
@@ -273,13 +273,13 @@ func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uin
 // validateCursorState is the base function for store.v1.CursorState.
 func validateCursorState(c *storev1.CursorState) error {
 	if c.GetFileId() == "" {
-		return invalidf("cursor_advance.file_id is empty — the cursor's identity is what survives the vendor's renames")
+		return invalidFieldf("cursor_advance.file_id", "cursor_advance.file_id is empty — the cursor's identity is what survives the vendor's renames")
 	}
 	if c.GetPath() == "" {
-		return invalidf("cursor_advance.path is empty (file_id=%q)", c.GetFileId())
+		return invalidFieldf("cursor_advance.path", "cursor_advance.path is empty (file_id=%q)", c.GetFileId())
 	}
 	if c.GetOffset() < 0 {
-		return invalidf("cursor_advance.offset is negative (file_id=%q offset=%d)", c.GetFileId(), c.GetOffset())
+		return invalidFieldf("cursor_advance.offset", "cursor_advance.offset is negative (file_id=%q offset=%d)", c.GetFileId(), c.GetOffset())
 	}
 	return nil
 }

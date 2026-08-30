@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
@@ -58,6 +59,16 @@ const (
 	causeCreated   = "created"
 )
 
+// entryField spells one entry's field path exactly as the failure arm reports
+// it, so a producer reading `entries[1].upsert_key` off the wire is reading the
+// store's own name for what it sent wrong.
+func entryField(index int, path string) string {
+	if path == "" {
+		return fmt.Sprintf("entries[%d]", index)
+	}
+	return fmt.Sprintf("entries[%d].%s", index, path)
+}
+
 // routed is one validated StoreEntry, resolved to the columns of its `entry`
 // row. The proto message rides along because the LIFECYCLE effects (the agent,
 // detached_work rows) dispatch on the same arms a second time — deliberately,
@@ -103,7 +114,7 @@ type routed struct {
 // in the DDL.
 func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 	if entry == nil {
-		return routed{}, invalidf("entries[%d] is nil", index)
+		return routed{}, invalidFieldf(entryField(index, ""), "entries[%d] is nil", index)
 	}
 	r := routed{entry: entry, writeID: entry.GetWriteId(), upsertKey: entry.GetUpsertKey()}
 
@@ -113,15 +124,15 @@ func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 	}
 	r.plane = plane
 	if r.writeID == "" {
-		return routed{}, invalidf("entries[%d].write_id is empty", index)
+		return routed{}, invalidFieldf(entryField(index, "write_id"), "entries[%d].write_id is empty", index)
 	}
 	if r.upsertKey == "" {
-		return routed{}, invalidf("entries[%d].upsert_key is empty (write_id=%q)", index, r.writeID)
+		return routed{}, invalidFieldf(entryField(index, "upsert_key"), "entries[%d].upsert_key is empty (write_id=%q)", index, r.writeID)
 	}
 
 	frame, err := proto.Marshal(entry)
 	if err != nil {
-		return routed{}, invalidf("entries[%d] (write_id=%q) cannot be re-serialized: %v", index, r.writeID, err)
+		return routed{}, invalidFieldf(entryField(index, ""), "entries[%d] (write_id=%q) cannot be re-serialized: %v", index, r.writeID, err)
 	}
 	r.frame = frame
 
@@ -137,7 +148,7 @@ func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 	case *storev1.StoreEntry_AgentUpdate:
 		return classifyAgentUpdate(r, arm.AgentUpdate, index)
 	default:
-		return routed{}, invalidf("entries[%d] (write_id=%q) sets no `entry` arm", index, r.writeID)
+		return routed{}, invalidFieldf(entryField(index, "entry"), "entries[%d] (write_id=%q) sets no `entry` arm", index, r.writeID)
 	}
 }
 
@@ -150,7 +161,7 @@ func validatePlane(plane *storev1.Plane, index int) (int64, error) {
 	case *storev1.Plane_File:
 		return planeFile, nil
 	default:
-		return 0, invalidf("entries[%d].plane sets no arm — the entry does not name the producer that observed it", index)
+		return 0, invalidFieldf(entryField(index, "plane"), "entries[%d].plane sets no arm — the entry does not name the producer that observed it", index)
 	}
 }
 
@@ -159,10 +170,10 @@ func validatePlane(plane *storev1.Plane, index int) (int64, error) {
 // entry that states no fact at all.
 func validateSessionUpdate(update *conversationv1.SessionUpdate, index int) error {
 	if update == nil {
-		return invalidf("entries[%d].session_update is nil", index)
+		return invalidFieldf(entryField(index, "session_update"), "entries[%d].session_update is nil", index)
 	}
 	if update.GetUpdate() == nil {
-		return invalidf("entries[%d].session_update sets no `update` arm", index)
+		return invalidFieldf(entryField(index, "session_update"), "entries[%d].session_update sets no `update` arm", index)
 	}
 	return nil
 }
@@ -170,11 +181,11 @@ func validateSessionUpdate(update *conversationv1.SessionUpdate, index int) erro
 // classifyAgentUpdate is the base function for store.v1.StoreAgentUpdate.
 func classifyAgentUpdate(r routed, update *storev1.StoreAgentUpdate, index int) (routed, error) {
 	if update == nil {
-		return routed{}, invalidf("entries[%d].agent_update is nil", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update"), "entries[%d].agent_update is nil", index)
 	}
 	if update.TopLevel != nil {
 		if update.GetTopLevel().GetValue() == "" {
-			return routed{}, invalidf("entries[%d].agent_update.top_level is present with an empty value — absence is expressed by absence, never by an empty identifier", index)
+			return routed{}, invalidFieldf(entryField(index, "agent_update.top_level"), "entries[%d].agent_update.top_level is present with an empty value — absence is expressed by absence, never by an empty identifier", index)
 		}
 		r.topLevel = sql.NullString{String: update.GetTopLevel().GetValue(), Valid: true}
 	}
@@ -211,7 +222,7 @@ func classifyAgentUpdate(r routed, update *storev1.StoreAgentUpdate, index int) 
 		r.workflowNotImplemented = true
 		return r, nil
 	default:
-		return routed{}, invalidf("entries[%d].agent_update sets no `agent_info` arm — the producer did not decide the entry's pageability", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update"), "entries[%d].agent_update sets no `agent_info` arm — the producer did not decide the entry's pageability", index)
 	}
 }
 
@@ -221,15 +232,15 @@ func classifyAgentUpdate(r routed, update *storev1.StoreAgentUpdate, index int) 
 // pageability and names the book it decided on.
 func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (routed, error) {
 	if line == nil {
-		return routed{}, invalidf("entries[%d].agent_update.serveable_frame is nil", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame"), "entries[%d].agent_update.serveable_frame is nil", index)
 	}
 	book := line.GetPageAgentId().GetValue()
 	if book == "" {
-		return routed{}, invalidf("entries[%d].agent_update.serveable_frame.page_agent_id is unset or empty — a page line must name its book", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.page_agent_id"), "entries[%d].agent_update.serveable_frame.page_agent_id is unset or empty — a page line must name its book", index)
 	}
 	item := line.GetAgentItem()
 	if item == nil {
-		return routed{}, invalidf("entries[%d].agent_update.serveable_frame.agent_item is nil", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item"), "entries[%d].agent_update.serveable_frame.agent_item is nil", index)
 	}
 
 	switch arm := item.GetItem().(type) {
@@ -244,7 +255,7 @@ func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (r
 	case *storev1.StoreAgentItem_AgentFrame:
 		return classifyAgentFrame(r, line, arm.AgentFrame, index)
 	default:
-		return routed{}, invalidf("entries[%d].agent_update.serveable_frame.agent_item sets no `item` arm", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item"), "entries[%d].agent_update.serveable_frame.agent_item sets no `item` arm", index)
 	}
 }
 
@@ -253,10 +264,10 @@ func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (r
 // always has exactly one.
 func validateAgentPrompt(prompt *conversationv1.AgentPrompt, index int) error {
 	if prompt == nil {
-		return invalidf("entries[%d] carries a nil agent_prompt", index)
+		return invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item.agent_prompt"), "entries[%d] carries a nil agent_prompt", index)
 	}
 	if prompt.GetAgent().GetValue() == "" {
-		return invalidf("entries[%d].agent_prompt.agent is unset or empty — a prompt always has exactly one recipient", index)
+		return invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item.agent_prompt.agent"), "entries[%d].agent_prompt.agent is unset or empty — a prompt always has exactly one recipient", index)
 	}
 	return nil
 }
@@ -270,10 +281,10 @@ func validateAgentPrompt(prompt *conversationv1.AgentPrompt, index int) error {
 // in whether they are served.
 func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversationv1.AgentFrame, index int) (routed, error) {
 	if frame == nil {
-		return routed{}, invalidf("entries[%d] carries a nil agent_frame", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item.agent_frame"), "entries[%d] carries a nil agent_frame", index)
 	}
 	if frame.GetAgentId().GetValue() == "" {
-		return routed{}, invalidf("entries[%d].agent_frame.agent_id is unset or empty — a frame's attribution is its whole placement", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_frame.agent_id"), "entries[%d].agent_frame.agent_id is unset or empty — a frame's attribution is its whole placement", index)
 	}
 	book := line.GetPageAgentId().GetValue()
 
@@ -284,11 +295,11 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 		}
 	case *conversationv1.AgentFrame_Success:
 		if arm.Success.GetOutcome() == nil {
-			return routed{}, invalidf("entries[%d].agent_frame.success sets no `outcome` arm", index)
+			return routed{}, invalidFieldf(entryField(index, "agent_frame.success"), "entries[%d].agent_frame.success sets no `outcome` arm", index)
 		}
 	case *conversationv1.AgentFrame_Failure:
 		if arm.Failure.GetFailure() == nil {
-			return routed{}, invalidf("entries[%d].agent_frame.failure sets no `failure` arm", index)
+			return routed{}, invalidFieldf(entryField(index, "agent_frame.failure"), "entries[%d].agent_frame.failure sets no `failure` arm", index)
 		}
 	case *conversationv1.AgentFrame_DetachedWork:
 		kind, err := validateDetachedWork(arm.DetachedWork, index)
@@ -305,7 +316,7 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 			r.workflowNotImplemented = true
 		}
 	default:
-		return routed{}, invalidf("entries[%d].agent_frame sets no `result` arm", index)
+		return routed{}, invalidFieldf(entryField(index, "agent_frame"), "entries[%d].agent_frame sets no `result` arm", index)
 	}
 
 	r.kind = kindPageLine
@@ -320,13 +331,13 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 // them and only insists that one is set.
 func validateAgentUpdate(update *conversationv1.AgentUpdate, index int) error {
 	if update == nil {
-		return invalidf("entries[%d].agent_frame.update is nil", index)
+		return invalidFieldf(entryField(index, "agent_frame.update"), "entries[%d].agent_frame.update is nil", index)
 	}
 	switch arm := update.GetUpdate().(type) {
 	case *conversationv1.AgentUpdate_Activity:
 		return validateAgentActivity(arm.Activity, index)
 	case nil:
-		return invalidf("entries[%d].agent_frame.update sets no `update` arm", index)
+		return invalidFieldf(entryField(index, "agent_frame.update"), "entries[%d].agent_frame.update sets no `update` arm", index)
 	default:
 		return nil
 	}
@@ -338,13 +349,13 @@ func validateAgentUpdate(update *conversationv1.AgentUpdate, index int) error {
 // states nothing.
 func validateAgentActivity(activity *conversationv1.AgentActivity, index int) error {
 	if activity == nil {
-		return invalidf("entries[%d].agent_frame.update.activity is nil", index)
+		return invalidFieldf(entryField(index, "agent_frame.update.activity"), "entries[%d].agent_frame.update.activity is nil", index)
 	}
 	if activity.GetActivityId().GetValue() == "" {
-		return invalidf("entries[%d].agent_frame.update.activity.activity_id is unset or empty — a unit that names itself nothing can never be upserted", index)
+		return invalidFieldf(entryField(index, "agent_frame.update.activity.activity_id"), "entries[%d].agent_frame.update.activity.activity_id is unset or empty — a unit that names itself nothing can never be upserted", index)
 	}
 	if activity.GetItem() == nil {
-		return invalidf("entries[%d].agent_frame.update.activity sets no `item` arm", index)
+		return invalidFieldf(entryField(index, "agent_frame.update.activity"), "entries[%d].agent_frame.update.activity sets no `item` arm", index)
 	}
 	return nil
 }
@@ -353,12 +364,12 @@ func validateAgentActivity(activity *conversationv1.AgentActivity, index int) er
 // THE ARM IS WHY the row can never be served, so it is exactly the `kind`.
 func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, error) {
 	if item == nil {
-		return "", invalidf("entries[%d].agent_update.unserved_item is nil", index)
+		return "", invalidFieldf(entryField(index, "agent_update.unserved_item"), "entries[%d].agent_update.unserved_item is nil", index)
 	}
 	switch arm := item.GetUnservedItem().(type) {
 	case *storev1.StoreUnservedItem_Keepalive:
 		if arm.Keepalive.GetItem() == nil {
-			return "", invalidf("entries[%d].agent_update.unserved_item.keepalive sets no `item` arm", index)
+			return "", invalidFieldf(entryField(index, "agent_update.unserved_item.keepalive"), "entries[%d].agent_update.unserved_item.keepalive sets no `item` arm", index)
 		}
 		return kindKeepalive, nil
 	case *storev1.StoreUnservedItem_VendorSpecific:
@@ -368,7 +379,7 @@ func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, e
 	case *storev1.StoreUnservedItem_Unparsed:
 		return kindUnparsed, nil
 	default:
-		return "", invalidf("entries[%d].agent_update.unserved_item sets no arm — the residue must say WHY it cannot be served", index)
+		return "", invalidFieldf(entryField(index, "agent_update.unserved_item"), "entries[%d].agent_update.unserved_item sets no arm — the residue must say WHY it cannot be served", index)
 	}
 }
 
@@ -377,13 +388,13 @@ func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, e
 // land.
 func validateStoreAgentBash(bash *storev1.StoreAgentBash, index int) error {
 	if bash == nil {
-		return invalidf("entries[%d].agent_update.bash is nil", index)
+		return invalidFieldf(entryField(index, "agent_update.bash"), "entries[%d].agent_update.bash is nil", index)
 	}
 	if bash.GetRun().GetValue() == "" {
-		return invalidf("entries[%d].agent_update.bash.run is unset or empty — the run identity is the join the frame exists for", index)
+		return invalidFieldf(entryField(index, "agent_update.bash.run"), "entries[%d].agent_update.bash.run is unset or empty — the run identity is the join the frame exists for", index)
 	}
 	if bash.GetFrame().GetResult() == nil {
-		return invalidf("entries[%d].agent_update.bash.frame sets no `result` arm", index)
+		return invalidFieldf(entryField(index, "agent_update.bash.frame"), "entries[%d].agent_update.bash.frame sets no `result` arm", index)
 	}
 	return nil
 }
@@ -392,13 +403,13 @@ func validateStoreAgentBash(bash *storev1.StoreAgentBash, index int) error {
 // store.v1.StoreAgentWorkflow.
 func validateStoreAgentWorkflow(workflow *storev1.StoreAgentWorkflow, index int) error {
 	if workflow == nil {
-		return invalidf("entries[%d].agent_update.workflow is nil", index)
+		return invalidFieldf(entryField(index, "agent_update.workflow"), "entries[%d].agent_update.workflow is nil", index)
 	}
 	if workflow.GetRun().GetValue() == "" {
-		return invalidf("entries[%d].agent_update.workflow.run is unset or empty", index)
+		return invalidFieldf(entryField(index, "agent_update.workflow.run"), "entries[%d].agent_update.workflow.run is unset or empty", index)
 	}
 	if workflow.GetFrame().GetResult() == nil {
-		return invalidf("entries[%d].agent_update.workflow.frame sets no `result` arm", index)
+		return invalidFieldf(entryField(index, "agent_update.workflow.frame"), "entries[%d].agent_update.workflow.frame sets no `result` arm", index)
 	}
 	return nil
 }
@@ -408,27 +419,27 @@ func validateStoreAgentWorkflow(workflow *storev1.StoreAgentWorkflow, index int)
 // the announcement resolves to.
 func validateDetachedWork(work *conversationv1.AgentDetachedWork, index int) (string, error) {
 	if work == nil {
-		return "", invalidf("entries[%d].agent_frame.detached_work is nil", index)
+		return "", invalidFieldf(entryField(index, "agent_frame.detached_work"), "entries[%d].agent_frame.detached_work is nil", index)
 	}
 	if work.GetWork().GetValue() == "" {
-		return "", invalidf("entries[%d].agent_frame.detached_work.work is unset or empty — the handle is what the work is addressed by", index)
+		return "", invalidFieldf(entryField(index, "agent_frame.detached_work.work"), "entries[%d].agent_frame.detached_work.work is unset or empty — the handle is what the work is addressed by", index)
 	}
 	if work.Output != nil && work.GetOutput().GetReadability() == nil {
-		return "", invalidf("entries[%d].agent_frame.detached_work.output sets no `readability` arm — whether this reader may open the spool is the answer, not an assumption", index)
+		return "", invalidFieldf(entryField(index, "agent_frame.detached_work.output"), "entries[%d].agent_frame.detached_work.output sets no `readability` arm — whether this reader may open the spool is the answer, not an assumption", index)
 	}
 	switch arm := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
 		if arm.Detached.GetDetachedFromId().GetValue() == "" {
-			return "", invalidf("entries[%d].agent_frame.detached_work.detached.detached_from_id is unset or empty", index)
+			return "", invalidFieldf(entryField(index, "agent_frame.detached_work.detached.detached_from_id"), "entries[%d].agent_frame.detached_work.detached.detached_from_id is unset or empty", index)
 		}
 		if arm.Detached.GetCause() == nil {
-			return "", invalidf("entries[%d].agent_frame.detached_work.detached sets no `cause` arm", index)
+			return "", invalidFieldf(entryField(index, "agent_frame.detached_work.detached"), "entries[%d].agent_frame.detached_work.detached sets no `cause` arm", index)
 		}
 		return detachedKindDetached, nil
 	case *conversationv1.AgentDetachedWork_Created:
 		return detachableWorkKind(arm.Created.GetWorkCreated(), index)
 	default:
-		return "", invalidf("entries[%d].agent_frame.detached_work sets no `origin` arm", index)
+		return "", invalidFieldf(entryField(index, "agent_frame.detached_work"), "entries[%d].agent_frame.detached_work sets no `origin` arm", index)
 	}
 }
 
@@ -445,7 +456,7 @@ func detachableWorkKind(work *conversationv1.DetachableWork, index int) (string,
 	case *conversationv1.DetachableWork_Monitor:
 		return detachedKindMonitor, nil
 	default:
-		return "", invalidf("entries[%d].agent_frame.detached_work.created.work_created sets no `work` arm — a kind absent from DetachableWork cannot claim to be detached", index)
+		return "", invalidFieldf(entryField(index, "agent_frame.detached_work.created.work_created"), "entries[%d].agent_frame.detached_work.created.work_created sets no `work` arm — a kind absent from DetachableWork cannot claim to be detached", index)
 	}
 }
 
