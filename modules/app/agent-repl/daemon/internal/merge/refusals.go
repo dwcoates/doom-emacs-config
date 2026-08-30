@@ -11,12 +11,15 @@ import (
 //
 // Enqueue refuses before it records anything: an unmergeable workspace leaves
 // no enqueuing→failed trail, because there is no state to stamp yet. Each
-// refusal is a typed error carrying the intended contract arm, which the
-// server answers through server.UnlandedArm until the arm lands. The arms are
-// recorded in daemon/ERROR-ARMS.md.
+// refusal is a typed value carrying the ARM NAME the contract owes it, and the
+// server maps that name onto the arm of whichever rpc it is answering — the
+// same refusal is `MergeWorkspaceError.already_queued` under MergeWorkspace and
+// `UpdateMergeQueueError.no_such_queued_merge` under UpdateMergeQueue, so the
+// per-rpc choice belongs to the handler and the CAUSE belongs here. Every arm
+// below landed in landing 4; none of them owes an ERROR-ARMS.md row.
 
-// The intended MergeWorkspaceError arm names. They are the vocabulary the
-// server spells into `intended arm: MergeWorkspaceError.<arm>: …`.
+// The arm names, spelled exactly as the landed `<Rpc>Error` oneof arms spell
+// them.
 const (
 	// ArmNoLayoutFacts refuses a workspace whose creation job recorded no merge
 	// geometry. Geometry is recorded at creation and NEVER inferred later, so
@@ -31,19 +34,21 @@ const (
 	// ArmAlreadyMerging refuses an enqueue for the workspace whose merge is
 	// running right now.
 	ArmAlreadyMerging = "already_merging"
-	// ArmNoQueuedMerge refuses an evict or a dequeue answer for a workspace with
-	// nothing on the queue.
-	ArmNoQueuedMerge = "no_queued_merge"
-	// ArmNoOfferStanding refuses a dequeue answer when no offer stands.
+	// ArmNoSuchQueuedMerge refuses an evict or a dequeue answer for a workspace
+	// with nothing on the queue (UpdateMergeQueueError.no_such_queued_merge).
+	ArmNoSuchQueuedMerge = "no_such_queued_merge"
+	// ArmNoOfferStanding refuses a dequeue answer when no offer stands
+	// (AnswerHeldOfferError.no_offer_standing).
 	ArmNoOfferStanding = "no_offer_standing"
-	// ArmAlreadyPaused refuses a pause of a queue that is already paused.
+	// ArmOfferSuperseded refuses a dequeue answer for an offer a newer one
+	// replaced (AnswerHeldOfferError.offer_superseded).
+	ArmOfferSuperseded = "offer_superseded"
+	// ArmAlreadyPaused refuses a pause of a queue that is already paused
+	// (UpdateMergeQueueError.already_paused).
 	ArmAlreadyPaused = "already_paused"
-	// ArmNotPaused refuses an unpause of a queue that is not paused.
+	// ArmNotPaused refuses an unpause of a queue that is not paused
+	// (UpdateMergeQueueError.not_paused).
 	ArmNotPaused = "not_paused"
-	// ArmNotParked refuses a parked route for a workspace whose lease is not
-	// parked. The lease state is the recognition, so a route without one is the
-	// caller's bug, never guidance to deliver anyway.
-	ArmNotParked = "not_parked"
 )
 
 // RefusalError is one pre-state refusal: which arm the contract owes it, and
