@@ -264,3 +264,8 @@ func (t *Tailer) Handler() Handler { return t.handler }
 
 // Offset returns the committed read position.
 func (t *Tailer) Offset() int64 { return t.offset }
+
+// Context returns the attribution the tailer hands its handler on every batch.
+// It is the reader's own statement of whose work this file is, exposed so the
+// seam's callers can assert what was resolved rather than re-deriving it.
+func (t *Tailer) Context() *Context { return t.ctx }

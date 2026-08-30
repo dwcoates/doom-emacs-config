@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -46,6 +47,50 @@ func (h *residueHandler) Handle(frames []tail.Frame, ctx *tail.Context) []*store
 		h.log.With(logging.Context{
 			Operation: "residue", Path: ctx.Path, TaskID: ctx.TaskID, Offset: logging.Off(frame.Offset),
 		}).LogVerbose("ingested %d byte(s) as residue: %s", len(frame.Raw), h.reason)
+	}
+	return out
+}
+
+// declaredResidueHandler ingests a file whose kind IS recognized but whose
+// conversion deliberately does not exist yet — the w* workflow spool, with
+// workflow kicked for this wave (R-S4).
+//
+// IT IS NOT residueHandler. That one states "no conversion could be selected",
+// which is a failure to classify; this one states a DECLARED kind, so a reader
+// can tell the two apart without reading prose: the bytes land as
+// `vendor_specific{kind}` rather than as `unparsed`, and the day workflow
+// ingestion lands, every one of these rows is findable by that kind.
+type declaredResidueHandler struct {
+	kind string
+	log  *logging.Bound
+}
+
+func newDeclaredResidueHandler(kind string, log *logging.Bound) *declaredResidueHandler {
+	return &declaredResidueHandler{kind: kind, log: log}
+}
+
+// Handle implements tail.Handler.
+func (h *declaredResidueHandler) Handle(frames []tail.Frame, ctx *tail.Context) []*storev1.StoreEntry {
+	out := make([]*storev1.StoreEntry, 0, len(frames))
+	for _, frame := range frames {
+		at := convert.Attribution{
+			Path:   ctx.Path,
+			FileID: ctx.FileID,
+			Offset: frame.Offset,
+			TaskID: ctx.TaskID,
+		}
+		// The attribution carries no RecordUUID — a spool's bytes are a byte
+		// range, not a record — so convert.ResidueKey keys it
+		// `residue:file:<path>:<offset>`, which is exactly what R-S4 pins.
+		out = append(out, convert.VendorSpecificEntry(at, h.kind, map[string]any{
+			"path":   ctx.Path,
+			"offset": float64(frame.Offset),
+			"output": string(frame.Raw),
+		}))
+		h.log.With(logging.Context{
+			Operation: "declared-residue", Path: ctx.Path, TaskID: ctx.TaskID,
+			FileID: ctx.FileID, Offset: logging.Off(frame.Offset),
+		}).LogVerbose("ingested %d byte(s) as declared residue kind=%s", len(frame.Raw), h.kind)
 	}
 	return out
 }

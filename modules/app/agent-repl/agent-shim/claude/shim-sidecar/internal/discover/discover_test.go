@@ -182,7 +182,14 @@ func TestScanClassifiesSpoolsByPrefix(t *testing.T) {
 	}{
 		{name: "shell output", file: "b17.output", wantKind: tail.KindShellSpool, wantRaw: true},
 		{name: "agent transcript", file: "a17.output", wantKind: tail.KindAgentTranscript, wantRaw: false},
-		{name: "workflow journal", file: "w17.output", wantKind: tail.KindWorkflowJournal, wantRaw: false},
+		// R-S4: workflow is KICKED this wave, so a w* spool is a RECOGNIZED
+		// prefix whose conversion deliberately does not exist yet — declared
+		// residue rather than a journal, read raw because no conversion would
+		// use its record structure.
+		{name: "workflow spool", file: "w17.output", wantKind: tail.KindWorkflowSpool, wantRaw: true},
+		// An unrecognized prefix is a different thing entirely: a
+		// total-ingestion VIOLATION, whose bytes land as unparsed residue.
+		{name: "unrecognized prefix", file: "q17.output", wantKind: tail.KindResidueSpool, wantRaw: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -248,6 +248,33 @@ because neither spelling may make a spool invisible.
   output path. Normalization walks up to the deepest existing ancestor, so a
   not-yet-created spool normalizes too; it never fails and never drops a path.
 
+### Spool routing by task-id prefix (ruling R-S4)
+
+The prefix is HOW a spool's conversion is selected, and each of the four cases
+is a different thing:
+
+- `b*` — a detached SHELL spool. Raw bytes, `KindShellSpool`, deltas keyed
+  `bash:<run>` under the spawning call's tool_use_id.
+- `a*` — a backgrounded SUBAGENT's transcript, delivered through the task
+  spool. JSONL, `KindAgentTranscript`, and its BOOK is the SPAWNING CALL's
+  tool_use_id, resolved from the owner index. The spool's path names a task and
+  nothing else, and the agent-transcript attribution has no filename fallback
+  on purpose (naming a book by `agent-<id>` would give one agent two books, one
+  per plane, that no consumer could reconcile) — so without the owner map's
+  answer the records name no book at all. A spool whose spawn is unresolved is
+  HELD rather than tailed, so reaching book resolution without one is a reader
+  defect and is stated as one.
+- `w*` — a WORKFLOW spool. Workflow is KICKED this wave, so it is discovered
+  and cursor-tailed like any other file and its bytes land as DECLARED residue:
+  `vendor_specific{kind: "spool/workflow"}`, keyed
+  `residue:file:<path>:<offset>`. It is read RAW, because no conversion would
+  use its record structure. It is deliberately NOT `unparsed`: the day workflow
+  ingestion lands, every one of these rows is findable by that kind, which a
+  row saying "no conversion could be selected" would never be.
+- anything else — a TOTAL-INGESTION VIOLATION. Logged at ERROR and ingested
+  whole as `unparsed` residue, because a file dropped from discovery is the one
+  thing total ingestion forbids.
+
 ## Owner resolution and the held spool
 
 `owner.go`, `held.go`. A spool's owner is looked up by task id against the

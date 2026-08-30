@@ -60,6 +60,11 @@ type terminalReadSink interface {
 	SetTerminalObserver(func(path, run string))
 }
 
+// workflowSpoolKind is the vendor_specific kind a w* spool's bytes land under
+// (R-S4). It is a DECLARED disposition, not a classification failure, so the
+// day workflow ingestion lands every one of these rows is findable by it.
+const workflowSpoolKind = "spool/workflow"
+
 // newHandler builds the converter for one file kind and hands it the reader's
 // observations.
 func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
@@ -74,6 +79,11 @@ func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
 		built = handler.NewWorkflowJournalHandler(handlerLog)
 	case tail.KindShellSpool:
 		built = handler.NewShellOutputHandler(handlerLog)
+	case tail.KindWorkflowSpool:
+		// R-S4: workflow is KICKED this wave. The spool is discovered and
+		// cursor-tailed like any other file, and its bytes land as DECLARED
+		// residue rather than being converted or dropped.
+		built = newDeclaredResidueHandler(workflowSpoolKind, handlerLog)
 	case tail.KindResidueSpool:
 		built = newResidueHandler("the spool's task id carries no a/b/w kind prefix, so no conversion could be selected for it", handlerLog)
 	default:
