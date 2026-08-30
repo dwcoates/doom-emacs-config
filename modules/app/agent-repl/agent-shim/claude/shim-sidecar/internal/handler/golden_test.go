@@ -20,6 +20,7 @@ package handler
 // regressed into withholding something it used to convert would otherwise pass.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,10 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
+
+// goldenSpoolRun is the spawning call the corpus's spool fixtures are driven
+// under — the identity every bash row they produce must carry.
+const goldenSpoolRun = "toolu_golden_run"
 
 // fixtureDirs are the corpus directories written by the vendor's AGENT BINARY to
 // the FILE plane, which is the only plane this producer reads.
@@ -294,7 +299,36 @@ func driveWholeCorpus(t *testing.T) []*storev1.StoreEntry {
 	all = append(all, driveSidechain(t, filepath.Join(root, "sidechain", "agent-aef975b7bc3422d4b.jsonl"))...)
 	all = append(all, driveSpools(t, filepath.Join(root, "spools"))...)
 	all = append(all, driveRealTranscript(t)...)
+	all = append(all, driveAdjacentDiagnostics(t)...)
 	return all
+}
+
+// driveAdjacentDiagnostics composes the ONE conversion the per-file drivers
+// structurally cannot reach: the IDE diagnostics report joins its write/edit
+// unit by ADJACENCY, so it needs the change and the report in ONE converter, in
+// file order — which is exactly how the vendor writes them and how no single
+// fixture file holds them.
+//
+// BOTH LINES ARE REAL CAPTURES, composed rather than invented: the edit's
+// tool_use block and its result, then the diagnostics attachment that followed a
+// change in another session.
+func driveAdjacentDiagnostics(t *testing.T) []*storev1.StoreEntry {
+	t.Helper()
+	root := corpusRoot(t)
+	call := wrapBlocksAsAssistantLines(t, readFixture(t, filepath.Join(root, "tool-inputs", "file_edit.jsonl")))
+	// The two fixtures are excerpts from DIFFERENT sessions, so the result names
+	// a call id the assistant line never issued. Pairing them is what composing
+	// them means — the vendor's own file has one id for both — and it is the id
+	// alone that is re-pointed; every other byte of both captures stands.
+	result := repointToolResult(t, readFixture(t, filepath.Join(root, "tool-results", "edit.jsonl")), toolUseIDOfLine(t, call))
+	lines := []string{
+		call,
+		result,
+		readFixture(t, filepath.Join(root, "attachments", "diagnostics.jsonl")),
+	}
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/projects/proj/adjacent-diagnostics.jsonl", "adjacent-diagnostics")
+	return h.Handle(framesFrom(t, strings.Join(lines, "\n")), ctx)
 }
 
 // driveFixture reads one transcript-line fixture. A `tool-inputs` fixture is a
@@ -366,7 +400,7 @@ func driveSpools(t *testing.T, dir string) []*storev1.StoreEntry {
 		h := NewShellOutputHandler(testLogger(t))
 		ctx := &Context{
 			Path: path, SessionID: "spool-session", MainAgentID: "spool-session",
-			AgentID: "spool-session", TaskID: "b1golden", RunActivityID: "toolu_golden_run",
+			AgentID: "spool-session", TaskID: "b1golden", RunActivityID: goldenSpoolRun,
 			Kind: tail.KindShellSpool, FileID: "dev:4",
 		}
 		raw := readFixture(t, path)
@@ -465,4 +499,157 @@ func itoaTest(n int) string {
 		n /= 10
 	}
 	return string(digits)
+}
+
+// TestGoldenCorpusProducesTheSoleProducerConversions asserts that every fact the
+// SIDECAR IS THE ONLY PRODUCER OF actually comes out of the real corpus.
+//
+// THE PINNED SDK STREAM CARRIES NO ATTACHMENT RECORDS, so if these conversions
+// regress nothing else in the system will produce them and the facts simply
+// vanish from every book — with no error anywhere, because a withheld
+// attachment is an ordinary outcome. That silence is what this subject exists to
+// break.
+func TestGoldenCorpusProducesTheSoleProducerConversions(t *testing.T) {
+	// Arrange + Act.
+	entries := driveWholeCorpus(t)
+
+	// Assert.
+	var memory, skills, diagnostics, budget int
+	for _, e := range entries {
+		frame := e.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()
+		if frame.GetUpdate().GetContextBudgetWarning() != nil {
+			budget++
+		}
+		activity := frame.GetUpdate().GetActivity()
+		if injected := activity.GetContextInjected(); injected != nil {
+			if injected.GetMemory() != nil {
+				memory++
+			}
+			if injected.GetSkills() != nil {
+				skills++
+			}
+		}
+		if activity.GetEdit().GetDiagnostics() != nil || activity.GetWrite().GetDiagnostics() != nil {
+			diagnostics++
+		}
+	}
+	for _, want := range []struct {
+		name string
+		got  int
+	}{
+		{"AgentContextInjected.memory (nested_memory)", memory},
+		{"AgentContextInjected.skills (dynamic_skill/invoked_skills/skill_listing)", skills},
+		{"the write/edit diagnostics consequence arm", diagnostics},
+		{"AgentUpdate.context_budget_warning", budget},
+	} {
+		if want.got == 0 {
+			t.Errorf("the corpus produced no %s; the sidecar is its ONLY producer, so a regression here loses the fact entirely", want.name)
+		}
+	}
+}
+
+// toolUseIDOfLine answers the id of the single tool_use block on an assistant
+// line.
+func toolUseIDOfLine(t *testing.T, line string) string {
+	t.Helper()
+	var record map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &record); err != nil {
+		t.Fatalf("assistant line is not JSON: %v", err)
+	}
+	message, _ := record["message"].(map[string]any)
+	blocks, _ := message["content"].([]any)
+	for _, raw := range blocks {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if block["type"] == "tool_use" {
+			if id, ok := block["id"].(string); ok && id != "" {
+				return id
+			}
+		}
+	}
+	t.Fatalf("assistant line carries no tool_use block: %s", line)
+	return ""
+}
+
+// repointToolResult re-points a tool_result line at another call id.
+func repointToolResult(t *testing.T, line, id string) string {
+	t.Helper()
+	var record map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &record); err != nil {
+		t.Fatalf("tool result line is not JSON: %v", err)
+	}
+	message, _ := record["message"].(map[string]any)
+	blocks, _ := message["content"].([]any)
+	var repointed int
+	for _, raw := range blocks {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if block["type"] == "tool_result" {
+			block["tool_use_id"] = id
+			repointed++
+		}
+	}
+	if repointed != 1 {
+		t.Fatalf("re-pointed %d tool_result blocks, want exactly 1: %s", repointed, line)
+	}
+	out, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("re-encoding the tool result: %v", err)
+	}
+	return string(out)
+}
+
+// TestGoldenCorpusAnnouncesNoDetachedWork asserts the sidecar NEVER produces the
+// detached-work announcement.
+//
+// LANDING 4 MADE IT A PAGE LINE of the announcing agent's book, and THE STREAM
+// PLANE ANNOUNCES IT: the shim is first to know a call detached, and the
+// sidecar only ever sees the spool that appears afterwards. A file-plane
+// announcement would be a SECOND announcement of one detachment, racing the
+// stream's and keyed the same, so the two producers would fight over one row.
+// The sidecar's whole share of detached work is the run's own rows.
+func TestGoldenCorpusAnnouncesNoDetachedWork(t *testing.T) {
+	// Arrange + Act.
+	entries := driveWholeCorpus(t)
+
+	// Assert.
+	for _, e := range entries {
+		frame := e.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame()
+		if frame.GetDetachedWork() != nil {
+			t.Errorf("entry %q announces detached work; the stream plane owns that announcement", e.GetUpsertKey())
+		}
+	}
+}
+
+// TestEveryBashRunIsNamedByItsSpawningCall asserts landing 4's identity equality
+// where the sidecar writes it: a detached run's handle IS the spawning call's
+// AgentActivityId, so a consumer holding the call can address the run and a
+// vendor task id never reaches the wire.
+func TestEveryBashRunIsNamedByItsSpawningCall(t *testing.T) {
+	// Arrange + Act.
+	entries := driveWholeCorpus(t)
+
+	// Assert.
+	var checked int
+	for _, e := range entries {
+		row := e.GetAgentUpdate().GetBash()
+		if row == nil {
+			continue
+		}
+		checked++
+		run := row.GetRun().GetValue()
+		if run != goldenSpoolRun {
+			t.Errorf("bash row %q names run %q, wanted the spawning call %q", e.GetUpsertKey(), run, goldenSpoolRun)
+		}
+		if !strings.HasPrefix(e.GetUpsertKey(), "bash:"+run+":") {
+			t.Errorf("bash row keyed %q, which does not name run %q", e.GetUpsertKey(), run)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the corpus produced no bash rows, so the identity was never checked")
+	}
 }

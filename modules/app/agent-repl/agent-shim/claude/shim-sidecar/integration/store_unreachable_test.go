@@ -64,10 +64,19 @@ func TestTheSuspensionIsStatedOnceRatherThanPerRetry(t *testing.T) {
 	fake := startFakeStoreAt(t, socket)
 	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
 
-	// Assert.
-	warns := logsAtLevel(readLog(t, opts.LogPath), "warn")
-	if len(warns) > 1 {
-		t.Errorf("an outage is stated ONCE when it begins; the log carries %d warnings: %v", len(warns), warns)
+	// Assert. THE SUBJECT IS THE OUTAGE'S OWN RECORD, not the log's whole
+	// warning traffic: a real capture's content produces warnings of its own
+	// (the vendor recorded a failing hook, say) that say nothing about the store,
+	// and counting those would make this subject fail for an unrelated reason.
+	var suspensions []logRecord
+	for _, r := range logsAtLevel(readLog(t, opts.LogPath), "warn") {
+		if r.Operation == "production-suspended" {
+			suspensions = append(suspensions, r)
+		}
+	}
+	if len(suspensions) != 1 {
+		t.Errorf("an outage is stated ONCE when it begins; the log carries %d suspension records: %v",
+			len(suspensions), suspensions)
 	}
 }
 
