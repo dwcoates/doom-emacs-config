@@ -371,30 +371,15 @@ format's trailing `key=%S' fragments extend it)."
    (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase name))))
 
 (defun agent-repl-itest--operation-prefix (name)
-  "Return the `operation' prefix core.el derives for the log NAME.
-Kept for callers that want the plain `agent-repl.<slug>' form; the
-matcher below is what tolerates core.el's SEVERITY prefix."
+  "Return the `operation' prefix core.el derives for the log NAME."
   (concat "agent-repl." (agent-repl-itest--operation-slug name)))
-
-(defconst agent-repl-itest--operation-severity-slugs '("" "warning-" "error-")
-  "Slug fragments core.el's severity tags contribute to `operation'.
-`agent-repl--warn' and `agent-repl--error' prepend \"WARNING: \" and
-\"ERROR: \" to the FORMAT STRING itself, and `agent-repl--log-operation'
-normalizes that whole string — so the recorded operation for a warned
-`elisp.daemon.stale-addr' is `agent-repl.warning-elisp-daemon-stale-addr...'.
-The LEVEL field already carries the severity, so a reader asking for a
-logical operation name must accept it with or without the tag rather than
-making every caller spell the tag it cannot see from the call site.")
 
 (defun agent-repl-itest--operation-matches-p (operation name)
   "Return non-nil when the recorded OPERATION names the logical NAME.
-Matches `agent-repl.<slug>...' with or without a severity tag between the
-namespace and the slug (see
-`agent-repl-itest--operation-severity-slugs')."
-  (let ((slug (agent-repl-itest--operation-slug name)))
-    (seq-some (lambda (severity)
-                (string-prefix-p (concat "agent-repl." severity slug) operation))
-              agent-repl-itest--operation-severity-slugs)))
+core.el derives `operation' from the BARE format string on every rung —
+the severity rungs\' display tags never reach it, and `level' carries the
+severity instead — so a plain prefix match is the whole rule."
+  (string-prefix-p (agent-repl-itest--operation-prefix name) operation))
 
 (defun agent-repl-itest--log-entries (daemon operation &optional level)
   "Return DAEMON's log records for OPERATION, optionally at LEVEL.
