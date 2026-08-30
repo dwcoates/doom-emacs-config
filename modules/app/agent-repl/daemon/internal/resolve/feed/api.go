@@ -33,6 +33,20 @@ type ReaderID string
 // The typed refusals the read side answers with. Each is a fact about the
 // REQUEST, never about the feed's contents: an empty feed is a page, not an
 // error.
+//
+// THE SERVER MAPS THESE ONTO THE LANDED ERROR ARMS, one for one, and this is
+// the one place the mapping is written down:
+//
+//	ErrNoWalk       → GetFeedPageError.no_walk_standing
+//	ErrUnknownFeed  → OpenFeedError.feed_not_in_workspace /
+//	                  GetFeedPageError.feed_not_in_workspace
+//	ErrUnknownToken → WatchFeed's transport refusal (the token names no feed
+//	                  this daemon minted, so no page-level arm applies)
+//	ErrTokenExpired → the same, with the reader expected to re-open the feed
+//
+// `feed_undecodable` is deliberately NOT produced here: the server decodes a
+// FeedId before it reaches this package, so a value that does not decode never
+// becomes a resolver call.
 var (
 	// ErrUnknownToken is a watch token this resolver never minted, or one
 	// minted for another workspace or feed.

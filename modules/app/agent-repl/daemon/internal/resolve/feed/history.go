@@ -86,6 +86,13 @@ func (r *resolver) replayFrame(s *wsState, frame *conversationv1.AgentFrame) {
 			r.drawPermission(s, agent, update.Permission)
 		case *conversationv1.AgentUpdate_ContextCut:
 			r.drawContextCut(s, agent, update.ContextCut)
+		case *conversationv1.AgentUpdate_ContextBudgetWarning:
+			// The vendor's own context-budget warning is a PAGE LINE with
+			// nothing to draw in the feed: the footer's activity line is its
+			// home, so a replay of it produces no row and no warning.
+			r.logger(s.id).Debug("daemon.feed.context_budget_warning_draws_nothing",
+				"a replayed context-budget warning draws no feed row",
+				dlog.Context{"agent": agent.GetValue()})
 		case *conversationv1.AgentUpdate_ApiError:
 			// Mid-turn evidence, replayed as evidence: it was never a terminal
 			// and replaying it as one would invent a turn ending.
