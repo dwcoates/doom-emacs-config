@@ -6,8 +6,9 @@ import {
   FooterStatusSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { FOOTER_STATUS_ARMS, protoArmName } from "../../src/vocab.js";
+import { FOOTER_ALLOWANCE_ARMS, FOOTER_STATUS_ARMS, protoArmName } from "../../src/vocab.js";
 import {
+  ALLOWANCE_ARM_CLASS,
   FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
   STATUS_ARM_CLASS,
@@ -120,14 +121,34 @@ describe("FOOTER_ALLOWANCE_STATUS_CASES: the arm set is the schema's", () => {
   });
 });
 
+describe("ALLOWANCE_ARM_CLASS: asserted row for row against render-colors.json", () => {
+  it("has a row for every arm the proto declares", () => {
+    expect(Object.keys(ALLOWANCE_ARM_CLASS).sort()).toEqual([...ALLOWANCE_SCHEMA_ARMS].sort());
+  });
+
+  it("leaves no key in the file without an arm in the proto", () => {
+    expect([...FOOTER_ALLOWANCE_ARMS].sort()).toEqual(
+      ALLOWANCE_SCHEMA_ARMS.map(protoArmName).sort(),
+    );
+  });
+
+  it("takes each arm's colour from the shared file rather than a local copy", () => {
+    for (const arm of ALLOWANCE_SCHEMA_ARMS) {
+      expect(ALLOWANCE_ARM_CLASS[arm]).toBe(
+        (renderColors.footer_allowance as Record<string, string>)[protoArmName(arm)],
+      );
+    }
+  });
+});
+
 describe("allowanceStatusClass", () => {
   it.each(ALLOWANCE_SCHEMA_ARMS)("gives %s a colour", (arm) => {
     expect(allowanceStatusClass(arm)).toMatch(/^tone-/);
   });
 
   it.each<[string, string]>([
-    // The traffic-light reading the arms already are: headroom, the vendor's
-    // own warning, and a call that would be refused.
+    // render-colors.json#footer_allowance: the ordinary state, the newsworthy
+    // rung, and the vendor refusing.
     ["allowed", "tone-green"],
     ["allowedWarning", "tone-yellow"],
     ["rejected", "tone-red"],
@@ -135,13 +156,7 @@ describe("allowanceStatusClass", () => {
     expect(allowanceStatusClass(arm)).toBe(expected);
   });
 
-  it("refuses an allowance arm this table has no colour for", () => {
+  it("refuses an arm the shared vocabulary has no colour for", () => {
     expect(() => allowanceStatusClass("throttled")).toThrow(MalformedView);
-  });
-
-  it("has no colour the schema does not declare an arm for", () => {
-    for (const arm of ["allowed", "allowedWarning", "rejected"]) {
-      expect(ALLOWANCE_SCHEMA_ARMS).toContain(arm);
-    }
   });
 });
