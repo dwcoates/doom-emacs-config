@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_held_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_update_held_prompt: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX2hlbGRfcHJvbXB0LnByb3RvEgxhZ2VudHJlcGwudjEinwIKF1VwZGF0ZUhlbGRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJQoEdHVybhgCIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSOAoHcmVsZWFzZRgDIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZUgAEjIKBGRyb3AYBCABKAsyIi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdERyb3BIABI2CgZhY2NlcHQYBSABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEFjY2VwdEgAQggKBmFjdGlvbiIZChdVcGRhdGVIZWxkUHJvbXB0UmVsZWFzZSIWChRVcGRhdGVIZWxkUHJvbXB0RHJvcCIYChZVcGRhdGVIZWxkUHJvbXB0QWNjZXB0IpQBChhVcGRhdGVIZWxkUHJvbXB0UmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0U3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCIZChdVcGRhdGVIZWxkUHJvbXB0U3VjY2VzcyIXChVVcGRhdGVIZWxkUHJvbXB0RXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_conversation_v1_turn]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX2hlbGRfcHJvbXB0LnByb3RvEgxhZ2VudHJlcGwudjEinwIKF1VwZGF0ZUhlbGRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJQoEdHVybhgCIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQSOAoHcmVsZWFzZRgDIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZUgAEjIKBGRyb3AYBCABKAsyIi5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdERyb3BIABI2CgZhY2NlcHQYBSABKAsyJC5hZ2VudHJlcGwudjEuVXBkYXRlSGVsZFByb21wdEFjY2VwdEgAQggKBmFjdGlvbiIZChdVcGRhdGVIZWxkUHJvbXB0UmVsZWFzZSIWChRVcGRhdGVIZWxkUHJvbXB0RHJvcCIYChZVcGRhdGVIZWxkUHJvbXB0QWNjZXB0IpQBChhVcGRhdGVIZWxkUHJvbXB0UmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0U3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRFcnJvckgAQggKBnJlc3VsdCIZChdVcGRhdGVIZWxkUHJvbXB0U3VjY2VzcyKEBQoVVXBkYXRlSGVsZFByb21wdEVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0VHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0Tm90WWV0QWRvcHRlZEgAEkAKDG5vX3N1Y2hfaG9sZBgFIAEoCzIoLmFnZW50cmVwbC52MS5VcGRhdGVIZWxkUHJvbXB0Tm9TdWNoSG9sZEgAEksKEWFscmVhZHlfZGVsaXZlcmVkGAYgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRBbHJlYWR5RGVsaXZlcmVkSAASUgoVYWNjZXB0X25vdF9hcHBsaWNhYmxlGAcgASgLMjEuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRBY2NlcHROb3RBcHBsaWNhYmxlSAASRwoPcmVsZWFzZV9yZWZ1c2VkGAggASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZUhlbGRQcm9tcHRSZWxlYXNlUmVmdXNlZEgAQgcKBWNhdXNlIiIKIFVwZGF0ZUhlbGRQcm9tcHRVbmtub3duV29ya3NwYWNlIjwKJFVwZGF0ZUhlbGRQcm9tcHRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMwogVXBkYXRlSGVsZFByb21wdFRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIfCh1VcGRhdGVIZWxkUHJvbXB0Tm90WWV0QWRvcHRlZCIcChpVcGRhdGVIZWxkUHJvbXB0Tm9TdWNoSG9sZCIiCiBVcGRhdGVIZWxkUHJvbXB0QWxyZWFkeURlbGl2ZXJlZCIlCiNVcGRhdGVIZWxkUHJvbXB0QWNjZXB0Tm90QXBwbGljYWJsZSIgCh5VcGRhdGVIZWxkUHJvbXB0UmVsZWFzZVJlZnVzZWRCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_conversation_v1_turn]);
 
 /**
  * @generated from message agentrepl.v1.UpdateHeldPromptRequest
@@ -170,12 +170,80 @@ export const UpdateHeldPromptSuccessSchema: GenMessage<UpdateHeldPromptSuccess> 
   messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 5);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no such hold, already
- * delivered), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.UpdateHeldPromptError
  */
 export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.UpdateHeldPromptError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptUnknownWorkspace unknown_workspace = 1;
+     */
+    value: UpdateHeldPromptUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: UpdateHeldPromptWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptTransferringAway transferring_away = 3;
+     */
+    value: UpdateHeldPromptTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptNotYetAdopted not_yet_adopted = 4;
+     */
+    value: UpdateHeldPromptNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * No hold by that id.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptNoSuchHold no_such_hold = 5;
+     */
+    value: UpdateHeldPromptNoSuchHold;
+    case: "noSuchHold";
+  } | {
+    /**
+     * The hold was already delivered.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptAlreadyDelivered already_delivered = 6;
+     */
+    value: UpdateHeldPromptAlreadyDelivered;
+    case: "alreadyDelivered";
+  } | {
+    /**
+     * An accept on a verdict other than hold_for_turn_end.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptAcceptNotApplicable accept_not_applicable = 7;
+     */
+    value: UpdateHeldPromptAcceptNotApplicable;
+    case: "acceptNotApplicable";
+  } | {
+    /**
+     * A force-through on an uninterruptible or session_starting hold.
+     *
+     * @generated from field: agentrepl.v1.UpdateHeldPromptReleaseRefused release_refused = 8;
+     */
+    value: UpdateHeldPromptReleaseRefused;
+    case: "releaseRefused";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -184,4 +252,120 @@ export type UpdateHeldPromptError = Message<"agentrepl.v1.UpdateHeldPromptError"
  */
 export const UpdateHeldPromptErrorSchema: GenMessage<UpdateHeldPromptError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 6);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptUnknownWorkspace
+ */
+export type UpdateHeldPromptUnknownWorkspace = Message<"agentrepl.v1.UpdateHeldPromptUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptUnknownWorkspace.
+ * Use `create(UpdateHeldPromptUnknownWorkspaceSchema)` to create a new message.
+ */
+export const UpdateHeldPromptUnknownWorkspaceSchema: GenMessage<UpdateHeldPromptUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 7);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
+ */
+export type UpdateHeldPromptWorkspaceRefMismatch = Message<"agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch.
+ * Use `create(UpdateHeldPromptWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const UpdateHeldPromptWorkspaceRefMismatchSchema: GenMessage<UpdateHeldPromptWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 8);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptTransferringAway
+ */
+export type UpdateHeldPromptTransferringAway = Message<"agentrepl.v1.UpdateHeldPromptTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptTransferringAway.
+ * Use `create(UpdateHeldPromptTransferringAwaySchema)` to create a new message.
+ */
+export const UpdateHeldPromptTransferringAwaySchema: GenMessage<UpdateHeldPromptTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 9);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptNotYetAdopted
+ */
+export type UpdateHeldPromptNotYetAdopted = Message<"agentrepl.v1.UpdateHeldPromptNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptNotYetAdopted.
+ * Use `create(UpdateHeldPromptNotYetAdoptedSchema)` to create a new message.
+ */
+export const UpdateHeldPromptNotYetAdoptedSchema: GenMessage<UpdateHeldPromptNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 10);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptNoSuchHold
+ */
+export type UpdateHeldPromptNoSuchHold = Message<"agentrepl.v1.UpdateHeldPromptNoSuchHold"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptNoSuchHold.
+ * Use `create(UpdateHeldPromptNoSuchHoldSchema)` to create a new message.
+ */
+export const UpdateHeldPromptNoSuchHoldSchema: GenMessage<UpdateHeldPromptNoSuchHold> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 11);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptAlreadyDelivered
+ */
+export type UpdateHeldPromptAlreadyDelivered = Message<"agentrepl.v1.UpdateHeldPromptAlreadyDelivered"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptAlreadyDelivered.
+ * Use `create(UpdateHeldPromptAlreadyDeliveredSchema)` to create a new message.
+ */
+export const UpdateHeldPromptAlreadyDeliveredSchema: GenMessage<UpdateHeldPromptAlreadyDelivered> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 12);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
+ */
+export type UpdateHeldPromptAcceptNotApplicable = Message<"agentrepl.v1.UpdateHeldPromptAcceptNotApplicable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptAcceptNotApplicable.
+ * Use `create(UpdateHeldPromptAcceptNotApplicableSchema)` to create a new message.
+ */
+export const UpdateHeldPromptAcceptNotApplicableSchema: GenMessage<UpdateHeldPromptAcceptNotApplicable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 13);
+
+/**
+ * @generated from message agentrepl.v1.UpdateHeldPromptReleaseRefused
+ */
+export type UpdateHeldPromptReleaseRefused = Message<"agentrepl.v1.UpdateHeldPromptReleaseRefused"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateHeldPromptReleaseRefused.
+ * Use `create(UpdateHeldPromptReleaseRefusedSchema)` to create a new message.
+ */
+export const UpdateHeldPromptReleaseRefusedSchema: GenMessage<UpdateHeldPromptReleaseRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_held_prompt, 14);
 
