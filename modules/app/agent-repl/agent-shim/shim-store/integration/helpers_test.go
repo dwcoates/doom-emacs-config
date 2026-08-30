@@ -571,6 +571,21 @@ func recordsAtLevel(records []logRecord, level string) []logRecord {
 	return out
 }
 
+// recordsAtOperation filters records by their stable operation name.
+//
+// A LEVEL FILTER ALONE IS NOT AN ASSERTION. "Some warn was logged" passes for a
+// reclaimed socket or a slow query as readily as for the thing under test, so
+// every warning subject narrows to the operation it means.
+func recordsAtOperation(records []logRecord, operation string) []logRecord {
+	var out []logRecord
+	for _, rec := range records {
+		if rec.Operation == operation {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
 // recordsWithContextKey filters records that carry one correlation key.
 func recordsWithContextKey(records []logRecord, key string) []logRecord {
 	var out []logRecord
