@@ -38,7 +38,6 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_AccountUsage,
-		*conversationv1.SessionUpdate_ContextBudgetWarning,
 		*conversationv1.SessionUpdate_Compacting:
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
 			"arm": sessionArm(update),
@@ -109,8 +108,6 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "identity_rotated"
 	case *conversationv1.SessionUpdate_AccountUsage:
 		return "account_usage"
-	case *conversationv1.SessionUpdate_ContextBudgetWarning:
-		return "context_budget_warning"
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting"
 	case *conversationv1.SessionUpdate_QueryDied:
