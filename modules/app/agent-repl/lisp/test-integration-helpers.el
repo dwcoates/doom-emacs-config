@@ -424,21 +424,33 @@ suite asserting on a log line waits for it rather than racing it."
 
 ;;;; ---- Boundary mocks the suite installs ----
 
-(defun agent-repl-itest--real-spawn-curl ()
-  "Return the REAL `agent-repl-connect--spawn-curl' captured before guarding.
+(defun agent-repl-itest--real-boundary (symbol)
+  "Return the REAL implementation of boundary SYMBOL, captured before guarding.
 The batch harness replaces every entry of
 `agent-repl--external-boundary-functions' with a guard that errors, which
-is exactly right for every other boundary — but the transport's ONE spawn
-point is the boundary this suite exists to exercise, against a fake daemon
-on loopback.  Every OTHER guard stays armed."
-  (let ((cell (assq 'agent-repl-connect--spawn-curl
-                    agent-repl-test--external-original-functions)))
+is exactly right for every boundary a scenario only has to STUB — but a
+handful of boundaries are the very thing an integration scenario exists to
+exercise against real, harmless, test-owned targets (the fake daemon on
+loopback; stub shell scripts in the test's own temp dir).  Restoring one
+is deliberate and NARROW: it happens per scenario, by name, and every
+other guard stays armed.
+
+Signals when SYMBOL is not registered — a boundary that left the registry
+must not be reachable by accident."
+  (let ((cell (assq symbol agent-repl-test--external-original-functions)))
     (unless cell
-      (error (concat "agent-repl-itest: `agent-repl-connect--spawn-curl' is not in "
-                     "`agent-repl--external-boundary-functions' — the integration suite "
-                     "cannot reach the fake daemon without the real spawn point")))
+      (error (concat "agent-repl-itest: `%s' is not in "
+                     "`agent-repl--external-boundary-functions' — the integration "
+                     "suite cannot restore a boundary it does not know about")
+             symbol))
     (or (cdr cell)
-        (error "agent-repl-itest: no original captured for `agent-repl-connect--spawn-curl'"))))
+        (error "agent-repl-itest: no original captured for `%s'" symbol))))
+
+(defun agent-repl-itest--real-spawn-curl ()
+  "Return the REAL `agent-repl-connect--spawn-curl' captured before guarding.
+The transport's ONE spawn point is the boundary the integration suite
+exists to exercise, against a fake daemon on loopback."
+  (agent-repl-itest--real-boundary 'agent-repl-connect--spawn-curl))
 
 (defvar agent-repl-itest-notifications nil
   "Desktop notifications the fake notifier backend recorded, newest first.
@@ -512,6 +524,78 @@ address is already published and recorded before it is replaced."
 
 (defalias 'agent-repl-itest--start-second-daemon #'agent-repl-itest--start-daemon
   "Start a second fake daemon; pass the primary's state dir to stage a handover.")
+
+;;;; ---- Cold start ----
+;;
+;; Scenario 14 (§14) drives daemon.el's cold start with STUB SHELL SCRIPTS in
+;; the test's own temp dir: "build script (stub) invoked → daemon command (stub
+;; that starts the fake) → link up".  That contract is exactly "run this
+;; script, then wait for daemon.addr", so an elisp stub over the boundary would
+;; assert nothing — and the state-root export can only be observed by a child
+;; that really ran.  These three boundaries are therefore RESTORED for a
+;; cold-start scenario, per-scenario and by name, the same way the transport's
+;; spawn point is; every other guard stays armed.
+
+(defconst agent-repl-itest--cold-start-boundaries
+  '(agent-repl--frontend-run-build-script
+    agent-repl--frontend-spawn-daemon
+    agent-repl--frontend-artifact-exists-p)
+  "The external boundaries a cold-start scenario exercises for real.
+Their targets are all test-owned: a stub script and a stub argv written
+into the scenario's own temp dir, and `file-exists-p' on those paths.")
+
+(defvar agent-repl-daemon--ensure-in-flight)
+(defvar agent-repl-daemon--boot-timer)
+(defvar agent-repl-daemon--boot-deadline)
+(defvar agent-repl-daemon--boot-continuation)
+(defvar agent-repl-daemon-build-failure)
+(defvar agent-repl-daemon-mode-line-segment)
+(defvar agent-repl--frontend-daemon-process)
+(declare-function agent-repl-daemon--cancel-boot-wait "daemon")
+(declare-function agent-repl-link-teardown "daemon-link")
+
+(defun agent-repl-itest--reset-cold-start ()
+  "Take down everything a cold-start scenario can leave running.
+A scenario that asserts as soon as its stub script ran leaves a POLL
+TIMER armed and, on the paths that got that far, a spawned daemon and a
+standing link.  All three outlive the `let' that reset daemon.el's state,
+so the next scenario's ensure would see an in-flight boot or a live link
+and no-op — which is how one broken scenario silently disables the rest of
+the suite.  Cancelling and reaping is the only thing that actually ends
+them."
+  (agent-repl-daemon--cancel-boot-wait)
+  (when (process-live-p agent-repl--frontend-daemon-process)
+    (delete-process agent-repl--frontend-daemon-process))
+  (agent-repl-link-teardown)
+  (dolist (name '("*agent-repl-health*" "*agent-repl-build-frontend*"))
+    (when (get-buffer name) (kill-buffer name))))
+
+(defmacro agent-repl-itest--with-cold-start (&rest body)
+  "Run BODY with daemon.el's cold start reachable and its state isolated.
+Inside BODY the three `agent-repl-itest--cold-start-boundaries' are the
+real implementations, and every piece of daemon.el's cold-start state
+starts fresh.  On the way out the boot poll is cancelled, any spawned
+daemon is reaped and the link is torn down, so nothing leaks into the next
+scenario."
+  (declare (indent 0) (debug body))
+  `(let ((agent-repl-daemon--ensure-in-flight nil)
+         (agent-repl-daemon--boot-timer nil)
+         (agent-repl-daemon--boot-deadline nil)
+         (agent-repl-daemon--boot-continuation nil)
+         (agent-repl-daemon-build-failure nil)
+         (agent-repl-daemon-mode-line-segment nil)
+         (agent-repl--frontend-daemon-process nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+                (agent-repl-itest--real-boundary
+                 'agent-repl--frontend-run-build-script))
+               ((symbol-function 'agent-repl--frontend-spawn-daemon)
+                (agent-repl-itest--real-boundary
+                 'agent-repl--frontend-spawn-daemon))
+               ((symbol-function 'agent-repl--frontend-artifact-exists-p)
+                (agent-repl-itest--real-boundary
+                 'agent-repl--frontend-artifact-exists-p)))
+       (unwind-protect (progn ,@body)
+         (agent-repl-itest--reset-cold-start)))))
 
 ;;;; ---- Small assertion helpers ----
 
