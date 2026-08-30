@@ -734,10 +734,15 @@ Five families joined the mocked vendor for the e2e suite. Each is a registered
   `seven_day_oauth_apps`, `seven_day_opus`, `seven_day_sonnet`, `model_scoped`,
   `extra_usage`), each with a `utilization` and a `resets_at`, beside
   `subscription_type`. The older name was kept rather than renamed so no caller
-  that already spells it breaks. `!usage-window-unavailable` nulls
-  `seven_day_opus` and `!usage-utilization-unavailable` nulls `five_hour`'s
-  utilization — a null WINDOW and a null FIGURE on different windows, so the two
-  shapes can never be confused for one another.
+  that already spells it breaks.
+- `!usage-window-unavailable` nulls the FIVE-HOUR window, and nothing else
+  (shim lead ruling): `SessionUsageWindowUnavailable` means "the service
+  answered without a five-hour window", so a null `seven_day_opus` is merely an
+  ABSENT OPTIONAL window and still produces the AVAILABLE arm. That absent-opus
+  shape is worth having and keeps its own row as `!usage-opus-absent`;
+  `!usage-utilization-unavailable` nulls `five_hour`'s utilization while the
+  window itself is present, so the null WINDOW and the null FIGURE stay
+  distinguishable.
 
 ## Landing 3 relay (2026-08-29, project lead)
 

@@ -318,9 +318,17 @@ export function fakeAccountUsage(arm: AccountUsageArm): AccountUsageLike {
     case "service_unavailable":
       // The endpoint answered nothing at all.
       return { ...base, rate_limits_available: false, rate_limits: null };
-    case "window_unavailable":
-      // The service answered, but one window is simply absent.
+    case "opus_absent":
+      // An ABSENT OPTIONAL WINDOW, which is NOT an unavailability: the service
+      // answered in full and this account simply has no opus window, so the
+      // contract's arm is still `available` with `seven_day_opus` unset.
       return { ...base, rate_limits: { ...allWindows, seven_day_opus: null } };
+    case "window_unavailable":
+      // THE FIVE-HOUR WINDOW, specifically. `SessionUsageWindowUnavailable`
+      // means "the service answered without a five-hour window" and nothing
+      // else; nulling any other window would leave this reason unproducible
+      // while looking as though it had been covered.
+      return { ...base, rate_limits: { ...allWindows, five_hour: null } };
     case "utilization_unavailable":
       // The window exists and its utilization does not.
       return { ...base, rate_limits: { ...allWindows, five_hour: window(null, "2026-08-29T20:00:00.000Z") } };
