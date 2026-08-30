@@ -682,3 +682,21 @@ Rulings already binding; code swaps to the generated arms when it lands:
   NEWER than the last sample wins for the figure.
 - Footer remediation owed: replace the "both windows from rate_limit_status"
   rule with the above (tests per bullet).
+
+## Merge orchestrator rulings (project lead, on its report)
+
+- Pause/Resume scope: landing 5 adds `optional RepositoryRef repository` to
+  UpdateMergeQueuePause/Resume (UNSET = every repository); until it lands
+  the daemon-wide switch is correct.
+- `gitclient.Git` gains `Commit(ctx, dir, message string) (sha string, err
+  error)` (`commit --no-edit -m <message>`; the fake-git tests cover argv
+  only) — the merge orchestrator completes a resolved conflict through it.
+- `prompts/merge-conflict-resolve.md` and `merge-test-failure-resolve.md`
+  still describe the retired rebase-worktree/cherry-pick flow: the prompts
+  agent rewrites their BODIES for the no-ff-merge-in-target flow with the
+  placeholder sets unchanged.
+- Recovery re-queues an in-flight merge at the FRONT of its repo queue
+  rather than re-entering a tab: accepted as an override (recorded in
+  docs/overhaul/daemon.md).
+- Terminal ordering post-prompt → terminal → release → worktree removal →
+  displaced turn → rollout trigger: accepted.
