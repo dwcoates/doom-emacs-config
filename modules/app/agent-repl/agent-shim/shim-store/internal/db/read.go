@@ -138,7 +138,7 @@ func (d *DB) ReadPage(ctx context.Context, agentID string, pageSize uint32, afte
 func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error) {
 	base := logging.Fields{Operation: "store.db.lines-since", Table: "entry", BookAgentID: agentID, WriteSeq: afterSeq}
 	if agentID == "" {
-		return nil, d.refuse(base, invalidf("agent id value is empty"))
+		return nil, d.refuse(base, invalidFieldf("agent", "agent id value is empty"))
 	}
 	started := time.Now()
 
@@ -180,10 +180,10 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 // validateBook is the shared refusal for the two paging verbs.
 func validateBook(agentID string, pageSize uint32) error {
 	if agentID == "" {
-		return invalidf("agent id value is empty")
+		return invalidFieldf("agent", "agent id value is empty")
 	}
 	if pageSize == 0 {
-		return invalidf("page_size is zero — a page with no budget is not a page")
+		return invalidFieldf("page_size", "page_size is zero — a page with no budget is not a page")
 	}
 	return nil
 }
@@ -200,7 +200,7 @@ func (d *DB) pointerInBook(ctx context.Context, tx *sql.Tx, agentID string, posi
 	case err == nil:
 		return nil
 	case isNoRows(err):
-		return stalePointerf("%s %q names no line of book %q", field, value, agentID)
+		return stalePointerf(field, "%s %q names no line of book %q", field, value, agentID)
 	default:
 		return storagef(err, "validating %s against book %q", field, agentID)
 	}
