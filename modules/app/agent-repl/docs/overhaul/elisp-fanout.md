@@ -62,8 +62,8 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   W2-B (roster, status, popup, workspace, session, frontend,
   webview-recovery, open-progress, panels, window); integration suite +
   Go fake daemon (lisp/testsupport/fakedaemon). Landings 1–3 merged.
-- RUNNING (keep their opus-medium tier): W2-C composer+verbs in
-  elisp-agents/w2c (branch overhaul/elisp-w2c); remediation-1
+- W2-C MERGED (74b1445df): composer + verbs + worktree slimming +
+  doctor; every unit suite green. RUNNING (opus-medium tier): remediation-1
   (R-ACCEPT, R-QUESTION, R-STREAMCLOSE) in elisp-agents/remed1;
   R-DAEMON in elisp-agents/remed2. Resume by SendMessage to the existing
   agent, never re-dispatch.
