@@ -278,3 +278,54 @@ describe("the session-update arm", () => {
     expect(fake.book("book-1")).toHaveLength(0);
   });
 });
+
+describe("the producer's name", () => {
+  it("refuses a write before StartSession named the conversation", async () => {
+    const started = await startFakeStore(socketPathForTest("unnamed"));
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+    });
+
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    // A row landed under a placeholder name would have write ids in a namespace
+    // no later replay could absorb against, so it would double on the first
+    // retry after the real name arrived. Nothing lands instead.
+    expect(started.book("book-1")).toHaveLength(0);
+  });
+
+  it("writes once StartSession has named it", async () => {
+    const started = await startFakeStore(socketPathForTest("named"));
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      nowMs: () => 1_000,
+      sleep: async () => undefined,
+    });
+
+    plane.setProducer("vendor-session-1");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    expect(started.writes()[0]?.producer).toBe("claude-shim:vendor-session-1");
+  });
+
+  it("accepts the same name twice, since a resume names the same original id", async () => {
+    const { persistence: plane } = await persistence("named-twice");
+
+    plane.setProducer("vendor-session-1");
+
+    expect(() => plane.setProducer("vendor-session-1")).not.toThrow();
+  });
+
+  it("refuses a DIFFERENT name: a conversation has one original vendor session id", async () => {
+    const { persistence: plane } = await persistence("re-keyed");
+    plane.setProducer("vendor-session-1");
+
+    expect(() => plane.setProducer("vendor-session-2")).toThrow(/cannot become/);
+  });
+});

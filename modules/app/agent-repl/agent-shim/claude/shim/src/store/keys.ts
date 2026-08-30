@@ -159,6 +159,18 @@ export function sessionUpsertKey(arm: string, vendorRecordUuid: string): string 
 }
 
 /**
+ * The vendor's context-budget warning, keyed by the record that stated it.
+ *
+ * A PAGE LINE of the agent's book (landing 4), so it needs a key of its own: it
+ * is not an activity, so `activity:` would be a lie, and a key naming only the
+ * warning would have each new one overwrite the last — leaving a conversation
+ * with exactly one visible warning however often the window filled.
+ */
+export function contextBudgetWarningUpsertKey(vendorRecordUuid: string): string {
+  return `budget:${requireValue(vendorRecordUuid, "the vendor record uuid")}`;
+}
+
+/**
  * A residue row, keyed by WHAT KIND of record it was and which record it was.
  *
  * Residue has no identity of its own — that is what makes it residue — so the

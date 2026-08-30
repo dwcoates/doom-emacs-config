@@ -27,9 +27,14 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
-import { detachedWorkUpsertKey } from "../store/keys.js";
+import {
+  activityUpsertKey,
+  bashUpsertKey,
+  detachedWorkUpsertKey,
+  terminalUpsertKey,
+} from "../store/keys.js";
 import type { PersistEntry } from "../store/persistence.js";
-import { agentFrame, prose, settledAt } from "./entries.js";
+import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import { detachedWorkId, toolCallActivityId } from "./ids.js";
 import { residueEntry, residueForMessage } from "./residue.js";
@@ -77,9 +82,15 @@ export function detachedOutput(path: string, readable: boolean): conversationv1.
 
 /** What one detachment announcement says. */
 export interface DetachmentFacts {
-  /** The handle the work is addressed by. */
-  readonly workId: string;
-  /** The in-turn unit it detached FROM. */
+  /**
+   * The in-turn unit it detached FROM — and, by the same bytes, the HANDLE the
+   * work is addressed by.
+   *
+   * `DetachedWorkId.value == AgentActivityId.value` (ruling, landing 3): one
+   * identity addresses the work, its unit, and (for a subagent) its book, so a
+   * terminal retires the handle by equality. The vendor's `task_id` stays
+   * shim-side as the lookup for `stopTask` and the live level.
+   */
   readonly detachedFromToolUseId: string;
   /** Why it left. */
   readonly cause: DetachCause;
@@ -105,7 +116,7 @@ export function detachmentEntry(
   vendorUuid: string,
   facts: DetachmentFacts,
 ): PersistEntry {
-  const work = detachedWorkId(facts.workId);
+  const work = detachedWorkId(facts.detachedFromToolUseId);
   const announcement = create(conversationv1.AgentDetachedWorkSchema, {
     work,
     output:
@@ -154,8 +165,11 @@ export function bashDetachmentEntry(
   structured: unknown,
 ): PersistEntry | undefined {
   const output = structured as Record<string, unknown> | undefined;
-  const workId = output?.backgroundTaskId;
-  if (typeof workId !== "string" || workId === "") return undefined;
+  // THE VENDOR'S TASK ID IS ONLY EVIDENCE THAT IT BACKGROUNDED, not the handle:
+  // the wire handle is the spawning call's own id (ruling, landing 3), and the
+  // task id stays shim-side for `stopTask` and the live level.
+  const vendorTaskId = output?.backgroundTaskId;
+  if (typeof vendorTaskId !== "string" || vendorTaskId === "") return undefined;
   const timedOut = output?.timedOutAfterMs;
   const cause: DetachCause =
     typeof timedOut === "number"
@@ -164,11 +178,10 @@ export function bashDetachmentEntry(
         ? "by_user"
         : "requested";
   LOGGER.log(
-    { work: workId, tool_use_id: toolUseId, cause },
+    { vendor_task_id: vendorTaskId, work: toolUseId, tool_use_id: toolUseId, cause },
     "a shell command moved to the background rather than ending",
   );
   return detachmentEntry(context, agentId, vendorUuid, {
-    workId,
     detachedFromToolUseId: toolUseId,
     cause,
     timeoutMs: typeof timedOut === "number" ? timedOut : undefined,
@@ -247,7 +260,6 @@ export function convertDetached(
       LOGGER.log({ uuid, task_id: taskId, tool_use_id: toolUseId }, "work left the turn");
       return [
         detachmentEntry(context, agentId, uuid, {
-          workId: taskId,
           detachedFromToolUseId: toolUseId,
           cause: "requested",
         }),
@@ -275,7 +287,6 @@ export function convertDetached(
       LOGGER.log({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
       return [
         detachmentEntry(context, agentId, uuid, {
-          workId: taskId,
           detachedFromToolUseId: toolUseId,
           cause: "by_user",
         }),
@@ -294,7 +305,6 @@ export function convertDetached(
       if (toolUseId !== undefined && toolUseId !== "" && raw.output_file !== undefined) {
         entries.push(
           detachmentEntry(context, agentId, uuid, {
-            workId: taskId,
             detachedFromToolUseId: toolUseId,
             cause: "requested",
             outputPath: raw.output_file,
@@ -436,4 +446,176 @@ function subagentTerminalEntries(
       }),
     ),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Work we stopped being able to see
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY the stream plane can produce `went_silent` but never judges it here.
+ *
+ * `DetachedLost.went_silent` says "the run produced nothing past the reader's
+ * silence ruling". On this plane the only evidence of disappearance is a task
+ * leaving the `background_tasks_changed` LEVEL without a notification — and
+ * reading that requires DIFFING the level, which the contract explicitly forbids
+ * the fold to do (the level is consumed with replace semantics, and the live set
+ * IS the set of open detached-item streams, which is the engine's). So the
+ * engine's own live-set bookkeeping makes the ruling and calls these builders;
+ * the fold states the shape and nothing else.
+ *
+ * `file_vanished` is NEVER ours: only the sidecar reads files.
+ */
+export function wentSilent(): conversationv1.DetachedLost {
+  return create(conversationv1.DetachedLostSchema, {
+    how: { case: "wentSilent", value: create(conversationv1.DetachedLostWentSilentSchema, {}) },
+  });
+}
+
+/**
+ * A detached SHELL run the engine concluded went silent.
+ *
+ * The original start is passed in because a settled bash frame restates its
+ * command, and after the run left the turn only the record holds it.
+ */
+export function lostBashEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  run: conversationv1.AgentActivityId,
+  originalStart: conversationv1.AgentBashStart,
+  how: conversationv1.DetachedLost,
+): PersistEntry | undefined {
+  if (originalStart.command === undefined) {
+    LOGGER.log(
+      { level: "error", run: run.value },
+      "the recorded start for this shell run states no command; no terminal is produced",
+    );
+    return undefined;
+  }
+  LOGGER.log(
+    { run: run.value, how: how.how.case },
+    "a detached shell run was concluded LOST: not known to have failed, not known to have finished",
+  );
+  return {
+    agentId,
+    upsertKey: bashUpsertKey(run),
+    source: {
+      vendorUuid: `lost:${run.value}`,
+      discriminator: `agent_bash.success.interrupted.lost.${String(how.how.case)}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "bash_run",
+      run,
+      frame: create(conversationv1.AgentBashSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentBashSuccessSchema, {
+            command: originalStart.command,
+            outcome: {
+              case: "interrupted",
+              value: create(conversationv1.AgentBashInterruptedSchema, {
+                // NOT OURS TO STATE: nothing observed what the command said
+                // after we lost sight of it, so the extent is `partial` with no
+                // countable omission and no spill to point at. The contract has
+                // no "not observed" arm; a `whole` here would claim the command
+                // said exactly this much and stopped.
+                output: create(conversationv1.AgentBashOutputSchema, {
+                  form: {
+                    case: "text",
+                    value: create(conversationv1.AgentBashOutputTextSchema, {
+                      stdout: "",
+                      stderr: "",
+                      extent: {
+                        case: "partial",
+                        value: create(conversationv1.AgentBashOutputPartialSchema, {
+                          bytesOmitted: 0n,
+                        }),
+                      },
+                    }),
+                  },
+                }),
+                cause: { case: "lost", value: how },
+              }),
+            },
+          }),
+        },
+      }),
+    },
+  };
+}
+
+/** A detached SPAWN unit the engine concluded went silent. */
+export function lostSubagentEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  spawn: conversationv1.AgentActivityId,
+  how: conversationv1.DetachedLost,
+): PersistEntry {
+  LOGGER.log(
+    { spawn: spawn.value, how: how.how.case },
+    "a detached spawn was concluded LOST: not known to have failed, not known to have finished",
+  );
+  return {
+    agentId,
+    upsertKey: activityUpsertKey(spawn),
+    source: {
+      vendorUuid: `lost:${spawn.value}`,
+      discriminator: `activity.subagent.failure.lost.${String(how.how.case)}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "frame",
+      frame: updateFrame(
+        agentId,
+        create(conversationv1.AgentUpdateSchema, {
+          update: {
+            case: "activity",
+            value: agentActivity(spawn, {
+              case: "subagent",
+              value: create(conversationv1.AgentSubagentSchema, {
+                result: {
+                  case: "failure",
+                  value: create(conversationv1.AgentSubagentFailureSchema, {
+                    cause: { case: "lost", value: how },
+                  }),
+                },
+              }),
+            }),
+          },
+        }),
+      ),
+    },
+  };
+}
+
+/** A detached AGENT's own book, closed as lost. */
+export function lostAgentEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  how: conversationv1.DetachedLost,
+): PersistEntry {
+  LOGGER.log(
+    { agent: agentId.value, how: how.how.case },
+    "a detached agent was concluded LOST: not known to have failed, not known to have finished",
+  );
+  const coordinate = `lost:${agentId.value}`;
+  return {
+    agentId,
+    upsertKey: terminalUpsertKey(agentId, coordinate),
+    source: {
+      vendorUuid: coordinate,
+      discriminator: `agent_frame.failure.lost.${String(how.how.case)}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "frame",
+      frame: agentFrame(agentId, {
+        case: "failure",
+        value: create(conversationv1.AgentFailureSchema, {
+          failure: { case: "lost", value: how },
+        }),
+      }),
+    },
+  };
 }

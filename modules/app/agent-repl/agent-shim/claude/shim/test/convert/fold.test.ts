@@ -557,14 +557,52 @@ describe("hooks", () => {
 });
 
 describe("session facts", () => {
-  it("records the account's allowance from a rate-limit event", () => {
+  it("records the LIVE rate-limit status, which is not the sampled allowance", () => {
     const fold = createFold();
 
     const output = fold.onSdkMessage(streamMessage("rate_limit_event"), foldContext());
 
     const update =
       output.entries[0]?.item.kind === "session_update" ? output.entries[0].item.update : undefined;
-    expect(update?.update.case).toBe("accountUsage");
+    expect(update?.update.case).toBe("rateLimitStatus");
+  });
+
+  it("converts the vendor's seconds to millis and its fraction to a percent", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(streamMessage("rate_limit_event"), foldContext());
+
+    const update =
+      output.entries[0]?.item.kind === "session_update" ? output.entries[0].item.update : undefined;
+    const status = update?.update.value as conversationv1.SessionRateLimitStatus;
+    // The corpus states resetsAt 1785542400 (seconds) and utilization 0.79.
+    expect(status.resetsAtMs).toBe(1_785_542_400_000n);
+    expect(status.utilizationPercent).toBeCloseTo(79);
+  });
+
+  it("carries the status and window as typed arms, never as vendor strings", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(streamMessage("rate_limit_event"), foldContext());
+
+    const update =
+      output.entries[0]?.item.kind === "session_update" ? output.entries[0].item.update : undefined;
+    const status = update?.update.value as conversationv1.SessionRateLimitStatus;
+    expect(status.status.case).toBe("allowedWarning");
+    expect(status.rateLimitType?.window.case).toBe("overage");
+  });
+
+  it("leaves every field the vendor omitted UNSET", () => {
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(streamMessage("rate_limit_event"), foldContext());
+
+    const update =
+      output.entries[0]?.item.kind === "session_update" ? output.entries[0].item.update : undefined;
+    const status = update?.update.value as conversationv1.SessionRateLimitStatus;
+    // The corpus event states no error code and no purchase flags.
+    expect(status.errorCode).toBeUndefined();
+    expect(status.canUserPurchaseCredits).toBeUndefined();
   });
 
   it("records nothing for a status that carries no conversation fact", () => {

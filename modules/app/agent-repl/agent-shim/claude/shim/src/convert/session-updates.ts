@@ -165,45 +165,153 @@ export function fastModeUpdate(state: string, reason: string | undefined): conve
   });
 }
 
-/** The account's allowance, as the vendor's rate-limit event states it. */
-export function accountUsageUpdate(
-  observedAtMs: number,
+// ---------------------------------------------------------------------------
+// The vendor's rate-limit event
+// ---------------------------------------------------------------------------
+
+/**
+ * The three-value status vocabulary, which IS in evidence.
+ *
+ * A value the vendor adds later leaves the arm UNSET rather than becoming one of
+ * these: an unset status says "the vendor said something we do not model", and
+ * defaulting to `allowed` would tell a user they have room they may not have.
+ */
+export function rateLimitStatus(
+  value: unknown,
+): conversationv1.SessionRateLimitStatus["status"] {
+  switch (value) {
+    case "allowed":
+      return { case: "allowed", value: create(conversationv1.SessionRateLimitAllowedSchema, {}) };
+    case "allowed_warning":
+      return {
+        case: "allowedWarning",
+        value: create(conversationv1.SessionRateLimitAllowedWarningSchema, {}),
+      };
+    case "rejected":
+      return { case: "rejected", value: create(conversationv1.SessionRateLimitRejectedSchema, {}) };
+    default:
+      LOGGER.log(
+        { level: "warn", status: String(value) },
+        "the vendor named a rate-limit status this contract does not spell; the arm stays unset",
+      );
+      return { case: undefined };
+  }
+}
+
+/** Which window a status is about; the vendor's declared six-value vocabulary. */
+export function rateLimitType(value: unknown): conversationv1.SessionRateLimitType | undefined {
+  const window: conversationv1.SessionRateLimitType["window"] | undefined =
+    value === "five_hour"
+      ? { case: "fiveHour", value: create(conversationv1.SessionRateLimitWindowFiveHourSchema, {}) }
+      : value === "seven_day"
+        ? { case: "sevenDay", value: create(conversationv1.SessionRateLimitWindowSevenDaySchema, {}) }
+        : value === "seven_day_opus"
+          ? {
+              case: "sevenDayOpus",
+              value: create(conversationv1.SessionRateLimitWindowSevenDayOpusSchema, {}),
+            }
+          : value === "seven_day_sonnet"
+            ? {
+                case: "sevenDaySonnet",
+                value: create(conversationv1.SessionRateLimitWindowSevenDaySonnetSchema, {}),
+              }
+            : value === "seven_day_overage_included"
+              ? {
+                  case: "sevenDayOverageIncluded",
+                  value: create(
+                    conversationv1.SessionRateLimitWindowSevenDayOverageIncludedSchema,
+                    {},
+                  ),
+                }
+              : value === "overage"
+                ? {
+                    case: "overage",
+                    value: create(conversationv1.SessionRateLimitWindowOverageSchema, {}),
+                  }
+                : undefined;
+  if (window === undefined) {
+    // UNSET, never guessed: a status attributed to the wrong window would tell
+    // a user their weekly allowance is nearly spent when it was the five-hour.
+    if (value !== undefined) {
+      LOGGER.log(
+        { level: "warn", rate_limit_type: String(value) },
+        "the vendor named a rate-limit window this contract does not spell; the field stays unset",
+      );
+    }
+    return undefined;
+  }
+  return create(conversationv1.SessionRateLimitTypeSchema, { window });
+}
+
+/** The vendor's SECONDS as the unix millis the wire carries. */
+export function resetsAtMs(seconds: unknown): bigint | undefined {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds)) return undefined;
+  return BigInt(Math.trunc(seconds * 1_000));
+}
+
+/** The vendor's FRACTION (0–1) as the percent (0–100) the wire carries. */
+export function percentOf(fraction: unknown): number | undefined {
+  if (typeof fraction !== "number" || !Number.isFinite(fraction)) return undefined;
+  return fraction * 100;
+}
+
+/** A boolean the vendor stated, or UNSET when it stated none. */
+function flag(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+/** A string the vendor stated, or UNSET when it stated none. */
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** The overage side of the account, when the vendor reported it. */
+export function rateLimitOverage(
+  info: Record<string, unknown>,
+): conversationv1.SessionRateLimitOverage | undefined {
+  const status = info.overageStatus;
+  const resets = info.overageResetsAt;
+  const reason = info.overageDisabledReason;
+  if (status === undefined && resets === undefined && reason === undefined) return undefined;
+  return create(conversationv1.SessionRateLimitOverageSchema, {
+    status: status === undefined ? { case: undefined } : rateLimitStatus(status),
+    resetsAtMs: resetsAtMs(resets),
+    // THIRTEEN DECLARED VALUES AND NONE OBSERVED, so the vendor's word is
+    // carried verbatim rather than sorted into arms nobody has seen produced.
+    disabledReason: text(reason),
+  });
+}
+
+/**
+ * The vendor's rate-limit event, typed.
+ *
+ * STREAM-ONLY (landing 4): this is the live `rate_limit_event` the SDK pushes,
+ * and it is a different fact from `account_usage`, which is the sampled answer
+ * to the vendor's usage verb. Two facts, two arms — folding one into the other
+ * would make a live status and a sample indistinguishable.
+ *
+ * EVERY OPTIONAL FIELD IS ABSENT WHEN THE VENDOR OMITTED IT. The conversions are
+ * the two the proto names: seconds→millis, fraction→percent.
+ */
+export function rateLimitStatusUpdate(
   info: Record<string, unknown> | undefined,
 ): conversationv1.SessionUpdate {
-  const utilization = info?.utilization;
-  const resetsAt = info?.resetsAt;
-  const outcome: conversationv1.SessionAccountUsage["outcome"] =
-    typeof utilization === "number" && Number.isFinite(utilization)
-      ? {
-          case: "available",
-          value: create(conversationv1.SessionAccountUsageAvailableSchema, {
-            fiveHour: create(conversationv1.SessionUsageWindowSchema, {
-              utilizationPercent: utilization,
-              resetsAtMs:
-                typeof resetsAt === "number" && Number.isFinite(resetsAt)
-                  ? BigInt(Math.trunc(resetsAt))
-                  : 0n,
-            }),
-          }),
-        }
-      : {
-          case: "unavailable",
-          value: create(conversationv1.SessionAccountUsageUnavailableSchema, {
-            reason: {
-              case: "utilizationUnavailable",
-              value: create(conversationv1.SessionUsageUtilizationUnavailableSchema, {}),
-            },
-          }),
-        };
+  const record = info ?? {};
   return create(conversationv1.SessionUpdateSchema, {
     update: {
-      case: "accountUsage",
-      value: create(conversationv1.SessionAccountUsageSchema, {
-        observedAtMs: BigInt(Math.trunc(observedAtMs)),
-        // The vendor's own subscription word, verbatim; its vocabulary is not
-        // in evidence, so nothing is switched on it.
-        subscriptionType: typeof info?.rateLimitType === "string" ? info.rateLimitType : "",
-        outcome,
+      case: "rateLimitStatus",
+      value: create(conversationv1.SessionRateLimitStatusSchema, {
+        status: rateLimitStatus(record.status),
+        resetsAtMs: resetsAtMs(record.resetsAt),
+        rateLimitType: rateLimitType(record.rateLimitType),
+        utilizationPercent: percentOf(record.utilization),
+        overage: rateLimitOverage(record),
+        isUsingOverage: flag(record.isUsingOverage),
+        overageInUse: flag(record.overageInUse),
+        surpassedThresholdPercent: percentOf(record.surpassedThreshold),
+        errorCode: text(record.errorCode),
+        canUserPurchaseCredits: flag(record.canUserPurchaseCredits),
+        hasChargeableSavedPaymentMethod: flag(record.hasChargeableSavedPaymentMethod),
       }),
     },
   });
@@ -226,16 +334,13 @@ export function convertSessionMessage(
   const subtype = typeof record.subtype === "string" ? record.subtype : undefined;
 
   if (message.type === "rate_limit_event") {
-    LOGGER.log({ uuid }, "the account's allowance was observed");
+    LOGGER.log({ uuid }, "the vendor stated the account's live rate-limit status");
     return [
       sessionEntry(
         context,
         uuid,
-        "account_usage",
-        accountUsageUpdate(
-          context.nowMs(),
-          record.rate_limit_info as Record<string, unknown> | undefined,
-        ),
+        "rate_limit_status",
+        rateLimitStatusUpdate(record.rate_limit_info as Record<string, unknown> | undefined),
       ),
     ];
   }

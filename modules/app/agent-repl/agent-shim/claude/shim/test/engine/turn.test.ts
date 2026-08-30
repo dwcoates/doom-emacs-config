@@ -402,7 +402,7 @@ describe("KillTurn", () => {
     expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("live");
   });
 
-  it("NAMES the live work in the refusal", async () => {
+  it("NAMES the live work in the refusal, by its spawning call", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
     h.live.onTaskStarted(
@@ -414,7 +414,7 @@ describe("KillTurn", () => {
     const failure = response.result.case === "failure" ? response.result.value : undefined;
     expect(
       failure?.cause.case === "live" ? failure.cause.value.liveWork.map((id) => id.value) : undefined,
-    ).toEqual(["b01"]);
+    ).toEqual(["t"]);
   });
 
   it("stops the whole transitive set when forced", async () => {
@@ -586,7 +586,7 @@ describe("StopBash", () => {
       work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
     });
 
-  it("stops the run by its task id", async () => {
+  it("resolves the HANDLE to the vendor's task id, which is what stopTask wants", async () => {
     const h = await harness();
     h.live.onTaskStarted({
       type: "system",
@@ -598,7 +598,9 @@ describe("StopBash", () => {
       session_id: "s",
     } as SdkTaskStartedMessage);
 
-    await h.turns.stopBash(stop("b01"));
+    // The handle names the SPAWNING CALL (ruling, landing 3); the task id stays
+    // shim-side as the internal address.
+    await h.turns.stopBash(stop("t"));
 
     expect(h.query.stoppedTasks).toEqual(["b01"]);
   });
@@ -625,5 +627,177 @@ describe("WatchBash", () => {
     }
 
     expect(frames).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Landing 3: the opening page, and the two arms that name the SDK's gaps
+// ---------------------------------------------------------------------------
+
+describe("the opening page StartTurn paints", () => {
+  it("rides the answer, so one call submits AND paints", async () => {
+    const h = await harness();
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [
+        create(conversationv1.HistoryEntryAtSchema, {
+          at: create(conversationv1.HistoryPointerSchema, { value: "1" }),
+          entry: create(conversationv1.HistoryEntrySchema, {
+            entry: { case: "userPrompt", value: create(conversationv1.AgentPromptSchema, {}) },
+          }),
+        }),
+      ],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    const response = await h.turns.startTurn(startTurn());
+
+    const success = response.result.value as shimv1.StartTurnSuccess;
+    expect(success.page?.entries).toHaveLength(1);
+  });
+
+  it("is read AFTER the prompt is durable, so the first paint holds the new turn", async () => {
+    const h = await harness();
+
+    await h.turns.startTurn(startTurn());
+
+    // The durable prompt row lands before the page is opened; a page read first
+    // would paint a feed missing the very turn the caller just opened.
+    expect(h.persistence.durable).toHaveLength(1);
+    expect(h.persistence.closedPages).toBe(1);
+  });
+
+  it("closes the page session at once: StartTurn paints once and never tails", async () => {
+    const h = await harness();
+
+    await h.turns.startTurn(startTurn());
+
+    expect(h.persistence.closedPages).toBe(1);
+  });
+
+  it("answers an EMPTY page with a floor when the store cannot be read, never a failure", async () => {
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
+
+    const response = await h.turns.startTurn(startTurn());
+
+    // The prompt is already durable and already delivered, so a failure here
+    // would tell the daemon a turn did not start that is running.
+    expect(response.result.case).toBe("success");
+    const success = response.result.value as shimv1.StartTurnSuccess;
+    expect(success.page?.entries).toHaveLength(0);
+    expect(success.page?.boundary.case).toBe("floor");
+  });
+
+  it("never answers an ABSENT page, which a consumer cannot tell from an empty one", async () => {
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
+
+    const response = await h.turns.startTurn(startTurn());
+
+    const success = response.result.value as shimv1.StartTurnSuccess;
+    expect(success.page).toBeDefined();
+  });
+});
+
+describe("UpdateAgent.prompt to a subagent", () => {
+  it("refuses not_deliverable: the gap is the SDK's, not the agent's state", async () => {
+    const h = await harness();
+
+    const response = await h.turns.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        target: create(conversationv1.AgentIdSchema, { value: "agent-7" }),
+        input: create(conversationv1.AgentInputSchema, {
+          input: { case: "prompt", value: textSaid("carry on") },
+        }),
+      }),
+    );
+
+    expect(failureKind(response)).toBe("notDeliverable");
+  });
+
+  it("never says nothing_running, which would send a caller hunting a live agent", async () => {
+    const h = await harness();
+
+    const response = await h.turns.updateAgent(
+      create(shimv1.UpdateAgentRequestSchema, {
+        target: create(conversationv1.AgentIdSchema, { value: "agent-7" }),
+        input: create(conversationv1.AgentInputSchema, {
+          input: { case: "prompt", value: textSaid("carry on") },
+        }),
+      }),
+    );
+
+    expect(failureKind(response)).not.toBe("nothingRunning");
+  });
+});
+
+describe("DetachForeground on a live foreground unit", () => {
+  /** A live task the vendor has NOT backgrounded. */
+  function liveForeground(h: Harness): void {
+    h.live.onTaskStarted(
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "b01",
+        tool_use_id: "toolu_f",
+        description: "sleep 100",
+        uuid: "00000000-0000-4000-8000-000000000000",
+        session_id: "s",
+      } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+  }
+
+  it("refuses unsupported: the pinned SDK offers no verb to INITIATE a detachment", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    liveForeground(h);
+    h.query.backgroundTaskAnswer = true;
+
+    const response = await h.turns.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_f" }),
+      }),
+    );
+
+    expect(failureKind(response)).toBe("unsupported");
+  });
+
+  it("never says not_detachable, which would deny a kind that backgrounds routinely", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    liveForeground(h);
+    h.query.backgroundTaskAnswer = true;
+
+    const response = await h.turns.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_f" }),
+      }),
+    );
+
+    expect(failureKind(response)).not.toBe("notDetachable");
+  });
+
+  it("CONFIRMS a detachment the vendor made on its own", async () => {
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
+    liveForeground(h);
+    h.live.onTaskUpdated({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "b01",
+      patch: { is_backgrounded: true },
+      uuid: "00000000-0000-4000-8000-000000000001",
+      session_id: "s",
+    } as never);
+    h.query.backgroundTaskAnswer = true;
+
+    const response = await h.turns.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_f" }),
+      }),
+    );
+
+    expect(response.result.case).toBe("success");
   });
 });
