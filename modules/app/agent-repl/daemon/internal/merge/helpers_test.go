@@ -3,6 +3,8 @@ package merge
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -298,6 +300,11 @@ func (f *fakeDB) policyOf(lease wsm.LeaseID) wsm.LeasePolicy {
 // error rather than a surprise at run time.
 type fakeGit struct {
 	mu sync.Mutex
+	// seq stamps every call with the harness's shared sequence, so an ordering
+	// between a git call and a feed push is asserted on the real order rather
+	// than inferred.
+	seq func() int
+	at  map[string]int
 
 	defaultBranch string
 	commonDirs    map[string]string
@@ -320,8 +327,10 @@ type fakeGit struct {
 	removedWorktrees []string
 }
 
-func newFakeGit() *fakeGit {
+func newFakeGit(seq func() int) *fakeGit {
 	return &fakeGit{
+		seq:           seq,
+		at:            map[string]int{},
 		defaultBranch: "master",
 		commonDirs:    map[string]string{},
 		refs:          map[string]string{},
@@ -330,8 +339,12 @@ func newFakeGit() *fakeGit {
 }
 
 func (g *fakeGit) record(call string) {
+	at := g.seq()
 	g.mu.Lock()
 	g.calls = append(g.calls, call)
+	if _, seen := g.at[call]; !seen {
+		g.at[call] = at
+	}
 	g.mu.Unlock()
 }
 
@@ -354,8 +367,8 @@ func (g *fakeGit) CreateWorktree(context.Context, string, string, string, string
 }
 
 func (g *fakeGit) RemoveWorktree(_ context.Context, _, worktreeDir string) error {
+	g.record("remove_worktree")
 	g.mu.Lock()
-	g.calls = append(g.calls, "remove_worktree")
 	g.removedWorktrees = append(g.removedWorktrees, worktreeDir)
 	g.mu.Unlock()
 	return nil
@@ -380,8 +393,8 @@ func (g *fakeGit) SameRepo(context.Context, string, string) (bool, error) {
 }
 
 func (g *fakeGit) MergeNoFF(context.Context, string, string, string) (gitclient.MergeOutcome, error) {
+	g.record("merge_no_ff")
 	g.mu.Lock()
-	g.calls = append(g.calls, "merge_no_ff")
 	var out gitclient.MergeOutcome
 	if len(g.outcomes) > 0 {
 		out = g.outcomes[0]
@@ -392,8 +405,8 @@ func (g *fakeGit) MergeNoFF(context.Context, string, string, string) (gitclient.
 }
 
 func (g *fakeGit) ConflictedFiles(context.Context, string) ([]string, error) {
+	g.record("conflicted_files")
 	g.mu.Lock()
-	g.calls = append(g.calls, "conflicted_files")
 	var files []string
 	if len(g.conflicted) > 0 {
 		files = g.conflicted[0]
@@ -506,22 +519,27 @@ func (q *fakeQueue) countOrigin(origin conversationv1.PromptOrigin) int {
 // zero value.
 type fakeFeed struct {
 	feed.Resolver
-	mu sync.Mutex
+	// seq stamps every push with the harness's shared sequence.
+	seq func() int
+	mu  sync.Mutex
 
 	rows      []synthesized
 	addresses []*wsm.OutputAddress
 }
 
-// synthesized is one published row with the feed it landed on.
+// synthesized is one published row with the feed it landed on and when it was
+// pushed, in the harness's shared sequence.
 type synthesized struct {
 	WS   ids.WorkspaceID
 	Feed feedid.Feed
 	Row  *frontendv1.FeedRow
+	At   int
 }
 
 func (f *fakeFeed) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	at := f.seq()
 	f.mu.Lock()
-	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row})
+	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row, At: at})
 	f.mu.Unlock()
 }
 
@@ -776,6 +794,10 @@ type harness struct {
 	// parked is signalled the moment a run parks, so a test synchronizes on the
 	// state rather than on elapsed time.
 	parked chan ids.WorkspaceID
+	// seq is the shared monotonic sequence both the feed and the git fakes
+	// stamp their calls with, so an ordering between two subsystems is asserted
+	// on the real order.
+	seq int
 
 	mu  sync.Mutex
 	now time.Time
@@ -815,9 +837,7 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		t:        t,
 		db:       newFakeDB(),
-		git:      newFakeGit(),
 		queue:    &fakeQueue{},
-		feed:     &fakeFeed{},
 		footer:   &fakeFooter{},
 		sidebar:  &fakeSidebar{},
 		holds:    &fakeHolds{},
@@ -827,6 +847,8 @@ func newHarness(t *testing.T) *harness {
 		now:      time.Unix(1700000000, 0).UTC(),
 		briefs:   map[string][]string{},
 	}
+	h.git = newFakeGit(h.next)
+	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db}
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
@@ -915,6 +937,14 @@ func (h *harness) deps() Deps {
 		Now:     h.clock,
 		Log:     h.logs,
 	}
+}
+
+// next stamps the shared sequence.
+func (h *harness) next() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.seq++
+	return h.seq
 }
 
 // clock advances a millisecond per read, so two stamps in one run are ordered
@@ -1019,6 +1049,95 @@ func (h *harness) parks() <-chan ids.WorkspaceID {
 	parked := make(chan ids.WorkspaceID, 8)
 	h.o.onPark = func(ws ids.WorkspaceID) { parked <- ws }
 	return parked
+}
+
+// configureActions records the workspace's configured before/after prompts.
+func (h *harness) configureActions(before, after []string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	job := h.db.jobs[theWorkspace]
+	job.Actions = wsm.MergeActions{Before: before, After: after}
+	h.db.jobs[theWorkspace] = job
+}
+
+// escalate writes the record the fixes agent uses to end its loop without a
+// passing suite.
+func (h *harness) escalate(why string) {
+	h.t.Helper()
+	body := EscalationMarker + "\n" + why + "\n"
+	if err := os.WriteFile(filepath.Join(h.targetD, EscalationFile), []byte(body), 0o644); err != nil {
+		h.t.Fatalf("writing the escalation record: %v", err)
+	}
+}
+
+// leaseID reports the lease the harness's merge holds.
+func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
+	t.Helper()
+	lease, held, err := h.db.Lease(context.Background(), theWorkspace)
+	if err != nil || !held {
+		t.Fatalf("no lease is held: %v", err)
+	}
+	return lease.ID
+}
+
+// enqueue queues the harness's merge, failing the test if it is refused.
+func enqueue(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+}
+
+// admitAsync admits the harness's merge on its own goroutine, for the tests whose
+// merge parks and therefore never returns on its own.
+func admitAsync(h *harness, ctx context.Context) <-chan error {
+	done := make(chan error, 1)
+	go func() { _, err := h.o.pumpOnce(ctx, h.repoKey()); done <- err }()
+	return done
+}
+
+// equal reports whether two string slices match.
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// names renders a directory listing for a failure message.
+func names(entries []os.DirEntry) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// roundsOfKind reports the rounds one tab kind was drawn with, in order, once
+// per round.
+func (f *fakeFeed) roundsOfKind(kind string) []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []int
+	seen := map[uint32]bool{}
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab == nil || tabKindOf(tab) != kind {
+			continue
+		}
+		round := tab.GetLabel().GetRound()
+		if seen[round] {
+			continue
+		}
+		seen[round] = true
+		out = append(out, int(round))
+	}
+	return out
 }
 
 // waitForParked blocks until the harness's merge parks.

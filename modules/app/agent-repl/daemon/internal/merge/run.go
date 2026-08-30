@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -61,6 +62,9 @@ type run struct {
 	// rounds counts each tab kind's opened rounds, which is what makes a second
 	// pass a second tab.
 	rounds map[string]int
+	// opened remembers when each round opened, so a closed ledger interval is a
+	// real interval rather than an instant.
+	opened map[string]time.Time
 	// tab is the tab kind currently live.
 	tab string
 	// guidance carries a parked submission from RouteParked into the waiting
@@ -96,13 +100,15 @@ func (r *run) roundOf(kind string) int {
 // start in the ledger. Tabs are append-only, so opening is always a NEW round
 // rather than a reopened tab.
 func (r *run) openTab(ctx context.Context, kind string) int {
+	started := r.o.deps.Now()
 	r.mu.Lock()
 	r.rounds[kind]++
 	round := r.rounds[kind]
 	r.tab = kind
+	r.opened[roundKey(kind, round)] = started
 	r.mu.Unlock()
 	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, wsm.TabInterval{
-		Round: round, Kind: kind, StartedAt: r.o.deps.Now(),
+		Round: round, Kind: kind, StartedAt: started,
 	}); err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.tab_open", "could not record a tab interval",
 			dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round, "error": err.Error()})
@@ -118,8 +124,11 @@ func (r *run) openTab(ctx context.Context, kind string) int {
 // daemon synthesizes, never a WSM column.
 func (r *run) closeTab(ctx context.Context, kind string, round int, outcome string) {
 	ended := r.o.deps.Now()
+	r.mu.Lock()
+	started := r.opened[roundKey(kind, round)]
+	r.mu.Unlock()
 	if err := r.o.deps.DB.RecordTabInterval(ctx, r.lease.ID, wsm.TabInterval{
-		Round: round, Kind: kind, StartedAt: ended, EndedAt: &ended, Outcome: outcome,
+		Round: round, Kind: kind, StartedAt: started, EndedAt: &ended, Outcome: outcome,
 	}); err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.tab_close", "could not record a tab interval's end",
 			dlog.Context{"workspace": string(r.ws), "tab": kind, "round": round, "error": err.Error()})
@@ -180,6 +189,7 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		o: o, ws: ws, job: job, repo: repo, lease: lease, lock: lock,
 		startedMS:       o.deps.Now().UnixMilli(),
 		rounds:          map[string]int{},
+		opened:          map[string]time.Time{},
 		guidance:        make(chan *conversationv1.UserSaid),
 		answered:        make(chan error),
 		conflictBriefed: map[string]bool{},
@@ -228,6 +238,9 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	})
 	return r.execute(ctx)
 }
+
+// roundKey addresses one tab round's recorded start.
+func roundKey(kind string, round int) string { return fmt.Sprintf("%s/%d", kind, round) }
 
 // methodName names the method a run took, for the log record.
 func methodName(emacsRepo bool) string {
