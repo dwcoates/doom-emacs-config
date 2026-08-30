@@ -374,6 +374,15 @@ are deleted by the verbs agent once verbs.el replaces them.
   draws a "moved" notice and stops its streams; it never reconnects
   itself — the host owns the redial. `not_yet_adopted` → INFO, retry the
   adopt once the successor's WatchDaemon is accepted.
+- FINAL HANDOVER SEQUENCE (project lead): on `transferred{address}` (the
+  push now carries the successor address — decode it; when absent, fall
+  back to `agent-repl-link-successor`) and on `transferring_away{address}`:
+  (a) AdoptHostWorkspace on a connection to ADDRESS (reuse the link's
+  successor when its address matches, else open one and WatchDaemon it);
+  (b) reload the workspace's webview to `http://<address>/?workspace=<id>
+  &dir=<dir>` — the reloaded page adopts itself (AdoptWebWorkspace at
+  boot); Emacs does nothing else for the web side. Roster and daemon-link
+  then follow the successor's address as the current daemon (promotion).
 - `open_in_editor` (Q2 ruling) → `(agent-repl-popup-open PATH LINE)` — the
   ONE shared subroutine; a directory opens in dired. Log INFO with the path.
 - On `agent-repl-link-up-functions`: for every live workspace
