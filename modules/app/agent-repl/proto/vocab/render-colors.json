@@ -27,9 +27,13 @@
     "state a renderer paints, and there is no second spelling to keep aligned",
     "by hand."
   ],
-
-  "colors": ["blue", "purple", "red", "yellow", "green"],
-
+  "colors": [
+    "blue",
+    "purple",
+    "red",
+    "yellow",
+    "green"
+  ],
   "_precedence_comment": [
     "The five-color precedence, strongest claim first. Each color is a",
     "strictly stronger claim about what the user CANNOT do than the one",
@@ -40,8 +44,13 @@
     "holding the turn; yellow is detached work the user can talk over; green",
     "is the session yours to use."
   ],
-  "precedence": ["blue", "purple", "red", "yellow", "green"],
-
+  "precedence": [
+    "blue",
+    "purple",
+    "red",
+    "yellow",
+    "green"
+  ],
   "_roster_status_comment": [
     "Keyed by the RosterRow.status oneof arm names in",
     "frontend/v1/sidebar.proto, spelled EXACTLY as the proto spells them.",
@@ -58,27 +67,21 @@
   "roster_status": {
     "none": "none",
     "inactive": "none",
-
     "init": "blue",
     "severed": "blue",
     "dead": "blue",
     "degraded": "blue",
     "start_failed": "blue",
-
     "vendor_blocked": "purple",
-
     "submitting": "red",
     "thinking": "red",
     "clearing": "red",
     "compacting": "red",
-
     "idle_async": "yellow",
-
     "ready": "green",
     "done": "green",
     "interrupted": "green",
     "permission": "green",
-
     "merge_enqueuing": "none",
     "merging": "none",
     "merge_queued": "none",
@@ -86,7 +89,6 @@
     "merge_failed": "none",
     "merged": "none"
   },
-
   "_merge_glyphs_comment": [
     "GLYPH NAMES, not characters. The merge arms take no color, so the glyph",
     "is the whole report, and each renderer maps these names to whatever its",
@@ -107,7 +109,6 @@
     "merged": "check"
   },
   "feed_merge_head_glyph": "merge",
-
   "_footer_status_comment": [
     "Keyed by the FooterStatus.status oneof arm names in",
     "frontend/v1/footer.proto. The footer speaks about ONE session, so its",
@@ -128,7 +129,17 @@
     "closing": "blue",
     "loading": "red"
   },
-
+  "_footer_allowance_comment": [
+    "The rate-limit allowance rung's status arms (frontend.v1 FooterAllowance.status,",
+    "sourced from SessionUpdate.rate_limit_status): allowed is quiet, allowed_warning",
+    "is the newsworthy rung, rejected means the vendor refused. Consumers assert row",
+    "for row against the three arm names; no private fallback table exists anywhere."
+  ],
+  "footer_allowance": {
+    "allowed": "green",
+    "allowed_warning": "yellow",
+    "rejected": "red"
+  },
   "_topbar_connectivity_comment": [
     "TopbarConnectivity.tone, keyed by the daemon's link states. The topbar",
     "reports the route to the session's shim, so its whole range is green",
@@ -147,8 +158,14 @@
     "dead": "blue",
     "no_session": "none"
   },
-  "topbar_tones": ["none", "blue", "purple", "red", "yellow", "green"],
-
+  "topbar_tones": [
+    "none",
+    "blue",
+    "purple",
+    "red",
+    "yellow",
+    "green"
+  ],
   "_surface_overrides_comment": [
     "A surface may paint a state differently from the shared assignment",
     "above, but ONLY by naming the divergence here. Undeclared drift is",
@@ -193,7 +210,6 @@
       "vendor_blocked": "blue"
     }
   },
-
   "_failure_sides_comment": [
     "The SIDES of a failure — failure.proto's own vocabulary, which replaced",
     "the old error classes. A failure card takes the color of the side it",
@@ -210,15 +226,5 @@
     "machinery": "blue",
     "vendor": "purple",
     "client_local": "blue"
-  },
-  "_footer_allowance_comment": [
-    "FooterAllowance.status, keyed by its oneof arm names. The allowance cell",
-    "colors by arm: allowed is the ordinary state, allowed_warning is the",
-    "newsworthy rung, rejected is the vendor refusing."
-  ],
-  "footer_allowance": {
-    "allowed": "green",
-    "allowed_warning": "yellow",
-    "rejected": "red"
   }
 }
