@@ -465,7 +465,7 @@ purpose).
   AgentActivityId>` (tool_use_id; `<message.id>:<block_index>` 0-based for
   text/thinking); `prompt:<TurnId>`; `question:<AgentQuestionId>` (the ask
   tool_use_id); `permission:<AgentPermissionId>`; `terminal:<AgentId>:<
-  vendor record uuid>`; `bash:<run AgentActivityId>`; `session:<arm>:<vendor
+  vendor record uuid>`; `bash:<run AgentActivityId>:<from_offset>` per output delta and `bash:<run AgentActivityId>:terminal` (amended 2026-08-29: one key per run made each delta supersede the last; both planes spell it this way); `session:<arm>:<vendor
   record uuid>`. write_id = sha256("<producer>|<source coordinates>|<
   discriminator>") hex; producer = "claude-shim:<original vendor session
   id>". Shim-synthesized session facts (diagnostics, context_usage) are
