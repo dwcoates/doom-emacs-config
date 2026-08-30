@@ -34,6 +34,14 @@ import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identi
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
 import { bashUpsertKey, terminalUpsertKey } from "../store/keys.js";
 import type { PersistEntry, Persistence } from "../store/persistence.js";
+import {
+  announceLiveWork,
+  closingAgentTerminal,
+  closingBashTerminal,
+  closingSubagentTerminal,
+  findBashStart,
+  findUnit,
+} from "../store/reconcile.js";
 import type {
   CanUseToolLike,
   PermissionModeLike,
@@ -1018,6 +1026,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
       : await SessionIdentity.resume(identityStore, vendorSessionId);
+    // NAME THE WRITER BEFORE ANYTHING IS WRITTEN. A row is keyed by the
+    // conversation's ORIGINAL vendor session id, which is exactly what the
+    // identity just settled — and a write attempted before this raises rather
+    // than landing rows under a name no replay could absorb against.
+    deps.persistence.setProducer(identity.originalVendorSessionId);
     if (clearedTo !== undefined) {
       // The AgentId does not move; only the resume handle does, and the
       // rotation is announced exactly like a vendor-initiated one.
@@ -1264,6 +1277,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   }
 
   /**
+   * How much of the book a reconciliation reads to describe live work.
+   *
+   * Generous rather than exact: the descriptions it needs are the STARTS of
+   * units that are still open, which are near the end of the book by
+   * definition, and a budget too small would silently leave live work
+   * undescribed — which reads to a consumer as work that does not exist.
+   */
+  const RECONCILE_PAGE_SIZE = 512;
+
+  /**
    * GetLiveWork reconciliation.
    *
    * RE-ADOPT what the revived vendor process actually has, and WRITE THE
@@ -1285,86 +1308,68 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       return [];
     }
-    const readopted: conversationv1.AgentDetachedWork[] = [];
     const closing: PersistEntry[] = [];
     const agentId = requireIdentity().agentId;
-    for (const work of open.liveDetached) {
-      const entry = live.get(work.value);
-      if (entry === undefined) {
-        closing.push({
-          agentId,
-          upsertKey: bashUpsertKey(toolCallActivityId(work.value)),
-          source: { vendorUuid: work.value, discriminator: "agent_bash.failure.reconciled" },
-          keepalive: false,
-          item: {
-            kind: "bash_run",
-            run: toolCallActivityId(work.value),
-            frame: create(conversationv1.AgentBashSchema, {
-              result: {
-                case: "failure",
-                value: create(conversationv1.AgentBashFailureSchema, {
-                  error: create(conversationv1.AgentToolFailureSchema, {
-                    settledAt: create(conversationv1.AgentActivitySettledAtSchema, {
-                      atMs: BigInt(deps.nowMs()),
-                    }),
-                  }),
-                }),
-              },
-            }),
-          },
-        });
-        continue;
-      }
-      if (entry.toolUseId === undefined) {
-        // Every non-optional field or the message is not sent: without the
-        // originating call there is no legal `detached_from_id`, so the item is
-        // reported in the log rather than half-stated on the wire.
+
+    // THE RECORD IS THE ONLY PLACE the work's own start survives a bounce, so
+    // the book is read ONCE and every description below comes out of it. The
+    // page session's tail is closed at once: this is a read, not a follow.
+    let book: readonly conversationv1.HistoryEntryAt[] = [];
+    if (open.liveDetached.length > 0 || open.liveAgents.length > 0) {
+      let page;
+      try {
+        page = await deps.persistence.openAgentPage(agentId, RECONCILE_PAGE_SIZE);
+        book = page.page.entries;
+      } catch (err) {
         LOGGER.log(
-          { level: "warn", work_id: work.value },
-          "re-adopted live work whose originating call is unknown; it is not reported in SessionStarted.live_work",
+          { level: "warn", cause: err instanceof Error ? err.message : String(err) },
+          "the book could not be read for reconciliation; live work cannot be described",
         );
+      } finally {
+        page?.close();
+      }
+    }
+
+    // RE-ADOPTED WORK IS ANNOUNCED `created`, NEVER `detached`: a daemon that
+    // restarted was not there for the original announcement and has no element
+    // to continue, so it must be told what the work IS.
+    // A HANDLE NAMES THE SPAWNING CALL, so "does the revived vendor still have
+    // it" is a lookup by tool_use_id and never by the vendor's own task id.
+    const survives = (work: conversationv1.DetachedWorkId): boolean =>
+      live.byToolUseId(work.value) !== undefined;
+    const readopted = announceLiveWork(book, open.liveDetached.filter(survives));
+
+    for (const work of open.liveDetached) {
+      if (survives(work)) continue;
+      // The vendor no longer has it and nobody stopped it: we simply stopped
+      // being able to see it, which is what `lost.swept_up` says.
+      //
+      // THE KIND COMES FROM THE RECORD, never from a guess: every terminal arm
+      // is kind-specific, so closing an unknown unit as a shell would claim it
+      // ran a command and closing it as a spawn would claim it made an agent.
+      // A unit the record cannot describe is reported and left open — the
+      // obligation is real, and inventing its kind would not discharge it.
+      const run = toolCallActivityId(work.value);
+      const item = findUnit(book, run);
+      if (item?.case === "bash") {
+        const recorded = findBashStart(book, run);
+        if (recorded !== undefined) {
+          closing.push(closingBashTerminal(agentId, run, recorded));
+          continue;
+        }
+      }
+      if (item?.case === "subagent") {
+        closing.push(closingSubagentTerminal(agentId, run));
         continue;
       }
-      readopted.push(
-        create(conversationv1.AgentDetachedWorkSchema, {
-          work,
-          origin: {
-            case: "detached",
-            value: create(conversationv1.DetachedWorkDetachedSchema, {
-              detachedFromId: toolCallActivityId(entry.toolUseId),
-              cause: {
-                case: "requested",
-                value: create(conversationv1.DetachedCauseRequestedSchema, {}),
-              },
-            }),
-          },
-        }),
+      LOGGER.log(
+        { level: "warn", work_id: work.value, kind: item?.case },
+        "the record cannot describe this live work; its terminal would have to invent the unit's kind, so it stays open",
       );
     }
     for (const agent of open.liveAgents) {
       if (agent.value === agentId.value) continue;
-      closing.push({
-        agentId: subagentId(agent.value),
-        upsertKey: terminalUpsertKey(subagentId(agent.value), `reconciled-${deps.nowMs()}`),
-        source: { vendorUuid: `reconcile-${agent.value}`, discriminator: "agent_frame.failure.execution_error" },
-        keepalive: false,
-        item: {
-          kind: "frame",
-          frame: create(conversationv1.AgentFrameSchema, {
-            agentId: subagentId(agent.value),
-            result: {
-              case: "failure",
-              value: create(conversationv1.AgentFailureSchema, {
-                errors: ["the shim that was watching this agent was replaced; the vendor no longer has it"],
-                failure: {
-                  case: "executionError",
-                  value: create(conversationv1.AgentExecutionErrorSchema, {}),
-                },
-              }),
-            },
-          }),
-        },
-      });
+      closing.push(closingAgentTerminal(subagentId(agent.value)));
     }
     if (open.liveWorkflows.length > 0) {
       LOGGER.log(
