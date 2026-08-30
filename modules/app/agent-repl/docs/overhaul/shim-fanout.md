@@ -512,3 +512,12 @@ every UX or contract gap you surfaced instead of improvising.
   storage_failure on Open/ReadAgentPage; storage_failure on GetLiveWork;
   invalid_request | storage_failure on WriteBatch): the shim's reader must
   switch on them, never on detail prose (remediation #2).
+- INTEGRATION RUN #1 (tree 04703c1c3, pre-record-plane; stale): 98 failed /
+  91 passed / 4 todo in 1623 s (many 60 s timeouts). Persisting signals to
+  carry into remediation #2: six `[internal] internal error` Connect
+  responses (a shim exception escaping as internal — every handler must map
+  known refusals to arms and unknown exceptions to a logged
+  Code.Internal WITH detail), socket hang-ups on kill/stand-down paths,
+  DetachForeground `unsupported` on the `!ctrl-b` unit (the mock must make
+  the vendor detachment BEFORE the call, or the test must wait for it), and
+  the timeouts. Run #2 on the merged tree is the authoritative inventory.
