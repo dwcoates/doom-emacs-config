@@ -256,7 +256,7 @@ func TestCursorsRefusesAnEmptyFileIdentity(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "file_id is present with an empty value")
+	s.assertTracedRefusal(t, "file_id is present with an empty value")
 }
 
 func TestCursorsPreservesTheCarry(t *testing.T) {
