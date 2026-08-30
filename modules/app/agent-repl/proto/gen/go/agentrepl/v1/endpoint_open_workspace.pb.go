@@ -189,9 +189,20 @@ func (*OpenWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type OpenWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*OpenWorkspaceError_UnknownWorkspace
+	//	*OpenWorkspaceError_WorkspaceRefMismatch
+	//	*OpenWorkspaceError_TransferringAway
+	//	*OpenWorkspaceError_NotYetAdopted
+	//	*OpenWorkspaceError_SessionDeleted
+	//	*OpenWorkspaceError_TranscriptMissing
+	//	*OpenWorkspaceError_SpawnFailed
+	Cause         isOpenWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -226,6 +237,426 @@ func (*OpenWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *OpenWorkspaceError) GetCause() isOpenWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetUnknownWorkspace() *OpenWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetWorkspaceRefMismatch() *OpenWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetTransferringAway() *OpenWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetNotYetAdopted() *OpenWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetSessionDeleted() *OpenWorkspaceSessionDeleted {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_SessionDeleted); ok {
+			return x.SessionDeleted
+		}
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetTranscriptMissing() *OpenWorkspaceTranscriptMissing {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_TranscriptMissing); ok {
+			return x.TranscriptMissing
+		}
+	}
+	return nil
+}
+
+func (x *OpenWorkspaceError) GetSpawnFailed() *OpenWorkspaceSpawnFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenWorkspaceError_SpawnFailed); ok {
+			return x.SpawnFailed
+		}
+	}
+	return nil
+}
+
+type isOpenWorkspaceError_Cause interface {
+	isOpenWorkspaceError_Cause()
+}
+
+type OpenWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *OpenWorkspaceUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type OpenWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *OpenWorkspaceWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type OpenWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *OpenWorkspaceTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type OpenWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *OpenWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type OpenWorkspaceError_SessionDeleted struct {
+	// The workspace's session has been deleted and cannot be reopened.
+	SessionDeleted *OpenWorkspaceSessionDeleted `protobuf:"bytes,5,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
+}
+
+type OpenWorkspaceError_TranscriptMissing struct {
+	// The vendor transcript to resume from is nowhere on disk.
+	TranscriptMissing *OpenWorkspaceTranscriptMissing `protobuf:"bytes,6,opt,name=transcript_missing,json=transcriptMissing,proto3,oneof"`
+}
+
+type OpenWorkspaceError_SpawnFailed struct {
+	// Spawning the session's shim failed.
+	SpawnFailed *OpenWorkspaceSpawnFailed `protobuf:"bytes,7,opt,name=spawn_failed,json=spawnFailed,proto3,oneof"`
+}
+
+func (*OpenWorkspaceError_UnknownWorkspace) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_WorkspaceRefMismatch) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_TransferringAway) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_NotYetAdopted) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_SessionDeleted) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_TranscriptMissing) isOpenWorkspaceError_Cause() {}
+
+func (*OpenWorkspaceError_SpawnFailed) isOpenWorkspaceError_Cause() {}
+
+type OpenWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceUnknownWorkspace) Reset() {
+	*x = OpenWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *OpenWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+type OpenWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = OpenWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *OpenWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type OpenWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceTransferringAway) Reset() {
+	*x = OpenWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *OpenWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *OpenWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type OpenWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceNotYetAdopted) Reset() {
+	*x = OpenWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *OpenWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+type OpenWorkspaceSessionDeleted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceSessionDeleted) Reset() {
+	*x = OpenWorkspaceSessionDeleted{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceSessionDeleted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceSessionDeleted) ProtoMessage() {}
+
+func (x *OpenWorkspaceSessionDeleted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceSessionDeleted.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceSessionDeleted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{8}
+}
+
+type OpenWorkspaceTranscriptMissing struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The vendor session whose transcript is missing.
+	VendorSessionId string `protobuf:"bytes,1,opt,name=vendor_session_id,json=vendorSessionId,proto3" json:"vendor_session_id,omitempty"`
+	// Every path the daemon looked in.
+	SearchedPaths []string `protobuf:"bytes,2,rep,name=searched_paths,json=searchedPaths,proto3" json:"searched_paths,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceTranscriptMissing) Reset() {
+	*x = OpenWorkspaceTranscriptMissing{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceTranscriptMissing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceTranscriptMissing) ProtoMessage() {}
+
+func (x *OpenWorkspaceTranscriptMissing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceTranscriptMissing.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceTranscriptMissing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *OpenWorkspaceTranscriptMissing) GetVendorSessionId() string {
+	if x != nil {
+		return x.VendorSessionId
+	}
+	return ""
+}
+
+func (x *OpenWorkspaceTranscriptMissing) GetSearchedPaths() []string {
+	if x != nil {
+		return x.SearchedPaths
+	}
+	return nil
+}
+
+type OpenWorkspaceSpawnFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The spawn's own account of the failure.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenWorkspaceSpawnFailed) Reset() {
+	*x = OpenWorkspaceSpawnFailed{}
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenWorkspaceSpawnFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenWorkspaceSpawnFailed) ProtoMessage() {}
+
+func (x *OpenWorkspaceSpawnFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenWorkspaceSpawnFailed.ProtoReflect.Descriptor instead.
+func (*OpenWorkspaceSpawnFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *OpenWorkspaceSpawnFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_open_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
@@ -237,8 +668,28 @@ const file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.OpenWorkspaceSuccessH\x00R\asuccess\x128\n" +
 	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.OpenWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x16\n" +
-	"\x14OpenWorkspaceSuccess\"\x14\n" +
-	"\x12OpenWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x14OpenWorkspaceSuccess\"\x94\x05\n" +
+	"\x12OpenWorkspaceError\x12Z\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.OpenWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.OpenWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2+.agentrepl.v1.OpenWorkspaceTransferringAwayH\x00R\x10transferringAway\x12R\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.OpenWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12T\n" +
+	"\x0fsession_deleted\x18\x05 \x01(\v2).agentrepl.v1.OpenWorkspaceSessionDeletedH\x00R\x0esessionDeleted\x12]\n" +
+	"\x12transcript_missing\x18\x06 \x01(\v2,.agentrepl.v1.OpenWorkspaceTranscriptMissingH\x00R\x11transcriptMissing\x12K\n" +
+	"\fspawn_failed\x18\a \x01(\v2&.agentrepl.v1.OpenWorkspaceSpawnFailedH\x00R\vspawnFailedB\a\n" +
+	"\x05cause\"\x1f\n" +
+	"\x1dOpenWorkspaceUnknownWorkspace\"F\n" +
+	"!OpenWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
+	"\x1dOpenWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
+	"\x1aOpenWorkspaceNotYetAdopted\"\x1d\n" +
+	"\x1bOpenWorkspaceSessionDeleted\"s\n" +
+	"\x1eOpenWorkspaceTranscriptMissing\x12*\n" +
+	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12%\n" +
+	"\x0esearched_paths\x18\x02 \x03(\tR\rsearchedPaths\"2\n" +
+	"\x18OpenWorkspaceSpawnFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_open_workspace_proto_rawDescOnce sync.Once
@@ -252,23 +703,37 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_open_workspace_proto_goTypes = []any{
-	(*OpenWorkspaceRequest)(nil),  // 0: agentrepl.v1.OpenWorkspaceRequest
-	(*OpenWorkspaceResponse)(nil), // 1: agentrepl.v1.OpenWorkspaceResponse
-	(*OpenWorkspaceSuccess)(nil),  // 2: agentrepl.v1.OpenWorkspaceSuccess
-	(*OpenWorkspaceError)(nil),    // 3: agentrepl.v1.OpenWorkspaceError
-	(*v1.WorkspaceRef)(nil),       // 4: workspace.v1.WorkspaceRef
+	(*OpenWorkspaceRequest)(nil),              // 0: agentrepl.v1.OpenWorkspaceRequest
+	(*OpenWorkspaceResponse)(nil),             // 1: agentrepl.v1.OpenWorkspaceResponse
+	(*OpenWorkspaceSuccess)(nil),              // 2: agentrepl.v1.OpenWorkspaceSuccess
+	(*OpenWorkspaceError)(nil),                // 3: agentrepl.v1.OpenWorkspaceError
+	(*OpenWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenWorkspaceUnknownWorkspace
+	(*OpenWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
+	(*OpenWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.OpenWorkspaceTransferringAway
+	(*OpenWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenWorkspaceNotYetAdopted
+	(*OpenWorkspaceSessionDeleted)(nil),       // 8: agentrepl.v1.OpenWorkspaceSessionDeleted
+	(*OpenWorkspaceTranscriptMissing)(nil),    // 9: agentrepl.v1.OpenWorkspaceTranscriptMissing
+	(*OpenWorkspaceSpawnFailed)(nil),          // 10: agentrepl.v1.OpenWorkspaceSpawnFailed
+	(*v1.WorkspaceRef)(nil),                   // 11: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_open_workspace_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.OpenWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.OpenWorkspaceResponse.success:type_name -> agentrepl.v1.OpenWorkspaceSuccess
-	3, // 2: agentrepl.v1.OpenWorkspaceResponse.error:type_name -> agentrepl.v1.OpenWorkspaceError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	11, // 0: agentrepl.v1.OpenWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.OpenWorkspaceResponse.success:type_name -> agentrepl.v1.OpenWorkspaceSuccess
+	3,  // 2: agentrepl.v1.OpenWorkspaceResponse.error:type_name -> agentrepl.v1.OpenWorkspaceError
+	4,  // 3: agentrepl.v1.OpenWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.OpenWorkspaceUnknownWorkspace
+	5,  // 4: agentrepl.v1.OpenWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenWorkspaceWorkspaceRefMismatch
+	6,  // 5: agentrepl.v1.OpenWorkspaceError.transferring_away:type_name -> agentrepl.v1.OpenWorkspaceTransferringAway
+	7,  // 6: agentrepl.v1.OpenWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.OpenWorkspaceNotYetAdopted
+	8,  // 7: agentrepl.v1.OpenWorkspaceError.session_deleted:type_name -> agentrepl.v1.OpenWorkspaceSessionDeleted
+	9,  // 8: agentrepl.v1.OpenWorkspaceError.transcript_missing:type_name -> agentrepl.v1.OpenWorkspaceTranscriptMissing
+	10, // 9: agentrepl.v1.OpenWorkspaceError.spawn_failed:type_name -> agentrepl.v1.OpenWorkspaceSpawnFailed
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_workspace_proto_init() }
@@ -280,13 +745,22 @@ func file_agentrepl_v1_endpoint_open_workspace_proto_init() {
 		(*OpenWorkspaceResponse_Success)(nil),
 		(*OpenWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*OpenWorkspaceError_UnknownWorkspace)(nil),
+		(*OpenWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*OpenWorkspaceError_TransferringAway)(nil),
+		(*OpenWorkspaceError_NotYetAdopted)(nil),
+		(*OpenWorkspaceError_SessionDeleted)(nil),
+		(*OpenWorkspaceError_TranscriptMissing)(nil),
+		(*OpenWorkspaceError_SpawnFailed)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
