@@ -9,13 +9,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
+import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_daemon_health.proto.
  */
 export const file_agentrepl_v1_endpoint_daemon_health: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IoMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIAEIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSI8Cg9EYWVtb25VbmhlYWx0aHkSKQoGZmF1bHRzGAEgAygLMhkuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0Ih0KC0RhZW1vbkZhdWx0Eg4KBmRldGFpbBgBIAEoCSITChFEYWVtb25IZWFsdGhFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM");
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZGFlbW9uX2hlYWx0aC5wcm90bxIMYWdlbnRyZXBsLnYxIhUKE0RhZW1vbkhlYWx0aFJlcXVlc3QiiAEKFERhZW1vbkhlYWx0aFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLkRhZW1vbkhlYWx0aEVycm9ySABCCAoGcmVzdWx0IoMBChNEYWVtb25IZWFsdGhTdWNjZXNzEi4KB2hlYWx0aHkYASABKAsyGy5hZ2VudHJlcGwudjEuRGFlbW9uSGVhbHRoeUgAEjIKCXVuaGVhbHRoeRgCIAEoCzIdLmFnZW50cmVwbC52MS5EYWVtb25VbmhlYWx0aHlIAEIICgZoZWFsdGgiDwoNRGFlbW9uSGVhbHRoeSI8Cg9EYWVtb25VbmhlYWx0aHkSKQoGZmF1bHRzGAEgAygLMhkuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0IucDCgtEYWVtb25GYXVsdBIOCgZkZXRhaWwYASABKAkSUQoXYWRvcHRpb25fd2luZG93X2V4cGlyZWQYAiABKAsyLi5hZ2VudHJlcGwudjEuRGFlbW9uRmF1bHRBZG9wdGlvbldpbmRvd0V4cGlyZWRIABJFChFsb2dfc2lua19wb2lzb25lZBgDIAEoCzIoLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdExvZ1NpbmtQb2lzb25lZEgAEksKFGRlcGxveV9zY3JpcHRfZmFpbGVkGAQgASgLMisuYWdlbnRyZXBsLnYxLkRhZW1vbkZhdWx0RGVwbG95U2NyaXB0RmFpbGVkSAASTwoWc3VjY2Vzc29yX3NwYXduX2ZhaWxlZBgFIAEoCzItLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFN1Y2Nlc3NvclNwYXduRmFpbGVkSAASSQoTcHJvbXB0c19kaXJfbWlzc2luZxgGIAEoCzIqLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFByb21wdHNEaXJNaXNzaW5nSAASPQoNd3NtX3JlYWRfb25seRgHIAEoCzIkLmFnZW50cmVwbC52MS5EYWVtb25GYXVsdFdzbVJlYWRPbmx5SABCBgoEa2luZCJRCiBEYWVtb25GYXVsdEFkb3B0aW9uV2luZG93RXhwaXJlZBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIioKGkRhZW1vbkZhdWx0TG9nU2lua1BvaXNvbmVkEgwKBHNpbmsYASABKAkiLwodRGFlbW9uRmF1bHREZXBsb3lTY3JpcHRGYWlsZWQSDgoGZGV0YWlsGAEgASgJIjEKH0RhZW1vbkZhdWx0U3VjY2Vzc29yU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJIiwKHERhZW1vbkZhdWx0UHJvbXB0c0Rpck1pc3NpbmcSDAoEcGF0aBgBIAEoCSIYChZEYWVtb25GYXVsdFdzbVJlYWRPbmx5IhMKEURhZW1vbkhlYWx0aEVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * Nothing to ask beyond "you?".
@@ -138,15 +140,65 @@ export type DaemonFault = Message<"agentrepl.v1.DaemonFault"> & {
   /**
    * The dynamic account, verbatim — supplements the kind, never replaces it.
    *
-   * THE KIND ONEOF IS ADDED WITH ITS FIRST DERIVED ARMS at the wave (an
-   * empty oneof is not legal proto): derived from the daemon's real fault
-   * sites, never invented. The pending file's RuntimeFault (string
-   * component/fault_type/impact/cause) is this message's ancestor and is
-   * judged INTO these arms at the host stream's turn.
-   *
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * Kinds derived from the daemon's real fault sites (landing 4, 2026-08-29).
+   *
+   * @generated from oneof agentrepl.v1.DaemonFault.kind
+   */
+  kind: {
+    /**
+     * A workspace's adoption window closed before the joining daemon
+     * adopted it.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultAdoptionWindowExpired adoption_window_expired = 2;
+     */
+    value: DaemonFaultAdoptionWindowExpired;
+    case: "adoptionWindowExpired";
+  } | {
+    /**
+     * A log sink can no longer be written.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultLogSinkPoisoned log_sink_poisoned = 3;
+     */
+    value: DaemonFaultLogSinkPoisoned;
+    case: "logSinkPoisoned";
+  } | {
+    /**
+     * The deploy script failed.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultDeployScriptFailed deploy_script_failed = 4;
+     */
+    value: DaemonFaultDeployScriptFailed;
+    case: "deployScriptFailed";
+  } | {
+    /**
+     * Spawning the successor daemon failed.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultSuccessorSpawnFailed successor_spawn_failed = 5;
+     */
+    value: DaemonFaultSuccessorSpawnFailed;
+    case: "successorSpawnFailed";
+  } | {
+    /**
+     * The prompts directory is not on disk.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultPromptsDirMissing prompts_dir_missing = 6;
+     */
+    value: DaemonFaultPromptsDirMissing;
+    case: "promptsDirMissing";
+  } | {
+    /**
+     * The workspace-state store is read-only.
+     *
+     * @generated from field: agentrepl.v1.DaemonFaultWsmReadOnly wsm_read_only = 7;
+     */
+    value: DaemonFaultWsmReadOnly;
+    case: "wsmReadOnly";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -157,7 +209,115 @@ export const DaemonFaultSchema: GenMessage<DaemonFault> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_daemon_health, 5);
 
 /**
- * EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+ * @generated from message agentrepl.v1.DaemonFaultAdoptionWindowExpired
+ */
+export type DaemonFaultAdoptionWindowExpired = Message<"agentrepl.v1.DaemonFaultAdoptionWindowExpired"> & {
+  /**
+   * The workspace whose window expired.
+   *
+   * @generated from field: workspace.v1.WorkspaceRef workspace = 1;
+   */
+  workspace?: WorkspaceRef | undefined;
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultAdoptionWindowExpired.
+ * Use `create(DaemonFaultAdoptionWindowExpiredSchema)` to create a new message.
+ */
+export const DaemonFaultAdoptionWindowExpiredSchema: GenMessage<DaemonFaultAdoptionWindowExpired> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 6);
+
+/**
+ * @generated from message agentrepl.v1.DaemonFaultLogSinkPoisoned
+ */
+export type DaemonFaultLogSinkPoisoned = Message<"agentrepl.v1.DaemonFaultLogSinkPoisoned"> & {
+  /**
+   * Which sink.
+   *
+   * @generated from field: string sink = 1;
+   */
+  sink: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultLogSinkPoisoned.
+ * Use `create(DaemonFaultLogSinkPoisonedSchema)` to create a new message.
+ */
+export const DaemonFaultLogSinkPoisonedSchema: GenMessage<DaemonFaultLogSinkPoisoned> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 7);
+
+/**
+ * @generated from message agentrepl.v1.DaemonFaultDeployScriptFailed
+ */
+export type DaemonFaultDeployScriptFailed = Message<"agentrepl.v1.DaemonFaultDeployScriptFailed"> & {
+  /**
+   * The script's own account of the failure.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultDeployScriptFailed.
+ * Use `create(DaemonFaultDeployScriptFailedSchema)` to create a new message.
+ */
+export const DaemonFaultDeployScriptFailedSchema: GenMessage<DaemonFaultDeployScriptFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 8);
+
+/**
+ * @generated from message agentrepl.v1.DaemonFaultSuccessorSpawnFailed
+ */
+export type DaemonFaultSuccessorSpawnFailed = Message<"agentrepl.v1.DaemonFaultSuccessorSpawnFailed"> & {
+  /**
+   * The spawn's own account of the failure.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultSuccessorSpawnFailed.
+ * Use `create(DaemonFaultSuccessorSpawnFailedSchema)` to create a new message.
+ */
+export const DaemonFaultSuccessorSpawnFailedSchema: GenMessage<DaemonFaultSuccessorSpawnFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 9);
+
+/**
+ * @generated from message agentrepl.v1.DaemonFaultPromptsDirMissing
+ */
+export type DaemonFaultPromptsDirMissing = Message<"agentrepl.v1.DaemonFaultPromptsDirMissing"> & {
+  /**
+   * The path that is not there.
+   *
+   * @generated from field: string path = 1;
+   */
+  path: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultPromptsDirMissing.
+ * Use `create(DaemonFaultPromptsDirMissingSchema)` to create a new message.
+ */
+export const DaemonFaultPromptsDirMissingSchema: GenMessage<DaemonFaultPromptsDirMissing> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 10);
+
+/**
+ * @generated from message agentrepl.v1.DaemonFaultWsmReadOnly
+ */
+export type DaemonFaultWsmReadOnly = Message<"agentrepl.v1.DaemonFaultWsmReadOnly"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.DaemonFaultWsmReadOnly.
+ * Use `create(DaemonFaultWsmReadOnlySchema)` to create a new message.
+ */
+export const DaemonFaultWsmReadOnlySchema: GenMessage<DaemonFaultWsmReadOnly> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 11);
+
+/**
+ * No arms: DaemonHealth has no refusal site (landing 4).
  *
  * @generated from message agentrepl.v1.DaemonHealthError
  */
@@ -169,5 +329,5 @@ export type DaemonHealthError = Message<"agentrepl.v1.DaemonHealthError"> & {
  * Use `create(DaemonHealthErrorSchema)` to create a new message.
  */
 export const DaemonHealthErrorSchema: GenMessage<DaemonHealthError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 6);
+  messageDesc(file_agentrepl_v1_endpoint_daemon_health, 12);
 

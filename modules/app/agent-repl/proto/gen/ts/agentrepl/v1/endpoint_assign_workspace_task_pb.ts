@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_assign_workspace_task.proto.
  */
 export const file_agentrepl_v1_endpoint_assign_workspace_task: GenFile = /*@__PURE__*/
-  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXNzaWduX3dvcmtzcGFjZV90YXNrLnByb3RvEgxhZ2VudHJlcGwudjEifgoaQXNzaWduV29ya3NwYWNlVGFza1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIoCgR0YXNrGAIgASgLMhUuYWdlbnRyZXBsLnYxLlRhc2tSZWZIAIgBAUIHCgVfdGFzayKdAQobQXNzaWduV29ya3NwYWNlVGFza1Jlc3BvbnNlEjsKB3N1Y2Nlc3MYASABKAsyKC5hZ2VudHJlcGwudjEuQXNzaWduV29ya3NwYWNlVGFza1N1Y2Nlc3NIABI3CgVlcnJvchgCIAEoCzImLmFnZW50cmVwbC52MS5Bc3NpZ25Xb3Jrc3BhY2VUYXNrRXJyb3JIAEIICgZyZXN1bHQiHAoaQXNzaWduV29ya3NwYWNlVGFza1N1Y2Nlc3MiGgoYQXNzaWduV29ya3NwYWNlVGFza0Vycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_task, file_workspace_v1_workspace]);
+  fileDesc("CjFhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXNzaWduX3dvcmtzcGFjZV90YXNrLnByb3RvEgxhZ2VudHJlcGwudjEifgoaQXNzaWduV29ya3NwYWNlVGFza1JlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIoCgR0YXNrGAIgASgLMhUuYWdlbnRyZXBsLnYxLlRhc2tSZWZIAIgBAUIHCgVfdGFzayKdAQobQXNzaWduV29ya3NwYWNlVGFza1Jlc3BvbnNlEjsKB3N1Y2Nlc3MYASABKAsyKC5hZ2VudHJlcGwudjEuQXNzaWduV29ya3NwYWNlVGFza1N1Y2Nlc3NIABI3CgVlcnJvchgCIAEoCzImLmFnZW50cmVwbC52MS5Bc3NpZ25Xb3Jrc3BhY2VUYXNrRXJyb3JIAEIICgZyZXN1bHQiHAoaQXNzaWduV29ya3NwYWNlVGFza1N1Y2Nlc3MirQMKGEFzc2lnbldvcmtzcGFjZVRhc2tFcnJvchJOChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIxLmFnZW50cmVwbC52MS5Bc3NpZ25Xb3Jrc3BhY2VUYXNrVW5rbm93bldvcmtzcGFjZUgAElcKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyNS5hZ2VudHJlcGwudjEuQXNzaWduV29ya3NwYWNlVGFza1dvcmtzcGFjZVJlZk1pc21hdGNoSAASTgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyMS5hZ2VudHJlcGwudjEuQXNzaWduV29ya3NwYWNlVGFza1RyYW5zZmVycmluZ0F3YXlIABJJCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLi5hZ2VudHJlcGwudjEuQXNzaWduV29ya3NwYWNlVGFza05vdFlldEFkb3B0ZWRIABJECgx1bmtub3duX3Rhc2sYBSABKAsyLC5hZ2VudHJlcGwudjEuQXNzaWduV29ya3NwYWNlVGFza1Vua25vd25UYXNrSABCBwoFY2F1c2UiJQojQXNzaWduV29ya3NwYWNlVGFza1Vua25vd25Xb3Jrc3BhY2UiPwonQXNzaWduV29ya3NwYWNlVGFza1dvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSI2CiNBc3NpZ25Xb3Jrc3BhY2VUYXNrVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIiIKIEFzc2lnbldvcmtzcGFjZVRhc2tOb3RZZXRBZG9wdGVkIiAKHkFzc2lnbldvcmtzcGFjZVRhc2tVbmtub3duVGFza0IqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_task, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.AssignWorkspaceTaskRequest
@@ -93,12 +93,56 @@ export const AssignWorkspaceTaskSuccessSchema: GenMessage<AssignWorkspaceTaskSuc
   messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown task,
- * unknown workspace, …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.AssignWorkspaceTaskError
  */
 export type AssignWorkspaceTaskError = Message<"agentrepl.v1.AssignWorkspaceTaskError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.AssignWorkspaceTaskError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.AssignWorkspaceTaskUnknownWorkspace unknown_workspace = 1;
+     */
+    value: AssignWorkspaceTaskUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.AssignWorkspaceTaskWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: AssignWorkspaceTaskWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.AssignWorkspaceTaskTransferringAway transferring_away = 3;
+     */
+    value: AssignWorkspaceTaskTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.AssignWorkspaceTaskNotYetAdopted not_yet_adopted = 4;
+     */
+    value: AssignWorkspaceTaskNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * No task by that id.
+     *
+     * @generated from field: agentrepl.v1.AssignWorkspaceTaskUnknownTask unknown_task = 5;
+     */
+    value: AssignWorkspaceTaskUnknownTask;
+    case: "unknownTask";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -107,4 +151,81 @@ export type AssignWorkspaceTaskError = Message<"agentrepl.v1.AssignWorkspaceTask
  */
 export const AssignWorkspaceTaskErrorSchema: GenMessage<AssignWorkspaceTaskError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 3);
+
+/**
+ * @generated from message agentrepl.v1.AssignWorkspaceTaskUnknownWorkspace
+ */
+export type AssignWorkspaceTaskUnknownWorkspace = Message<"agentrepl.v1.AssignWorkspaceTaskUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AssignWorkspaceTaskUnknownWorkspace.
+ * Use `create(AssignWorkspaceTaskUnknownWorkspaceSchema)` to create a new message.
+ */
+export const AssignWorkspaceTaskUnknownWorkspaceSchema: GenMessage<AssignWorkspaceTaskUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 4);
+
+/**
+ * @generated from message agentrepl.v1.AssignWorkspaceTaskWorkspaceRefMismatch
+ */
+export type AssignWorkspaceTaskWorkspaceRefMismatch = Message<"agentrepl.v1.AssignWorkspaceTaskWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AssignWorkspaceTaskWorkspaceRefMismatch.
+ * Use `create(AssignWorkspaceTaskWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const AssignWorkspaceTaskWorkspaceRefMismatchSchema: GenMessage<AssignWorkspaceTaskWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 5);
+
+/**
+ * @generated from message agentrepl.v1.AssignWorkspaceTaskTransferringAway
+ */
+export type AssignWorkspaceTaskTransferringAway = Message<"agentrepl.v1.AssignWorkspaceTaskTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AssignWorkspaceTaskTransferringAway.
+ * Use `create(AssignWorkspaceTaskTransferringAwaySchema)` to create a new message.
+ */
+export const AssignWorkspaceTaskTransferringAwaySchema: GenMessage<AssignWorkspaceTaskTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 6);
+
+/**
+ * @generated from message agentrepl.v1.AssignWorkspaceTaskNotYetAdopted
+ */
+export type AssignWorkspaceTaskNotYetAdopted = Message<"agentrepl.v1.AssignWorkspaceTaskNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AssignWorkspaceTaskNotYetAdopted.
+ * Use `create(AssignWorkspaceTaskNotYetAdoptedSchema)` to create a new message.
+ */
+export const AssignWorkspaceTaskNotYetAdoptedSchema: GenMessage<AssignWorkspaceTaskNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 7);
+
+/**
+ * @generated from message agentrepl.v1.AssignWorkspaceTaskUnknownTask
+ */
+export type AssignWorkspaceTaskUnknownTask = Message<"agentrepl.v1.AssignWorkspaceTaskUnknownTask"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AssignWorkspaceTaskUnknownTask.
+ * Use `create(AssignWorkspaceTaskUnknownTaskSchema)` to create a new message.
+ */
+export const AssignWorkspaceTaskUnknownTaskSchema: GenMessage<AssignWorkspaceTaskUnknownTask> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_assign_workspace_task, 8);
 
