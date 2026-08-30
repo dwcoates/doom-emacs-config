@@ -750,7 +750,6 @@ func TestWriteBatchStoresTheAgentFrameItselfAsTheTerminal(t *testing.T) {
 	}
 }
 
-
 // ---- the write ledger ----
 
 func TestWriteBatchAbsorbsASupersededWriteIdWithoutRegressingTheRow(t *testing.T) {
