@@ -463,3 +463,105 @@ func TestCloseReportsADoubleCloseAsAStorageFailure(t *testing.T) {
 		s.assertLogged(t, "error", "closing SQLite database failed")
 	}
 }
+
+func TestOpenNukesAFileThatIsNotADatabaseAtAll(t *testing.T) {
+	// Arrange: a truncated copy, a half-written file, somebody's notes. A --db
+	// path this binary cannot read is the SAME situation as a schema it did not
+	// create, and refusing to boot would wedge the service on bytes nobody can
+	// read.
+	path := filepath.Join(t.TempDir(), "store.db")
+	if err := os.WriteFile(path, []byte("this is not a SQLite database"), 0o600); err != nil {
+		t.Fatalf("stage garbage: %v", err)
+	}
+	s, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenWithOptions over a garbage file = %v, want the file removed and recreated", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+	if got := scalar[int](t, d, `SELECT version FROM schema_meta`); got != SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", got, SchemaVersion)
+	}
+	s.assertLogged(t, "warn", "cannot be read by this binary")
+}
+
+func TestOpenRemovesTheWalSiblingsOfAnUnreadableDatabase(t *testing.T) {
+	// Arrange: SQLite opening a fresh database beside a stale WAL is how a
+	// "recreated" store comes up carrying fragments of the one it replaced.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.WriteFile(name, []byte("garbage"), 0o600); err != nil {
+			t.Fatalf("stage %q: %v", name, err)
+		}
+	}
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+	if err != nil {
+		t.Fatalf("OpenWithOptions: %v", err)
+	}
+	defer d.Close() //nolint:errcheck // test teardown
+
+	// Assert: whatever WAL files exist now are this database's own, not the
+	// staged bytes.
+	if data, readErr := os.ReadFile(path + "-wal"); readErr == nil && string(data) == "garbage" {
+		t.Fatal("the stale -wal survived the recreate")
+	}
+	if data, readErr := os.ReadFile(path + "-shm"); readErr == nil && string(data) == "garbage" {
+		t.Fatal("the stale -shm survived the recreate")
+	}
+}
+
+func TestOpenStillFailsWhenTheRecreateItselfCannotSucceed(t *testing.T) {
+	// Arrange: the nuke happens ONCE. A second failure after a clean recreate is
+	// a real problem — an unwritable directory, a full disk — and is returned
+	// rather than retried forever.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.db")
+	if err := os.WriteFile(path, []byte("not a database"), 0o600); err != nil {
+		t.Fatalf("stage garbage: %v", err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions succeeded on a read-only directory holding a garbage file")
+	}
+}
+
+func TestOpenRefusesADirectoryAtTheDatabasePathRatherThanRemovingIt(t *testing.T) {
+	// Arrange: unlinking whatever sits at an operator-supplied path is how a
+	// service deletes somebody's data. A directory at --db is a
+	// misconfiguration to report, not a database to replace.
+	path := filepath.Join(t.TempDir(), "events.db")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("stage a directory: %v", err)
+	}
+	_, log := newSink(t)
+
+	// Act
+	d, err := OpenWithOptions(path, log, Options{})
+
+	// Assert
+	if err == nil {
+		d.Close() //nolint:errcheck // test teardown
+		t.Fatal("OpenWithOptions accepted a directory at the database path")
+	}
+	if info, statErr := os.Stat(path); statErr != nil || !info.IsDir() {
+		t.Fatalf("the directory at %q did not survive the refused open (stat err: %v)", path, statErr)
+	}
+}
