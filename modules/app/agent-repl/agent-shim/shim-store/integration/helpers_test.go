@@ -518,6 +518,37 @@ func (s *storeProcess) assertNoErrorRecords() {
 	}
 }
 
+// assertExactlyOneNormalRecord asserts that a refusal produced exactly ONE
+// normal-verbosity record, and returns it.
+//
+// EVERY ERROR IS LOGGED EXACTLY ONCE BY ITS OWNING LAYER. Two layers each
+// writing a normal-level record for one refusal is not redundancy — it is a
+// count that lies to anyone who alerts on it, and a reader who cannot tell one
+// refusal from two.
+func assertExactlyOneNormalRecord(t *testing.T, records []logRecord, what string) logRecord {
+	t.Helper()
+	var normal []logRecord
+	for _, rec := range records {
+		if rec.Verbosity == "normal" && (rec.Level == "warn" || rec.Level == "error") {
+			normal = append(normal, rec)
+		}
+	}
+	if len(normal) != 1 {
+		t.Fatalf("%s produced %d normal-level records, want exactly 1: %v", what, len(normal), normal)
+	}
+	return normal[0]
+}
+
+// assertNoErrorRecordIn fails if any record in the window is an error.
+func assertNoErrorRecordIn(t *testing.T, records []logRecord, what string) {
+	t.Helper()
+	for _, rec := range records {
+		if rec.Level == "error" {
+			t.Errorf("%s logged an error record: operation=%q message=%q context=%v", what, rec.Operation, rec.Message, rec.Context)
+		}
+	}
+}
+
 // recordsAtLevel filters records by level ("warn", "error").
 func recordsAtLevel(records []logRecord, level string) []logRecord {
 	var out []logRecord

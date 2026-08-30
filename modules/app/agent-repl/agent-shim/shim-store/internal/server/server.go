@@ -162,18 +162,20 @@ func storeRefusal(err error) *refusal {
 // storeFailure classifies a storage-layer error, records it at the weight its
 // class deserves, and returns the refusal the failure arm carries.
 //
-// A REFUSED REQUEST IS NOT A DATABASE FAILURE. When the storage layer refuses
-// the request itself (ErrInvalid — a malformed frame inside the envelope this
-// layer keeps opaque), the refusal belongs to the CALL, and only this layer
-// knows the call: the storage layer's own record names its statement and table,
-// and nothing in it ties the refusal to the procedure, the request id or the
-// producer. So an ErrInvalid is recorded here exactly as this layer's own
-// validation refusals are. A stale pointer is an ordinary race a caller
-// recovers from, and a database failure was already recorded by the layer that
-// owns it; both stay verbose traces.
+// A REFUSED REQUEST IS NOT A DATABASE FAILURE, and the refusal belongs to the
+// CALL. Only this layer knows the call — its procedure, its request id, its
+// producer — so this is where a refused request gets its ONE normal-level
+// record, whether the storage layer classified it as malformed (ErrInvalid) or
+// as a pointer that has moved (ErrStalePointer). The storage layer traces both
+// at verbose with its statement and table, which is context, not a second
+// record.
+//
+// A DATABASE FAILURE IS THE OTHER WAY AROUND: internal/db already recorded it at
+// `error` with the statement that failed, so this layer adds only a verbose
+// trace tying the rpc to it.
 func (s *Server) storeFailure(log *logging.Logger, operation string, err error, fields logging.Fields) *refusal {
 	ref := storeRefusal(err)
-	if ref.class == classInvalid {
+	if ref.class == classInvalid || ref.class == classStalePointer {
 		s.logRefusal(log, operation, ref, fields)
 		return ref
 	}

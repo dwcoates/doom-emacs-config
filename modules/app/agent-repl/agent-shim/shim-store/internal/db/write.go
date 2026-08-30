@@ -176,18 +176,39 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	return result, nil
 }
 
-// refuse records the refusal exactly once, here at its owning layer, and hands
-// the error back for the server to shape into a typed failure arm.
+// refuse records one refusal and hands the error back for the server to shape
+// into a typed failure arm.
 //
-// EVERY error return of this package goes through it, read paths included, so
-// the rule "each error is logged exactly once by its owning layer" has one
-// implementation rather than a convention.
+// WHO OWNS THE RECORD DEPENDS ON WHOSE FAULT IT IS, and that is the whole rule.
+//
+//   - A REFUSED REQUEST (ErrInvalid, ErrStalePointer) belongs to the CALL, and
+//     only the server knows the call: its rpc, its request id, its producer.
+//     This layer's record would name a statement and a table and tie the
+//     refusal to nothing, so it is a VERBOSE trace here and the server writes
+//     the single normal-level record. Emitting both put two normal-level
+//     records on one refusal and made "every error is logged exactly once" false
+//     wherever anyone counted.
+//   - A STALE POINTER IS NOT AN ERROR AT ALL. It is an ordinary race — the
+//     caller walked a book that moved — and its recovery is a repaint. Logging
+//     it at `error` meant a healthy store wrote error records during normal
+//     operation, which is exactly how an error log stops being read.
+//   - A STORAGE FAILURE is this layer's own, with statement and table context
+//     nothing above can supply, so it stays a normal-level `error` record here
+//     and the server answers with a verbose trace instead of a second one.
 func (d *DB) refuse(fields logging.Fields, err error) error {
-	fields.Level = "error"
 	fields.ErrorCause = err.Error()
 	if fields.Operation == "" {
 		fields.Operation = "store.db"
 	}
+	if errors.Is(err, ErrInvalid) || errors.Is(err, ErrStalePointer) {
+		fields.Level = "debug"
+		if site := RefusalSite(err); site != "" {
+			fields.RefusalSite = site
+		}
+		d.log.LogVerbose(fields, "refused: %v", err)
+		return err
+	}
+	fields.Level = "error"
 	d.log.Log(fields, "refused: %v", err)
 	return err
 }
