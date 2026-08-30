@@ -664,3 +664,21 @@ Rulings already binding; code swaps to the generated arms when it lands:
 - Vocab merge note: `footer_allowance` also landed on overhaul/integration
   (8c56dece8) directly; when overhaul/daemon merges into integration the
   render-colors.json conflict resolves to the daemon's version.
+
+## FooterAllowance sourcing (project lead ruling, supersedes the landing-4 adaptation)
+
+- `SessionUpdate.account_usage` is NOT retired. FIGURES (utilization,
+  resets_at) come from account_usage: five_hour → `session`, seven_day →
+  `weekly`; sampled at a cadence and complete from the first sample.
+- The VERDICT (`FooterAllowance.status` arm) comes from
+  `SessionUpdate.rate_limit_status`, matched by window: five_hour →
+  session; seven_day / seven_day_opus / seven_day_sonnet /
+  seven_day_overage_included → weekly; `overage` → the overage note. It
+  stays UNSET until a rate-limit event for that window has been seen — an
+  unset status oneof is LEGAL ("no vendor verdict observed yet").
+- The allowance line draws as soon as a usage sample exists; the verdict
+  arm joins when it arrives.
+- A rate-limit event carrying a utilization for the same window that is
+  NEWER than the last sample wins for the figure.
+- Footer remediation owed: replace the "both windows from rate_limit_status"
+  rule with the above (tests per bullet).
