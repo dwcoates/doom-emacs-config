@@ -48,6 +48,7 @@ import type {
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
 import { clearRefusals, refusal, whileInFlight } from "../cards/controls.js";
+import { refusalOf, type SentenceTable } from "../refusal-text.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
@@ -342,10 +343,20 @@ async function answer(
 }
 
 /**
+ * The causes only THIS verb can answer with. The four cross-cutting ones are
+ * worded once, in `refusal-text.ts`, so they read identically at every control.
+ */
+const OWN_CAUSES = {
+  askNotStanding: () => "this ask is no longer standing",
+  noStandingOffer: () => "no standing allow was offered for this call",
+  noSession: () => "the workspace has no session to answer",
+} as unknown as SentenceTable;
+
+/**
  * What came back: nothing to draw on success, this click's own refusal on error.
  *
- * The error arm is EMPTY today, so the refusal names the rpc rather than
- * inventing a cause the wire did not state.
+ * The cause is TYPED, so the refusal names the arm and says what it means. An
+ * unset cause is a malformed view, not a generic "it was refused".
  */
 function drawAnswerOutcome(
   response: AnswerPermissionResponse,
@@ -358,10 +369,15 @@ function drawAnswerOutcome(
       // The card's new state is the row's re-push. Nothing is drawn here, and
       // the buttons stay latched: this ask has been answered.
       return;
-    case "error":
-      actions.append(refusal(result.case, "AnswerPermission was refused"));
+    case "error": {
+      const said = refusalOf(result.value.cause, OWN_CAUSES, "AnswerPermissionError.cause");
+      actions.append(refusal(said.arm, said.text));
+      // The buttons come back: every cause here is one the reader may be able to
+      // act on (reconnect, reconcile, pick the other button), and a card that
+      // refused a click while staying inert would be a dead end.
       for (const button of buttons) button.disabled = false;
       return;
+    }
     default:
       unreachableArm("AnswerPermissionResponse.result", armName(result));
   }
