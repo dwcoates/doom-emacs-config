@@ -686,6 +686,64 @@ from CONTROL ANSWERS and from fields riding other messages:
   `utilization` inside a present window, and `behaviors: null` (the local scan).
 - context budget → the vendor's `context_tip` ATTACHMENT record.
 
+### The e2e mock additions, and what they found (mock agent evidence)
+
+Five families joined the mocked vendor for the e2e suite. Each is a registered
+`!name` in the published table; what they found while being written:
+
+- `!context-usage-drift` — `getContextUsage()` answers a GROWING occupancy from
+  the turn it runs on: the total, the percentage, the message category and the
+  whole `messageBreakdown` move together, and the answer stays a full
+  `SDKControlGetContextUsageResponse`. The FIXED costs (system prompt, memory
+  files, MCP tool list) deliberately do not move. CADENCE IS THE ENGINE'S:
+  `context_usage` is pushed at session start and at every turn end regardless of
+  scenario, so a scenario can only change WHAT is sampled, never WHEN.
+- `!fault-converter` / `!fault-recover` — the shape the fold demonstrably
+  refuses is a `system:hook_started` whose `hook_id` is PRESENT AND EMPTY:
+  `hook_id` IS the firing's activity identity, `convert/ids.ts` refuses an
+  identity stated as nothing, and the fold's catch turns that into
+  `StoreUnparsed{source: "system/hook_started", parse_error: "converter
+  defect: …"}` and NO frame. Asserted against the real fold in
+  `test/fake/scenarios/failures.test.ts`.
+  - GAP FOR THE ENGINE, not the mock: nothing turns a fold defect into a
+    `SessionFault.converter_defect` or opens a degraded window. The only
+    producer of `converter_defect` today is `store/writer.ts`'s constructor,
+    which is never called with that arm, and `store_unreachable` is the only
+    fault the writer actually emits. Until the engine subscribes to the fold's
+    defects, `!fault-converter` produces the defect and diagnostics stay
+    HEALTHY.
+- `!model-fallback` — an UNSOLICITED, PERSISTENT swap: the declared
+  `model_refusal_fallback` message (`direction: "retry"`, both models, an empty
+  `retracted_message_uuids` because nothing had been delivered), the
+  `session_state_changed` beat, and then the answer whose `message.model` is the
+  fallback. It sticks, so a following turn answers on the fallback too, and no
+  `SetSessionModel` was called.
+  - GAP FOR THE ENGINE: `model_changed` is an engine-owned arm produced from
+    `init.model` and from `SetSessionModel`'s own `applyModel`. Nothing watches
+    the next assistant message's `message.model`, so an unsolicited fallback
+    currently produces no `model_changed` push.
+- `!fast-on` / `!fast-off` / `!fast-cooldown` — the state now STICKS on the
+  session, so it is reported in BOTH declared places: every later `result` and
+  the `init` a rotation emits. A reason is cleared when fast mode is on, which is
+  what `sdk.d.ts` documents (the field is absent when nothing blocks it).
+  - GAP FOR THE ENGINE: `fastMode` is in the engine's OWNED_ARMS, so the
+    fold-produced `fast_mode` update from `init` is DROPPED, and nothing in the
+    engine pushes one. WatchSession's `fast_mode` arm has no producer yet.
+- `!usage-full` — the same `available` shape as `!usage-available` under the name
+  the e2e roster spells: every window populated (`five_hour`, `seven_day`,
+  `seven_day_oauth_apps`, `seven_day_opus`, `seven_day_sonnet`, `model_scoped`,
+  `extra_usage`), each with a `utilization` and a `resets_at`, beside
+  `subscription_type`. The older name was kept rather than renamed so no caller
+  that already spells it breaks.
+- `!usage-window-unavailable` nulls the FIVE-HOUR window, and nothing else
+  (shim lead ruling): `SessionUsageWindowUnavailable` means "the service
+  answered without a five-hour window", so a null `seven_day_opus` is merely an
+  ABSENT OPTIONAL window and still produces the AVAILABLE arm. That absent-opus
+  shape is worth having and keeps its own row as `!usage-opus-absent`;
+  `!usage-utilization-unavailable` nulls `five_hour`'s utilization while the
+  window itself is present, so the null WINDOW and the null FIGURE stay
+  distinguishable.
+
 ## Landing 3 relay (2026-08-29, project lead)
 
 - StartTurnSuccess.page is the opening page (required; empty page ≠ absent).

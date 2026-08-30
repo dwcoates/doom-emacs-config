@@ -62,16 +62,96 @@ export const SLASH_LOCAL = scenario({
   },
 });
 
+export const CONTEXT_USAGE_DRIFT = scenario({
+  name: "context-usage-drift",
+  prompt: "!context-usage-drift",
+  emits:
+    "prose only. It switches `getContextUsage()` to a GROWING answer, so the `context_usage` the shim pushes at " +
+    "this turn's end differs from the one it pushed at session start — total tokens, percentage, the message " +
+    "category and the whole `messageBreakdown` all move, and the answer stays a full " +
+    "`SDKControlGetContextUsageResponse`. CADENCE IS THE ENGINE'S: context_usage is pushed at session start and " +
+    "at EVERY turn end regardless of scenario, so this one changes what is sampled and never when",
+  writes: "the assistant line, the prompt line and the turn record",
+  arms: "SessionContextUsage — the same arm twice with DIFFERENT figures, which is what a re-render tests",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "context-usage-drift" }, "fake context-usage drift turn");
+    ctx.setContextUsageDrift(true);
+    conclude(ctx, "The context-usage answer now grows with every turn.");
+  },
+});
+
+export const MODEL_FALLBACK = scenario({
+  name: "model-fallback",
+  prompt: "!model-fallback",
+  emits:
+    "an UNSOLICITED model change: the declared `model_refusal_fallback` message with `direction: \"retry\"`, the " +
+    "`session_state_changed` beat, and then the answer from the FALLBACK model — whose `message.model` is the only " +
+    "evidence the swap happened. The swap STICKS, so a following turn answers on the fallback model too. Nothing " +
+    "called SetSessionModel, so no confirmation exists anywhere",
+  writes: "a `system:model_refusal_fallback` line, the fallback-model assistant line, the prompt line and the turn record",
+  arms: "SessionModelChanged with no SetSessionModel behind it — the vendor's own decision, not a confirmed request",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "model-fallback" }, "fake unsolicited model-fallback turn");
+    const original = ctx.model;
+    const fallback = original === "fake-sonnet-5" ? "fake-haiku-4-5" : "fake-sonnet-5";
+    const content = `Switched to ${fallback} for the rest of this session.`;
+    ctx.emit({
+      type: "system",
+      subtype: "model_refusal_fallback",
+      trigger: "refusal",
+      direction: "retry",
+      original_model: original,
+      fallback_model: fallback,
+      request_id: `req_fake_fallback_${String(ctx.turn)}`,
+      api_refusal_category: "cyber",
+      api_refusal_explanation: null,
+      // EMPTY, and not omitted: the refusal landed before any block had been
+      // delivered, so there is nothing for the consumer to evict. An absent list
+      // would mean "an older CLI that cannot tell you", which is a different
+      // fact.
+      retracted_message_uuids: [],
+      refused_user_message_uuid: null,
+      content,
+    });
+    ctx.files.transcript.append({
+      type: "system",
+      subtype: "model_refusal_fallback",
+      direction: "retry",
+      content,
+      level: "warning",
+      trigger: "refusal",
+      originalModel: original,
+      fallbackModel: fallback,
+      requestId: `req_fake_fallback_${String(ctx.turn)}`,
+      apiRefusalCategory: "cyber",
+      apiRefusalExplanation: null,
+      isMeta: false,
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.fallbackTo(fallback);
+    // The declared beat a model switch produces. It carries NO model, which is
+    // exactly why the assistant message below is the evidence.
+    ctx.systemMessage("session_state_changed", { state: "idle" });
+    conclude(ctx, `Answered on ${fallback} after the fallback.`);
+  },
+});
+
 /** One fast-mode scenario per declared state. */
 function fastModeScenario(name: string, state: "on" | "off" | "cooldown", reason?: string) {
   return scenario({
     name,
     prompt: `!${name}`,
-    emits: `a turn whose \`result\` reports \`fast_mode_state: "${state}"\`${reason === undefined ? "" : ` with \`fast_mode_disabled_reason: "${reason}"\``}`,
+    emits:
+      `a turn whose \`result\` reports \`fast_mode_state: "${state}"\`` +
+      `${reason === undefined ? "" : ` with \`fast_mode_disabled_reason: "${reason}"\``}` +
+      ". The state STICKS: every later result reports it, and so does the `init` a rotation emits — the two places " +
+      "`sdk.d.ts` carries fast mode at all",
     writes: "the assistant line, the prompt line and the turn record",
     arms: `SessionFastMode.state=${state}`,
     run(ctx) {
-      ctx.log({ turn: ctx.turn, branch: name }, "fake fast-mode turn");
+      ctx.log({ turn: ctx.turn, branch: name, fast_mode_state: state }, "fake fast-mode turn");
+      ctx.setFastMode(state, reason);
       const conclusion = `Fast mode is ${state}.`;
       ctx.assistant([{ type: "text", text: conclusion }], { stopReason: "end_turn" });
       ctx.result({
@@ -137,6 +217,25 @@ export const USAGE_AVAILABLE = usageScenario(
   "available",
   "SessionAccountUsage.outcome=available with five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage",
 );
+/**
+ * The SAME available shape under the name the e2e roster reaches for.
+ *
+ * Two names for one arm is deliberate: `!usage-available` names the ARM and
+ * `!usage-full` names what a reader wants from it — every window populated, each
+ * with a utilization and a reset instant, plus `subscription_type` and the
+ * session cost rollup. Renaming the older one would have broken every caller
+ * that already spells it.
+ */
+export const USAGE_FULL = usageScenario(
+  "usage-full",
+  "available",
+  "SessionAccountUsage.outcome=available with EVERY window populated — five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage, each with utilization and resets_at — beside subscription_type",
+);
+export const USAGE_OPUS_ABSENT = usageScenario(
+  "usage-opus-absent",
+  "opus_absent",
+  "SessionAccountUsage.outcome=available with seven_day_opus UNSET — an absent optional window, which is not an unavailability",
+);
 export const USAGE_SERVICE_UNAVAILABLE = usageScenario(
   "usage-service-unavailable",
   "service_unavailable",
@@ -145,7 +244,7 @@ export const USAGE_SERVICE_UNAVAILABLE = usageScenario(
 export const USAGE_WINDOW_UNAVAILABLE = usageScenario(
   "usage-window-unavailable",
   "window_unavailable",
-  "SessionAccountUsage.outcome=unavailable reason=window_unavailable",
+  "SessionAccountUsage.outcome=unavailable reason=window_unavailable — the FIVE-HOUR window is null, which is what that reason means",
 );
 export const USAGE_UTILIZATION_UNAVAILABLE = usageScenario(
   "usage-utilization-unavailable",
@@ -396,12 +495,16 @@ export const COLD_SEED = scenario({
 export const SESSION_SCENARIOS = [
   ROTATE,
   SLASH_LOCAL,
+  CONTEXT_USAGE_DRIFT,
+  MODEL_FALLBACK,
   FAST_ON,
   FAST_OFF,
   FAST_COOLDOWN,
   MCP_ALL,
   MCP_HEALTHY,
   USAGE_AVAILABLE,
+  USAGE_FULL,
+  USAGE_OPUS_ABSENT,
   USAGE_SERVICE_UNAVAILABLE,
   USAGE_WINDOW_UNAVAILABLE,
   USAGE_UTILIZATION_UNAVAILABLE,

@@ -254,6 +254,34 @@ export interface ScenarioContext {
   setAccountUsageArm(arm: AccountUsageArm): void;
   /** Choose which mcp-server healths `mcpServerStatus()` reports. */
   setMcpArm(arm: "all" | "healthy"): void;
+  /**
+   * Make `getContextUsage()` answer a GROWING occupancy from now on.
+   *
+   * The shim samples context usage on its own cadence — at session start and at
+   * every turn end — so a scenario cannot push a `context_usage` update. What it
+   * CAN do is make the next sample differ from the last, which is the only way
+   * to tell a consumer that re-renders on change from one that renders once and
+   * never again.
+   */
+  setContextUsageDrift(drifting: boolean): void;
+  /**
+   * Set the session's fast-mode state, as the vendor's own toggle does.
+   *
+   * It STICKS: `sdk.d.ts` carries fast mode on `init` and on every `result`, so
+   * a state set here is reported by every later turn's result AND by the init a
+   * rotation emits. A per-turn `ResultSpec.fastModeState` states one turn's
+   * figure and leaves the session's alone.
+   */
+  setFastMode(state: "on" | "off" | "cooldown", reason?: string): void;
+  /**
+   * The VENDOR'S OWN model swap, made persistent for the session.
+   *
+   * Not `setModel`: that verb is the shim asking, and its answer is a
+   * CONFIRMATION. This is the vendor deciding by itself — a refusal fallback —
+   * so nothing asked and no confirmation exists. Every later message reports the
+   * new model, which is the only evidence the swap happened at all.
+   */
+  fallbackTo(model: string): void;
 
   // -- logging -------------------------------------------------------------
   /** Log through `src/log.ts`. Every branch of every scenario logs. */
@@ -263,6 +291,7 @@ export interface ScenarioContext {
 /** Which shape `usage_EXPERIMENTAL…` answers with. */
 export type AccountUsageArm =
   | "available"
+  | "opus_absent"
   | "service_unavailable"
   | "window_unavailable"
   | "utilization_unavailable"

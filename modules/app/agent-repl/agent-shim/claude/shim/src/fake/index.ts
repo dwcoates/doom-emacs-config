@@ -227,6 +227,14 @@ export function createFakeQuery(
   let permissionMode: PermissionModeLike = opts.permissionMode ?? "default";
   let accountUsageArm: AccountUsageArm = "available";
   let mcpArm: "all" | "healthy" = "all";
+  // Whether `getContextUsage()` answers a growing occupancy. OFF by default: the
+  // ordinary session's answer moves only with the turn counter, and a mock that
+  // always drifted would make a consumer's change detection untestable in the
+  // steady case.
+  let contextUsageDrift = false;
+  // The session's fast-mode state, which `init` and every `result` report.
+  let fastModeState: "on" | "off" | "cooldown" = "off";
+  let fastModeDisabledReason: string | undefined = "preference";
   let turn = 0;
   let interrupted = false;
   let resultEmitted = false;
@@ -570,10 +578,17 @@ export function createFakeQuery(
       // `TerminalReason`. A mock that only varied the subtype could reach four
       // of the sixteen conversation.v1 failure arms.
       terminal_reason: spec.terminalReason ?? (spec.subtype === "success" ? "completed" : "api_error"),
-      fast_mode_state: spec.fastModeState ?? "off",
-      ...(spec.fastModeDisabledReason === undefined
-        ? {}
-        : { fast_mode_disabled_reason: spec.fastModeDisabledReason }),
+      // THE SESSION'S STATE IS THE DEFAULT, not a constant: fast mode is a
+      // session fact the vendor restates on every result, so a turn that says
+      // nothing about it reports what the session is actually in.
+      fast_mode_state: spec.fastModeState ?? fastModeState,
+      ...(() => {
+        const reason =
+          spec.fastModeState === undefined
+            ? fastModeDisabledReason
+            : spec.fastModeDisabledReason;
+        return reason === undefined ? {} : { fast_mode_disabled_reason: reason };
+      })(),
       ...(spec.subtype === "success"
         ? {
             result: spec.result ?? "",
@@ -617,7 +632,10 @@ export function createFakeQuery(
       plugins: [{ name: "fake-plugin", path: "/fake/plugins/fake-plugin", version: "1.0.0" }],
       capabilities: ["interrupt_receipt_v1", "msg_lifecycle_v1"],
       betas: [],
-      fast_mode_state: "off",
+      fast_mode_state: fastModeState,
+      ...(fastModeDisabledReason === undefined
+        ? {}
+        : { fast_mode_disabled_reason: fastModeDisabledReason }),
     });
 
   /**
@@ -731,6 +749,23 @@ export function createFakeQuery(
     },
     setMcpArm: (arm) => {
       mcpArm = arm;
+    },
+    setContextUsageDrift: (drifting) => {
+      contextUsageDrift = drifting;
+    },
+    setFastMode: (state, reason) => {
+      fastModeState = state;
+      // A reason is meaningless while fast mode is ON — `sdk.d.ts` documents the
+      // field as absent when nothing blocks fast mode — so the ON state clears
+      // it rather than carrying a stale explanation.
+      fastModeDisabledReason = state === "on" ? undefined : reason;
+    },
+    fallbackTo: (next) => {
+      LOGGER.log(
+        { claude_session_id: sessionUuid, previous_model: model, model: next },
+        "fake vendor fell back to another model ON ITS OWN; nothing asked it to",
+      );
+      model = next;
     },
     log: (fields, message) => LOGGER.log({ claude_session_id: sessionUuid, ...fields }, message),
   };
@@ -871,7 +906,13 @@ export function createFakeQuery(
     supportedAgents: async (): Promise<AgentInfoLike[]> => FAKE_AGENTS,
     mcpServerStatus: async (): Promise<McpServerStatusLike[]> =>
       mcpArm === "all" ? FAKE_MCP_SERVERS : FAKE_MCP_SERVERS_HEALTHY,
-    getContextUsage: async (): Promise<ContextUsageLike> => fakeContextUsage(model, 30_000 + turn * 1_000),
+    getContextUsage: async (): Promise<ContextUsageLike> =>
+      // A DRIFTING answer grows by twenty thousand tokens a turn and scales the
+      // occupancy-derived tables with it; the steady one moves only by the
+      // thousand-token-per-turn the ordinary session accrues.
+      contextUsageDrift
+        ? fakeContextUsage(model, 30_000 + turn * 20_000, turn)
+        : fakeContextUsage(model, 30_000 + turn * 1_000),
     usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async (): Promise<AccountUsageLike> =>
       fakeAccountUsage(accountUsageArm),
     accountInfo: async (): Promise<AccountInfoLike> => FAKE_ACCOUNT_INFO,
