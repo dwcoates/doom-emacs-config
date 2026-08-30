@@ -86,11 +86,9 @@ func (h *ShellOutputHandler) CancelTerminal(taskID, run, ownerAgentID string, se
 			Log("no terminal minted for a stopped run: no spawning-call activity id was supplied, so the frame would name no unit")
 		return nil
 	}
-	at := convert.Attribution{
-		VendorSessionID: ownerAgentID,
-		MainAgentID:     ownerAgentID,
-		AgentID:         ownerAgentID,
-		TaskID:          taskID,
+	at, ok := h.terminalAttribution(taskID, ownerAgentID, "cancel-terminal", "stopped")
+	if !ok {
+		return nil
 	}
 	return []*storev1.StoreEntry{h.conv.BashCancelled(at, run, string(h.seen), h.omitted, settledAtMs)}
 }
@@ -130,11 +128,39 @@ func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, r
 			Log("no terminal minted for a LOST run: no spawning-call activity id was supplied, so the frame would name no unit (reason=%s)", reason)
 		return nil
 	}
-	at := convert.Attribution{
+	at, ok := h.terminalAttribution(taskID, ownerAgentID, "lost-terminal", "LOST")
+	if !ok {
+		return nil
+	}
+	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason))}
+}
+
+// terminalAttribution states WHERE a reader-concluded terminal is written from.
+//
+// THE FILE COORDINATES ARE NOT DECORATION: the write identity is the digest of
+// "producer|file_id|offset|discriminator" (R-S1), so a terminal built without
+// them digests the SAME id for every run in the process and the store absorbs
+// the second one as a replay of the first, losing a run's only terminal. The
+// coordinates are the ones this handler last read at, which are the same ones
+// the cursor is stated in.
+//
+// A HANDLER THAT HAS READ NOTHING HAS NO POSITION TO STATE, and it refuses
+// loudly rather than minting a terminal at a coordinate it invented.
+func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, operation, what string) (convert.Attribution, bool) {
+	if h.coords.FileID == "" {
+		h.log.With(logging.Context{
+			Operation: operation, Level: "error", TaskID: taskID,
+			AgentID: ownerAgentID, Path: h.coords.Path,
+		}).Log("no terminal minted for a %s run: this handler has read no batch of its spool, so it has no file position to state the terminal at and every such terminal would share one write identity", what)
+		return convert.Attribution{}, false
+	}
+	return convert.Attribution{
 		VendorSessionID: ownerAgentID,
 		MainAgentID:     ownerAgentID,
 		AgentID:         ownerAgentID,
 		TaskID:          taskID,
-	}
-	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason))}
+		Path:            h.coords.Path,
+		FileID:          h.coords.FileID,
+		Offset:          h.coords.Offset,
+	}, true
 }

@@ -410,10 +410,22 @@ func (s *sidecar) watch(target discover.Target, now time.Time) {
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer}
 	s.trackDetached(target, now)
 	bound.With(logging.Context{Operation: "watch"}).Log("watching %s", target.Kind)
-	// A stop that arrived while this spool was still held is applied now that it
-	// has a reader — the whole reason the stop is remembered rather than dropped.
+	// A stop that arrived while this spool was held is NOT applied here, even
+	// though the spool now has a reader.
+	//
+	// A CANCELLED TERMINAL OWES THE OUTPUT THE RUN PRODUCED, and at this instant
+	// the handler has read no byte of the spool: it has neither the output nor
+	// the file position the terminal's write identity is digested from (R-S1).
+	// Minting here settled a stopped run with an EMPTY output and, before the
+	// file coordinates were carried, with a write identity every such terminal
+	// in the process shared. The stop stays pending and pollAll applies it as
+	// soon as this file's first batch is DURABLE, which is the first moment
+	// there is anything true to say.
 	if target.TaskID != "" {
-		s.applyStop(target.TaskID)
+		if _, pending := s.stopped[target.TaskID]; pending {
+			bound.With(logging.Context{Operation: "cancel-terminal"}).LogVerbose(
+				"the stopped task's spool is now being read; its terminal is minted once the spool's first batch is durable and can state the output")
+		}
 	}
 }
 
@@ -486,6 +498,13 @@ func (s *sidecar) pollAll() {
 		}
 		w.tailer.Commit(result)
 		s.applySettled()
+		// A stop that arrived before this file had a reader is applied HERE,
+		// once a batch of it is durable: only now does its handler hold the
+		// output the cancelled terminal owes and the file position the
+		// terminal's write identity is digested from.
+		if w.target.TaskID != "" {
+			s.applyStop(w.target.TaskID)
+		}
 		if w.vanished {
 			// A file that is readable again was a rename race; the tracker
 			// clears its own grace clock on the activity below.
