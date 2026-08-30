@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
+  InterruptErrorSchema,
   InterruptResponseSchema,
   type InterruptResponse,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
@@ -18,6 +19,7 @@ import {
   STOP_OUTCOME_MS,
 } from "../../../src/feed/cards/shell.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
+import { armsOf } from "../arms.js";
 import { feedId, harness, rowContext, WORKSPACE } from "../harness.js";
 
 const ROW = "shell-1";
@@ -357,23 +359,6 @@ describe("the stop control", () => {
     expect(el.querySelector("[data-interrupt-confirm]")).toBeNull();
   });
 
-  it("draws an error arm as an ordinary refusal beside the control", async () => {
-    const { rc } = ctxFor(
-      create(InterruptResponseSchema, {
-        result: {
-          case: "error",
-          value: { kind: { case: "confirmRequired", value: { liveAgentCount: 3n } } },
-        },
-      }),
-    );
-    const el = drawFeedShell(shell(), rc);
-    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
-    await settle();
-    expect(el.querySelector(".shell-stop .refusal")?.getAttribute("data-arm")).toBe(
-      "confirmRequired",
-    );
-  });
-
   it("gives the button back after a refusal, so the user can try again", async () => {
     const { rc } = ctxFor(
       create(InterruptResponseSchema, {
@@ -388,6 +373,78 @@ describe("the stop control", () => {
     button?.click();
     await settle();
     expect(button?.disabled).toBe(false);
+  });
+
+  it("states an unset cause as unreadable rather than as a cause", async () => {
+    const { rc } = ctxFor(
+      create(InterruptResponseSchema, { result: { case: "error", value: {} } }),
+    );
+    const el = drawFeedShell(shell(), rc);
+    el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+    await settle();
+    expect(el.querySelector(".shell-stop .refusal")?.getAttribute("data-arm")).toBe("malformed");
+  });
+});
+
+describe("the stop's typed refusals", () => {
+  const causes = [
+    {
+      arm: "confirmRequired",
+      kind: { case: "confirmRequired", value: { liveAgentCount: 3n } },
+      text: "stopping would also end 3 live agent(s)",
+    },
+    { arm: "unknownWorkspace", kind: { case: "unknownWorkspace", value: {} }, text: "unknown workspace" },
+    {
+      arm: "workspaceRefMismatch",
+      kind: { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
+      text: "workspace ref mismatch — registry says /elsewhere",
+    },
+    {
+      arm: "transferringAway",
+      kind: { case: "transferringAway", value: { address: "127.0.0.1:9931" } },
+      text: "this workspace is transferring to 127.0.0.1:9931",
+    },
+    {
+      arm: "notYetAdopted",
+      kind: { case: "notYetAdopted", value: {} },
+      text: "the new daemon has not adopted this workspace yet",
+    },
+    {
+      arm: "notDetachedWork",
+      kind: { case: "notDetachedWork", value: {} },
+      text: "this row names no detached work",
+    },
+    {
+      arm: "noSession",
+      kind: { case: "noSession", value: {} },
+      text: "the workspace has no session to interrupt",
+    },
+    {
+      arm: "shimRefused",
+      kind: { case: "shimRefused", value: { detail: "the shim says nothing is running" } },
+      text: "the shim says nothing is running",
+    },
+  ] as const;
+
+  for (const c of causes) {
+    it(`says what ${c.arm} means, beside the control`, async () => {
+      const { rc } = ctxFor(
+        create(InterruptResponseSchema, {
+          result: { case: "error", value: { kind: c.kind as never } },
+        }),
+      );
+      const el = drawFeedShell(shell(), rc);
+      el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
+      await settle();
+      const drawn = el.querySelector(".shell-stop .refusal");
+      expect([drawn?.getAttribute("data-arm"), drawn?.textContent]).toEqual([c.arm, c.text]);
+    });
+  }
+
+  it("words every cause the schema declares", () => {
+    expect(causes.map((c) => c.arm).sort()).toEqual(
+      armsOf(InterruptErrorSchema.oneofs, "kind").sort(),
+    );
   });
 });
 
