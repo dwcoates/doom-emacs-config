@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_feed.proto.
  */
 export const file_agentrepl_v1_endpoint_open_feed: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9mZWVkLnByb3RvEgxhZ2VudHJlcGwudjEicQoPT3BlbkZlZWRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJgoEZmVlZBgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBQgcKBV9mZWVkInwKEE9wZW5GZWVkUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5PcGVuRmVlZFN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5PcGVuRmVlZEVycm9ySABCCAoGcmVzdWx0ImMKD09wZW5GZWVkU3VjY2VzcxIjCgRwYWdlGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZFBhZ2USKwoFd2F0Y2gYAiABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4iDwoNT3BlbkZlZWRFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed, file_agentrepl_v1_feed_token]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9mZWVkLnByb3RvEgxhZ2VudHJlcGwudjEicQoPT3BlbkZlZWRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJgoEZmVlZBgCIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBQgcKBV9mZWVkInwKEE9wZW5GZWVkUmVzcG9uc2USMAoHc3VjY2VzcxgBIAEoCzIdLmFnZW50cmVwbC52MS5PcGVuRmVlZFN1Y2Nlc3NIABIsCgVlcnJvchgCIAEoCzIbLmFnZW50cmVwbC52MS5PcGVuRmVlZEVycm9ySABCCAoGcmVzdWx0ImMKD09wZW5GZWVkU3VjY2VzcxIjCgRwYWdlGAEgASgLMhUuZnJvbnRlbmQudjEuRmVlZFBhZ2USKwoFd2F0Y2gYAiABKAsyHC5hZ2VudHJlcGwudjEuRmVlZFdhdGNoVG9rZW4ivgMKDU9wZW5GZWVkRXJyb3ISQwoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJi5hZ2VudHJlcGwudjEuT3BlbkZlZWRVbmtub3duV29ya3NwYWNlSAASTAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIqLmFnZW50cmVwbC52MS5PcGVuRmVlZFdvcmtzcGFjZVJlZk1pc21hdGNoSAASQwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyJi5hZ2VudHJlcGwudjEuT3BlbkZlZWRUcmFuc2ZlcnJpbmdBd2F5SAASPgoPbm90X3lldF9hZG9wdGVkGAQgASgLMiMuYWdlbnRyZXBsLnYxLk9wZW5GZWVkTm90WWV0QWRvcHRlZEgAEkEKEGZlZWRfdW5kZWNvZGFibGUYBSABKAsyJS5hZ2VudHJlcGwudjEuT3BlbkZlZWRGZWVkVW5kZWNvZGFibGVIABJJChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYBiABKAsyKC5hZ2VudHJlcGwudjEuT3BlbkZlZWRGZWVkTm90SW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIaChhPcGVuRmVlZFVua25vd25Xb3Jrc3BhY2UiNAocT3BlbkZlZWRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiKwoYT3BlbkZlZWRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiFwoVT3BlbkZlZWROb3RZZXRBZG9wdGVkIhkKF09wZW5GZWVkRmVlZFVuZGVjb2RhYmxlIhwKGk9wZW5GZWVkRmVlZE5vdEluV29ya3NwYWNlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed, file_agentrepl_v1_feed_token]);
 
 /**
  * @generated from message agentrepl.v1.OpenFeedRequest
@@ -114,13 +114,64 @@ export const OpenFeedSuccessSchema: GenMessage<OpenFeedSuccess> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_feed, 2);
 
 /**
- * EMPTY ON PURPOSE: the refusal arms are DERIVED from the daemon's real
- * refusal sites at the wave (an unregistered workspace; a feed id that does
- * not decode or names a bubble this workspace does not own), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.OpenFeedError
  */
 export type OpenFeedError = Message<"agentrepl.v1.OpenFeedError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.OpenFeedError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.OpenFeedUnknownWorkspace unknown_workspace = 1;
+     */
+    value: OpenFeedUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.OpenFeedWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: OpenFeedWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.OpenFeedTransferringAway transferring_away = 3;
+     */
+    value: OpenFeedTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.OpenFeedNotYetAdopted not_yet_adopted = 4;
+     */
+    value: OpenFeedNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The FeedId does not decode.
+     *
+     * @generated from field: agentrepl.v1.OpenFeedFeedUndecodable feed_undecodable = 5;
+     */
+    value: OpenFeedFeedUndecodable;
+    case: "feedUndecodable";
+  } | {
+    /**
+     * The FeedId decodes to another workspace.
+     *
+     * @generated from field: agentrepl.v1.OpenFeedFeedNotInWorkspace feed_not_in_workspace = 6;
+     */
+    value: OpenFeedFeedNotInWorkspace;
+    case: "feedNotInWorkspace";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -129,4 +180,94 @@ export type OpenFeedError = Message<"agentrepl.v1.OpenFeedError"> & {
  */
 export const OpenFeedErrorSchema: GenMessage<OpenFeedError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_feed, 3);
+
+/**
+ * @generated from message agentrepl.v1.OpenFeedUnknownWorkspace
+ */
+export type OpenFeedUnknownWorkspace = Message<"agentrepl.v1.OpenFeedUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedUnknownWorkspace.
+ * Use `create(OpenFeedUnknownWorkspaceSchema)` to create a new message.
+ */
+export const OpenFeedUnknownWorkspaceSchema: GenMessage<OpenFeedUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 4);
+
+/**
+ * @generated from message agentrepl.v1.OpenFeedWorkspaceRefMismatch
+ */
+export type OpenFeedWorkspaceRefMismatch = Message<"agentrepl.v1.OpenFeedWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedWorkspaceRefMismatch.
+ * Use `create(OpenFeedWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const OpenFeedWorkspaceRefMismatchSchema: GenMessage<OpenFeedWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 5);
+
+/**
+ * @generated from message agentrepl.v1.OpenFeedTransferringAway
+ */
+export type OpenFeedTransferringAway = Message<"agentrepl.v1.OpenFeedTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedTransferringAway.
+ * Use `create(OpenFeedTransferringAwaySchema)` to create a new message.
+ */
+export const OpenFeedTransferringAwaySchema: GenMessage<OpenFeedTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 6);
+
+/**
+ * @generated from message agentrepl.v1.OpenFeedNotYetAdopted
+ */
+export type OpenFeedNotYetAdopted = Message<"agentrepl.v1.OpenFeedNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedNotYetAdopted.
+ * Use `create(OpenFeedNotYetAdoptedSchema)` to create a new message.
+ */
+export const OpenFeedNotYetAdoptedSchema: GenMessage<OpenFeedNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 7);
+
+/**
+ * @generated from message agentrepl.v1.OpenFeedFeedUndecodable
+ */
+export type OpenFeedFeedUndecodable = Message<"agentrepl.v1.OpenFeedFeedUndecodable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedFeedUndecodable.
+ * Use `create(OpenFeedFeedUndecodableSchema)` to create a new message.
+ */
+export const OpenFeedFeedUndecodableSchema: GenMessage<OpenFeedFeedUndecodable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 8);
+
+/**
+ * @generated from message agentrepl.v1.OpenFeedFeedNotInWorkspace
+ */
+export type OpenFeedFeedNotInWorkspace = Message<"agentrepl.v1.OpenFeedFeedNotInWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenFeedFeedNotInWorkspace.
+ * Use `create(OpenFeedFeedNotInWorkspaceSchema)` to create a new message.
+ */
+export const OpenFeedFeedNotInWorkspaceSchema: GenMessage<OpenFeedFeedNotInWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_feed, 9);
 

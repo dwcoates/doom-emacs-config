@@ -13,13 +13,15 @@ import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
+import type { SessionFaultBounceDied, SessionFaultBounceUnknown, SessionFaultClassifierFailed, SessionFaultLinkSevered, SessionFaultResumeFailed, SessionFaultShimDied, SessionFaultShimReported, SessionFaultShimStartFailed } from "./endpoint_session_health_pb";
+import { file_agentrepl_v1_endpoint_session_health } from "./endpoint_session_health_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_watch_host_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_host_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlXYXRjaEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYizQIKGldhdGNoSG9zdFdvcmtzcGFjZVJlc3BvbnNlEisKBGhvc3QYASABKAsyGy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUgAEj8KDG5vdGlmaWNhdGlvbhgCIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlTm90aWZpY2F0aW9uSAASPQoLdHJhbnNmZXJyZWQYAyABKAsyJi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVRyYW5zZmVycmVkSAASQAoNcmVsb2FkX3dlYmFwcBgEIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlUmVsb2FkV2ViYXBwSAASOAoOb3Blbl9pbl9lZGl0b3IYBSABKAsyHi5hZ2VudHJlcGwudjEuSG9zdE9wZW5JbkVkaXRvckgAQgYKBHB1c2giPAoQSG9zdE9wZW5JbkVkaXRvchIMCgRwYXRoGAEgASgJEhEKBGxpbmUYAiABKA1IAIgBAUIHCgVfbGluZSIaChhIb3N0V29ya3NwYWNlVHJhbnNmZXJyZWQiGwoZSG9zdFdvcmtzcGFjZVJlbG9hZFdlYmFwcCJqChlIb3N0V29ya3NwYWNlTm90aWZpY2F0aW9uEgwKBHRleHQYASABKAkSDQoFYXRfbXMYAiABKAMSMAoEa2luZBgDIAEoCzIiLmFnZW50cmVwbC52MS5Ib3N0Tm90aWZpY2F0aW9uS2luZCKBAgoUSG9zdE5vdGlmaWNhdGlvbktpbmQSRwoPYWdlbnRfYWRkcmVzc2VkGAEgASgLMiwuYWdlbnRyZXBsLnYxLkhvc3ROb3RpZmljYXRpb25BZ2VudEFkZHJlc3NlZEgAElEKFHBlcm1pc3Npb25fcmVxdWVzdGVkGAIgASgLMjEuYWdlbnRyZXBsLnYxLkhvc3ROb3RpZmljYXRpb25QZXJtaXNzaW9uUmVxdWVzdGVkSAASRQoOcXVlc3Rpb25fYXNrZWQYAyABKAsyKy5hZ2VudHJlcGwudjEuSG9zdE5vdGlmaWNhdGlvblF1ZXN0aW9uQXNrZWRIAEIGCgRraW5kIi8KHUhvc3ROb3RpZmljYXRpb25RdWVzdGlvbkFza2VkEg4KBmhlYWRlchgBIAEoCSIgCh5Ib3N0Tm90aWZpY2F0aW9uQWdlbnRBZGRyZXNzZWQiOAojSG9zdE5vdGlmaWNhdGlvblBlcm1pc3Npb25SZXF1ZXN0ZWQSEQoJdG9vbF9uYW1lGAEgASgJIrMBCg1Ib3N0V29ya3NwYWNlEi0KBG5vbmUYASABKAsyHS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25Ob25lSAASNQoIZXhpc3RpbmcYAiABKAsyIS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25FeGlzdGluZ0gAEjEKBm5hbWluZxgDIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlTmFtaW5nQgkKB3Nlc3Npb24iEQoPSG9zdFNlc3Npb25Ob25lIrABChNIb3N0U2Vzc2lvbkV4aXN0aW5nEicKAmlkGAEgASgLMhsuYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uSWQSLQoEbGl2ZRgCIAEoCzIdLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbkxpdmVIABI1Cgh0ZXJtaW5hbBgDIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvblRlcm1pbmFsSABCCgoIc3RhbmRpbmcimQQKD0hvc3RTZXNzaW9uTGl2ZRIyCgpnZW5lcmF0aW9uGAEgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RHZW5lcmF0aW9uSWQSFQoNc2hpbV9hdHRhY2hlZBgCIAEoCBIwCgZjbGF1ZGUYAyABKAsyHi5hZ2VudHJlcGwudjEuSG9zdFZlbmRvckNsYXVkZUgAEiwKCGJhY2tmaWxsGAQgASgLMhouYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbBIuCgRvcGVuGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck9wZW5IARI0CgdtZXJnaW5nGAYgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck1lcmdpbmdIARI2CghkcmFpbmluZxgHIAEoCzIiLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJEcmFpbmluZ0gBEjoKCnJlc3RhcnRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuSG9zdENvbXBvc2VyUmVzdGFydGluZ0gBEj0KDG1lcmdlX3BhcmtlZBgKIAEoCzIlLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJNZXJnZVBhcmtlZEgBEicKBmZhdWx0cxgJIAMoCzIXLmFnZW50cmVwbC52MS5Ib3N0RmF1bHRCDQoLdmVuZG9yX2luZm9CCgoIY29tcG9zZXIiKwoTSG9zdFNlc3Npb25UZXJtaW5hbBIUCgxyZWh5ZHJhdGFibGUYASABKAgiHgoNSG9zdFNlc3Npb25JZBINCgV2YWx1ZRgBIAEoCSIhChBIb3N0R2VuZXJhdGlvbklkEg0KBXZhbHVlGAEgASgJIjoKEEhvc3RWZW5kb3JDbGF1ZGUSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjb25maWdfZGlyGAIgASgJIk8KE0hvc3RXb3Jrc3BhY2VOYW1pbmcSEQoEc2x1ZxgBIAEoCUgAiAEBEhIKBXRpdGxlGAIgASgJSAGIAQFCBwoFX3NsdWdCCAoGX3RpdGxlIuEBCgxIb3N0QmFja2ZpbGwSLgoEbm9uZRgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxOb25lSAASNAoHcGVuZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxQZW5kaW5nSAASLgoEZG9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxEb25lSAASMgoGZmFpbGVkGAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbEZhaWxlZEgAQgcKBXN0YXRlIhIKEEhvc3RCYWNrZmlsbE5vbmUiFQoTSG9zdEJhY2tmaWxsUGVuZGluZyISChBIb3N0QmFja2ZpbGxEb25lIiQKEkhvc3RCYWNrZmlsbEZhaWxlZBIOCgZkZXRhaWwYASABKAkiEgoQSG9zdENvbXBvc2VyT3BlbiIVChNIb3N0Q29tcG9zZXJNZXJnaW5nIhYKFEhvc3RDb21wb3NlckRyYWluaW5nIhgKFkhvc3RDb21wb3NlclJlc3RhcnRpbmciGQoXSG9zdENvbXBvc2VyTWVyZ2VQYXJrZWQiMQoJSG9zdEZhdWx0Eg4KBmRldGFpbBgBIAEoCRIUCgxvcGVuZWRfYXRfbXMYAiABKANCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CjBhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfaG9zdF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJKChlXYXRjaEhvc3RXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYizQIKGldhdGNoSG9zdFdvcmtzcGFjZVJlc3BvbnNlEisKBGhvc3QYASABKAsyGy5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZUgAEj8KDG5vdGlmaWNhdGlvbhgCIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlTm90aWZpY2F0aW9uSAASPQoLdHJhbnNmZXJyZWQYAyABKAsyJi5hZ2VudHJlcGwudjEuSG9zdFdvcmtzcGFjZVRyYW5zZmVycmVkSAASQAoNcmVsb2FkX3dlYmFwcBgEIAEoCzInLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlUmVsb2FkV2ViYXBwSAASOAoOb3Blbl9pbl9lZGl0b3IYBSABKAsyHi5hZ2VudHJlcGwudjEuSG9zdE9wZW5JbkVkaXRvckgAQgYKBHB1c2giPAoQSG9zdE9wZW5JbkVkaXRvchIMCgRwYXRoGAEgASgJEhEKBGxpbmUYAiABKA1IAIgBAUIHCgVfbGluZSIaChhIb3N0V29ya3NwYWNlVHJhbnNmZXJyZWQiGwoZSG9zdFdvcmtzcGFjZVJlbG9hZFdlYmFwcCJqChlIb3N0V29ya3NwYWNlTm90aWZpY2F0aW9uEgwKBHRleHQYASABKAkSDQoFYXRfbXMYAiABKAMSMAoEa2luZBgDIAEoCzIiLmFnZW50cmVwbC52MS5Ib3N0Tm90aWZpY2F0aW9uS2luZCKBAgoUSG9zdE5vdGlmaWNhdGlvbktpbmQSRwoPYWdlbnRfYWRkcmVzc2VkGAEgASgLMiwuYWdlbnRyZXBsLnYxLkhvc3ROb3RpZmljYXRpb25BZ2VudEFkZHJlc3NlZEgAElEKFHBlcm1pc3Npb25fcmVxdWVzdGVkGAIgASgLMjEuYWdlbnRyZXBsLnYxLkhvc3ROb3RpZmljYXRpb25QZXJtaXNzaW9uUmVxdWVzdGVkSAASRQoOcXVlc3Rpb25fYXNrZWQYAyABKAsyKy5hZ2VudHJlcGwudjEuSG9zdE5vdGlmaWNhdGlvblF1ZXN0aW9uQXNrZWRIAEIGCgRraW5kIi8KHUhvc3ROb3RpZmljYXRpb25RdWVzdGlvbkFza2VkEg4KBmhlYWRlchgBIAEoCSIgCh5Ib3N0Tm90aWZpY2F0aW9uQWdlbnRBZGRyZXNzZWQiOAojSG9zdE5vdGlmaWNhdGlvblBlcm1pc3Npb25SZXF1ZXN0ZWQSEQoJdG9vbF9uYW1lGAEgASgJIrMBCg1Ib3N0V29ya3NwYWNlEi0KBG5vbmUYASABKAsyHS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25Ob25lSAASNQoIZXhpc3RpbmcYAiABKAsyIS5hZ2VudHJlcGwudjEuSG9zdFNlc3Npb25FeGlzdGluZ0gAEjEKBm5hbWluZxgDIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0V29ya3NwYWNlTmFtaW5nQgkKB3Nlc3Npb24iEQoPSG9zdFNlc3Npb25Ob25lIrABChNIb3N0U2Vzc2lvbkV4aXN0aW5nEicKAmlkGAEgASgLMhsuYWdlbnRyZXBsLnYxLkhvc3RTZXNzaW9uSWQSLQoEbGl2ZRgCIAEoCzIdLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvbkxpdmVIABI1Cgh0ZXJtaW5hbBgDIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0U2Vzc2lvblRlcm1pbmFsSABCCgoIc3RhbmRpbmcimQQKD0hvc3RTZXNzaW9uTGl2ZRIyCgpnZW5lcmF0aW9uGAEgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RHZW5lcmF0aW9uSWQSFQoNc2hpbV9hdHRhY2hlZBgCIAEoCBIwCgZjbGF1ZGUYAyABKAsyHi5hZ2VudHJlcGwudjEuSG9zdFZlbmRvckNsYXVkZUgAEiwKCGJhY2tmaWxsGAQgASgLMhouYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbBIuCgRvcGVuGAUgASgLMh4uYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck9wZW5IARI0CgdtZXJnaW5nGAYgASgLMiEuYWdlbnRyZXBsLnYxLkhvc3RDb21wb3Nlck1lcmdpbmdIARI2CghkcmFpbmluZxgHIAEoCzIiLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJEcmFpbmluZ0gBEjoKCnJlc3RhcnRpbmcYCCABKAsyJC5hZ2VudHJlcGwudjEuSG9zdENvbXBvc2VyUmVzdGFydGluZ0gBEj0KDG1lcmdlX3BhcmtlZBgKIAEoCzIlLmFnZW50cmVwbC52MS5Ib3N0Q29tcG9zZXJNZXJnZVBhcmtlZEgBEicKBmZhdWx0cxgJIAMoCzIXLmFnZW50cmVwbC52MS5Ib3N0RmF1bHRCDQoLdmVuZG9yX2luZm9CCgoIY29tcG9zZXIiKwoTSG9zdFNlc3Npb25UZXJtaW5hbBIUCgxyZWh5ZHJhdGFibGUYASABKAgiHgoNSG9zdFNlc3Npb25JZBINCgV2YWx1ZRgBIAEoCSIhChBIb3N0R2VuZXJhdGlvbklkEg0KBXZhbHVlGAEgASgJIjoKEEhvc3RWZW5kb3JDbGF1ZGUSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjb25maWdfZGlyGAIgASgJIk8KE0hvc3RXb3Jrc3BhY2VOYW1pbmcSEQoEc2x1ZxgBIAEoCUgAiAEBEhIKBXRpdGxlGAIgASgJSAGIAQFCBwoFX3NsdWdCCAoGX3RpdGxlIuEBCgxIb3N0QmFja2ZpbGwSLgoEbm9uZRgBIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxOb25lSAASNAoHcGVuZGluZxgCIAEoCzIhLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxQZW5kaW5nSAASLgoEZG9uZRgDIAEoCzIeLmFnZW50cmVwbC52MS5Ib3N0QmFja2ZpbGxEb25lSAASMgoGZmFpbGVkGAQgASgLMiAuYWdlbnRyZXBsLnYxLkhvc3RCYWNrZmlsbEZhaWxlZEgAQgcKBXN0YXRlIhIKEEhvc3RCYWNrZmlsbE5vbmUiFQoTSG9zdEJhY2tmaWxsUGVuZGluZyISChBIb3N0QmFja2ZpbGxEb25lIiQKEkhvc3RCYWNrZmlsbEZhaWxlZBIOCgZkZXRhaWwYASABKAkiEgoQSG9zdENvbXBvc2VyT3BlbiIVChNIb3N0Q29tcG9zZXJNZXJnaW5nIhYKFEhvc3RDb21wb3NlckRyYWluaW5nIhgKFkhvc3RDb21wb3NlclJlc3RhcnRpbmciGQoXSG9zdENvbXBvc2VyTWVyZ2VQYXJrZWQixAQKCUhvc3RGYXVsdBIOCgZkZXRhaWwYASABKAkSFAoMb3BlbmVkX2F0X21zGAIgASgDEkYKEXNoaW1fc3RhcnRfZmFpbGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdFNoaW1TdGFydEZhaWxlZEgAEjcKCXNoaW1fZGllZBgEIAEoCzIiLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltRGllZEgAEj0KDGxpbmtfc2V2ZXJlZBgFIAEoCzIlLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRMaW5rU2V2ZXJlZEgAEj8KDXJlc3VtZV9mYWlsZWQYBiABKAsyJi5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0UmVzdW1lRmFpbGVkSAASOwoLYm91bmNlX2RpZWQYByABKAsyJC5hZ2VudHJlcGwudjEuU2Vzc2lvbkZhdWx0Qm91bmNlRGllZEgAEkEKDmJvdW5jZV91bmtub3duGAggASgLMicuYWdlbnRyZXBsLnYxLlNlc3Npb25GYXVsdEJvdW5jZVVua25vd25IABJHChFjbGFzc2lmaWVyX2ZhaWxlZBgJIAEoCzIqLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRDbGFzc2lmaWVyRmFpbGVkSAASPwoNc2hpbV9yZXBvcnRlZBgKIAEoCzImLmFnZW50cmVwbC52MS5TZXNzaW9uRmF1bHRTaGltUmVwb3J0ZWRIAEIGCgRraW5kQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_agentrepl_v1_endpoint_session_health]);
 
 /**
  * @generated from message agentrepl.v1.WatchHostWorkspaceRequest
@@ -823,10 +825,10 @@ export const HostComposerMergeParkedSchema: GenMessage<HostComposerMergeParked> 
   messageDesc(file_agentrepl_v1_endpoint_watch_host_workspace, 28);
 
 /**
- * One standing fault — the dynamic account now; the kind oneof is added WITH
- * its first derived arms at the wave, from the controller's real fault sites
- * (the old RuntimeFault's component/fault_type/impact/cause strings become
- * arms then).
+ * One standing fault — the same kinds SessionHealth's SessionFault carries,
+ * the same messages: a session's fault classes do not change because the
+ * host stream is what reports them. Kinds derived from the controller's real
+ * fault sites (landing 4, 2026-08-29).
  *
  * @generated from message agentrepl.v1.HostFault
  */
@@ -844,6 +846,75 @@ export type HostFault = Message<"agentrepl.v1.HostFault"> & {
    * @generated from field: int64 opened_at_ms = 2;
    */
   openedAtMs: bigint;
+
+  /**
+   * @generated from oneof agentrepl.v1.HostFault.kind
+   */
+  kind: {
+    /**
+     * Starting the session's shim failed.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultShimStartFailed shim_start_failed = 3;
+     */
+    value: SessionFaultShimStartFailed;
+    case: "shimStartFailed";
+  } | {
+    /**
+     * The shim exited while the session was live.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultShimDied shim_died = 4;
+     */
+    value: SessionFaultShimDied;
+    case: "shimDied";
+  } | {
+    /**
+     * The daemon-shim link was severed.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultLinkSevered link_severed = 5;
+     */
+    value: SessionFaultLinkSevered;
+    case: "linkSevered";
+  } | {
+    /**
+     * Resuming the vendor session failed.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultResumeFailed resume_failed = 6;
+     */
+    value: SessionFaultResumeFailed;
+    case: "resumeFailed";
+  } | {
+    /**
+     * A bounce's replacement shim died before it came up.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultBounceDied bounce_died = 7;
+     */
+    value: SessionFaultBounceDied;
+    case: "bounceDied";
+  } | {
+    /**
+     * A bounce ended in a state the controller cannot name.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultBounceUnknown bounce_unknown = 8;
+     */
+    value: SessionFaultBounceUnknown;
+    case: "bounceUnknown";
+  } | {
+    /**
+     * The turn classifier failed.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultClassifierFailed classifier_failed = 9;
+     */
+    value: SessionFaultClassifierFailed;
+    case: "classifierFailed";
+  } | {
+    /**
+     * A shim-side SessionFault, relayed.
+     *
+     * @generated from field: agentrepl.v1.SessionFaultShimReported shim_reported = 10;
+     */
+    value: SessionFaultShimReported;
+    case: "shimReported";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
