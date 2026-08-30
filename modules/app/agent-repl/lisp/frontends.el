@@ -55,7 +55,6 @@ capability check is genuinely two-axis and the vendor oneof stays
 extensible in the contract; the day a second vendor lands, the daemon
 tells us which one a workspace runs and this reads it from there."
   'claude)
-(declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 
 ;;;; ---- Struct ---------------------------------------------------------------
 
@@ -272,7 +271,7 @@ capability-constrained default (`agent-repl--frontend-default-for-ws')."
 Two writes, and the second is the point: `:frontend' is the resolution
 key, while `:frontend-explicit' marks the value as CHOSEN rather than
 merely resolved-to.  Only a chosen frontend is restored across an
-Emacs restart (`agent-repl--apply-display-state'); a workspace with no
+Emacs restart (the daemon's pushed views); a workspace with no
 `:frontend' of its own re-resolves from the default every time
 \(`agent-repl--frontend-default-for-ws'), which is what lets a
 workspace that only ever rode the default follow the default forward
@@ -403,45 +402,13 @@ ever marking itself `:inactive', which in turn left the sidebar showing a
 torn-down workspace as live."
   (agent-repl--frontend-dispatch-view ws 'hide #'agent-repl-frontend-hide-fn))
 
-(defun agent-repl--frontend-boot-session (ws &optional project-dir-hint active-env-hint)
-  "Start WS's agent session under WS's own frontend, WITHOUT showing it.
-
-The single boot door for every path that brings a workspace into
-existence or back from disk — snapshot / project restore and reopen
-\(`agent-repl--establish-workspace') — so all of them agree on which
-frontend a workspace is born under, instead of each hard-wiring its
-own boot path and stranding the gui default.
-
-Order matters: the environment is hydrated (PROJECT-DIR-HINT and
-ACTIVE-ENV-HINT are `agent-repl--initialize-ws-env' hints) BEFORE the
-booting frontend is picked, because `:active-env' is one of the two
-axes the frontend resolves against, so a workspace must have declared
-its environment before a frontend is chosen for it.
-
-No-op when WS's frontend already has a live session — the restore path
-re-establishes workspaces that may already be running.  The
-already-running check runs BEFORE the hydration, because
-`agent-repl--initialize-ws-env' must never run against a live session
-\(it would clobber the instantiation structs' session ids).  A running
-workspace always carries the `:active-env' its own boot hydrated, so
-the pre-hydration resolution below sees the same frontend the running
-session is on."
-  (let ((running (agent-repl--ws-frontend ws)))
-    (if (funcall (agent-repl-frontend-running-p-fn running) ws)
-        (agent-repl--log ws "boot-session: ws=%s frontend=%s running=t project-dir-hint=%S active-env-hint=%S -> skipping"
-                         ws (agent-repl-frontend-name running) project-dir-hint active-env-hint)
-      (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
-      (let ((fe (agent-repl--ws-frontend ws)))
-        (agent-repl--log ws "boot-session: ws=%s frontend=%s running=nil project-dir-hint=%S active-env-hint=%S hydrated-env=%S merged=%s merge-completed-at=%s -> booting"
-                         ws (agent-repl-frontend-name fe) project-dir-hint active-env-hint
-                         (agent-repl--ws-get ws :active-env)
-                         (or (eq (agent-repl--ws-get ws :repl-state) :merged)
-                             (eq (agent-repl--ws-get ws :merge-completed) t))
-                         (agent-repl--ws-get ws :merge-completed-at))
-        (let ((result (funcall (agent-repl-frontend-boot-fn fe) ws project-dir-hint active-env-hint)))
-          (agent-repl--log ws "boot-session: ws=%s frontend=%s -> booted result=%S"
-                           ws (agent-repl-frontend-name fe) result)
-          result)))))
+;; `agent-repl--frontend-boot-session' is DELETED.  It was the single boot
+;; door for the paths that brought a workspace into existence from disk --
+;; the snapshot restore and `agent-repl--establish-workspace' -- and both
+;; are gone: THE DAEMON owns session lifecycle, CreateWorkspace creates and
+;; registers, and Emacs opens tabs from the roster stream on connect.  There
+;; is nothing left for Emacs to boot, so the door is removed rather than
+;; kept as an unreachable entry point.
 
 (provide 'frontends)
 
