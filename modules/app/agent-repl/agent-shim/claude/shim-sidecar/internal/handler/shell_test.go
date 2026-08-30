@@ -149,6 +149,10 @@ func TestLostTerminalResolvesInterruptedWithNoCause(t *testing.T) {
 	// carries no DetachedLost, and by_user/timed_out would be accusations with no
 	// evidence — so the cause arm must stay UNSET.
 	h := NewShellOutputHandler(testLogger(t))
+	// The handler must have READ the spool before its terminal can be stated:
+	// the terminal owes the run's output, and its write identity is digested
+	// from the file coordinates this batch establishes (R-S1).
+	h.Handle(spoolFrames("some output\n", 0), spoolContext("/private/tmp/b1.output", "b1", "toolu_run"))
 
 	// Act.
 	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostWentSilent))
