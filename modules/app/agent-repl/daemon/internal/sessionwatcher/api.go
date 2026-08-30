@@ -151,7 +151,12 @@ type FooterSink interface {
 	OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork)
 	// OnBash advances a shell chip.
 	OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash)
-	// OnSessionUpdate carries context usage, the budget warning and the
+	// OnContextBudgetWarning is the vendor's own context-budget warning. It
+	// is an AGENT-PLANE fact (a page line of the agent's book, sidecar-
+	// produced), never a session-stream event, so it arrives addressed to the
+	// agent whose transcript carried it.
+	OnContextBudgetWarning(ws ids.WorkspaceID, agent *conversationv1.AgentId, w *conversationv1.ContextBudgetWarning)
+	// OnSessionUpdate carries context usage, the rate-limit status and the
 	// terminals the footer reflects.
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
 	// OnLink is the connectivity change the footer reflects.
