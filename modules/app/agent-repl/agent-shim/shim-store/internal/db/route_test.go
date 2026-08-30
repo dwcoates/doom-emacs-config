@@ -56,14 +56,20 @@ func TestClassifyRoutesEveryArmToItsKind(t *testing.T) {
 			wantBook: "agent-1",
 		},
 		{
-			name:     "detached work announcement is never a page line",
+			// The handoff is what the book's reader has to see, and the
+			// announcement is the one durable copy of what was announced.
+			name:     "detached work announcement is a page line",
 			entry:    pageEntry("w", "u", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", bashWork())))),
-			wantKind: kindDetachedWork,
+			wantKind: kindPageLine,
+			wantBook: "agent-1",
 		},
 		{
-			name:     "a detached workflow announcement is workflow residue",
+			// A workflow-kind announcement is a page line like every other
+			// announcement; what this wave does not do is SERVE the workflow.
+			name:     "a detached workflow announcement is a page line too",
 			entry:    pageEntry("w", "u", "agent-1", frameItem(detachedFrame("agent-1", createdWork("work-1", workflowWork())))),
-			wantKind: kindWorkflow,
+			wantKind: kindPageLine,
+			wantBook: "agent-1",
 		},
 		{
 			name:     "keepalive is never served",
@@ -407,6 +413,17 @@ func bashStart() *conversationv1.AgentBash {
 		Command:   &conversationv1.AgentBashCommand{Line: "make test"},
 		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 7},
 	}}}
+}
+
+func bashFailure() *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{}}}
+}
+
+// terminalBash is the run's activity reaching a terminal arm IN THE SPAWNING
+// AGENT'S OWN BOOK — the frame whose activity_id is the run's unit id and whose
+// item has concluded, which is what closes the detached row by origin unit.
+func terminalBash() *conversationv1.AgentBash {
+	return bashSuccess()
 }
 
 func bashSuccess() *conversationv1.AgentBash {

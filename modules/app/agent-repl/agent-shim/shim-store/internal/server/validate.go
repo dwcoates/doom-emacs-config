@@ -35,6 +35,9 @@ const (
 	SiteDatabaseFailure        = "database_failure"
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
 	SiteStreamNotFlushable     = "stream_not_flushable"
+	SiteRunEmpty               = "run_empty"
+	SiteUnknownBashRun         = "unknown_bash_run"
+	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 )
 
 // refusal is one typed refusal: the site the server logs, and the human detail
@@ -135,19 +138,22 @@ func validateStoreEntry(e *storev1.StoreEntry, index int) *refusal {
 	return nil
 }
 
-// validateEntryBatch is the base validation of store.v1.EntryBatch: at least
-// one entry, every entry's envelope well-formed, and a cursor advance (when
-// the producer sent one) that names a file.
+// validateEntryBatch is the base validation of store.v1.EntryBatch: every
+// entry's envelope well-formed, a cursor advance (when the producer sent one)
+// that names a file, and AT LEAST ONE OF THE TWO.
 //
-// AN EMPTY BATCH IS A REFUSAL, not a cheap success: a producer with nothing to
-// write does not call, and a batch that lost its entries on the way is a defect
-// the store must name rather than acknowledge as durable.
+// A CURSOR-ONLY BATCH IS LEGAL. A sidecar that read bytes yielding no entries —
+// a partial line, a block of records it had already absorbed — must still make
+// its file position durable, and refusing it would leave the reader re-reading
+// the same bytes forever. What is empty is a batch carrying NEITHER entries nor
+// a cursor advance: that states nothing at all, which is a defect the store
+// names rather than acknowledging as durable.
 func validateEntryBatch(b *storev1.EntryBatch) *refusal {
 	if b == nil {
 		return refuse(SiteBatchMissing, "batch: the request carries no EntryBatch")
 	}
-	if len(b.GetEntries()) == 0 {
-		return refuse(SiteBatchEmpty, "batch: the EntryBatch carries no entries")
+	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil {
+		return refuse(SiteBatchEmpty, "batch: the EntryBatch carries neither entries nor a cursor advance")
 	}
 	for i, entry := range b.GetEntries() {
 		if ref := validateStoreEntry(entry, i); ref != nil {
@@ -202,6 +208,15 @@ func validateReadAgentPageRequest(req *storev1.ReadAgentPageRequest) *refusal {
 
 func validateWatchAgentSessionRequest(req *storev1.WatchAgentSessionRequest) *refusal {
 	return validateAgentSessionToken(req.GetWatch())
+}
+
+// validateWatchBashRunRequest is the use site for WatchBashRun: the run's unit
+// identity is the whole address, so an empty one names no run.
+func validateWatchBashRunRequest(req *storev1.WatchBashRunRequest) *refusal {
+	if req.GetRun() == nil || req.GetRun().GetValue() == "" {
+		return refuse(SiteRunEmpty, "run: an AgentActivityId with no value addresses no run")
+	}
+	return nil
 }
 
 func validateGetSidecarCursorsRequest(req *storev1.GetSidecarCursorsRequest) *refusal {
