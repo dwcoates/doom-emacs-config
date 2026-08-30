@@ -19,14 +19,16 @@ type standing struct {
 	at time.Time
 }
 
-// rateState is the last account-usage observation, kept until a newer one
-// replaces it. Both allowances are carried because the drawn line shows both.
+// rateState is the vendor's last rate-limit status PER WINDOW. The event
+// reports one window at a time and the drawn line states both allowances, so
+// each window's latest status stands until a newer one for that window
+// replaces it. A nil window is one the vendor has not reported yet.
 type rateState struct {
-	// session is the rolling five-hour allowance.
-	session *conversationv1.SessionUsageWindow
-	// weekly is the rolling seven-day allowance.
-	weekly *conversationv1.SessionUsageWindow
-	// at is when the sample was observed.
+	// session is the rolling five-hour allowance's last status.
+	session *conversationv1.SessionRateLimitStatus
+	// weekly is the seven-day allowance's last status.
+	weekly *conversationv1.SessionRateLimitStatus
+	// at is when the newest of the two was observed.
 	at time.Time
 }
 
@@ -272,8 +274,8 @@ type wsState struct {
 	notification *standing
 	// contextBudget is the vendor's standing context-budget warning.
 	contextBudget *standing
-	// rate is the last account-usage observation.
-	rate *rateState
+	// rate is the vendor's last rate-limit status per window.
+	rate rateState
 	// hook is the hook running right now, nil between hooks.
 	hook *hookState
 	// retrying is the standing mid-turn retry evidence.
