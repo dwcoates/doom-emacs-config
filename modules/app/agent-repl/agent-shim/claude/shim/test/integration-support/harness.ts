@@ -31,7 +31,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
-import { LogTail } from "./log.js";
+import { LogTail, StreamRecords, type RecordSink } from "./log.js";
 import { createShimClients, type ShimClients } from "./client.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -110,9 +110,9 @@ export interface ShimHandle {
   readonly child: ChildProcess;
   /** The fake store, when one was started. */
   readonly store: FakeStore | null;
-  /** The durable record on fd 3, when fd 3 is a file. */
-  readonly log: LogTail | null;
-  /** The parent's read end of fd 3, when fd 3 is a pipe. */
+  /** The shim's records, whether fd 3 is a file or a pipe. */
+  readonly log: RecordSink;
+  /** The parent's read end of fd 3, when fd 3 is a pipe (else null). */
   readonly logPipe: NodeJS.ReadableStream | null;
   /** shim.v1 clients over the one socket, in both dialects. */
   readonly clients: ShimClients;
@@ -213,13 +213,19 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     child.on("exit", (code, signal) => resolve({ code, signal }));
   });
 
-  const log = options.logPipe === true ? null : LogTail.open(dirs.logPath);
+  const pipeEnd =
+    options.logPipe === true ? ((child.stdio[3] as NodeJS.ReadableStream | null) ?? null) : null;
+  // A pipe's records arrive as data events; a file's are tailed on fs.watch.
+  // Either way the suites read one interface, so only the poisoned-sink test
+  // knows which sink it got.
+  const log: RecordSink =
+    pipeEnd === null ? LogTail.open(dirs.logPath) : new StreamRecords(pipeEnd);
   const handle: ShimHandle = {
     dirs,
     child,
     store,
     log,
-    logPipe: options.logPipe === true ? ((child.stdio[3] as NodeJS.ReadableStream) ?? null) : null,
+    logPipe: pipeEnd,
     clients: createShimClients(dirs.listen),
     stderr: () => stderrText,
     exited,
@@ -238,9 +244,7 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     // against the exit means a shim that DIED during startup reports as the
     // death it was rather than as a hang.
     await Promise.race([
-      log === null
-        ? new Promise<void>((resolve) => child.once("spawn", () => resolve()))
-        : log.record((record) => record.context.outcome === "serving").then(() => undefined),
+      log.record((record) => record.context.outcome === "serving").then(() => undefined),
       exited.then((exit) => {
         throw new Error(
           `shim exited before it served (code ${String(exit.code)}, signal ${String(exit.signal)}):\n${stderrText}`,
@@ -263,7 +267,7 @@ export async function cleanupShims(): Promise<void> {
   const handles = live.splice(0);
   await Promise.all(
     handles.map(async (handle) => {
-      handle.log?.close();
+      handle.log.close();
       if (handle.child.exitCode === null && handle.child.signalCode === null) {
         handle.child.kill("SIGKILL");
         await handle.exited;

@@ -34,6 +34,22 @@ export interface LogRecord {
 /** What a caller waits on. Returning true settles the wait with that record. */
 export type LogPredicate = (record: LogRecord) => boolean;
 
+/**
+ * A live view of one shim's records, however they reach us.
+ *
+ * Two implementations exist because fd 3 is a FILE in almost every test and a
+ * PIPE in the one test whose subject is a poisoned sink; the suites read both
+ * through this one interface so only that test knows the difference.
+ */
+export interface RecordSink {
+  /** Every record seen so far, in the order the shim wrote them. */
+  records(): LogRecord[];
+  /** The first record matching `predicate`, awaiting one if none has arrived. */
+  record(predicate: LogPredicate): Promise<LogRecord>;
+  /** Stop reading. */
+  close(): void;
+}
+
 interface Waiter {
   readonly predicate: LogPredicate;
   readonly resolve: (record: LogRecord) => void;
@@ -45,7 +61,7 @@ interface Waiter {
  * Records already written are readable synchronously ({@link records}); records
  * not written yet are awaited ({@link record}).
  */
-export class LogTail {
+export class LogTail implements RecordSink {
   private readonly parsed: LogRecord[] = [];
   private readonly waiters: Waiter[] = [];
   private readonly fd: number;
@@ -150,4 +166,86 @@ export function contextIs(field: string, value: unknown): LogPredicate {
 /** A predicate requiring every one of the given predicates. */
 export function allOf(...predicates: LogPredicate[]): LogPredicate {
   return (record) => predicates.every((predicate) => predicate(record));
+}
+
+/**
+ * The same view, fed by a STREAM rather than a file.
+ *
+ * Used when fd 3 is a pipe: the parent holds the read end, so the records
+ * arrive as data events. Nothing here waits on a clock either — a record is
+ * parsed when its line arrives.
+ */
+export class StreamRecords implements RecordSink {
+  private readonly parsed: LogRecord[] = [];
+  private readonly waiters: Waiter[] = [];
+  private carry = "";
+
+  constructor(private readonly source: NodeJS.ReadableStream) {
+    source.on("data", (chunk: Buffer | string) => {
+      this.consume(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+  }
+
+  records(): LogRecord[] {
+    return [...this.parsed];
+  }
+
+  async record(predicate: LogPredicate): Promise<LogRecord> {
+    const already = this.parsed.find(predicate);
+    if (already !== undefined) return already;
+    return new Promise<LogRecord>((resolve) => {
+      this.waiters.push({ predicate, resolve });
+    });
+  }
+
+  close(): void {
+    // Destroying the READ end is what poisons the writer's sink, so this is the
+    // one close with an observable effect on the shim; the tests that want that
+    // effect call it deliberately.
+    const maybe = this.source as unknown as { destroy?: () => void };
+    if (typeof maybe.destroy === "function") maybe.destroy();
+  }
+
+  private consume(text: string): void {
+    this.carry += text;
+    const lines = this.carry.split("\n");
+    this.carry = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.trim() === "") continue;
+      let record: LogRecord;
+      try {
+        record = JSON.parse(line) as LogRecord;
+      } catch {
+        continue;
+      }
+      this.parsed.push(record);
+      for (let index = this.waiters.length - 1; index >= 0; index--) {
+        const waiter = this.waiters[index];
+        if (waiter === undefined || !waiter.predicate(record)) continue;
+        this.waiters.splice(index, 1);
+        waiter.resolve(record);
+      }
+    }
+  }
+}
+
+/**
+ * Parse the JSON records out of a captured stderr stream.
+ *
+ * A startup refusal happens BEFORE the durable sink is configured, so its
+ * record has nowhere to go but stderr (`log.ts`'s emergency path). That makes
+ * stderr the only place the missing-variable refusals are observable, and this
+ * is how they are read.
+ */
+export function parseRecords(text: string): LogRecord[] {
+  return text
+    .split("\n")
+    .filter((line) => line.trim().startsWith("{"))
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as LogRecord];
+      } catch {
+        return [];
+      }
+    });
 }
