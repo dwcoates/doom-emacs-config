@@ -477,3 +477,11 @@ every UX or contract gap you surfaced instead of improvising.
   fast_mode producer, the keep-alive override, the fake-store read ledger,
   the auditor's critiques, and the first integration run's failures. The
   producer re-key (record plane step 4) is confirmed to the lead on landing.
+- LEDGER: record plane merged at 731aa5f00 (worktree/branch retired; 2205
+  unit tests, smoke 10/10). Producer re-key confirmed to the lead.
+  Remediation #1 worktree `shim-agents/remed1` (branch
+  `overhaul/shim-remed1`) cut for the opus-low agent: (a) converter_defect
+  fault + degraded window + recovery, (b) unsolicited model_changed from
+  message.model, (c) fast_mode producer, (d) `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS`
+  under --fake, (e) fake-store read ledger, then integration failures and
+  auditor #1 critiques as they arrive.
