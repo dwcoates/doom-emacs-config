@@ -696,3 +696,80 @@ describe("GetSidecarCursors", () => {
     ).toEqual([]);
   });
 });
+
+describe("the read ledger", () => {
+  it("records nothing before a read is served", async () => {
+    // Arrange + Act.
+    const { store: fake } = await store();
+
+    // Assert.
+    expect(fake.reads()).toEqual([]);
+  });
+
+  it("records a GetLiveWork", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(fake.reads().map((read) => read.rpc)).toEqual(["GetLiveWork"]);
+  });
+
+  it("records a GetSidecarCursors", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await client.getSidecarCursors(create(storev1.GetSidecarCursorsRequestSchema, {}));
+
+    // Assert.
+    expect(fake.reads().map((read) => read.rpc)).toEqual(["GetSidecarCursors"]);
+  });
+
+  it("records an OpenAgentSession with the request it was asked", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await open(client, "a", 5);
+
+    // Assert.
+    const read = fake.reads()[0];
+    expect({
+      rpc: read?.rpc,
+      agent: (read?.request as storev1.OpenAgentSessionRequest | undefined)?.agent?.value,
+    }).toEqual({ rpc: "OpenAgentSession", agent: "a" });
+  });
+
+  it("records a ReadAgentPage", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, { book: agentId("a"), pageSize: 5 }),
+    );
+
+    // Assert.
+    expect(fake.reads().map((read) => read.rpc)).toEqual(["ReadAgentPage"]);
+  });
+
+  it("keeps every read in the order it served them", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+
+    // Act.
+    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+    await client.getSidecarCursors(create(storev1.GetSidecarCursorsRequestSchema, {}));
+    await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(fake.reads().map((read) => read.rpc)).toEqual([
+      "GetLiveWork",
+      "GetSidecarCursors",
+      "GetLiveWork",
+    ]);
+  });
+});
