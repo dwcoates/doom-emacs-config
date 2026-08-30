@@ -49,7 +49,12 @@ import type {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
-import { clearRefusals, refusal, whileInFlight } from "../cards/controls.js";
+import {
+  clearRefusals,
+  drawMalformedRefusal,
+  refusal,
+  whileInFlight,
+} from "../cards/controls.js";
 import { refusalOf, type SentenceTable } from "../refusal-text.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -400,7 +405,14 @@ async function send(
     actions.append(refusal("transport", "the daemon could not be reached"));
     return;
   }
-  drawAnswerOutcome(answered.value, actions, submit);
+  try {
+    drawAnswerOutcome(answered.value, actions, submit);
+  } catch (err) {
+    // A refusal this build cannot read is still a failure the reader owns; it is
+    // stated at the control and reported once rather than becoming an unhandled
+    // rejection inside a click handler.
+    if (!drawMalformedRefusal(rc.ctx, actions, "feed.asks.question.malformed-refusal", err)) throw err;
+  }
 }
 
 /** The causes only AnswerQuestion can answer with; the four are shared. */
