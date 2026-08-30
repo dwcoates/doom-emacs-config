@@ -33,6 +33,30 @@ message SendLoginInputResponse {
 // Written to the pty.
 message SendLoginInputSuccess {}
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no login session
-// standing, pty write failed, …), spelled per 3b.
-message SendLoginInputError {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message SendLoginInputError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SendLoginInputUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SendLoginInputWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SendLoginInputTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SendLoginInputNotYetAdopted not_yet_adopted = 4;
+    // No login terminal is open for this workspace.
+    SendLoginInputNoLoginOpen no_login_open = 5;
+  }
+}
+message SendLoginInputUnknownWorkspace {}
+message SendLoginInputWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SendLoginInputTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SendLoginInputNotYetAdopted {}
+message SendLoginInputNoLoginOpen {}

@@ -384,10 +384,21 @@ func (*UpdateHeldPromptSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{5}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no such hold, already
-// delivered), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type UpdateHeldPromptError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*UpdateHeldPromptError_UnknownWorkspace
+	//	*UpdateHeldPromptError_WorkspaceRefMismatch
+	//	*UpdateHeldPromptError_TransferringAway
+	//	*UpdateHeldPromptError_NotYetAdopted
+	//	*UpdateHeldPromptError_NoSuchHold
+	//	*UpdateHeldPromptError_AlreadyDelivered
+	//	*UpdateHeldPromptError_AcceptNotApplicable
+	//	*UpdateHeldPromptError_ReleaseRefused
+	Cause         isUpdateHeldPromptError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -422,6 +433,451 @@ func (*UpdateHeldPromptError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *UpdateHeldPromptError) GetCause() isUpdateHeldPromptError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetUnknownWorkspace() *UpdateHeldPromptUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetWorkspaceRefMismatch() *UpdateHeldPromptWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetTransferringAway() *UpdateHeldPromptTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetNotYetAdopted() *UpdateHeldPromptNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetNoSuchHold() *UpdateHeldPromptNoSuchHold {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_NoSuchHold); ok {
+			return x.NoSuchHold
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetAlreadyDelivered() *UpdateHeldPromptAlreadyDelivered {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_AlreadyDelivered); ok {
+			return x.AlreadyDelivered
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetAcceptNotApplicable() *UpdateHeldPromptAcceptNotApplicable {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_AcceptNotApplicable); ok {
+			return x.AcceptNotApplicable
+		}
+	}
+	return nil
+}
+
+func (x *UpdateHeldPromptError) GetReleaseRefused() *UpdateHeldPromptReleaseRefused {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateHeldPromptError_ReleaseRefused); ok {
+			return x.ReleaseRefused
+		}
+	}
+	return nil
+}
+
+type isUpdateHeldPromptError_Cause interface {
+	isUpdateHeldPromptError_Cause()
+}
+
+type UpdateHeldPromptError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *UpdateHeldPromptUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *UpdateHeldPromptWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *UpdateHeldPromptTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *UpdateHeldPromptNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_NoSuchHold struct {
+	// No hold by that id.
+	NoSuchHold *UpdateHeldPromptNoSuchHold `protobuf:"bytes,5,opt,name=no_such_hold,json=noSuchHold,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_AlreadyDelivered struct {
+	// The hold was already delivered.
+	AlreadyDelivered *UpdateHeldPromptAlreadyDelivered `protobuf:"bytes,6,opt,name=already_delivered,json=alreadyDelivered,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_AcceptNotApplicable struct {
+	// An accept on a verdict other than hold_for_turn_end.
+	AcceptNotApplicable *UpdateHeldPromptAcceptNotApplicable `protobuf:"bytes,7,opt,name=accept_not_applicable,json=acceptNotApplicable,proto3,oneof"`
+}
+
+type UpdateHeldPromptError_ReleaseRefused struct {
+	// A force-through on an uninterruptible or session_starting hold.
+	ReleaseRefused *UpdateHeldPromptReleaseRefused `protobuf:"bytes,8,opt,name=release_refused,json=releaseRefused,proto3,oneof"`
+}
+
+func (*UpdateHeldPromptError_UnknownWorkspace) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_WorkspaceRefMismatch) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_TransferringAway) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_NotYetAdopted) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_NoSuchHold) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_AlreadyDelivered) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_AcceptNotApplicable) isUpdateHeldPromptError_Cause() {}
+
+func (*UpdateHeldPromptError_ReleaseRefused) isUpdateHeldPromptError_Cause() {}
+
+type UpdateHeldPromptUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptUnknownWorkspace) Reset() {
+	*x = UpdateHeldPromptUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptUnknownWorkspace) ProtoMessage() {}
+
+func (x *UpdateHeldPromptUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{7}
+}
+
+type UpdateHeldPromptWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptWorkspaceRefMismatch) Reset() {
+	*x = UpdateHeldPromptWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *UpdateHeldPromptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *UpdateHeldPromptWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type UpdateHeldPromptTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptTransferringAway) Reset() {
+	*x = UpdateHeldPromptTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptTransferringAway) ProtoMessage() {}
+
+func (x *UpdateHeldPromptTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptTransferringAway.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *UpdateHeldPromptTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type UpdateHeldPromptNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptNotYetAdopted) Reset() {
+	*x = UpdateHeldPromptNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptNotYetAdopted) ProtoMessage() {}
+
+func (x *UpdateHeldPromptNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{10}
+}
+
+type UpdateHeldPromptNoSuchHold struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptNoSuchHold) Reset() {
+	*x = UpdateHeldPromptNoSuchHold{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptNoSuchHold) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptNoSuchHold) ProtoMessage() {}
+
+func (x *UpdateHeldPromptNoSuchHold) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptNoSuchHold.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptNoSuchHold) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{11}
+}
+
+type UpdateHeldPromptAlreadyDelivered struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptAlreadyDelivered) Reset() {
+	*x = UpdateHeldPromptAlreadyDelivered{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptAlreadyDelivered) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptAlreadyDelivered) ProtoMessage() {}
+
+func (x *UpdateHeldPromptAlreadyDelivered) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptAlreadyDelivered.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptAlreadyDelivered) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{12}
+}
+
+type UpdateHeldPromptAcceptNotApplicable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptAcceptNotApplicable) Reset() {
+	*x = UpdateHeldPromptAcceptNotApplicable{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptAcceptNotApplicable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptAcceptNotApplicable) ProtoMessage() {}
+
+func (x *UpdateHeldPromptAcceptNotApplicable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptAcceptNotApplicable.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptAcceptNotApplicable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{13}
+}
+
+type UpdateHeldPromptReleaseRefused struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateHeldPromptReleaseRefused) Reset() {
+	*x = UpdateHeldPromptReleaseRefused{}
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateHeldPromptReleaseRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateHeldPromptReleaseRefused) ProtoMessage() {}
+
+func (x *UpdateHeldPromptReleaseRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateHeldPromptReleaseRefused.ProtoReflect.Descriptor instead.
+func (*UpdateHeldPromptReleaseRefused) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP(), []int{14}
+}
+
 var File_agentrepl_v1_endpoint_update_held_prompt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
@@ -441,8 +897,28 @@ const file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.UpdateHeldPromptSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.UpdateHeldPromptErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17UpdateHeldPromptSuccess\"\x17\n" +
-	"\x15UpdateHeldPromptErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x17UpdateHeldPromptSuccess\"\x90\x06\n" +
+	"\x15UpdateHeldPromptError\x12]\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.UpdateHeldPromptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2..agentrepl.v1.UpdateHeldPromptTransferringAwayH\x00R\x10transferringAway\x12U\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.UpdateHeldPromptNotYetAdoptedH\x00R\rnotYetAdopted\x12L\n" +
+	"\fno_such_hold\x18\x05 \x01(\v2(.agentrepl.v1.UpdateHeldPromptNoSuchHoldH\x00R\n" +
+	"noSuchHold\x12]\n" +
+	"\x11already_delivered\x18\x06 \x01(\v2..agentrepl.v1.UpdateHeldPromptAlreadyDeliveredH\x00R\x10alreadyDelivered\x12g\n" +
+	"\x15accept_not_applicable\x18\a \x01(\v21.agentrepl.v1.UpdateHeldPromptAcceptNotApplicableH\x00R\x13acceptNotApplicable\x12W\n" +
+	"\x0frelease_refused\x18\b \x01(\v2,.agentrepl.v1.UpdateHeldPromptReleaseRefusedH\x00R\x0ereleaseRefusedB\a\n" +
+	"\x05cause\"\"\n" +
+	" UpdateHeldPromptUnknownWorkspace\"I\n" +
+	"$UpdateHeldPromptWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
+	" UpdateHeldPromptTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
+	"\x1dUpdateHeldPromptNotYetAdopted\"\x1c\n" +
+	"\x1aUpdateHeldPromptNoSuchHold\"\"\n" +
+	" UpdateHeldPromptAlreadyDelivered\"%\n" +
+	"#UpdateHeldPromptAcceptNotApplicable\" \n" +
+	"\x1eUpdateHeldPromptReleaseRefusedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescOnce sync.Once
@@ -456,31 +932,47 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_goTypes = []any{
-	(*UpdateHeldPromptRequest)(nil),  // 0: agentrepl.v1.UpdateHeldPromptRequest
-	(*UpdateHeldPromptRelease)(nil),  // 1: agentrepl.v1.UpdateHeldPromptRelease
-	(*UpdateHeldPromptDrop)(nil),     // 2: agentrepl.v1.UpdateHeldPromptDrop
-	(*UpdateHeldPromptAccept)(nil),   // 3: agentrepl.v1.UpdateHeldPromptAccept
-	(*UpdateHeldPromptResponse)(nil), // 4: agentrepl.v1.UpdateHeldPromptResponse
-	(*UpdateHeldPromptSuccess)(nil),  // 5: agentrepl.v1.UpdateHeldPromptSuccess
-	(*UpdateHeldPromptError)(nil),    // 6: agentrepl.v1.UpdateHeldPromptError
-	(*v1.WorkspaceRef)(nil),          // 7: workspace.v1.WorkspaceRef
-	(*v11.TurnId)(nil),               // 8: conversation.v1.TurnId
+	(*UpdateHeldPromptRequest)(nil),              // 0: agentrepl.v1.UpdateHeldPromptRequest
+	(*UpdateHeldPromptRelease)(nil),              // 1: agentrepl.v1.UpdateHeldPromptRelease
+	(*UpdateHeldPromptDrop)(nil),                 // 2: agentrepl.v1.UpdateHeldPromptDrop
+	(*UpdateHeldPromptAccept)(nil),               // 3: agentrepl.v1.UpdateHeldPromptAccept
+	(*UpdateHeldPromptResponse)(nil),             // 4: agentrepl.v1.UpdateHeldPromptResponse
+	(*UpdateHeldPromptSuccess)(nil),              // 5: agentrepl.v1.UpdateHeldPromptSuccess
+	(*UpdateHeldPromptError)(nil),                // 6: agentrepl.v1.UpdateHeldPromptError
+	(*UpdateHeldPromptUnknownWorkspace)(nil),     // 7: agentrepl.v1.UpdateHeldPromptUnknownWorkspace
+	(*UpdateHeldPromptWorkspaceRefMismatch)(nil), // 8: agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
+	(*UpdateHeldPromptTransferringAway)(nil),     // 9: agentrepl.v1.UpdateHeldPromptTransferringAway
+	(*UpdateHeldPromptNotYetAdopted)(nil),        // 10: agentrepl.v1.UpdateHeldPromptNotYetAdopted
+	(*UpdateHeldPromptNoSuchHold)(nil),           // 11: agentrepl.v1.UpdateHeldPromptNoSuchHold
+	(*UpdateHeldPromptAlreadyDelivered)(nil),     // 12: agentrepl.v1.UpdateHeldPromptAlreadyDelivered
+	(*UpdateHeldPromptAcceptNotApplicable)(nil),  // 13: agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
+	(*UpdateHeldPromptReleaseRefused)(nil),       // 14: agentrepl.v1.UpdateHeldPromptReleaseRefused
+	(*v1.WorkspaceRef)(nil),                      // 15: workspace.v1.WorkspaceRef
+	(*v11.TurnId)(nil),                           // 16: conversation.v1.TurnId
 }
 var file_agentrepl_v1_endpoint_update_held_prompt_proto_depIdxs = []int32{
-	7, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	8, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
-	1, // 2: agentrepl.v1.UpdateHeldPromptRequest.release:type_name -> agentrepl.v1.UpdateHeldPromptRelease
-	2, // 3: agentrepl.v1.UpdateHeldPromptRequest.drop:type_name -> agentrepl.v1.UpdateHeldPromptDrop
-	3, // 4: agentrepl.v1.UpdateHeldPromptRequest.accept:type_name -> agentrepl.v1.UpdateHeldPromptAccept
-	5, // 5: agentrepl.v1.UpdateHeldPromptResponse.success:type_name -> agentrepl.v1.UpdateHeldPromptSuccess
-	6, // 6: agentrepl.v1.UpdateHeldPromptResponse.error:type_name -> agentrepl.v1.UpdateHeldPromptError
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	15, // 0: agentrepl.v1.UpdateHeldPromptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	16, // 1: agentrepl.v1.UpdateHeldPromptRequest.turn:type_name -> conversation.v1.TurnId
+	1,  // 2: agentrepl.v1.UpdateHeldPromptRequest.release:type_name -> agentrepl.v1.UpdateHeldPromptRelease
+	2,  // 3: agentrepl.v1.UpdateHeldPromptRequest.drop:type_name -> agentrepl.v1.UpdateHeldPromptDrop
+	3,  // 4: agentrepl.v1.UpdateHeldPromptRequest.accept:type_name -> agentrepl.v1.UpdateHeldPromptAccept
+	5,  // 5: agentrepl.v1.UpdateHeldPromptResponse.success:type_name -> agentrepl.v1.UpdateHeldPromptSuccess
+	6,  // 6: agentrepl.v1.UpdateHeldPromptResponse.error:type_name -> agentrepl.v1.UpdateHeldPromptError
+	7,  // 7: agentrepl.v1.UpdateHeldPromptError.unknown_workspace:type_name -> agentrepl.v1.UpdateHeldPromptUnknownWorkspace
+	8,  // 8: agentrepl.v1.UpdateHeldPromptError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateHeldPromptWorkspaceRefMismatch
+	9,  // 9: agentrepl.v1.UpdateHeldPromptError.transferring_away:type_name -> agentrepl.v1.UpdateHeldPromptTransferringAway
+	10, // 10: agentrepl.v1.UpdateHeldPromptError.not_yet_adopted:type_name -> agentrepl.v1.UpdateHeldPromptNotYetAdopted
+	11, // 11: agentrepl.v1.UpdateHeldPromptError.no_such_hold:type_name -> agentrepl.v1.UpdateHeldPromptNoSuchHold
+	12, // 12: agentrepl.v1.UpdateHeldPromptError.already_delivered:type_name -> agentrepl.v1.UpdateHeldPromptAlreadyDelivered
+	13, // 13: agentrepl.v1.UpdateHeldPromptError.accept_not_applicable:type_name -> agentrepl.v1.UpdateHeldPromptAcceptNotApplicable
+	14, // 14: agentrepl.v1.UpdateHeldPromptError.release_refused:type_name -> agentrepl.v1.UpdateHeldPromptReleaseRefused
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_held_prompt_proto_init() }
@@ -497,13 +989,23 @@ func file_agentrepl_v1_endpoint_update_held_prompt_proto_init() {
 		(*UpdateHeldPromptResponse_Success)(nil),
 		(*UpdateHeldPromptResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_held_prompt_proto_msgTypes[6].OneofWrappers = []any{
+		(*UpdateHeldPromptError_UnknownWorkspace)(nil),
+		(*UpdateHeldPromptError_WorkspaceRefMismatch)(nil),
+		(*UpdateHeldPromptError_TransferringAway)(nil),
+		(*UpdateHeldPromptError_NotYetAdopted)(nil),
+		(*UpdateHeldPromptError_NoSuchHold)(nil),
+		(*UpdateHeldPromptError_AlreadyDelivered)(nil),
+		(*UpdateHeldPromptError_AcceptNotApplicable)(nil),
+		(*UpdateHeldPromptError_ReleaseRefused)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_held_prompt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

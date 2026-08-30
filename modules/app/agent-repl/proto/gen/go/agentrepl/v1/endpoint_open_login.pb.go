@@ -205,10 +205,18 @@ func (x *OpenLoginSuccess) GetConfigDir() string {
 	return ""
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (spawn failed, …),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type OpenLoginError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*OpenLoginError_UnknownWorkspace
+	//	*OpenLoginError_WorkspaceRefMismatch
+	//	*OpenLoginError_TransferringAway
+	//	*OpenLoginError_NotYetAdopted
+	//	*OpenLoginError_SpawnFailed
+	Cause         isOpenLoginError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,6 +251,304 @@ func (*OpenLoginError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *OpenLoginError) GetCause() isOpenLoginError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *OpenLoginError) GetUnknownWorkspace() *OpenLoginUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenLoginError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *OpenLoginError) GetWorkspaceRefMismatch() *OpenLoginWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenLoginError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *OpenLoginError) GetTransferringAway() *OpenLoginTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenLoginError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *OpenLoginError) GetNotYetAdopted() *OpenLoginNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenLoginError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *OpenLoginError) GetSpawnFailed() *OpenLoginSpawnFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenLoginError_SpawnFailed); ok {
+			return x.SpawnFailed
+		}
+	}
+	return nil
+}
+
+type isOpenLoginError_Cause interface {
+	isOpenLoginError_Cause()
+}
+
+type OpenLoginError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *OpenLoginUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type OpenLoginError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *OpenLoginWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type OpenLoginError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *OpenLoginTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type OpenLoginError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *OpenLoginNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type OpenLoginError_SpawnFailed struct {
+	// Spawning the login terminal failed.
+	SpawnFailed *OpenLoginSpawnFailed `protobuf:"bytes,5,opt,name=spawn_failed,json=spawnFailed,proto3,oneof"`
+}
+
+func (*OpenLoginError_UnknownWorkspace) isOpenLoginError_Cause() {}
+
+func (*OpenLoginError_WorkspaceRefMismatch) isOpenLoginError_Cause() {}
+
+func (*OpenLoginError_TransferringAway) isOpenLoginError_Cause() {}
+
+func (*OpenLoginError_NotYetAdopted) isOpenLoginError_Cause() {}
+
+func (*OpenLoginError_SpawnFailed) isOpenLoginError_Cause() {}
+
+type OpenLoginUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenLoginUnknownWorkspace) Reset() {
+	*x = OpenLoginUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenLoginUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenLoginUnknownWorkspace) ProtoMessage() {}
+
+func (x *OpenLoginUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenLoginUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenLoginUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP(), []int{4}
+}
+
+type OpenLoginWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenLoginWorkspaceRefMismatch) Reset() {
+	*x = OpenLoginWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenLoginWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenLoginWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *OpenLoginWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenLoginWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*OpenLoginWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenLoginWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type OpenLoginTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenLoginTransferringAway) Reset() {
+	*x = OpenLoginTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenLoginTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenLoginTransferringAway) ProtoMessage() {}
+
+func (x *OpenLoginTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenLoginTransferringAway.ProtoReflect.Descriptor instead.
+func (*OpenLoginTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *OpenLoginTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type OpenLoginNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenLoginNotYetAdopted) Reset() {
+	*x = OpenLoginNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenLoginNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenLoginNotYetAdopted) ProtoMessage() {}
+
+func (x *OpenLoginNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenLoginNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*OpenLoginNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP(), []int{7}
+}
+
+type OpenLoginSpawnFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The spawn's own account of the failure.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenLoginSpawnFailed) Reset() {
+	*x = OpenLoginSpawnFailed{}
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenLoginSpawnFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenLoginSpawnFailed) ProtoMessage() {}
+
+func (x *OpenLoginSpawnFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_login_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenLoginSpawnFailed.ProtoReflect.Descriptor instead.
+func (*OpenLoginSpawnFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *OpenLoginSpawnFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_open_login_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_login_proto_rawDesc = "" +
@@ -256,8 +562,22 @@ const file_agentrepl_v1_endpoint_open_login_proto_rawDesc = "" +
 	"\x06result\"1\n" +
 	"\x10OpenLoginSuccess\x12\x1d\n" +
 	"\n" +
-	"config_dir\x18\x01 \x01(\tR\tconfigDir\"\x10\n" +
-	"\x0eOpenLoginErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"config_dir\x18\x01 \x01(\tR\tconfigDir\"\xc7\x03\n" +
+	"\x0eOpenLoginError\x12V\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2'.agentrepl.v1.OpenLoginUnknownWorkspaceH\x00R\x10unknownWorkspace\x12c\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2+.agentrepl.v1.OpenLoginWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12V\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2'.agentrepl.v1.OpenLoginTransferringAwayH\x00R\x10transferringAway\x12N\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2$.agentrepl.v1.OpenLoginNotYetAdoptedH\x00R\rnotYetAdopted\x12G\n" +
+	"\fspawn_failed\x18\x05 \x01(\v2\".agentrepl.v1.OpenLoginSpawnFailedH\x00R\vspawnFailedB\a\n" +
+	"\x05cause\"\x1b\n" +
+	"\x19OpenLoginUnknownWorkspace\"B\n" +
+	"\x1dOpenLoginWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"5\n" +
+	"\x19OpenLoginTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x18\n" +
+	"\x16OpenLoginNotYetAdopted\".\n" +
+	"\x14OpenLoginSpawnFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_open_login_proto_rawDescOnce sync.Once
@@ -271,23 +591,33 @@ func file_agentrepl_v1_endpoint_open_login_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_login_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_login_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_open_login_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_open_login_proto_goTypes = []any{
-	(*OpenLoginRequest)(nil),  // 0: agentrepl.v1.OpenLoginRequest
-	(*OpenLoginResponse)(nil), // 1: agentrepl.v1.OpenLoginResponse
-	(*OpenLoginSuccess)(nil),  // 2: agentrepl.v1.OpenLoginSuccess
-	(*OpenLoginError)(nil),    // 3: agentrepl.v1.OpenLoginError
-	(*v1.WorkspaceRef)(nil),   // 4: workspace.v1.WorkspaceRef
+	(*OpenLoginRequest)(nil),              // 0: agentrepl.v1.OpenLoginRequest
+	(*OpenLoginResponse)(nil),             // 1: agentrepl.v1.OpenLoginResponse
+	(*OpenLoginSuccess)(nil),              // 2: agentrepl.v1.OpenLoginSuccess
+	(*OpenLoginError)(nil),                // 3: agentrepl.v1.OpenLoginError
+	(*OpenLoginUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenLoginUnknownWorkspace
+	(*OpenLoginWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenLoginWorkspaceRefMismatch
+	(*OpenLoginTransferringAway)(nil),     // 6: agentrepl.v1.OpenLoginTransferringAway
+	(*OpenLoginNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenLoginNotYetAdopted
+	(*OpenLoginSpawnFailed)(nil),          // 8: agentrepl.v1.OpenLoginSpawnFailed
+	(*v1.WorkspaceRef)(nil),               // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_open_login_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.OpenLoginRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 0: agentrepl.v1.OpenLoginRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.OpenLoginResponse.success:type_name -> agentrepl.v1.OpenLoginSuccess
 	3, // 2: agentrepl.v1.OpenLoginResponse.error:type_name -> agentrepl.v1.OpenLoginError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: agentrepl.v1.OpenLoginError.unknown_workspace:type_name -> agentrepl.v1.OpenLoginUnknownWorkspace
+	5, // 4: agentrepl.v1.OpenLoginError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenLoginWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.OpenLoginError.transferring_away:type_name -> agentrepl.v1.OpenLoginTransferringAway
+	7, // 6: agentrepl.v1.OpenLoginError.not_yet_adopted:type_name -> agentrepl.v1.OpenLoginNotYetAdopted
+	8, // 7: agentrepl.v1.OpenLoginError.spawn_failed:type_name -> agentrepl.v1.OpenLoginSpawnFailed
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_login_proto_init() }
@@ -299,13 +629,20 @@ func file_agentrepl_v1_endpoint_open_login_proto_init() {
 		(*OpenLoginResponse_Success)(nil),
 		(*OpenLoginResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_login_proto_msgTypes[3].OneofWrappers = []any{
+		(*OpenLoginError_UnknownWorkspace)(nil),
+		(*OpenLoginError_WorkspaceRefMismatch)(nil),
+		(*OpenLoginError_TransferringAway)(nil),
+		(*OpenLoginError_NotYetAdopted)(nil),
+		(*OpenLoginError_SpawnFailed)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_login_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_login_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_send_login_input.proto.
  */
 export const file_agentrepl_v1_endpoint_send_login_input: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VuZF9sb2dpbl9pbnB1dC5wcm90bxIMYWdlbnRyZXBsLnYxIsEBChVTZW5kTG9naW5JbnB1dFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhI7CgprZXlzdHJva2VzGAIgASgLMiUuYWdlbnRyZXBsLnYxLkxvZ2luVGVybWluYWxLZXlzdHJva2VzSAASMwoGcmVzaXplGAMgASgLMiEuYWdlbnRyZXBsLnYxLkxvZ2luVGVybWluYWxSZXNpemVIAEIHCgVpbnB1dCKOAQoWU2VuZExvZ2luSW5wdXRSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0U3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0RXJyb3JIAEIICgZyZXN1bHQiFwoVU2VuZExvZ2luSW5wdXRTdWNjZXNzIhUKE1NlbmRMb2dpbklucHV0RXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_watch_login_terminal, file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VuZF9sb2dpbl9pbnB1dC5wcm90bxIMYWdlbnRyZXBsLnYxIsEBChVTZW5kTG9naW5JbnB1dFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhI7CgprZXlzdHJva2VzGAIgASgLMiUuYWdlbnRyZXBsLnYxLkxvZ2luVGVybWluYWxLZXlzdHJva2VzSAASMwoGcmVzaXplGAMgASgLMiEuYWdlbnRyZXBsLnYxLkxvZ2luVGVybWluYWxSZXNpemVIAEIHCgVpbnB1dCKOAQoWU2VuZExvZ2luSW5wdXRSZXNwb25zZRI2CgdzdWNjZXNzGAEgASgLMiMuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0U3VjY2Vzc0gAEjIKBWVycm9yGAIgASgLMiEuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0RXJyb3JIAEIICgZyZXN1bHQiFwoVU2VuZExvZ2luSW5wdXRTdWNjZXNzIpADChNTZW5kTG9naW5JbnB1dEVycm9yEkkKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiwuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0VW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMC5hZ2VudHJlcGwudjEuU2VuZExvZ2luSW5wdXRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMiwuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0VHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIpLmFnZW50cmVwbC52MS5TZW5kTG9naW5JbnB1dE5vdFlldEFkb3B0ZWRIABJACg1ub19sb2dpbl9vcGVuGAUgASgLMicuYWdlbnRyZXBsLnYxLlNlbmRMb2dpbklucHV0Tm9Mb2dpbk9wZW5IAEIHCgVjYXVzZSIgCh5TZW5kTG9naW5JbnB1dFVua25vd25Xb3Jrc3BhY2UiOgoiU2VuZExvZ2luSW5wdXRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeU2VuZExvZ2luSW5wdXRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobU2VuZExvZ2luSW5wdXROb3RZZXRBZG9wdGVkIhsKGVNlbmRMb2dpbklucHV0Tm9Mb2dpbk9wZW5CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_endpoint_watch_login_terminal, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SendLoginInputRequest
@@ -105,12 +105,56 @@ export const SendLoginInputSuccessSchema: GenMessage<SendLoginInputSuccess> = /*
   messageDesc(file_agentrepl_v1_endpoint_send_login_input, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no login session
- * standing, pty write failed, …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.SendLoginInputError
  */
 export type SendLoginInputError = Message<"agentrepl.v1.SendLoginInputError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SendLoginInputError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.SendLoginInputUnknownWorkspace unknown_workspace = 1;
+     */
+    value: SendLoginInputUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.SendLoginInputWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: SendLoginInputWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.SendLoginInputTransferringAway transferring_away = 3;
+     */
+    value: SendLoginInputTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.SendLoginInputNotYetAdopted not_yet_adopted = 4;
+     */
+    value: SendLoginInputNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * No login terminal is open for this workspace.
+     *
+     * @generated from field: agentrepl.v1.SendLoginInputNoLoginOpen no_login_open = 5;
+     */
+    value: SendLoginInputNoLoginOpen;
+    case: "noLoginOpen";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -119,4 +163,81 @@ export type SendLoginInputError = Message<"agentrepl.v1.SendLoginInputError"> & 
  */
 export const SendLoginInputErrorSchema: GenMessage<SendLoginInputError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_send_login_input, 3);
+
+/**
+ * @generated from message agentrepl.v1.SendLoginInputUnknownWorkspace
+ */
+export type SendLoginInputUnknownWorkspace = Message<"agentrepl.v1.SendLoginInputUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SendLoginInputUnknownWorkspace.
+ * Use `create(SendLoginInputUnknownWorkspaceSchema)` to create a new message.
+ */
+export const SendLoginInputUnknownWorkspaceSchema: GenMessage<SendLoginInputUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_send_login_input, 4);
+
+/**
+ * @generated from message agentrepl.v1.SendLoginInputWorkspaceRefMismatch
+ */
+export type SendLoginInputWorkspaceRefMismatch = Message<"agentrepl.v1.SendLoginInputWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SendLoginInputWorkspaceRefMismatch.
+ * Use `create(SendLoginInputWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const SendLoginInputWorkspaceRefMismatchSchema: GenMessage<SendLoginInputWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_send_login_input, 5);
+
+/**
+ * @generated from message agentrepl.v1.SendLoginInputTransferringAway
+ */
+export type SendLoginInputTransferringAway = Message<"agentrepl.v1.SendLoginInputTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SendLoginInputTransferringAway.
+ * Use `create(SendLoginInputTransferringAwaySchema)` to create a new message.
+ */
+export const SendLoginInputTransferringAwaySchema: GenMessage<SendLoginInputTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_send_login_input, 6);
+
+/**
+ * @generated from message agentrepl.v1.SendLoginInputNotYetAdopted
+ */
+export type SendLoginInputNotYetAdopted = Message<"agentrepl.v1.SendLoginInputNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SendLoginInputNotYetAdopted.
+ * Use `create(SendLoginInputNotYetAdoptedSchema)` to create a new message.
+ */
+export const SendLoginInputNotYetAdoptedSchema: GenMessage<SendLoginInputNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_send_login_input, 7);
+
+/**
+ * @generated from message agentrepl.v1.SendLoginInputNoLoginOpen
+ */
+export type SendLoginInputNoLoginOpen = Message<"agentrepl.v1.SendLoginInputNoLoginOpen"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SendLoginInputNoLoginOpen.
+ * Use `create(SendLoginInputNoLoginOpenSchema)` to create a new message.
+ */
+export const SendLoginInputNoLoginOpenSchema: GenMessage<SendLoginInputNoLoginOpen> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_send_login_input, 8);
 

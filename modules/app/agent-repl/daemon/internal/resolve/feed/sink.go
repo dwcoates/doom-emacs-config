@@ -1,0 +1,249 @@
+package feed
+
+import (
+	"errors"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
+)
+
+// The sink is the routing table: one frame in, one family function, one row.
+// Nothing here decides what a row LOOKS like — that is each family's business
+// — and nothing in a family decides where its row goes.
+
+// OnPrompt draws a prompt one agent addressed to another. It appears on the
+// SENDER's feed as the outgoing send and on the RECIPIENT's as the delivered
+// prompt: one kind, both ends, differing only in the composed address line.
+func (r *resolver) OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawAgentPrompt(s, agent, prompt)
+}
+
+// OnActivity draws one unit of a turn's synchronous progress.
+func (r *resolver) OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawActivity(s, agent, act, nil)
+}
+
+// drawActivity routes one activity to its family. turn, when set, is the turn
+// the row belongs to (history replay knows it; a live frame learns it from the
+// session's in-flight turn).
+func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *conversationv1.AgentActivity, turn *conversationv1.TurnId) {
+	log := r.logger(s.id)
+	at := r.place(s, agent)
+	unit := act.GetActivityId().GetValue()
+	if unit == "" {
+		log.Error("daemon.feed.activity_without_identity",
+			"an activity arrived with no unit identity; nothing can be upserted for it",
+			dlog.Context{"agent": agent.GetValue()})
+		return
+	}
+
+	var (
+		row *frontendv1.FeedRow
+		err error
+	)
+	switch item := act.GetItem().(type) {
+	case *conversationv1.AgentActivity_Response:
+		row, err = r.drawResponse(s, at, agent, act, item.Response)
+	case *conversationv1.AgentActivity_Read:
+		row, err = r.drawRead(s, at, act, item.Read)
+	case *conversationv1.AgentActivity_Write:
+		row, err = r.drawWrite(s, at, act, item.Write)
+	case *conversationv1.AgentActivity_Edit:
+		row, err = r.drawEdit(s, at, act, item.Edit)
+	case *conversationv1.AgentActivity_Grep:
+		row, err = r.drawGrep(s, at, act, item.Grep)
+	case *conversationv1.AgentActivity_Glob:
+		row, err = r.drawGlob(s, at, act, item.Glob)
+	case *conversationv1.AgentActivity_Bash:
+		row, err = r.drawBash(s, at, act, item.Bash)
+	case *conversationv1.AgentActivity_WebFetch:
+		row, err = r.drawWebFetch(s, at, act, item.WebFetch)
+	case *conversationv1.AgentActivity_WebSearch:
+		row, err = r.drawWebSearch(s, at, act, item.WebSearch)
+	case *conversationv1.AgentActivity_SkillUse:
+		row, err = r.drawSkill(s, at, act, item.SkillUse)
+	case *conversationv1.AgentActivity_Subagent:
+		row, err = r.drawSubagent(s, at, act, item.Subagent, false)
+	case *conversationv1.AgentActivity_Hook:
+		row, err = r.drawHook(s, at, act, item.Hook)
+	case *conversationv1.AgentActivity_Artifact:
+		row, err = r.drawArtifact(s, at, act, item.Artifact)
+	case *conversationv1.AgentActivity_PlanMode:
+		row, err = r.drawPlan(s, at, agent, act, item.PlanMode)
+	case *conversationv1.AgentActivity_ReportFindings:
+		row, err = r.drawFindings(s, at, act, item.ReportFindings)
+	case *conversationv1.AgentActivity_Worktree:
+		row, err = r.drawWorktree(s, at, act, item.Worktree)
+	default:
+		// An unmodeled tool is NOT a failure and NEVER a feed row: its home is
+		// the topbar's warning dropdown. Every other kind that draws nowhere
+		// (thinking, task acts, monitors, wakeups, cron, notifications,
+		// injected context, sends) answers the same way.
+		err = errNotARow
+	}
+
+	if errors.Is(err, errNotARow) {
+		log.Debug("daemon.feed.activity_draws_nothing",
+			"an activity kind draws no feed row",
+			dlog.Context{"unit": unit, "agent": agent.GetValue()})
+		return
+	}
+	if err != nil {
+		log.Error("daemon.feed.activity_undrawable",
+			"an activity could not be resolved into a row",
+			dlog.Context{"unit": unit, "agent": agent.GetValue(), "cause": err.Error()})
+		return
+	}
+	if row == nil {
+		return
+	}
+	r.stampTurn(s, row, turn)
+	log.Debug("daemon.feed.activity",
+		"an activity row was upserted",
+		dlog.Context{"unit": unit, "agent": agent.GetValue(), "row": row.GetId().GetValue()})
+	r.upsert(s, at, row, true)
+}
+
+// stampTurn puts the turn a row belongs to on it. A separation belongs to no
+// turn and is deliberately left unstamped.
+func (r *resolver) stampTurn(s *wsState, row *frontendv1.FeedRow, turn *conversationv1.TurnId) {
+	if row.GetTurn() != nil {
+		return
+	}
+	if turn != nil {
+		row.Turn = turn
+		return
+	}
+	if s.turnInFlight != nil {
+		row.Turn = &conversationv1.TurnId{Value: string(*s.turnInFlight)}
+	}
+}
+
+// OnQuestion draws the agent blocking on a choice.
+func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId, q *conversationv1.AgentQuestion, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawQuestion(s, agent, q)
+}
+
+// OnPermission draws the agent blocking on consent.
+func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentId, p *conversationv1.AgentPermission, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawPermission(s, agent, p)
+}
+
+// OnContextCut draws the separation divider a context cut leaves.
+func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentId, cut *conversationv1.ContextCut, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawContextCut(s, agent, cut)
+}
+
+// OnApiError records a mid-turn vendor failure as EVIDENCE on the turn. It is
+// never a terminal and never its own row: the turn's end is the frame-level
+// failure arm and nothing else.
+func (r *resolver) OnApiError(ws ids.WorkspaceID, agent *conversationv1.AgentId, failed *conversationv1.ApiRequestFailed, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	line := "a vendor request failed mid-turn and the turn went on"
+	if failed.GetMessage() != "" {
+		line = line + ": " + failed.GetMessage()
+	}
+	r.addEvidence(s, line)
+	r.logger(ws).Warn("daemon.feed.api_error",
+		"a mid-turn vendor request failure was recorded as the turn's evidence",
+		dlog.Context{"agent": agent.GetValue(), "message": failed.GetMessage()})
+}
+
+// addEvidence attaches a line to the turn in flight, if one is.
+func (r *resolver) addEvidence(s *wsState, line string) {
+	if s.turnInFlight == nil {
+		return
+	}
+	key := string(*s.turnInFlight)
+	s.turnEvidence[key] = append(s.turnEvidence[key], line)
+}
+
+// OnAgentTerminal draws how one agent's stream ended.
+func (r *resolver) OnAgentTerminal(ws ids.WorkspaceID, agent *conversationv1.AgentId, turn *ids.TurnID, success *conversationv1.AgentSuccess, failure *conversationv1.AgentFailure, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawTerminal(s, agent, turn, success, failure)
+}
+
+// OnDetachedWork draws the bubble of work that left the stream.
+func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.AgentId, work *conversationv1.AgentDetachedWork, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawDetachedWork(s, agent, work)
+}
+
+// OnBash draws one detached shell's progress.
+func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkId, bash *conversationv1.AgentBash, addr sessionwatcher.OutputAddress) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	r.drawDetachedShell(s, work, bash)
+}
+
+// OnSessionUpdate reacts to the session-scoped facts that change rows.
+func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	log := r.logger(ws)
+	switch update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_QueryDied:
+		// The query died out from under the turn. A consumer with no stream
+		// open still needs the turn's terminal, so the feed draws it here.
+		r.drawQueryDied(s, update.GetQueryDied())
+	default:
+		log.Debug("daemon.feed.session_update_ignored",
+			"a session update changes no feed row",
+			dlog.Context{"arm": sessionUpdateArm(update)})
+	}
+}
+
+// sessionUpdateArm names a session update's arm for a log record.
+func sessionUpdateArm(update *conversationv1.SessionUpdate) string {
+	switch update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_IdentityRotated:
+		return "identity_rotated"
+	case *conversationv1.SessionUpdate_QueryDied:
+		return "query_died"
+	case *conversationv1.SessionUpdate_ModelChanged:
+		return "model_changed"
+	case *conversationv1.SessionUpdate_FastMode:
+		return "fast_mode"
+	case *conversationv1.SessionUpdate_McpServer:
+		return "mcp_server"
+	case *conversationv1.SessionUpdate_AccountUsage:
+		return "account_usage"
+	case *conversationv1.SessionUpdate_PermissionModeChanged:
+		return "permission_mode_changed"
+	case *conversationv1.SessionUpdate_Diagnostics:
+		return "diagnostics"
+	case *conversationv1.SessionUpdate_ContextUsage:
+		return "context_usage"
+	case *conversationv1.SessionUpdate_Compacting:
+		return "compacting"
+	}
+	return "unset"
+}

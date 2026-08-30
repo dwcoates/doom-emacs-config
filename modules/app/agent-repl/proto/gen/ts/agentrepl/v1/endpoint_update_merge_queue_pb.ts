@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_merge_queue.proto.
  */
 export const file_agentrepl_v1_endpoint_update_merge_queue: GenFile = /*@__PURE__*/
-  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEixwEKF1VwZGF0ZU1lcmdlUXVldWVSZXF1ZXN0EjQKBXBhdXNlGAEgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQYXVzZUgAEjYKBnJlc3VtZRgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVzdW1lSAASNAoFZXZpY3QYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0SABCCAoGYWN0aW9uIhcKFVVwZGF0ZU1lcmdlUXVldWVQYXVzZSIYChZVcGRhdGVNZXJnZVF1ZXVlUmVzdW1lIkYKFVVwZGF0ZU1lcmdlUXVldWVFdmljdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpQBChhVcGRhdGVNZXJnZVF1ZXVlUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVFcnJvckgAQggKBnJlc3VsdCIZChdVcGRhdGVNZXJnZVF1ZXVlU3VjY2VzcyIXChVVcGRhdGVNZXJnZVF1ZXVlRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Ci5hZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX21lcmdlX3F1ZXVlLnByb3RvEgxhZ2VudHJlcGwudjEixwEKF1VwZGF0ZU1lcmdlUXVldWVSZXF1ZXN0EjQKBXBhdXNlGAEgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVQYXVzZUgAEjYKBnJlc3VtZRgCIAEoCzIkLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlUmVzdW1lSAASNAoFZXZpY3QYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZUV2aWN0SABCCAoGYWN0aW9uIhcKFVVwZGF0ZU1lcmdlUXVldWVQYXVzZSIYChZVcGRhdGVNZXJnZVF1ZXVlUmVzdW1lIkYKFVVwZGF0ZU1lcmdlUXVldWVFdmljdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpQBChhVcGRhdGVNZXJnZVF1ZXVlUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVFcnJvckgAQggKBnJlc3VsdCIZChdVcGRhdGVNZXJnZVF1ZXVlU3VjY2VzcyKvBAoVVXBkYXRlTWVyZ2VRdWV1ZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm90WWV0QWRvcHRlZEgAEkUKDmFscmVhZHlfcGF1c2VkGAUgASgLMisuYWdlbnRyZXBsLnYxLlVwZGF0ZU1lcmdlUXVldWVBbHJlYWR5UGF1c2VkSAASPQoKbm90X3BhdXNlZBgGIAEoCzInLmFnZW50cmVwbC52MS5VcGRhdGVNZXJnZVF1ZXVlTm90UGF1c2VkSAASTwoUbm9fc3VjaF9xdWV1ZWRfbWVyZ2UYByABKAsyLy5hZ2VudHJlcGwudjEuVXBkYXRlTWVyZ2VRdWV1ZU5vU3VjaFF1ZXVlZE1lcmdlSABCBwoFY2F1c2UiIgogVXBkYXRlTWVyZ2VRdWV1ZVVua25vd25Xb3Jrc3BhY2UiPAokVXBkYXRlTWVyZ2VRdWV1ZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIzCiBVcGRhdGVNZXJnZVF1ZXVlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh8KHVVwZGF0ZU1lcmdlUXVldWVOb3RZZXRBZG9wdGVkIh8KHVVwZGF0ZU1lcmdlUXVldWVBbHJlYWR5UGF1c2VkIhsKGVVwZGF0ZU1lcmdlUXVldWVOb3RQYXVzZWQiIwohVXBkYXRlTWVyZ2VRdWV1ZU5vU3VjaFF1ZXVlZE1lcmdlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.UpdateMergeQueueRequest
@@ -155,12 +155,72 @@ export const UpdateMergeQueueSuccessSchema: GenMessage<UpdateMergeQueueSuccess> 
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 5);
 
 /**
- * EMPTY ON PURPOSE: arms DERIVED at the wave (already paused, not paused,
- * no such queued merge), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.UpdateMergeQueueError
  */
 export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.UpdateMergeQueueError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueUnknownWorkspace unknown_workspace = 1;
+     */
+    value: UpdateMergeQueueUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: UpdateMergeQueueWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueTransferringAway transferring_away = 3;
+     */
+    value: UpdateMergeQueueTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueNotYetAdopted not_yet_adopted = 4;
+     */
+    value: UpdateMergeQueueNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The queue is already paused.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueAlreadyPaused already_paused = 5;
+     */
+    value: UpdateMergeQueueAlreadyPaused;
+    case: "alreadyPaused";
+  } | {
+    /**
+     * The queue is not paused.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueNotPaused not_paused = 6;
+     */
+    value: UpdateMergeQueueNotPaused;
+    case: "notPaused";
+  } | {
+    /**
+     * No queued merge for that workspace.
+     *
+     * @generated from field: agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge no_such_queued_merge = 7;
+     */
+    value: UpdateMergeQueueNoSuchQueuedMerge;
+    case: "noSuchQueuedMerge";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -169,4 +229,107 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
  */
 export const UpdateMergeQueueErrorSchema: GenMessage<UpdateMergeQueueError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 6);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+ */
+export type UpdateMergeQueueUnknownWorkspace = Message<"agentrepl.v1.UpdateMergeQueueUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueUnknownWorkspace.
+ * Use `create(UpdateMergeQueueUnknownWorkspaceSchema)` to create a new message.
+ */
+export const UpdateMergeQueueUnknownWorkspaceSchema: GenMessage<UpdateMergeQueueUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 7);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+ */
+export type UpdateMergeQueueWorkspaceRefMismatch = Message<"agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch.
+ * Use `create(UpdateMergeQueueWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const UpdateMergeQueueWorkspaceRefMismatchSchema: GenMessage<UpdateMergeQueueWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 8);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueTransferringAway
+ */
+export type UpdateMergeQueueTransferringAway = Message<"agentrepl.v1.UpdateMergeQueueTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueTransferringAway.
+ * Use `create(UpdateMergeQueueTransferringAwaySchema)` to create a new message.
+ */
+export const UpdateMergeQueueTransferringAwaySchema: GenMessage<UpdateMergeQueueTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 9);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueNotYetAdopted
+ */
+export type UpdateMergeQueueNotYetAdopted = Message<"agentrepl.v1.UpdateMergeQueueNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueNotYetAdopted.
+ * Use `create(UpdateMergeQueueNotYetAdoptedSchema)` to create a new message.
+ */
+export const UpdateMergeQueueNotYetAdoptedSchema: GenMessage<UpdateMergeQueueNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 10);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueAlreadyPaused
+ */
+export type UpdateMergeQueueAlreadyPaused = Message<"agentrepl.v1.UpdateMergeQueueAlreadyPaused"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueAlreadyPaused.
+ * Use `create(UpdateMergeQueueAlreadyPausedSchema)` to create a new message.
+ */
+export const UpdateMergeQueueAlreadyPausedSchema: GenMessage<UpdateMergeQueueAlreadyPaused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 11);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueNotPaused
+ */
+export type UpdateMergeQueueNotPaused = Message<"agentrepl.v1.UpdateMergeQueueNotPaused"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueNotPaused.
+ * Use `create(UpdateMergeQueueNotPausedSchema)` to create a new message.
+ */
+export const UpdateMergeQueueNotPausedSchema: GenMessage<UpdateMergeQueueNotPaused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 12);
+
+/**
+ * @generated from message agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+ */
+export type UpdateMergeQueueNoSuchQueuedMerge = Message<"agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge.
+ * Use `create(UpdateMergeQueueNoSuchQueuedMergeSchema)` to create a new message.
+ */
+export const UpdateMergeQueueNoSuchQueuedMergeSchema: GenMessage<UpdateMergeQueueNoSuchQueuedMerge> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 13);
 

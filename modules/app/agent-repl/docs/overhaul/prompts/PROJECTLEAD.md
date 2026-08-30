@@ -219,9 +219,17 @@ others are squared away.
 ## Model tiers (binding for every dispatch)
 
 - TEAMLEADS are ALWAYS dispatched as FABLE at HIGH effort.
-- IMPLEMENTATION SUBAGENTS are ALWAYS Opus at MEDIUM effort — yours
-  (e2e and playtest remediation) and the teamleads' alike; relay this
-  to every teamlead.
+- IMPLEMENTATION SUBAGENTS: Opus at LOW effort (`opus-low`) for every
+  dispatch from 2026-08-29 onward — yours (e2e and playtest remediation)
+  and the teamleads' alike; relay this to every teamlead. (Agents
+  dispatched before that ruling ran Opus at MEDIUM and finish as they
+  are; a RESUME keeps the agent's original tier.)
+- An implementation agent MAY OFFLOAD ITS WRITES to Sonnet at MEDIUM
+  effort (`sonnet-medium`) when it judges the write mechanical and fully
+  specified — boilerplate, tests from a settled table, rote conversions,
+  doc sections. The offloading agent stays accountable: it reviews the
+  result, runs the suites, and reports the offload in its completion
+  report.
 
 ## The three classes of directive (relay to every teamlead)
 

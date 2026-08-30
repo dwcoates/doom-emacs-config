@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_nuke_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_nuke_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfbnVrZV93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChROdWtlV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVOdWtlV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChROdWtlV29ya3NwYWNlU3VjY2VzcyIUChJOdWtlV29ya3NwYWNlRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfbnVrZV93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChROdWtlV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVOdWtlV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChROdWtlV29ya3NwYWNlU3VjY2VzcyKFAwoSTnVrZVdvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLk51a2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5OdWtlV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEjoKCmdpdF9mYWlsZWQYBSABKAsyJC5hZ2VudHJlcGwudjEuTnVrZVdvcmtzcGFjZUdpdEZhaWxlZEgAQgcKBWNhdXNlIh8KHU51a2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIU51a2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodTnVrZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpOdWtlV29ya3NwYWNlTm90WWV0QWRvcHRlZCIoChZOdWtlV29ya3NwYWNlR2l0RmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.NukeWorkspaceRequest
@@ -86,12 +86,56 @@ export const NukeWorkspaceSuccessSchema: GenMessage<NukeWorkspaceSuccess> = /*@_
   messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unregistered
- * workspace, a worktree the daemon does not own, a git failure mid-delete).
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.NukeWorkspaceError
  */
 export type NukeWorkspaceError = Message<"agentrepl.v1.NukeWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.NukeWorkspaceError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceUnknownWorkspace unknown_workspace = 1;
+     */
+    value: NukeWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: NukeWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceTransferringAway transferring_away = 3;
+     */
+    value: NukeWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceNotYetAdopted not_yet_adopted = 4;
+     */
+    value: NukeWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * A git operation failed mid-delete.
+     *
+     * @generated from field: agentrepl.v1.NukeWorkspaceGitFailed git_failed = 5;
+     */
+    value: NukeWorkspaceGitFailed;
+    case: "gitFailed";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -100,4 +144,87 @@ export type NukeWorkspaceError = Message<"agentrepl.v1.NukeWorkspaceError"> & {
  */
 export const NukeWorkspaceErrorSchema: GenMessage<NukeWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.NukeWorkspaceUnknownWorkspace
+ */
+export type NukeWorkspaceUnknownWorkspace = Message<"agentrepl.v1.NukeWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceUnknownWorkspace.
+ * Use `create(NukeWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const NukeWorkspaceUnknownWorkspaceSchema: GenMessage<NukeWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
+ */
+export type NukeWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch.
+ * Use `create(NukeWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const NukeWorkspaceWorkspaceRefMismatchSchema: GenMessage<NukeWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.NukeWorkspaceTransferringAway
+ */
+export type NukeWorkspaceTransferringAway = Message<"agentrepl.v1.NukeWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceTransferringAway.
+ * Use `create(NukeWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const NukeWorkspaceTransferringAwaySchema: GenMessage<NukeWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.NukeWorkspaceNotYetAdopted
+ */
+export type NukeWorkspaceNotYetAdopted = Message<"agentrepl.v1.NukeWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceNotYetAdopted.
+ * Use `create(NukeWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const NukeWorkspaceNotYetAdoptedSchema: GenMessage<NukeWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 7);
+
+/**
+ * @generated from message agentrepl.v1.NukeWorkspaceGitFailed
+ */
+export type NukeWorkspaceGitFailed = Message<"agentrepl.v1.NukeWorkspaceGitFailed"> & {
+  /**
+   * Git's own account of the failure.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.NukeWorkspaceGitFailed.
+ * Use `create(NukeWorkspaceGitFailedSchema)` to create a new message.
+ */
+export const NukeWorkspaceGitFailedSchema: GenMessage<NukeWorkspaceGitFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_nuke_workspace, 8);
 

@@ -9,8 +9,6 @@ package daemonaddr
 
 import (
 	"net"
-
-	"claude-repld/internal/notimpl"
 )
 
 // Claim is a bound loopback listener together with the advertisement file it
@@ -34,13 +32,18 @@ type Claim interface {
 // Bind claims a loopback listener and prepares the advertisement at addrPath.
 // port 0 asks the kernel for a free port, which is what Address then reports.
 // Nothing is published until Publish is called.
+// Binding is preceded by an exclusive kernel lock on LockPath(addrPath),
+// which is the actual boot-exclusivity claim: a port-0 bind hands every
+// racing daemon a different free port and arbitrates nothing. A second daemon
+// loses there, before it has bound or written anything, and Bind returns
+// ErrClaimed.
 func Bind(addrPath string, port int) (Claim, error) {
-	return nil, notimpl.Err
+	return bind(addrPath, port)
 }
 
 // Read reads an existing daemon.addr file, which is how a joining successor
 // learns the incumbent's address when it is not given one. A missing file is
 // reported as an error, never as an empty address.
 func Read(addrPath string) (string, error) {
-	return "", notimpl.Err
+	return read(addrPath)
 }

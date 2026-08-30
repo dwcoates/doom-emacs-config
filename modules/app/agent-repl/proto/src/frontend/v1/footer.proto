@@ -747,11 +747,18 @@ message FooterAllowance {
   int64 resets_at_s = 2;
   // 0..1.
   double utilization = 3;
-  // The vendor's status word, verbatim (e.g. "allowed_warning"). Kept
-  // verbatim because the vendor's full vocabulary is not in evidence; typed
-  // arms when it is.
-  string status = 4;
+  // Tag 4 (status, verbatim string) is RETIRED: the vocabulary is now in
+  // evidence (SessionRateLimitStatus), so the arm is typed.
+  // The vendor's status, copied from SessionRateLimitStatus.status.
+  oneof status {
+    FooterAllowanceAllowed allowed = 5;
+    FooterAllowanceAllowedWarning allowed_warning = 6;
+    FooterAllowanceRejected rejected = 7;
+  }
 }
+message FooterAllowanceAllowed {}
+message FooterAllowanceAllowedWarning {}
+message FooterAllowanceRejected {}
 // ---- 4. Clock ------------------------------------------------------------
 
 // The turn clock. UNSET = no turn in flight; the cell renders idle.

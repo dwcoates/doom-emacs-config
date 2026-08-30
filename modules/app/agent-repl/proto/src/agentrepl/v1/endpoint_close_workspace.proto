@@ -39,11 +39,30 @@ message CloseWorkspaceResponse {
 message CloseWorkspaceSuccess {}
 
 // THE ARM IS THE REFUSAL.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message CloseWorkspaceError {
   oneof cause {
     // Work is in flight; the footer's close-blocked state carries the
-    // reasons. Further arms DERIVED at the wave.
+    // reasons.
     CloseWorkspaceBlocked blocked = 1;
+    // The workspace id is not in the daemon's registry.
+    CloseWorkspaceUnknownWorkspace unknown_workspace = 2;
+    // The echoed dir disagrees with the registry's dir for this id.
+    CloseWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 3;
+    // This daemon released the workspace to a successor; dial `address`.
+    CloseWorkspaceTransferringAway transferring_away = 4;
+    // A joining daemon has not finished adopting this workspace yet.
+    CloseWorkspaceNotYetAdopted not_yet_adopted = 5;
   }
 }
 message CloseWorkspaceBlocked {}
+message CloseWorkspaceUnknownWorkspace {}
+message CloseWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message CloseWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message CloseWorkspaceNotYetAdopted {}

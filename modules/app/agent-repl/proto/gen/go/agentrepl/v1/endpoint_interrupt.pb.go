@@ -529,15 +529,20 @@ func (*InterruptNothingRunning) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{7}
 }
 
-// Refusal arms: confirm_required is landed (the UX depends on it); the
-// rest are DERIVED at the wave (e.g. the shim cannot be asked — today's
-// shim.v1 DetachedCancelUnsupported — is a real failure and lands here),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type InterruptError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Kind:
 	//
 	//	*InterruptError_ConfirmRequired
+	//	*InterruptError_UnknownWorkspace
+	//	*InterruptError_WorkspaceRefMismatch
+	//	*InterruptError_TransferringAway
+	//	*InterruptError_NotYetAdopted
+	//	*InterruptError_NotDetachedWork
+	//	*InterruptError_NoSession
+	//	*InterruptError_ShimRefused
 	Kind          isInterruptError_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -589,6 +594,69 @@ func (x *InterruptError) GetConfirmRequired() *InterruptConfirmRequired {
 	return nil
 }
 
+func (x *InterruptError) GetUnknownWorkspace() *InterruptUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *InterruptError) GetWorkspaceRefMismatch() *InterruptWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *InterruptError) GetTransferringAway() *InterruptTransferringAway {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *InterruptError) GetNotYetAdopted() *InterruptNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *InterruptError) GetNotDetachedWork() *InterruptNotDetachedWork {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_NotDetachedWork); ok {
+			return x.NotDetachedWork
+		}
+	}
+	return nil
+}
+
+func (x *InterruptError) GetNoSession() *InterruptNoSession {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *InterruptError) GetShimRefused() *InterruptShimRefused {
+	if x != nil {
+		if x, ok := x.Kind.(*InterruptError_ShimRefused); ok {
+			return x.ShimRefused
+		}
+	}
+	return nil
+}
+
 type isInterruptError_Kind interface {
 	isInterruptError_Kind()
 }
@@ -600,7 +668,56 @@ type InterruptError_ConfirmRequired struct {
 	ConfirmRequired *InterruptConfirmRequired `protobuf:"bytes,1,opt,name=confirm_required,json=confirmRequired,proto3,oneof"`
 }
 
+type InterruptError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *InterruptUnknownWorkspace `protobuf:"bytes,2,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type InterruptError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *InterruptWorkspaceRefMismatch `protobuf:"bytes,3,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type InterruptError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *InterruptTransferringAway `protobuf:"bytes,4,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type InterruptError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *InterruptNotYetAdopted `protobuf:"bytes,5,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type InterruptError_NotDetachedWork struct {
+	// The FeedId names no detached item.
+	NotDetachedWork *InterruptNotDetachedWork `protobuf:"bytes,6,opt,name=not_detached_work,json=notDetachedWork,proto3,oneof"`
+}
+
+type InterruptError_NoSession struct {
+	// The workspace has no session to interrupt.
+	NoSession *InterruptNoSession `protobuf:"bytes,7,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type InterruptError_ShimRefused struct {
+	// A typed shim refusal relayed (e.g. UpdateAgent nothing_running).
+	ShimRefused *InterruptShimRefused `protobuf:"bytes,8,opt,name=shim_refused,json=shimRefused,proto3,oneof"`
+}
+
 func (*InterruptError_ConfirmRequired) isInterruptError_Kind() {}
+
+func (*InterruptError_UnknownWorkspace) isInterruptError_Kind() {}
+
+func (*InterruptError_WorkspaceRefMismatch) isInterruptError_Kind() {}
+
+func (*InterruptError_TransferringAway) isInterruptError_Kind() {}
+
+func (*InterruptError_NotYetAdopted) isInterruptError_Kind() {}
+
+func (*InterruptError_NotDetachedWork) isInterruptError_Kind() {}
+
+func (*InterruptError_NoSession) isInterruptError_Kind() {}
+
+func (*InterruptError_ShimRefused) isInterruptError_Kind() {}
 
 // The are-you-sure challenge for a turn stop with live agents.
 type InterruptConfirmRequired struct {
@@ -648,6 +765,285 @@ func (x *InterruptConfirmRequired) GetLiveAgentCount() int64 {
 	return 0
 }
 
+type InterruptUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptUnknownWorkspace) Reset() {
+	*x = InterruptUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptUnknownWorkspace) ProtoMessage() {}
+
+func (x *InterruptUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*InterruptUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{10}
+}
+
+type InterruptWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptWorkspaceRefMismatch) Reset() {
+	*x = InterruptWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *InterruptWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*InterruptWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *InterruptWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type InterruptTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptTransferringAway) Reset() {
+	*x = InterruptTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptTransferringAway) ProtoMessage() {}
+
+func (x *InterruptTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptTransferringAway.ProtoReflect.Descriptor instead.
+func (*InterruptTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *InterruptTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type InterruptNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptNotYetAdopted) Reset() {
+	*x = InterruptNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptNotYetAdopted) ProtoMessage() {}
+
+func (x *InterruptNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*InterruptNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{13}
+}
+
+type InterruptNotDetachedWork struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptNotDetachedWork) Reset() {
+	*x = InterruptNotDetachedWork{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptNotDetachedWork) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptNotDetachedWork) ProtoMessage() {}
+
+func (x *InterruptNotDetachedWork) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptNotDetachedWork.ProtoReflect.Descriptor instead.
+func (*InterruptNotDetachedWork) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{14}
+}
+
+type InterruptNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptNoSession) Reset() {
+	*x = InterruptNoSession{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptNoSession) ProtoMessage() {}
+
+func (x *InterruptNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptNoSession.ProtoReflect.Descriptor instead.
+func (*InterruptNoSession) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{15}
+}
+
+type InterruptShimRefused struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The shim's own account of the refusal.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InterruptShimRefused) Reset() {
+	*x = InterruptShimRefused{}
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InterruptShimRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InterruptShimRefused) ProtoMessage() {}
+
+func (x *InterruptShimRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InterruptShimRefused.ProtoReflect.Descriptor instead.
+func (*InterruptShimRefused) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *InterruptShimRefused) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_interrupt_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_interrupt_proto_rawDesc = "" +
@@ -675,12 +1071,30 @@ const file_agentrepl_v1_endpoint_interrupt_proto_rawDesc = "" +
 	"\x0fInterruptedTurn\"+\n" +
 	"\x13InterruptedDetached\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\x03R\x05count\"\x19\n" +
-	"\x17InterruptNothingRunning\"m\n" +
+	"\x17InterruptNothingRunning\"\xb4\x05\n" +
 	"\x0eInterruptError\x12S\n" +
-	"\x10confirm_required\x18\x01 \x01(\v2&.agentrepl.v1.InterruptConfirmRequiredH\x00R\x0fconfirmRequiredB\x06\n" +
+	"\x10confirm_required\x18\x01 \x01(\v2&.agentrepl.v1.InterruptConfirmRequiredH\x00R\x0fconfirmRequired\x12V\n" +
+	"\x11unknown_workspace\x18\x02 \x01(\v2'.agentrepl.v1.InterruptUnknownWorkspaceH\x00R\x10unknownWorkspace\x12c\n" +
+	"\x16workspace_ref_mismatch\x18\x03 \x01(\v2+.agentrepl.v1.InterruptWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12V\n" +
+	"\x11transferring_away\x18\x04 \x01(\v2'.agentrepl.v1.InterruptTransferringAwayH\x00R\x10transferringAway\x12N\n" +
+	"\x0fnot_yet_adopted\x18\x05 \x01(\v2$.agentrepl.v1.InterruptNotYetAdoptedH\x00R\rnotYetAdopted\x12T\n" +
+	"\x11not_detached_work\x18\x06 \x01(\v2&.agentrepl.v1.InterruptNotDetachedWorkH\x00R\x0fnotDetachedWork\x12A\n" +
+	"\n" +
+	"no_session\x18\a \x01(\v2 .agentrepl.v1.InterruptNoSessionH\x00R\tnoSession\x12G\n" +
+	"\fshim_refused\x18\b \x01(\v2\".agentrepl.v1.InterruptShimRefusedH\x00R\vshimRefusedB\x06\n" +
 	"\x04kind\"D\n" +
 	"\x18InterruptConfirmRequired\x12(\n" +
-	"\x10live_agent_count\x18\x01 \x01(\x03R\x0eliveAgentCountB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x10live_agent_count\x18\x01 \x01(\x03R\x0eliveAgentCount\"\x1b\n" +
+	"\x19InterruptUnknownWorkspace\"B\n" +
+	"\x1dInterruptWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"5\n" +
+	"\x19InterruptTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x18\n" +
+	"\x16InterruptNotYetAdopted\"\x1a\n" +
+	"\x18InterruptNotDetachedWork\"\x14\n" +
+	"\x12InterruptNoSession\".\n" +
+	"\x14InterruptShimRefused\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_interrupt_proto_rawDescOnce sync.Once
@@ -694,25 +1108,32 @@ func file_agentrepl_v1_endpoint_interrupt_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_interrupt_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_interrupt_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_agentrepl_v1_endpoint_interrupt_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_agentrepl_v1_endpoint_interrupt_proto_goTypes = []any{
-	(*InterruptRequest)(nil),         // 0: agentrepl.v1.InterruptRequest
-	(*InterruptTurn)(nil),            // 1: agentrepl.v1.InterruptTurn
-	(*InterruptAllAgents)(nil),       // 2: agentrepl.v1.InterruptAllAgents
-	(*InterruptResponse)(nil),        // 3: agentrepl.v1.InterruptResponse
-	(*InterruptSuccess)(nil),         // 4: agentrepl.v1.InterruptSuccess
-	(*InterruptedTurn)(nil),          // 5: agentrepl.v1.InterruptedTurn
-	(*InterruptedDetached)(nil),      // 6: agentrepl.v1.InterruptedDetached
-	(*InterruptNothingRunning)(nil),  // 7: agentrepl.v1.InterruptNothingRunning
-	(*InterruptError)(nil),           // 8: agentrepl.v1.InterruptError
-	(*InterruptConfirmRequired)(nil), // 9: agentrepl.v1.InterruptConfirmRequired
-	(*v1.WorkspaceRef)(nil),          // 10: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),               // 11: frontend.v1.FeedId
+	(*InterruptRequest)(nil),              // 0: agentrepl.v1.InterruptRequest
+	(*InterruptTurn)(nil),                 // 1: agentrepl.v1.InterruptTurn
+	(*InterruptAllAgents)(nil),            // 2: agentrepl.v1.InterruptAllAgents
+	(*InterruptResponse)(nil),             // 3: agentrepl.v1.InterruptResponse
+	(*InterruptSuccess)(nil),              // 4: agentrepl.v1.InterruptSuccess
+	(*InterruptedTurn)(nil),               // 5: agentrepl.v1.InterruptedTurn
+	(*InterruptedDetached)(nil),           // 6: agentrepl.v1.InterruptedDetached
+	(*InterruptNothingRunning)(nil),       // 7: agentrepl.v1.InterruptNothingRunning
+	(*InterruptError)(nil),                // 8: agentrepl.v1.InterruptError
+	(*InterruptConfirmRequired)(nil),      // 9: agentrepl.v1.InterruptConfirmRequired
+	(*InterruptUnknownWorkspace)(nil),     // 10: agentrepl.v1.InterruptUnknownWorkspace
+	(*InterruptWorkspaceRefMismatch)(nil), // 11: agentrepl.v1.InterruptWorkspaceRefMismatch
+	(*InterruptTransferringAway)(nil),     // 12: agentrepl.v1.InterruptTransferringAway
+	(*InterruptNotYetAdopted)(nil),        // 13: agentrepl.v1.InterruptNotYetAdopted
+	(*InterruptNotDetachedWork)(nil),      // 14: agentrepl.v1.InterruptNotDetachedWork
+	(*InterruptNoSession)(nil),            // 15: agentrepl.v1.InterruptNoSession
+	(*InterruptShimRefused)(nil),          // 16: agentrepl.v1.InterruptShimRefused
+	(*v1.WorkspaceRef)(nil),               // 17: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                    // 18: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_interrupt_proto_depIdxs = []int32{
-	10, // 0: agentrepl.v1.InterruptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	17, // 0: agentrepl.v1.InterruptRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.InterruptRequest.turn:type_name -> agentrepl.v1.InterruptTurn
-	11, // 2: agentrepl.v1.InterruptRequest.detached:type_name -> frontend.v1.FeedId
+	18, // 2: agentrepl.v1.InterruptRequest.detached:type_name -> frontend.v1.FeedId
 	2,  // 3: agentrepl.v1.InterruptRequest.all_agents:type_name -> agentrepl.v1.InterruptAllAgents
 	4,  // 4: agentrepl.v1.InterruptResponse.success:type_name -> agentrepl.v1.InterruptSuccess
 	8,  // 5: agentrepl.v1.InterruptResponse.error:type_name -> agentrepl.v1.InterruptError
@@ -720,11 +1141,18 @@ var file_agentrepl_v1_endpoint_interrupt_proto_depIdxs = []int32{
 	6,  // 7: agentrepl.v1.InterruptSuccess.interrupted_detached:type_name -> agentrepl.v1.InterruptedDetached
 	7,  // 8: agentrepl.v1.InterruptSuccess.nothing_running:type_name -> agentrepl.v1.InterruptNothingRunning
 	9,  // 9: agentrepl.v1.InterruptError.confirm_required:type_name -> agentrepl.v1.InterruptConfirmRequired
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	10, // 10: agentrepl.v1.InterruptError.unknown_workspace:type_name -> agentrepl.v1.InterruptUnknownWorkspace
+	11, // 11: agentrepl.v1.InterruptError.workspace_ref_mismatch:type_name -> agentrepl.v1.InterruptWorkspaceRefMismatch
+	12, // 12: agentrepl.v1.InterruptError.transferring_away:type_name -> agentrepl.v1.InterruptTransferringAway
+	13, // 13: agentrepl.v1.InterruptError.not_yet_adopted:type_name -> agentrepl.v1.InterruptNotYetAdopted
+	14, // 14: agentrepl.v1.InterruptError.not_detached_work:type_name -> agentrepl.v1.InterruptNotDetachedWork
+	15, // 15: agentrepl.v1.InterruptError.no_session:type_name -> agentrepl.v1.InterruptNoSession
+	16, // 16: agentrepl.v1.InterruptError.shim_refused:type_name -> agentrepl.v1.InterruptShimRefused
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_interrupt_proto_init() }
@@ -748,6 +1176,13 @@ func file_agentrepl_v1_endpoint_interrupt_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_interrupt_proto_msgTypes[8].OneofWrappers = []any{
 		(*InterruptError_ConfirmRequired)(nil),
+		(*InterruptError_UnknownWorkspace)(nil),
+		(*InterruptError_WorkspaceRefMismatch)(nil),
+		(*InterruptError_TransferringAway)(nil),
+		(*InterruptError_NotYetAdopted)(nil),
+		(*InterruptError_NotDetachedWork)(nil),
+		(*InterruptError_NoSession)(nil),
+		(*InterruptError_ShimRefused)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -755,7 +1190,7 @@ func file_agentrepl_v1_endpoint_interrupt_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_interrupt_proto_rawDesc), len(file_agentrepl_v1_endpoint_interrupt_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

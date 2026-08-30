@@ -204,11 +204,21 @@ func (*SetPermissionModeSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown mode,
-// unswitchable mode, ungated mode without consent, no session, …),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type SetPermissionModeError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*SetPermissionModeError_UnknownWorkspace
+	//	*SetPermissionModeError_WorkspaceRefMismatch
+	//	*SetPermissionModeError_TransferringAway
+	//	*SetPermissionModeError_NotYetAdopted
+	//	*SetPermissionModeError_ModeNotServed
+	//	*SetPermissionModeError_UngatedWithoutConsent
+	//	*SetPermissionModeError_NoSession
+	//	*SetPermissionModeError_VendorRefused
+	Cause         isSetPermissionModeError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,6 +253,460 @@ func (*SetPermissionModeError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *SetPermissionModeError) GetCause() isSetPermissionModeError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetUnknownWorkspace() *SetPermissionModeUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetWorkspaceRefMismatch() *SetPermissionModeWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetTransferringAway() *SetPermissionModeTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetNotYetAdopted() *SetPermissionModeNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetModeNotServed() *SetPermissionModeModeNotServed {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_ModeNotServed); ok {
+			return x.ModeNotServed
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetUngatedWithoutConsent() *SetPermissionModeUngatedWithoutConsent {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_UngatedWithoutConsent); ok {
+			return x.UngatedWithoutConsent
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetNoSession() *SetPermissionModeNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+func (x *SetPermissionModeError) GetVendorRefused() *SetPermissionModeVendorRefused {
+	if x != nil {
+		if x, ok := x.Cause.(*SetPermissionModeError_VendorRefused); ok {
+			return x.VendorRefused
+		}
+	}
+	return nil
+}
+
+type isSetPermissionModeError_Cause interface {
+	isSetPermissionModeError_Cause()
+}
+
+type SetPermissionModeError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *SetPermissionModeUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type SetPermissionModeError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *SetPermissionModeWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type SetPermissionModeError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *SetPermissionModeTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type SetPermissionModeError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *SetPermissionModeNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type SetPermissionModeError_ModeNotServed struct {
+	// The mode is not among the ones served.
+	ModeNotServed *SetPermissionModeModeNotServed `protobuf:"bytes,5,opt,name=mode_not_served,json=modeNotServed,proto3,oneof"`
+}
+
+type SetPermissionModeError_UngatedWithoutConsent struct {
+	// An ungated mode was asked for without the explicit consent.
+	UngatedWithoutConsent *SetPermissionModeUngatedWithoutConsent `protobuf:"bytes,6,opt,name=ungated_without_consent,json=ungatedWithoutConsent,proto3,oneof"`
+}
+
+type SetPermissionModeError_NoSession struct {
+	// The workspace has no session to set a mode on.
+	NoSession *SetPermissionModeNoSession `protobuf:"bytes,7,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+type SetPermissionModeError_VendorRefused struct {
+	// The vendor refused the change.
+	VendorRefused *SetPermissionModeVendorRefused `protobuf:"bytes,8,opt,name=vendor_refused,json=vendorRefused,proto3,oneof"`
+}
+
+func (*SetPermissionModeError_UnknownWorkspace) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_WorkspaceRefMismatch) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_TransferringAway) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_NotYetAdopted) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_ModeNotServed) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_UngatedWithoutConsent) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_NoSession) isSetPermissionModeError_Cause() {}
+
+func (*SetPermissionModeError_VendorRefused) isSetPermissionModeError_Cause() {}
+
+type SetPermissionModeUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeUnknownWorkspace) Reset() {
+	*x = SetPermissionModeUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeUnknownWorkspace) ProtoMessage() {}
+
+func (x *SetPermissionModeUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{4}
+}
+
+type SetPermissionModeWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeWorkspaceRefMismatch) Reset() {
+	*x = SetPermissionModeWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *SetPermissionModeWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SetPermissionModeWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type SetPermissionModeTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeTransferringAway) Reset() {
+	*x = SetPermissionModeTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeTransferringAway) ProtoMessage() {}
+
+func (x *SetPermissionModeTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeTransferringAway.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SetPermissionModeTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type SetPermissionModeNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeNotYetAdopted) Reset() {
+	*x = SetPermissionModeNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeNotYetAdopted) ProtoMessage() {}
+
+func (x *SetPermissionModeNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{7}
+}
+
+type SetPermissionModeModeNotServed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeModeNotServed) Reset() {
+	*x = SetPermissionModeModeNotServed{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeModeNotServed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeModeNotServed) ProtoMessage() {}
+
+func (x *SetPermissionModeModeNotServed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeModeNotServed.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeModeNotServed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{8}
+}
+
+type SetPermissionModeUngatedWithoutConsent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeUngatedWithoutConsent) Reset() {
+	*x = SetPermissionModeUngatedWithoutConsent{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeUngatedWithoutConsent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeUngatedWithoutConsent) ProtoMessage() {}
+
+func (x *SetPermissionModeUngatedWithoutConsent) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeUngatedWithoutConsent.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeUngatedWithoutConsent) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{9}
+}
+
+type SetPermissionModeNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeNoSession) Reset() {
+	*x = SetPermissionModeNoSession{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeNoSession) ProtoMessage() {}
+
+func (x *SetPermissionModeNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeNoSession.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeNoSession) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{10}
+}
+
+type SetPermissionModeVendorRefused struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The vendor's own account of the refusal.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetPermissionModeVendorRefused) Reset() {
+	*x = SetPermissionModeVendorRefused{}
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetPermissionModeVendorRefused) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetPermissionModeVendorRefused) ProtoMessage() {}
+
+func (x *SetPermissionModeVendorRefused) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetPermissionModeVendorRefused.ProtoReflect.Descriptor instead.
+func (*SetPermissionModeVendorRefused) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SetPermissionModeVendorRefused) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_set_permission_mode_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDesc = "" +
@@ -255,8 +719,29 @@ const file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.SetPermissionModeSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.SetPermissionModeErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1a\n" +
-	"\x18SetPermissionModeSuccess\"\x18\n" +
-	"\x16SetPermissionModeErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x18SetPermissionModeSuccess\"\x90\x06\n" +
+	"\x16SetPermissionModeError\x12^\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2/.agentrepl.v1.SetPermissionModeUnknownWorkspaceH\x00R\x10unknownWorkspace\x12k\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v23.agentrepl.v1.SetPermissionModeWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12^\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2/.agentrepl.v1.SetPermissionModeTransferringAwayH\x00R\x10transferringAway\x12V\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2,.agentrepl.v1.SetPermissionModeNotYetAdoptedH\x00R\rnotYetAdopted\x12V\n" +
+	"\x0fmode_not_served\x18\x05 \x01(\v2,.agentrepl.v1.SetPermissionModeModeNotServedH\x00R\rmodeNotServed\x12n\n" +
+	"\x17ungated_without_consent\x18\x06 \x01(\v24.agentrepl.v1.SetPermissionModeUngatedWithoutConsentH\x00R\x15ungatedWithoutConsent\x12I\n" +
+	"\n" +
+	"no_session\x18\a \x01(\v2(.agentrepl.v1.SetPermissionModeNoSessionH\x00R\tnoSession\x12U\n" +
+	"\x0evendor_refused\x18\b \x01(\v2,.agentrepl.v1.SetPermissionModeVendorRefusedH\x00R\rvendorRefusedB\a\n" +
+	"\x05cause\"#\n" +
+	"!SetPermissionModeUnknownWorkspace\"J\n" +
+	"%SetPermissionModeWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
+	"!SetPermissionModeTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
+	"\x1eSetPermissionModeNotYetAdopted\" \n" +
+	"\x1eSetPermissionModeModeNotServed\"(\n" +
+	"&SetPermissionModeUngatedWithoutConsent\"\x1c\n" +
+	"\x1aSetPermissionModeNoSession\"8\n" +
+	"\x1eSetPermissionModeVendorRefused\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescOnce sync.Once
@@ -270,23 +755,39 @@ func file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_set_permission_mode_proto_goTypes = []any{
-	(*SetPermissionModeRequest)(nil),  // 0: agentrepl.v1.SetPermissionModeRequest
-	(*SetPermissionModeResponse)(nil), // 1: agentrepl.v1.SetPermissionModeResponse
-	(*SetPermissionModeSuccess)(nil),  // 2: agentrepl.v1.SetPermissionModeSuccess
-	(*SetPermissionModeError)(nil),    // 3: agentrepl.v1.SetPermissionModeError
-	(*v1.WorkspaceRef)(nil),           // 4: workspace.v1.WorkspaceRef
+	(*SetPermissionModeRequest)(nil),               // 0: agentrepl.v1.SetPermissionModeRequest
+	(*SetPermissionModeResponse)(nil),              // 1: agentrepl.v1.SetPermissionModeResponse
+	(*SetPermissionModeSuccess)(nil),               // 2: agentrepl.v1.SetPermissionModeSuccess
+	(*SetPermissionModeError)(nil),                 // 3: agentrepl.v1.SetPermissionModeError
+	(*SetPermissionModeUnknownWorkspace)(nil),      // 4: agentrepl.v1.SetPermissionModeUnknownWorkspace
+	(*SetPermissionModeWorkspaceRefMismatch)(nil),  // 5: agentrepl.v1.SetPermissionModeWorkspaceRefMismatch
+	(*SetPermissionModeTransferringAway)(nil),      // 6: agentrepl.v1.SetPermissionModeTransferringAway
+	(*SetPermissionModeNotYetAdopted)(nil),         // 7: agentrepl.v1.SetPermissionModeNotYetAdopted
+	(*SetPermissionModeModeNotServed)(nil),         // 8: agentrepl.v1.SetPermissionModeModeNotServed
+	(*SetPermissionModeUngatedWithoutConsent)(nil), // 9: agentrepl.v1.SetPermissionModeUngatedWithoutConsent
+	(*SetPermissionModeNoSession)(nil),             // 10: agentrepl.v1.SetPermissionModeNoSession
+	(*SetPermissionModeVendorRefused)(nil),         // 11: agentrepl.v1.SetPermissionModeVendorRefused
+	(*v1.WorkspaceRef)(nil),                        // 12: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_set_permission_mode_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.SetPermissionModeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.SetPermissionModeResponse.success:type_name -> agentrepl.v1.SetPermissionModeSuccess
-	3, // 2: agentrepl.v1.SetPermissionModeResponse.error:type_name -> agentrepl.v1.SetPermissionModeError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	12, // 0: agentrepl.v1.SetPermissionModeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.SetPermissionModeResponse.success:type_name -> agentrepl.v1.SetPermissionModeSuccess
+	3,  // 2: agentrepl.v1.SetPermissionModeResponse.error:type_name -> agentrepl.v1.SetPermissionModeError
+	4,  // 3: agentrepl.v1.SetPermissionModeError.unknown_workspace:type_name -> agentrepl.v1.SetPermissionModeUnknownWorkspace
+	5,  // 4: agentrepl.v1.SetPermissionModeError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetPermissionModeWorkspaceRefMismatch
+	6,  // 5: agentrepl.v1.SetPermissionModeError.transferring_away:type_name -> agentrepl.v1.SetPermissionModeTransferringAway
+	7,  // 6: agentrepl.v1.SetPermissionModeError.not_yet_adopted:type_name -> agentrepl.v1.SetPermissionModeNotYetAdopted
+	8,  // 7: agentrepl.v1.SetPermissionModeError.mode_not_served:type_name -> agentrepl.v1.SetPermissionModeModeNotServed
+	9,  // 8: agentrepl.v1.SetPermissionModeError.ungated_without_consent:type_name -> agentrepl.v1.SetPermissionModeUngatedWithoutConsent
+	10, // 9: agentrepl.v1.SetPermissionModeError.no_session:type_name -> agentrepl.v1.SetPermissionModeNoSession
+	11, // 10: agentrepl.v1.SetPermissionModeError.vendor_refused:type_name -> agentrepl.v1.SetPermissionModeVendorRefused
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_permission_mode_proto_init() }
@@ -298,13 +799,23 @@ func file_agentrepl_v1_endpoint_set_permission_mode_proto_init() {
 		(*SetPermissionModeResponse_Success)(nil),
 		(*SetPermissionModeResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_set_permission_mode_proto_msgTypes[3].OneofWrappers = []any{
+		(*SetPermissionModeError_UnknownWorkspace)(nil),
+		(*SetPermissionModeError_WorkspaceRefMismatch)(nil),
+		(*SetPermissionModeError_TransferringAway)(nil),
+		(*SetPermissionModeError_NotYetAdopted)(nil),
+		(*SetPermissionModeError_ModeNotServed)(nil),
+		(*SetPermissionModeError_UngatedWithoutConsent)(nil),
+		(*SetPermissionModeError_NoSession)(nil),
+		(*SetPermissionModeError_VendorRefused)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_permission_mode_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

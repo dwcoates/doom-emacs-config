@@ -297,10 +297,20 @@ func (*GetFeedPageResponse_Success) isGetFeedPageResponse_Result() {}
 
 func (*GetFeedPageResponse_Error) isGetFeedPageResponse_Result() {}
 
-// EMPTY ON PURPOSE (the SubmitPromptError precedent): the refusal arms are
-// DERIVED from the daemon's real refusal sites at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type GetFeedPageError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*GetFeedPageError_UnknownWorkspace
+	//	*GetFeedPageError_WorkspaceRefMismatch
+	//	*GetFeedPageError_TransferringAway
+	//	*GetFeedPageError_NotYetAdopted
+	//	*GetFeedPageError_NoWalkStanding
+	//	*GetFeedPageError_FeedUndecodable
+	//	*GetFeedPageError_FeedNotInWorkspace
+	Cause         isGetFeedPageError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -335,6 +345,399 @@ func (*GetFeedPageError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{4}
 }
 
+func (x *GetFeedPageError) GetCause() isGetFeedPageError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetUnknownWorkspace() *GetFeedPageUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetWorkspaceRefMismatch() *GetFeedPageWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetTransferringAway() *GetFeedPageTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetNotYetAdopted() *GetFeedPageNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetNoWalkStanding() *GetFeedPageNoWalkStanding {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_NoWalkStanding); ok {
+			return x.NoWalkStanding
+		}
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetFeedUndecodable() *GetFeedPageFeedUndecodable {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_FeedUndecodable); ok {
+			return x.FeedUndecodable
+		}
+	}
+	return nil
+}
+
+func (x *GetFeedPageError) GetFeedNotInWorkspace() *GetFeedPageFeedNotInWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*GetFeedPageError_FeedNotInWorkspace); ok {
+			return x.FeedNotInWorkspace
+		}
+	}
+	return nil
+}
+
+type isGetFeedPageError_Cause interface {
+	isGetFeedPageError_Cause()
+}
+
+type GetFeedPageError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *GetFeedPageUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type GetFeedPageError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *GetFeedPageWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type GetFeedPageError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *GetFeedPageTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type GetFeedPageError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *GetFeedPageNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type GetFeedPageError_NoWalkStanding struct {
+	// A next page was asked for with no walk standing.
+	NoWalkStanding *GetFeedPageNoWalkStanding `protobuf:"bytes,5,opt,name=no_walk_standing,json=noWalkStanding,proto3,oneof"`
+}
+
+type GetFeedPageError_FeedUndecodable struct {
+	// The FeedId does not decode.
+	FeedUndecodable *GetFeedPageFeedUndecodable `protobuf:"bytes,6,opt,name=feed_undecodable,json=feedUndecodable,proto3,oneof"`
+}
+
+type GetFeedPageError_FeedNotInWorkspace struct {
+	// The FeedId decodes to another workspace.
+	FeedNotInWorkspace *GetFeedPageFeedNotInWorkspace `protobuf:"bytes,7,opt,name=feed_not_in_workspace,json=feedNotInWorkspace,proto3,oneof"`
+}
+
+func (*GetFeedPageError_UnknownWorkspace) isGetFeedPageError_Cause() {}
+
+func (*GetFeedPageError_WorkspaceRefMismatch) isGetFeedPageError_Cause() {}
+
+func (*GetFeedPageError_TransferringAway) isGetFeedPageError_Cause() {}
+
+func (*GetFeedPageError_NotYetAdopted) isGetFeedPageError_Cause() {}
+
+func (*GetFeedPageError_NoWalkStanding) isGetFeedPageError_Cause() {}
+
+func (*GetFeedPageError_FeedUndecodable) isGetFeedPageError_Cause() {}
+
+func (*GetFeedPageError_FeedNotInWorkspace) isGetFeedPageError_Cause() {}
+
+type GetFeedPageUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageUnknownWorkspace) Reset() {
+	*x = GetFeedPageUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageUnknownWorkspace) ProtoMessage() {}
+
+func (x *GetFeedPageUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*GetFeedPageUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{5}
+}
+
+type GetFeedPageWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageWorkspaceRefMismatch) Reset() {
+	*x = GetFeedPageWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *GetFeedPageWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*GetFeedPageWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetFeedPageWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type GetFeedPageTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageTransferringAway) Reset() {
+	*x = GetFeedPageTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageTransferringAway) ProtoMessage() {}
+
+func (x *GetFeedPageTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageTransferringAway.ProtoReflect.Descriptor instead.
+func (*GetFeedPageTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetFeedPageTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type GetFeedPageNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageNotYetAdopted) Reset() {
+	*x = GetFeedPageNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageNotYetAdopted) ProtoMessage() {}
+
+func (x *GetFeedPageNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*GetFeedPageNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{8}
+}
+
+type GetFeedPageNoWalkStanding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageNoWalkStanding) Reset() {
+	*x = GetFeedPageNoWalkStanding{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageNoWalkStanding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageNoWalkStanding) ProtoMessage() {}
+
+func (x *GetFeedPageNoWalkStanding) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageNoWalkStanding.ProtoReflect.Descriptor instead.
+func (*GetFeedPageNoWalkStanding) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{9}
+}
+
+type GetFeedPageFeedUndecodable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageFeedUndecodable) Reset() {
+	*x = GetFeedPageFeedUndecodable{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageFeedUndecodable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageFeedUndecodable) ProtoMessage() {}
+
+func (x *GetFeedPageFeedUndecodable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageFeedUndecodable.ProtoReflect.Descriptor instead.
+func (*GetFeedPageFeedUndecodable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{10}
+}
+
+type GetFeedPageFeedNotInWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetFeedPageFeedNotInWorkspace) Reset() {
+	*x = GetFeedPageFeedNotInWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetFeedPageFeedNotInWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetFeedPageFeedNotInWorkspace) ProtoMessage() {}
+
+func (x *GetFeedPageFeedNotInWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetFeedPageFeedNotInWorkspace.ProtoReflect.Descriptor instead.
+func (*GetFeedPageFeedNotInWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP(), []int{11}
+}
+
 var File_agentrepl_v1_endpoint_get_feed_page_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_get_feed_page_proto_rawDesc = "" +
@@ -352,8 +755,25 @@ const file_agentrepl_v1_endpoint_get_feed_page_proto_rawDesc = "" +
 	"\x13GetFeedPageResponse\x121\n" +
 	"\asuccess\x18\x01 \x01(\v2\x15.frontend.v1.FeedPageH\x00R\asuccess\x126\n" +
 	"\x05error\x18\x02 \x01(\v2\x1e.agentrepl.v1.GetFeedPageErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\x12\n" +
-	"\x10GetFeedPageErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x06result\"\x96\x05\n" +
+	"\x10GetFeedPageError\x12X\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2).agentrepl.v1.GetFeedPageUnknownWorkspaceH\x00R\x10unknownWorkspace\x12e\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2-.agentrepl.v1.GetFeedPageWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12X\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2).agentrepl.v1.GetFeedPageTransferringAwayH\x00R\x10transferringAway\x12P\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2&.agentrepl.v1.GetFeedPageNotYetAdoptedH\x00R\rnotYetAdopted\x12S\n" +
+	"\x10no_walk_standing\x18\x05 \x01(\v2'.agentrepl.v1.GetFeedPageNoWalkStandingH\x00R\x0enoWalkStanding\x12U\n" +
+	"\x10feed_undecodable\x18\x06 \x01(\v2(.agentrepl.v1.GetFeedPageFeedUndecodableH\x00R\x0ffeedUndecodable\x12`\n" +
+	"\x15feed_not_in_workspace\x18\a \x01(\v2+.agentrepl.v1.GetFeedPageFeedNotInWorkspaceH\x00R\x12feedNotInWorkspaceB\a\n" +
+	"\x05cause\"\x1d\n" +
+	"\x1bGetFeedPageUnknownWorkspace\"D\n" +
+	"\x1fGetFeedPageWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"7\n" +
+	"\x1bGetFeedPageTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1a\n" +
+	"\x18GetFeedPageNotYetAdopted\"\x1b\n" +
+	"\x19GetFeedPageNoWalkStanding\"\x1c\n" +
+	"\x1aGetFeedPageFeedUndecodable\"\x1f\n" +
+	"\x1dGetFeedPageFeedNotInWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescOnce sync.Once
@@ -367,29 +787,43 @@ func file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_get_feed_page_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_get_feed_page_proto_goTypes = []any{
-	(*GetFeedPageRequest)(nil),  // 0: agentrepl.v1.GetFeedPageRequest
-	(*GetFeedPageFirst)(nil),    // 1: agentrepl.v1.GetFeedPageFirst
-	(*GetFeedPageNext)(nil),     // 2: agentrepl.v1.GetFeedPageNext
-	(*GetFeedPageResponse)(nil), // 3: agentrepl.v1.GetFeedPageResponse
-	(*GetFeedPageError)(nil),    // 4: agentrepl.v1.GetFeedPageError
-	(*v1.WorkspaceRef)(nil),     // 5: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),          // 6: frontend.v1.FeedId
-	(*v11.FeedPage)(nil),        // 7: frontend.v1.FeedPage
+	(*GetFeedPageRequest)(nil),              // 0: agentrepl.v1.GetFeedPageRequest
+	(*GetFeedPageFirst)(nil),                // 1: agentrepl.v1.GetFeedPageFirst
+	(*GetFeedPageNext)(nil),                 // 2: agentrepl.v1.GetFeedPageNext
+	(*GetFeedPageResponse)(nil),             // 3: agentrepl.v1.GetFeedPageResponse
+	(*GetFeedPageError)(nil),                // 4: agentrepl.v1.GetFeedPageError
+	(*GetFeedPageUnknownWorkspace)(nil),     // 5: agentrepl.v1.GetFeedPageUnknownWorkspace
+	(*GetFeedPageWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.GetFeedPageWorkspaceRefMismatch
+	(*GetFeedPageTransferringAway)(nil),     // 7: agentrepl.v1.GetFeedPageTransferringAway
+	(*GetFeedPageNotYetAdopted)(nil),        // 8: agentrepl.v1.GetFeedPageNotYetAdopted
+	(*GetFeedPageNoWalkStanding)(nil),       // 9: agentrepl.v1.GetFeedPageNoWalkStanding
+	(*GetFeedPageFeedUndecodable)(nil),      // 10: agentrepl.v1.GetFeedPageFeedUndecodable
+	(*GetFeedPageFeedNotInWorkspace)(nil),   // 11: agentrepl.v1.GetFeedPageFeedNotInWorkspace
+	(*v1.WorkspaceRef)(nil),                 // 12: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                      // 13: frontend.v1.FeedId
+	(*v11.FeedPage)(nil),                    // 14: frontend.v1.FeedPage
 }
 var file_agentrepl_v1_endpoint_get_feed_page_proto_depIdxs = []int32{
-	5, // 0: agentrepl.v1.GetFeedPageRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	6, // 1: agentrepl.v1.GetFeedPageRequest.feed:type_name -> frontend.v1.FeedId
-	1, // 2: agentrepl.v1.GetFeedPageRequest.first:type_name -> agentrepl.v1.GetFeedPageFirst
-	2, // 3: agentrepl.v1.GetFeedPageRequest.next:type_name -> agentrepl.v1.GetFeedPageNext
-	7, // 4: agentrepl.v1.GetFeedPageResponse.success:type_name -> frontend.v1.FeedPage
-	4, // 5: agentrepl.v1.GetFeedPageResponse.error:type_name -> agentrepl.v1.GetFeedPageError
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	12, // 0: agentrepl.v1.GetFeedPageRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	13, // 1: agentrepl.v1.GetFeedPageRequest.feed:type_name -> frontend.v1.FeedId
+	1,  // 2: agentrepl.v1.GetFeedPageRequest.first:type_name -> agentrepl.v1.GetFeedPageFirst
+	2,  // 3: agentrepl.v1.GetFeedPageRequest.next:type_name -> agentrepl.v1.GetFeedPageNext
+	14, // 4: agentrepl.v1.GetFeedPageResponse.success:type_name -> frontend.v1.FeedPage
+	4,  // 5: agentrepl.v1.GetFeedPageResponse.error:type_name -> agentrepl.v1.GetFeedPageError
+	5,  // 6: agentrepl.v1.GetFeedPageError.unknown_workspace:type_name -> agentrepl.v1.GetFeedPageUnknownWorkspace
+	6,  // 7: agentrepl.v1.GetFeedPageError.workspace_ref_mismatch:type_name -> agentrepl.v1.GetFeedPageWorkspaceRefMismatch
+	7,  // 8: agentrepl.v1.GetFeedPageError.transferring_away:type_name -> agentrepl.v1.GetFeedPageTransferringAway
+	8,  // 9: agentrepl.v1.GetFeedPageError.not_yet_adopted:type_name -> agentrepl.v1.GetFeedPageNotYetAdopted
+	9,  // 10: agentrepl.v1.GetFeedPageError.no_walk_standing:type_name -> agentrepl.v1.GetFeedPageNoWalkStanding
+	10, // 11: agentrepl.v1.GetFeedPageError.feed_undecodable:type_name -> agentrepl.v1.GetFeedPageFeedUndecodable
+	11, // 12: agentrepl.v1.GetFeedPageError.feed_not_in_workspace:type_name -> agentrepl.v1.GetFeedPageFeedNotInWorkspace
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_get_feed_page_proto_init() }
@@ -405,13 +839,22 @@ func file_agentrepl_v1_endpoint_get_feed_page_proto_init() {
 		(*GetFeedPageResponse_Success)(nil),
 		(*GetFeedPageResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_get_feed_page_proto_msgTypes[4].OneofWrappers = []any{
+		(*GetFeedPageError_UnknownWorkspace)(nil),
+		(*GetFeedPageError_WorkspaceRefMismatch)(nil),
+		(*GetFeedPageError_TransferringAway)(nil),
+		(*GetFeedPageError_NotYetAdopted)(nil),
+		(*GetFeedPageError_NoWalkStanding)(nil),
+		(*GetFeedPageError_FeedUndecodable)(nil),
+		(*GetFeedPageError_FeedNotInWorkspace)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_get_feed_page_proto_rawDesc), len(file_agentrepl_v1_endpoint_get_feed_page_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
