@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_answer_cold_gate.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_cold_gate: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2NvbGRfZ2F0ZS5wcm90bxIMYWdlbnRyZXBsLnYxIo8CChVBbnN3ZXJDb2xkR2F0ZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIhCgRnYXRlGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KA3BheRgDIAEoCzIfLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVBheUgAEjIKBWNsZWFyGAQgASgLMiEuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ2xlYXJIABI2Cgdjb21wYWN0GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ29tcGFjdEgAQggKBmNob2ljZSITChFBbnN3ZXJDb2xkR2F0ZVBheSIVChNBbnN3ZXJDb2xkR2F0ZUNsZWFyIngKFUFuc3dlckNvbGRHYXRlQ29tcGFjdBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjMKBXNjb3BlGAIgASgOMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21wYWN0U2NvcGUijgEKFkFuc3dlckNvbGRHYXRlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZUVycm9ySABCCAoGcmVzdWx0IhcKFUFuc3dlckNvbGRHYXRlU3VjY2VzcyIVChNBbnN3ZXJDb2xkR2F0ZUVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed, file_conversation_v1_api, file_conversation_v1_session]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2NvbGRfZ2F0ZS5wcm90bxIMYWdlbnRyZXBsLnYxIo8CChVBbnN3ZXJDb2xkR2F0ZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIhCgRnYXRlGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEi4KA3BheRgDIAEoCzIfLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVBheUgAEjIKBWNsZWFyGAQgASgLMiEuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ2xlYXJIABI2Cgdjb21wYWN0GAUgASgLMiMuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlQ29tcGFjdEgAQggKBmNob2ljZSITChFBbnN3ZXJDb2xkR2F0ZVBheSIVChNBbnN3ZXJDb2xkR2F0ZUNsZWFyIngKFUFuc3dlckNvbGRHYXRlQ29tcGFjdBIqCgVtb2RlbBgBIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudE1vZGVsEjMKBXNjb3BlGAIgASgOMiQuY29udmVyc2F0aW9uLnYxLlNlc3Npb25Db21wYWN0U2NvcGUijgEKFkFuc3dlckNvbGRHYXRlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZUVycm9ySABCCAoGcmVzdWx0IhcKFUFuc3dlckNvbGRHYXRlU3VjY2VzcyKcBAoTQW5zd2VyQ29sZEdhdGVFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5BbnN3ZXJDb2xkR2F0ZVRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb3RZZXRBZG9wdGVkSAASPgoMbm9fY29sZF9nYXRlGAUgASgLMiYuYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlTm9Db2xkR2F0ZUgAEk8KFHVuc2VydmVkX3JlbWVkaWF0aW9uGAYgASgLMi8uYWdlbnRyZXBsLnYxLkFuc3dlckNvbGRHYXRlVW5zZXJ2ZWRSZW1lZGlhdGlvbkgAEjsKCm5vX3Nlc3Npb24YByABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyQ29sZEdhdGVOb1Nlc3Npb25IAEIHCgVjYXVzZSIgCh5BbnN3ZXJDb2xkR2F0ZVVua25vd25Xb3Jrc3BhY2UiOgoiQW5zd2VyQ29sZEdhdGVXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeQW5zd2VyQ29sZEdhdGVUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobQW5zd2VyQ29sZEdhdGVOb3RZZXRBZG9wdGVkIhoKGEFuc3dlckNvbGRHYXRlTm9Db2xkR2F0ZSIjCiFBbnN3ZXJDb2xkR2F0ZVVuc2VydmVkUmVtZWRpYXRpb24iGQoXQW5zd2VyQ29sZEdhdGVOb1Nlc3Npb25CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed, file_conversation_v1_api, file_conversation_v1_session]);
 
 /**
  * @generated from message agentrepl.v1.AnswerColdGateRequest
@@ -184,12 +184,72 @@ export const AnswerColdGateSuccessSchema: GenMessage<AnswerColdGateSuccess> = /*
   messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 5);
 
 /**
- * EMPTY ON PURPOSE: arms derived at the wave (no gate standing, a model or
- * scope the menu never served).
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.AnswerColdGateError
  */
 export type AnswerColdGateError = Message<"agentrepl.v1.AnswerColdGateError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.AnswerColdGateError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateUnknownWorkspace unknown_workspace = 1;
+     */
+    value: AnswerColdGateUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: AnswerColdGateWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateTransferringAway transferring_away = 3;
+     */
+    value: AnswerColdGateTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateNotYetAdopted not_yet_adopted = 4;
+     */
+    value: AnswerColdGateNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * No cold gate is standing for this workspace.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateNoColdGate no_cold_gate = 5;
+     */
+    value: AnswerColdGateNoColdGate;
+    case: "noColdGate";
+  } | {
+    /**
+     * A remediation the gate never served.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateUnservedRemediation unserved_remediation = 6;
+     */
+    value: AnswerColdGateUnservedRemediation;
+    case: "unservedRemediation";
+  } | {
+    /**
+     * The workspace has no session to answer to.
+     *
+     * @generated from field: agentrepl.v1.AnswerColdGateNoSession no_session = 7;
+     */
+    value: AnswerColdGateNoSession;
+    case: "noSession";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -198,4 +258,107 @@ export type AnswerColdGateError = Message<"agentrepl.v1.AnswerColdGateError"> & 
  */
 export const AnswerColdGateErrorSchema: GenMessage<AnswerColdGateError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 6);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateUnknownWorkspace
+ */
+export type AnswerColdGateUnknownWorkspace = Message<"agentrepl.v1.AnswerColdGateUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateUnknownWorkspace.
+ * Use `create(AnswerColdGateUnknownWorkspaceSchema)` to create a new message.
+ */
+export const AnswerColdGateUnknownWorkspaceSchema: GenMessage<AnswerColdGateUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 7);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateWorkspaceRefMismatch
+ */
+export type AnswerColdGateWorkspaceRefMismatch = Message<"agentrepl.v1.AnswerColdGateWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateWorkspaceRefMismatch.
+ * Use `create(AnswerColdGateWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const AnswerColdGateWorkspaceRefMismatchSchema: GenMessage<AnswerColdGateWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 8);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateTransferringAway
+ */
+export type AnswerColdGateTransferringAway = Message<"agentrepl.v1.AnswerColdGateTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateTransferringAway.
+ * Use `create(AnswerColdGateTransferringAwaySchema)` to create a new message.
+ */
+export const AnswerColdGateTransferringAwaySchema: GenMessage<AnswerColdGateTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 9);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateNotYetAdopted
+ */
+export type AnswerColdGateNotYetAdopted = Message<"agentrepl.v1.AnswerColdGateNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateNotYetAdopted.
+ * Use `create(AnswerColdGateNotYetAdoptedSchema)` to create a new message.
+ */
+export const AnswerColdGateNotYetAdoptedSchema: GenMessage<AnswerColdGateNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 10);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateNoColdGate
+ */
+export type AnswerColdGateNoColdGate = Message<"agentrepl.v1.AnswerColdGateNoColdGate"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateNoColdGate.
+ * Use `create(AnswerColdGateNoColdGateSchema)` to create a new message.
+ */
+export const AnswerColdGateNoColdGateSchema: GenMessage<AnswerColdGateNoColdGate> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 11);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateUnservedRemediation
+ */
+export type AnswerColdGateUnservedRemediation = Message<"agentrepl.v1.AnswerColdGateUnservedRemediation"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateUnservedRemediation.
+ * Use `create(AnswerColdGateUnservedRemediationSchema)` to create a new message.
+ */
+export const AnswerColdGateUnservedRemediationSchema: GenMessage<AnswerColdGateUnservedRemediation> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 12);
+
+/**
+ * @generated from message agentrepl.v1.AnswerColdGateNoSession
+ */
+export type AnswerColdGateNoSession = Message<"agentrepl.v1.AnswerColdGateNoSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerColdGateNoSession.
+ * Use `create(AnswerColdGateNoSessionSchema)` to create a new message.
+ */
+export const AnswerColdGateNoSessionSchema: GenMessage<AnswerColdGateNoSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_cold_gate, 13);
 
