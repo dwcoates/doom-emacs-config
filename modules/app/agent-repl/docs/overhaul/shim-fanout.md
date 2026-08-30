@@ -450,3 +450,8 @@ every UX or contract gap you surfaced instead of improvising.
   retired), mock additions (from e017fe398; five_hour fix pending). Next:
   merge each, run `npm run test:integration`, opus-low remediation for the
   three engine gaps + suite failures, fable audit loop.
+- LEDGER: mock additions merged at cd73f3c3b (worktree/branch retired;
+  table 138 rows incl. `!usage-opus-absent`). Running: record plane
+  `a699887424d695c83` (steps 1–10 + landing-4 mappings), integration author
+  `a4e55fa0df5a8d8c9`. One slot free; the engine-gap remediation waits for
+  the record plane to land (shared engine files).
