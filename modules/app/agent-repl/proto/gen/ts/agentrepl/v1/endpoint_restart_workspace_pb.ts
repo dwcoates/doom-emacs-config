@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_restart_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_restart_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVzdGFydF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJXChdSZXN0YXJ0V29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWZvcmNlGAIgASgIIpQBChhSZXN0YXJ0V29ya3NwYWNlUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlJlc3RhcnRXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIZChdSZXN0YXJ0V29ya3NwYWNlU3VjY2VzcyIXChVSZXN0YXJ0V29ya3NwYWNlRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVzdGFydF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJXChdSZXN0YXJ0V29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEg0KBWZvcmNlGAIgASgIIpQBChhSZXN0YXJ0V29ya3NwYWNlUmVzcG9uc2USOAoHc3VjY2VzcxgBIAEoCzIlLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlU3VjY2Vzc0gAEjQKBWVycm9yGAIgASgLMiMuYWdlbnRyZXBsLnYxLlJlc3RhcnRXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIZChdSZXN0YXJ0V29ya3NwYWNlU3VjY2VzcyKXAwoVUmVzdGFydFdvcmtzcGFjZUVycm9yEksKEXVua25vd25fd29ya3NwYWNlGAEgASgLMi4uYWdlbnRyZXBsLnYxLlJlc3RhcnRXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASVAoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIyLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJLChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIuLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkYKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIrLmFnZW50cmVwbC52MS5SZXN0YXJ0V29ya3NwYWNlTm90WWV0QWRvcHRlZEgAEj0KCm5vX3Nlc3Npb24YBSABKAsyJy5hZ2VudHJlcGwudjEuUmVzdGFydFdvcmtzcGFjZU5vU2Vzc2lvbkgAQgcKBWNhdXNlIiIKIFJlc3RhcnRXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjwKJFJlc3RhcnRXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMwogUmVzdGFydFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIfCh1SZXN0YXJ0V29ya3NwYWNlTm90WWV0QWRvcHRlZCIbChlSZXN0YXJ0V29ya3NwYWNlTm9TZXNzaW9uQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RestartWorkspaceRequest
@@ -96,11 +96,56 @@ export const RestartWorkspaceSuccessSchema: GenMessage<RestartWorkspaceSuccess> 
   messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.RestartWorkspaceError
  */
 export type RestartWorkspaceError = Message<"agentrepl.v1.RestartWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.RestartWorkspaceError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceUnknownWorkspace unknown_workspace = 1;
+     */
+    value: RestartWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: RestartWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceTransferringAway transferring_away = 3;
+     */
+    value: RestartWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceNotYetAdopted not_yet_adopted = 4;
+     */
+    value: RestartWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The workspace has no session to restart.
+     *
+     * @generated from field: agentrepl.v1.RestartWorkspaceNoSession no_session = 5;
+     */
+    value: RestartWorkspaceNoSession;
+    case: "noSession";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -109,4 +154,81 @@ export type RestartWorkspaceError = Message<"agentrepl.v1.RestartWorkspaceError"
  */
 export const RestartWorkspaceErrorSchema: GenMessage<RestartWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.RestartWorkspaceUnknownWorkspace
+ */
+export type RestartWorkspaceUnknownWorkspace = Message<"agentrepl.v1.RestartWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceUnknownWorkspace.
+ * Use `create(RestartWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const RestartWorkspaceUnknownWorkspaceSchema: GenMessage<RestartWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
+ */
+export type RestartWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch.
+ * Use `create(RestartWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const RestartWorkspaceWorkspaceRefMismatchSchema: GenMessage<RestartWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.RestartWorkspaceTransferringAway
+ */
+export type RestartWorkspaceTransferringAway = Message<"agentrepl.v1.RestartWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceTransferringAway.
+ * Use `create(RestartWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const RestartWorkspaceTransferringAwaySchema: GenMessage<RestartWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.RestartWorkspaceNotYetAdopted
+ */
+export type RestartWorkspaceNotYetAdopted = Message<"agentrepl.v1.RestartWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceNotYetAdopted.
+ * Use `create(RestartWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const RestartWorkspaceNotYetAdoptedSchema: GenMessage<RestartWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 7);
+
+/**
+ * @generated from message agentrepl.v1.RestartWorkspaceNoSession
+ */
+export type RestartWorkspaceNoSession = Message<"agentrepl.v1.RestartWorkspaceNoSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RestartWorkspaceNoSession.
+ * Use `create(RestartWorkspaceNoSessionSchema)` to create a new message.
+ */
+export const RestartWorkspaceNoSessionSchema: GenMessage<RestartWorkspaceNoSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_restart_workspace, 8);
 
