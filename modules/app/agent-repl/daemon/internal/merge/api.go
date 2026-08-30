@@ -108,9 +108,9 @@ type Deps struct {
 	// Prompts reads the briefs at use time. The field holds the directory,
 	// not a cached brief, because a brief is never cached across a use.
 	PromptsDir string
-	// Briefs loads one brief by name at USE time. It is injected rather than
-	// called directly so the orchestrator's tests fake a brief without a
-	// prompts directory on disk; the production value is BriefsFrom.
+	// Briefs loads and splices one brief by name at USE time. It is injected
+	// rather than called directly so the orchestrator's tests fake a brief
+	// without a prompts directory on disk; the production value is BriefsFrom.
 	Briefs BriefLoader
 	// SelfRepoDir is the daemon's OWN checkout. SameRepo against it is what
 	// selects the Emacs-repo method; AGENT_REPL_SELF_REPO_DIR overrides it in
@@ -165,13 +165,23 @@ type Deps struct {
 	Log dlog.Surfaces
 }
 
-// BriefLoader loads one brief by name, at use time.
-type BriefLoader func(name string) (prompts.Prompt, error)
+// BriefLoader loads one brief by name and splices its values, at use time. It
+// composes rather than returning the parsed brief because a brief is never
+// worth having half-composed: the two steps fail for the same reason and the
+// caller reacts the same way to either.
+type BriefLoader func(name string, values map[string]string) (string, error)
 
-// BriefsFrom is the production BriefLoader: it reads dir at every use, so
-// editing a brief takes effect without a daemon bounce.
+// BriefsFrom is the production BriefLoader: it reads dir at EVERY use, so
+// editing a brief takes effect without a daemon bounce, and a missing file or a
+// placeholder the values do not cover is LOUD rather than a hole in a prompt.
 func BriefsFrom(dir string) BriefLoader {
-	return func(name string) (prompts.Prompt, error) { return LoadBrief(dir, name) }
+	return func(name string, values map[string]string) (string, error) {
+		brief, err := LoadBrief(dir, name)
+		if err != nil {
+			return "", err
+		}
+		return brief.Splice(values)
+	}
 }
 
 // ScriptRunner runs one command in a directory and reports its combined output
