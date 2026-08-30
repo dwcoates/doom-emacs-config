@@ -49,7 +49,13 @@ import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { stopTicking, tick } from "../ticking.js";
 import { refusalOf, type SentenceTable } from "../refusal-text.js";
-import { clearRefusals, refusal, release, whileInFlight } from "./controls.js";
+import {
+  clearRefusals,
+  drawMalformedRefusal,
+  refusal,
+  release,
+  whileInFlight,
+} from "./controls.js";
 
 const PATH = "FeedShell";
 
@@ -294,7 +300,14 @@ async function stop(
     wrap.append(refusal("transport", "the daemon could not be reached"));
     return;
   }
-  drawAnswer(answered.value, rc, wrap, button);
+  try {
+    drawAnswer(answered.value, rc, wrap, button);
+  } catch (err) {
+    // A refusal this build cannot read is still a failure the reader owns; it is
+    // stated at the control and reported once rather than becoming an unhandled
+    // rejection inside a click handler.
+    if (!drawMalformedRefusal(rc.ctx, wrap, "feed.cards.shell.malformed-refusal", err)) throw err;
+  }
 }
 
 /**
