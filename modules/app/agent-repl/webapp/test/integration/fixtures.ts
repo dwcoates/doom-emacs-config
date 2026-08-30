@@ -43,6 +43,7 @@ import {
   FooterViewSchema,
   FooterStatusSchema,
   FooterExpandedSchema,
+  FooterAllowanceSchema,
   type FooterView,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import {
@@ -73,6 +74,14 @@ import {
   type WatchDaemonResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
 import { DrainReasonSchema, type DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
+import {
+  DaemonHealthResponseSchema,
+  DaemonFaultSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_daemon_health_pb";
+import {
+  SessionHealthResponseSchema,
+  SessionFaultSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_session_health_pb";
 import {
   SubmitPromptCommandPanelSchema,
   type SubmitPromptCommandPanel,
@@ -1166,13 +1175,36 @@ const substatusValue = (substatus: string): object => {
   return {};
 };
 
+/** The allowance verdicts; the free-text status string was retired. */
+export const FOOTER_ALLOWANCE_ARMS = ["allowed", "allowedWarning", "rejected"] as const;
+export type FooterAllowanceArm = (typeof FOOTER_ALLOWANCE_ARMS)[number];
+
+/** One rate-limit allowance, complete, with its verdict as a typed arm. */
+export function allowance(
+  arm: FooterAllowanceArm,
+  init?: { newsworthy?: boolean; resetsAtS?: bigint; utilization?: number },
+): MessageInitShape<typeof FooterAllowanceSchema> {
+  return {
+    newsworthy: init?.newsworthy ?? true,
+    resetsAtS: init?.resetsAtS ?? 1_700n,
+    utilization: init?.utilization ?? 0.82,
+    status: { case: arm, value: {} },
+  };
+}
+
+/** A rate-limited activity whose two allowances carry the given verdicts. */
+export const rateLimitedActivity = (
+  session: FooterAllowanceArm,
+  weekly: FooterAllowanceArm = "allowed",
+): object => ({ session: allowance(session), weekly: allowance(weekly) });
+
 /** Every activity kind arm, with a complete payload for each. */
 export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
   notification: { text: "the agent addressed you" },
   contextBudget: { text: "84% of the window" },
   rateLimited: {
-    session: { newsworthy: true, resetsAtS: 1_700n, utilization: 0.82, status: "warn" },
-    weekly: { newsworthy: false, resetsAtS: 9_000n, utilization: 0.3, status: "ok" },
+    session: allowance("allowedWarning", { newsworthy: true, resetsAtS: 1_700n, utilization: 0.82 }),
+    weekly: allowance("allowed", { newsworthy: false, resetsAtS: 9_000n, utilization: 0.3 }),
   },
   hook: { name: "PreToolUse" },
   retrying: { attempt: 3, status: "overloaded" },
@@ -1222,7 +1254,13 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
  */
 export function footerStatus(
   status: string,
-  init?: { substatus?: string; activity?: string; activityAtMs?: bigint },
+  init?: {
+    substatus?: string;
+    activity?: string;
+    activityAtMs?: bigint;
+    /** Replace the activity kind's payload, for arm-by-arm tables. */
+    activityOverride?: object;
+  },
 ): StatusArm {
   const substatuses = FOOTER_STATUS_SUBSTATUSES[status];
   if (!substatuses) throw new Error(`no substatus table for footer status ${JSON.stringify(status)}`);
@@ -1234,7 +1272,7 @@ export function footerStatus(
   if (init?.activity) {
     value.activity = {
       at: { atMs: init.activityAtMs ?? 3_000n },
-      kind: { case: init.activity, value: FOOTER_ACTIVITY_KINDS[init.activity] },
+      kind: { case: init.activity, value: init.activityOverride ?? FOOTER_ACTIVITY_KINDS[init.activity] },
     };
   }
   return { case: status, value } as StatusArm;
@@ -1255,6 +1293,7 @@ type FooterInit = {
   substatus?: string;
   activity?: string;
   activityAtMs?: bigint;
+  activityOverride?: object;
   turnStartedAtMs?: bigint;
   tokensText?: string;
   alarm?: boolean;
@@ -1824,6 +1863,110 @@ export const hostWorkspacePush = (): WatchHostWorkspaceResponse =>
                 backfill: { state: { case: "done", value: {} } },
                 composer: { case: "open", value: {} },
                 faults: [],
+              },
+            },
+          },
+        },
+        naming: { slug: "webapp-integration-suite", title: "the integration suite" },
+      },
+    },
+  });
+
+// ---------------------------------------------------------------------------
+// Faults (DaemonHealth / SessionHealth answers, and the host stream's rows)
+// ---------------------------------------------------------------------------
+
+export const DAEMON_FAULT_ARMS = [
+  "adoptionWindowExpired",
+  "logSinkPoisoned",
+  "deployScriptFailed",
+  "successorSpawnFailed",
+  "promptsDirMissing",
+  "wsmReadOnly",
+] as const;
+export type DaemonFaultArm = (typeof DAEMON_FAULT_ARMS)[number];
+
+export const SESSION_FAULT_ARMS = [
+  "shimStartFailed",
+  "shimDied",
+  "linkSevered",
+  "resumeFailed",
+  "bounceDied",
+  "bounceUnknown",
+  "classifierFailed",
+  "shimReported",
+] as const;
+export type SessionFaultArm = (typeof SESSION_FAULT_ARMS)[number];
+
+type DaemonFaultInit = MessageInitShape<typeof DaemonFaultSchema>;
+type SessionFaultInit = MessageInitShape<typeof SessionFaultSchema>;
+
+/** An unhealthy answer is an ANSWER, not an error: it rides the success arm. */
+export function daemonFault(arm: DaemonFaultArm, detail?: string): DaemonFaultInit {
+  const kind = (() => {
+    switch (arm) {
+      case "adoptionWindowExpired":
+        return { case: "adoptionWindowExpired" as const, value: { workspace: workspaceRef() } };
+      case "logSinkPoisoned":
+        return { case: "logSinkPoisoned" as const, value: { sink: "the durable log" } };
+      case "deployScriptFailed":
+        return { case: "deployScriptFailed" as const, value: { detail: "the deploy script exited 1" } };
+      case "successorSpawnFailed":
+        return { case: "successorSpawnFailed" as const, value: { detail: "the successor never came up" } };
+      case "promptsDirMissing":
+        return { case: "promptsDirMissing" as const, value: { path: "/no/such/prompts" } };
+      case "wsmReadOnly":
+        return { case: "wsmReadOnly" as const, value: {} };
+    }
+  })();
+  return { detail: detail ?? `daemon fault: ${arm}`, kind };
+}
+
+export function sessionFault(arm: SessionFaultArm, detail?: string): SessionFaultInit {
+  return { detail: detail ?? `session fault: ${arm}`, kind: { case: arm, value: {} } };
+}
+
+export const daemonUnhealthy = (arms: readonly DaemonFaultArm[] = DAEMON_FAULT_ARMS) =>
+  create(DaemonHealthResponseSchema, {
+    result: {
+      case: "success",
+      value: { health: { case: "unhealthy", value: { faults: arms.map((a) => daemonFault(a)) } } },
+    },
+  });
+
+export const sessionUnhealthy = (arms: readonly SessionFaultArm[] = SESSION_FAULT_ARMS) =>
+  create(SessionHealthResponseSchema, {
+    result: {
+      case: "success",
+      value: { health: { case: "unhealthy", value: { faults: arms.map((a) => sessionFault(a)) } } },
+    },
+  });
+
+/** A host push whose live session carries one fault of each named arm. */
+export const hostWorkspaceWithFaults = (
+  arms: readonly SessionFaultArm[] = SESSION_FAULT_ARMS,
+): WatchHostWorkspaceResponse =>
+  create(WatchHostWorkspaceResponseSchema, {
+    push: {
+      case: "host",
+      value: {
+        session: {
+          case: "existing",
+          value: {
+            id: { value: "session-1" },
+            standing: {
+              case: "live",
+              value: {
+                generation: { value: "gen-1" },
+                shimAttached: true,
+                vendorInfo: { case: "claude", value: { sessionId: "vendor-1", configDir: "/tmp/config" } },
+                backfill: { state: { case: "done", value: {} } },
+                composer: { case: "open", value: {} },
+                faults: arms.map((a) => ({
+                  detail: `host fault: ${a}`,
+                  openedAtMs: 1_000n,
+                  kind: { case: a, value: {} },
+                })),
               },
             },
           },

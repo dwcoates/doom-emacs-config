@@ -29,19 +29,23 @@ import { RequestCommandSupportResponseSchema } from "../../../proto/gen/ts/agent
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
 import { startHarness, type Harness } from "./harness";
-import { ROOT_FEED } from "./fake-daemon";
+import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import {
   REFUSED_COMMAND,
   WORKSPACE_ID,
   activityRow,
+  artifactUnit,
+  coldGateStandingRow,
   commandRefusedRow,
   feedId,
   feedPageSuccess,
   footerView,
+  heldOfferItem,
   heldPromptItem,
   holdTray,
   permissionRow,
   planUnit,
+  questionRow,
   roster,
   rosterRow,
   topbarView,
@@ -442,5 +446,285 @@ describe("a refusal is never pushed state", () => {
     });
     // Assert: nothing in a cold page carries a refusal.
     expect(harness.refusalArms()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TYPED REFUSAL ARMS (landing 4)
+//
+// Every `<Rpc>Error` now carries a typed arm oneof: the four cross-cutting
+// causes on every per-workspace rpc, plus per-rpc arms. The suite drives them
+// off the SCHEMA (`fake.refusalArms(rpc)`), so an arm landed in the contract
+// shows up here without anyone remembering to add it.
+// ---------------------------------------------------------------------------
+
+/** The four every per-workspace rpc declares. */
+const CROSS_CUTTING_ARMS = [
+  "unknownWorkspace",
+  "workspaceRefMismatch",
+  "transferringAway",
+  "notYetAdopted",
+] as const;
+
+/**
+ * How to provoke each rpc the app actually calls, and where its refusal must
+ * land. `arrange` scripts the daemon and draws whatever the click needs.
+ */
+interface RefusalSite {
+  name: string;
+  rpc: RpcName;
+  /** The selector clicked to make the call. */
+  click: string;
+  /** Where the refusal must be drawn. */
+  site: string;
+  /** Put the app in a state where `click` exists. */
+  arrange?(h: Harness): void | Promise<void>;
+  /** Extra steps between arrange and the click. */
+  before?(h: Harness): Promise<void>;
+}
+
+const REFUSAL_SITES: RefusalSite[] = [
+  {
+    name: "SubmitPrompt",
+    rpc: "submitPrompt",
+    click: "[data-composer-send]",
+    site: '[data-component="composer"]',
+    before: async (h) => {
+      const input = h.$('[data-component="composer"] textarea') as HTMLTextAreaElement;
+      input.value = "a prompt";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      await h.settle();
+    },
+  },
+  {
+    name: "Interrupt",
+    rpc: "interrupt",
+    click: "[data-interrupt]",
+    site: '[data-component="footer"]',
+    arrange: (h) => h.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+  },
+  {
+    name: "AnswerPermission",
+    rpc: "answerPermission",
+    click: '[data-permission="allowOnce"]',
+    site: '[data-feed-row="perm"]',
+    arrange: (h) =>
+      h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("open", undefined, { id: feedId("perm") })),
+  },
+  {
+    name: "AnswerQuestion",
+    rpc: "answerQuestion",
+    click: "[data-question-submit]",
+    site: '[data-feed-row="ask"]',
+    arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, questionRow("open", { id: feedId("ask") })),
+  },
+  {
+    name: "AnswerColdGate",
+    rpc: "answerColdGate",
+    click: '[data-cold-gate="pay"]',
+    site: '[data-feed-row="gate"]',
+    arrange: (h) =>
+      h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, coldGateStandingRow(undefined, { id: feedId("gate") })),
+  },
+  {
+    name: "UpdateHeldPrompt",
+    rpc: "updateHeldPrompt",
+    click: '[data-held-action="drop"]',
+    site: '[data-component="hold-tray"]',
+    arrange: (h) => h.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem()] })),
+  },
+  {
+    name: "AnswerHeldOffer",
+    rpc: "answerHeldOffer",
+    click: '[data-offer-decision="keep"]',
+    site: '[data-component="hold-tray"]',
+    arrange: (h) => h.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldOfferItem()] })),
+  },
+  {
+    name: "CloseWorkspace",
+    rpc: "closeWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="close"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "KillWorkspace",
+    rpc: "killWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="kill"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "NukeWorkspace",
+    rpc: "nukeWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="nuke"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "MergeWorkspace",
+    rpc: "mergeWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="merge"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "RestartWorkspace",
+    rpc: "restartWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="restart"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "OpenWorkspace",
+    rpc: "openWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="open"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "SetWorkspacePriority",
+    rpc: "setWorkspacePriority",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-verb="priority"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "SelectWorkspace",
+    rpc: "selectWorkspace",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-select]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "AssignWorkspaceTask",
+    rpc: "assignWorkspaceTask",
+    click: `[data-roster-row="${WORKSPACE_ID}"] [data-assign-task="task-1"]`,
+    site: `[data-roster-row="${WORKSPACE_ID}"]`,
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "SetModel",
+    rpc: "setModel",
+    click: '[data-model-option="sonnet"]',
+    site: ".topbar-model",
+    arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
+    before: async (h) => await h.click(".topbar-model"),
+  },
+  {
+    name: "SetPermissionMode",
+    rpc: "setPermissionMode",
+    click: '[data-mode-option="plan"]',
+    site: ".topbar-mode",
+    arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
+    before: async (h) => await h.click(".topbar-mode"),
+  },
+  {
+    name: "OpenLogin",
+    rpc: "openLogin",
+    click: ".topbar-account",
+    site: ".topbar-account",
+    arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView({ account: "loggedOut" })),
+  },
+  {
+    name: "OpenExternal",
+    rpc: "openExternal",
+    click: "[data-external-link]",
+    site: '[data-feed-row="row-1"]',
+    arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(artifactUnit("published"))),
+  },
+  {
+    name: "OpenInEditor",
+    rpc: "openInEditor",
+    click: "[data-editor-link]",
+    site: '[data-feed-row="row-1"]',
+    arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(planUnit("planned"))),
+  },
+  {
+    name: "RequestCommandSupport",
+    rpc: "requestCommandSupport",
+    click: "[data-add-support]",
+    site: '[data-feed-row="row-1"]',
+    arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, commandRefusedRow()),
+  },
+];
+
+/** Boot, script the refusal, put the app in reach of the control, and click. */
+async function provoke(testCase: RefusalSite, arm: string): Promise<Harness> {
+  const h = await startHarness({ composer: true });
+  await h.fake.awaitStream("watchFeed");
+  h.fake.refuse(testCase.rpc, arm);
+  await testCase.arrange?.(h);
+  await h.settle();
+  await testCase.before?.(h);
+  await h.click(testCase.click);
+  return h;
+}
+
+describe.each(REFUSAL_SITES)("$name's typed refusals", (testCase) => {
+  it("declares the four cross-cutting arms on its error", () => {
+    // Assert: read off the descriptor, so a dropped arm fails here.
+    expect(refusalArmsOf(testCase.rpc)).toEqual(expect.arrayContaining([...CROSS_CUTTING_ARMS]));
+  });
+
+  it.each(CROSS_CUTTING_ARMS)("draws the %s arm at its call site", async (arm) => {
+    // Arrange / Act
+    harness = await provoke(testCase, arm);
+    // Assert
+    expect(harness.$(`${testCase.site} .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it("draws the registry dir the ref-mismatch arm carries", async () => {
+    // Arrange / Act
+    harness = await provoke(testCase, "workspaceRefMismatch");
+    // Assert
+    expect(harness.$(`${testCase.site} .refusal`)?.textContent).toContain(REFUSAL_FACTS.registryDir);
+  });
+
+  it("draws the address the transferring-away arm carries", async () => {
+    // Arrange / Act
+    harness = await provoke(testCase, "transferringAway");
+    // Assert
+    expect(harness.$(`${testCase.site} .refusal`)?.textContent).toContain(REFUSAL_FACTS.address);
+  });
+
+  it("draws no refusal in the feed for a control outside it", async () => {
+    // Arrange / Act
+    harness = await provoke(testCase, "unknownWorkspace");
+    // Assert: exactly one refusal stands, and it is the one at the call site.
+    expect(harness.refusalArms()).toEqual(["unknownWorkspace"]);
+  });
+});
+
+describe("per-rpc refusal arms", () => {
+  /** Every arm that is NOT one of the four cross-cutting ones. */
+  const perRpcArms = (rpc: RpcName): string[] =>
+    refusalArmsOf(rpc).filter((a) => !(CROSS_CUTTING_ARMS as readonly string[]).includes(a));
+
+  it.each(
+    REFUSAL_SITES.flatMap((testCase) =>
+      perRpcArms(testCase.rpc).map((arm) => ({ name: testCase.name, testCase, arm })),
+    ),
+  )("draws $name's $arm arm at its call site", async ({ testCase, arm }) => {
+    // Arrange / Act
+    harness = await provoke(testCase, arm);
+    // Assert
+    expect(harness.$(`${testCase.site} .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+});
+
+describe("AdoptWebWorkspace's refusals", () => {
+  it.each(CROSS_CUTTING_ARMS)("reports the %s arm as a client-local failure", async (arm) => {
+    // Arrange: the adoption has no clicked control — it happens during a
+    // transfer — so its refusal is machinery failing, not a user's click.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    const second = await harness.startSecondDaemon();
+    second.refuse("adoptWebWorkspace", arm);
+    // Act
+    harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.failureArms()).toContain("controlPlaneFailed");
   });
 });
