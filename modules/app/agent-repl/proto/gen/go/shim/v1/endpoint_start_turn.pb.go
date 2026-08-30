@@ -201,13 +201,19 @@ func (*StartTurnResponse_Success) isStartTurnResponse_Result() {}
 
 func (*StartTurnResponse_Failure) isStartTurnResponse_Result() {}
 
-// The prompt was accepted and the turn is open. Empty: the id was the
-// daemon's, and everything the turn produces is WatchAgent's.
+// The prompt was accepted and the turn is open. The turn's frames are
+// WatchAgent's; what returns here is the prompt as delivered and the OPENING
+// PAGE the request's `page_size` / `known_through` asked for.
 type StartTurnSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The prompt as delivered: the daemon's id adopted, the recipient resolved,
 	// the text as accepted. `prompt.agent` is the address for WatchAgent. The same message history replays.
-	Prompt        *v1.AgentPrompt `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	Prompt *v1.AgentPrompt `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	// The opening page: a full first page of `page_size` entries when
+	// `known_through` was UNSET, else only the entries newer than it. Always
+	// set on success; an empty page is a page with no entries, never an
+	// absent one.
+	Page          *v1.HistoryPage `protobuf:"bytes,2,opt,name=page,proto3" json:"page,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -245,6 +251,13 @@ func (*StartTurnSuccess) Descriptor() ([]byte, []int) {
 func (x *StartTurnSuccess) GetPrompt() *v1.AgentPrompt {
 	if x != nil {
 		return x.Prompt
+	}
+	return nil
+}
+
+func (x *StartTurnSuccess) GetPage() *v1.HistoryPage {
+	if x != nil {
+		return x.Page
 	}
 	return nil
 }
@@ -537,9 +550,10 @@ const file_shim_v1_endpoint_start_turn_proto_rawDesc = "" +
 	"\x11StartTurnResponse\x125\n" +
 	"\asuccess\x18\x01 \x01(\v2\x19.shim.v1.StartTurnSuccessH\x00R\asuccess\x125\n" +
 	"\afailure\x18\x02 \x01(\v2\x19.shim.v1.StartTurnFailureH\x00R\afailureB\b\n" +
-	"\x06result\"H\n" +
+	"\x06result\"z\n" +
 	"\x10StartTurnSuccess\x124\n" +
-	"\x06prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptR\x06prompt\"\xc9\x02\n" +
+	"\x06prompt\x18\x01 \x01(\v2\x1c.conversation.v1.AgentPromptR\x06prompt\x120\n" +
+	"\x04page\x18\x02 \x01(\v2\x1c.conversation.v1.HistoryPageR\x04page\"\xc9\x02\n" +
 	"\x10StartTurnFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12O\n" +
 	"\x11turn_already_open\x18\x02 \x01(\v2!.shim.v1.StartTurnTurnAlreadyOpenH\x00R\x0fturnAlreadyOpen\x12<\n" +
@@ -581,6 +595,7 @@ var file_shim_v1_endpoint_start_turn_proto_goTypes = []any{
 	(v1.PromptOrigin)(0),             // 10: conversation.v1.PromptOrigin
 	(*v1.HistoryPointer)(nil),        // 11: conversation.v1.HistoryPointer
 	(*v1.AgentPrompt)(nil),           // 12: conversation.v1.AgentPrompt
+	(*v1.HistoryPage)(nil),           // 13: conversation.v1.HistoryPage
 }
 var file_shim_v1_endpoint_start_turn_proto_depIdxs = []int32{
 	8,  // 0: shim.v1.StartTurnRequest.turn:type_name -> conversation.v1.TurnId
@@ -590,15 +605,16 @@ var file_shim_v1_endpoint_start_turn_proto_depIdxs = []int32{
 	2,  // 4: shim.v1.StartTurnResponse.success:type_name -> shim.v1.StartTurnSuccess
 	3,  // 5: shim.v1.StartTurnResponse.failure:type_name -> shim.v1.StartTurnFailure
 	12, // 6: shim.v1.StartTurnSuccess.prompt:type_name -> conversation.v1.AgentPrompt
-	4,  // 7: shim.v1.StartTurnFailure.turn_already_open:type_name -> shim.v1.StartTurnTurnAlreadyOpen
-	5,  // 8: shim.v1.StartTurnFailure.no_session:type_name -> shim.v1.StartTurnNoSession
-	6,  // 9: shim.v1.StartTurnFailure.vendor_refused:type_name -> shim.v1.StartTurnVendorRefused
-	7,  // 10: shim.v1.StartTurnFailure.query_dead:type_name -> shim.v1.StartTurnQueryDead
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 7: shim.v1.StartTurnSuccess.page:type_name -> conversation.v1.HistoryPage
+	4,  // 8: shim.v1.StartTurnFailure.turn_already_open:type_name -> shim.v1.StartTurnTurnAlreadyOpen
+	5,  // 9: shim.v1.StartTurnFailure.no_session:type_name -> shim.v1.StartTurnNoSession
+	6,  // 10: shim.v1.StartTurnFailure.vendor_refused:type_name -> shim.v1.StartTurnVendorRefused
+	7,  // 11: shim.v1.StartTurnFailure.query_dead:type_name -> shim.v1.StartTurnQueryDead
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_start_turn_proto_init() }

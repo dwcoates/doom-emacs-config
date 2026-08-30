@@ -189,9 +189,21 @@ func (*MergeWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type MergeWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*MergeWorkspaceError_UnknownWorkspace
+	//	*MergeWorkspaceError_WorkspaceRefMismatch
+	//	*MergeWorkspaceError_TransferringAway
+	//	*MergeWorkspaceError_NotYetAdopted
+	//	*MergeWorkspaceError_NoLayoutFacts
+	//	*MergeWorkspaceError_SessionDeleted
+	//	*MergeWorkspaceError_AlreadyQueued
+	//	*MergeWorkspaceError_AlreadyMerging
+	Cause         isMergeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -226,6 +238,451 @@ func (*MergeWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *MergeWorkspaceError) GetCause() isMergeWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetUnknownWorkspace() *MergeWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetWorkspaceRefMismatch() *MergeWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetTransferringAway() *MergeWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetNotYetAdopted() *MergeWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetNoLayoutFacts() *MergeWorkspaceNoLayoutFacts {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_NoLayoutFacts); ok {
+			return x.NoLayoutFacts
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetSessionDeleted() *MergeWorkspaceSessionDeleted {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_SessionDeleted); ok {
+			return x.SessionDeleted
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetAlreadyQueued() *MergeWorkspaceAlreadyQueued {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_AlreadyQueued); ok {
+			return x.AlreadyQueued
+		}
+	}
+	return nil
+}
+
+func (x *MergeWorkspaceError) GetAlreadyMerging() *MergeWorkspaceAlreadyMerging {
+	if x != nil {
+		if x, ok := x.Cause.(*MergeWorkspaceError_AlreadyMerging); ok {
+			return x.AlreadyMerging
+		}
+	}
+	return nil
+}
+
+type isMergeWorkspaceError_Cause interface {
+	isMergeWorkspaceError_Cause()
+}
+
+type MergeWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *MergeWorkspaceUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type MergeWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *MergeWorkspaceWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type MergeWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *MergeWorkspaceTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type MergeWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *MergeWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type MergeWorkspaceError_NoLayoutFacts struct {
+	// The daemon holds no layout facts for this workspace to merge with.
+	NoLayoutFacts *MergeWorkspaceNoLayoutFacts `protobuf:"bytes,5,opt,name=no_layout_facts,json=noLayoutFacts,proto3,oneof"`
+}
+
+type MergeWorkspaceError_SessionDeleted struct {
+	// The workspace's session has been deleted.
+	SessionDeleted *MergeWorkspaceSessionDeleted `protobuf:"bytes,6,opt,name=session_deleted,json=sessionDeleted,proto3,oneof"`
+}
+
+type MergeWorkspaceError_AlreadyQueued struct {
+	// This workspace's merge is already in the queue.
+	AlreadyQueued *MergeWorkspaceAlreadyQueued `protobuf:"bytes,7,opt,name=already_queued,json=alreadyQueued,proto3,oneof"`
+}
+
+type MergeWorkspaceError_AlreadyMerging struct {
+	// This workspace's merge is already in flight.
+	AlreadyMerging *MergeWorkspaceAlreadyMerging `protobuf:"bytes,8,opt,name=already_merging,json=alreadyMerging,proto3,oneof"`
+}
+
+func (*MergeWorkspaceError_UnknownWorkspace) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_WorkspaceRefMismatch) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_TransferringAway) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_NotYetAdopted) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_NoLayoutFacts) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_SessionDeleted) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_AlreadyQueued) isMergeWorkspaceError_Cause() {}
+
+func (*MergeWorkspaceError_AlreadyMerging) isMergeWorkspaceError_Cause() {}
+
+type MergeWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceUnknownWorkspace) Reset() {
+	*x = MergeWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *MergeWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+type MergeWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = MergeWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *MergeWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *MergeWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type MergeWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceTransferringAway) Reset() {
+	*x = MergeWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *MergeWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *MergeWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type MergeWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceNotYetAdopted) Reset() {
+	*x = MergeWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *MergeWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+type MergeWorkspaceNoLayoutFacts struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceNoLayoutFacts) Reset() {
+	*x = MergeWorkspaceNoLayoutFacts{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceNoLayoutFacts) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceNoLayoutFacts) ProtoMessage() {}
+
+func (x *MergeWorkspaceNoLayoutFacts) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceNoLayoutFacts.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceNoLayoutFacts) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{8}
+}
+
+type MergeWorkspaceSessionDeleted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceSessionDeleted) Reset() {
+	*x = MergeWorkspaceSessionDeleted{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceSessionDeleted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceSessionDeleted) ProtoMessage() {}
+
+func (x *MergeWorkspaceSessionDeleted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceSessionDeleted.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceSessionDeleted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{9}
+}
+
+type MergeWorkspaceAlreadyQueued struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceAlreadyQueued) Reset() {
+	*x = MergeWorkspaceAlreadyQueued{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceAlreadyQueued) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceAlreadyQueued) ProtoMessage() {}
+
+func (x *MergeWorkspaceAlreadyQueued) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceAlreadyQueued.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceAlreadyQueued) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{10}
+}
+
+type MergeWorkspaceAlreadyMerging struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MergeWorkspaceAlreadyMerging) Reset() {
+	*x = MergeWorkspaceAlreadyMerging{}
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MergeWorkspaceAlreadyMerging) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MergeWorkspaceAlreadyMerging) ProtoMessage() {}
+
+func (x *MergeWorkspaceAlreadyMerging) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MergeWorkspaceAlreadyMerging.ProtoReflect.Descriptor instead.
+func (*MergeWorkspaceAlreadyMerging) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP(), []int{11}
+}
+
 var File_agentrepl_v1_endpoint_merge_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
@@ -237,8 +694,27 @@ const file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.MergeWorkspaceSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.MergeWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15MergeWorkspaceSuccess\"\x15\n" +
-	"\x13MergeWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x15MergeWorkspaceSuccess\"\xee\x05\n" +
+	"\x13MergeWorkspaceError\x12[\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.MergeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.MergeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2,.agentrepl.v1.MergeWorkspaceTransferringAwayH\x00R\x10transferringAway\x12S\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2).agentrepl.v1.MergeWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12S\n" +
+	"\x0fno_layout_facts\x18\x05 \x01(\v2).agentrepl.v1.MergeWorkspaceNoLayoutFactsH\x00R\rnoLayoutFacts\x12U\n" +
+	"\x0fsession_deleted\x18\x06 \x01(\v2*.agentrepl.v1.MergeWorkspaceSessionDeletedH\x00R\x0esessionDeleted\x12R\n" +
+	"\x0ealready_queued\x18\a \x01(\v2).agentrepl.v1.MergeWorkspaceAlreadyQueuedH\x00R\ralreadyQueued\x12U\n" +
+	"\x0falready_merging\x18\b \x01(\v2*.agentrepl.v1.MergeWorkspaceAlreadyMergingH\x00R\x0ealreadyMergingB\a\n" +
+	"\x05cause\" \n" +
+	"\x1eMergeWorkspaceUnknownWorkspace\"G\n" +
+	"\"MergeWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
+	"\x1eMergeWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
+	"\x1bMergeWorkspaceNotYetAdopted\"\x1d\n" +
+	"\x1bMergeWorkspaceNoLayoutFacts\"\x1e\n" +
+	"\x1cMergeWorkspaceSessionDeleted\"\x1d\n" +
+	"\x1bMergeWorkspaceAlreadyQueued\"\x1e\n" +
+	"\x1cMergeWorkspaceAlreadyMergingB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescOnce sync.Once
@@ -252,23 +728,39 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_merge_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_agentrepl_v1_endpoint_merge_workspace_proto_goTypes = []any{
-	(*MergeWorkspaceRequest)(nil),  // 0: agentrepl.v1.MergeWorkspaceRequest
-	(*MergeWorkspaceResponse)(nil), // 1: agentrepl.v1.MergeWorkspaceResponse
-	(*MergeWorkspaceSuccess)(nil),  // 2: agentrepl.v1.MergeWorkspaceSuccess
-	(*MergeWorkspaceError)(nil),    // 3: agentrepl.v1.MergeWorkspaceError
-	(*v1.WorkspaceRef)(nil),        // 4: workspace.v1.WorkspaceRef
+	(*MergeWorkspaceRequest)(nil),              // 0: agentrepl.v1.MergeWorkspaceRequest
+	(*MergeWorkspaceResponse)(nil),             // 1: agentrepl.v1.MergeWorkspaceResponse
+	(*MergeWorkspaceSuccess)(nil),              // 2: agentrepl.v1.MergeWorkspaceSuccess
+	(*MergeWorkspaceError)(nil),                // 3: agentrepl.v1.MergeWorkspaceError
+	(*MergeWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.MergeWorkspaceUnknownWorkspace
+	(*MergeWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
+	(*MergeWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.MergeWorkspaceTransferringAway
+	(*MergeWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.MergeWorkspaceNotYetAdopted
+	(*MergeWorkspaceNoLayoutFacts)(nil),        // 8: agentrepl.v1.MergeWorkspaceNoLayoutFacts
+	(*MergeWorkspaceSessionDeleted)(nil),       // 9: agentrepl.v1.MergeWorkspaceSessionDeleted
+	(*MergeWorkspaceAlreadyQueued)(nil),        // 10: agentrepl.v1.MergeWorkspaceAlreadyQueued
+	(*MergeWorkspaceAlreadyMerging)(nil),       // 11: agentrepl.v1.MergeWorkspaceAlreadyMerging
+	(*v1.WorkspaceRef)(nil),                    // 12: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_merge_workspace_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
-	3, // 2: agentrepl.v1.MergeWorkspaceResponse.error:type_name -> agentrepl.v1.MergeWorkspaceError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	12, // 0: agentrepl.v1.MergeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.MergeWorkspaceResponse.success:type_name -> agentrepl.v1.MergeWorkspaceSuccess
+	3,  // 2: agentrepl.v1.MergeWorkspaceResponse.error:type_name -> agentrepl.v1.MergeWorkspaceError
+	4,  // 3: agentrepl.v1.MergeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.MergeWorkspaceUnknownWorkspace
+	5,  // 4: agentrepl.v1.MergeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
+	6,  // 5: agentrepl.v1.MergeWorkspaceError.transferring_away:type_name -> agentrepl.v1.MergeWorkspaceTransferringAway
+	7,  // 6: agentrepl.v1.MergeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.MergeWorkspaceNotYetAdopted
+	8,  // 7: agentrepl.v1.MergeWorkspaceError.no_layout_facts:type_name -> agentrepl.v1.MergeWorkspaceNoLayoutFacts
+	9,  // 8: agentrepl.v1.MergeWorkspaceError.session_deleted:type_name -> agentrepl.v1.MergeWorkspaceSessionDeleted
+	10, // 9: agentrepl.v1.MergeWorkspaceError.already_queued:type_name -> agentrepl.v1.MergeWorkspaceAlreadyQueued
+	11, // 10: agentrepl.v1.MergeWorkspaceError.already_merging:type_name -> agentrepl.v1.MergeWorkspaceAlreadyMerging
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_merge_workspace_proto_init() }
@@ -280,13 +772,23 @@ func file_agentrepl_v1_endpoint_merge_workspace_proto_init() {
 		(*MergeWorkspaceResponse_Success)(nil),
 		(*MergeWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_merge_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*MergeWorkspaceError_UnknownWorkspace)(nil),
+		(*MergeWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*MergeWorkspaceError_TransferringAway)(nil),
+		(*MergeWorkspaceError_NotYetAdopted)(nil),
+		(*MergeWorkspaceError_NoLayoutFacts)(nil),
+		(*MergeWorkspaceError_SessionDeleted)(nil),
+		(*MergeWorkspaceError_AlreadyQueued)(nil),
+		(*MergeWorkspaceError_AlreadyMerging)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_merge_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

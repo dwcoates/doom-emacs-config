@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_request_command_support.proto.
  */
 export const file_agentrepl_v1_endpoint_request_command_support: GenFile = /*@__PURE__*/
-  fileDesc("CjNhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVxdWVzdF9jb21tYW5kX3N1cHBvcnQucHJvdG8SDGFnZW50cmVwbC52MSJeChxSZXF1ZXN0Q29tbWFuZFN1cHBvcnRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDwoHY29tbWFuZBgCIAEoCSKjAQodUmVxdWVzdENvbW1hbmRTdXBwb3J0UmVzcG9uc2USPQoHc3VjY2VzcxgBIAEoCzIqLmFnZW50cmVwbC52MS5SZXF1ZXN0Q29tbWFuZFN1cHBvcnRTdWNjZXNzSAASOQoFZXJyb3IYAiABKAsyKC5hZ2VudHJlcGwudjEuUmVxdWVzdENvbW1hbmRTdXBwb3J0RXJyb3JIAEIICgZyZXN1bHQiTQocUmVxdWVzdENvbW1hbmRTdXBwb3J0U3VjY2VzcxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIhwKGlJlcXVlc3RDb21tYW5kU3VwcG9ydEVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CjNhZ2VudHJlcGwvdjEvZW5kcG9pbnRfcmVxdWVzdF9jb21tYW5kX3N1cHBvcnQucHJvdG8SDGFnZW50cmVwbC52MSJeChxSZXF1ZXN0Q29tbWFuZFN1cHBvcnRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDwoHY29tbWFuZBgCIAEoCSKjAQodUmVxdWVzdENvbW1hbmRTdXBwb3J0UmVzcG9uc2USPQoHc3VjY2VzcxgBIAEoCzIqLmFnZW50cmVwbC52MS5SZXF1ZXN0Q29tbWFuZFN1cHBvcnRTdWNjZXNzSAASOQoFZXJyb3IYAiABKAsyKC5hZ2VudHJlcGwudjEuUmVxdWVzdENvbW1hbmRTdXBwb3J0RXJyb3JIAEIICgZyZXN1bHQiTQocUmVxdWVzdENvbW1hbmRTdXBwb3J0U3VjY2VzcxItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIoUEChpSZXF1ZXN0Q29tbWFuZFN1cHBvcnRFcnJvchJQChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIzLmFnZW50cmVwbC52MS5SZXF1ZXN0Q29tbWFuZFN1cHBvcnRVbmtub3duV29ya3NwYWNlSAASWQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzI3LmFnZW50cmVwbC52MS5SZXF1ZXN0Q29tbWFuZFN1cHBvcnRXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAElAKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMjMuYWdlbnRyZXBsLnYxLlJlcXVlc3RDb21tYW5kU3VwcG9ydFRyYW5zZmVycmluZ0F3YXlIABJLCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyMC5hZ2VudHJlcGwudjEuUmVxdWVzdENvbW1hbmRTdXBwb3J0Tm90WWV0QWRvcHRlZEgAEkgKDWJsYW5rX2NvbW1hbmQYBSABKAsyLy5hZ2VudHJlcGwudjEuUmVxdWVzdENvbW1hbmRTdXBwb3J0QmxhbmtDb21tYW5kSAASSAoNYnJpZWZfbWlzc2luZxgGIAEoCzIvLmFnZW50cmVwbC52MS5SZXF1ZXN0Q29tbWFuZFN1cHBvcnRCcmllZk1pc3NpbmdIAEIHCgVjYXVzZSInCiVSZXF1ZXN0Q29tbWFuZFN1cHBvcnRVbmtub3duV29ya3NwYWNlIkEKKVJlcXVlc3RDb21tYW5kU3VwcG9ydFdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSI4CiVSZXF1ZXN0Q29tbWFuZFN1cHBvcnRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiJAoiUmVxdWVzdENvbW1hbmRTdXBwb3J0Tm90WWV0QWRvcHRlZCIjCiFSZXF1ZXN0Q29tbWFuZFN1cHBvcnRCbGFua0NvbW1hbmQiMQohUmVxdWVzdENvbW1hbmRTdXBwb3J0QnJpZWZNaXNzaW5nEgwKBG5hbWUYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.RequestCommandSupportRequest
@@ -99,12 +99,64 @@ export const RequestCommandSupportSuccessSchema: GenMessage<RequestCommandSuppor
   messageDesc(file_agentrepl_v1_endpoint_request_command_support, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace, a
- * command the daemon never refused, creation failed, …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.RequestCommandSupportError
  */
 export type RequestCommandSupportError = Message<"agentrepl.v1.RequestCommandSupportError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.RequestCommandSupportError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.RequestCommandSupportUnknownWorkspace unknown_workspace = 1;
+     */
+    value: RequestCommandSupportUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.RequestCommandSupportWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: RequestCommandSupportWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.RequestCommandSupportTransferringAway transferring_away = 3;
+     */
+    value: RequestCommandSupportTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.RequestCommandSupportNotYetAdopted not_yet_adopted = 4;
+     */
+    value: RequestCommandSupportNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The command is blank once trimmed.
+     *
+     * @generated from field: agentrepl.v1.RequestCommandSupportBlankCommand blank_command = 5;
+     */
+    value: RequestCommandSupportBlankCommand;
+    case: "blankCommand";
+  } | {
+    /**
+     * The named brief file is absent.
+     *
+     * @generated from field: agentrepl.v1.RequestCommandSupportBriefMissing brief_missing = 6;
+     */
+    value: RequestCommandSupportBriefMissing;
+    case: "briefMissing";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -113,4 +165,100 @@ export type RequestCommandSupportError = Message<"agentrepl.v1.RequestCommandSup
  */
 export const RequestCommandSupportErrorSchema: GenMessage<RequestCommandSupportError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_request_command_support, 3);
+
+/**
+ * @generated from message agentrepl.v1.RequestCommandSupportUnknownWorkspace
+ */
+export type RequestCommandSupportUnknownWorkspace = Message<"agentrepl.v1.RequestCommandSupportUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RequestCommandSupportUnknownWorkspace.
+ * Use `create(RequestCommandSupportUnknownWorkspaceSchema)` to create a new message.
+ */
+export const RequestCommandSupportUnknownWorkspaceSchema: GenMessage<RequestCommandSupportUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_request_command_support, 4);
+
+/**
+ * @generated from message agentrepl.v1.RequestCommandSupportWorkspaceRefMismatch
+ */
+export type RequestCommandSupportWorkspaceRefMismatch = Message<"agentrepl.v1.RequestCommandSupportWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RequestCommandSupportWorkspaceRefMismatch.
+ * Use `create(RequestCommandSupportWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const RequestCommandSupportWorkspaceRefMismatchSchema: GenMessage<RequestCommandSupportWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_request_command_support, 5);
+
+/**
+ * @generated from message agentrepl.v1.RequestCommandSupportTransferringAway
+ */
+export type RequestCommandSupportTransferringAway = Message<"agentrepl.v1.RequestCommandSupportTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RequestCommandSupportTransferringAway.
+ * Use `create(RequestCommandSupportTransferringAwaySchema)` to create a new message.
+ */
+export const RequestCommandSupportTransferringAwaySchema: GenMessage<RequestCommandSupportTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_request_command_support, 6);
+
+/**
+ * @generated from message agentrepl.v1.RequestCommandSupportNotYetAdopted
+ */
+export type RequestCommandSupportNotYetAdopted = Message<"agentrepl.v1.RequestCommandSupportNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RequestCommandSupportNotYetAdopted.
+ * Use `create(RequestCommandSupportNotYetAdoptedSchema)` to create a new message.
+ */
+export const RequestCommandSupportNotYetAdoptedSchema: GenMessage<RequestCommandSupportNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_request_command_support, 7);
+
+/**
+ * @generated from message agentrepl.v1.RequestCommandSupportBlankCommand
+ */
+export type RequestCommandSupportBlankCommand = Message<"agentrepl.v1.RequestCommandSupportBlankCommand"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.RequestCommandSupportBlankCommand.
+ * Use `create(RequestCommandSupportBlankCommandSchema)` to create a new message.
+ */
+export const RequestCommandSupportBlankCommandSchema: GenMessage<RequestCommandSupportBlankCommand> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_request_command_support, 8);
+
+/**
+ * @generated from message agentrepl.v1.RequestCommandSupportBriefMissing
+ */
+export type RequestCommandSupportBriefMissing = Message<"agentrepl.v1.RequestCommandSupportBriefMissing"> & {
+  /**
+   * The brief's name, as asked for.
+   *
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.RequestCommandSupportBriefMissing.
+ * Use `create(RequestCommandSupportBriefMissingSchema)` to create a new message.
+ */
+export const RequestCommandSupportBriefMissingSchema: GenMessage<RequestCommandSupportBriefMissing> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_request_command_support, 9);
 

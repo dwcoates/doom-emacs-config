@@ -216,10 +216,18 @@ func (*OpenInEditorSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace, no
-// host stream open for it, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type OpenInEditorError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*OpenInEditorError_UnknownWorkspace
+	//	*OpenInEditorError_WorkspaceRefMismatch
+	//	*OpenInEditorError_TransferringAway
+	//	*OpenInEditorError_NotYetAdopted
+	//	*OpenInEditorError_PathEscapesWorkspace
+	Cause         isOpenInEditorError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -254,6 +262,295 @@ func (*OpenInEditorError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *OpenInEditorError) GetCause() isOpenInEditorError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *OpenInEditorError) GetUnknownWorkspace() *OpenInEditorUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenInEditorError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *OpenInEditorError) GetWorkspaceRefMismatch() *OpenInEditorWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenInEditorError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *OpenInEditorError) GetTransferringAway() *OpenInEditorTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenInEditorError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *OpenInEditorError) GetNotYetAdopted() *OpenInEditorNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenInEditorError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *OpenInEditorError) GetPathEscapesWorkspace() *OpenInEditorPathEscapesWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenInEditorError_PathEscapesWorkspace); ok {
+			return x.PathEscapesWorkspace
+		}
+	}
+	return nil
+}
+
+type isOpenInEditorError_Cause interface {
+	isOpenInEditorError_Cause()
+}
+
+type OpenInEditorError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *OpenInEditorUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type OpenInEditorError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *OpenInEditorWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type OpenInEditorError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *OpenInEditorTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type OpenInEditorError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *OpenInEditorNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type OpenInEditorError_PathEscapesWorkspace struct {
+	// The path resolves outside the workspace's worktree.
+	PathEscapesWorkspace *OpenInEditorPathEscapesWorkspace `protobuf:"bytes,5,opt,name=path_escapes_workspace,json=pathEscapesWorkspace,proto3,oneof"`
+}
+
+func (*OpenInEditorError_UnknownWorkspace) isOpenInEditorError_Cause() {}
+
+func (*OpenInEditorError_WorkspaceRefMismatch) isOpenInEditorError_Cause() {}
+
+func (*OpenInEditorError_TransferringAway) isOpenInEditorError_Cause() {}
+
+func (*OpenInEditorError_NotYetAdopted) isOpenInEditorError_Cause() {}
+
+func (*OpenInEditorError_PathEscapesWorkspace) isOpenInEditorError_Cause() {}
+
+type OpenInEditorUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorUnknownWorkspace) Reset() {
+	*x = OpenInEditorUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorUnknownWorkspace) ProtoMessage() {}
+
+func (x *OpenInEditorUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenInEditorUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{4}
+}
+
+type OpenInEditorWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorWorkspaceRefMismatch) Reset() {
+	*x = OpenInEditorWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *OpenInEditorWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*OpenInEditorWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenInEditorWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type OpenInEditorTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorTransferringAway) Reset() {
+	*x = OpenInEditorTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorTransferringAway) ProtoMessage() {}
+
+func (x *OpenInEditorTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorTransferringAway.ProtoReflect.Descriptor instead.
+func (*OpenInEditorTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *OpenInEditorTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type OpenInEditorNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorNotYetAdopted) Reset() {
+	*x = OpenInEditorNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorNotYetAdopted) ProtoMessage() {}
+
+func (x *OpenInEditorNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*OpenInEditorNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{7}
+}
+
+type OpenInEditorPathEscapesWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenInEditorPathEscapesWorkspace) Reset() {
+	*x = OpenInEditorPathEscapesWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenInEditorPathEscapesWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenInEditorPathEscapesWorkspace) ProtoMessage() {}
+
+func (x *OpenInEditorPathEscapesWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenInEditorPathEscapesWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenInEditorPathEscapesWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP(), []int{8}
+}
+
 var File_agentrepl_v1_endpoint_open_in_editor_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
@@ -268,8 +565,21 @@ const file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.OpenInEditorSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.OpenInEditorErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x15\n" +
-	"\x13OpenInEditorSuccess\"\x13\n" +
-	"\x11OpenInEditorErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x13OpenInEditorSuccess\"\xf5\x03\n" +
+	"\x11OpenInEditorError\x12Y\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2*.agentrepl.v1.OpenInEditorUnknownWorkspaceH\x00R\x10unknownWorkspace\x12f\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2..agentrepl.v1.OpenInEditorWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Y\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2*.agentrepl.v1.OpenInEditorTransferringAwayH\x00R\x10transferringAway\x12Q\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2'.agentrepl.v1.OpenInEditorNotYetAdoptedH\x00R\rnotYetAdopted\x12f\n" +
+	"\x16path_escapes_workspace\x18\x05 \x01(\v2..agentrepl.v1.OpenInEditorPathEscapesWorkspaceH\x00R\x14pathEscapesWorkspaceB\a\n" +
+	"\x05cause\"\x1e\n" +
+	"\x1cOpenInEditorUnknownWorkspace\"E\n" +
+	" OpenInEditorWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
+	"\x1cOpenInEditorTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
+	"\x19OpenInEditorNotYetAdopted\"\"\n" +
+	" OpenInEditorPathEscapesWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescOnce sync.Once
@@ -283,23 +593,33 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_in_editor_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_open_in_editor_proto_goTypes = []any{
-	(*OpenInEditorRequest)(nil),  // 0: agentrepl.v1.OpenInEditorRequest
-	(*OpenInEditorResponse)(nil), // 1: agentrepl.v1.OpenInEditorResponse
-	(*OpenInEditorSuccess)(nil),  // 2: agentrepl.v1.OpenInEditorSuccess
-	(*OpenInEditorError)(nil),    // 3: agentrepl.v1.OpenInEditorError
-	(*v1.WorkspaceRef)(nil),      // 4: workspace.v1.WorkspaceRef
+	(*OpenInEditorRequest)(nil),              // 0: agentrepl.v1.OpenInEditorRequest
+	(*OpenInEditorResponse)(nil),             // 1: agentrepl.v1.OpenInEditorResponse
+	(*OpenInEditorSuccess)(nil),              // 2: agentrepl.v1.OpenInEditorSuccess
+	(*OpenInEditorError)(nil),                // 3: agentrepl.v1.OpenInEditorError
+	(*OpenInEditorUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenInEditorUnknownWorkspace
+	(*OpenInEditorWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenInEditorWorkspaceRefMismatch
+	(*OpenInEditorTransferringAway)(nil),     // 6: agentrepl.v1.OpenInEditorTransferringAway
+	(*OpenInEditorNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenInEditorNotYetAdopted
+	(*OpenInEditorPathEscapesWorkspace)(nil), // 8: agentrepl.v1.OpenInEditorPathEscapesWorkspace
+	(*v1.WorkspaceRef)(nil),                  // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_open_in_editor_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.OpenInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 0: agentrepl.v1.OpenInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.OpenInEditorResponse.success:type_name -> agentrepl.v1.OpenInEditorSuccess
 	3, // 2: agentrepl.v1.OpenInEditorResponse.error:type_name -> agentrepl.v1.OpenInEditorError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: agentrepl.v1.OpenInEditorError.unknown_workspace:type_name -> agentrepl.v1.OpenInEditorUnknownWorkspace
+	5, // 4: agentrepl.v1.OpenInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenInEditorWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.OpenInEditorError.transferring_away:type_name -> agentrepl.v1.OpenInEditorTransferringAway
+	7, // 6: agentrepl.v1.OpenInEditorError.not_yet_adopted:type_name -> agentrepl.v1.OpenInEditorNotYetAdopted
+	8, // 7: agentrepl.v1.OpenInEditorError.path_escapes_workspace:type_name -> agentrepl.v1.OpenInEditorPathEscapesWorkspace
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_in_editor_proto_init() }
@@ -312,13 +632,20 @@ func file_agentrepl_v1_endpoint_open_in_editor_proto_init() {
 		(*OpenInEditorResponse_Success)(nil),
 		(*OpenInEditorResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_in_editor_proto_msgTypes[3].OneofWrappers = []any{
+		(*OpenInEditorError_UnknownWorkspace)(nil),
+		(*OpenInEditorError_WorkspaceRefMismatch)(nil),
+		(*OpenInEditorError_TransferringAway)(nil),
+		(*OpenInEditorError_NotYetAdopted)(nil),
+		(*OpenInEditorError_PathEscapesWorkspace)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_in_editor_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

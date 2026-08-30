@@ -1,0 +1,431 @@
+package merge
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// TestEnqueueRefusesAWorkspaceWithNoLayoutFacts covers the geometry refusal:
+// merge geometry is recorded at creation and never inferred, so its absence
+// means this workspace can never be merged.
+func TestEnqueueRefusesAWorkspaceWithNoLayoutFacts(t *testing.T) {
+	// Arrange: a workspace whose creation job holds no geometry.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmNoLayoutFacts {
+		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmNoLayoutFacts)
+	}
+}
+
+// TestEnqueueRefusesAnIncompleteLayout covers the half-recorded geometry, which
+// is as unmergeable as none at all.
+func TestEnqueueRefusesAnIncompleteLayout(t *testing.T) {
+	// Arrange: a creation job with no target directory.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	job := h.db.jobs[theWorkspace]
+	job.Layout.TargetDir = ""
+	h.db.jobs[theWorkspace] = job
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmNoLayoutFacts {
+		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmNoLayoutFacts)
+	}
+}
+
+// TestEnqueueRefusesADeletedSession covers the deleted session: it refuses
+// resurrection, so the configured prompts could never run.
+func TestEnqueueRefusesADeletedSession(t *testing.T) {
+	// Arrange: a workspace whose session was deleted.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	h.db.sessions[theWorkspace] = wsm.Session{
+		Workspace: theWorkspace,
+		Terminal:  &wsm.SessionTerminal{Kind: "deleted", Detail: "the user deleted it"},
+	}
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmSessionDeleted {
+		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmSessionDeleted)
+	}
+}
+
+// TestEnqueueRefusesASecondEnqueue covers the duplicate: a merge is queued once.
+func TestEnqueueRefusesASecondEnqueue(t *testing.T) {
+	// Arrange: an already-queued merge.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("the first enqueue failed: %v", err)
+	}
+
+	// Act.
+	err := h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmAlreadyQueued {
+		t.Fatalf("the second Enqueue answered %v, want the %s refusal", err, ArmAlreadyQueued)
+	}
+}
+
+// TestEnqueueRefusesAWorkspaceAlreadyMerging covers the in-flight case, whose
+// refusal names a different arm from the merely-queued one.
+func TestEnqueueRefusesAWorkspaceAlreadyMerging(t *testing.T) {
+	// Arrange: a queue entry already admitted.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("the first enqueue failed: %v", err)
+	}
+	if err := h.db.AdmitMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+		t.Fatalf("admitting: %v", err)
+	}
+
+	// Act.
+	err := h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmAlreadyMerging {
+		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmAlreadyMerging)
+	}
+}
+
+// TestEnqueueLeavesNoStateWhenItRefuses covers the pre-state rule: a refusal
+// records nothing, so no enqueuing-then-failed trail is left behind.
+func TestEnqueueLeavesNoStateWhenItRefuses(t *testing.T) {
+	// Arrange: a workspace with no geometry.
+	h := newHarness(t)
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+
+	// Act.
+	_ = h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	if _, has := h.o.Facts(theWorkspace); has {
+		t.Fatal("a refused enqueue published merge facts")
+	}
+	queues, _ := h.db.AllMergeQueues(context.Background())
+	if len(queues) != 0 {
+		t.Fatalf("a refused enqueue left %d queue(s) behind", len(queues))
+	}
+}
+
+// TestEnqueueKeepsFifoOrder covers the queue's whole point: merges run in the
+// order they were asked for.
+func TestEnqueueKeepsFifoOrder(t *testing.T) {
+	// Arrange: three workspaces of one repository, enqueued in order.
+	h := newHarness(t)
+	order := []ids.WorkspaceID{"ws-1", "ws-2", "ws-3"}
+	h.register("ws-2", "ws-two")
+	h.register("ws-3", "ws-three")
+	for _, ws := range order {
+		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+			t.Fatalf("enqueueing %s: %v", ws, err)
+		}
+	}
+
+	// Act.
+	entries, err := h.db.MergeQueue(context.Background(), h.repoKey())
+	if err != nil {
+		t.Fatalf("reading the queue: %v", err)
+	}
+
+	// Assert.
+	for i, entry := range entries {
+		if entry.Workspace != order[i] || entry.Position != i+1 {
+			t.Fatalf("entry %d is %s at position %d, want %s at %d", i, entry.Workspace, entry.Position, order[i], i+1)
+		}
+	}
+}
+
+// TestPauseStopsAdmission covers the operator's pause: queued merges hold in
+// place and nothing new starts.
+func TestPauseStopsAdmission(t *testing.T) {
+	// Arrange: a queued merge on a paused queue.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	if err := h.o.Pause(context.Background()); err != nil {
+		t.Fatalf("pausing: %v", err)
+	}
+
+	// Act.
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the pump errored on a paused queue: %v", err)
+	}
+	if ran {
+		t.Fatal("a paused queue admitted a merge")
+	}
+}
+
+// TestUnpauseResumesAdmission covers the other half of the pause: the queue
+// admits again once it is resumed.
+func TestUnpauseResumesAdmission(t *testing.T) {
+	// Arrange: a paused queue with a merge waiting, then resumed.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def456")
+	h.gatePasses("daemon")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	if err := h.o.Pause(context.Background()); err != nil {
+		t.Fatalf("pausing: %v", err)
+	}
+	if err := h.o.Unpause(context.Background()); err != nil {
+		t.Fatalf("unpausing: %v", err)
+	}
+
+	// Act.
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil || !ran {
+		t.Fatalf("a resumed queue did not admit: ran=%v err=%v", ran, err)
+	}
+}
+
+// TestPauseRefusesAnAlreadyPausedQueue covers the no-op refusal: an operator
+// asked for a change that did not happen.
+func TestPauseRefusesAnAlreadyPausedQueue(t *testing.T) {
+	// Arrange: an already-paused queue.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	if err := h.o.Pause(context.Background()); err != nil {
+		t.Fatalf("the first pause failed: %v", err)
+	}
+
+	// Act.
+	err := h.o.Pause(context.Background())
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmAlreadyPaused {
+		t.Fatalf("the second pause answered %v, want the %s refusal", err, ArmAlreadyPaused)
+	}
+}
+
+// TestUnpauseRefusesAQueueThatIsNotPaused covers the mirror no-op refusal.
+func TestUnpauseRefusesAQueueThatIsNotPaused(t *testing.T) {
+	// Arrange: a running queue.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+
+	// Act.
+	err := h.o.Unpause(context.Background())
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmNotPaused {
+		t.Fatalf("Unpause answered %v, want the %s refusal", err, ArmNotPaused)
+	}
+}
+
+// TestEvictRemovesAQueuedMerge covers the operator's eviction, one of the three
+// distinct ends a merge can reach before it runs.
+func TestEvictRemovesAQueuedMerge(t *testing.T) {
+	// Arrange: two queued merges.
+	h := newHarness(t)
+	h.register("ws-2", "ws-two")
+	for _, ws := range []ids.WorkspaceID{theWorkspace, "ws-2"} {
+		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+			t.Fatalf("enqueueing %s: %v", ws, err)
+		}
+	}
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Evict failed: %v", err)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].Workspace != "ws-2" || entries[0].Position != 1 {
+		t.Fatalf("after the eviction the queue is %+v, want ws-2 alone at position 1", entries)
+	}
+}
+
+// TestEvictRecordsItsOwnCause covers the three-ends rule: an eviction is
+// recorded as an eviction, never as a merge that finished.
+func TestEvictRecordsItsOwnCause(t *testing.T) {
+	// Arrange: a queued merge.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict failed: %v", err)
+	}
+
+	// Assert.
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if len(h.db.dropped) != 1 || h.db.dropped[0] != string(theWorkspace)+":evicted" {
+		t.Fatalf("the drop was recorded as %v, want the evicted cause", h.db.dropped)
+	}
+}
+
+// TestEvictRefusesAWorkspaceWithNothingQueued covers the refusal an operator
+// gets for a merge that is not there.
+func TestEvictRefusesAWorkspaceWithNothingQueued(t *testing.T) {
+	// Arrange: a workspace with no queued merge.
+	h := newHarness(t)
+
+	// Act.
+	err := h.o.Evict(context.Background(), theWorkspace)
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmNoSuchQueuedMerge {
+		t.Fatalf("Evict answered %v, want the %s refusal", err, ArmNoSuchQueuedMerge)
+	}
+}
+
+// TestAdmissionTakesTheRepositoryLock covers the exclusivity: while a merge
+// runs, the repository's lock is held so no second daemon admits from the same
+// queue.
+func TestAdmissionTakesTheRepositoryLock(t *testing.T) {
+	// Arrange: a merge that parks, so the run holds its lock when the assert
+	// happens.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}}
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := h.o.pumpOnce(ctx, h.repoKey()); done <- err }()
+	waitForParked(t, h)
+
+	// Act.
+	_, taken, err := acquireRepoLock(h.o.lockDir, string(h.repoKey()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("probing the repository lock errored: %v", err)
+	}
+	if taken {
+		t.Fatal("the repository's queue lock was free while a merge was running")
+	}
+	cancel()
+	<-done
+}
+
+// TestPumpAdmitsNothingWhileARunHoldsTheRepository covers the in-process half of
+// the same exclusivity.
+func TestPumpAdmitsNothingWhileARunHoldsTheRepository(t *testing.T) {
+	// Arrange: a parked run holding the repository.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.register("ws-2", "ws-two")
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{"a.go"}, {"a.go"}}
+	for _, ws := range []ids.WorkspaceID{theWorkspace, "ws-2"} {
+		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+			t.Fatalf("enqueueing %s: %v", ws, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := h.o.pumpOnce(ctx, h.repoKey()); done <- err }()
+	waitForParked(t, h)
+
+	// Act.
+	ran, err := h.o.pumpOnce(context.Background(), h.repoKey())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the second pump errored: %v", err)
+	}
+	if ran {
+		t.Fatal("a second merge was admitted while the first held the repository")
+	}
+	cancel()
+	<-done
+}
+
+// TestEnqueuePublishesTheQueuePosition covers the facts a waiting user reads:
+// where in the queue their merge sits, and how deep the queue is.
+func TestEnqueuePublishesTheQueuePosition(t *testing.T) {
+	// Arrange: two merges on one repository.
+	h := newHarness(t)
+	h.register("ws-2", "ws-two")
+	for _, ws := range []ids.WorkspaceID{theWorkspace, "ws-2"} {
+		if err := h.o.Enqueue(context.Background(), ws); err != nil {
+			t.Fatalf("enqueueing %s: %v", ws, err)
+		}
+	}
+
+	// Act.
+	facts, ok := h.o.Facts("ws-2")
+
+	// Assert.
+	if !ok {
+		t.Fatal("the second merge published no facts")
+	}
+	if facts.State != StateQueued || facts.QueuePosition != 2 || facts.QueueDepth != 2 {
+		t.Fatalf("facts are %+v, want queued at position 2 of 2", facts)
+	}
+}
+
+// TestEnqueueSurfacesAnUnexpectedStoreFailure covers the error path: a store
+// failure is not a refusal, and nothing of the merge is left published.
+func TestEnqueueSurfacesAnUnexpectedStoreFailure(t *testing.T) {
+	// Arrange: a store whose next enqueue fails.
+	h := newHarness(t)
+	boom := errors.New("the database is gone")
+	h.db.mu.Lock()
+	h.db.enqueueErr = boom
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Enqueue(context.Background(), theWorkspace)
+
+	// Assert.
+	if !errors.Is(err, boom) {
+		t.Fatalf("Enqueue answered %v, want the store's own failure", err)
+	}
+	if _, arm := Refused(err); arm {
+		t.Fatal("a store failure was reported as a refusal")
+	}
+}

@@ -24,7 +24,27 @@ message SelectWorkspaceResponse {
 }
 // Selected; the roster stream carries the new `current`.
 message SelectWorkspaceSuccess {}
-// EMPTY ON PURPOSE: arms DERIVED at the wave (unregistered workspace),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message SelectWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    SelectWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SelectWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    SelectWorkspaceTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    SelectWorkspaceNotYetAdopted not_yet_adopted = 4;
+  }
 }
+message SelectWorkspaceUnknownWorkspace {}
+message SelectWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SelectWorkspaceTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SelectWorkspaceNotYetAdopted {}

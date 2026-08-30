@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_select_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_select_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFlNlbGVjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXU2VsZWN0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGAoWU2VsZWN0V29ya3NwYWNlU3VjY2VzcyIWChRTZWxlY3RXb3Jrc3BhY2VFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CixhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2VsZWN0X3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkcKFlNlbGVjdFdvcmtzcGFjZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiKRAQoXU2VsZWN0V29ya3NwYWNlUmVzcG9uc2USNwoHc3VjY2VzcxgBIAEoCzIkLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VTdWNjZXNzSAASMwoFZXJyb3IYAiABKAsyIi5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlRXJyb3JIAEIICgZyZXN1bHQiGAoWU2VsZWN0V29ya3NwYWNlU3VjY2VzcyLTAgoUU2VsZWN0V29ya3NwYWNlRXJyb3ISSgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElMKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyMS5hZ2VudHJlcGwudjEuU2VsZWN0V29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJKChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzItLmFnZW50cmVwbC52MS5TZWxlY3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiouYWdlbnRyZXBsLnYxLlNlbGVjdFdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSIhCh9TZWxlY3RXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjsKI1NlbGVjdFdvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIyCh9TZWxlY3RXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHgocU2VsZWN0V29ya3NwYWNlTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SelectWorkspaceRequest
@@ -83,12 +83,48 @@ export const SelectWorkspaceSuccessSchema: GenMessage<SelectWorkspaceSuccess> = 
   messageDesc(file_agentrepl_v1_endpoint_select_workspace, 2);
 
 /**
- * EMPTY ON PURPOSE: arms DERIVED at the wave (unregistered workspace),
- * spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.SelectWorkspaceError
  */
 export type SelectWorkspaceError = Message<"agentrepl.v1.SelectWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SelectWorkspaceError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.SelectWorkspaceUnknownWorkspace unknown_workspace = 1;
+     */
+    value: SelectWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: SelectWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.SelectWorkspaceTransferringAway transferring_away = 3;
+     */
+    value: SelectWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.SelectWorkspaceNotYetAdopted not_yet_adopted = 4;
+     */
+    value: SelectWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -97,4 +133,68 @@ export type SelectWorkspaceError = Message<"agentrepl.v1.SelectWorkspaceError"> 
  */
 export const SelectWorkspaceErrorSchema: GenMessage<SelectWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_select_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.SelectWorkspaceUnknownWorkspace
+ */
+export type SelectWorkspaceUnknownWorkspace = Message<"agentrepl.v1.SelectWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectWorkspaceUnknownWorkspace.
+ * Use `create(SelectWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const SelectWorkspaceUnknownWorkspaceSchema: GenMessage<SelectWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
+ */
+export type SelectWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch.
+ * Use `create(SelectWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const SelectWorkspaceWorkspaceRefMismatchSchema: GenMessage<SelectWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.SelectWorkspaceTransferringAway
+ */
+export type SelectWorkspaceTransferringAway = Message<"agentrepl.v1.SelectWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectWorkspaceTransferringAway.
+ * Use `create(SelectWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const SelectWorkspaceTransferringAwaySchema: GenMessage<SelectWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.SelectWorkspaceNotYetAdopted
+ */
+export type SelectWorkspaceNotYetAdopted = Message<"agentrepl.v1.SelectWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SelectWorkspaceNotYetAdopted.
+ * Use `create(SelectWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const SelectWorkspaceNotYetAdoptedSchema: GenMessage<SelectWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_select_workspace, 7);
 

@@ -48,9 +48,11 @@ message AgentFrame {
     // The agent ended because something broke. Lands as success does.
     AgentFailure failure = 3;
     // Work left this agent's stream for a life of its own. The consumer opens
-    // the connection its handle names; the store lands it in the lifecycle
-    // record for its kind, never as a page line — the spawning CALL is
-    // already one.
+    // the connection its handle names. The announcement IS a page line of the
+    // announcing agent's book (upsert key `detached:<work id>`): a replayed
+    // page must carry it, and the store's liveness of non-agent detached runs
+    // is read from it. The run's own rows land in the lifecycle table for its
+    // kind, which never holds the announcement.
     AgentDetachedWork detached_work = 5;
   }
 }
@@ -122,7 +124,21 @@ message AgentUpdate {
     // never a terminal: the turn's end is the frame-level failure arm
     // (AgentFailure.api_request_failed) and nothing else. A page line.
     ApiRequestFailed api_error = 6;
+    // The vendor's own CONTEXT-BUDGET WARNING, injected into the prompt as the
+    // window fills. A FILE-PLANE fact: it exists only as an attachment line in
+    // the agent's transcript, so the sidecar is its only producer and it
+    // reaches a consumer as a page line of the agent's book (moved here from
+    // SessionUpdate tag 24, which had no producer on the live session stream).
+    // The footer's activity line draws it; instantaneous, no lifecycle.
+    ContextBudgetWarning context_budget_warning = 7;
   }
+}
+
+// The vendor's context-budget warning as it appeared in the transcript.
+message ContextBudgetWarning {
+  // The vendor's warning text, verbatim — the producer composes it and no
+  // structured figure rides the record.
+  string text = 1;
 }
 
 // The agent's stream ended on terms the consumer asked for. THE ARM IS HOW —
@@ -255,6 +271,10 @@ message AgentFailure {
     // this is a turn that simply stops, which a consumer draws as still
     // working.
     AgentContinuationPrevented continuation_prevented = 17;
+    // WE STOPPED BEING ABLE TO SEE THE AGENT — a detached agent whose
+    // transcript vanished or went silent, or one a boot sweep found open with
+    // no producer. Not known to have failed; the feed draws "lost".
+    DetachedLost lost = 18;
   }
 }
 

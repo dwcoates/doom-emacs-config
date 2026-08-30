@@ -27,7 +27,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_get_live_work.proto.
  */
 export const file_store_v1_endpoint_get_live_work: GenFile = /*@__PURE__*/
-  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSIUChJHZXRMaXZlV29ya1JlcXVlc3QigQEKE0dldExpdmVXb3JrUmVzcG9uc2USLwoHc3VjY2VzcxgBIAEoCzIcLnN0b3JlLnYxLkdldExpdmVXb3JrU3VjY2Vzc0gAEi8KB2ZhaWx1cmUYAiABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya0ZhaWx1cmVIAEIICgZyZXN1bHQitAEKEkdldExpdmVXb3JrU3VjY2VzcxItCgtsaXZlX2FnZW50cxgBIAMoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjcKDmxpdmVfd29ya2Zsb3dzGAIgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjYKDWxpdmVfZGV0YWNoZWQYAyADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWQiJAoSR2V0TGl2ZVdvcmtGYWlsdXJlEg4KBmRldGFpbBgBIAEoCUIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
+  fileDesc("CiVzdG9yZS92MS9lbmRwb2ludF9nZXRfbGl2ZV93b3JrLnByb3RvEghzdG9yZS52MSIUChJHZXRMaXZlV29ya1JlcXVlc3QigQEKE0dldExpdmVXb3JrUmVzcG9uc2USLwoHc3VjY2VzcxgBIAEoCzIcLnN0b3JlLnYxLkdldExpdmVXb3JrU3VjY2Vzc0gAEi8KB2ZhaWx1cmUYAiABKAsyHC5zdG9yZS52MS5HZXRMaXZlV29ya0ZhaWx1cmVIAEIICgZyZXN1bHQitAEKEkdldExpdmVXb3JrU3VjY2VzcxItCgtsaXZlX2FnZW50cxgBIAMoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEjcKDmxpdmVfd29ya2Zsb3dzGAIgAygLMh8uY29udmVyc2F0aW9uLnYxLkRldGFjaGVkV29ya0lkEjYKDWxpdmVfZGV0YWNoZWQYAyADKAsyHy5jb252ZXJzYXRpb24udjEuRGV0YWNoZWRXb3JrSWQibAoSR2V0TGl2ZVdvcmtGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI+Cg9zdG9yYWdlX2ZhaWx1cmUYAiABKAsyIy5zdG9yZS52MS5HZXRMaXZlV29ya1N0b3JhZ2VGYWlsdXJlSABCBgoEa2luZCIbChlHZXRMaXZlV29ya1N0b3JhZ2VGYWlsdXJlQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_conversation_v1_detached_work]);
 
 /**
  * Ask for every open obligation.
@@ -114,8 +114,7 @@ export const GetLiveWorkSuccessSchema: GenMessage<GetLiveWorkSuccess> = /*@__PUR
   messageDesc(file_store_v1_endpoint_get_live_work, 2);
 
 /**
- * The set could not be read. `kind` arms are DERIVED at the wave from the
- * store's real failure sites.
+ * The set could not be read. THE ARM IS WHY.
  *
  * @generated from message store.v1.GetLiveWorkFailure
  */
@@ -126,6 +125,17 @@ export type GetLiveWorkFailure = Message<"store.v1.GetLiveWorkFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof store.v1.GetLiveWorkFailure.kind
+   */
+  kind: {
+    /**
+     * @generated from field: store.v1.GetLiveWorkStorageFailure storage_failure = 2;
+     */
+    value: GetLiveWorkStorageFailure;
+    case: "storageFailure";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -134,4 +144,19 @@ export type GetLiveWorkFailure = Message<"store.v1.GetLiveWorkFailure"> & {
  */
 export const GetLiveWorkFailureSchema: GenMessage<GetLiveWorkFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_get_live_work, 3);
+
+/**
+ * The database failed; `detail` carries the driver's text.
+ *
+ * @generated from message store.v1.GetLiveWorkStorageFailure
+ */
+export type GetLiveWorkStorageFailure = Message<"store.v1.GetLiveWorkStorageFailure"> & {
+};
+
+/**
+ * Describes the message store.v1.GetLiveWorkStorageFailure.
+ * Use `create(GetLiveWorkStorageFailureSchema)` to create a new message.
+ */
+export const GetLiveWorkStorageFailureSchema: GenMessage<GetLiveWorkStorageFailure> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_get_live_work, 4);
 
