@@ -85,11 +85,11 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   integration tests (R-SUITE-1 carries it). R-PUSHINVALID may be moot
   after the reader fix — re-run host/roster before dispatching it.
 - RUNNING: R-ARMS + R-LOGOP (`opus-low`) in elisp-agents/remed3.
-- VOCAB SEAM (escalated): overhaul/integration carries the UNTRIMMED
-  render-colors.json (+ footer_allowance); overhaul/elisp keeps the daemon
-  lead's trimmed file unioned with footer_allowance (015bec1b1). Every
-  merge from integration conflicts on that file until reconciled: resolve
-  to the union (trimmed keys + footer_allowance), never to theirs.
+- VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
+  footer_allowance verbatim (f1132d3a7); merged, resolved to theirs; the
+  files are identical on both branches. HostWorkspaceTransferred stays
+  EMPTY by design — the successor address is always WatchDaemon's
+  announcement; the webview reload uses that address.
 - RE-RUN after the reader fix: host 24/32, roster 19/20, link 14/18,
   connect 12/16, daemon 12/12. R-PUSHINVALID is RETIRED (the reader was
   the cause); its residue, if any, folds into R-NOTIFY.
