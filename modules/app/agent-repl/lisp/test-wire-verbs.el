@@ -107,7 +107,8 @@ logging rung that never signals, so the stub is a no-op: the typed
 ;;;; ---- CreateWorkspaceRequest: the standard form ----------------------
 
 (ert-deftest agent-repl-test-wire-verbs-create-standard-minimal ()
-  "A standard create with no optional facts carries repository and an empty form."
+  "A standard create with no optional facts carries repository and an empty
+form."
   (agent-repl-test-wire-verbs--with-common
     (let* ((request (list :repository agent-repl-test-wire-verbs--repo
                           :form '(:arm :standard :value nil)))
@@ -362,12 +363,13 @@ logging rung that never signals, so the stub is a no-op: the typed
                      "{\"success\":{\"workspace\":{\"id\":\"ws-9\",\"dir\":\"/w/nine\"}}}"))
                    '(:arm :success :value (:workspace (:id "ws-9" :dir "/w/nine")))))))
 
-(ert-deftest agent-repl-test-wire-verbs-create-response-error-empty ()
-  "The empty CreateWorkspaceError decodes to the arm with a nil value."
+(ert-deftest agent-repl-test-wire-verbs-create-response-error-without-cause ()
+  "A CreateWorkspaceError with no cause arm is a contract breach.
+THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
   (agent-repl-test-wire-verbs--with-common
-    (should (equal (agent-repl-wire-decode-create-workspace-response
-                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
-                   '(:arm :error :value nil)))))
+    (should-error (agent-repl-wire-decode-create-workspace-response
+                   (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-create-response-success-without-workspace ()
   "A success missing the non-optional workspace is a contract breach."
@@ -416,12 +418,22 @@ logging rung that never signals, so the stub is a no-op: the typed
                      '(:arm :success :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-simple-response-error ()
-  "Each simple verb's empty error decodes to the error arm."
+  "Each simple verb's error decodes to the error arm carrying its cause."
   (agent-repl-test-wire-verbs--with-common
     (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
       (should (equal (funcall (nth 2 verb)
-                              (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
-                     '(:arm :error :value nil))))))
+                              (agent-repl-test-wire-verbs--parse
+                               "{\"error\":{\"unknownWorkspace\":{}}}"))
+                     '(:arm :error
+                       :value (:cause (:arm :unknown-workspace :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-simple-response-error-without-cause ()
+  "Each simple verb refuses an error with no cause arm."
+  (agent-repl-test-wire-verbs--with-common
+    (dolist (verb agent-repl-test-wire-verbs--simple-verbs)
+      (should-error (funcall (nth 2 verb)
+                             (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
+                    :type 'agent-repl-wire-error))))
 
 (ert-deftest agent-repl-test-wire-verbs-simple-response-unset-oneof ()
   "A response with no result arm set is a contract breach for every verb."
@@ -544,17 +556,20 @@ logging rung that never signals, so the stub is a no-op: the typed
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-set-priority-response-error ()
-  "A refused priority change decodes to the empty error arm."
+  "A refused priority change decodes to the error arm carrying its cause."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-set-workspace-priority-response
-                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
-                   '(:arm :error :value nil)))))
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"notYetAdopted\":{}}}"))
+                   '(:arm :error
+                     :value (:cause (:arm :not-yet-adopted :value nil)))))))
 
 
 ;;;; ---- SubmitPromptRequest ---------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-submit-request-shape ()
-  "A submission carries the workspace, said, the idempotency key and the origin."
+  "A submission carries the workspace, said, the idempotency key and the
+origin."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-encode-submit-prompt-request
                     (list :workspace agent-repl-test-wire-verbs--ref
@@ -578,7 +593,8 @@ Landing 2: the root feed has no id of its own, so the workspace — not
                    '((id . "ws-1") (dir . "/w/one"))))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-missing-workspace-refused ()
-  "The workspace is REQUIRED, so a submission without one never reaches the wire."
+  "The workspace is REQUIRED, so a submission without one never reaches the
+wire."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-submit-prompt-request
                    '(:said (:text "hi") :idempotency-key "k-1" :origin :user-sent))
@@ -846,17 +862,20 @@ Landing 2: the root feed has no id of its own, so the workspace — not
                   :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-response-error ()
-  "A refused queue change decodes to the empty error arm."
+  "A refused queue change decodes to the error arm carrying its cause."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-update-merge-queue-response
-                    (agent-repl-test-wire-verbs--parse "{\"error\":{}}"))
-                   '(:arm :error :value nil)))))
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"error\":{\"alreadyPaused\":{}}}"))
+                   '(:arm :error
+                     :value (:cause (:arm :already-paused :value nil)))))))
 
 
 ;;;; ---- DaemonHealth ----------------------------------------------------
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-request-empty ()
-  "There is nothing to ask beyond \"you?\", so the request is the empty message."
+  "There is nothing to ask beyond \"you?\", so the request is the empty
+message."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-daemon-health-request)) "{}"))))
 
@@ -868,16 +887,22 @@ Landing 2: the root feed has no id of its own, so the workspace — not
                    '(:arm :success :value (:arm :healthy :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-unhealthy-faults ()
-  "UNHEALTHY IS AN ANSWER: the faults arrive inside success, each with its detail."
+  "UNHEALTHY IS AN ANSWER: the faults arrive inside success, each with its
+detail."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-daemon-health-response
                     (agent-repl-test-wire-verbs--parse
                      (concat "{\"success\":{\"unhealthy\":{\"faults\":"
-                             "[{\"detail\":\"store down\"},{\"detail\":\"queue stuck\"}]}}}")))
+                             "[{\"detail\":\"store down\",\"wsmReadOnly\":{}},"
+                             "{\"detail\":\"queue stuck\",\"logSinkPoisoned\":{\"sink\":\"emacs\"}}]}}}")))
                    '(:arm :success
                      :value (:arm :unhealthy
-                             :value (:faults ((:detail "store down")
-                                              (:detail "queue stuck")))))))))
+                             :value (:faults
+                                     ((:detail "store down"
+                                       :kind (:arm :wsm-read-only :value nil))
+                                      (:detail "queue stuck"
+                                       :kind (:arm :log-sink-poisoned
+                                              :value (:sink "emacs")))))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-unhealthy-no-faults ()
   "An omitted repeated field is the empty list, protojson's `no elements'."
@@ -890,8 +915,15 @@ Landing 2: the root feed has no id of its own, so the workspace — not
   "An omitted fault detail is the proto3 default, never a missing-field breach."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-daemon-fault
-                    (agent-repl-test-wire-verbs--parse "{}"))
-                   '(:detail "")))))
+                    (agent-repl-test-wire-verbs--parse "{\"wsmReadOnly\":{}}"))
+                   '(:detail "" :kind (:arm :wsm-read-only :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-without-kind ()
+  "A DaemonFault with no kind arm is a breach: detail never replaces the class."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-daemon-fault
+                   (agent-repl-test-wire-verbs--parse "{\"detail\":\"prose\"}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-fault-unknown-field ()
   "A DaemonFault kind arm added upstream arrives as an unknown key and is loud."
@@ -925,7 +957,8 @@ Landing 2: the root feed has no id of its own, so the workspace — not
                    '((workspace . ((id . "ws-1") (dir . "/w/one"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-request-without-workspace ()
-  "A session-health pull with no workspace is incomplete and errors before send."
+  "A session-health pull with no workspace is incomplete and errors before
+send."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-encode-session-health-request nil)
                   :type 'agent-repl-wire-error)))
@@ -942,12 +975,24 @@ Landing 2: the root feed has no id of its own, so the workspace — not
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-session-health-response
                     (agent-repl-test-wire-verbs--parse
-                     "{\"success\":{\"unhealthy\":{\"faults\":[{\"detail\":\"shim gone\"}]}}}"))
+                     (concat "{\"success\":{\"unhealthy\":{\"faults\":"
+                             "[{\"detail\":\"shim gone\",\"shimDied\":{\"exitCode\":9}}]}}}")))
                    '(:arm :success
-                     :value (:arm :unhealthy :value (:faults ((:detail "shim gone")))))))))
+                     :value (:arm :unhealthy
+                             :value (:faults ((:detail "shim gone"
+                                               :kind (:arm :shim-died
+                                                      :value (:exit-code 9)))))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-without-kind ()
+  "A SessionFault with no kind arm is a breach, as HostFault's is."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-session-fault
+                   (agent-repl-test-wire-verbs--parse "{\"detail\":\"prose\"}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-session-fault-unknown-field ()
-  "A SessionFault kind arm added upstream arrives as an unknown key and is loud."
+  "A SessionFault kind arm added upstream arrives as an unknown key and is
+loud."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-session-fault
                    (agent-repl-test-wire-verbs--parse "{\"shimDead\":{}}"))
@@ -998,11 +1043,13 @@ logging rung returns normally, and the typed signal follows it."
                  '("openPr" "selfMerge"))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-cause-arms-pinned ()
-  "CloseWorkspaceError's cause oneof has exactly the arm this codec decodes."
-  (should (equal (agent-repl-test--generated-oneof-arms
-                  "agentrepl/v1/endpoint_close_workspace.pb.go"
-                  "CloseWorkspaceError")
-                 '("blocked"))))
+  "CloseWorkspaceError's cause oneof has exactly the arms this codec decodes."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_close_workspace.pb.go"
+                        "CloseWorkspaceError")
+                       #'string<)
+                 '("blocked" "notYetAdopted" "transferringAway"
+                   "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
   "SubmitPromptSuccess's outcome oneof has exactly the three arms decoded here."
@@ -1013,7 +1060,8 @@ logging rung returns normally, and the typed signal follows it."
                  '("commandPanel" "commandRefused" "turn"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-panel-arms-pinned ()
-  "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded here."
+  "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded
+here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptCommandPanel")
@@ -1021,14 +1069,18 @@ logging rung returns normally, and the typed signal follows it."
                  '("agents" "context" "help" "mcp" "status" "todos"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-reason-arms-pinned ()
-  "SubmitPromptError's reason oneof has exactly the arm this codec decodes."
-  (should (equal (agent-repl-test--generated-oneof-arms
-                  "agentrepl/v1/endpoint_submit_prompt.pb.go"
-                  "SubmitPromptError")
-                 '("merging"))))
+  "SubmitPromptError's reason oneof has exactly the arms this codec decodes."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_submit_prompt.pb.go"
+                        "SubmitPromptError")
+                       #'string<)
+                 '("feedNotInWorkspace" "feedUndecodable" "merging" "noSession"
+                   "notYetAdopted" "transferringAway" "turnAlreadyOpen"
+                   "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
-  "UpdateShutdownScheduleRequest's action oneof has exactly the three arms encoded here."
+  "UpdateShutdownScheduleRequest's action oneof has exactly the three arms
+encoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_shutdown_schedule.pb.go"
                         "UpdateShutdownScheduleRequest")
@@ -1036,7 +1088,8 @@ logging rung returns normally, and the typed signal follows it."
                  '("cancel" "now" "schedule"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
-  "UpdateMergeQueueRequest's action oneof has exactly the three arms encoded here."
+  "UpdateMergeQueueRequest's action oneof has exactly the three arms encoded
+here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
@@ -1044,7 +1097,8 @@ logging rung returns normally, and the typed signal follows it."
                  '("evict" "pause" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
-  "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded here."
+  "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
+here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_daemon_health.pb.go"
                         "DaemonHealthSuccess")
@@ -1052,12 +1106,979 @@ logging rung returns normally, and the typed signal follows it."
                  '("healthy" "unhealthy"))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-arms-pinned ()
-  "SessionHealthSuccess's health oneof has exactly the two verdict arms decoded here."
+  "SessionHealthSuccess's health oneof has exactly the two verdict arms decoded
+here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_session_health.pb.go"
                         "SessionHealthSuccess")
                        #'string<)
                  '("healthy" "unhealthy"))))
+
+;;;; ---- <Rpc>Error cause arms (landing 4) --------------------------------
+;;
+;; One test per arm the proto declares, plus the unset-oneof and unknown-arm
+;; refusals, plus the per-rpc pin against the checked-in Go bindings.  The
+;; PROTO is the arm list; the pins are what make a landed arm this codec has
+;; not been taught fail loudly rather than silently decode as an unknown key.
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-ungated-without-consent-arm ()
+  "CreateWorkspaceError's `ungated_without_consent' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"ungatedWithoutConsent\":{}}"))
+                   '(:cause (:arm :ungated-without-consent :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-no-slug-arm ()
+  "CreateWorkspaceError's `no_slug' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"noSlug\":{}}"))
+                   '(:cause (:arm :no-slug :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-finish-required-arm ()
+  "CreateWorkspaceError's `finish_required' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"finishRequired\":{}}"))
+                   '(:cause (:arm :finish-required :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-finish-not-one-shot-arm ()
+  "CreateWorkspaceError's `finish_not_one_shot' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"finishNotOneShot\":{}}"))
+                   '(:cause (:arm :finish-not-one-shot :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-fork-parent-has-no-conversation-arm ()
+  "CreateWorkspaceError's `fork_parent_has_no_conversation' arm decodes with
+everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"forkParentHasNoConversation\":{}}"))
+                   '(:cause (:arm :fork-parent-has-no-conversation :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-brief-missing-arm ()
+  "CreateWorkspaceError's `brief_missing' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"briefMissing\":{\"name\":\"nightly\"}}"))
+                   '(:cause (:arm :brief-missing :value (:name "nightly")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-repository-arm ()
+  "CreateWorkspaceError's `unknown_repository' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownRepository\":{}}"))
+                   '(:cause (:arm :unknown-repository :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-parent-arm ()
+  "CreateWorkspaceError's `unknown_parent' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownParent\":{}}"))
+                   '(:cause (:arm :unknown-parent :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-base-ref-unresolved-arm ()
+  "CreateWorkspaceError's `base_ref_unresolved' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"baseRefUnresolved\":{\"ref\":\"origin/main\"}}"))
+                   '(:cause (:arm :base-ref-unresolved :value (:ref "origin/main")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-worktree-creation-failed-arm ()
+  "CreateWorkspaceError's `worktree_creation_failed' arm decodes with
+everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"worktreeCreationFailed\":{\"detail\":\"fatal: exists\"}}"))
+                   '(:cause (:arm :worktree-creation-failed :value (:detail "fatal: exists")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-unset-cause-is-a-breach ()
+  "CreateWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-unknown-arm-is-a-breach ()
+  "An arm CreateWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-create-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-create-error-arms-pinned ()
+  "CreateWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_create_workspace.pb.go" "CreateWorkspaceError")
+                       #'string<)
+                 (sort (list "ungatedWithoutConsent" "noSlug" "finishRequired" "finishNotOneShot" "forkParentHasNoConversation" "briefMissing" "unknownRepository" "unknownParent" "baseRefUnresolved" "worktreeCreationFailed")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-unknown-workspace-arm ()
+  "OpenWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-workspace-ref-mismatch-arm ()
+  "OpenWorkspaceError's `workspace_ref_mismatch' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-transferring-away-arm ()
+  "OpenWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-not-yet-adopted-arm ()
+  "OpenWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-session-deleted-arm ()
+  "OpenWorkspaceError's `session_deleted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"sessionDeleted\":{}}"))
+                   '(:cause (:arm :session-deleted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-transcript-missing-arm ()
+  "OpenWorkspaceError's `transcript_missing' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transcriptMissing\":{\"vendorSessionId\":\"vendor-9\",\"searchedPaths\":[\"/a\",\"/b\"]}}"))
+                   '(:cause (:arm :transcript-missing :value (:vendor-session-id "vendor-9" :searched-paths ("/a" "/b"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-spawn-failed-arm ()
+  "OpenWorkspaceError's `spawn_failed' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-open-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"spawnFailed\":{\"detail\":\"exec format error\"}}"))
+                   '(:cause (:arm :spawn-failed :value (:detail "exec format error")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-unset-cause-is-a-breach ()
+  "OpenWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-open-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-unknown-arm-is-a-breach ()
+  "An arm OpenWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-open-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-open-error-arms-pinned ()
+  "OpenWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_open_workspace.pb.go" "OpenWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "sessionDeleted" "transcriptMissing" "spawnFailed")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-blocked-arm ()
+  "CloseWorkspaceError's `blocked' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"blocked\":{}}"))
+                   '(:cause (:arm :blocked :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-unknown-workspace-arm ()
+  "CloseWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-workspace-ref-mismatch-arm ()
+  "CloseWorkspaceError's `workspace_ref_mismatch' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-transferring-away-arm ()
+  "CloseWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-not-yet-adopted-arm ()
+  "CloseWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-unset-cause-is-a-breach ()
+  "CloseWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-unknown-arm-is-a-breach ()
+  "An arm CloseWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-error-arms-pinned ()
+  "CloseWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_close_workspace.pb.go" "CloseWorkspaceError")
+                       #'string<)
+                 (sort (list "blocked" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-unknown-workspace-arm ()
+  "KillWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-kill-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-workspace-ref-mismatch-arm ()
+  "KillWorkspaceError's `workspace_ref_mismatch' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-kill-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-transferring-away-arm ()
+  "KillWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-kill-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-not-yet-adopted-arm ()
+  "KillWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-kill-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-unset-cause-is-a-breach ()
+  "KillWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-kill-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-unknown-arm-is-a-breach ()
+  "An arm KillWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-kill-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-kill-error-arms-pinned ()
+  "KillWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_kill_workspace.pb.go" "KillWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-unknown-workspace-arm ()
+  "NukeWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-nuke-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-workspace-ref-mismatch-arm ()
+  "NukeWorkspaceError's `workspace_ref_mismatch' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-nuke-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-transferring-away-arm ()
+  "NukeWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-nuke-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-not-yet-adopted-arm ()
+  "NukeWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-nuke-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-git-failed-arm ()
+  "NukeWorkspaceError's `git_failed' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-nuke-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"gitFailed\":{\"detail\":\"fatal: locked\"}}"))
+                   '(:cause (:arm :git-failed :value (:detail "fatal: locked")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-unset-cause-is-a-breach ()
+  "NukeWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-nuke-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-unknown-arm-is-a-breach ()
+  "An arm NukeWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-nuke-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-nuke-error-arms-pinned ()
+  "NukeWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_nuke_workspace.pb.go" "NukeWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "gitFailed")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-workspace-arm ()
+  "MergeWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-workspace-ref-mismatch-arm ()
+  "MergeWorkspaceError's `workspace_ref_mismatch' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-transferring-away-arm ()
+  "MergeWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-not-yet-adopted-arm ()
+  "MergeWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-no-layout-facts-arm ()
+  "MergeWorkspaceError's `no_layout_facts' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"noLayoutFacts\":{}}"))
+                   '(:cause (:arm :no-layout-facts :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-session-deleted-arm ()
+  "MergeWorkspaceError's `session_deleted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"sessionDeleted\":{}}"))
+                   '(:cause (:arm :session-deleted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-already-queued-arm ()
+  "MergeWorkspaceError's `already_queued' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"alreadyQueued\":{}}"))
+                   '(:cause (:arm :already-queued :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-already-merging-arm ()
+  "MergeWorkspaceError's `already_merging' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-merge-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"alreadyMerging\":{}}"))
+                   '(:cause (:arm :already-merging :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-unset-cause-is-a-breach ()
+  "MergeWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-merge-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-unknown-arm-is-a-breach ()
+  "An arm MergeWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-merge-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-error-arms-pinned ()
+  "MergeWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_merge_workspace.pb.go" "MergeWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noLayoutFacts" "sessionDeleted" "alreadyQueued" "alreadyMerging")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-unknown-workspace-arm ()
+  "RestartWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-workspace-ref-mismatch-arm ()
+  "RestartWorkspaceError's `workspace_ref_mismatch' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-transferring-away-arm ()
+  "RestartWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-not-yet-adopted-arm ()
+  "RestartWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-no-session-arm ()
+  "RestartWorkspaceError's `no_session' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-restart-workspace-error
+                    (agent-repl-test-wire-verbs--parse "{\"noSession\":{}}"))
+                   '(:cause (:arm :no-session :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-unset-cause-is-a-breach ()
+  "RestartWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-restart-workspace-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-unknown-arm-is-a-breach ()
+  "An arm RestartWorkspaceError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-restart-workspace-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-restart-error-arms-pinned ()
+  "RestartWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_restart_workspace.pb.go" "RestartWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noSession")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-unknown-workspace-arm ()
+  "SetWorkspacePriorityError's `unknown_workspace' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-priority-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-workspace-ref-mismatch-arm ()
+  "SetWorkspacePriorityError's `workspace_ref_mismatch' arm decodes with
+everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-priority-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-transferring-away-arm ()
+  "SetWorkspacePriorityError's `transferring_away' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-priority-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-not-yet-adopted-arm ()
+  "SetWorkspacePriorityError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-set-workspace-priority-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-unset-cause-is-a-breach ()
+  "SetWorkspacePriorityError with no arm set says nothing actionable, so it is
+a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-set-workspace-priority-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-unknown-arm-is-a-breach ()
+  "An arm SetWorkspacePriorityError does not declare here is refused, never
+guessed at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-set-workspace-priority-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-set-priority-error-arms-pinned ()
+  "SetWorkspacePriorityError's arm set is exactly what the frozen schema
+declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_set_workspace_priority.pb.go" "SetWorkspacePriorityError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-merging-arm ()
+  "SubmitPromptError's `merging' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"merging\":{}}"))
+                   '(:reason (:arm :merging :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-unknown-workspace-arm ()
+  "SubmitPromptError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:reason (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-workspace-ref-mismatch-arm ()
+  "SubmitPromptError's `workspace_ref_mismatch' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:reason (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-transferring-away-arm ()
+  "SubmitPromptError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:reason (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-not-yet-adopted-arm ()
+  "SubmitPromptError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:reason (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-feed-not-in-workspace-arm ()
+  "SubmitPromptError's `feed_not_in_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"feedNotInWorkspace\":{}}"))
+                   '(:reason (:arm :feed-not-in-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-feed-undecodable-arm ()
+  "SubmitPromptError's `feed_undecodable' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"feedUndecodable\":{}}"))
+                   '(:reason (:arm :feed-undecodable :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-turn-already-open-arm ()
+  "SubmitPromptError's `turn_already_open' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"turnAlreadyOpen\":{}}"))
+                   '(:reason (:arm :turn-already-open :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-no-session-arm ()
+  "SubmitPromptError's `no_session' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse "{\"noSession\":{}}"))
+                   '(:reason (:arm :no-session :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-unset-reason-is-a-breach ()
+  "SubmitPromptError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-unknown-arm-is-a-breach ()
+  "An arm SubmitPromptError does not declare here is refused, never guessed at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-arms-pinned ()
+  "SubmitPromptError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
+                       #'string<)
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "turnAlreadyOpen" "noSession")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()
+  "UpdateShutdownScheduleError's `nothing_scheduled' arm decodes with
+everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-shutdown-schedule-error
+                    (agent-repl-test-wire-verbs--parse "{\"nothingScheduled\":{}}"))
+                   '(:cause (:arm :nothing-scheduled :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-shutdown-error-unset-cause-is-a-breach ()
+  "UpdateShutdownScheduleError with no arm set says nothing actionable, so it
+is a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-shutdown-schedule-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-shutdown-error-unknown-arm-is-a-breach ()
+  "An arm UpdateShutdownScheduleError does not declare here is refused, never
+guessed at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-shutdown-schedule-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-shutdown-error-arms-pinned ()
+  "UpdateShutdownScheduleError's arm set is exactly what the frozen schema
+declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_shutdown_schedule.pb.go" "UpdateShutdownScheduleError")
+                       #'string<)
+                 (sort (list "nothingScheduled")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unknown-workspace-arm ()
+  "UpdateMergeQueueError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-workspace-ref-mismatch-arm ()
+  "UpdateMergeQueueError's `workspace_ref_mismatch' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-transferring-away-arm ()
+  "UpdateMergeQueueError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-not-yet-adopted-arm ()
+  "UpdateMergeQueueError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-already-paused-arm ()
+  "UpdateMergeQueueError's `already_paused' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"alreadyPaused\":{}}"))
+                   '(:cause (:arm :already-paused :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-not-paused-arm ()
+  "UpdateMergeQueueError's `not_paused' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"notPaused\":{}}"))
+                   '(:cause (:arm :not-paused :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-such-queued-merge-arm ()
+  "UpdateMergeQueueError's `no_such_queued_merge' arm decodes with everything
+it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"noSuchQueuedMerge\":{}}"))
+                   '(:cause (:arm :no-such-queued-merge :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unset-cause-is-a-breach ()
+  "UpdateMergeQueueError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-merge-queue-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unknown-arm-is-a-breach ()
+  "An arm UpdateMergeQueueError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-update-merge-queue-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-arms-pinned ()
+  "UpdateMergeQueueError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()
+  "SessionHealthError's `unknown_workspace' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-health-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownWorkspace\":{}}"))
+                   '(:cause (:arm :unknown-workspace :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-workspace-ref-mismatch-arm ()
+  "SessionHealthError's `workspace_ref_mismatch' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-health-error
+                    (agent-repl-test-wire-verbs--parse "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}"))
+                   '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-transferring-away-arm ()
+  "SessionHealthError's `transferring_away' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-health-error
+                    (agent-repl-test-wire-verbs--parse "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}"))
+                   '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-not-yet-adopted-arm ()
+  "SessionHealthError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-health-error
+                    (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
+                   '(:cause (:arm :not-yet-adopted :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-unset-cause-is-a-breach ()
+  "SessionHealthError with no arm set says nothing actionable, so it is a
+breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-session-health-error (agent-repl-test-wire-verbs--parse "{}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-arm-is-a-breach ()
+  "An arm SessionHealthError does not declare here is refused, never guessed
+at."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-session-health-error
+                   (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-session-health-error-arms-pinned ()
+  "SessionHealthError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_session_health.pb.go" "SessionHealthError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                       #'string<))))
+
+;;;; ---- SessionFault kinds (landing 4) -----------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-shim-start-failed-kind ()
+  "SessionFault's `shim_start_failed' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"shimStartFailed\":{\"exitCode\":3,\"stderrTail\":\"panic\"}}"))
+                   '(:detail "" :kind (:arm :shim-start-failed :value (:exit-code 3 :stderr-tail "panic")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-shim-died-kind ()
+  "SessionFault's `shim_died' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"shimDied\":{\"exitCode\":9}}"))
+                   '(:detail "" :kind (:arm :shim-died :value (:exit-code 9)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-link-severed-kind ()
+  "SessionFault's `link_severed' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"linkSevered\":{}}"))
+                   '(:detail "" :kind (:arm :link-severed :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-resume-failed-kind ()
+  "SessionFault's `resume_failed' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"resumeFailed\":{\"cause\":\"no transcript\"}}"))
+                   '(:detail "" :kind (:arm :resume-failed :value (:cause "no transcript")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-bounce-died-kind ()
+  "SessionFault's `bounce_died' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"bounceDied\":{}}"))
+                   '(:detail "" :kind (:arm :bounce-died :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-bounce-unknown-kind ()
+  "SessionFault's `bounce_unknown' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"bounceUnknown\":{}}"))
+                   '(:detail "" :kind (:arm :bounce-unknown :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-classifier-failed-kind ()
+  "SessionFault's `classifier_failed' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"classifierFailed\":{\"detail\":\"regex blew up\"}}"))
+                   '(:detail "" :kind (:arm :classifier-failed :value (:detail "regex blew up")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-shim-reported-kind ()
+  "SessionFault's `shim_reported' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-session-fault
+                    (agent-repl-test-wire-verbs--parse "{\"shimReported\":{\"component\":\"stdout\",\"kind\":\"parse\"}}"))
+                   '(:detail "" :kind (:arm :shim-reported :value (:component "stdout" :kind "parse")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-unknown-kind-is-a-breach ()
+  "A SessionFault kind this codec does not know is refused, never dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-session-fault
+                   (agent-repl-test-wire-verbs--parse "{\"shimDead\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-session-fault-kind-arms-pinned ()
+  "SessionFault's kind oneof has exactly the eight arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_session_health.pb.go" "SessionFault")
+                       #'string<)
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported")
+                       #'string<))))
+
+;;;; ---- DaemonFault kinds (landing 4) ------------------------------------
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-adoption-window-expired-kind ()
+  "DaemonFault's `adoption_window_expired' kind names the workspace whose
+window closed."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"adoptionWindowExpired\":{\"workspace\":{\"id\":\"ws-1\",\"dir\":\"/w/one\"}}}"))
+                   '(:detail ""
+                     :kind (:arm :adoption-window-expired
+                            :value (:workspace (:id "ws-1" :dir "/w/one"))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-adoption-window-expired-without-workspace ()
+  "The expired-window arm without its workspace is a required-field breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-daemon-fault
+                   (agent-repl-test-wire-verbs--parse "{\"adoptionWindowExpired\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-log-sink-poisoned-kind ()
+  "DaemonFault's `log_sink_poisoned' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"logSinkPoisoned\":{\"sink\":\"emacs\"}}"))
+                   '(:detail "" :kind (:arm :log-sink-poisoned :value (:sink "emacs")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-deploy-script-failed-kind ()
+  "DaemonFault's `deploy_script_failed' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"deployScriptFailed\":{\"detail\":\"exit 1\"}}"))
+                   '(:detail "" :kind (:arm :deploy-script-failed :value (:detail "exit 1")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-successor-spawn-failed-kind ()
+  "DaemonFault's `successor_spawn_failed' kind decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"successorSpawnFailed\":{\"detail\":\"no port\"}}"))
+                   '(:detail "" :kind (:arm :successor-spawn-failed :value (:detail "no port")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-prompts-dir-missing-kind ()
+  "DaemonFault's `prompts_dir_missing' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"promptsDirMissing\":{\"path\":\"/p\"}}"))
+                   '(:detail "" :kind (:arm :prompts-dir-missing :value (:path "/p")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-wsm-read-only-kind ()
+  "DaemonFault's `wsm_read_only' kind decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-daemon-fault
+                    (agent-repl-test-wire-verbs--parse "{\"wsmReadOnly\":{}}"))
+                   '(:detail "" :kind (:arm :wsm-read-only :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-daemon-fault-kind-arms-pinned ()
+  "DaemonFault's kind oneof has exactly the six arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_daemon_health.pb.go" "DaemonFault")
+                       #'string<)
+                 (sort (list "adoptionWindowExpired" "logSinkPoisoned" "deployScriptFailed" "successorSpawnFailed" "promptsDirMissing" "wsmReadOnly")
+                       #'string<))))
 
 (provide 'test-wire-verbs)
 

@@ -495,6 +495,70 @@ without a keyword here fails this test instead of failing a send."
                      '(:arm :p1 :value (:level 1)))))
                  '("WorkspacePriorityP1" - "expected an empty message"))))
 
+
+;;;; ---- Shared SessionFault arm messages (landing 4) ---------------------
+;;
+;; The base decoders live here because TWO parents carry them — SessionFault
+;; on the SessionHealth response and HostFault on the host stream — and
+;; validation lives once per message.
+
+(ert-deftest agent-repl-test-wire-common-int32-absent-is-the-proto3-default ()
+  "An omitted int32 is 0, which protojson omits rather than spells."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-shim-died "{}")
+                 '(:exit-code 0))))
+
+(ert-deftest agent-repl-test-wire-common-int32-accepts-a-decimal-string ()
+  "int32 is accepted in protojson's int64 string spelling as readily as a number."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-shim-died
+                  "{\"exitCode\":\"-1\"}")
+                 '(:exit-code -1))))
+
+(ert-deftest agent-repl-test-wire-common-int32-refuses-a-non-integer ()
+  "A non-integer at an int32 position is a contract breach."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-session-fault-shim-died
+                     (agent-repl-test-wire-common--parse "{\"exitCode\":\"nine\"}"))))
+                 '("SessionFaultShimDied" exitCode "expected an integer"))))
+
+(ert-deftest agent-repl-test-wire-common-fault-string-absent-is-the-proto3-default ()
+  "An omitted string inside a fault arm is the empty string, not a breach."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-common--decode
+                   #'agent-repl-wire-decode-session-fault-shim-start-failed "{}")
+                  :stderr-tail)
+                 "")))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-shim-start-failed-decodes ()
+  "The shim-start-failed class carries the exit code and the stderr tail."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-shim-start-failed
+                  "{\"exitCode\":3,\"stderrTail\":\"panic\"}")
+                 '(:exit-code 3 :stderr-tail "panic"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-shim-reported-decodes ()
+  "A relayed shim-side fault names the component and the shim's own kind."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-shim-reported
+                  "{\"component\":\"stdout\",\"kind\":\"parse\"}")
+                 '(:component "stdout" :kind "parse"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-refuses-an-unknown-field ()
+  "An unknown key inside a fault arm is refused, never dropped."
+  (should (equal (agent-repl-test-wire-common--breach
+                  (lambda ()
+                    (agent-repl-wire-decode-session-fault-resume-failed
+                     (agent-repl-test-wire-common--parse "{\"why\":\"x\"}"))))
+                 '("SessionFaultResumeFailed" why "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-empty-arm-decodes-to-nil ()
+  "An empty fault class decodes to nil: the arm is the whole assertion."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-link-severed "{}")
+                 nil)))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here
