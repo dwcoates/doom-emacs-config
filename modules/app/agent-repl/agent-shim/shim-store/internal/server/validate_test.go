@@ -185,8 +185,24 @@ func TestValidateStoreEntryNamesTheOffendingIndex(t *testing.T) {
 	}
 }
 
+func TestValidateEntryBatchAcceptsACursorOnlyBatch(t *testing.T) {
+	// Arrange. A sidecar that read bytes yielding no entries must still make
+	// its file position durable, or it re-reads the same bytes forever.
+
+	// Act.
+	ref := validateEntryBatch(&storev1.EntryBatch{
+		CursorAdvance: &storev1.CursorState{FileId: "16777232:424242", Path: "/t/a.jsonl", Offset: 100},
+	})
+
+	// Assert.
+	if ref != nil {
+		t.Fatalf("validateEntryBatch = %q, want a cursor-only batch accepted", ref.detail)
+	}
+}
+
 func TestValidateEntryBatchRefusesAnEmptyBatch(t *testing.T) {
-	// Arrange. A producer with nothing to write does not call.
+	// Arrange. A batch carrying neither entries nor a cursor advance states
+	// nothing at all.
 
 	// Act.
 	ref := validateEntryBatch(&storev1.EntryBatch{})

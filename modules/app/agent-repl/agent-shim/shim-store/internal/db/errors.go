@@ -50,5 +50,9 @@ func storagef(cause error, format string, args ...any) error {
 // anything a caller did.
 var errNotAPageLine = errors.New("entry row indexed as a page line carries no serveable frame")
 
+// errNotABashRow is the cause of a row indexed as a bash row whose stored
+// frame carries none — a corruption of this store's own invariant.
+var errNotABashRow = errors.New("entry row indexed as a bash row carries no bash frame")
+
 // isNoRows reports the driver's empty-result signal.
 func isNoRows(err error) bool { return errors.Is(err, sql.ErrNoRows) }

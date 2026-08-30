@@ -10,6 +10,15 @@ import (
 	"agentrepl/shim-store/internal/logging"
 )
 
+// BashRowWritten is one detached-run row this write produced, ready for the
+// WatchBashRun fan-out. WriteSeq is the ordinal a watcher is pinned by; it
+// never reaches the wire.
+type BashRowWritten struct {
+	RunID    string
+	Row      *storev1.StoreAgentBash
+	WriteSeq uint64
+}
+
 // LineWritten is one page line this write produced, ready for the fan-out to
 // publish. WriteSeq is the store-internal ordinal a watcher is pinned by; it
 // never reaches the wire.
@@ -26,6 +35,9 @@ type WriteResult struct {
 	Written  int
 	Absorbed int
 	Lines    []LineWritten
+	// BashRows is the bash rows this write produced, ready for the WatchBashRun
+	// fan-out. A run's rows are published exactly as a book's lines are.
+	BashRows []BashRowWritten
 }
 
 // WriteBatch commits one producer's batch — records and cursor advance — as ONE
@@ -108,7 +120,7 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			continue
 		}
 
-		if r.kind == kindWorkflow {
+		if r.workflowNotImplemented {
 			// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing
 			// is lost, and the warning says why nothing serves it yet.
 			warn := fields
@@ -121,14 +133,24 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 		if err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
+		if err := d.recordApplied(ctx, tx, r, nextSeq, now); err != nil {
+			return WriteResult{}, d.refuse(fields, err)
+		}
 		if err := d.applyLifecycle(ctx, tx, r, now); err != nil {
 			return WriteResult{}, d.refuse(fields, err)
 		}
 		result.Written++
-		if r.kind == kindPageLine {
+		switch r.kind {
+		case kindPageLine:
 			result.Lines = append(result.Lines, LineWritten{
 				AgentID:  r.book.String,
 				Line:     &storev1.StoreLineAt{At: encodePointer(position), Line: r.pageLine},
+				WriteSeq: nextSeq,
+			})
+		case kindBash:
+			result.BashRows = append(result.BashRows, BashRowWritten{
+				RunID:    r.runID.String,
+				Row:      r.bashRow,
 				WriteSeq: nextSeq,
 			})
 		}
@@ -181,13 +203,19 @@ func (d *DB) currentWriteSeq(ctx context.Context, tx *sql.Tx) (uint64, error) {
 	return seq, nil
 }
 
-// absorbedBefore reports whether this exact write already landed. It is the
-// FIRST question asked of every entry, because a replay must not bump the
-// write ordinal of a row nothing changed — doing so would re-deliver an
-// unchanged line to every live watcher on every retry.
+// absorbedBefore reports whether this exact write already landed, by asking
+// the WRITE LEDGER rather than the `entry` row.
+//
+// THE LEDGER IS THE WHOLE POINT. `entry.write_id` holds only the LATEST write
+// applied to a row, so probing it answered "has this write landed?" with "is
+// this write the most recent one?" — and a replay of a SUPERSEDED write (w1
+// after w2 settled the same upsert_key) read as never-seen, was re-applied over
+// the newer content, and bumped write_seq, re-delivering the regressed line to
+// every live watcher. The ledger keeps one row per write ever APPLIED, so
+// absorption is a single indexed lookup that no later write can erase.
 func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bool, error) {
 	var one int
-	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM entry WHERE write_id = ?`, writeID).Scan(&one); {
+	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM write_ledger WHERE write_id = ?`, writeID).Scan(&one); {
 	case err == nil:
 		return true, nil
 	case errors.Is(err, sql.ErrNoRows):
@@ -195,6 +223,18 @@ func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bo
 	default:
 		return false, storagef(err, "probing write_id %q", writeID)
 	}
+}
+
+// recordApplied writes the ledger row for one applied write, IN THE SAME
+// TRANSACTION as the row it applied. Split them and a crash between the two
+// would either lose the absorption fact (a replay regresses the row) or claim
+// one that never happened (a write is silently dropped).
+func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) error {
+	const insertSQL = `INSERT INTO write_ledger (write_id, upsert_key, write_seq, applied_at_ms) VALUES (?,?,?,?)`
+	if _, err := tx.ExecContext(ctx, insertSQL, r.writeID, r.upsertKey, writeSeq, now); err != nil {
+		return storagef(err, "recording write_id %q in the write ledger", r.writeID)
+	}
+	return nil
 }
 
 // upsertEntry writes the row and returns the position it occupies.
@@ -206,22 +246,23 @@ func (d *DB) absorbedBefore(ctx context.Context, tx *sql.Tx, writeID string) (bo
 // past it.
 func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uint64, now int64) (int64, error) {
 	const upsertSQL = `INSERT INTO entry (
-	    upsert_key, write_id, write_seq, plane, kind, book_agent_id, top_level, frame,
+	    upsert_key, write_id, write_seq, plane, kind, book_agent_id, run_id, top_level, frame,
 	    first_inserted_at_ms, last_written_at_ms)
-	  VALUES (?,?,?,?,?,?,?,?,?,?)
+	  VALUES (?,?,?,?,?,?,?,?,?,?,?)
 	  ON CONFLICT(upsert_key) DO UPDATE SET
 	    write_id = excluded.write_id,
 	    write_seq = excluded.write_seq,
 	    plane = excluded.plane,
 	    kind = excluded.kind,
 	    book_agent_id = excluded.book_agent_id,
+	    run_id = excluded.run_id,
 	    top_level = excluded.top_level,
 	    frame = excluded.frame,
 	    last_written_at_ms = excluded.last_written_at_ms
 	  RETURNING position`
 	var position int64
 	err := tx.QueryRowContext(ctx, upsertSQL,
-		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.topLevel, r.frame, now, now,
+		r.upsertKey, r.writeID, writeSeq, r.plane, r.kind, r.book, r.runID, r.topLevel, r.frame, now, now,
 	).Scan(&position)
 	if err != nil {
 		return 0, storagef(err, "writing entry upsert_key=%q write_id=%q", r.upsertKey, r.writeID)

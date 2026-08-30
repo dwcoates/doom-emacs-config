@@ -101,3 +101,70 @@ func TestUnknownBookReadsEmptyAtFloor(t *testing.T) {
 		t.Errorf("the stale-pointer refusal carried no detail")
 	}
 }
+
+// TestContinuationLinesCarryTheSamePointersTheOpeningPageWouldHave: a
+// continuation page's pointers are REAL positions, not placeholders — the same
+// values OpenAgentSession serves for the same rows.
+func TestContinuationLinesCarryTheSamePointersTheOpeningPageWouldHave(t *testing.T) {
+	// Arrange: one book read two ways — a wide open that sees every row, and a
+	// narrow open plus a continuation that walks to them.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", 4)
+	wide := openSession(ctx, t, cli, "main", 4, nil)
+	wantPointers := pagePointers(wide.GetPage())
+
+	// Act.
+	narrow := openSession(ctx, t, cli, "main", 2, nil)
+	next := readPage(ctx, t, cli, "main", 2, assertPageMore(t, narrow.GetPage()))
+
+	// Assert.
+	assertTexts(t, "the continuation's pointers", readPointers(next), wantPointers[2:])
+	store.assertNoErrorRecords()
+}
+
+// TestContinuationMoreArmEchoesTheLastLinesOwnPointer: the boundary and the
+// lines cannot disagree, because the boundary IS one of the lines.
+func TestContinuationMoreArmEchoesTheLastLinesOwnPointer(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", 5)
+	opened := openSession(ctx, t, cli, "main", 1, nil)
+
+	// Act.
+	next := readPage(ctx, t, cli, "main", 2, assertPageMore(t, opened.GetPage()))
+
+	// Assert.
+	pointers := readPointers(next)
+	if got := assertReadMore(t, next).GetValue(); got != pointers[len(pointers)-1] {
+		t.Fatalf("more.last_item = %q, want the last line's own pointer %q", got, pointers[len(pointers)-1])
+	}
+}
+
+// TestAContinuationPointerReopensTheSessionAtThatMark: the pointers a
+// continuation served are accepted as known_through, which is the whole reason
+// they must be real.
+func TestAContinuationPointerReopensTheSessionAtThatMark(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	writeNumberedLines(ctx, t, streamProducer(cli), "main", 4)
+	opened := openSession(ctx, t, cli, "main", 2, nil)
+	next := readPage(ctx, t, cli, "main", 1, assertPageMore(t, opened.GetPage()))
+	mark := &storev1.StoreItemPointer{Value: readPointers(next)[0]}
+
+	// Act.
+	reopened := openSession(ctx, t, cli, "main", 10, mark)
+
+	// Assert: only the rows NEWER than the walked-to mark. The walk reached L2,
+	// so L3 and L4 are what the caller does not hold.
+	assertTexts(t, "the page after a continuation mark", pageTexts(reopened.GetPage()), []string{"L4", "L3"})
+	store.assertNoErrorRecords()
+}

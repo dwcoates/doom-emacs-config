@@ -62,7 +62,7 @@ func (d *DB) applyServeableFrameLifecycle(ctx context.Context, tx *sql.Tx, r rou
 		case *conversationv1.AgentFrame_Success, *conversationv1.AgentFrame_Failure:
 			return d.endAgent(ctx, tx, agentID, blob, now)
 		case *conversationv1.AgentFrame_DetachedWork:
-			return d.announceDetachedWork(ctx, tx, agentID, arm.DetachedWork, blob, now)
+			return d.announceDetachedWork(ctx, tx, agentID, arm.DetachedWork, now)
 		}
 	}
 	return nil
@@ -179,30 +179,22 @@ func (d *DB) endAgent(ctx context.Context, tx *sql.Tx, agentID string, terminal 
 	return nil
 }
 
-// announceDetachedWork records one AgentDetachedWork in the lifecycle table.
-// It is never a page line: the spawning call already is one.
-func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string, work *conversationv1.AgentDetachedWork, blob []byte, now int64) error {
+// announceDetachedWork records the JOIN ROW for one AgentDetachedWork.
+//
+// THE ANNOUNCEMENT ITSELF IS THE PAGE LINE, and this row is only what the store
+// filters and joins on. The spool path, the readability, the detach cause and
+// the timeout live in that page line and nowhere else: unpacking them here as
+// well would give one fact two homes that can disagree.
+func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string, work *conversationv1.AgentDetachedWork, now int64) error {
 	kind, err := validateDetachedWork(work, 0)
 	if err != nil {
 		return err
 	}
 	var originUnit sql.NullString
-	var cause string
-	var timeout sql.NullInt64
 	switch arm := work.GetOrigin().(type) {
 	case *conversationv1.AgentDetachedWork_Detached:
 		originUnit = sql.NullString{String: arm.Detached.GetDetachedFromId().GetValue(), Valid: true}
-		switch causeArm := arm.Detached.GetCause().(type) {
-		case *conversationv1.DetachedWorkDetached_Requested:
-			cause = causeRequested
-		case *conversationv1.DetachedWorkDetached_ByUser:
-			cause = causeByUser
-		case *conversationv1.DetachedWorkDetached_TimedOut:
-			cause = causeTimedOut
-			timeout = sql.NullInt64{Int64: int64(causeArm.TimedOut.GetTimeoutMs()), Valid: true}
-		}
 	case *conversationv1.AgentDetachedWork_Created:
-		cause = causeCreated
 		// The created unit's own id, where the unit HAS one. Only a subagent
 		// does: a bash run, a monitor and a workflow start carry no unit
 		// identity in DetachableWork, and inventing one would fabricate a join.
@@ -217,25 +209,18 @@ func (d *DB) announceDetachedWork(ctx context.Context, tx *sql.Tx, owner string,
 			}
 		}
 	}
-
-	var outputPath sql.NullString
-	var outputReadable sql.NullBool
-	if work.Output != nil {
-		outputPath = sql.NullString{String: work.GetOutput().GetPath(), Valid: true}
-		_, readable := work.GetOutput().GetReadability().(*conversationv1.DetachedWorkOutput_Readable)
-		outputReadable = sql.NullBool{Bool: readable, Valid: true}
+	// A run frame may already have created this run's row under the run's own
+	// identity, so the announcement joins it rather than opening a second one.
+	workID, err := d.resolveDetachedRowKey(ctx, tx, originUnit, work.GetWork().GetValue())
+	if err != nil {
+		return err
 	}
 	return d.upsertDetachedWork(ctx, tx, detachedRow{
-		workID:         work.GetWork().GetValue(),
-		kind:           kind,
-		originUnit:     originUnit,
-		ownerAgent:     sql.NullString{String: owner, Valid: owner != ""},
-		outputPath:     outputPath,
-		outputReadable: outputReadable,
-		cause:          sql.NullString{String: cause, Valid: cause != ""},
-		timeoutMs:      timeout,
-		latestState:    blob,
-		now:            now,
+		workID:     workID,
+		kind:       kind,
+		originUnit: originUnit,
+		ownerAgent: sql.NullString{String: owner, Valid: owner != ""},
+		now:        now,
 	})
 }
 
@@ -248,67 +233,93 @@ func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, bash *storev1.S
 	if err != nil {
 		return invalidf("bash frame for run %q cannot be re-serialized: %v", runID, err)
 	}
+	// The run IS the unit, so the origin join is the identity itself — which is
+	// what lets a terminal on the spawning stream close this row. The row may
+	// already exist under the ANNOUNCEMENT's handle, which is a different
+	// string; resolving by origin unit finds it instead of opening a second row.
+	origin := sql.NullString{String: runID, Valid: true}
+	workID, err := d.resolveDetachedRowKey(ctx, tx, origin, runID)
+	if err != nil {
+		return err
+	}
 	if err := d.upsertDetachedWork(ctx, tx, detachedRow{
-		workID: runID,
-		kind:   detachedKindBash,
-		// The run IS the unit, so the origin join is the identity itself —
-		// which is what lets a terminal on the spawning stream close this row.
-		originUnit:  sql.NullString{String: runID, Valid: true},
-		latestState: state,
-		now:         now,
+		workID:     workID,
+		kind:       detachedKindBash,
+		originUnit: origin,
+		now:        now,
 	}); err != nil {
 		return err
 	}
 	switch bash.GetFrame().GetResult().(type) {
 	case *conversationv1.AgentBash_Success, *conversationv1.AgentBash_Failure:
-		return d.endDetachedWork(ctx, tx, runID, state, now)
+		return d.endDetachedWork(ctx, tx, workID, state, now)
 	}
 	return nil
 }
 
-// detachedRow is one upsert of the detached_work table.
-type detachedRow struct {
-	workID         string
-	kind           string
-	originUnit     sql.NullString
-	ownerAgent     sql.NullString
-	outputPath     sql.NullString
-	outputReadable sql.NullBool
-	cause          sql.NullString
-	timeoutMs      sql.NullInt64
-	latestState    []byte
-	now            int64
+// resolveDetachedRowKey answers which detached_work row a write belongs to.
+//
+// THE ORIGIN UNIT IS TRIED FIRST, AND THAT IS THE WHOLE POINT. The two writers
+// of this table address the same run by DIFFERENT identities: the announcement
+// knows the DetachedWorkId handle, and the run's own frames know the
+// AgentActivityId of the run. Those strings are not required to be equal, and
+// keying each writer by the identity it happens to hold produced TWO rows for
+// one run — which GetLiveWork then reported as two open obligations, so the
+// shim had to resolve a run that did not exist.
+//
+// Either writer may arrive first (the file plane can observe a spool before the
+// stream plane announces it), so the rule is symmetric: if any row already
+// carries this origin unit, that row IS the run and its key is returned;
+// otherwise the caller's own identity keys it, and the later writer will find
+// it through this same lookup. One indexed lookup on detached_work(origin_unit).
+func (d *DB) resolveDetachedRowKey(ctx context.Context, tx *sql.Tx, originUnit sql.NullString, fallback string) (string, error) {
+	if !originUnit.Valid || originUnit.String == "" {
+		return fallback, nil
+	}
+	var existing string
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT work_id FROM detached_work WHERE origin_unit = ? LIMIT 1`, originUnit.String).Scan(&existing); {
+	case err == nil:
+		return existing, nil
+	case isNoRows(err):
+		return fallback, nil
+	default:
+		return "", d.queryError("store.db.write-batch", "detached_work", logging.Fields{ActivityID: originUnit.String},
+			storagef(err, "locating the detached work row of origin unit %q", originUnit.String))
+	}
 }
 
-// upsertDetachedWork writes one detached run's latest state.
+// detachedRow is one upsert of the detached_work table: the join columns only.
+type detachedRow struct {
+	workID     string
+	kind       string
+	originUnit sql.NullString
+	ownerAgent sql.NullString
+	now        int64
+}
+
+// upsertDetachedWork writes one detached run's join row.
 //
 // COALESCE ON EVERY OPTIONAL COLUMN, and the kind never downgrades: the two
 // writers of this table see different halves of the same run. The announcement
-// carries the spool path and the cause; the run's own frames carry the state
-// and, for a `detached` origin, no kind at all. Letting either clobber the
-// other's half with a NULL would lose the only copy of it.
+// knows the kind and the origin unit; the run's own frames know the run
+// identity and, for a `detached` origin, no kind at all. Letting either clobber
+// the other's half with a NULL would lose the only copy of it.
 func (d *DB) upsertDetachedWork(ctx context.Context, tx *sql.Tx, row detachedRow) error {
 	const upsertSQL = `INSERT INTO detached_work (
-	    work_id, kind, origin_unit, owner_agent, output_path, output_readable,
-	    cause, timeout_ms, announced_at_ms, latest_state)
-	  VALUES (?,?,?,?,?,?,?,?,?,?)
+	    work_id, kind, origin_unit, owner_agent, announced_at_ms)
+	  VALUES (?,?,?,?,?)
 	  ON CONFLICT(work_id) DO UPDATE SET
 	    kind = CASE WHEN excluded.kind = ? THEN detached_work.kind ELSE excluded.kind END,
 	    origin_unit = COALESCE(excluded.origin_unit, detached_work.origin_unit),
-	    owner_agent = COALESCE(excluded.owner_agent, detached_work.owner_agent),
-	    output_path = COALESCE(excluded.output_path, detached_work.output_path),
-	    output_readable = COALESCE(excluded.output_readable, detached_work.output_readable),
-	    cause = COALESCE(excluded.cause, detached_work.cause),
-	    timeout_ms = COALESCE(excluded.timeout_ms, detached_work.timeout_ms),
-	    latest_state = excluded.latest_state`
+	    owner_agent = COALESCE(excluded.owner_agent, detached_work.owner_agent)`
 	_, err := tx.ExecContext(ctx, upsertSQL,
-		row.workID, row.kind, row.originUnit, row.ownerAgent, row.outputPath, row.outputReadable,
-		row.cause, row.timeoutMs, row.now, row.latestState, detachedKindDetached)
+		row.workID, row.kind, row.originUnit, row.ownerAgent, row.now, detachedKindDetached)
 	if err != nil {
 		return d.queryError("store.db.write-batch", "detached_work", logging.Fields{TaskID: row.workID}, storagef(err, "recording detached work %q", row.workID))
 	}
 	d.log.LogVerbose(logging.Fields{Operation: "store.db.write-batch", Table: "detached_work", TaskID: row.workID},
-		"detached work recorded kind=%s", row.kind)
+		"detached work join row recorded kind=%s", row.kind)
 	return nil
 }
 

@@ -71,6 +71,11 @@ type routed struct {
 	// book is StorePageLine.page_agent_id.value for a page line and NULL for
 	// every never-served row. It IS the never-served index.
 	book sql.NullString
+	// runID is StoreAgentBash.run.value for a bash row and NULL for everything
+	// else. It is the bash equivalent of `book`: the indexed column WatchBashRun
+	// replays a run's own rows by, so following one detached shell costs the
+	// same single indexed lookup a page does.
+	runID sql.NullString
 	// topLevel is StoreAgentUpdate.top_level, the nearest non-sync ancestor.
 	topLevel sql.NullString
 	// frame is the whole serialized StoreEntry, exactly as written.
@@ -78,6 +83,15 @@ type routed struct {
 	// pageLine is the line a page or a watcher serves. Non-nil exactly when
 	// kind == kindPageLine.
 	pageLine *storev1.StorePageLine
+	// bashRow is the row a WatchBashRun watcher serves. Non-nil exactly when
+	// kind == kindBash.
+	bashRow *storev1.StoreAgentBash
+	// workflowNotImplemented marks an entry that carries workflow material this
+	// wave serves nothing for. It is a FLAG rather than a `kind`, because a
+	// workflow-kind DETACHED ANNOUNCEMENT is a page line like every other
+	// announcement — the warning is about what the store does not yet SERVE,
+	// not about where the row lands.
+	workflowNotImplemented bool
 }
 
 // classify validates one StoreEntry whole and resolves its `entry` row.
@@ -179,13 +193,22 @@ func classifyAgentUpdate(r routed, update *storev1.StoreAgentUpdate, index int) 
 		if err := validateStoreAgentBash(arm.Bash, index); err != nil {
 			return routed{}, err
 		}
+		// A BASH FRAME IS ITS OWN ROW, not merely a lifecycle-table update.
+		// The sidecar writes a detached run's spool in deltas, and every one
+		// of them must survive and be replayable in order — so the run's
+		// history lives in the entry spine under `run_id`, the way a book's
+		// history lives there under `book_agent_id`. It is still NOT a page
+		// line: a detached run has no book, and its reader is WatchBashRun.
 		r.kind = kindBash
+		r.runID = sql.NullString{String: arm.Bash.GetRun().GetValue(), Valid: true}
+		r.bashRow = arm.Bash
 		return r, nil
 	case *storev1.StoreAgentUpdate_Workflow:
 		if err := validateStoreAgentWorkflow(arm.Workflow, index); err != nil {
 			return routed{}, err
 		}
 		r.kind = kindWorkflow
+		r.workflowNotImplemented = true
 		return r, nil
 	default:
 		return routed{}, invalidf("entries[%d].agent_update sets no `agent_info` arm — the producer did not decide the entry's pageability", index)
@@ -240,9 +263,11 @@ func validateAgentPrompt(prompt *conversationv1.AgentPrompt, index int) error {
 
 // classifyAgentFrame is the base function for conversation.v1.AgentFrame.
 //
-// THREE OF ITS FOUR ARMS ARE PAGE LINES AND ONE IS NOT. `detached_work` is an
-// announcement that work left this stream; the spawning CALL is already the
-// page line for it, so landing a second one would draw the same work twice.
+// EVERY ARM IS A PAGE LINE, `detached_work` included: an announcement that work
+// left this stream is the HANDOFF the book's reader has to see, and it is the
+// one durable copy of what was announced. The arms differ in what else they
+// touch — a terminal ends its agent, an announcement writes the join row — not
+// in whether they are served.
 func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversationv1.AgentFrame, index int) (routed, error) {
 	if frame == nil {
 		return routed{}, invalidf("entries[%d] carries a nil agent_frame", index)
@@ -270,15 +295,15 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 		if err != nil {
 			return routed{}, err
 		}
-		// A workflow announcement lands as workflow residue rather than as a
-		// detached-work row's kind alone, so the not-implemented warning is
-		// raised from exactly one place.
+		// AN ANNOUNCEMENT IS A PAGE LINE. "Work left this stream" is something
+		// the reader of the announcing agent's book must SEE — it is the
+		// handoff, and drawing the spawning call without it leaves the feed
+		// claiming work that is still in the turn. It is also the one durable
+		// copy of what was announced (the spool, the cause, the timeout), which
+		// is why the lifecycle table keeps only the join columns.
 		if kind == detachedKindWorkflow {
-			r.kind = kindWorkflow
-		} else {
-			r.kind = kindDetachedWork
+			r.workflowNotImplemented = true
 		}
-		return r, nil
 	default:
 		return routed{}, invalidf("entries[%d].agent_frame sets no `result` arm", index)
 	}

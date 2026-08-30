@@ -305,13 +305,44 @@ func (s *storeProcess) exit() error {
 	return s.exitErr
 }
 
-// restart stops the store and starts a new one on the SAME database. Every
-// durability subject is expressed through this.
+// restart stops the store and starts a new one on the SAME database and the
+// SAME socket path. Every durability subject is expressed through this.
+//
+// IT DOES NOT REMOVE THE SOCKET. Doing so masked the reclaim path entirely:
+// every restart handed the successor a clean path, so the store's own decision
+// about a socket already sitting there — dial it, refuse a live one, reclaim a
+// dead one — was never exercised by a single subject.
 func (s *storeProcess) restart() {
 	s.t.Helper()
 	s.stop()
-	if err := os.Remove(s.socket); err != nil && !os.IsNotExist(err) {
-		s.t.Fatalf("removing the socket before restart: %v", err)
+	s.launch()
+	s.awaitReady()
+}
+
+// kill ends the store with SIGKILL and waits for it. There is no orderly
+// shutdown and therefore no listener close, so the socket file is LEFT ON DISK
+// exactly as a crashed store leaves it.
+func (s *storeProcess) kill() {
+	s.t.Helper()
+	select {
+	case <-s.done:
+		return
+	default:
+	}
+	if err := s.cmd.Process.Kill(); err != nil {
+		s.t.Fatalf("killing the store: %v", err)
+	}
+	<-s.done
+}
+
+// restartAfterKill kills the store and starts a successor over the socket its
+// predecessor abandoned. This is the ONLY path that reaches the reclaim branch,
+// because an orderly exit unlinks the socket on its way out.
+func (s *storeProcess) restartAfterKill() {
+	s.t.Helper()
+	s.kill()
+	if !s.socketExists() {
+		s.t.Fatalf("SIGKILL left no socket at %q; the reclaim path is not being exercised", s.socket)
 	}
 	s.launch()
 	s.awaitReady()
@@ -398,6 +429,14 @@ func (s *storeProcess) client() storev1connect.ShimStoreClient {
 // http1Client is the same service over HTTP/1.1.
 func (s *storeProcess) http1Client() storev1connect.ShimStoreClient {
 	return storev1connect.NewShimStoreClient(http1HTTPClient(s.socket), baseURL)
+}
+
+// jsonClient is the same service with the JSON codec instead of the binary one.
+// IT IS NOT A SECOND ENDPOINT: the same handler answers a different content
+// type, which is what makes the surface curl-able — and what makes every rpc's
+// JSON encoding a real part of the contract rather than an accident.
+func (s *storeProcess) jsonClient() storev1connect.ShimStoreClient {
+	return storev1connect.NewShimStoreClient(h2cHTTPClient(s.socket), baseURL, connect.WithProtoJSON())
 }
 
 // ---- the store's log file ----
@@ -862,6 +901,20 @@ func bashStart(line string, at int64) *conversationv1.AgentBash {
 	}
 }
 
+// bashDelta is one appended chunk of a detached run's spool — what the sidecar
+// writes as it copies the file, and the reason a run's rows are individual
+// entry rows rather than one overwritten lifecycle blob.
+func bashDelta(newOutput string, fromOffset uint64) *conversationv1.AgentBash {
+	return &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Update{
+			Update: &conversationv1.AgentBashUpdate{
+				NewOutput:  newOutput,
+				FromOffset: fromOffset,
+			},
+		},
+	}
+}
+
 // bashSuccess is a detached run's terminal frame.
 func bashSuccess(line string, exitCode int32) *conversationv1.AgentBash {
 	return &conversationv1.AgentBash{
@@ -1031,6 +1084,26 @@ func bashRun(topLevel *conversationv1.AgentId, runActID string, frame *conversat
 	}
 }
 
+// bashActivityFrame is a shell run's activity IN ITS SPAWNING AGENT'S BOOK — an
+// ordinary page line whose activity_id is the run's unit id. When its item
+// reaches a terminal arm, that is what closes the detached row joined on
+// origin_unit.
+func bashActivityFrame(agent, runActID string, frame *conversationv1.AgentBash) *conversationv1.AgentFrame {
+	return &conversationv1.AgentFrame{
+		AgentId: agentID(agent),
+		Result: &conversationv1.AgentFrame_Update{
+			Update: &conversationv1.AgentUpdate{
+				Update: &conversationv1.AgentUpdate_Activity{
+					Activity: &conversationv1.AgentActivity{
+						ActivityId: activityID(runActID),
+						Item:       &conversationv1.AgentActivity_Bash{Bash: frame},
+					},
+				},
+			},
+		},
+	}
+}
+
 // workflowRun wraps a workflow run's frame with the run's agent identity.
 func workflowRun(topLevel *conversationv1.AgentId, runAgent string, frame *conversationv1.AgentWorkflow) *storev1.StoreAgentUpdate {
 	return &storev1.StoreAgentUpdate{
@@ -1194,6 +1267,147 @@ func watchStream(ctx context.Context, t *testing.T, cli storev1connect.ShimStore
 	return &watch{ServerStreamForClient: stream, cancel: cancel}
 }
 
+// bashWatch is one open WatchBashRun tail plus the cancellation that ends it.
+// Unlike a book's tail this stream has a NATURAL END — the run's terminal — so a
+// test may legitimately drain it to completion.
+type bashWatch struct {
+	*connect.ServerStreamForClient[storev1.WatchBashRunResponse]
+	cancel context.CancelFunc
+}
+
+func (w *bashWatch) Close() error {
+	w.cancel()
+	err := w.ServerStreamForClient.Close()
+	if err == nil || errors.Is(err, context.Canceled) || connect.CodeOf(err) == connect.CodeCanceled {
+		return nil
+	}
+	return err
+}
+
+// watchBashRun opens the tail for one run. The caller owns Close.
+func watchBashRun(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, run string) *bashWatch {
+	t.Helper()
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := cli.WatchBashRun(streamCtx, connect.NewRequest(&storev1.WatchBashRunRequest{Run: activityID(run)}))
+	if err != nil {
+		cancel()
+		t.Fatalf("WatchBashRun(%q) transport error: %v", run, err)
+	}
+	return &bashWatch{ServerStreamForClient: stream, cancel: cancel}
+}
+
+// bashRowLabel reduces one run row to the arm it carries, so run assertions
+// read as text.
+func bashRowLabel(row *storev1.StoreAgentBash) string {
+	frame := row.GetFrame()
+	switch {
+	case frame.GetStart() != nil:
+		return "start:" + frame.GetStart().GetCommand().GetLine()
+	case frame.GetUpdate() != nil:
+		return "delta:" + frame.GetUpdate().GetNewOutput()
+	case frame.GetProgress() != nil:
+		return "progress"
+	case frame.GetSuccess() != nil:
+		return "success"
+	case frame.GetFailure() != nil:
+		return "failure"
+	default:
+		return "<no frame arm>"
+	}
+}
+
+// drainBashRun reads a run's stream to its natural end and returns every row's
+// label. The stream ENDING is the synchronization primitive: no polling and no
+// sleeping anywhere in this path.
+func drainBashRun(t *testing.T, stream *bashWatch) []string {
+	t.Helper()
+
+	type result struct {
+		labels []string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var labels []string
+		for stream.Receive() {
+			labels = append(labels, bashRowLabel(stream.Msg().GetRow()))
+		}
+		done <- result{labels: labels, err: stream.Err()}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("the bash run stream ended with an error after %v: %v", res.labels, res.err)
+		}
+		return res.labels
+	case <-time.After(streamTimeout):
+		t.Fatalf("the bash run stream did not reach its natural end within %s", streamTimeout)
+		return nil
+	}
+}
+
+// receiveBashRows reads exactly n rows from a run's stream.
+func receiveBashRows(t *testing.T, stream *bashWatch, n int) []string {
+	t.Helper()
+
+	type result struct {
+		labels []string
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var labels []string
+		for len(labels) < n {
+			if !stream.Receive() {
+				done <- result{labels: labels, err: fmt.Errorf("stream ended after %d of %d rows: %w", len(labels), n, stream.Err())}
+				return
+			}
+			labels = append(labels, bashRowLabel(stream.Msg().GetRow()))
+		}
+		done <- result{labels: labels}
+	}()
+
+	select {
+	case res := <-done:
+		if res.err != nil {
+			t.Fatalf("bash run stream: %v", res.err)
+		}
+		return res.labels
+	case <-time.After(streamTimeout):
+		t.Fatalf("the bash run stream delivered fewer than %d rows within %s", n, streamTimeout)
+		return nil
+	}
+}
+
+// assertBashRunRefused asserts the refused-open convention for a run the store
+// holds no row for: there is no failure frame, so the stream closes at the
+// transport with CodeNotFound.
+func assertBashRunRefused(t *testing.T, stream *bashWatch) {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() {
+		for stream.Receive() {
+			done <- fmt.Errorf("a refused bash watch delivered a row")
+			return
+		}
+		done <- stream.Err()
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatalf("a refused bash watch ended cleanly; want a Connect %v error", connect.CodeNotFound)
+		}
+		if code := connect.CodeOf(err); code != connect.CodeNotFound {
+			t.Fatalf("a refused bash watch ended with Connect code %v, want %v (error: %v)", code, connect.CodeNotFound, err)
+		}
+	case <-time.After(streamTimeout):
+		t.Fatalf("a refused bash watch neither delivered nor closed within %s", streamTimeout)
+	}
+}
+
 // receivedLine is one frame a watcher saw, reduced to what tests assert on.
 type receivedLine struct {
 	pointer string
@@ -1334,8 +1548,19 @@ func pagePointers(page *storev1.AgentSessionPage) []string {
 // readTexts is a continuation page's labels, newest first.
 func readTexts(page *storev1.ReadAgentPageSuccess) []string {
 	out := make([]string, 0, len(page.GetLines()))
-	for _, line := range page.GetLines() {
-		out = append(out, lineText(line))
+	for _, at := range page.GetLines() {
+		out = append(out, lineText(at.GetLine()))
+	}
+	return out
+}
+
+// readPointers is a continuation page's pointers, newest first. A continuation
+// page carries REAL positions exactly as the opening page does, so a reader
+// never has to mint a placeholder mark for a line it walked to.
+func readPointers(page *storev1.ReadAgentPageSuccess) []string {
+	out := make([]string, 0, len(page.GetLines()))
+	for _, at := range page.GetLines() {
+		out = append(out, at.GetAt().GetValue())
 	}
 	return out
 }
