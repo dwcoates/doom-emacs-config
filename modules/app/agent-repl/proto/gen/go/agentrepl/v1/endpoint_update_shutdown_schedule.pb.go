@@ -388,10 +388,14 @@ func (*UpdateShutdownScheduleSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDescGZIP(), []int{5}
 }
 
-// EMPTY ON PURPOSE: arms DERIVED at the wave (nothing scheduled to cancel,
-// a newer schedule already stands), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type UpdateShutdownScheduleError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*UpdateShutdownScheduleError_NothingScheduled
+	Cause         isUpdateShutdownScheduleError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -426,6 +430,69 @@ func (*UpdateShutdownScheduleError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *UpdateShutdownScheduleError) GetCause() isUpdateShutdownScheduleError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *UpdateShutdownScheduleError) GetNothingScheduled() *UpdateShutdownScheduleNothingScheduled {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateShutdownScheduleError_NothingScheduled); ok {
+			return x.NothingScheduled
+		}
+	}
+	return nil
+}
+
+type isUpdateShutdownScheduleError_Cause interface {
+	isUpdateShutdownScheduleError_Cause()
+}
+
+type UpdateShutdownScheduleError_NothingScheduled struct {
+	// Nothing is scheduled to cancel.
+	NothingScheduled *UpdateShutdownScheduleNothingScheduled `protobuf:"bytes,1,opt,name=nothing_scheduled,json=nothingScheduled,proto3,oneof"`
+}
+
+func (*UpdateShutdownScheduleError_NothingScheduled) isUpdateShutdownScheduleError_Cause() {}
+
+type UpdateShutdownScheduleNothingScheduled struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateShutdownScheduleNothingScheduled) Reset() {
+	*x = UpdateShutdownScheduleNothingScheduled{}
+	mi := &file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateShutdownScheduleNothingScheduled) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateShutdownScheduleNothingScheduled) ProtoMessage() {}
+
+func (x *UpdateShutdownScheduleNothingScheduled) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateShutdownScheduleNothingScheduled.ProtoReflect.Descriptor instead.
+func (*UpdateShutdownScheduleNothingScheduled) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDescGZIP(), []int{7}
+}
+
 var File_agentrepl_v1_endpoint_update_shutdown_schedule_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDesc = "" +
@@ -446,8 +513,11 @@ const file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2+.agentrepl.v1.UpdateShutdownScheduleSuccessH\x00R\asuccess\x12A\n" +
 	"\x05error\x18\x02 \x01(\v2).agentrepl.v1.UpdateShutdownScheduleErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1f\n" +
-	"\x1dUpdateShutdownScheduleSuccess\"\x1d\n" +
-	"\x1bUpdateShutdownScheduleErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1dUpdateShutdownScheduleSuccess\"\x8b\x01\n" +
+	"\x1bUpdateShutdownScheduleError\x12c\n" +
+	"\x11nothing_scheduled\x18\x01 \x01(\v24.agentrepl.v1.UpdateShutdownScheduleNothingScheduledH\x00R\x10nothingScheduledB\a\n" +
+	"\x05cause\"(\n" +
+	"&UpdateShutdownScheduleNothingScheduledB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDescOnce sync.Once
@@ -461,30 +531,32 @@ func file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDescGZIP() []b
 	return file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_goTypes = []any{
-	(*UpdateShutdownScheduleRequest)(nil),  // 0: agentrepl.v1.UpdateShutdownScheduleRequest
-	(*UpdateShutdownScheduleSchedule)(nil), // 1: agentrepl.v1.UpdateShutdownScheduleSchedule
-	(*UpdateShutdownScheduleCancel)(nil),   // 2: agentrepl.v1.UpdateShutdownScheduleCancel
-	(*UpdateShutdownScheduleNow)(nil),      // 3: agentrepl.v1.UpdateShutdownScheduleNow
-	(*UpdateShutdownScheduleResponse)(nil), // 4: agentrepl.v1.UpdateShutdownScheduleResponse
-	(*UpdateShutdownScheduleSuccess)(nil),  // 5: agentrepl.v1.UpdateShutdownScheduleSuccess
-	(*UpdateShutdownScheduleError)(nil),    // 6: agentrepl.v1.UpdateShutdownScheduleError
-	(*DrainReason)(nil),                    // 7: agentrepl.v1.DrainReason
+	(*UpdateShutdownScheduleRequest)(nil),          // 0: agentrepl.v1.UpdateShutdownScheduleRequest
+	(*UpdateShutdownScheduleSchedule)(nil),         // 1: agentrepl.v1.UpdateShutdownScheduleSchedule
+	(*UpdateShutdownScheduleCancel)(nil),           // 2: agentrepl.v1.UpdateShutdownScheduleCancel
+	(*UpdateShutdownScheduleNow)(nil),              // 3: agentrepl.v1.UpdateShutdownScheduleNow
+	(*UpdateShutdownScheduleResponse)(nil),         // 4: agentrepl.v1.UpdateShutdownScheduleResponse
+	(*UpdateShutdownScheduleSuccess)(nil),          // 5: agentrepl.v1.UpdateShutdownScheduleSuccess
+	(*UpdateShutdownScheduleError)(nil),            // 6: agentrepl.v1.UpdateShutdownScheduleError
+	(*UpdateShutdownScheduleNothingScheduled)(nil), // 7: agentrepl.v1.UpdateShutdownScheduleNothingScheduled
+	(*DrainReason)(nil),                            // 8: agentrepl.v1.DrainReason
 }
 var file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_depIdxs = []int32{
 	1, // 0: agentrepl.v1.UpdateShutdownScheduleRequest.schedule:type_name -> agentrepl.v1.UpdateShutdownScheduleSchedule
 	2, // 1: agentrepl.v1.UpdateShutdownScheduleRequest.cancel:type_name -> agentrepl.v1.UpdateShutdownScheduleCancel
 	3, // 2: agentrepl.v1.UpdateShutdownScheduleRequest.now:type_name -> agentrepl.v1.UpdateShutdownScheduleNow
-	7, // 3: agentrepl.v1.UpdateShutdownScheduleSchedule.reason:type_name -> agentrepl.v1.DrainReason
-	7, // 4: agentrepl.v1.UpdateShutdownScheduleNow.reason:type_name -> agentrepl.v1.DrainReason
+	8, // 3: agentrepl.v1.UpdateShutdownScheduleSchedule.reason:type_name -> agentrepl.v1.DrainReason
+	8, // 4: agentrepl.v1.UpdateShutdownScheduleNow.reason:type_name -> agentrepl.v1.DrainReason
 	5, // 5: agentrepl.v1.UpdateShutdownScheduleResponse.success:type_name -> agentrepl.v1.UpdateShutdownScheduleSuccess
 	6, // 6: agentrepl.v1.UpdateShutdownScheduleResponse.error:type_name -> agentrepl.v1.UpdateShutdownScheduleError
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	7, // 7: agentrepl.v1.UpdateShutdownScheduleError.nothing_scheduled:type_name -> agentrepl.v1.UpdateShutdownScheduleNothingScheduled
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_init() }
@@ -502,13 +574,16 @@ func file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_init() {
 		(*UpdateShutdownScheduleResponse_Success)(nil),
 		(*UpdateShutdownScheduleResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_msgTypes[6].OneofWrappers = []any{
+		(*UpdateShutdownScheduleError_NothingScheduled)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_shutdown_schedule_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
