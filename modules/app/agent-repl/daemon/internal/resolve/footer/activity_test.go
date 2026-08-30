@@ -40,37 +40,46 @@ func hookFrame(name string, running bool) *conversationv1.AgentActivity {
 	}
 }
 
-// accountUsage is one allowance sample with both windows.
-func accountUsage(fiveHour, sevenDay float64) *conversationv1.SessionUpdate {
-	seven := &conversationv1.SessionUsageWindow{
-		UtilizationPercent: sevenDay,
-		ResetsAtMs:         instant.Add(7 * 24 * time.Hour).UnixMilli(),
-	}
+// rateLimitStatus is one vendor rate-limit event for one window.
+func rateLimitStatus(window *conversationv1.SessionRateLimitType, utilization float64, resetsIn time.Duration) *conversationv1.SessionUpdate {
 	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{
-			AccountUsage: &conversationv1.SessionAccountUsage{
-				ObservedAtMs: instant.UnixMilli(),
-				Outcome: &conversationv1.SessionAccountUsage_Available{
-					Available: &conversationv1.SessionAccountUsageAvailable{
-						FiveHour: &conversationv1.SessionUsageWindow{
-							UtilizationPercent: fiveHour,
-							ResetsAtMs:         instant.Add(5 * time.Hour).UnixMilli(),
-						},
-						SevenDay: seven,
-					},
-				},
+		Update: &conversationv1.SessionUpdate_RateLimitStatus{
+			RateLimitStatus: &conversationv1.SessionRateLimitStatus{
+				Status:             &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
+				UtilizationPercent: &utilization,
+				ResetsAtMs:         ptr(instant.Add(resetsIn).UnixMilli()),
+				RateLimitType:      window,
 			},
 		},
 	}
 }
 
-// budgetWarning is the vendor's own context-budget warning.
-func budgetWarning(text string) *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_ContextBudgetWarning{
-			ContextBudgetWarning: &conversationv1.SessionContextBudgetWarning{Text: text},
-		},
-	}
+// fiveHourWindow and sevenDayWindow are the two windows the drawn line states.
+func fiveHourWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_FiveHour{
+		FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{},
+	}}
+}
+
+func sevenDayWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDay{
+		SevenDay: &conversationv1.SessionRateLimitWindowSevenDay{},
+	}}
+}
+
+// ptr is the address of a value, which is how an optional scalar is set.
+func ptr[T any](v T) *T { return &v }
+
+// bothAllowances reports both windows, which is what makes the line drawable.
+func bothAllowances(h *harness, fiveHour, sevenDay float64) {
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), fiveHour, 5*time.Hour))
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(sevenDayWindow(), sevenDay, 7*24*time.Hour))
+}
+
+// budgetWarning is the vendor's own context-budget warning, an AGENT-PLANE
+// fact the sidecar produces from the transcript.
+func budgetWarning(h *harness, text string) {
+	h.r.OnContextBudgetWarning(testWS, mainAgent, &conversationv1.ContextBudgetWarning{Text: text})
 }
 
 func TestANotificationOutranksEveryCompetingActivity(t *testing.T) {
@@ -95,7 +104,7 @@ func TestAStatusBoundHookOutranksTheRateReport(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 	h.r.SetTurn(testWS, &TurnStarted{At: instant})
-	h.r.OnSessionUpdate(testWS, accountUsage(95, 40))
+	bothAllowances(h, 95, 40)
 
 	// Act
 	h.r.OnActivity(testWS, mainAgent, hookFrame("pre-commit", true))
@@ -111,10 +120,10 @@ func TestTheRateReportOutranksTheContextBudget(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, budgetWarning("context is filling"))
+	budgetWarning(h, "context is filling")
 
 	// Act
-	h.r.OnSessionUpdate(testWS, accountUsage(95, 40))
+	bothAllowances(h, 95, 40)
 
 	// Assert
 	activity := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity()
@@ -129,7 +138,7 @@ func TestTheContextBudgetStandsWhenNothingElseDoes(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, budgetWarning("context is filling"))
+	budgetWarning(h, "context is filling")
 
 	// Assert
 	activity := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity()
@@ -144,7 +153,7 @@ func TestAnUnremarkableAllowanceIsNotNews(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, accountUsage(10, 5))
+	bothAllowances(h, 10, 5)
 
 	// Assert
 	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
@@ -158,7 +167,7 @@ func TestAnAllowancePastTheThresholdIsNewsworthy(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, accountUsage(90, 12))
+	bothAllowances(h, 90, 12)
 
 	// Assert
 	report := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
@@ -176,7 +185,7 @@ func TestTheNewsworthyThresholdIsInjectable(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, accountUsage(10, 5))
+	bothAllowances(h, 10, 5)
 
 	// Assert
 	report := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
@@ -191,7 +200,7 @@ func TestAnAllowanceIsCarriedAsAFractionAndEpochSeconds(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, accountUsage(90, 90))
+	bothAllowances(h, 90, 90)
 
 	// Assert
 	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
@@ -203,41 +212,121 @@ func TestAnAllowanceIsCarriedAsAFractionAndEpochSeconds(t *testing.T) {
 	}
 }
 
-func TestAnUnavailableAllowanceDrawsNothing(t *testing.T) {
+func TestAnAllowanceCopiesTheVendorsStatusArm(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, accountUsage(95, 95))
 
 	// Act
-	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
-		Update: &conversationv1.SessionUpdate_AccountUsage{
-			AccountUsage: &conversationv1.SessionAccountUsage{
-				Outcome: &conversationv1.SessionAccountUsage_Unavailable{
-					Unavailable: &conversationv1.SessionAccountUsageUnavailable{},
-				},
-			},
-		},
-	})
+	bothAllowances(h, 95, 95)
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
-		t.Fatalf("an unavailable sample kept the previous report standing")
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetAllowed() == nil {
+		t.Fatalf("status = %+v, want the vendor's allowed arm copied", got.GetStatus())
 	}
 }
 
-func TestASampleMissingTheWeeklyWindowIsNotDrawn(t *testing.T) {
+func TestAnAllowanceWarningStatusIsCopied(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	bothAllowances(h, 95, 95)
+
+	// Act
+	update := rateLimitStatus(fiveHourWindow(), 95, 5*time.Hour)
+	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_AllowedWarning{
+		AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{},
+	}
+	h.r.OnSessionUpdate(testWS, update)
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetAllowedWarning() == nil {
+		t.Fatalf("status = %+v, want the vendor's allowed_warning arm copied", got.GetStatus())
+	}
+}
+
+func TestARejectedAllowanceStatusIsCopied(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	bothAllowances(h, 95, 95)
+
+	// Act
+	update := rateLimitStatus(fiveHourWindow(), 95, 5*time.Hour)
+	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
+		Rejected: &conversationv1.SessionRateLimitRejected{},
+	}
+	h.r.OnSessionUpdate(testWS, update)
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetRejected() == nil {
+		t.Fatalf("status = %+v, want the vendor's rejected arm copied", got.GetStatus())
+	}
+}
+
+func TestAStatusTheVendorLeftUnsetDrawsNoArm(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	bothAllowances(h, 95, 95)
+
+	// Act
+	update := rateLimitStatus(fiveHourWindow(), 95, 5*time.Hour)
+	update.GetRateLimitStatus().Status = nil
+	h.r.OnSessionUpdate(testWS, update)
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetStatus() != nil {
+		t.Fatalf("status = %+v, want no arm; an absent status is never defaulted", got.GetStatus())
+	}
+}
+
+func TestOnlyTheFiveHourWindowIsNotDrawn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
 	// Act
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 99, 5*time.Hour))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
+		t.Fatalf("a one-window report was drawn; the line states BOTH allowances or neither")
+	}
+}
+
+func TestAStatusNamingNoWindowIsDropped(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(sevenDayWindow(), 99, 7*24*time.Hour))
+
+	// Act: a status the vendor gave no window is not filable.
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(nil, 99, 5*time.Hour))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
+		t.Fatalf("a windowless status was filed as an allowance")
+	}
+}
+
+func TestTheAccountUsageArmDrawsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act: the account's usage is no longer the allowance line's source.
 	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_AccountUsage{
 			AccountUsage: &conversationv1.SessionAccountUsage{
 				Outcome: &conversationv1.SessionAccountUsage_Available{
 					Available: &conversationv1.SessionAccountUsageAvailable{
 						FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 99},
+						SevenDay: &conversationv1.SessionUsageWindow{UtilizationPercent: 99},
 					},
 				},
 			},
@@ -246,7 +335,7 @@ func TestASampleMissingTheWeeklyWindowIsNotDrawn(t *testing.T) {
 
 	// Assert
 	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
-		t.Fatalf("a one-window sample was drawn; the line states BOTH allowances or neither")
+		t.Fatalf("account usage drew an allowance; rate_limit_status is its only source")
 	}
 }
 
@@ -311,7 +400,7 @@ func TestEveryActivityCarriesItsStandingInstant(t *testing.T) {
 	connected(h)
 
 	// Act
-	h.r.OnSessionUpdate(testWS, budgetWarning("context is filling"))
+	budgetWarning(h, "context is filling")
 
 	// Assert
 	at := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetAt()
