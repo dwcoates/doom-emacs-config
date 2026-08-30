@@ -41,7 +41,7 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 	sub := s.bashFan.subscribe(runID, "")
 	defer s.bashFan.unsubscribe(sub)
 
-	replay, err := s.store.BashRun(ctx, runID)
+	replay, err := s.store.BashRun(correlated(ctx, req.Header()), runID)
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.watch-bash-run", err, logging.Fields{})
 		return connect.NewError(connect.CodeInternal, ref)

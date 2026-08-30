@@ -52,6 +52,7 @@ func (d *DB) LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error) 
 	}
 
 	d.observeQuery(StatementLiveWork, "agent", base, started, int64(len(agents)+len(detached)))
+	d.traceStatement(ctx, StatementLiveWork, "agent", base, int64(len(agents)+len(detached)))
 	d.log.LogVerbose(base, "live work read agents=%d workflows=%d detached=%d",
 		len(success.LiveAgents), len(success.LiveWorkflows), len(success.LiveDetached))
 	return success, nil
@@ -98,6 +99,7 @@ func (d *DB) Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorStat
 		return nil, d.refuse(base, storagef(err, "iterating cursor rows"))
 	}
 	d.observeQuery(StatementListCursors, "cursor", base, started, int64(len(out)))
+	d.traceStatement(ctx, StatementListCursors, "cursor", base, int64(len(out)))
 	d.log.LogVerbose(base, "cursors read cursors=%d one_file=%t", len(out), fileID != nil)
 	return out, nil
 }

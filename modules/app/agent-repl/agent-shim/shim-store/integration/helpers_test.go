@@ -119,6 +119,10 @@ type storeOptions struct {
 	// noWait starts the process without waiting for the socket, for the
 	// bootstrap-failure subjects.
 	noWait bool
+	// verbose runs the store with AGENT_REPL_LOG_VERBOSE=1, which is what makes
+	// its per-statement traces durable — the only way a test can assert that a
+	// refused request never reached storage.
+	verbose bool
 }
 
 // storeProcess is one running (or crashed) store, with everything a test needs
@@ -193,7 +197,7 @@ func (s *storeProcess) launch() {
 	}
 
 	cmd := exec.Command(storeBinary, args...)
-	cmd.Env = storeEnv(s.socket)
+	cmd.Env = storeEnv(s.socket, s.opts.verbose)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 
@@ -219,9 +223,10 @@ func (s *storeProcess) launch() {
 }
 
 // storeEnv is the child's environment: the private socket as the documented
-// default, the vendor-call guard on, and verbose logging explicitly absent.
-func storeEnv(socket string) []string {
-	env := make([]string, 0, len(os.Environ())+2)
+// default, the vendor-call guard on, and verbose logging off unless the subject
+// asked for it.
+func storeEnv(socket string, verbose bool) []string {
+	env := make([]string, 0, len(os.Environ())+3)
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "AGENT_REPL_LOG_VERBOSE=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_STORE_SOCKET=") ||
@@ -230,10 +235,14 @@ func storeEnv(socket string) []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env,
+	env = append(env,
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
+	if verbose {
+		env = append(env, "AGENT_REPL_LOG_VERBOSE=1")
+	}
+	return env
 }
 
 // awaitReady polls the socket under a deadline, failing at once if the process
@@ -573,17 +582,51 @@ func recordsWithContextKey(records []logRecord, key string) []logRecord {
 	return out
 }
 
-// assertNoDatabaseTouch asserts that a refused request never reached storage.
-// The store's own contract is that a database operation is logged with a
-// `statement` family in its context; a refusal that never reached the database
-// therefore has none.
-func assertNoDatabaseTouch(t *testing.T, records []logRecord) {
+// assertNoDatabaseTouch asserts that ONE refused request never reached storage.
+//
+// IT SCOPES BY request_id, WHICH IS WHAT MAKES IT MEAN ANYTHING. The old version
+// looked for any record carrying a `statement` family at all — and the only
+// record that carried one was the slow-query warning, which fires past a
+// threshold, so its absence meant "nothing was slow", not "nothing ran". Every
+// validation subject passed it without ever exercising the claim. The store now
+// traces each statement family it runs, at verbose, with the request id the
+// caller sent; a refusal that never opened a transaction leaves none carrying
+// that id.
+//
+// The store must be started with `verbose: true` for this to be a real
+// assertion, and the caller must have sent a request id — assertRefusedRequest
+// below does both.
+func assertNoDatabaseTouch(t *testing.T, records []logRecord, requestID string) {
 	t.Helper()
+	if requestID == "" {
+		t.Fatal("assertNoDatabaseTouch needs the refused request's id; without it the assertion is vacuous")
+	}
+	sawAnyStatement := false
 	for _, rec := range records {
-		if _, ok := rec.Context["statement"]; ok {
-			t.Errorf("a refused request reached the database: operation=%q message=%q context=%v", rec.Operation, rec.Message, rec.Context)
+		if _, ok := rec.Context["statement"]; !ok {
+			continue
+		}
+		sawAnyStatement = true
+		if rec.RequestID == requestID {
+			t.Errorf("a refused request reached the database: operation=%q statement=%v request_id=%q",
+				rec.Operation, rec.Context["statement"], rec.RequestID)
 		}
 	}
+	_ = sawAnyStatement
+}
+
+// requestIDHeader is the header the store reads a caller's correlation id from.
+const requestIDHeader = "X-Agent-Repl-Request-Id"
+
+// newRequestID mints a correlation id unique to one subject, so a log scan can
+// isolate exactly one call.
+func newRequestID(t *testing.T) string {
+	t.Helper()
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		t.Fatalf("generating a request id: %v", err)
+	}
+	return "req-itest-" + hex.EncodeToString(raw[:])
 }
 
 // ---- fake producers ----
@@ -596,6 +639,18 @@ type producer struct {
 	name string
 	file bool
 	cli  storev1connect.ShimStoreClient
+	// requestID, when set, rides every write as the caller's correlation
+	// header. A subject that must prove a refusal never reached storage needs
+	// it: the proof is scoped by request id.
+	requestID string
+}
+
+// correlated returns a copy of this producer that stamps every write with one
+// correlation id.
+func (p *producer) correlated(requestID string) *producer {
+	copied := *p
+	copied.requestID = requestID
+	return &copied
 }
 
 // streamProducer writes as the shim does: plane stream, never a cursor.
@@ -637,10 +692,14 @@ func (p *producer) sessionEntry(writeID, upsertKey string, update *conversationv
 
 // attempt sends one batch and returns whatever came back, refusals included.
 func (p *producer) attempt(ctx context.Context, batch *storev1.EntryBatch) (*storev1.WriteBatchResponse, error) {
-	resp, err := p.cli.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
+	req := connect.NewRequest(&storev1.WriteBatchRequest{
 		Producer: p.name,
 		Batch:    batch,
-	}))
+	})
+	if p.requestID != "" {
+		req.Header().Set(requestIDHeader, p.requestID)
+	}
+	resp, err := p.cli.WriteBatch(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -1280,9 +1339,13 @@ func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStore
 	return success
 }
 
-func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest) *storev1.OpenAgentSessionFailure {
+func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest, requestID ...string) *storev1.OpenAgentSessionFailure {
 	t.Helper()
-	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(req))
+	call := connect.NewRequest(req)
+	if len(requestID) == 1 && requestID[0] != "" {
+		call.Header().Set(requestIDHeader, requestID[0])
+	}
+	resp, err := cli.OpenAgentSession(ctx, call)
 	if err != nil {
 		t.Fatalf("OpenAgentSession answered a transport error where a typed failure was owed: %v", err)
 	}
@@ -1313,9 +1376,13 @@ func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreCli
 	return success
 }
 
-func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.ReadAgentPageRequest) *storev1.ReadAgentPageFailure {
+func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.ReadAgentPageRequest, requestID ...string) *storev1.ReadAgentPageFailure {
 	t.Helper()
-	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(req))
+	call := connect.NewRequest(req)
+	if len(requestID) == 1 && requestID[0] != "" {
+		call.Header().Set(requestIDHeader, requestID[0])
+	}
+	resp, err := cli.ReadAgentPage(ctx, call)
 	if err != nil {
 		t.Fatalf("ReadAgentPage answered a transport error where a typed failure was owed: %v", err)
 	}
@@ -1359,9 +1426,13 @@ func sidecarCursors(ctx context.Context, t *testing.T, cli storev1connect.ShimSt
 }
 
 // cursorsExpectingFailure asks for cursors with a request the store must refuse.
-func cursorsExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, fileID *string) *storev1.GetSidecarCursorsFailure {
+func cursorsExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, fileID *string, requestID ...string) *storev1.GetSidecarCursorsFailure {
 	t.Helper()
-	resp, err := cli.GetSidecarCursors(ctx, connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: fileID}))
+	call := connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: fileID})
+	if len(requestID) == 1 && requestID[0] != "" {
+		call.Header().Set(requestIDHeader, requestID[0])
+	}
+	resp, err := cli.GetSidecarCursors(ctx, call)
 	if err != nil {
 		t.Fatalf("GetSidecarCursors answered a transport error where a typed failure was owed: %v", err)
 	}
