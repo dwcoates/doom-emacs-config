@@ -264,8 +264,10 @@ every vocabulary assertion built on it pass vacuously."
 (ert-deftest agent-repl-test-helpers-generated-enum-names-reads-a-value-name ()
   "The enum reader recovers a prefixed value name from the generated bindings."
   ;; Act
+  ;; PromptOrigin moved into conversation/v1 so replay resolvers can read
+  ;; it; the shim/v1 copy is gone, and this fixture names where it lives.
   (let ((names (agent-repl-test--generated-enum-names
-                "shim/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
+                "conversation/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
     ;; Assert
     (should (member "PROMPT_ORIGIN_USER_SENT" names))))
 

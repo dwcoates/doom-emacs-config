@@ -215,6 +215,13 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; blink, the webview reload, the editor popup) resolve at call time, long
 ;; after every module is loaded.
 (agent-repl--load-module "host")
+;; WHY: verbs.el is the workspace and daemon-admin verbs as thin wrappers.
+;; It sits directly on rpc.el, host.el (for the ref and the per-workspace
+;; connection) and daemon-link.el (for the primary connection), all loaded
+;; above.  The roster it reads for its open/create pickers and the tab
+;; teardown it calls on a close resolve at call time, long after every
+;; module is loaded.
+(agent-repl--load-module "verbs")
 ;; WHY: roster.el is the WatchWorkspaceRoster consumer — the one source of
 ;; Emacs's tabs, their order and their paint.  It sits above rpc.el (it
 ;; subscribes through it) and calls workspace.el and status.el at runtime
@@ -270,11 +277,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; that variable, so the producer's position above is not load-critical.
 (agent-repl--load-module "open-progress")
 (agent-repl--load-module "worktree")
-;; merge-handlers.el and workspace-create-client.el are NOT loaded any more.
-;; Both were written against the deleted frontend-state/frontend-uds transport
-;; (`agent-repl--frontend-render-state-map', `agent-repl--uds-register-handler')
-;; and no longer load at all.  verbs.el replaces both; the verbs agent removes
-;; the files themselves.
+;; merge-handlers.el and workspace-create-client.el are DELETED.  Both were
+;; written against the removed frontend-state/frontend-uds transport, and
+;; both did work that is now the daemon's outright: verbs.el replaces them
+;; with thin wrappers over MergeWorkspace and CreateWorkspace.
 (agent-repl--load-module "keybindings")
 (agent-repl--load-module "magit")
 (agent-repl--load-module "emoji")
@@ -335,47 +341,12 @@ never by its name."
              (length agent-repl--load-errors)))
   (agent-repl--info nil "Loaded Agent-Repl package."))
 
-;; Snapshot restore is wired to `emacs-startup-hook' through an idle
-;; timer (`agent-repl-snapshot-startup-load-delay' seconds).  The
-;; deferral exists only to let persp-mode finish its own initialization
-;; before our loader iterates entries — once the timer fires, restore
-;; runs fully synchronously: each entry is created, activated,
-;; project-aligned (default-directory, dir-locals, magit lambda,
-;; find-file recent), and has its claude session started before the
-;; loader moves to the next entry.  The loader returns to whichever
-;; workspace was active when it began.
-;;
-;; Companion save-guard (`agent-repl--snapshot-loaded-p') prevents
-;; `--state-save' from clobbering the on-disk roster if a state-
-;; mutation fires before the idle timer resolves.
-;;
-;; Snapshot save is paired with `agent-repl--state-save' (history.el) so
-;; the roster is updated on every workspace mutation rather than only at
-;; Emacs quit — that way a crash before quit doesn't lose the roster.
-(defcustom agent-repl-snapshot-startup-load-delay 2.0
-  "Idle seconds to wait after `emacs-startup-hook' before restoring snapshot.
-Tuned to let persp-mode finish initialization (so `safe-persp-name'
-and friends are bound) before the loader iterates entries.  Set to nil
-to disable startup-time restore entirely."
-  :type '(choice (const :tag "Disabled" nil) number)
-  :group 'agent-repl)
-
-(defun agent-repl--schedule-snapshot-startup-load ()
-  "Schedule `--load-workspace-snapshot-on-startup' on an idle timer.
-Honours `agent-repl-snapshot-startup-load-delay'; a nil delay disables
-the auto-load entirely.  Intended to run from `emacs-startup-hook'."
-  (if agent-repl-snapshot-startup-load-delay
-      (let ((timer (run-with-idle-timer agent-repl-snapshot-startup-load-delay
-                                         nil
-                                         #'agent-repl--load-workspace-snapshot-on-startup)))
-        (agent-repl--boot-info "snapshot-startup: scheduled delay=%S timer=%S callback=%S"
-                               agent-repl-snapshot-startup-load-delay timer
-                               #'agent-repl--load-workspace-snapshot-on-startup)
-        timer)
-    (agent-repl--boot-info "snapshot-startup: disabled delay=nil")))
-
-(add-hook 'emacs-startup-hook #'agent-repl--schedule-snapshot-startup-load)
-(agent-repl--boot-info "snapshot-startup: registered scheduler on emacs-startup-hook")
+;; NO SNAPSHOT RESTORE.  The durable Emacs workspace-roster snapshot is
+;; gone: THE DAEMON is the source of which workspaces exist, and on connect
+;; Emacs opens tabs from the roster stream (roster.el's reconciliation).  A
+;; second, Emacs-authored roster on disk could only ever disagree with the
+;; pushed one, and reconciling two sources of truth was the machinery this
+;; overhaul removed rather than repaired.
 
 ;; COLD START.  Emacs owns bringing a daemon up and nothing after that:
 ;; `agent-repl-daemon-ensure' adopts any daemon that answers, and only
