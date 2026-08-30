@@ -88,10 +88,11 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			store := startStore(t, storeOptions{})
+			store := startStore(t, storeOptions{verbose: true})
 			ctx, cancel := callContext(t)
 			defer cancel()
-			shim := streamProducer(store.client())
+			requestID := newRequestID(t)
+			shim := streamProducer(store.client()).correlated(requestID)
 			mark := store.logMark()
 
 			// Act.
@@ -100,7 +101,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 			// Assert.
 			assertWriteInvalidRequest(t, failure, tc.wantField)
 			records := store.logRecordsAfter(mark)
-			assertNoDatabaseTouch(t, records)
+			assertNoDatabaseTouch(t, records, requestID)
 			if len(recordsWithContextKey(records, "rpc")) == 0 {
 				t.Errorf("the refusal logged no record carrying the rpc correlation key")
 			}
@@ -112,10 +113,11 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 // not a no-op to absorb quietly.
 func TestWriteBatchRefusesAnEmptyBatch(t *testing.T) {
 	// Arrange.
-	store := startStore(t, storeOptions{})
+	store := startStore(t, storeOptions{verbose: true})
 	ctx, cancel := callContext(t)
 	defer cancel()
-	shim := streamProducer(store.client())
+	requestID := newRequestID(t)
+	shim := streamProducer(store.client()).correlated(requestID)
 	mark := store.logMark()
 
 	// Act.
@@ -123,7 +125,7 @@ func TestWriteBatchRefusesAnEmptyBatch(t *testing.T) {
 
 	// Assert.
 	assertWriteInvalidRequest(t, failure, "batch")
-	assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
+	assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
 }
 
 // TestOpenAgentSessionRefusesUnsetRequiredFields.
@@ -150,17 +152,18 @@ func TestOpenAgentSessionRefusesUnsetRequiredFields(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			store := startStore(t, storeOptions{})
+			store := startStore(t, storeOptions{verbose: true})
 			ctx, cancel := callContext(t)
 			defer cancel()
+			requestID := newRequestID(t)
 			mark := store.logMark()
 
 			// Act.
-			failure := openSessionExpectingFailure(ctx, t, store.client(), tc.req)
+			failure := openSessionExpectingFailure(ctx, t, store.client(), tc.req, requestID)
 
 			// Assert.
 			assertOpenInvalidRequest(t, failure, tc.wantField)
-			assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
+			assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
 		})
 	}
 }
@@ -202,17 +205,18 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			store := startStore(t, storeOptions{})
+			store := startStore(t, storeOptions{verbose: true})
 			ctx, cancel := callContext(t)
 			defer cancel()
+			requestID := newRequestID(t)
 			mark := store.logMark()
 
 			// Act.
-			failure := readPageExpectingFailure(ctx, t, store.client(), tc.req)
+			failure := readPageExpectingFailure(ctx, t, store.client(), tc.req, requestID)
 
 			// Assert.
 			assertReadInvalidRequest(t, failure, tc.wantField)
-			assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
+			assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
 		})
 	}
 }
@@ -221,13 +225,16 @@ func TestReadAgentPageRefusesUnsetRequiredFields(t *testing.T) {
 // answer, so an unset handle must be refused on its own terms first.
 func TestGetWorkflowRefusesAnUnsetHandle(t *testing.T) {
 	// Arrange.
-	store := startStore(t, storeOptions{})
+	store := startStore(t, storeOptions{verbose: true})
 	ctx, cancel := callContext(t)
 	defer cancel()
+	requestID := newRequestID(t)
 	mark := store.logMark()
+	call := connect.NewRequest(&storev1.GetWorkflowRequest{})
+	call.Header().Set(requestIDHeader, requestID)
 
 	// Act.
-	resp, err := store.client().GetWorkflow(ctx, connect.NewRequest(&storev1.GetWorkflowRequest{}))
+	resp, err := store.client().GetWorkflow(ctx, call)
 	if err != nil {
 		t.Fatalf("GetWorkflow answered a transport error where a typed failure was owed: %v", err)
 	}
@@ -241,7 +248,7 @@ func TestGetWorkflowRefusesAnUnsetHandle(t *testing.T) {
 	if failure.GetNotImplemented() == nil {
 		t.Fatalf("GetWorkflow failure kind = %v, want not_implemented", failure.GetKind())
 	}
-	assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
+	assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
 }
 
 // TestWatchAgentSessionRefusesAnUnsetToken: there is no failure arm on this
@@ -277,18 +284,19 @@ func TestWatchAgentSessionRefusesAnUnsetToken(t *testing.T) {
 // absence — the one thing it may not be.
 func TestGetSidecarCursorsRefusesAnEmptyFileID(t *testing.T) {
 	// Arrange.
-	store := startStore(t, storeOptions{})
+	store := startStore(t, storeOptions{verbose: true})
 	ctx, cancel := callContext(t)
 	defer cancel()
+	requestID := newRequestID(t)
 	mark := store.logMark()
 	empty := ""
 
 	// Act.
-	failure := cursorsExpectingFailure(ctx, t, store.client(), &empty)
+	failure := cursorsExpectingFailure(ctx, t, store.client(), &empty, requestID)
 
 	// Assert.
 	assertCursorsInvalidRequest(t, failure, "file_id")
-	assertNoDatabaseTouch(t, store.logRecordsAfter(mark))
+	assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
 }
 
 // TestWatchBashRunRefusesAnEmptyRunAtTheTransport: this rpc has no failure arm,
@@ -309,5 +317,39 @@ func TestWatchBashRunRefusesAnEmptyRunAtTheTransport(t *testing.T) {
 	err := awaitBashRunEnd(t, stream)
 	if code := connect.CodeOf(err); code != connect.CodeInvalidArgument {
 		t.Fatalf("an empty run ended with Connect code %v, want %v (error: %v)", code, connect.CodeInvalidArgument, err)
+	}
+}
+
+// TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId is the POSITIVE
+// CONTROL for every assertNoDatabaseTouch above.
+//
+// Without it those assertions could pass while proving nothing — which is
+// exactly what happened before: they looked for any record carrying a
+// `statement` family, and the only record that carried one was the slow-query
+// warning, so their success meant "nothing was slow", not "nothing ran". This
+// subject fails if the store ever stops leaving that mark, which is what keeps
+// the negative assertions honest.
+func TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{verbose: true})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	requestID := newRequestID(t)
+	shim := streamProducer(store.client()).correlated(requestID)
+	mark := store.logMark()
+
+	// Act.
+	shim.write(ctx, t, shim.agentEntry("w-touch", "u-touch",
+		frameLine(agentID("main"), responseFrame("main", "act-1", "L1"))))
+
+	// Assert.
+	found := false
+	for _, rec := range store.logRecordsAfter(mark) {
+		if rec.RequestID == requestID && rec.Context["statement"] != nil {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("an accepted write left no statement record carrying its request id; every no-database-touch assertion is vacuous")
 	}
 }
