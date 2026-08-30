@@ -1290,3 +1290,10 @@ its own file only when >1 endpoint needs it.
 - FILE-PLANE-ONLY facts: AgentContextInjected, the write/edit `diagnostics` consequence arm and SessionUpdate.context_budget_warning arrive only through the store tail (WatchAgent replay/follow), never on the shim's live WatchSession; the daemon must not wait for them on the session stream.
 - Left unset by the stream plane (never invented): subagent spawn_depth/working_dir/transcript_suppressed/structured_result, worktree provenance/cleanup, AgentActivity.effort, ApiRateLimited.retry_after_ms from a result, AgentHookStart.gated_call, a foreground bash's termination, an image bash result's media_type.
 - Your error-arm batch is landing 4.
+
+## Landing 4 relay (2026-08-29, project lead)
+
+- Every `<Rpc>Error` carries its typed arms; refusal sites switch off the seam constants; ERROR-ARMS.md rows are retired as each lands. Arms prescribed for unlanded packages are landed too; report any that end up unused and I retire them.
+- FooterAllowance is sourced from SessionUpdate.rate_limit_status (typed status); the verbatim string is gone.
+- context_budget_warning arrives on the agent plane (AgentUpdate); the WatchSession routing goes.
+- Re-adopted live work is always `created`-origin (shim ruling); DetachedWorkId == the unit's AgentActivityId, so `created`-origin monitors are retired by their own terminal.

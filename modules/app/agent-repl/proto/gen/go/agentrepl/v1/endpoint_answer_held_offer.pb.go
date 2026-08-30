@@ -382,10 +382,19 @@ func (*AnswerHeldOfferSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{5}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no offer standing,
-// offer superseded), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type AnswerHeldOfferError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*AnswerHeldOfferError_UnknownWorkspace
+	//	*AnswerHeldOfferError_WorkspaceRefMismatch
+	//	*AnswerHeldOfferError_TransferringAway
+	//	*AnswerHeldOfferError_NotYetAdopted
+	//	*AnswerHeldOfferError_NoOfferStanding
+	//	*AnswerHeldOfferError_OfferSuperseded
+	Cause         isAnswerHeldOfferError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -420,6 +429,347 @@ func (*AnswerHeldOfferError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *AnswerHeldOfferError) GetCause() isAnswerHeldOfferError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *AnswerHeldOfferError) GetUnknownWorkspace() *AnswerHeldOfferUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerHeldOfferError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *AnswerHeldOfferError) GetWorkspaceRefMismatch() *AnswerHeldOfferWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerHeldOfferError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *AnswerHeldOfferError) GetTransferringAway() *AnswerHeldOfferTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerHeldOfferError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *AnswerHeldOfferError) GetNotYetAdopted() *AnswerHeldOfferNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerHeldOfferError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *AnswerHeldOfferError) GetNoOfferStanding() *AnswerHeldOfferNoOfferStanding {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerHeldOfferError_NoOfferStanding); ok {
+			return x.NoOfferStanding
+		}
+	}
+	return nil
+}
+
+func (x *AnswerHeldOfferError) GetOfferSuperseded() *AnswerHeldOfferOfferSuperseded {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerHeldOfferError_OfferSuperseded); ok {
+			return x.OfferSuperseded
+		}
+	}
+	return nil
+}
+
+type isAnswerHeldOfferError_Cause interface {
+	isAnswerHeldOfferError_Cause()
+}
+
+type AnswerHeldOfferError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *AnswerHeldOfferUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type AnswerHeldOfferError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *AnswerHeldOfferWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type AnswerHeldOfferError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *AnswerHeldOfferTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type AnswerHeldOfferError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *AnswerHeldOfferNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type AnswerHeldOfferError_NoOfferStanding struct {
+	// No offer is standing for this workspace.
+	NoOfferStanding *AnswerHeldOfferNoOfferStanding `protobuf:"bytes,5,opt,name=no_offer_standing,json=noOfferStanding,proto3,oneof"`
+}
+
+type AnswerHeldOfferError_OfferSuperseded struct {
+	// A newer offer has superseded the one answered.
+	OfferSuperseded *AnswerHeldOfferOfferSuperseded `protobuf:"bytes,6,opt,name=offer_superseded,json=offerSuperseded,proto3,oneof"`
+}
+
+func (*AnswerHeldOfferError_UnknownWorkspace) isAnswerHeldOfferError_Cause() {}
+
+func (*AnswerHeldOfferError_WorkspaceRefMismatch) isAnswerHeldOfferError_Cause() {}
+
+func (*AnswerHeldOfferError_TransferringAway) isAnswerHeldOfferError_Cause() {}
+
+func (*AnswerHeldOfferError_NotYetAdopted) isAnswerHeldOfferError_Cause() {}
+
+func (*AnswerHeldOfferError_NoOfferStanding) isAnswerHeldOfferError_Cause() {}
+
+func (*AnswerHeldOfferError_OfferSuperseded) isAnswerHeldOfferError_Cause() {}
+
+type AnswerHeldOfferUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerHeldOfferUnknownWorkspace) Reset() {
+	*x = AnswerHeldOfferUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerHeldOfferUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerHeldOfferUnknownWorkspace) ProtoMessage() {}
+
+func (x *AnswerHeldOfferUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerHeldOfferUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*AnswerHeldOfferUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{7}
+}
+
+type AnswerHeldOfferWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerHeldOfferWorkspaceRefMismatch) Reset() {
+	*x = AnswerHeldOfferWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerHeldOfferWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerHeldOfferWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *AnswerHeldOfferWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerHeldOfferWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*AnswerHeldOfferWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AnswerHeldOfferWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type AnswerHeldOfferTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerHeldOfferTransferringAway) Reset() {
+	*x = AnswerHeldOfferTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerHeldOfferTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerHeldOfferTransferringAway) ProtoMessage() {}
+
+func (x *AnswerHeldOfferTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerHeldOfferTransferringAway.ProtoReflect.Descriptor instead.
+func (*AnswerHeldOfferTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AnswerHeldOfferTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type AnswerHeldOfferNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerHeldOfferNotYetAdopted) Reset() {
+	*x = AnswerHeldOfferNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerHeldOfferNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerHeldOfferNotYetAdopted) ProtoMessage() {}
+
+func (x *AnswerHeldOfferNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerHeldOfferNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*AnswerHeldOfferNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{10}
+}
+
+type AnswerHeldOfferNoOfferStanding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerHeldOfferNoOfferStanding) Reset() {
+	*x = AnswerHeldOfferNoOfferStanding{}
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerHeldOfferNoOfferStanding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerHeldOfferNoOfferStanding) ProtoMessage() {}
+
+func (x *AnswerHeldOfferNoOfferStanding) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerHeldOfferNoOfferStanding.ProtoReflect.Descriptor instead.
+func (*AnswerHeldOfferNoOfferStanding) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{11}
+}
+
+type AnswerHeldOfferOfferSuperseded struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerHeldOfferOfferSuperseded) Reset() {
+	*x = AnswerHeldOfferOfferSuperseded{}
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerHeldOfferOfferSuperseded) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerHeldOfferOfferSuperseded) ProtoMessage() {}
+
+func (x *AnswerHeldOfferOfferSuperseded) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerHeldOfferOfferSuperseded.ProtoReflect.Descriptor instead.
+func (*AnswerHeldOfferOfferSuperseded) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP(), []int{12}
+}
+
 var File_agentrepl_v1_endpoint_answer_held_offer_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDesc = "" +
@@ -440,8 +790,23 @@ const file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.AnswerHeldOfferSuccessH\x00R\asuccess\x12:\n" +
 	"\x05error\x18\x02 \x01(\v2\".agentrepl.v1.AnswerHeldOfferErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x18\n" +
-	"\x16AnswerHeldOfferSuccess\"\x16\n" +
-	"\x14AnswerHeldOfferErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x16AnswerHeldOfferSuccess\"\xd3\x04\n" +
+	"\x14AnswerHeldOfferError\x12\\\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2-.agentrepl.v1.AnswerHeldOfferUnknownWorkspaceH\x00R\x10unknownWorkspace\x12i\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v21.agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12\\\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2-.agentrepl.v1.AnswerHeldOfferTransferringAwayH\x00R\x10transferringAway\x12T\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2*.agentrepl.v1.AnswerHeldOfferNotYetAdoptedH\x00R\rnotYetAdopted\x12Z\n" +
+	"\x11no_offer_standing\x18\x05 \x01(\v2,.agentrepl.v1.AnswerHeldOfferNoOfferStandingH\x00R\x0fnoOfferStanding\x12Y\n" +
+	"\x10offer_superseded\x18\x06 \x01(\v2,.agentrepl.v1.AnswerHeldOfferOfferSupersededH\x00R\x0fofferSupersededB\a\n" +
+	"\x05cause\"!\n" +
+	"\x1fAnswerHeldOfferUnknownWorkspace\"H\n" +
+	"#AnswerHeldOfferWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\";\n" +
+	"\x1fAnswerHeldOfferTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1e\n" +
+	"\x1cAnswerHeldOfferNotYetAdopted\" \n" +
+	"\x1eAnswerHeldOfferNoOfferStanding\" \n" +
+	"\x1eAnswerHeldOfferOfferSupersededB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescOnce sync.Once
@@ -455,29 +820,41 @@ func file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agentrepl_v1_endpoint_answer_held_offer_proto_goTypes = []any{
-	(*AnswerHeldOfferRequest)(nil),      // 0: agentrepl.v1.AnswerHeldOfferRequest
-	(*AnswerHeldOfferMergeDequeue)(nil), // 1: agentrepl.v1.AnswerHeldOfferMergeDequeue
-	(*AnswerHeldOfferKeep)(nil),         // 2: agentrepl.v1.AnswerHeldOfferKeep
-	(*AnswerHeldOfferRelease)(nil),      // 3: agentrepl.v1.AnswerHeldOfferRelease
-	(*AnswerHeldOfferResponse)(nil),     // 4: agentrepl.v1.AnswerHeldOfferResponse
-	(*AnswerHeldOfferSuccess)(nil),      // 5: agentrepl.v1.AnswerHeldOfferSuccess
-	(*AnswerHeldOfferError)(nil),        // 6: agentrepl.v1.AnswerHeldOfferError
-	(*v1.WorkspaceRef)(nil),             // 7: workspace.v1.WorkspaceRef
+	(*AnswerHeldOfferRequest)(nil),              // 0: agentrepl.v1.AnswerHeldOfferRequest
+	(*AnswerHeldOfferMergeDequeue)(nil),         // 1: agentrepl.v1.AnswerHeldOfferMergeDequeue
+	(*AnswerHeldOfferKeep)(nil),                 // 2: agentrepl.v1.AnswerHeldOfferKeep
+	(*AnswerHeldOfferRelease)(nil),              // 3: agentrepl.v1.AnswerHeldOfferRelease
+	(*AnswerHeldOfferResponse)(nil),             // 4: agentrepl.v1.AnswerHeldOfferResponse
+	(*AnswerHeldOfferSuccess)(nil),              // 5: agentrepl.v1.AnswerHeldOfferSuccess
+	(*AnswerHeldOfferError)(nil),                // 6: agentrepl.v1.AnswerHeldOfferError
+	(*AnswerHeldOfferUnknownWorkspace)(nil),     // 7: agentrepl.v1.AnswerHeldOfferUnknownWorkspace
+	(*AnswerHeldOfferWorkspaceRefMismatch)(nil), // 8: agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatch
+	(*AnswerHeldOfferTransferringAway)(nil),     // 9: agentrepl.v1.AnswerHeldOfferTransferringAway
+	(*AnswerHeldOfferNotYetAdopted)(nil),        // 10: agentrepl.v1.AnswerHeldOfferNotYetAdopted
+	(*AnswerHeldOfferNoOfferStanding)(nil),      // 11: agentrepl.v1.AnswerHeldOfferNoOfferStanding
+	(*AnswerHeldOfferOfferSuperseded)(nil),      // 12: agentrepl.v1.AnswerHeldOfferOfferSuperseded
+	(*v1.WorkspaceRef)(nil),                     // 13: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_answer_held_offer_proto_depIdxs = []int32{
-	7, // 0: agentrepl.v1.AnswerHeldOfferRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	1, // 1: agentrepl.v1.AnswerHeldOfferRequest.merge_dequeue:type_name -> agentrepl.v1.AnswerHeldOfferMergeDequeue
-	2, // 2: agentrepl.v1.AnswerHeldOfferMergeDequeue.keep:type_name -> agentrepl.v1.AnswerHeldOfferKeep
-	3, // 3: agentrepl.v1.AnswerHeldOfferMergeDequeue.release:type_name -> agentrepl.v1.AnswerHeldOfferRelease
-	5, // 4: agentrepl.v1.AnswerHeldOfferResponse.success:type_name -> agentrepl.v1.AnswerHeldOfferSuccess
-	6, // 5: agentrepl.v1.AnswerHeldOfferResponse.error:type_name -> agentrepl.v1.AnswerHeldOfferError
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	13, // 0: agentrepl.v1.AnswerHeldOfferRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	1,  // 1: agentrepl.v1.AnswerHeldOfferRequest.merge_dequeue:type_name -> agentrepl.v1.AnswerHeldOfferMergeDequeue
+	2,  // 2: agentrepl.v1.AnswerHeldOfferMergeDequeue.keep:type_name -> agentrepl.v1.AnswerHeldOfferKeep
+	3,  // 3: agentrepl.v1.AnswerHeldOfferMergeDequeue.release:type_name -> agentrepl.v1.AnswerHeldOfferRelease
+	5,  // 4: agentrepl.v1.AnswerHeldOfferResponse.success:type_name -> agentrepl.v1.AnswerHeldOfferSuccess
+	6,  // 5: agentrepl.v1.AnswerHeldOfferResponse.error:type_name -> agentrepl.v1.AnswerHeldOfferError
+	7,  // 6: agentrepl.v1.AnswerHeldOfferError.unknown_workspace:type_name -> agentrepl.v1.AnswerHeldOfferUnknownWorkspace
+	8,  // 7: agentrepl.v1.AnswerHeldOfferError.workspace_ref_mismatch:type_name -> agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatch
+	9,  // 8: agentrepl.v1.AnswerHeldOfferError.transferring_away:type_name -> agentrepl.v1.AnswerHeldOfferTransferringAway
+	10, // 9: agentrepl.v1.AnswerHeldOfferError.not_yet_adopted:type_name -> agentrepl.v1.AnswerHeldOfferNotYetAdopted
+	11, // 10: agentrepl.v1.AnswerHeldOfferError.no_offer_standing:type_name -> agentrepl.v1.AnswerHeldOfferNoOfferStanding
+	12, // 11: agentrepl.v1.AnswerHeldOfferError.offer_superseded:type_name -> agentrepl.v1.AnswerHeldOfferOfferSuperseded
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_held_offer_proto_init() }
@@ -496,13 +873,21 @@ func file_agentrepl_v1_endpoint_answer_held_offer_proto_init() {
 		(*AnswerHeldOfferResponse_Success)(nil),
 		(*AnswerHeldOfferResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_answer_held_offer_proto_msgTypes[6].OneofWrappers = []any{
+		(*AnswerHeldOfferError_UnknownWorkspace)(nil),
+		(*AnswerHeldOfferError_WorkspaceRefMismatch)(nil),
+		(*AnswerHeldOfferError_TransferringAway)(nil),
+		(*AnswerHeldOfferError_NotYetAdopted)(nil),
+		(*AnswerHeldOfferError_NoOfferStanding)(nil),
+		(*AnswerHeldOfferError_OfferSuperseded)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_held_offer_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
