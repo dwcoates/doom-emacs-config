@@ -1,0 +1,1460 @@
+{
+  "_readme": "The capture harness's prompt corpus. One entry per scenario in the SHIM directive's coverage list. `prompt` is null exactly when the scenario has no prompt-only provocation; `manual` then states the operator step. See README.md.",
+  "_fields": {
+    "name": "Directory name under captures/. Stable: the mock's scenario registry keys off it.",
+    "covers": "The coverage-list item this entry discharges.",
+    "prompt": "The single user turn, or null for a manual scenario.",
+    "manual": "The operator procedure, for a scenario a prompt cannot provoke (or cannot provoke alone).",
+    "manual_setup": "An operator step needed BEFORE an otherwise prompt-driven turn.",
+    "cwd_setup": "Files materialized in the scratch cwd before the turn: {path, content} or {path, dir: true}.",
+    "options": "Extra SDK Options merged over the production options (maxTurns, maxBudgetUsd, model, outputFormat, mcpServers). The token {{CAPTURE_DIR}} is replaced with scripts/capture/'s absolute path.",
+    "model": "Options.model for this scenario.",
+    "permission_mode": "Options.permissionMode for this scenario.",
+    "permission_script": "{default, rules:[{tool, decision, message?, delay_ms?}]}; decision is allow_once | allow_standing | deny | park.",
+    "question_script": "{answers:[{question, select:[label...], free_text?}]}; a question with no entry is left UNANSWERED.",
+    "controls": "[{at: session_start|on_message|turn_end, after?: {type, subtype, contains}, do: <verb>, args}].",
+    "expect": "What the capture must contain for the scenario to have discharged its coverage. Prose, read by a human at review time — not asserted by code.",
+    "expects_api_error": "True only for a scenario whose GOLDEN is an API error. Every other scenario is quarantined if its result carries is_error / terminal_reason api_error / api_error_status, or if any message carries is_api_error_message.",
+    "config_root": "\"shared-world:<name>\": scenarios naming the same world share ONE cwd and account root and run in corpus order, so a later scenario sees what the earlier ones did. Absent = an isolated world of its own.",
+    "prompts": "An ordered array of turns, instead of `prompt`. Each entry is a string, or { text, resume: true } to close the query and reopen it resuming the same vendor session id.",
+    "cwd_init": "A shell command run in the scratch cwd BEFORE the query (e.g. `git init`). A non-zero exit fails the scenario."
+  },
+  "scenarios": [
+    {
+      "name": "prose-streamed",
+      "covers": "plain streamed prose: several blocks, thinking withheld and with text, a settled answer",
+      "prompt": "Think carefully, then explain in three clearly separated paragraphs what a write-ahead log is, why it makes a crash-consistent database possible, and what it costs. Use no tools.",
+      "expect": [
+        "stream_event:message_start",
+        "stream_event:content_block_start:thinking",
+        "stream_event:content_block_delta:thinking_delta",
+        "stream_event:content_block_delta:signature_delta",
+        "stream_event:content_block_start:text",
+        "stream_event:content_block_delta:text_delta",
+        "stream_event:content_block_stop",
+        "stream_event:message_delta",
+        "stream_event:message_stop",
+        "assistant",
+        "result:success"
+      ],
+      "config_root": "shared-world:conversation-history"
+    },
+    {
+      "name": "read-whole-head-range",
+      "covers": "read whole / head / range",
+      "prompt": "Read notes.txt in full. Then read only its first 5 lines. Then read lines 20 through 30. Report what you saw after each read.",
+      "cwd_setup": [
+        {
+          "path": "notes.txt",
+          "content": "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\nline 20\nline 21\nline 22\nline 23\nline 24\nline 25\nline 26\nline 27\nline 28\nline 29\nline 30\nline 31\nline 32\nline 33\nline 34\nline 35\nline 36\nline 37\nline 38\nline 39\nline 40\nline 41\nline 42\nline 43\nline 44\nline 45\nline 46\nline 47\nline 48\nline 49\nline 50\nline 51\nline 52\nline 53\nline 54\nline 55\nline 56\nline 57\nline 58\nline 59\nline 60\n"
+        }
+      ],
+      "expect": [
+        "tool:Read",
+        "tool_result:read",
+        "tool:Read(limit)",
+        "tool:Read(offset+limit)"
+      ],
+      "config_root": "shared-world:conversation-history"
+    },
+    {
+      "name": "write-created-and-updated",
+      "covers": "write created / write updated",
+      "prompt": "Create a new file called fresh.txt containing the single line 'hello'. Then overwrite existing.txt so that its only content is the line 'replaced'.",
+      "cwd_setup": [
+        {
+          "path": "existing.txt",
+          "content": "original content\n"
+        }
+      ],
+      "expect": [
+        "tool:Write",
+        "tool_result:write(created)",
+        "tool_result:write(updated)"
+      ]
+    },
+    {
+      "name": "edit",
+      "covers": "edit",
+      "prompt": "In config.ini, change the line 'timeout = 30' to 'timeout = 90'. Change nothing else.",
+      "cwd_setup": [
+        {
+          "path": "config.ini",
+          "content": "[server]\nhost = localhost\ntimeout = 30\nretries = 3\n"
+        }
+      ],
+      "expect": [
+        "tool:Edit",
+        "tool_result:edit",
+        "attachment:edited_text_file"
+      ]
+    },
+    {
+      "name": "grep-content-files-count",
+      "covers": "grep content / files_with_matches / count",
+      "prompt": "Search this directory for the word 'needle' three ways: once showing the matching lines with their content, once listing only the files that match, and once reporting just the number of matches per file.",
+      "cwd_setup": [
+        {
+          "path": "a.txt",
+          "content": "haystack\nneedle here\nhaystack\n"
+        },
+        {
+          "path": "b.txt",
+          "content": "needle\nneedle\n"
+        },
+        {
+          "path": "sub/c.txt",
+          "content": "nothing\n"
+        }
+      ],
+      "expect": [
+        "tool:Grep(output_mode=content)",
+        "tool:Grep(output_mode=files_with_matches)",
+        "tool:Grep(output_mode=count)",
+        "tool_result:grep"
+      ],
+      "config_root": "shared-world:conversation-history"
+    },
+    {
+      "name": "glob",
+      "covers": "glob",
+      "prompt": "List every .md file anywhere under this directory using a glob pattern.",
+      "cwd_setup": [
+        {
+          "path": "one.md",
+          "content": "# one\n"
+        },
+        {
+          "path": "deep/two.md",
+          "content": "# two\n"
+        },
+        {
+          "path": "deep/three.txt",
+          "content": "three\n"
+        }
+      ],
+      "expect": [
+        "tool:Glob",
+        "tool_result:glob"
+      ]
+    },
+    {
+      "name": "bash-foreground-completed",
+      "covers": "bash foreground completed",
+      "prompt": "Run `echo capture-harness-ok && ls -1` in the current directory and tell me the output.",
+      "cwd_setup": [
+        {
+          "path": "marker.txt",
+          "content": "marker\n"
+        }
+      ],
+      "expect": [
+        "tool:Bash",
+        "tool_result:bash(exit 0)"
+      ]
+    },
+    {
+      "name": "bash-nonzero-exit",
+      "covers": "bash foreground, non-zero exit",
+      "prompt": "Run `bash fail.sh` and report exactly what happened, including the exit status. Do not try to fix it.",
+      "cwd_setup": [
+        {
+          "path": "fail.sh",
+          "content": "echo 'partway'\necho 'to stderr' >&2\nexit 7\n"
+        }
+      ],
+      "expect": [
+        "tool:Bash",
+        "tool_result:bash(exit 7)",
+        "tool_result:bash.stderr"
+      ]
+    },
+    {
+      "name": "bash-interrupted-by-timeout",
+      "covers": "bash foreground interrupted by its own timeout",
+      "prompt": "Run `sleep 600` with a Bash timeout of 5000 milliseconds. Report exactly what the tool told you when it stopped.",
+      "expect": [
+        "tool:Bash(timeout=5000)",
+        "tool_result:bash.timedOutAfterMs",
+        "detached_work:bash"
+      ]
+    },
+    {
+      "name": "bash-partial-output-with-spill",
+      "covers": "bash partial output with spill (the persisted-output file)",
+      "prompt": "Run `bash chatty.sh` and summarize what it printed.",
+      "cwd_setup": [
+        {
+          "path": "chatty.sh",
+          "content": "for i in $(seq 1 20000); do echo \"line $i of a deliberately enormous stream\"; done\n"
+        }
+      ],
+      "expect": [
+        "tool:Bash",
+        "tool_result:bash(truncated)",
+        "file:spool"
+      ]
+    },
+    {
+      "name": "bash-image-output",
+      "covers": "bash image output",
+      "prompt": "Run `bash shot.sh`, which writes a small PNG, then read that PNG back with the Read tool and describe it.",
+      "cwd_setup": [
+        {
+          "path": "shot.sh",
+          "content": "printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' | base64 -d > shot.png\n"
+        }
+      ],
+      "expect": [
+        "tool:Bash",
+        "tool:Read(image)",
+        "tool_result:read(type=image)",
+        "content_block:image"
+      ]
+    },
+    {
+      "name": "web-fetch",
+      "covers": "web fetch",
+      "prompt": "Fetch https://example.com and tell me the exact text of its heading.",
+      "expect": [
+        "tool:WebFetch",
+        "tool_result:web_fetch"
+      ]
+    },
+    {
+      "name": "web-search",
+      "covers": "web search",
+      "prompt": "Search the web for the current stable release version of SQLite and cite where you found it.",
+      "expect": [
+        "tool:WebSearch",
+        "tool_result:web_search"
+      ]
+    },
+    {
+      "name": "skill-invocation",
+      "covers": "skill invocation + the skill DOCUMENT + the allowances it carries",
+      "prompt": "Invoke the project skill named capture-probe and follow it.",
+      "cwd_setup": [
+        {
+          "path": ".claude/skills/capture-probe/SKILL.md",
+          "content": "---\nname: capture-probe\ndescription: A no-op probe skill used by the capture harness to observe the skill document, its allowed-tools frontmatter, and the isMeta user record that carries it.\nallowed-tools: Read, Glob\n---\n\n# capture-probe\n\nWhen invoked, read `probe.txt` in the working directory and report its contents verbatim. Do nothing else.\n"
+        },
+        {
+          "path": "probe.txt",
+          "content": "probe payload\n"
+        }
+      ],
+      "expect": [
+        "tool:Skill",
+        "tool_result:skill",
+        "attachment:dynamic_skill",
+        "attachment:invoked_skills",
+        "isMeta user record with sourceToolUseID"
+      ]
+    },
+    {
+      "name": "task-acts-create-change-reject",
+      "covers": "task acts: create / change / reject, and the DAG links between them",
+      "prompt": "Using the task tools, create three tasks: 'design the schema', 'write the migration' (which depends on the first), and 'backfill the rows' (which depends on the second). Then mark the first one in progress. Then reject the third one as out of scope, giving a reason.",
+      "expect": [
+        "tool:TaskCreate",
+        "tool_result:task_create",
+        "tool:TaskUpdate",
+        "tool_result:task_update",
+        "task dependency links",
+        "rejected task with reason"
+      ]
+    },
+    {
+      "name": "send-message-queued-and-resumed",
+      "covers": "send_message to a LIVE recipient (queued_to_live) and to a finished one (resumed_recipient)",
+      "prompt": "Spawn a named subagent called 'longhand' that counts slowly from 1 to 40, sleeping a second between numbers, and run it in the background. While it is still running, send it a message telling it to also report whether each number is even. After it finishes, send it a second message asking it for a one-line summary.",
+      "expect": [
+        "tool:Agent(background)",
+        "tool:SendMessage",
+        "tool_result:send_message(queued to live)",
+        "tool_result:send_message(resumedAgentId set)"
+      ]
+    },
+    {
+      "name": "plan-mode-enter-exit",
+      "covers": "plan mode enter and exit, with a plan file on disk",
+      "prompt": "Enter plan mode, draw up a short plan for adding a health-check endpoint to app.py, then exit plan mode presenting that plan for approval.",
+      "cwd_setup": [
+        {
+          "path": "app.py",
+          "content": "def main():\n    print('hello')\n"
+        }
+      ],
+      "permission_script": {
+        "default": "allow_once",
+        "rules": [
+          {
+            "tool": "ExitPlanMode",
+            "decision": "allow_once"
+          }
+        ]
+      },
+      "expect": [
+        "tool:EnterPlanMode",
+        "tool:ExitPlanMode",
+        "attachment:plan_mode_exit",
+        "file:plan"
+      ]
+    },
+    {
+      "name": "report-findings",
+      "covers": "report_findings",
+      "prompt": "Audit report-me.py for correctness bugs and report your findings through the findings tool rather than as prose.",
+      "cwd_setup": [
+        {
+          "path": "report-me.py",
+          "content": "def divide(a, b):\n    return a / b\n\ndef main():\n    print(divide(1, 0))\n"
+        }
+      ],
+      "expect": [
+        "tool:ReportFindings",
+        "tool_result:report_findings"
+      ]
+    },
+    {
+      "name": "worktree-enter-exit-kept-and-removed",
+      "covers": "worktree enter / exit kept / exit removed",
+      "prompt": "This directory is a git repository. Enter a worktree to make an experimental change, add a file called kept.txt, then exit the worktree KEEPING it. Then enter a second worktree, add scratch.txt, and exit that one REMOVING it.",
+      "cwd_setup": [
+        {
+          "path": "README.md",
+          "content": "# capture worktree fixture\n"
+        }
+      ],
+      "expect": [
+        "tool:EnterWorktree",
+        "tool_result:enter_worktree",
+        "tool:ExitWorktree",
+        "exit kept",
+        "exit removed"
+      ],
+      "cwd_init": "git init -q . && git add -A && git -c user.email=capture@example.invalid -c user.name=capture commit -qm init"
+    },
+    {
+      "name": "cron-create-list-delete",
+      "covers": "cron create / list / delete",
+      "prompt": "Create a cron entry that runs every day at 09:00 and says 'capture probe'. Then list the cron entries. Then delete the one you created.",
+      "expect": [
+        "tool:CronCreate",
+        "tool_result:cron_create",
+        "tool:CronList",
+        "tool:CronDelete"
+      ]
+    },
+    {
+      "name": "push-notification-sent",
+      "covers": "push_notification, delivered",
+      "prompt": "Send me a push notification that says 'capture harness probe: sent'.",
+      "expect": [
+        "tool:PushNotification",
+        "tool_result:push_notification(sent)"
+      ]
+    },
+    {
+      "name": "push-notification-not-sent",
+      "covers": "push_notification, NOT delivered (no registered device)",
+      "prompt": "Send me a push notification that says 'capture harness probe: not sent'.",
+      "expect": [
+        "tool:PushNotification",
+        "tool_result:push_notification(not sent, with reason)"
+      ],
+      "manual": "Run this scenario on an account with NO push device registered, or with notifications disabled, so the vendor reports the not-sent arm and its reason. The sent/not-sent split is an account-state property, not a prompt property."
+    },
+    {
+      "name": "monitor-deadline",
+      "covers": "monitor with a deadline",
+      "prompt": "Start `bash slow.sh > out.log 2>&1 &` and then use the Monitor tool to wait, with a 30 second deadline, until out.log contains the word DONE.",
+      "cwd_setup": [
+        {
+          "path": "slow.sh",
+          "content": "sleep 5\necho DONE\n"
+        }
+      ],
+      "expect": [
+        "tool:Monitor",
+        "tool_result:monitor(deadline)"
+      ]
+    },
+    {
+      "name": "monitor-persistent",
+      "covers": "persistent monitor (no deadline)",
+      "prompt": "Set up a persistent monitor that watches watched.log and wakes you whenever a line containing ERROR appears. Do not give it a deadline.",
+      "cwd_setup": [
+        {
+          "path": "watched.log",
+          "content": "startup ok\n"
+        }
+      ],
+      "expect": [
+        "tool:Monitor(persistent)",
+        "tool_result:monitor"
+      ]
+    },
+    {
+      "name": "schedule-wakeup-schedule-and-stop",
+      "covers": "schedule_wakeup schedule then stop",
+      "prompt": "Schedule a wakeup two minutes from now that reminds you to check out.log. Then immediately cancel that wakeup.",
+      "expect": [
+        "tool:ScheduleWakeup",
+        "tool_result:schedule_wakeup(scheduled)",
+        "tool:ScheduleWakeup(stop)",
+        "tool_result:schedule_wakeup(stopped)"
+      ]
+    },
+    {
+      "name": "artifact-publish-and-list",
+      "covers": "artifact publish / list",
+      "prompt": "Publish page.html as an artifact titled 'Capture Probe' with the favicon 📎, then list my artifacts.",
+      "cwd_setup": [
+        {
+          "path": "page.html",
+          "content": "<title>Capture Probe</title>\n<style>body{font:14px system-ui}</style>\n<h1>Capture Probe</h1>\n<p>A one-page artifact published by the capture harness.</p>\n"
+        }
+      ],
+      "expect": [
+        "tool:Artifact(publish)",
+        "tool_result:artifact(typed output)",
+        "tool:Artifact(list)"
+      ]
+    },
+    {
+      "name": "hook-succeeded",
+      "covers": "hook succeeded",
+      "prompt": "Run `echo hook-ok`.",
+      "cwd_setup": [
+        {
+          "path": ".claude/settings.json",
+          "content": "{\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/pre.sh\"\n          }\n        ]\n      }\n    ],\n    \"PostToolUse\": [\n      {\n        \"matcher\": \"Write\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/post.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+        },
+        {
+          "path": ".claude/hooks/pre.sh",
+          "content": "echo 'pre-hook ran' >&2\nexit 0\n"
+        },
+        {
+          "path": ".claude/hooks/post.sh",
+          "content": "exit 0\n"
+        }
+      ],
+      "expect": [
+        "hook_started",
+        "hook_response",
+        "attachment:hook_success"
+      ]
+    },
+    {
+      "name": "hook-blocked",
+      "covers": "hook blocked the tool",
+      "prompt": "Run `echo this-will-be-blocked`.",
+      "cwd_setup": [
+        {
+          "path": ".claude/settings.json",
+          "content": "{\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/pre.sh\"\n          }\n        ]\n      }\n    ],\n    \"PostToolUse\": [\n      {\n        \"matcher\": \"Write\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/post.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+        },
+        {
+          "path": ".claude/hooks/pre.sh",
+          "content": "echo 'the capture hook refuses every Bash call' >&2\nexit 2\n"
+        },
+        {
+          "path": ".claude/hooks/post.sh",
+          "content": "exit 0\n"
+        }
+      ],
+      "expect": [
+        "hook_started",
+        "hook_response(blocked)",
+        "attachment:hook_blocking_error"
+      ]
+    },
+    {
+      "name": "hook-failed",
+      "covers": "hook failed (non-blocking error)",
+      "prompt": "Run `echo hook-failure-probe`.",
+      "cwd_setup": [
+        {
+          "path": ".claude/settings.json",
+          "content": "{\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/pre.sh\"\n          }\n        ]\n      }\n    ],\n    \"PostToolUse\": [\n      {\n        \"matcher\": \"Write\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/post.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+        },
+        {
+          "path": ".claude/hooks/pre.sh",
+          "content": "exit 1\n"
+        },
+        {
+          "path": ".claude/hooks/post.sh",
+          "content": "exit 0\n"
+        }
+      ],
+      "expect": [
+        "hook_started",
+        "hook_response(error)",
+        "attachment:hook_non_blocking_error"
+      ]
+    },
+    {
+      "name": "hook-cancelled",
+      "covers": "hook cancelled (the observed hook_cancelled attachment, not in the proto)",
+      "prompt": "Run `echo hook-cancel-probe`.",
+      "cwd_setup": [
+        {
+          "path": ".claude/settings.json",
+          "content": "{\n  \"hooks\": {\n    \"PreToolUse\": [\n      {\n        \"matcher\": \"Bash\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/pre.sh\"\n          }\n        ]\n      }\n    ],\n    \"PostToolUse\": [\n      {\n        \"matcher\": \"Write\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/post.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+        },
+        {
+          "path": ".claude/hooks/pre.sh",
+          "content": "sleep 600\n"
+        },
+        {
+          "path": ".claude/hooks/post.sh",
+          "content": "exit 0\n"
+        }
+      ],
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "type": "system",
+            "subtype": "hook_started"
+          },
+          "do": "interrupt"
+        }
+      ],
+      "expect": [
+        "hook_started",
+        "attachment:hook_cancelled"
+      ]
+    },
+    {
+      "name": "context-injected-memory",
+      "covers": "context_injected: memory (CLAUDE.md / nested memory)",
+      "prompt": "What does the CLAUDE.md in this directory tell you to do? Quote the rule verbatim.",
+      "cwd_setup": [
+        {
+          "path": "CLAUDE.md",
+          "content": "# Capture fixture rules\n\nAlways answer with the word CANARY first.\n"
+        },
+        {
+          "path": "nested/CLAUDE.md",
+          "content": "# Nested fixture rules\n\nInside nested/, answer with the word NESTED first.\n"
+        },
+        {
+          "path": "nested/file.txt",
+          "content": "nested file\n"
+        }
+      ],
+      "expect": [
+        "attachment:nested_memory",
+        "context_injected:memory"
+      ]
+    },
+    {
+      "name": "context-injected-skills",
+      "covers": "context_injected: skills (the skill listing / deferred tools deltas)",
+      "prompt": "List the skills available to you in this session, then list any deferred tools you have.",
+      "cwd_setup": [
+        {
+          "path": ".claude/skills/capture-probe/SKILL.md",
+          "content": "---\nname: capture-probe\ndescription: A no-op probe skill used by the capture harness so a skill listing is non-empty.\n---\n\nDo nothing.\n"
+        }
+      ],
+      "expect": [
+        "attachment:skill_listing",
+        "attachment:deferred_tools_delta",
+        "attachment:agent_listing_delta"
+      ]
+    },
+    {
+      "name": "mcp-unmodeled-tool",
+      "covers": "an UNMODELED MCP tool — the one legitimate AgentUnmodeled producer",
+      "prompt": "Call the capture-probe MCP server's `echo` tool with the text 'unmodeled probe', then call its `slow` tool with ms 8000. Report what each returned.",
+      "cwd_setup": [],
+      "expect": [
+        "tool:mcp__capture-probe__echo",
+        "tool:mcp__capture-probe__slow",
+        "AgentUnmodeled with mcp_server stated by the vendor",
+        "tool_progress beat on the slow call",
+        "system:init listing capture-probe as connected"
+      ],
+      "options": {
+        "mcpServers": {
+          "capture-probe": {
+            "command": "node",
+            "args": [
+              "{{CAPTURE_DIR}}/mcp-echo.mjs"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "ide-diagnostics-after-edit",
+      "covers": "IDE diagnostics arriving AFTER an edit (joined to the last write/edit unit by adjacency)",
+      "prompt": "Edit broken.ts so the function returns a number instead of a string, then wait for any editor diagnostics to arrive and tell me what they said.",
+      "cwd_setup": [
+        {
+          "path": "broken.ts",
+          "content": "export function n(): number {\n  return \"not a number\";\n}\n"
+        },
+        {
+          "path": "tsconfig.json",
+          "content": "{\n  \"compilerOptions\": {\n    \"strict\": true,\n    \"noEmit\": true\n  }\n}"
+        }
+      ],
+      "expect": [
+        "tool:Edit",
+        "attachment:diagnostics"
+      ],
+      "manual": "Run with an IDE/LSP attached to the scratch cwd (the diagnostics record only exists when an editor integration is connected). Without one the edit still captures, but the diagnostics consequence arm will be absent."
+    },
+    {
+      "name": "permission-allow-once",
+      "covers": "permission ask, allowed ONCE",
+      "prompt": "Run `rm -f throwaway.txt`.",
+      "cwd_setup": [
+        {
+          "path": "throwaway.txt",
+          "content": "delete me\n"
+        }
+      ],
+      "permission_mode": "default",
+      "permission_script": {
+        "default": "allow_once"
+      },
+      "expect": [
+        "can_use_tool request with rendered prompt sentence",
+        "PermissionResult allow",
+        "tool:Bash"
+      ]
+    },
+    {
+      "name": "permission-allow-standing",
+      "covers": "permission ask, allowed STANDING (the vendor's own offered suggestions echoed back)",
+      "prompt": "Run `rm -f one.txt`, then run `rm -f two.txt`. I will grant a standing allowance on the first ask.",
+      "cwd_setup": [
+        {
+          "path": "one.txt",
+          "content": "one\n"
+        },
+        {
+          "path": "two.txt",
+          "content": "two\n"
+        }
+      ],
+      "permission_mode": "default",
+      "permission_script": {
+        "default": "allow_standing"
+      },
+      "expect": [
+        "can_use_tool options.suggestions non-empty",
+        "PermissionResult allow with updatedPermissions",
+        "second Bash NOT re-asked"
+      ]
+    },
+    {
+      "name": "permission-denied-by-user",
+      "covers": "permission DENIED by the user",
+      "prompt": "Run `rm -rf .` in this directory.",
+      "permission_mode": "default",
+      "permission_script": {
+        "default": "deny",
+        "rules": [
+          {
+            "tool": "Bash",
+            "decision": "deny",
+            "message": "the capture script denies this"
+          }
+        ]
+      },
+      "expect": [
+        "can_use_tool request",
+        "PermissionResult deny",
+        "no activity frames for the denied call"
+      ]
+    },
+    {
+      "name": "permission-denied-by-policy",
+      "covers": "permission DENIED BY POLICY — the vendor's system permission_denied message, with no open ask",
+      "prompt": "Run `curl https://example.com`.",
+      "permission_mode": "default",
+      "cwd_setup": [
+        {
+          "path": ".claude/settings.json",
+          "content": "{\n  \"permissions\": {\n    \"deny\": [\n      \"Bash(curl:*)\"\n    ]\n  }\n}"
+        }
+      ],
+      "expect": [
+        "system:permission_denied",
+        "no can_use_tool callback for the denied call"
+      ]
+    },
+    {
+      "name": "permission-undecidable-parked",
+      "covers": "an UNDECIDABLE permission: the gate is never answered and the turn is aborted (AgentPermissionAbandoned's candidate producer)",
+      "prompt": "Run `rm -f parked.txt`.",
+      "cwd_setup": [
+        {
+          "path": "parked.txt",
+          "content": "parked\n"
+        }
+      ],
+      "permission_mode": "default",
+      "permission_script": {
+        "default": "park"
+      },
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "contains": "can_use_tool"
+          },
+          "do": "interrupt"
+        }
+      ],
+      "expect": [
+        "can_use_tool request never answered",
+        "whatever the SDK emits when the query is interrupted with a pending gate"
+      ]
+    },
+    {
+      "name": "question-single-select",
+      "covers": "AskUserQuestion, one question, single select",
+      "prompt": "Before you do anything else, ask me exactly one question with the question tool: whether I want the output as JSON or as YAML.",
+      "question_script": {
+        "answers": [
+          {
+            "question": "/JSON|YAML|format/i",
+            "select": [
+              "JSON"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "tool:AskUserQuestion",
+        "tool_result:ask_user_question with answers keyed by question text"
+      ]
+    },
+    {
+      "name": "question-multi-select",
+      "covers": "AskUserQuestion, multi-select (answers comma-joined by the vendor)",
+      "prompt": "Ask me exactly one multi-select question with the question tool: which of logging, metrics, tracing and profiling I want enabled.",
+      "question_script": {
+        "answers": [
+          {
+            "question": "/logging|metrics|tracing|profiling/i",
+            "select": [
+              "Logging",
+              "Tracing"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "tool:AskUserQuestion(multiSelect=true)",
+        "comma-joined answer string in the result"
+      ]
+    },
+    {
+      "name": "question-free-text",
+      "covers": "AskUserQuestion answered with FREE TEXT (the residue rule's producer definition)",
+      "prompt": "Ask me exactly one question with the question tool: what to name the new service.",
+      "question_script": {
+        "answers": [
+          {
+            "question": "/name/i",
+            "select": [],
+            "free_text": "quarterdeck"
+          }
+        ]
+      },
+      "expect": [
+        "tool:AskUserQuestion",
+        "answer string containing text matching NO offered label"
+      ]
+    },
+    {
+      "name": "question-multiple-in-one-batch",
+      "covers": "AskUserQuestion, a BATCH of several questions in one call",
+      "prompt": "Ask me three questions in a single question-tool call: which language, which test runner, and which CI provider.",
+      "question_script": {
+        "answers": [
+          {
+            "question": "/language/i",
+            "select": [
+              "TypeScript"
+            ]
+          },
+          {
+            "question": "/test/i",
+            "select": [
+              "Vitest"
+            ]
+          },
+          {
+            "question": "/CI/i",
+            "select": [
+              "GitHub Actions"
+            ]
+          }
+        ]
+      },
+      "expect": [
+        "tool:AskUserQuestion with 3 questions",
+        "3 keys in the answers map"
+      ]
+    },
+    {
+      "name": "question-unanswered",
+      "covers": "AskUserQuestion left UNANSWERED",
+      "prompt": "Ask me exactly one question with the question tool: whether to proceed.",
+      "question_script": {
+        "answers": []
+      },
+      "expect": [
+        "tool:AskUserQuestion",
+        "the vendor's own shape for a question that was not answered"
+      ]
+    },
+    {
+      "name": "subagent-sync-nested-activity",
+      "covers": "a SYNCHRONOUS subagent with nested activity (forwardSubagentText's whole reason to exist)",
+      "prompt": "Spawn one subagent that reads every .txt file in this directory, greps them for 'target', and reports back what it found. Wait for it.",
+      "cwd_setup": [
+        {
+          "path": "x.txt",
+          "content": "target here\n"
+        },
+        {
+          "path": "y.txt",
+          "content": "nothing\n"
+        },
+        {
+          "path": "z.txt",
+          "content": "target twice\ntarget\n"
+        }
+      ],
+      "expect": [
+        "tool:Agent",
+        "forwarded subagent assistant text",
+        "forwarded subagent thinking",
+        "tool_result:agent with AgentToolStats",
+        "file:subagents/agent-<id>.jsonl",
+        "file:subagents/agent-<id>.meta.json"
+      ]
+    },
+    {
+      "name": "subagent-detached",
+      "covers": "a DETACHED (background) subagent",
+      "prompt": "Spawn a subagent in the background that counts from 1 to 60 with a one-second sleep between numbers, and do not wait for it. Tell me its id, then answer 'launched'.",
+      "controls": [
+        {
+          "at": "turn_end",
+          "do": "backgroundTasks"
+        }
+      ],
+      "expect": [
+        "tool:Agent(background)",
+        "tool_result:agent_async_launch",
+        "task_started",
+        "background_tasks_changed",
+        "file:spool a<hex>.output"
+      ]
+    },
+    {
+      "name": "bash-detached",
+      "covers": "a DETACHED shell (run_in_background)",
+      "prompt": "Start `bash noisy.sh` in the background and immediately tell me its task id. Do not wait for it.",
+      "cwd_setup": [
+        {
+          "path": "noisy.sh",
+          "content": "for i in $(seq 1 60); do echo \"tick $i\"; sleep 1; done\necho done\n"
+        }
+      ],
+      "controls": [
+        {
+          "at": "turn_end",
+          "do": "backgroundTasks"
+        }
+      ],
+      "expect": [
+        "tool:Bash(run_in_background)",
+        "tool_result:bash with backgroundTaskId",
+        "task_started",
+        "file:spool b<hex>.output terminated by EXIT="
+      ]
+    },
+    {
+      "name": "ctrl-b-detach-of-foreground-work",
+      "covers": "Ctrl-B: a FOREGROUND item moved onto its own stream mid-flight",
+      "prompt": "Run `bash long.sh` in the foreground and report its output.",
+      "cwd_setup": [
+        {
+          "path": "long.sh",
+          "content": "for i in $(seq 1 120); do echo \"tick $i\"; sleep 1; done\n"
+        }
+      ],
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "type": "assistant",
+            "contains": "\"name\":\"Bash\""
+          },
+          "do": "backgroundTasks",
+          "args": {
+            "tool_use_id": "<the Bash tool_use_id from the message above>"
+          }
+        }
+      ],
+      "expect": [
+        "query.backgroundTasks(toolUseId) resolving true",
+        "task_started for the promoted item",
+        "task_updated with patch.is_backgrounded (the OPEN QUESTION: this is the candidate producer for a backgrounded AGENT; the capture settles it)",
+        "tool_result:bash with backgroundedByUser"
+      ]
+    },
+    {
+      "name": "ctrl-b-detach-of-foreground-subagent",
+      "covers": "Ctrl-B on a foreground SUBAGENT — the explicitly-open question in shim.md's gotchas",
+      "prompt": "Spawn one subagent in the FOREGROUND that counts from 1 to 90 with a one-second sleep between numbers, and wait for it.",
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "type": "assistant",
+            "contains": "\"name\":\"Agent\""
+          },
+          "do": "backgroundTasks",
+          "args": {
+            "tool_use_id": "<the Agent tool_use_id from the message above>"
+          }
+        }
+      ],
+      "expect": [
+        "task_updated{patch.is_backgrounded} present or ABSENT — either answer settles the gotcha",
+        "whatever the agent tool result carries when it is backgrounded by the user"
+      ]
+    },
+    {
+      "name": "fan-wide-cancel",
+      "covers": "fan-wide cancel: several live items, all stopped at once",
+      "prompt": "Start four background shells at once, each running `for i in $(seq 1 120); do echo tick $i; sleep 1; done`, and tell me their four task ids.",
+      "controls": [
+        {
+          "at": "turn_end",
+          "do": "stopTask",
+          "args": {
+            "task_id": "<first id from task_started>"
+          }
+        },
+        {
+          "at": "turn_end",
+          "do": "stopTask",
+          "args": {
+            "task_id": "<second id>"
+          }
+        },
+        {
+          "at": "turn_end",
+          "do": "stopTask",
+          "args": {
+            "task_id": "<third id>"
+          }
+        },
+        {
+          "at": "turn_end",
+          "do": "stopTask",
+          "args": {
+            "task_id": "<fourth id>"
+          }
+        }
+      ],
+      "expect": [
+        "four task_started",
+        "background_tasks_changed shrinking to empty",
+        "the terminal each stopped spool carries"
+      ]
+    },
+    {
+      "name": "held-turn-gate",
+      "covers": "a HELD turn: the model blocked at a gate, nothing flowing, then released",
+      "prompt": "Run `rm -f held.txt`, then tell me it is done.",
+      "cwd_setup": [
+        {
+          "path": "held.txt",
+          "content": "held\n"
+        }
+      ],
+      "permission_mode": "default",
+      "permission_script": {
+        "default": "allow_once",
+        "rules": [
+          {
+            "tool": "Bash",
+            "decision": "allow_once",
+            "delay_ms": 20000
+          }
+        ]
+      },
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "contains": "can_use_tool"
+          },
+          "do": "getContextUsage"
+        }
+      ],
+      "expect": [
+        "a long gap in t_ms across the gate",
+        "no SDK messages while held",
+        "the turn resuming after the answer"
+      ]
+    },
+    {
+      "name": "interrupt",
+      "covers": "interrupt of a running turn (and the interrupt receipt)",
+      "prompt": "Count from 1 to 200 out loud, one number per line, thinking briefly before each. Do not use any tools.",
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "type": "stream_event",
+            "contains": "text_delta"
+          },
+          "do": "interrupt"
+        }
+      ],
+      "expect": [
+        "SDKControlInterruptResponse (still_queued, or undefined on an older CLI)",
+        "result:error_during_execution or the vendor's own interrupt terminal"
+      ]
+    },
+    {
+      "name": "turn-stop-max-turns",
+      "covers": "turn-stop failure arm: error_max_turns",
+      "prompt": "Repeatedly run `echo tick` one command at a time, forever, never stopping to summarize.",
+      "options": {
+        "maxTurns": 3
+      },
+      "expect": [
+        "result:error_max_turns"
+      ]
+    },
+    {
+      "name": "turn-stop-max-budget-usd",
+      "covers": "turn-stop failure arm: error_max_budget_usd",
+      "prompt": "Write a 40000 word essay on the history of file systems, one section at a time.",
+      "options": {
+        "maxBudgetUsd": 0.02
+      },
+      "expect": [
+        "result:error_max_budget_usd"
+      ]
+    },
+    {
+      "name": "turn-stop-max-structured-output-retries",
+      "covers": "turn-stop failure arm: error_max_structured_output_retries",
+      "prompt": "Answer with a structured output that satisfies the session's output schema. The schema requires an integer property `impossible` that is at once >= 10 and <= 5. Do your best and keep trying.",
+      "expect": [
+        "result:error_max_structured_output_retries",
+        "result.terminal_reason \"structured_output_retry_exhausted\"",
+        "the vendor's retry attempts visible in the stream"
+      ],
+      "options": {
+        "outputFormat": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "impossible": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 5
+              }
+            },
+            "required": [
+              "impossible"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "name": "turn-stop-error-during-execution",
+      "covers": "turn-stop failure arm: error_during_execution",
+      "prompt": "Count from 1 to 500 out loud.",
+      "controls": [
+        {
+          "at": "on_message",
+          "after": {
+            "type": "stream_event",
+            "contains": "text_delta"
+          },
+          "do": "interrupt"
+        }
+      ],
+      "expect": [
+        "result:error_during_execution"
+      ]
+    },
+    {
+      "name": "turn-stop-hook-stop",
+      "covers": "turn-stop failure arms: the vendor's own HOOK-STOP terminals (both)",
+      "prompt": "Say hello and stop.",
+      "cwd_setup": [
+        {
+          "path": ".claude/settings.json",
+          "content": "{\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"matcher\": \"\",\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"bash .claude/hooks/stop.sh\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+        },
+        {
+          "path": ".claude/hooks/stop.sh",
+          "content": "echo 'the capture stop hook refuses the stop' >&2\nexit 2\n"
+        }
+      ],
+      "expect": [
+        "system:stop_hook_summary",
+        "the two hook-stop result terminals"
+      ]
+    },
+    {
+      "name": "api-error-classes",
+      "covers": "the API error classes (ApiRequestFailed's taxonomy), including a 429",
+      "prompt": null,
+      "manual": "No prompt provokes these. Capture each by driving the SDK against a deliberately broken API path: (a) 429 — run a burst of concurrent sessions on a rate-limited account, or capture the `rate_limit_event` message and `system:api_error` line the vendor emits when the account's window is exhausted; (b) 401/403 — run once with an invalid credential in the scratch CLAUDE_CONFIG_DIR; (c) 500/overloaded — capture opportunistically, or point the SDK at a proxy that returns 529; (d) connection failure — run with the network down. Each run's `system:api_error` line and `api_retry` message is the golden.",
+      "expect": [
+        "system:api_error",
+        "api_retry",
+        "rate_limit_event"
+      ],
+      "expects_api_error": true
+    },
+    {
+      "name": "max-tokens",
+      "covers": "a response cut off by max_tokens",
+      "prompt": "Reproduce, verbatim and in full, the complete text of the GNU General Public License version 3. Do not summarize and do not stop early.",
+      "expect": [
+        "stream_event:message_delta with stop_reason max_tokens",
+        "result carrying the truncated response"
+      ]
+    },
+    {
+      "name": "model-refusal",
+      "covers": "model refusal — both the fallback and the no-fallback arms",
+      "prompt": null,
+      "manual": "Refusals are not reliably promptable and must not be provoked by attempting genuinely harmful requests. Capture opportunistically: the two goldens are the `system:model_refusal_fallback` and `system:model_refusal_no_fallback` lines, both of which already exist as real fixtures at testdata/corpus/transcript-lines/. Re-capture only if the vendor reshapes them; the canary guards the two subtypes meanwhile.",
+      "expect": [
+        "system:model_refusal_fallback",
+        "system:model_refusal_no_fallback"
+      ]
+    },
+    {
+      "name": "context-window-exceeded",
+      "covers": "context window exceeded",
+      "prompt": null,
+      "manual": "Fill the window first: run a scenario whose cwd holds a multi-megabyte file and prompt the model to read the whole thing in one Read with no limit, repeatedly, until the window is exceeded. The turn must be driven to the vendor's own over-window terminal rather than to auto-compaction, so run it with auto-compaction disabled in the scratch settings.",
+      "expect": [
+        "the vendor's over-window api_error",
+        "result carrying the over-window terminal"
+      ]
+    },
+    {
+      "name": "identity-rotation-clear",
+      "covers": "identity rotation via /clear (SessionIdentityRotated — the resume handle changes, the agent does not)",
+      "controls": [
+        {
+          "at": "turn_end",
+          "do": "initializationResult"
+        }
+      ],
+      "expect": [
+        "system:local_command_output",
+        "the vendor session id BEFORE and AFTER the clear (they differ)",
+        "ContextCleared",
+        "the post-clear turn having no memory of the pre-clear turns"
+      ],
+      "config_root": "shared-world:conversation-history",
+      "prompts": [
+        "Summarize in one sentence everything we have discussed so far in this conversation.",
+        "/clear",
+        "What did we discuss before? Answer in one sentence."
+      ]
+    },
+    {
+      "name": "model-changed",
+      "covers": "model_changed",
+      "prompt": "Say hello.",
+      "controls": [
+        {
+          "at": "turn_end",
+          "do": "supportedModels"
+        },
+        {
+          "at": "turn_end",
+          "do": "setModel",
+          "args": {
+            "model": "claude-sonnet-4-5"
+          }
+        },
+        {
+          "at": "turn_end",
+          "do": "getContextUsage"
+        }
+      ],
+      "expect": [
+        "ModelInfo list",
+        "the vendor's own model-change acknowledgement",
+        "transcript-lines:mode"
+      ]
+    },
+    {
+      "name": "permission-mode-changed",
+      "covers": "permission_mode_changed",
+      "prompt": "Say hello.",
+      "controls": [
+        {
+          "at": "turn_end",
+          "do": "setPermissionMode",
+          "args": {
+            "mode": "acceptEdits"
+          }
+        },
+        {
+          "at": "turn_end",
+          "do": "setPermissionMode",
+          "args": {
+            "mode": "plan"
+          }
+        },
+        {
+          "at": "turn_end",
+          "do": "setPermissionMode",
+          "args": {
+            "mode": "default"
+          }
+        }
+      ],
+      "expect": [
+        "session_state_changed",
+        "transcript-lines:permission-mode"
+      ]
+    },
+    {
+      "name": "fast-mode",
+      "covers": "fast_mode",
+      "prompt": "Say hello quickly.",
+      "options": {
+        "model": "claude-haiku-4-5"
+      },
+      "expect": [
+        "result carrying fast_mode_state",
+        "session_state_changed with the fast-mode fact"
+      ],
+      "manual": "Fast mode is an account/serving-side state. Capture on an account where fast mode engages, or capture the `fast_mode_state` field the result message already carries (see testdata/corpus/stream/result_success.jsonl) and treat that as the golden."
+    },
+    {
+      "name": "mcp-server-healths",
+      "covers": "mcp_server healths (connected / failed / needs-auth / pending)",
+      "prompt": "Report the status of every MCP server configured in this session.",
+      "controls": [
+        {
+          "at": "session_start",
+          "do": "mcpServerStatus"
+        },
+        {
+          "at": "turn_end",
+          "do": "mcpServerStatus"
+        }
+      ],
+      "expect": [
+        "system:init with mcp_servers",
+        "McpServerStatus[] with at least one connected and one failed",
+        "system:mcp_status"
+      ],
+      "manual": "The connected and failed healths are produced by this scenario as written. The NEEDS-AUTH health additionally requires a remote MCP server demanding OAuth; capture it against one of the claude.ai connectors if the lead's account has one configured.",
+      "options": {
+        "mcpServers": {
+          "capture-ok": {
+            "command": "node",
+            "args": [
+              "{{CAPTURE_DIR}}/mcp-echo.mjs"
+            ]
+          },
+          "capture-broken": {
+            "command": "/nonexistent/binary",
+            "args": []
+          }
+        }
+      }
+    },
+    {
+      "name": "account-usage",
+      "covers": "account_usage (the experimental /usage answer) and the account identity",
+      "prompt": "Say hello.",
+      "controls": [
+        {
+          "at": "session_start",
+          "do": "accountInfo"
+        },
+        {
+          "at": "turn_end",
+          "do": "usage_EXPERIMENTAL"
+        },
+        {
+          "at": "turn_end",
+          "do": "accountInfo"
+        }
+      ],
+      "expect": [
+        "AccountInfo",
+        "SDKControlGetUsageResponse.session",
+        "SDKControlGetUsageResponse.rate_limits (five_hour / seven_day / model_scoped)"
+      ]
+    },
+    {
+      "name": "context-budget-warning",
+      "covers": "context_budget_warning",
+      "prompt": "Read every file in this directory, in full, one at a time, until you are told you are running low on context.",
+      "cwd_setup": [
+        {
+          "path": "bulk/README.md",
+          "content": "The lead generates the bulk files at capture time (see README.md); they are not committed.\n"
+        }
+      ],
+      "expect": [
+        "attachment:context_tip",
+        "the vendor's low-context warning",
+        "system:status"
+      ],
+      "manual": "Generate the bulk corpus first: `python3 -c \"...\"` writing ~40 files of ~200KB each into bulk/ inside the scratch cwd. The warning is a function of window occupancy, not of the prompt."
+    },
+    {
+      "name": "diagnostics",
+      "covers": "diagnostics (the session's own health, pushed as the daemon's readiness signal)",
+      "prompt": "Say hello.",
+      "controls": [
+        {
+          "at": "session_start",
+          "do": "initializationResult"
+        },
+        {
+          "at": "session_start",
+          "do": "supportedCommands"
+        },
+        {
+          "at": "session_start",
+          "do": "supportedAgents"
+        },
+        {
+          "at": "turn_end",
+          "do": "initializationResult"
+        }
+      ],
+      "expect": [
+        "SDKControlInitializeResponse",
+        "SlashCommand[]",
+        "AgentInfo[]",
+        "system:init"
+      ]
+    },
+    {
+      "name": "context-usage",
+      "covers": "context_usage — the vendor's own get_context_usage answer, at session start and at turn end",
+      "prompt": "Read notes.txt and summarize it in one sentence.",
+      "cwd_setup": [
+        {
+          "path": "notes.txt",
+          "content": "note line 1\nnote line 2\nnote line 3\nnote line 4\nnote line 5\nnote line 6\nnote line 7\nnote line 8\nnote line 9\nnote line 10\nnote line 11\nnote line 12\nnote line 13\nnote line 14\nnote line 15\nnote line 16\nnote line 17\nnote line 18\nnote line 19\nnote line 20\nnote line 21\nnote line 22\nnote line 23\nnote line 24\nnote line 25\nnote line 26\nnote line 27\nnote line 28\nnote line 29\nnote line 30\nnote line 31\nnote line 32\nnote line 33\nnote line 34\nnote line 35\nnote line 36\nnote line 37\nnote line 38\nnote line 39\nnote line 40\nnote line 41\nnote line 42\nnote line 43\nnote line 44\nnote line 45\nnote line 46\nnote line 47\nnote line 48\nnote line 49\nnote line 50\nnote line 51\nnote line 52\nnote line 53\nnote line 54\nnote line 55\nnote line 56\nnote line 57\nnote line 58\nnote line 59\nnote line 60\nnote line 61\nnote line 62\nnote line 63\nnote line 64\nnote line 65\nnote line 66\nnote line 67\nnote line 68\nnote line 69\nnote line 70\nnote line 71\nnote line 72\nnote line 73\nnote line 74\nnote line 75\nnote line 76\nnote line 77\nnote line 78\nnote line 79\nnote line 80\nnote line 81\nnote line 82\nnote line 83\nnote line 84\nnote line 85\nnote line 86\nnote line 87\nnote line 88\nnote line 89\nnote line 90\nnote line 91\nnote line 92\nnote line 93\nnote line 94\nnote line 95\nnote line 96\nnote line 97\nnote line 98\nnote line 99\nnote line 100\nnote line 101\nnote line 102\nnote line 103\nnote line 104\nnote line 105\nnote line 106\nnote line 107\nnote line 108\nnote line 109\nnote line 110\nnote line 111\nnote line 112\nnote line 113\nnote line 114\nnote line 115\nnote line 116\nnote line 117\nnote line 118\nnote line 119\nnote line 120\nnote line 121\nnote line 122\nnote line 123\nnote line 124\nnote line 125\nnote line 126\nnote line 127\nnote line 128\nnote line 129\nnote line 130\nnote line 131\nnote line 132\nnote line 133\nnote line 134\nnote line 135\nnote line 136\nnote line 137\nnote line 138\nnote line 139\nnote line 140\nnote line 141\nnote line 142\nnote line 143\nnote line 144\nnote line 145\nnote line 146\nnote line 147\nnote line 148\nnote line 149\nnote line 150\nnote line 151\nnote line 152\nnote line 153\nnote line 154\nnote line 155\nnote line 156\nnote line 157\nnote line 158\nnote line 159\nnote line 160\nnote line 161\nnote line 162\nnote line 163\nnote line 164\nnote line 165\nnote line 166\nnote line 167\nnote line 168\nnote line 169\nnote line 170\nnote line 171\nnote line 172\nnote line 173\nnote line 174\nnote line 175\nnote line 176\nnote line 177\nnote line 178\nnote line 179\nnote line 180\nnote line 181\nnote line 182\nnote line 183\nnote line 184\nnote line 185\nnote line 186\nnote line 187\nnote line 188\nnote line 189\nnote line 190\nnote line 191\nnote line 192\nnote line 193\nnote line 194\nnote line 195\nnote line 196\nnote line 197\nnote line 198\nnote line 199\nnote line 200\nnote line 201\nnote line 202\nnote line 203\nnote line 204\nnote line 205\nnote line 206\nnote line 207\nnote line 208\nnote line 209\nnote line 210\nnote line 211\nnote line 212\nnote line 213\nnote line 214\nnote line 215\nnote line 216\nnote line 217\nnote line 218\nnote line 219\nnote line 220\nnote line 221\nnote line 222\nnote line 223\nnote line 224\nnote line 225\nnote line 226\nnote line 227\nnote line 228\nnote line 229\nnote line 230\nnote line 231\nnote line 232\nnote line 233\nnote line 234\nnote line 235\nnote line 236\nnote line 237\nnote line 238\nnote line 239\nnote line 240\nnote line 241\nnote line 242\nnote line 243\nnote line 244\nnote line 245\nnote line 246\nnote line 247\nnote line 248\nnote line 249\nnote line 250\nnote line 251\nnote line 252\nnote line 253\nnote line 254\nnote line 255\nnote line 256\nnote line 257\nnote line 258\nnote line 259\nnote line 260\nnote line 261\nnote line 262\nnote line 263\nnote line 264\nnote line 265\nnote line 266\nnote line 267\nnote line 268\nnote line 269\nnote line 270\nnote line 271\nnote line 272\nnote line 273\nnote line 274\nnote line 275\nnote line 276\nnote line 277\nnote line 278\nnote line 279\nnote line 280\nnote line 281\nnote line 282\nnote line 283\nnote line 284\nnote line 285\nnote line 286\nnote line 287\nnote line 288\nnote line 289\nnote line 290\nnote line 291\nnote line 292\nnote line 293\nnote line 294\nnote line 295\nnote line 296\nnote line 297\nnote line 298\nnote line 299\nnote line 300\nnote line 301\nnote line 302\nnote line 303\nnote line 304\nnote line 305\nnote line 306\nnote line 307\nnote line 308\nnote line 309\nnote line 310\nnote line 311\nnote line 312\nnote line 313\nnote line 314\nnote line 315\nnote line 316\nnote line 317\nnote line 318\nnote line 319\nnote line 320\nnote line 321\nnote line 322\nnote line 323\nnote line 324\nnote line 325\nnote line 326\nnote line 327\nnote line 328\nnote line 329\nnote line 330\nnote line 331\nnote line 332\nnote line 333\nnote line 334\nnote line 335\nnote line 336\nnote line 337\nnote line 338\nnote line 339\nnote line 340\nnote line 341\nnote line 342\nnote line 343\nnote line 344\nnote line 345\nnote line 346\nnote line 347\nnote line 348\nnote line 349\nnote line 350\nnote line 351\nnote line 352\nnote line 353\nnote line 354\nnote line 355\nnote line 356\nnote line 357\nnote line 358\nnote line 359\nnote line 360\nnote line 361\nnote line 362\nnote line 363\nnote line 364\nnote line 365\nnote line 366\nnote line 367\nnote line 368\nnote line 369\nnote line 370\nnote line 371\nnote line 372\nnote line 373\nnote line 374\nnote line 375\nnote line 376\nnote line 377\nnote line 378\nnote line 379\nnote line 380\nnote line 381\nnote line 382\nnote line 383\nnote line 384\nnote line 385\nnote line 386\nnote line 387\nnote line 388\nnote line 389\nnote line 390\nnote line 391\nnote line 392\nnote line 393\nnote line 394\nnote line 395\nnote line 396\nnote line 397\nnote line 398\nnote line 399\n"
+        }
+      ],
+      "controls": [
+        {
+          "at": "session_start",
+          "do": "getContextUsage"
+        },
+        {
+          "at": "turn_end",
+          "do": "getContextUsage"
+        }
+      ],
+      "expect": [
+        "SDKControlGetContextUsageResponse with categories, memoryFiles, mcpTools, agents, skills, messageBreakdown, apiUsage",
+        "the totals differing between the two calls"
+      ]
+    },
+    {
+      "name": "compaction-directed",
+      "covers": "DIRECTED compaction (ours: the throwaway summarizing session that rewrites the transcript)",
+      "expect": [
+        "system:compact_boundary with DiskCompactMetadata",
+        "system:local_command_output",
+        "the rewritten transcript's per-line field union (the undocumented shape the compaction experiment must observe)"
+      ],
+      "config_root": "shared-world:conversation-history",
+      "prompts": [
+        "Recap, at length, every topic covered in this conversation so far.",
+        "/compact",
+        "What is the first thing I asked you in this conversation?"
+      ]
+    },
+    {
+      "name": "auto-compaction",
+      "covers": "vendor-initiated AUTO-compaction and its in-progress signal",
+      "prompt": null,
+      "manual": "Auto-compaction fires on window occupancy, not on a prompt. Run the `context-budget-warning` bulk-read procedure with auto-compaction ENABLED and keep reading past the threshold. The two goldens are the `system:status` message whose status is `compacting` (the START signal the owed `compacting` SessionUpdate arm forwards) and the `system:compact_boundary` line (the END).",
+      "expect": [
+        "system:status(compacting)",
+        "system:compact_boundary"
+      ]
+    },
+    {
+      "name": "vendor-answered-slash-commands",
+      "covers": "slash commands the VENDOR answers itself (no API call, a local_command_output)",
+      "prompt": "/help",
+      "controls": [
+        {
+          "at": "session_start",
+          "do": "supportedCommands"
+        }
+      ],
+      "expect": [
+        "system:local_command_output",
+        "SlashCommand[] listing the vendor's own commands",
+        "no assistant message"
+      ]
+    },
+    {
+      "name": "query-death",
+      "covers": "query death — the vendor process going away under a live query",
+      "prompt": null,
+      "manual": "Kill the SDK's spawned agent binary mid-turn: start `prose-streamed`'s long prompt, find the child process the SDK spawned (`pgrep -P <capture pid>`), and `kill -9` it. The golden is whatever the SDK's async iterator does at that moment (a throw, a synthetic result, or a silent end) — that answer is what the shim's query_died arm has to be built on, and nothing in the declarations states it.",
+      "expect": [
+        "the SDK iterator's behavior on child death",
+        "any final message the SDK emits"
+      ]
+    },
+    {
+      "name": "cold-resume",
+      "covers": "cold resume — resuming a session after its context has gone cold (past the vendor's cache TTL)",
+      "prompt": null,
+      "manual": "The RESUME ITSELF is now driven by the harness (turn 2 carries `resume: true`, which closes the query and reopens it against the same vendor session id). What the harness cannot do is WAIT: a genuinely COLD resume needs the prompt-cache TTL to lapse between the two turns (well over an hour). Run this scenario as-is for the warm-resume golden; for the cold one, run turn 1, wait past the TTL, and run turn 2 with --only cold-resume against the same world.",
+      "expect": [
+        "a resume that emits system:init and nothing else",
+        "the first prompt's usage showing a full cache MISS",
+        "the model and permission mode readable from the transcript's last mode / permission-mode lines"
+      ],
+      "prompts": [
+        "Explain in one paragraph what a write-ahead log is.",
+        {
+          "text": "What did you just tell me? Answer in one sentence.",
+          "resume": true
+        }
+      ]
+    }
+  ]
+}

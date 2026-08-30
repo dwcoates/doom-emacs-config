@@ -1,0 +1,621 @@
+/**
+ * convert/detached.ts — WORK THAT LEFT THE TURN.
+ *
+ * # One row, upserted as knowledge improves
+ *
+ * A detachment is learned in pieces: `task_started` says a handle exists and
+ * which call it came from, the BASH TOOL RESULT says WHY it detached (the task
+ * stream carries no cause on any frame), `task_updated` says a person
+ * backgrounded it by hand, and `task_notification` says where its output is and
+ * that it ended. All four write the SAME row under the same upsert key, so the
+ * announcement improves in place rather than appearing four times. That is what
+ * upsert-by-identity is for, and it is why nothing here has to accumulate.
+ *
+ * # Liveness is structural
+ *
+ * `background_tasks_changed` is a LEVEL with replace semantics, and the shim
+ * consumes it WITHOUT diffing it and without pairing the edge bookends into a
+ * retained set. The set of open detached-item streams IS the live set, and that
+ * is the engine's business — so this file produces nothing from the level.
+ *
+ * # `skip_transcript`
+ *
+ * An ambient housekeeping task is dropped from every announcement: no bubble, no
+ * row. The vendor's own level set still governs liveness, so no indicator wedges.
+ */
+import { create } from "@bufbuild/protobuf";
+import { bindLog } from "../log.js";
+import { conversationv1 } from "../proto.js";
+import type { SdkMessage } from "../sdk/types.js";
+import {
+  activityUpsertKey,
+  bashUpsertKey,
+  detachedWorkUpsertKey,
+  terminalUpsertKey,
+} from "../store/keys.js";
+import type { PersistEntry } from "../store/persistence.js";
+import { agentFrame, prose, settledAt, updateFrame } from "./entries.js";
+import type { FoldContext } from "./fold-context.js";
+import { detachedWorkId, toolCallActivityId } from "./ids.js";
+import { residueEntry, residueForMessage } from "./residue.js";
+import { activityEntry, agentActivity } from "./entries.js";
+
+const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.convert.detached" });
+
+/** Why a unit left the turn. */
+export type DetachCause = "requested" | "by_user" | "timed_out";
+
+/** The cause arm, with the timeout figure the timed-out arm carries. */
+export function detachCause(
+  cause: DetachCause,
+  timeoutMs: number | undefined,
+): conversationv1.DetachedWorkDetached["cause"] {
+  switch (cause) {
+    case "by_user":
+      return { case: "byUser", value: create(conversationv1.DetachedCauseByUserSchema, {}) };
+    case "timed_out":
+      return {
+        case: "timedOut",
+        value: create(conversationv1.DetachedCauseTimedOutSchema, {
+          // THE CONFIGURED LIMIT, not the work's runtime: the work is still
+          // running, so its runtime is not yet a fact.
+          timeoutMs: BigInt(Math.max(0, Math.trunc(timeoutMs ?? 0))),
+        }),
+      };
+    default:
+      return { case: "requested", value: create(conversationv1.DetachedCauseRequestedSchema, {}) };
+  }
+}
+
+/** Where a detached unit's output is accumulating, and whether it may be opened. */
+export function detachedOutput(path: string, readable: boolean): conversationv1.DetachedWorkOutput {
+  return create(conversationv1.DetachedWorkOutputSchema, {
+    path,
+    readability: readable
+      ? { case: "readable", value: create(conversationv1.DetachedWorkOutputReadableSchema, {}) }
+      : {
+          case: "unreadable",
+          value: create(conversationv1.DetachedWorkOutputUnreadableSchema, {}),
+        },
+  });
+}
+
+/** What one detachment announcement says. */
+export interface DetachmentFacts {
+  /**
+   * The in-turn unit it detached FROM — and, by the same bytes, the HANDLE the
+   * work is addressed by.
+   *
+   * `DetachedWorkId.value == AgentActivityId.value` (ruling, landing 3): one
+   * identity addresses the work, its unit, and (for a subagent) its book, so a
+   * terminal retires the handle by equality. The vendor's `task_id` stays
+   * shim-side as the lookup for `stopTask` and the live level.
+   */
+  readonly detachedFromToolUseId: string;
+  /** Why it left. */
+  readonly cause: DetachCause;
+  /** The timeout that was exceeded, for the timed-out cause. */
+  readonly timeoutMs?: number;
+  /** Where its output accumulates, when the producer named a file. */
+  readonly outputPath?: string;
+  /** Whether this reader may open that file. */
+  readonly outputReadable?: boolean;
+}
+
+/**
+ * One detachment announcement, as a row.
+ *
+ * Always the `detached` arm: ALL THREE CAUSES ARRIVE ON IT, including work that
+ * asked for the background up front — such a call is streamed as a progress item
+ * before it backgrounds, so it always has an item it detached FROM; it simply
+ * never has a foreground running phase.
+ */
+export function detachmentEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  vendorUuid: string,
+  facts: DetachmentFacts,
+): PersistEntry {
+  const work = detachedWorkId(facts.detachedFromToolUseId);
+  const announcement = create(conversationv1.AgentDetachedWorkSchema, {
+    work,
+    output:
+      facts.outputPath === undefined
+        ? undefined
+        : detachedOutput(facts.outputPath, facts.outputReadable !== false),
+    origin: {
+      case: "detached",
+      value: create(conversationv1.DetachedWorkDetachedSchema, {
+        detachedFromId: toolCallActivityId(facts.detachedFromToolUseId),
+        cause: detachCause(facts.cause, facts.timeoutMs),
+      }),
+    },
+  });
+  return {
+    agentId,
+    upsertKey: detachedWorkUpsertKey(work),
+    source: {
+      vendorUuid,
+      discriminator: `agent_frame.detached_work.detached.${facts.cause}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "frame",
+      frame: agentFrame(agentId, {
+        case: "detachedWork",
+        value: announcement,
+      }),
+    },
+  };
+}
+
+/**
+ * The detachment a BACKGROUNDED SHELL COMMAND's own result announces.
+ *
+ * BACKGROUNDING CAUSES FOR SHELLS ARE HARVESTED FROM THE BASH TOOL RESULT —
+ * `backgroundedByUser` and `timedOutAfterMs` — and never from the task stream,
+ * which carries no cause on any frame. The call's own `run_in_background` is the
+ * ordinary path.
+ */
+export function bashDetachmentEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  vendorUuid: string,
+  toolUseId: string,
+  structured: unknown,
+): PersistEntry | undefined {
+  const output = structured as Record<string, unknown> | undefined;
+  // THE VENDOR'S TASK ID IS ONLY EVIDENCE THAT IT BACKGROUNDED, not the handle:
+  // the wire handle is the spawning call's own id (ruling, landing 3), and the
+  // task id stays shim-side for `stopTask` and the live level.
+  const vendorTaskId = output?.backgroundTaskId;
+  if (typeof vendorTaskId !== "string" || vendorTaskId === "") return undefined;
+  const timedOut = output?.timedOutAfterMs;
+  const cause: DetachCause =
+    typeof timedOut === "number"
+      ? "timed_out"
+      : output?.backgroundedByUser === true
+        ? "by_user"
+        : "requested";
+  LOGGER.log(
+    { vendor_task_id: vendorTaskId, work: toolUseId, tool_use_id: toolUseId, cause },
+    "a shell command moved to the background rather than ending",
+  );
+  return detachmentEntry(context, agentId, vendorUuid, {
+    detachedFromToolUseId: toolUseId,
+    cause,
+    timeoutMs: typeof timedOut === "number" ? timedOut : undefined,
+    outputPath: typeof output?.persistedOutputPath === "string" ? output.persistedOutputPath : undefined,
+  });
+}
+
+/** The vendor's task-stream messages, read loosely for their optional fields. */
+interface RawTask {
+  readonly subtype?: string;
+  readonly task_id?: string;
+  readonly tool_use_id?: string;
+  readonly skip_transcript?: boolean;
+  readonly output_file?: string;
+  readonly status?: string;
+  readonly summary?: string;
+  readonly usage?: { readonly total_tokens?: number };
+  readonly patch?: { readonly is_backgrounded?: boolean; readonly status?: string };
+}
+
+/** Every task-stream message. */
+export function convertDetached(
+  message: Extract<SdkMessage, { type: "system" }>,
+  context: FoldContext,
+): readonly PersistEntry[] {
+  const raw = message as unknown as RawTask;
+  const uuid = (message as { uuid: string }).uuid;
+
+  if (raw.subtype === "background_tasks_changed") {
+    // A LEVEL, consumed without diffing: the live set is the set of open
+    // detached-item streams, which is the engine's structural fact, not a row.
+    LOGGER.logVerbose({ uuid }, "the background-task level changed; consumed, never recorded");
+    return [];
+  }
+
+  if (raw.skip_transcript === true) {
+    LOGGER.logVerbose(
+      { uuid, task_id: raw.task_id },
+      "an ambient task is dropped from every announcement; the vendor's level still governs liveness",
+    );
+    return [];
+  }
+
+  const taskId = raw.task_id;
+  if (typeof taskId !== "string" || taskId === "") {
+    LOGGER.log(
+      { level: "error", uuid, subtype: raw.subtype },
+      "a task message named no task; nothing can be addressed by it",
+    );
+    return [residueEntry(context, message, residueForMessage(message, "task message has no task_id"), "residue.unparsed")];
+  }
+
+  const known = context.liveTask(taskId);
+  const toolUseId = raw.tool_use_id ?? known?.toolUseId;
+  const agentId = known?.agentId ?? context.mainAgentId;
+
+  switch (raw.subtype) {
+    case "task_started": {
+      if (toolUseId === undefined || toolUseId === "") {
+        // NO ORIGINATING CALL AND NO PAYLOAD WE CAN BUILD: `created` needs a
+        // DetachableWork describing the work, and nothing here states one. An
+        // invented description would be worse than residue.
+        LOGGER.log(
+          { level: "warn", uuid, task_id: taskId },
+          "a task started with no originating call; it cannot be announced and lands as residue",
+        );
+        return [
+          residueEntry(
+            context,
+            message,
+            residueForMessage(message, "task_started names no originating call"),
+            "residue.unknown.task_started",
+          ),
+        ];
+      }
+      LOGGER.log({ uuid, task_id: taskId, tool_use_id: toolUseId }, "work left the turn");
+      return [
+        detachmentEntry(context, agentId, uuid, {
+          detachedFromToolUseId: toolUseId,
+          cause: "requested",
+        }),
+      ];
+    }
+
+    case "task_updated": {
+      if (raw.patch?.is_backgrounded !== true) {
+        LOGGER.logVerbose(
+          { uuid, task_id: taskId, status: raw.patch?.status },
+          "a task patch with no detachment fact; the unit's own frames carry the rest",
+        );
+        return [];
+      }
+      if (toolUseId === undefined || toolUseId === "") {
+        LOGGER.log(
+          { level: "warn", uuid, task_id: taskId },
+          "a task was backgrounded by hand but names no originating call; nothing can be upserted",
+        );
+        return [];
+      }
+      // THE CANDIDATE PRODUCER FOR A BACKGROUNDED AGENT, confirmed at this wave:
+      // a person backgrounded running work by hand, which the shell path
+      // harvests from its tool result and the agent path only states here.
+      LOGGER.log({ uuid, task_id: taskId }, "a person backgrounded running work by hand");
+      return [
+        detachmentEntry(context, agentId, uuid, {
+          detachedFromToolUseId: toolUseId,
+          cause: "by_user",
+        }),
+      ];
+    }
+
+    case "task_progress":
+      // The vendor's per-task progress is the SUBAGENT unit's `update` arm, and
+      // building one needs the spawn's prompt, which this message does not
+      // carry. Consumed; the unit's own frames are the account.
+      LOGGER.logVerbose({ uuid, task_id: taskId }, "task progress consumed; the unit's frames carry it");
+      return [];
+
+    case "task_notification": {
+      const entries: PersistEntry[] = [];
+      if (toolUseId !== undefined && toolUseId !== "" && raw.output_file !== undefined) {
+        entries.push(
+          detachmentEntry(context, agentId, uuid, {
+            detachedFromToolUseId: toolUseId,
+            cause: "requested",
+            outputPath: raw.output_file,
+            outputReadable: true,
+          }),
+        );
+      }
+      if (toolUseId === undefined || toolUseId === "") {
+        LOGGER.log(
+          { level: "warn", uuid, task_id: taskId },
+          "a task notification names no originating call; its unit cannot be settled",
+        );
+        return entries;
+      }
+      entries.push(...subagentTerminalEntries(context, agentId, uuid, toolUseId, raw));
+      return entries;
+    }
+
+    default:
+      LOGGER.log(
+        { level: "warn", uuid, subtype: raw.subtype },
+        "no detached-work converter owns this task message; it lands as residue",
+      );
+      return [residueEntry(context, message, residueForMessage(message), `unknown.${String(raw.subtype)}`)];
+  }
+}
+
+/**
+ * The spawn unit's terminal, from the task's own notification.
+ *
+ * AN ASYNC RUN'S SETTLED USAGE IS AS THIN AS THE VENDOR REPORTS IT: a
+ * notification carries at most a total-tokens scalar, so a full breakdown is
+ * unproducible here and the contract makes that unrepresentable rather than
+ * letting a producer fake one.
+ */
+function subagentTerminalEntries(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  vendorUuid: string,
+  toolUseId: string,
+  raw: RawTask,
+): readonly PersistEntry[] {
+  const activityId = toolCallActivityId(toolUseId);
+  const settled = settledAt(context.nowMs());
+  const totalTokens = raw.usage?.total_tokens;
+  if (raw.status === "stopped") {
+    LOGGER.log({ task_id: raw.task_id }, "a person stopped the detached run");
+    return [
+      activityEntry(
+        context,
+        { agentId, vendorUuid, discriminator: "activity.subagent.failure.stopped_by_user" },
+        agentActivity(activityId, {
+          case: "subagent",
+          value: create(conversationv1.AgentSubagentSchema, {
+            result: {
+              case: "failure",
+              value: create(conversationv1.AgentSubagentFailureSchema, {
+                cause: {
+                  case: "stoppedByUser",
+                  value: create(conversationv1.AgentSubagentStoppedByUserSchema, {}),
+                },
+              }),
+            },
+          }),
+        }),
+      ),
+    ];
+  }
+  if (raw.status === "failed") {
+    LOGGER.log({ level: "warn", task_id: raw.task_id }, "a detached run failed");
+    return [
+      activityEntry(
+        context,
+        { agentId, vendorUuid, discriminator: "activity.subagent.failure" },
+        agentActivity(activityId, {
+          case: "subagent",
+          value: create(conversationv1.AgentSubagentSchema, {
+            result: {
+              case: "failure",
+              value: create(conversationv1.AgentSubagentFailureSchema, {
+                error: create(conversationv1.AgentToolFailureSchema, {
+                  content:
+                    raw.summary === undefined
+                      ? undefined
+                      : create(conversationv1.ToolResultContentSchema, {
+                          blocks: [
+                            create(conversationv1.ToolResultContentBlockSchema, {
+                              block: {
+                                case: "text",
+                                value: create(conversationv1.TextBlockSchema, { text: raw.summary }),
+                              },
+                            }),
+                          ],
+                        }),
+                  settledAt: settled,
+                }),
+              }),
+            },
+          }),
+        }),
+      ),
+    ];
+  }
+  // `completed`. THE PROMPT IS NOT RESTATED HERE: a settled frame is supposed to
+  // describe itself, and this message carries no prompt — so the spawn's own
+  // success frame (from its tool result) is the self-describing one, and this is
+  // the ASYNC path, where the vendor gives a summary and a token total.
+  LOGGER.log({ task_id: raw.task_id }, "a detached run completed");
+  return [
+    activityEntry(
+      context,
+      { agentId, vendorUuid, discriminator: "activity.subagent.success" },
+      agentActivity(activityId, {
+        case: "subagent",
+        value: create(conversationv1.AgentSubagentSchema, {
+          result: {
+            case: "success",
+            value: create(conversationv1.AgentSubagentSuccessSchema, {
+              prompt: create(conversationv1.AgentSubagentPromptSchema, { text: "" }),
+              report: create(conversationv1.AgentSubagentReportSchema, {
+                prose: prose(raw.summary ?? ""),
+              }),
+              totals: create(conversationv1.AgentSubagentTotalsSchema, {
+                durationMs: 0n,
+                usage: {
+                  case: "totalOnly",
+                  value: create(conversationv1.AgentSubagentAsyncUsageSchema, {
+                    totalTokens:
+                      typeof totalTokens === "number" && Number.isFinite(totalTokens)
+                        ? BigInt(Math.trunc(totalTokens))
+                        : undefined,
+                  }),
+                },
+              }),
+              settledAt: settled,
+            }),
+          },
+        }),
+      }),
+    ),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Work we stopped being able to see
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY the stream plane can produce `went_silent` but never judges it here.
+ *
+ * `DetachedLost.went_silent` says "the run produced nothing past the reader's
+ * silence ruling". On this plane the only evidence of disappearance is a task
+ * leaving the `background_tasks_changed` LEVEL without a notification — and
+ * reading that requires DIFFING the level, which the contract explicitly forbids
+ * the fold to do (the level is consumed with replace semantics, and the live set
+ * IS the set of open detached-item streams, which is the engine's). So the
+ * engine's own live-set bookkeeping makes the ruling and calls these builders;
+ * the fold states the shape and nothing else.
+ *
+ * `file_vanished` is NEVER ours: only the sidecar reads files.
+ */
+export function wentSilent(): conversationv1.DetachedLost {
+  return create(conversationv1.DetachedLostSchema, {
+    how: { case: "wentSilent", value: create(conversationv1.DetachedLostWentSilentSchema, {}) },
+  });
+}
+
+/**
+ * A detached SHELL run the engine concluded went silent.
+ *
+ * The original start is passed in because a settled bash frame restates its
+ * command, and after the run left the turn only the record holds it.
+ */
+export function lostBashEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  run: conversationv1.AgentActivityId,
+  originalStart: conversationv1.AgentBashStart,
+  how: conversationv1.DetachedLost,
+): PersistEntry | undefined {
+  if (originalStart.command === undefined) {
+    LOGGER.log(
+      { level: "error", run: run.value },
+      "the recorded start for this shell run states no command; no terminal is produced",
+    );
+    return undefined;
+  }
+  LOGGER.log(
+    { run: run.value, how: how.how.case },
+    "a detached shell run was concluded LOST: not known to have failed, not known to have finished",
+  );
+  return {
+    agentId,
+    upsertKey: bashUpsertKey(run),
+    source: {
+      vendorUuid: `lost:${run.value}`,
+      discriminator: `agent_bash.success.interrupted.lost.${String(how.how.case)}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "bash_run",
+      run,
+      frame: create(conversationv1.AgentBashSchema, {
+        result: {
+          case: "success",
+          value: create(conversationv1.AgentBashSuccessSchema, {
+            command: originalStart.command,
+            outcome: {
+              case: "interrupted",
+              value: create(conversationv1.AgentBashInterruptedSchema, {
+                // NOT OURS TO STATE: nothing observed what the command said
+                // after we lost sight of it, so the extent is `partial` with no
+                // countable omission and no spill to point at. The contract has
+                // no "not observed" arm; a `whole` here would claim the command
+                // said exactly this much and stopped.
+                output: create(conversationv1.AgentBashOutputSchema, {
+                  form: {
+                    case: "text",
+                    value: create(conversationv1.AgentBashOutputTextSchema, {
+                      stdout: "",
+                      stderr: "",
+                      extent: {
+                        case: "partial",
+                        value: create(conversationv1.AgentBashOutputPartialSchema, {
+                          bytesOmitted: 0n,
+                        }),
+                      },
+                    }),
+                  },
+                }),
+                cause: { case: "lost", value: how },
+              }),
+            },
+          }),
+        },
+      }),
+    },
+  };
+}
+
+/** A detached SPAWN unit the engine concluded went silent. */
+export function lostSubagentEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  spawn: conversationv1.AgentActivityId,
+  how: conversationv1.DetachedLost,
+): PersistEntry {
+  LOGGER.log(
+    { spawn: spawn.value, how: how.how.case },
+    "a detached spawn was concluded LOST: not known to have failed, not known to have finished",
+  );
+  return {
+    agentId,
+    upsertKey: activityUpsertKey(spawn),
+    source: {
+      vendorUuid: `lost:${spawn.value}`,
+      discriminator: `activity.subagent.failure.lost.${String(how.how.case)}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "frame",
+      frame: updateFrame(
+        agentId,
+        create(conversationv1.AgentUpdateSchema, {
+          update: {
+            case: "activity",
+            value: agentActivity(spawn, {
+              case: "subagent",
+              value: create(conversationv1.AgentSubagentSchema, {
+                result: {
+                  case: "failure",
+                  value: create(conversationv1.AgentSubagentFailureSchema, {
+                    cause: { case: "lost", value: how },
+                  }),
+                },
+              }),
+            }),
+          },
+        }),
+      ),
+    },
+  };
+}
+
+/** A detached AGENT's own book, closed as lost. */
+export function lostAgentEntry(
+  context: FoldContext,
+  agentId: conversationv1.AgentId,
+  how: conversationv1.DetachedLost,
+): PersistEntry {
+  LOGGER.log(
+    { agent: agentId.value, how: how.how.case },
+    "a detached agent was concluded LOST: not known to have failed, not known to have finished",
+  );
+  const coordinate = `lost:${agentId.value}`;
+  return {
+    agentId,
+    upsertKey: terminalUpsertKey(agentId, coordinate),
+    source: {
+      vendorUuid: coordinate,
+      discriminator: `agent_frame.failure.lost.${String(how.how.case)}`,
+    },
+    keepalive: context.keepalive,
+    item: {
+      kind: "frame",
+      frame: agentFrame(agentId, {
+        case: "failure",
+        value: create(conversationv1.AgentFailureSchema, {
+          failure: { case: "lost", value: how },
+        }),
+      }),
+    },
+  };
+}

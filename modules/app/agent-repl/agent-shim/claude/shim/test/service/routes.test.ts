@@ -1,0 +1,271 @@
+/**
+ * The routing layer, driven in-process through a router transport.
+ *
+ * WHAT THESE GUARD: that each of the seventeen verbs reaches the RIGHT engine
+ * method with the request unchanged, that the workflow trio is refused WITHOUT
+ * an engine ever being consulted, and that validation runs BEFORE the engine so
+ * an illegal request can never reach a session.
+ */
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError, createClient, createRouterTransport } from "@connectrpc/connect";
+import { describe, expect, it } from "vitest";
+import type { Engine } from "../../src/engine/engine.js";
+import { conversationv1, shimv1 } from "../../src/proto.js";
+import { shimRoutes } from "../../src/service/routes.js";
+import * as requests from "./requests.js";
+
+/** An engine that records what it was asked and answers the emptiest legal thing. */
+function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; request: unknown }> } {
+  const calls: Array<{ verb: string; request: unknown }> = [];
+  const record = (verb: string) => (request: unknown): void => {
+    calls.push({ verb, request });
+  };
+  const engine: Engine = {
+    async startSession(request) {
+      record("startSession")(request);
+      return create(shimv1.StartSessionResponseSchema, {});
+    },
+    async *watchSession(request) {
+      record("watchSession")(request);
+      yield create(shimv1.WatchSessionResponseSchema, {});
+    },
+    async setSessionModel(request) {
+      record("setSessionModel")(request);
+      return create(shimv1.SetSessionModelResponseSchema, {});
+    },
+    async setSessionPermissionMode(request) {
+      record("setSessionPermissionMode")(request);
+      return create(shimv1.SetSessionPermissionModeResponseSchema, {});
+    },
+    async hibernate(request) {
+      record("hibernate")(request);
+      return create(shimv1.HibernateResponseSchema, {});
+    },
+    async killSession(request) {
+      record("killSession")(request);
+      return create(shimv1.KillSessionResponseSchema, {});
+    },
+    async startTurn(request) {
+      record("startTurn")(request);
+      return create(shimv1.StartTurnResponseSchema, {});
+    },
+    async *watchAgent(request) {
+      record("watchAgent")(request);
+      yield create(shimv1.WatchAgentResponseSchema, {});
+    },
+    async updateAgent(request) {
+      record("updateAgent")(request);
+      return create(shimv1.UpdateAgentResponseSchema, {});
+    },
+    async killTurn(request) {
+      record("killTurn")(request);
+      return create(shimv1.KillTurnResponseSchema, {});
+    },
+    async *watchBash(request) {
+      record("watchBash")(request);
+      yield create(shimv1.WatchBashResponseSchema, {});
+    },
+    async stopBash(request) {
+      record("stopBash")(request);
+      return create(shimv1.StopBashResponseSchema, {});
+    },
+    async detachForeground(request) {
+      record("detachForeground")(request);
+      return create(shimv1.DetachForegroundResponseSchema, {});
+    },
+    async readHistory(request) {
+      record("readHistory")(request);
+      return create(shimv1.ReadHistoryResponseSchema, {});
+    },
+    async standDown() {
+      record("standDown")(undefined);
+    },
+  };
+  return { engine, calls };
+}
+
+function clientFor(engine: Engine) {
+  return createClient(shimv1.Shim, createRouterTransport(shimRoutes(engine)));
+}
+
+async function drain(stream: AsyncIterable<unknown>): Promise<void> {
+  for await (const _frame of stream) break;
+}
+
+describe("shimRoutes unary delegation", () => {
+  it.each([
+    ["startSession", requests.startSessionRequest],
+    ["setSessionModel", requests.setSessionModelRequest],
+    ["setSessionPermissionMode", requests.setSessionPermissionModeRequest],
+    ["hibernate", requests.hibernateRequest],
+    ["killSession", requests.killSessionRequest],
+    ["startTurn", requests.startTurnRequest],
+    ["updateAgent", requests.updateAgentRequest],
+    ["killTurn", requests.killTurnRequest],
+    ["stopBash", requests.stopBashRequest],
+    ["detachForeground", requests.detachForegroundRequest],
+    ["readHistory", requests.readHistoryRequest],
+  ] as const)("routes %s to its own engine method", async (verb, build) => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+    const client = clientFor(engine);
+
+    // Act.
+    await (client[verb] as (r: unknown) => Promise<unknown>)(build());
+
+    // Assert.
+    expect(calls.map((call) => call.verb)).toEqual([verb]);
+  });
+});
+
+describe("shimRoutes stream delegation", () => {
+  it.each([
+    ["watchSession", requests.watchSessionRequest],
+    ["watchAgent", requests.watchAgentRequest],
+    ["watchBash", requests.watchBashRequest],
+  ] as const)("routes %s to its own engine method", async (verb, build) => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+    const client = clientFor(engine);
+
+    // Act.
+    await drain((client[verb] as (r: unknown) => AsyncIterable<unknown>)(build()));
+
+    // Assert.
+    expect(calls.map((call) => call.verb)).toEqual([verb]);
+  });
+});
+
+describe("shimRoutes request fidelity", () => {
+  it("hands the engine the request unchanged", async () => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+    const request = requests.startTurnRequest();
+
+    // Act.
+    await clientFor(engine).startTurn(request);
+
+    // Assert.
+    expect(calls[0]?.request).toEqual(request);
+  });
+});
+
+describe("shimRoutes workflow verbs", () => {
+  it.each([
+    ["getWorkflow", requests.getWorkflowRequest],
+    ["stopWorkflow", requests.stopWorkflowRequest],
+  ] as const)("refuses %s with Unimplemented", async (verb, build) => {
+    // Arrange.
+    const { engine } = recordingEngine();
+
+    // Act.
+    const rejection = await (clientFor(engine)[verb] as (r: unknown) => Promise<unknown>)(build())
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+
+  it("refuses the WatchWorkflow stream with Unimplemented", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+
+    // Act.
+    const rejection = await drain(
+      clientFor(engine).watchWorkflow(requests.watchWorkflowRequest()),
+    ).then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.Unimplemented);
+  });
+
+  it("never consults an engine for a kicked verb", async () => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+
+    // Act.
+    await clientFor(engine)
+      .getWorkflow(requests.getWorkflowRequest())
+      .catch(() => undefined);
+
+    // Assert.
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("shimRoutes validation ordering", () => {
+  it("refuses an unset request oneof with InvalidArgument", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+    const request = create(shimv1.StartSessionRequestSchema, {});
+
+    // Act.
+    const rejection = await clientFor(engine)
+      .startSession(request)
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.InvalidArgument);
+  });
+
+  it("never reaches the engine with an illegal request", async () => {
+    // Arrange.
+    const { engine, calls } = recordingEngine();
+
+    // Act.
+    await clientFor(engine)
+      .startSession(create(shimv1.StartSessionRequestSchema, {}))
+      .catch(() => undefined);
+
+    // Assert.
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses an unset non-optional message field with InvalidArgument", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+    const request = create(shimv1.KillTurnRequestSchema, { force: true });
+
+    // Act.
+    const rejection = await clientFor(engine)
+      .killTurn(request)
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.InvalidArgument);
+  });
+
+  it("refuses an illegal STREAM open with InvalidArgument too", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+    const request = create(shimv1.WatchBashRequestSchema, {});
+
+    // Act.
+    const rejection = await drain(clientFor(engine).watchBash(request)).then(
+      () => null,
+      (err: unknown) => ConnectError.from(err),
+    );
+
+    // Assert.
+    expect(rejection?.code).toBe(Code.InvalidArgument);
+  });
+
+  it("names the offending field path so a refusal is actionable", async () => {
+    // Arrange.
+    const { engine } = recordingEngine();
+    const request = create(shimv1.StartTurnRequestSchema, {
+      turn: create(conversationv1.TurnIdSchema, { value: "t" }),
+      said: requests.said(),
+      origin: conversationv1.PromptOrigin.USER_SENT,
+      pageSize: 0,
+    });
+
+    // Act.
+    const rejection = await clientFor(engine)
+      .startTurn(request)
+      .then(() => null, (err: unknown) => ConnectError.from(err));
+
+    // Assert.
+    expect(rejection?.message).toContain("start_turn.page_size");
+  });
+});
