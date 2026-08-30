@@ -52,16 +52,6 @@ export function toStorePointer(pointer: conversationv1.HistoryPointer): storev1.
   if (pointer.value === "") {
     throw new PersistenceError("stale_pointer", "a history pointer is never the empty string");
   }
-  if (pointer.value.startsWith(UNPOINTERED_PREFIX)) {
-    // See `readAgentPage`: an older page's per-entry pointers are shim-minted
-    // because store.v1 does not serve them, and one handed back would name a
-    // position the store has never heard of. Refusing it LOUDLY is the only
-    // honest answer; silently accepting it would page from the wrong place.
-    throw new PersistenceError(
-      "stale_pointer",
-      `the pointer ${JSON.stringify(pointer.value)} was minted for an older page's entry and cannot address the store`,
-    );
-  }
   return create(storev1.StoreItemPointerSchema, { value: pointer.value });
 }
 
@@ -139,19 +129,6 @@ export function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.Hi
 }
 
 /**
- * The prefix every shim-minted older-page pointer carries.
- *
- * CONTRACT GAP, surfaced rather than hidden: `ReadAgentPageSuccess.lines` is
- * `repeated StorePageLine` — the lines arrive WITHOUT their pointers, while
- * `HistoryEntryAt.at` is non-optional. The boundary's `more.last_item` is a real
- * store pointer, so WALKING older pages is correct; only the per-entry marks on
- * an older page are synthetic, and {@link toStorePointer} refuses one loudly if
- * a caller ever echoes it. The fix is a proto change (`lines` → `repeated
- * StoreLineAt`), requested in the record-plane report.
- */
-export const UNPOINTERED_PREFIX = "shim-unpointered:";
-
-/**
  * The budget a REFUSED-OPEN recovery re-opens with.
  *
  * Deliberately NOT the caller's own page size. The re-open's page is what
@@ -210,8 +187,6 @@ export interface Reader {
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
   openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
-  /** Remember which run a detached-work handle names, from its announcement. */
-  linkWork(workValue: string, runValue: string): void;
   /** Relay one shell-run frame to whoever is watching that run. */
   noteBashFrame(runValue: string, frame: conversationv1.AgentBash): void;
 }
@@ -221,22 +196,8 @@ export interface ReaderOptions {
   readonly client: StoreClient;
 }
 
-/** One live WatchBash subscription. */
-interface BashSubscriber {
-  readonly runValue: string;
-  readonly pending: conversationv1.AgentBash[];
-  readonly waiters: Array<(frame: conversationv1.AgentBash | null) => void>;
-  closed: boolean;
-}
-
 export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
-  /** DetachedWorkId → the run's AgentActivityId, from the announcement. */
-  const workToRun = new Map<string, string>();
-  /** The newest frame per run, so a late watcher opens with the original start. */
-  const lastFrameByRun = new Map<string, conversationv1.AgentBash>();
-  const subscribers = new Set<BashSubscriber>();
-  let unpointeredCounter = 0;
 
   const openSession = async (
     agent: conversationv1.AgentId,
@@ -404,101 +365,91 @@ export function createReader(options: ReaderOptions): Reader {
           "the store answered ReadAgentPage with no result arm set",
         );
       }
-      if (result.value.lines.length > 0) {
-        LOGGER.log(
-          { level: "warn", agent: agent.value, entries: result.value.lines.length },
-          "ReadAgentPage serves lines without pointers; this page's per-entry marks are shim-minted and cannot address the store",
-        );
-      }
+      LOGGER.log(
+        { agent: agent.value, entries: result.value.lines.length },
+        "served an older page of an agent's book",
+      );
+      // EVERY LINE CARRIES ITS OWN POINTER (landing 3): a continuation page is
+      // a reconnect mark like any other, so nothing here is minted and nothing
+      // has to be refused if a caller echoes one back.
       return create(conversationv1.HistoryPageSchema, {
-        entries: result.value.lines.map((line) =>
-          create(conversationv1.HistoryEntryAtSchema, {
-            at: create(conversationv1.HistoryPointerSchema, {
-              value: `${UNPOINTERED_PREFIX}${++unpointeredCounter}`,
-            }),
-            entry: toHistoryEntry(line),
-          }),
-        ),
+        entries: result.value.lines.map(toHistoryEntryAt),
         boundary: toHistoryBoundary(result.value.boundary),
       });
     },
 
     async openBashRun(work) {
-      const runValue = workToRun.get(work.value);
-      if (runValue === undefined) {
-        LOGGER.log(
-          { level: "warn", work: work.value },
-          "no announced shell run carries this detached-work handle",
-        );
-        throw new PersistenceError(
-          "unknown_work",
-          `no announced shell run carries the detached-work handle ${JSON.stringify(work.value)}`,
-        );
+      // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
+      // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there
+      // is no side table to consult and no way for a lookup to go stale — and a
+      // handle the store holds no row for is refused by the store itself.
+      const runValue = work.value;
+      if (runValue === "") {
+        throw new PersistenceError("unknown_work", "a detached-work handle is never the empty string");
       }
-      // CONTRACT GAP, surfaced rather than papered over: store.v1 offers NO
-      // read verb for the bash lifecycle table, so the sidecar's spool-derived
-      // update frames — every byte of a detached shell's output — cannot be
-      // read back through this client at all. What is served here is what this
-      // shim itself observed: the announced start (replayed at its ORIGINAL
-      // instant, as a stream's first frame owes) and every later frame it
-      // writes. Requested proto change: a `ReadBashRun`/`WatchBashRun` verb.
-      LOGGER.log(
-        { run: runValue, work: work.value },
-        "serving a shell run's lifecycle from this shim's own frames; store.v1 has no bash read verb",
-      );
-      const subscriber: BashSubscriber = {
-        runValue,
-        pending: [],
-        waiters: [],
-        closed: false,
-      };
-      const opening = lastFrameByRun.get(runValue);
-      if (opening !== undefined) subscriber.pending.push(opening);
-      subscribers.add(subscriber);
+      // ONE PATH FOR EVERY RUN, and it is the STORE's. A detached shell's output
+      // is written by the SIDECAR as deltas — no SDK route carries a byte of it
+      // — so serving the run from what this shim happened to observe would show
+      // a command's start and its ending with the whole middle missing.
+      // `WatchBashRun` replays every stored row in write order and then follows,
+      // which is exactly what a watcher of a growing spool needs, and it is the
+      // same path whether this shim wrote the rows or the sidecar did.
+      const run = create(conversationv1.AgentActivityIdSchema, { value: runValue });
+      const abort = new AbortController();
+      LOGGER.log({ run: runValue, work: work.value }, "following a shell run's stored rows");
+      let opened = false;
       return {
         async *[Symbol.asyncIterator]() {
           try {
-            for (;;) {
-              const next = subscriber.pending.shift();
-              if (next !== undefined) {
-                yield next;
-                continue;
+            for await (const push of client.watchBashRun(
+              create(storev1.WatchBashRunRequestSchema, { run }),
+              abort.signal,
+            )) {
+              opened = true;
+              const frame = push.row?.frame;
+              if (frame === undefined) {
+                throw new PersistenceError(
+                  "store_unavailable",
+                  "the store pushed a bash row with no frame",
+                );
               }
-              if (subscriber.closed) return;
-              const awaited = await new Promise<conversationv1.AgentBash | null>((resolve) => {
-                subscriber.waiters.push(resolve);
-              });
-              if (awaited === null) return;
-              yield awaited;
+              yield frame;
             }
+          } catch (error) {
+            if (isNotFound(error)) {
+              // A REFUSED OPEN means the store holds no row for this run — the
+              // announcement reached us before the run's first row did. It is
+              // an `unknown_work` refusal, not a transport failure, so the
+              // caller can say so rather than reporting the store as broken.
+              LOGGER.log(
+                { level: "warn", run: runValue, work: work.value },
+                "the store holds no rows for this shell run yet",
+              );
+              throw new PersistenceError(
+                "unknown_work",
+                `the store holds no rows for shell run ${JSON.stringify(runValue)}`,
+              );
+            }
+            throw transportFailure(error);
           } finally {
-            subscriber.closed = true;
-            subscribers.delete(subscriber);
+            // CANCELLING THE CALL IS HOW A STREAM ENDS EARLY: a consumer that
+            // breaks out of the loop would otherwise leave the call draining a
+            // body that has not finished.
+            if (opened || !abort.signal.aborted) abort.abort();
           }
         },
       };
     },
 
-    linkWork(workValue, runValue) {
-      if (workValue === "" || runValue === "") return;
-      workToRun.set(workValue, runValue);
-    },
-
     noteBashFrame(runValue, frame) {
-      if (runValue === "") return;
-      lastFrameByRun.set(runValue, frame);
-      const terminal = frame.result.case === "success" || frame.result.case === "failure";
-      for (const subscriber of subscribers) {
-        if (subscriber.runValue !== runValue) continue;
-        const waiter = subscriber.waiters.shift();
-        if (waiter !== undefined) waiter(frame);
-        else subscriber.pending.push(frame);
-        if (!terminal) continue;
-        // EVERY BOUNDED STREAM ENDS WITH ITS TERMINAL FRAME, and a shell run's
-        // stream is bounded: once the terminal is delivered the watch is over.
-        subscriber.closed = true;
-        for (const parked of subscriber.waiters.splice(0)) parked(null);
-      }
+      // NOTHING TO RELAY ANY MORE. A run is served from the store's own rows,
+      // so a frame this shim wrote reaches a watcher the same way the sidecar's
+      // do — through `WatchBashRun`. Kept as the writer's one observation point
+      // so a frame that never reached the store is visible in the log.
+      LOGGER.logVerbose(
+        { run: runValue, arm: frame.result.case },
+        "wrote a shell run's lifecycle row; watchers read it back from the store",
+      );
     },
   };
 }

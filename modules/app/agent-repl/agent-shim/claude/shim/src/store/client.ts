@@ -63,6 +63,20 @@ export interface StoreClient {
     request: storev1.WatchAgentSessionRequest,
     signal?: AbortSignal,
   ): AsyncIterable<storev1.WatchAgentSessionResponse>;
+  /**
+   * One detached shell run's lifecycle rows: every stored row in write order,
+   * then the tail, ending after the terminal.
+   *
+   * THE ONE READ PATH TO THE BASH TABLE, and the reason a detached shell's
+   * output can come entirely from the sidecar and still be served by the shim's
+   * own WatchBash. A run with no stored row is a refused open — a Connect
+   * `NotFound` at the transport, like every other watch here. `signal` ends it,
+   * per the standing-stream rule.
+   */
+  watchBashRun(
+    request: storev1.WatchBashRunRequest,
+    signal?: AbortSignal,
+  ): AsyncIterable<storev1.WatchBashRunResponse>;
   /** An OLDER page of one book, walking down from a served pointer. */
   readAgentPage(request: storev1.ReadAgentPageRequest): Promise<storev1.ReadAgentPageResponse>;
   /** One workflow run's stored state. Answers Unimplemented this wave. */
@@ -108,6 +122,7 @@ export function createStoreClient(socketPath: string): StoreClient {
   return {
     openAgentSession: (request) => client.openAgentSession(request),
     watchAgentSession: (request, signal) => client.watchAgentSession(request, { signal }),
+    watchBashRun: (request, signal) => client.watchBashRun(request, { signal }),
     readAgentPage: (request) => client.readAgentPage(request),
     getWorkflow: (request) => client.getWorkflow(request),
     getSidecarCursors: (request) => client.getSidecarCursors(request),
