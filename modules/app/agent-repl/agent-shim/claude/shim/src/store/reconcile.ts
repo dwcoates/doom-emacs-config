@@ -85,6 +85,147 @@ export interface Reconciler {
   ): PersistEntry;
 }
 
+// ---------------------------------------------------------------------------
+// The closing terminals — pure, because they need no store at all
+// ---------------------------------------------------------------------------
+
+export function closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry {
+  LOGGER.log(
+    { agent: agent.value },
+    "closing an agent the record holds no terminal for: the boot sweep found it open with no producer",
+  );
+  const frame = create(conversationv1.AgentFrameSchema, {
+    agentId: agent,
+    result: {
+      case: "failure",
+      value: create(conversationv1.AgentFailureSchema, {
+        // NO ERROR STRINGS: the run accumulated none that anyone observed,
+        // and inventing one ("did not survive the shim restart") would put
+        // a sentence in the record that no producer ever said.
+        failure: { case: "lost", value: sweptUp() },
+      }),
+}
+  });
+  const coordinate = reconciledCoordinate(agent.value);
+  return {
+    agentId: agent,
+    upsertKey: terminalUpsertKey(agent, coordinate),
+    source: { vendorUuid: coordinate, discriminator: "agent_frame.failure.lost.swept_up" },
+    keepalive: false,
+    item: { kind: "frame", frame },
+  };
+}
+
+export function closingSubagentTerminal(
+  agent: conversationv1.AgentId,
+  spawn: conversationv1.AgentActivityId,
+): PersistEntry {
+  LOGGER.log(
+    { agent: agent.value, spawn: spawn.value },
+    "closing a spawn unit the record holds no terminal for as lost",
+  );
+  const activity = create(conversationv1.AgentActivitySchema, {
+    activityId: spawn,
+    item: {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "failure",
+          value: create(conversationv1.AgentSubagentFailureSchema, {
+            cause: { case: "lost", value: sweptUp() },
+          }),
+}
+      }),
+}
+  });
+  return {
+    agentId: agent,
+    upsertKey: activityUpsertKey(spawn),
+    source: {
+      vendorUuid: reconciledCoordinate(spawn.value),
+      discriminator: "activity.subagent.failure.lost.swept_up",
+    },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: agent,
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentUpdateSchema, {
+            update: { case: "activity", value: activity },
+          }),
+}
+      }),
+}
+  };
+}
+
+export function closingBashTerminal(
+  agent: conversationv1.AgentId,
+  run: conversationv1.AgentActivityId,
+  originalStart: conversationv1.AgentBashStart,
+): PersistEntry {
+  if (originalStart.command === undefined) {
+    throw new PersistenceError(
+      "unknown_work",
+      `the recorded start for shell run ${JSON.stringify(run.value)} states no command`,
+    );
+  }
+  LOGGER.log(
+    { agent: agent.value, run: run.value },
+    "closing a shell run that did not survive the shim's restart as interrupted",
+  );
+  const frame = create(conversationv1.AgentBashSchema, {
+    result: {
+      case: "success",
+      value: create(conversationv1.AgentBashSuccessSchema, {
+        command: originalStart.command,
+        outcome: {
+          case: "interrupted",
+          value: create(conversationv1.AgentBashInterruptedSchema, {
+            // NOT OURS TO STATE: the reconciliation observed no output at
+            // all, so the extent is `partial` with nothing omitted that we
+            // can count and no spill we can point at. The contract has no
+            // "not observed" arm; recorded as a gap in the record-plane
+            // report rather than answered with a `whole` that would claim
+            // the command said nothing.
+            output: create(conversationv1.AgentBashOutputSchema, {
+              form: {
+                case: "text",
+                value: create(conversationv1.AgentBashOutputTextSchema, {
+                  stdout: "",
+                  stderr: "",
+                  extent: {
+                    case: "partial",
+                    value: create(conversationv1.AgentBashOutputPartialSchema, {
+                      bytesOmitted: 0n,
+                    }),
+}
+                }),
+}
+            }),
+            // THE CAUSE IS NOW STATEABLE (landing 3): we stopped being
+            // able to see the run, which is what `lost.swept_up` says.
+            cause: { case: "lost", value: sweptUp() },
+          }),
+}
+      }),
+}
+  });
+  return {
+    agentId: agent,
+    upsertKey: bashUpsertKey(run),
+    source: {
+      vendorUuid: reconciledCoordinate(run.value),
+      discriminator: "agent_bash.success.interrupted.lost.swept_up",
+    },
+    keepalive: false,
+    item: { kind: "bash_run", run, frame },
+  };
+}
+
+
 /**
  * The one arm a RECONCILIATION may ever state.
  *
@@ -105,16 +246,16 @@ export interface ReconcilerOptions {
 }
 
 /**
- * The shell run's own `start` frame, found in one agent's book.
+ * One unit's own frames, found in an agent's book.
  *
  * A PLAIN SEARCH OVER PAGES the caller already has, deliberately: the reconciler
  * does not open a reading session of its own, because the engine is already
  * paging the book it is reconciling and a second walk would double the reads.
  */
-export function findBashStart(
+export function findUnit(
   entries: readonly conversationv1.HistoryEntryAt[],
-  run: conversationv1.AgentActivityId,
-): conversationv1.AgentBashStart | undefined {
+  unit: conversationv1.AgentActivityId,
+): conversationv1.AgentActivity["item"] | undefined {
   for (const at of entries) {
     const entry = at.entry?.entry;
     if (entry?.case !== "agentFrame") continue;
@@ -122,13 +263,100 @@ export function findBashStart(
     if (result.case !== "update") continue;
     const update = result.value.update;
     if (update.case !== "activity") continue;
-    if (update.value.activityId?.value !== run.value) continue;
-    const item = update.value.item;
-    if (item.case !== "bash") continue;
-    if (item.value.result.case !== "start") continue;
-    return item.value.result.value;
+    if (update.value.activityId?.value !== unit.value) continue;
+    return update.value.item;
   }
   return undefined;
+}
+
+/** The shell run's own `start` frame, found in one agent's book. */
+export function findBashStart(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  run: conversationv1.AgentActivityId,
+): conversationv1.AgentBashStart | undefined {
+  const item = findUnit(entries, run);
+  if (item?.case !== "bash") return undefined;
+  return item.value.result.case === "start" ? item.value.result.value : undefined;
+}
+
+/**
+ * WHAT THE WORK IS, for a consumer that has never seen it.
+ *
+ * `DetachableWork` names the UNIT TYPES themselves, each carrying the `start`
+ * arm that describes the work — so a stored unit is exactly what an
+ * announcement needs, with no separate description type and no second copy able
+ * to disagree with the first.
+ *
+ * Answers nothing for a unit whose kind cannot detach, or for one the record
+ * holds no `start` for: a kind absent from `DetachableWork` cannot claim to be
+ * detached, and an announcement with an invented description is worse than one
+ * that is missing.
+ */
+export function describeDetachable(
+  item: conversationv1.AgentActivity["item"] | undefined,
+): conversationv1.DetachableWork | undefined {
+  if (item === undefined) return undefined;
+  if (item.case === "bash" && item.value.result.case === "start") {
+    return create(conversationv1.DetachableWorkSchema, { work: { case: "bash", value: item.value } });
+  }
+  if (item.case === "subagent" && item.value.result.case === "start") {
+    return create(conversationv1.DetachableWorkSchema, {
+      work: { case: "subagent", value: item.value },
+    });
+  }
+  if (item.case === "monitor" && item.value.result.case === "start") {
+    return create(conversationv1.DetachableWorkSchema, {
+      work: { case: "monitor", value: item.value },
+    });
+  }
+  return undefined;
+}
+
+/**
+ * The announcements `SessionStarted.live_work` carries.
+ *
+ * THE `created` ARM, ALWAYS. A daemon that restarted was NOT THERE for the
+ * original announcement, so it has no element to continue — and `detached`
+ * means exactly "continue the element you are already drawing". Telling a fresh
+ * consumer to continue something it never saw leaves the work undrawn and
+ * unreachable, which is the whole reason the two arms are different situations.
+ *
+ * The description comes FROM THE STORE, by unit id: the shim remembers nothing
+ * across a bounce, and the record is the only place the work's own start
+ * survives. Work the record cannot describe is OMITTED and logged rather than
+ * announced as a handle with nothing behind it.
+ */
+export function announceLiveWork(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  work: readonly conversationv1.DetachedWorkId[],
+): conversationv1.AgentDetachedWork[] {
+  const announcements: conversationv1.AgentDetachedWork[] = [];
+  for (const handle of work) {
+    // THE HANDLE IS THE UNIT (ruling, landing 3), so the lookup is equality.
+    const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
+    const described = describeDetachable(findUnit(entries, unit));
+    if (described === undefined) {
+      LOGGER.log(
+        { level: "warn", work: handle.value },
+        "the record holds no describable start for this live work; it is not announced",
+      );
+      continue;
+    }
+    announcements.push(
+      create(conversationv1.AgentDetachedWorkSchema, {
+        work: handle,
+        origin: {
+          case: "created",
+          value: create(conversationv1.DetachedWorkCreatedSchema, { workCreated: described }),
+        },
+      }),
+    );
+  }
+  LOGGER.log(
+    { announced: announcements.length, live: work.length },
+    "described the live work a restarted consumer has never seen",
+  );
+  return announcements;
 }
 
 export function createReconciler(options: ReconcilerOptions): Reconciler {
@@ -169,140 +397,8 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       return result.value;
     },
 
-    closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry {
-      LOGGER.log(
-        { agent: agent.value },
-        "closing an agent the record holds no terminal for: the boot sweep found it open with no producer",
-      );
-      const frame = create(conversationv1.AgentFrameSchema, {
-        agentId: agent,
-        result: {
-          case: "failure",
-          value: create(conversationv1.AgentFailureSchema, {
-            // NO ERROR STRINGS: the run accumulated none that anyone observed,
-            // and inventing one ("did not survive the shim restart") would put
-            // a sentence in the record that no producer ever said.
-            failure: { case: "lost", value: sweptUp() },
-          }),
-        },
-      });
-      const coordinate = reconciledCoordinate(agent.value);
-      return {
-        agentId: agent,
-        upsertKey: terminalUpsertKey(agent, coordinate),
-        source: { vendorUuid: coordinate, discriminator: "agent_frame.failure.lost.swept_up" },
-        keepalive: false,
-        item: { kind: "frame", frame },
-      };
-    },
-
-    closingSubagentTerminal(
-      agent: conversationv1.AgentId,
-      spawn: conversationv1.AgentActivityId,
-    ): PersistEntry {
-      LOGGER.log(
-        { agent: agent.value, spawn: spawn.value },
-        "closing a spawn unit the record holds no terminal for as lost",
-      );
-      const activity = create(conversationv1.AgentActivitySchema, {
-        activityId: spawn,
-        item: {
-          case: "subagent",
-          value: create(conversationv1.AgentSubagentSchema, {
-            result: {
-              case: "failure",
-              value: create(conversationv1.AgentSubagentFailureSchema, {
-                cause: { case: "lost", value: sweptUp() },
-              }),
-            },
-          }),
-        },
-      });
-      return {
-        agentId: agent,
-        upsertKey: activityUpsertKey(spawn),
-        source: {
-          vendorUuid: reconciledCoordinate(spawn.value),
-          discriminator: "activity.subagent.failure.lost.swept_up",
-        },
-        keepalive: false,
-        item: {
-          kind: "frame",
-          frame: create(conversationv1.AgentFrameSchema, {
-            agentId: agent,
-            result: {
-              case: "update",
-              value: create(conversationv1.AgentUpdateSchema, {
-                update: { case: "activity", value: activity },
-              }),
-            },
-          }),
-        },
-      };
-    },
-
-    closingBashTerminal(
-      agent: conversationv1.AgentId,
-      run: conversationv1.AgentActivityId,
-      originalStart: conversationv1.AgentBashStart,
-    ): PersistEntry {
-      if (originalStart.command === undefined) {
-        throw new PersistenceError(
-          "unknown_work",
-          `the recorded start for shell run ${JSON.stringify(run.value)} states no command`,
-        );
-      }
-      LOGGER.log(
-        { agent: agent.value, run: run.value },
-        "closing a shell run that did not survive the shim's restart as interrupted",
-      );
-      const frame = create(conversationv1.AgentBashSchema, {
-        result: {
-          case: "success",
-          value: create(conversationv1.AgentBashSuccessSchema, {
-            command: originalStart.command,
-            outcome: {
-              case: "interrupted",
-              value: create(conversationv1.AgentBashInterruptedSchema, {
-                // NOT OURS TO STATE: the reconciliation observed no output at
-                // all, so the extent is `partial` with nothing omitted that we
-                // can count and no spill we can point at. The contract has no
-                // "not observed" arm; recorded as a gap in the record-plane
-                // report rather than answered with a `whole` that would claim
-                // the command said nothing.
-                output: create(conversationv1.AgentBashOutputSchema, {
-                  form: {
-                    case: "text",
-                    value: create(conversationv1.AgentBashOutputTextSchema, {
-                      stdout: "",
-                      stderr: "",
-                      extent: {
-                        case: "partial",
-                        value: create(conversationv1.AgentBashOutputPartialSchema, {
-                          bytesOmitted: 0n,
-                        }),
-                      },
-                    }),
-                  },
-                }),
-                // THE CAUSE IS NOW STATEABLE (landing 3): we stopped being
-                // able to see the run, which is what `lost.swept_up` says.
-                cause: { case: "lost", value: sweptUp() },
-              }),
-            },
-          }),
-        },
-      });
-      return {
-        agentId: agent,
-        upsertKey: bashUpsertKey(run),
-        source: {
-          vendorUuid: reconciledCoordinate(run.value),
-          discriminator: "agent_bash.success.interrupted.lost.swept_up",
-        },
-        keepalive: false,
-        item: { kind: "bash_run", run, frame },
-      };
-    },
+    closingAgentTerminal,
+    closingSubagentTerminal,
+    closingBashTerminal,
   };
 }
