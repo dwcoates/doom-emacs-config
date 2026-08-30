@@ -108,6 +108,14 @@
 (defvar agent-repl-test-host--successor nil
   "What the stubbed `agent-repl-link-successor' answers.")
 
+(defvar agent-repl-test-host--dialled nil
+  "Addresses handed to the stubbed dial, newest first.")
+
+(defvar agent-repl-test-host--dial-accepts t
+  "When non-nil the stubbed dial is ACCEPTED at once and answers a conn.
+Nil models the real gate: the dial stands but is not accepted yet, so
+`agent-repl-link-successor' keeps answering nil.")
+
 (defun agent-repl-test-host--logged-p (level substring)
   "Return non-nil when a LEVEL entry containing SUBSTRING was recorded."
   (seq-some (lambda (entry)
@@ -138,6 +146,9 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--focused nil)
          (agent-repl-test-host--current-ws nil)
          (agent-repl-test-host--successor nil)
+         (agent-repl-test-host--dialled nil)
+         (agent-repl-test-host--dial-accepts t)
+         (agent-repl-link-handover-functions nil)
          (agent-repl-test-host--register-answer
           (list :response (list :arm :success
                                 :value (list :workspace (agent-repl-test-host--ref)))))
@@ -175,6 +186,13 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-link-successor)
                 (lambda () agent-repl-test-host--successor))
                ((symbol-function 'agent-repl-link-primary) (lambda () nil))
+               ((symbol-function 'agent-repl-link-dial-successor)
+                (lambda (address)
+                  (push address agent-repl-test-host--dialled)
+                  (when agent-repl-test-host--dial-accepts
+                    (setq agent-repl-test-host--successor
+                          (agent-repl-connect-open address)))
+                  agent-repl-test-host--successor))
                ((symbol-function 'agent-repl--ws-put) (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--ws-current-name)
                 (lambda () agent-repl-test-host--current-ws))
@@ -992,6 +1010,191 @@ unary rpc can produce, which the contract never collapses into one."
     ;; Assert
     (should (null (agent-repl-host-ref "ws-1")))))
 
+
+;;;; ---- Handover refusals answered by a per-workspace rpc ----
+
+(ert-deftest agent-repl-test-host-transferring-away-adopts-on-the-named-daemon ()
+  "A verb's `transferring_away' is the same fact as a `transferred' push."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-host-handle-refusal
+       "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-transferring-away-resubscribes-on-the-successor ()
+  "The adopt is followed by cancel-then-subscribe, the one contract order."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (eq (plist-get (car agent-repl-test-host--streams) :conn)
+                agent-repl-test-host--successor))))
+
+(ert-deftest agent-repl-test-host-transferring-away-does-not-redial-the-standing-successor ()
+  "A successor already standing at the named address is dialed again by nobody."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (null agent-repl-test-host--dialled))))
+
+(ert-deftest agent-repl-test-host-transferring-away-dials-when-no-successor-stands ()
+  "The refusal can be the FIRST news of a handover: Emacs dials the address."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9100")))))
+
+(ert-deftest agent-repl-test-host-transferring-away-redials-a-stale-successor ()
+  "A successor standing at a DIFFERENT address is stale; the refusal wins."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9999"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9100")))))
+
+(ert-deftest agent-repl-test-host-transferring-away-logs-the-redial ()
+  "The dial is on the record as `elisp.host.redial'."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.redial"))))
+
+(ert-deftest agent-repl-test-host-transferring-away-waits-for-an-unaccepted-dial ()
+  "Adopting onto a daemon that has not answered is what the gate forbids."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--dial-accepts nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-transferring-away-adopts-once-the-dial-is-accepted ()
+  "Acceptance itself wakes the adopt; nothing polls."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--dial-accepts nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      ;; Act — daemon-link's acceptance seam
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-transferring-away-without-an-address-is-an-error ()
+  "The address is the whole content of the arm; without it nothing can act."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :transferring-away :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :error "elisp.host.transferring-away-without-address"))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-is-info-not-an-error ()
+  "The successor simply has not taken the workspace over yet."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.not-yet-adopted"))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-retries-on-the-standing-successor ()
+  "With the successor already accepted the adopt is simply walked again."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
+      ;; Assert
+      (should (equal (car agent-repl-test-host--calls)
+                     (list "AdoptHostWorkspace" successor
+                           (list :workspace (agent-repl-test-host--ref))))))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-waits-when-no-successor-stands ()
+  "Nothing is adopted onto a successor that has not been accepted."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
+    ;; Assert
+    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-not-yet-adopted-retries-on-acceptance ()
+  "Acceptance wakes the retry — one hook, no poll and no busy loop."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      ;; Act
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      ;; Assert
+      (should (agent-repl-test-host--logged-p :info "elisp.host.adopt-retry")))))
+
+(ert-deftest agent-repl-test-host-adopt-retry-hook-removes-itself ()
+  "The retry is ONE-SHOT: a later handover must not re-adopt out of nowhere."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      (setq agent-repl-test-host--calls nil)
+      ;; Act
+      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
+      ;; Assert
+      (should (null agent-repl-test-host--calls)))))
+
+(ert-deftest agent-repl-test-host-unknown-refusal-arm-is-an-error ()
+  "An arm that is not a handover refusal is a contract breach."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :budget-exceeded :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.unknown-refusal-arm"))))
 
 ;;;; ---- Subscription acceptance ----
 
