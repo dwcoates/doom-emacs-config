@@ -98,8 +98,31 @@ func TestAsyncLaunchAnnouncesTheSpawnAndCarriesOnlyATotal(t *testing.T) {
 	if start == nil {
 		t.Fatal("an async launch must land on the START arm: the run has not concluded")
 	}
-	if got := start.GetCreatedAgentId().GetValue(); got != "a15b5267244c1360e" {
-		t.Fatalf("created_agent_id = %q, want the vendor agent id", got)
+	// THE CROSS-PLANE MINTING RULE: the created agent's id is the tool_use_id of
+	// the call that spawned it, which is the id the stream plane names the same
+	// agent by. The vendor's own `agentId` is a locator for its files, kept for
+	// owner resolution and never used as an identity.
+	if got := start.GetCreatedAgentId().GetValue(); got != "toolu_spawn" {
+		t.Fatalf("created_agent_id = %q, want the spawning call's id", got)
+	}
+}
+
+func TestTheCreatedAgentIsNeverNamedByTheVendorsOwnAgentId(t *testing.T) {
+	// Arrange. Reading the vendor id as an identity would have the file plane and
+	// the stream plane name one agent differently, and no consumer could join the
+	// two books.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	result := toolResultLine("u1", "toolu_spawn", ts2, `[{"type":"text","text":"launched"}]`,
+		`{"isAsync":true,"agentId":"a15b5267244c1360e","outputFile":"/tmp/a15.output"}`)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	start := activityOf(entryByKey(t, entries, ActivityKey("toolu_spawn"))).GetSubagent().GetStart()
+	if got := start.GetCreatedAgentId().GetValue(); got == "a15b5267244c1360e" {
+		t.Fatalf("created_agent_id = %q, which is the vendor's locator rather than an identity", got)
 	}
 }
 

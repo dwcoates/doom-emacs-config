@@ -55,10 +55,17 @@ func attribute(ctx *Context, offset int64) convert.Attribution {
 		// The session's own book is the main agent's.
 		at.AgentID = main
 	case tail.KindAgentTranscript:
-		// A subagent's constituents form ITS OWN book, keyed by the vendor
-		// `agentId`. The SPAWN that created it is a line in the PARENT's book,
-		// which is why the two identities are distinct here.
-		at.AgentID = firstNonEmpty(ctx.AgentID, agentIDFromPath(ctx.Path))
+		// A subagent's constituents form ITS OWN book, keyed by the SPAWNING
+		// CALL's tool_use_id (the cross-plane minting rule), which the reader
+		// read out of the agent's meta file. The SPAWN that created it is a line
+		// in the PARENT's book, which is why the two identities are distinct.
+		//
+		// THERE IS NO FILENAME FALLBACK. `agent-<id>` is a locator, and naming
+		// the book by it would give one agent two books — one per plane — that no
+		// consumer could ever reconcile. A transcript whose meta has not been
+		// read is HELD by the reader and never reaches here, so an empty id is a
+		// reader defect and is stated as one.
+		at.AgentID = ctx.AgentID
 	default:
 		// A spool or a journal: the run's frames name the run, and the owning
 		// agent is whatever the reader resolved.
@@ -82,12 +89,6 @@ func sessionIDFromPath(path string) string {
 		return base
 	}
 	return filepath.Base(filepath.Dir(filepath.Dir(path)))
-}
-
-// agentIDFromPath reads a subagent's vendor id out of its transcript file name.
-func agentIDFromPath(path string) string {
-	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	return strings.TrimPrefix(base, "agent-")
 }
 
 // firstNonEmpty is the defensive read the seam requires: the first value the

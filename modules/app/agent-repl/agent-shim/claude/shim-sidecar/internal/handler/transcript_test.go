@@ -222,8 +222,32 @@ func TestAttributionFallsBackToThePathWhenTheReaderSuppliesNothing(t *testing.T)
 	}
 }
 
-func TestAttributionReadsASubagentIdFromItsFileName(t *testing.T) {
-	// Arrange. `projects/<proj>/<session>/subagents/agent-<id>.jsonl`.
+func TestASubagentsBookIsTheIdentityTheReaderSupplied(t *testing.T) {
+	// Arrange. `projects/<proj>/<session>/subagents/agent-<id>.jsonl`. The book is
+	// the SPAWNING CALL's id, which the reader read out of the companion meta
+	// file; the owning session is still derived from the path.
+	ctx := &Context{
+		Path:    "/p/projects/proj/sess-uuid/subagents/agent-abc123.jsonl",
+		Kind:    tail.KindAgentTranscript,
+		AgentID: "toolu_spawn_abc",
+	}
+
+	// Act.
+	at := attribute(ctx, 0)
+
+	// Assert.
+	if at.AgentID != "toolu_spawn_abc" {
+		t.Fatalf("AgentID = %q, want the identity the reader supplied", at.AgentID)
+	}
+	if at.MainAgentID != "sess-uuid" {
+		t.Fatalf("MainAgentID = %q, want the owning session two levels up", at.MainAgentID)
+	}
+}
+
+func TestASubagentsBookIsNeverItsFileName(t *testing.T) {
+	// Arrange. `agent-<id>` is a LOCATOR. Falling back to it would give one
+	// agent two books — one per plane — that no consumer could reconcile, so an
+	// identity-less context yields none rather than the file's name.
 	ctx := &Context{
 		Path: "/p/projects/proj/sess-uuid/subagents/agent-abc123.jsonl",
 		Kind: tail.KindAgentTranscript,
@@ -233,10 +257,30 @@ func TestAttributionReadsASubagentIdFromItsFileName(t *testing.T) {
 	at := attribute(ctx, 0)
 
 	// Assert.
-	if at.AgentID != "abc123" {
-		t.Fatalf("AgentID = %q, want the vendor agent id from the file name", at.AgentID)
+	if at.AgentID == "abc123" {
+		t.Fatal("the book was named by the file name; the identity comes only from the meta file")
 	}
-	if at.MainAgentID != "sess-uuid" {
-		t.Fatalf("MainAgentID = %q, want the owning session two levels up", at.MainAgentID)
+	if at.AgentID != "" {
+		t.Fatalf("AgentID = %q, want none: the reader supplied no identity", at.AgentID)
+	}
+}
+
+func TestASidechainWithNoIdentityConvertsNothing(t *testing.T) {
+	// Arrange. The reader HOLDS a transcript whose meta has not been read, so
+	// arriving here without an identity means the hold was skipped — and
+	// converting anyway would file this agent's whole book under the empty id.
+	h := NewAgentTranscriptHandler(testLogger(t))
+	ctx := &Context{
+		Path: "/p/projects/proj/sess-uuid/subagents/agent-abc123.jsonl",
+		Kind: tail.KindAgentTranscript,
+	}
+	lines := `{"type":"assistant","uuid":"a1","isSidechain":true,"timestamp":"2026-07-21T15:36:10.000Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"hello"}]}}`
+
+	// Act.
+	entries := h.Handle(framesFrom(t, lines), ctx)
+
+	// Assert.
+	if len(entries) != 0 {
+		t.Fatalf("entries = %d, want 0: a book with no name must not be written", len(entries))
 	}
 }

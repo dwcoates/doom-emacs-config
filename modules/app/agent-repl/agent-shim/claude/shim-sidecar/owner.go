@@ -28,10 +28,11 @@ import (
 // seam is the observation itself.
 type Observer interface {
 	// TaskSpawned reports a spawning call and the task it opened. toolUseID is
-	// the spawning call's activity id, agentID the created agent's id (empty for
-	// a shell run, which creates no agent), and outputPath the spool the task
-	// writes to when the vendor named one (empty when it did not).
-	TaskSpawned(taskID, toolUseID, agentID, outputPath string)
+	// the spawning call's activity id — which IS the created agent's AgentId
+	// under the cross-plane minting rule, so no separate id is reported —
+	// ownerAgentID the agent whose book the spawn happened in, and outputPath the
+	// spool the task writes to when the vendor named one.
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string)
 
 	// TaskStopped reports that a person stopped a task. The reader owns what
 	// that means: the terminal is minted by the spool's handler, which is the
@@ -42,12 +43,13 @@ type Observer interface {
 var _ Observer = (*sidecar)(nil)
 
 // TaskSpawned implements Observer for the sidecar.
-func (s *sidecar) TaskSpawned(taskID, toolUseID, agentID, outputPath string) {
+func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string) {
 	s.owners.observe(observation{
-		taskID:     taskID,
-		activityID: toolUseID,
-		agentID:    agentID,
-		outputPath: discover.Normalize(outputPath),
+		taskID:      taskID,
+		activityID:  toolUseID,
+		agentID:     ownerAgentID,
+		mainAgentID: ownerAgentID,
+		outputPath:  discover.Normalize(outputPath),
 	})
 }
 
@@ -135,6 +137,8 @@ func (s *sidecar) spoolForTask(taskID string) (string, bool) {
 type observation struct {
 	taskID     string
 	activityID string
+	// agentID is the agent whose book the spawn happened in — the SPAWNER. The
+	// spawned agent's identity is activityID, so it is not stored twice.
 	agentID    string
 	outputPath string
 	// mainAgentID is the agent whose stream carried the spawn.
@@ -226,7 +230,8 @@ func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	return observation{}, false
 }
 
-// agentFor returns the agent a task's spawn created, when one is known.
+// agentFor returns the agent whose book a task's spawn happened in, when it is
+// known — the run's owner, which is what its frames are attributed to.
 func (o *ownerIndex) agentFor(taskID string) string { return o.byTask[taskID].agentID }
 
 // activityFor returns the spawning call's activity id, when one is known.
