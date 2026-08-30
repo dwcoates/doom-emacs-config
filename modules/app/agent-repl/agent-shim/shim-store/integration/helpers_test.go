@@ -37,6 +37,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
@@ -1134,13 +1136,25 @@ func keepaliveLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentProm
 	}
 }
 
+// rawResidue is the VERBATIM record every residue arm exists to carry. Residue
+// with no raw record is the drop it was meant to prevent, dressed up as
+// durability — the store refuses it, and a fixture that omitted it was testing
+// that refusal by accident.
+func rawResidue(kind string) *structpb.Struct {
+	raw, err := structpb.NewStruct(map[string]any{"type": kind, "verbatim": true})
+	if err != nil {
+		panic("shim-store integration: building a raw residue record: " + err.Error())
+	}
+	return raw
+}
+
 // vendorSpecificLine is understood residue: carried, never served.
 func vendorSpecificLine(kind string) *storev1.StoreAgentUpdate {
 	return &storev1.StoreAgentUpdate{
 		AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{
 			UnservedItem: &storev1.StoreUnservedItem{
 				UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{
-					VendorSpecific: &storev1.StoreVendorSpecific{Kind: kind},
+					VendorSpecific: &storev1.StoreVendorSpecific{Kind: kind, Raw: rawResidue(kind)},
 				},
 			},
 		},
@@ -1156,6 +1170,7 @@ func unknownLine(discriminator, field string) *storev1.StoreAgentUpdate {
 					Unknown: &storev1.StoreUnknown{
 						Discriminator:      discriminator,
 						DiscriminatorField: field,
+						Raw:                rawResidue(discriminator),
 					},
 				},
 			},

@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // ---- the routed kind of every arm ----
@@ -78,17 +79,17 @@ func TestClassifyRoutesEveryArmToItsKind(t *testing.T) {
 		},
 		{
 			name:     "vendor specific residue is never served",
-			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook"}}}),
+			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}}}),
 			wantKind: kindVendorSpecific,
 		},
 		{
 			name:     "unknown residue is never served",
-			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{Discriminator: "widget"}}}),
+			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{Discriminator: "widget", Raw: rawRecord("widget")}}}),
 			wantKind: kindUnknown,
 		},
 		{
 			name:     "unparsed residue is never served",
-			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "transcript.jsonl"}}}),
+			entry:    unservedEntry("w", "u", &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "transcript.jsonl", Raw: "{\"broken\":"}}}),
 			wantKind: kindUnparsed,
 		},
 		{
@@ -151,7 +152,7 @@ func TestClassifyLeavesTopLevelUnsetWhenItIsUnresolvable(t *testing.T) {
 	// Arrange: an unparsed record may name no agent at all, and absence is
 	// expressed by absence.
 	entry := unservedEntry("w", "u", &storev1.StoreUnservedItem{
-		UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "x"}},
+		UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "x", Raw: "{"}},
 	})
 
 	// Act
@@ -430,6 +431,16 @@ func bashSuccess() *conversationv1.AgentBash {
 	return &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 		Command: &conversationv1.AgentBashCommand{Line: "make test"},
 	}}}
+}
+
+// rawRecord is the VERBATIM record every residue arm exists to carry. A fixture
+// that omitted it was testing a refusal by accident.
+func rawRecord(kind string) *structpb.Struct {
+	raw, err := structpb.NewStruct(map[string]any{"type": kind})
+	if err != nil {
+		panic("shim-store db test: building a raw residue record: " + err.Error())
+	}
+	return raw
 }
 
 func bashWork() *conversationv1.DetachableWork {
