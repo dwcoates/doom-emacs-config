@@ -199,3 +199,90 @@ func TestForgetDeletesAWorkspacesFaults(t *testing.T) {
 		t.Fatalf("%d faults survived the nuke, want none", n)
 	}
 }
+
+func TestOpenFaultRoundTripsTheTypedArmEvidence(t *testing.T) {
+	// Arrange: the typed arm's own fields travel on the record, so the reporter
+	// fills the arm rather than parsing them back out of the prose detail.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act.
+	id, err := s.OpenFault(context.Background(), Fault{
+		Workspace: &ws.ID,
+		Kind:      "shim_start_failed",
+		Detail:    "the shim exited during bring-up",
+		Evidence:  map[string]string{"exit_code": "127", "stderr_tail": "node: not found"},
+	})
+	if err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+	got, err := s.Fault(context.Background(), id)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Fault: %v", err)
+	}
+	if got.Evidence["exit_code"] != "127" || got.Evidence["stderr_tail"] != "node: not found" {
+		t.Fatalf("evidence = %v, want the recorded exit code and stderr tail", got.Evidence)
+	}
+}
+
+func TestOpenFaultStoresAbsentEvidenceAsAnEmptyObject(t *testing.T) {
+	// Arrange: an absent map and an empty one read back the same, so a decode
+	// never has to guess.
+	s, _ := testStore(t)
+
+	// Act.
+	id, err := s.OpenFault(context.Background(), Fault{Kind: "wsm_read_only"})
+	if err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+	got, err := s.Fault(context.Background(), id)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Fault: %v", err)
+	}
+	if len(got.Evidence) != 0 {
+		t.Fatalf("evidence = %v, want it empty", got.Evidence)
+	}
+}
+
+func TestOpenFaultsCarriesTheEvidence(t *testing.T) {
+	// Arrange.
+	s, _ := testStore(t)
+	if _, err := s.OpenFault(context.Background(), Fault{
+		Kind: "log_sink_poisoned", Evidence: map[string]string{"sink": "/w/.claude/emacs/daemon.log"},
+	}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+
+	// Act.
+	got, err := s.OpenFaults(context.Background(), FaultScope{})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(got) != 1 || got[0].Evidence["sink"] != "/w/.claude/emacs/daemon.log" {
+		t.Fatalf("faults = %+v, want the evidence carried", got)
+	}
+}
+
+func TestOpenFaultsRefusesTheWholeReadOnCorruptEvidence(t *testing.T) {
+	// Arrange: a fault whose typed arm cannot be filled is never reported as
+	// one that can, so the corrupt row fails the read rather than degrading.
+	s, _ := testStore(t)
+	if _, err := s.OpenFault(context.Background(), Fault{Kind: "link_severed"}); err != nil {
+		t.Fatalf("OpenFault: %v", err)
+	}
+	corrupt(t, s, `UPDATE faults SET evidence = 'not json'`)
+
+	// Act.
+	_, err := s.OpenFaults(context.Background(), FaultScope{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("OpenFaults() = nil error, want the corrupt row to fail the read")
+	}
+}

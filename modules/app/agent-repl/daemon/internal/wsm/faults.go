@@ -3,12 +3,38 @@ package wsm
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"claude-repld/internal/dlog"
 )
+
+// encodeEvidence renders a fault's typed-arm fields as the JSON object the
+// column holds. An absent map and an empty one are both stored as "{}", so a
+// decode never has to guess.
+func encodeEvidence(evidence map[string]string) (string, error) {
+	if evidence == nil {
+		evidence = map[string]string{}
+	}
+	out, err := json.Marshal(evidence)
+	if err != nil {
+		return "", fmt.Errorf("wsm: encode fault evidence: %w", err)
+	}
+	return string(out), nil
+}
+
+// decodeEvidence parses one stored evidence object, failing the WHOLE read when
+// the column is not a JSON object of strings — a fault whose typed arm cannot
+// be filled is never reported as one that can.
+func decodeEvidence(row, raw string) (map[string]string, error) {
+	var evidence map[string]string
+	if err := json.Unmarshal([]byte(raw), &evidence); err != nil {
+		return nil, &DecodeError{Table: "faults", Row: row, Field: "evidence", Err: err}
+	}
+	return evidence, nil
+}
 
 // nowUTC is the store's clock. It exists so every minted instant has one
 // spelling.
@@ -37,14 +63,19 @@ func (s *store) OpenFault(ctx context.Context, f Fault) (FaultID, error) {
 	if openedAt.IsZero() {
 		openedAt = nowUTC()
 	}
-	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	evidence, err := encodeEvidence(f.Evidence)
+	if err != nil {
+		s.log.Error(op, "refused unencodable fault evidence", withError(fields, err))
+		return "", err
+	}
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		var ws any
 		if f.Workspace != nil {
 			ws = string(*f.Workspace)
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO faults (id, workspace_id, kind, detail, opened_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?)`,
-			id, ws, f.Kind, f.Detail, nanos(openedAt), nullNanos(f.ResolvedAt))
+			`INSERT INTO faults (id, workspace_id, kind, detail, evidence, opened_at, resolved_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			id, ws, f.Kind, f.Detail, evidence, nanos(openedAt), nullNanos(f.ResolvedAt))
 		return err
 	})
 	if err != nil {
@@ -80,7 +111,7 @@ func (s *store) CloseFault(ctx context.Context, id FaultID, at time.Time) error 
 // OpenFaults loads the open faults matching scope, all-or-nothing.
 func (s *store) OpenFaults(ctx context.Context, scope FaultScope) ([]Fault, error) {
 	fields := dlog.Context{}
-	query := `SELECT id, workspace_id, kind, detail, opened_at, resolved_at FROM faults WHERE resolved_at IS NULL`
+	query := `SELECT id, workspace_id, kind, detail, evidence, opened_at, resolved_at FROM faults WHERE resolved_at IS NULL`
 	var args []any
 	if scope.Workspace != nil {
 		query += ` AND workspace_id = ?`
@@ -106,10 +137,14 @@ func (s *store) OpenFaults(ctx context.Context, scope FaultScope) ([]Fault, erro
 			var (
 				f        Fault
 				ws       sql.NullString
+				evidence string
 				opened   int64
 				resolved sql.NullInt64
 			)
-			if err := rows.Scan(&f.ID, &ws, &f.Kind, &f.Detail, &opened, &resolved); err != nil {
+			if err := rows.Scan(&f.ID, &ws, &f.Kind, &f.Detail, &evidence, &opened, &resolved); err != nil {
+				return err
+			}
+			if f.Evidence, err = decodeEvidence(string(f.ID), evidence); err != nil {
 				return err
 			}
 			if ws.Valid {
@@ -140,15 +175,19 @@ func (s *store) Fault(ctx context.Context, id FaultID) (Fault, error) {
 		var (
 			f        Fault
 			ws       sql.NullString
+			evidence string
 			opened   int64
 			resolved sql.NullInt64
 		)
-		err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, kind, detail, opened_at, resolved_at FROM faults WHERE id = ?`, id).
-			Scan(&f.ID, &ws, &f.Kind, &f.Detail, &opened, &resolved)
+		err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, kind, detail, evidence, opened_at, resolved_at FROM faults WHERE id = ?`, id).
+			Scan(&f.ID, &ws, &f.Kind, &f.Detail, &evidence, &opened, &resolved)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: fault %s: %w", id, ErrNotFound)
 		}
 		if err != nil {
+			return err
+		}
+		if f.Evidence, err = decodeEvidence(string(f.ID), evidence); err != nil {
 			return err
 		}
 		if ws.Valid {

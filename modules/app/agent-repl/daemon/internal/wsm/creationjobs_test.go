@@ -148,3 +148,53 @@ func TestCreationJobFailsWholeOnACorruptActionList(t *testing.T) {
 		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
 	}
 }
+
+func TestPutCreationJobRoundTripsTheOneShotFinish(t *testing.T) {
+	// Arrange: the finish outlives the daemon, because the turn that acts on it
+	// may run after a restart.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act.
+	if err := s.PutCreationJob(context.Background(), CreationJob{
+		Workspace: ws.ID, OneShot: true, Finish: "open_pr+add_to_merge_queue",
+	}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+	got, found, err := s.CreationJob(context.Background(), ws.ID)
+
+	// Assert.
+	if err != nil || !found {
+		t.Fatalf("CreationJob() = (%+v, %v, %v), want the recorded job", got, found, err)
+	}
+	if got.Finish != "open_pr+add_to_merge_queue" {
+		t.Fatalf("Finish = %q, want the recorded finish", got.Finish)
+	}
+}
+
+func TestPutCreationJobClearsASpentFinish(t *testing.T) {
+	// Arrange: clearing the finish is what makes the action happen exactly once.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutCreationJob(context.Background(), CreationJob{
+		Workspace: ws.ID, OneShot: true, Finish: "self_merge",
+	}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+
+	// Act.
+	if err := s.PutCreationJob(context.Background(), CreationJob{
+		Workspace: ws.ID, OneShot: true, Finish: "",
+	}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+
+	// Assert.
+	got, _, err := s.CreationJob(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("CreationJob: %v", err)
+	}
+	if got.Finish != "" {
+		t.Fatalf("Finish = %q, want it cleared", got.Finish)
+	}
+}

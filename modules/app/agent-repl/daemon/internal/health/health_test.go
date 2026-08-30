@@ -100,7 +100,7 @@ func TestDaemonSelfCheckAnswersUnhealthyWhenStateUnreadable(t *testing.T) {
 		t.Fatalf("Daemon() returned an error; unhealthy is an answer: %v", err)
 	}
 	faults := got.GetSuccess().GetUnhealthy().GetFaults()
-	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), FaultKindStateUnreadable) {
+	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), KindStateUnreadable) {
 		t.Fatalf("Daemon() faults = %v, want the state-unreadable self-check fault", faults)
 	}
 }
@@ -151,7 +151,7 @@ func TestSessionAbsentSessionIsAnUnhealthyAnswer(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 	faults := got.GetSuccess().GetUnhealthy().GetFaults()
-	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), FaultKindSessionAbsent) {
+	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), KindSessionAbsent) {
 		t.Fatalf("Session() faults = %v, want the session-absent fault", faults)
 	}
 }
@@ -169,7 +169,7 @@ func TestSessionSeveredLinkIsAnUnhealthyAnswer(t *testing.T) {
 		t.Fatalf("Session: %v", err)
 	}
 	faults := got.GetSuccess().GetUnhealthy().GetFaults()
-	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), FaultKindLinkSevered) {
+	if len(faults) != 1 || !strings.HasPrefix(faults[0].GetDetail(), KindLinkSevered) {
 		t.Fatalf("Session() faults = %v, want the link-severed fault", faults)
 	}
 }

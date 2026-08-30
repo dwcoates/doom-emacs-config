@@ -177,6 +177,13 @@ type Verbs interface {
 	// verbatim. The daemon validates the workspace and opens nothing itself;
 	// there is no ack and no command loop.
 	OpenInEditor(ctx context.Context, ws ids.WorkspaceID, path string, line *uint32) error
+	// OnOneShotTurnConcluded is the TURN-TERMINAL hook for a one-shot
+	// workspace's finish action: the prompt queue calls it when a turn
+	// concludes with the success marker, and this package does NOT detect the
+	// terminal itself. The action is the one recorded in the creation job at
+	// creation, and it is SPENT when it runs, so a second conclusion takes it
+	// exactly once.
+	OnOneShotTurnConcluded(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) error
 	// Notify raises one host notification: it relays the TYPED notification
 	// onto the workspace's host stream and sets the roster's attention marker,
 	// which SelectWorkspace clears. It is the session watcher's LifecycleSink
@@ -249,10 +256,6 @@ type Deps struct {
 	SplicePrompt PromptSplicer
 	// Now supplies the instants the verbs stamp. nil means time.Now.
 	Now func() time.Time
-	// EvictLogSink drops one workspace's durable log sink when the workspace
-	// closes, releasing the shared descriptor. It is a function because
-	// dlog.Surfaces does not expose eviction yet; nil leaves the sink open.
-	EvictLogSink func(dir string) error
 }
 
 // PromptLoader reads one brief by name from a prompts directory at use time.
