@@ -550,8 +550,14 @@ export function drawFooterStatusActivityRateLimited(
  * cell PAINTS it (`tones.ts`) instead of parking a word in a title nobody
  * reads: green while there is headroom, yellow on the vendor's own warning, red
  * once a call would be rejected. The arm rides as `data-arm` and its sentence
- * as the title. An UNSET status is a malformed view — a rate-limit line whose
- * standing nobody stated is not a line to draw uncoloured.
+ * as the title.
+ *
+ * AN UNSET STATUS IS LEGAL AND MEANS "NO VERDICT YET". The figures are sampled
+ * from the account's usage and are true the moment they are pushed; the vendor's
+ * verdict arrives later, on its own rate-limit event. So an allowance with no
+ * arm draws its percentage and its reset countdown UNPAINTED and untitled —
+ * absence of a verdict, not a verdict of its own — and gains the colour, the
+ * title and the `data-arm` on the push that carries one.
  */
 export function drawFooterAllowance(
   u: FooterAllowance,
@@ -559,17 +565,22 @@ export function drawFooterAllowance(
   deps: StripDeps,
   path: string,
 ): HTMLElement {
-  const status = requireCase(u.status, `${path}.status`);
+  const status = u.status.case === undefined ? null : u.status;
   const span = document.createElement("span");
-  span.className = `footer-allowance arm-${status.case} ${allowanceStatusClass(status.case)}`;
+  span.className =
+    status === null
+      ? "footer-allowance"
+      : `footer-allowance arm-${status.case} ${allowanceStatusClass(status.case)}`;
   span.setAttribute("data-allowance", label);
-  span.setAttribute("data-arm", status.case);
+  if (status !== null) {
+    span.setAttribute("data-arm", status.case);
+    span.title = allowanceStatusTitle(status, `${path}.status`);
+  }
   if (u.newsworthy) span.setAttribute("data-newsworthy", "true");
   if (u.newsworthy) span.classList.add("footer-allowance-newsworthy");
-  span.title = allowanceStatusTitle(status, `${path}.status`);
-  log("debug", `drawing the ${label} allowance as ${status.case}`, {
+  log("debug", `drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`, {
     operation: "footer.strip.allowance",
-    context: { allowance: label, status: status.case, newsworthy: u.newsworthy },
+    context: { allowance: label, status: status?.case, newsworthy: u.newsworthy },
   });
 
   span.appendChild(document.createTextNode(`${label} `));
