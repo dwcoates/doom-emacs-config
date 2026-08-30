@@ -21,6 +21,8 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -653,3 +655,106 @@ func TestEveryBashRunIsNamedByItsSpawningCall(t *testing.T) {
 		t.Fatal("the corpus produced no bash rows, so the identity was never checked")
 	}
 }
+
+// contextTipRecordUUID is the vendor's own uuid on the checked-in
+// `attachments/context_tip.jsonl` capture — a record the mapping deliberately
+// withholds, so it lands as residue and its KEY is observable.
+const contextTipRecordUUID = "91f90641-c528-4a97-aad0-6936bdadea70"
+
+// TestGoldenCorpusResidueIsKeyedByTheVendorsRecordUuid pins the residue key
+// LITERALLY, against a real capture.
+//
+// THE KEY IS A CROSS-PLANE AGREEMENT, not an internal detail. The shim sees the
+// same vendor record and may store it as residue too; only a key both planes
+// mint identically collapses the two writes onto one row. Nothing asserted this
+// spelling before, which is how a plane-local digest survived as the key for as
+// long as it did — so it is pinned here as an exact string.
+func TestGoldenCorpusResidueIsKeyedByTheVendorsRecordUuid(t *testing.T) {
+	// Arrange + Act.
+	entries := driveWholeCorpus(t)
+
+	// Assert.
+	var found bool
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetUnservedItem().GetVendorSpecific().GetKind() != "attachment/context_tip" {
+			continue
+		}
+		found = true
+		if got := e.GetUpsertKey(); got != "residue:"+contextTipRecordUUID {
+			t.Fatalf("residue key = %q, want %q", got, "residue:"+contextTipRecordUUID)
+		}
+	}
+	if !found {
+		t.Fatal("the context_tip capture produced no residue, so the key was never checked")
+	}
+}
+
+// TestGoldenCorpusEveryUuidBearingResidueIsKeyedByThatUuid generalizes the pin
+// across every residue entry the whole corpus produces: none of them may key on
+// anything but the record's own uuid.
+func TestGoldenCorpusEveryUuidBearingResidueIsKeyedByThatUuid(t *testing.T) {
+	// Arrange + Act.
+	entries := driveWholeCorpus(t)
+
+	// Assert.
+	var checked int
+	for _, e := range entries {
+		key := e.GetUpsertKey()
+		if !strings.HasPrefix(key, "residue:") || strings.HasPrefix(key, "residue:file:") {
+			continue
+		}
+		checked++
+		uuid := strings.TrimPrefix(key, "residue:")
+		if _, err := parseUUIDish(uuid); err != nil {
+			t.Errorf("residue key %q does not name a vendor record uuid: %v", key, err)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("the corpus produced no uuid-keyed residue, so nothing was checked")
+	}
+}
+
+// TestAnUnparsedLineIsKeyedByItsFileCoordinates pins the OTHER space: a line the
+// reader could not decode has no uuid — that is why it is unparsed — so there is
+// nothing the other plane could agree on and it keys on where it lives.
+func TestAnUnparsedLineIsKeyedByItsFileCoordinates(t *testing.T) {
+	// Arrange.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/projects/proj/session-uuid.jsonl", "session-uuid")
+	frames := []tail.Frame{{Raw: []byte("{not json"), Offset: 4096, ParseErr: errUnparsable}}
+
+	// Act.
+	entries := h.Handle(frames, ctx)
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	want := "residue:file:/p/projects/proj/session-uuid.jsonl:4096"
+	if got := entries[0].GetUpsertKey(); got != want {
+		t.Fatalf("unparsed key = %q, want %q", got, want)
+	}
+}
+
+// parseUUIDish checks the shape of a vendor record uuid without importing a
+// uuid package: 8-4-4-4-12 hex, which every captured record carries.
+func parseUUIDish(s string) (string, error) {
+	groups := strings.Split(s, "-")
+	want := []int{8, 4, 4, 4, 12}
+	if len(groups) != len(want) {
+		return "", fmt.Errorf("have %d dash-separated groups, want %d", len(groups), len(want))
+	}
+	for i, g := range groups {
+		if len(g) != want[i] {
+			return "", fmt.Errorf("group %d is %d chars, want %d", i, len(g), want[i])
+		}
+		for _, r := range g {
+			if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+				return "", fmt.Errorf("group %d holds a non-hex byte %q", i, r)
+			}
+		}
+	}
+	return s, nil
+}
+
+var errUnparsable = errors.New("invalid character 'n' looking for beginning of object key string")

@@ -354,3 +354,91 @@ func toSet(counts map[string]int) map[string]bool {
 	}
 	return out
 }
+
+// TestOneVendorRecordIngestedTwiceIsOneResidueRow asserts the point of keying
+// residue by the vendor's own uuid: the SAME record read again lands on the SAME
+// row rather than beside itself.
+//
+// A RE-READ IS THE ORDINARY CASE, not an edge one — the boot rewind re-reads the
+// in-progress turn on every restart by design, and the store absorbs the replay
+// only because the key and the write id are both identical. With a plane-local
+// key (a digest of the file position, say) this would still have passed, which
+// is why the assertion also pins that the key is the record's uuid.
+func TestOneVendorRecordIngestedTwiceIsOneResidueRow(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	opts := defaultSidecarOptions(t, fake.Socket, tree)
+
+	// Act: ingest the whole file, stop, and start again over a store that holds
+	// no cursor, so every record is necessarily read a second time.
+	first := startSidecar(t, opts)
+	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
+	for _, line := range captured.Lines {
+		g.AppendLine(line)
+	}
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+	firstPass := residueWriteIDsByKey(fake.Entries())
+	first.Stop()
+
+	before := fake.BatchCount()
+	startSidecar(t, opts)
+	fake.awaitBatches(ctx, t, before+1)
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+	secondPass := residueWriteIDsByKey(fake.Entries()[countEntriesInBatches(fake.Batches()[:before]):])
+
+	// Assert: the second pass introduced no new residue row, and every row it
+	// re-wrote carries the identical write id — which is what makes the store
+	// absorb it rather than store the record twice.
+	if len(firstPass) == 0 {
+		t.Fatal("the capture produced no residue at all, so nothing was checked")
+	}
+	var uuidKeyed int
+	for key, id := range secondPass {
+		was, seen := firstPass[key]
+		if !seen {
+			t.Errorf("the re-read minted a NEW residue row %q; one record must land on one row", key)
+			continue
+		}
+		if was != id {
+			t.Errorf("residue row %q minted write_id %q then %q; the store cannot absorb a replay that changed identity",
+				key, was, id)
+		}
+		if !strings.HasPrefix(key, "residue:file:") {
+			uuidKeyed++
+		}
+	}
+	// The key must be the VENDOR'S uuid, which is the only thing the other plane
+	// could agree on: a plane-local key would satisfy everything above and still
+	// leave one record as two rows across the two producers.
+	if uuidKeyed == 0 {
+		t.Fatalf("no residue row was keyed by a vendor record uuid; keys were %v",
+			sortedStrings(keysOf(toSetOfKeys(secondPass))))
+	}
+}
+
+// residueWriteIDsByKey indexes each residue row's write id by its upsert key.
+func residueWriteIDsByKey(entries []*storev1.StoreEntry) map[string]string {
+	out := map[string]string{}
+	for _, e := range entries {
+		if e.GetAgentUpdate().GetUnservedItem() == nil {
+			continue
+		}
+		if !strings.HasPrefix(e.GetUpsertKey(), "residue:") {
+			continue
+		}
+		out[e.GetUpsertKey()] = e.GetWriteId()
+	}
+	return out
+}
+
+func toSetOfKeys(in map[string]string) map[string]bool {
+	out := make(map[string]bool, len(in))
+	for k := range in {
+		out[k] = true
+	}
+	return out
+}
