@@ -56,7 +56,7 @@ func (s *Server) withResponseFlusher(next http.Handler) http.Handler {
 func (s *Server) openStream(ctx context.Context, log *logging.Logger, operation string) error {
 	flusher, ok := ctx.Value(responseFlusherKey{}).(http.Flusher)
 	if !ok {
-		ref := refuse(SiteStreamNotFlushable, "watch: this stream's transport cannot flush its headers, so the tail could never be opened")
+		ref := refuse(SiteStreamNotFlushable, "", "watch: this stream's transport cannot flush its headers, so the tail could never be opened")
 		s.logOwnFailure(log, operation, ref, logging.Fields{})
 		return connect.NewError(connect.CodeInternal, ref)
 	}

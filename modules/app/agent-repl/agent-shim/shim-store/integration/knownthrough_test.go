@@ -119,14 +119,13 @@ func TestStaleKnownThroughPointerIsRefused(t *testing.T) {
 	pointerInAnotherBook := &storev1.StoreItemPointer{Value: pagePointers(otherBook.GetPage())[0]}
 
 	// Act.
-	detail := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
+	failure := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
 		Agent:        agentID("main"),
 		PageSize:     10,
 		KnownThrough: pointerInAnotherBook,
 	})
 
-	// Assert.
-	if detail == "" {
-		t.Errorf("the stale-pointer refusal carried no detail")
-	}
+	// Assert: a well-formed pointer naming no row of THIS book is stale, not
+	// malformed — the caller's recovery is a repaint, not a bug fix.
+	assertOpenStalePointer(t, failure)
 }
