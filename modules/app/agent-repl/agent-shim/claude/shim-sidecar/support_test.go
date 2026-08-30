@@ -34,8 +34,15 @@ type fakeStore struct {
 	cursorsCalls int
 
 	writeFail  string // non-empty: answer the failure arm
-	writes     []*storev1.EntryBatch
-	writeCalls int
+	// writeInvalidField, when set alongside writeFail, answers the
+	// invalid_request arm naming this field — the refusal a retry CANNOT help
+	// with. Left empty the failure carries the storage_failure arm, which is
+	// the recoverable one. A kind-less failure is a separate, deliberately
+	// illegal shape: writeKindless.
+	writeInvalidField string
+	writeKindless     bool
+	writes            []*storev1.EntryBatch
+	writeCalls        int
 }
 
 func (f *fakeStore) GetSidecarCursors(_ context.Context, _ *connect.Request[storev1.GetSidecarCursorsRequest]) (*connect.Response[storev1.GetSidecarCursorsResponse], error) {
@@ -58,10 +65,22 @@ func (f *fakeStore) WriteBatch(_ context.Context, request *connect.Request[store
 	f.writeCalls++
 	f.writes = append(f.writes, request.Msg.GetBatch())
 	if f.writeFail != "" {
+		failure := &storev1.WriteBatchFailure{Detail: f.writeFail}
+		switch {
+		case f.writeKindless:
+			// Deliberately illegal on this contract, so the sidecar's own
+			// handling of a store that violates it can be exercised.
+		case f.writeInvalidField != "":
+			failure.Kind = &storev1.WriteBatchFailure_InvalidRequest{
+				InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: f.writeInvalidField},
+			}
+		default:
+			failure.Kind = &storev1.WriteBatchFailure_StorageFailure{
+				StorageFailure: &storev1.WriteBatchStorageFailure{},
+			}
+		}
 		return connect.NewResponse(&storev1.WriteBatchResponse{
-			Result: &storev1.WriteBatchResponse_Failure{
-				Failure: &storev1.WriteBatchFailure{Detail: f.writeFail},
-			},
+			Result: &storev1.WriteBatchResponse_Failure{Failure: failure},
 		}), nil
 	}
 	return connect.NewResponse(&storev1.WriteBatchResponse{

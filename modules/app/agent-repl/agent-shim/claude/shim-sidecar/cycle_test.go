@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -679,5 +680,186 @@ func TestASettledRunIsNeverConcludedLost(t *testing.T) {
 	// Assert.
 	if strings.Contains(h.logText(), "run concluded LOST") {
 		t.Fatalf("a run that ended on its own EXIT marker was restated LOST: %s", h.logText())
+	}
+}
+
+// ---- ruling R-S2: the refusal's KIND decides what the cycle does about it ----
+
+func TestAnInvalidRequestParksOnlyTheOffendingFile(t *testing.T) {
+	// Arrange. THE REFUSAL IS A PRODUCER DEFECT, NOT AN OUTAGE: the store is
+	// reachable and answering, so suspending the whole file plane over one
+	// malformed batch would stop every other file for a defect in one.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	first := h.transcript(t, "sess-1", promptLine)
+	second := h.transcript(t, "sess-2", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "entry 0 carries no upsert_key"
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+
+	// Act: one pass in which both files offer a batch.
+	h.sc.pollAll()
+
+	// Assert: production is NOT suspended, and the other file was still read.
+	if h.sc.cursors == nil {
+		t.Fatal("an invalid_request suspended production; it is a producer defect, not an outage")
+	}
+	if len(h.sc.parked) != 2 {
+		t.Fatalf("parked %v, want both files parked once each refused its own batch", h.sc.parked)
+	}
+	if _, watched := h.sc.watchers[first]; !watched {
+		t.Fatalf("the refused file's tailer was dropped; its cursor must stay where the store has it")
+	}
+	if _, watched := h.sc.watchers[second]; !watched {
+		t.Fatal("the second file's tailer was dropped by the first file's refusal")
+	}
+}
+
+func TestAParkedFileIsNeverReadAgain(t *testing.T) {
+	// Arrange. Re-reading the same durable bytes re-mints the SAME rejected
+	// batch, forever: a tight identical replay loop that makes no progress and
+	// drowns the log.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "entry 0 carries no upsert_key"
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+	h.sc.pollAll()
+	refusedAt := store.writeCalls
+
+	// Act: two further passes over the same unchanged bytes.
+	h.sc.pollAll()
+	h.sc.pollAll()
+
+	// Assert.
+	if store.writeCalls != refusedAt {
+		t.Fatalf("the parked file was written %d more time(s); a rejected batch must never be replayed identically",
+			store.writeCalls-refusedAt)
+	}
+}
+
+func TestParkingSurvivesAStoreOutage(t *testing.T) {
+	// Arrange. A suspension drops every tailer, and a resumed cycle rebuilds
+	// them — but an outage in between does not make a producer defect go away,
+	// so the parked file must not be quietly un-parked and replayed.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "entry 0 carries no upsert_key"
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+	h.sc.pollAll()
+	store.writeFail, store.writeInvalidField = "", ""
+
+	// Act: an outage, then a full recovery.
+	h.sc.suspend("a store bounce", errors.New("connection refused"))
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle after the outage: %v", err)
+	}
+	before := store.writeCalls
+	h.sc.pollAll()
+
+	// Assert.
+	if !h.sc.parked[path] {
+		t.Fatal("the outage un-parked a file the store said it can never accept")
+	}
+	if store.writeCalls != before {
+		t.Fatalf("the parked file was replayed %d time(s) after the outage", store.writeCalls-before)
+	}
+}
+
+func TestTheProducerDefectIsStatedWithTheStoresOwnField(t *testing.T) {
+	// Arrange. The field the store named, the write ids it rejected and the file
+	// position they were read at are the ONLY way anyone finds the bug, so they
+	// ride dedicated keys rather than prose.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "entry 0 carries no upsert_key"
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	text := h.logText()
+	for _, want := range []string{
+		`"operation":"producer-defect"`,
+		`"level":"error"`,
+		`"refusal_kind":"invalid_request"`,
+		`"field":"batch.entries[0].upsert_key"`,
+		`"write_ids":`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the producer-defect record does not carry %s; it read:\n%s", want, text)
+		}
+	}
+	if got := strings.Count(text, `"operation":"producer-defect"`); got != 1 {
+		t.Errorf("the defect was stated %d times, want exactly once per refused batch", got)
+	}
+}
+
+func TestAStorageFailureStillSuspendsProduction(t *testing.T) {
+	// Arrange. The other arm: the transaction failed in the DATABASE and a retry
+	// may succeed, which is the outage the recover-cursors-then-rescan cycle
+	// exists for. Parking a file over it would abandon a file the store will
+	// happily take next time.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "database is locked"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if h.sc.cursors != nil {
+		t.Fatal("a storage_failure did not suspend production")
+	}
+	if h.sc.parked[path] {
+		t.Fatal("a storage_failure parked the file; a retry of those same bytes may well succeed")
+	}
+}
+
+func TestAKindLessFailureIsStatedAsAContractViolationAndSuspends(t *testing.T) {
+	// Arrange. An unset oneof is illegal here — the kind is the arm that says
+	// whether a retry can help — so a store that omits it has told the producer
+	// nothing actionable. It is stated at ERROR and then treated as the
+	// RECOVERABLE kind, so the sidecar keeps trying rather than parking a file
+	// on a verdict the store never gave.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	path := h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "something went wrong"
+	store.writeKindless = true
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	if h.sc.parked[path] {
+		t.Fatal("a kind-less failure parked the file; the store never said the batch was invalid")
+	}
+	if h.sc.cursors != nil {
+		t.Fatal("a kind-less failure did not suspend production; it is treated as a storage failure")
+	}
+	if !strings.Contains(h.logText(), "refused with NO failure kind") {
+		t.Fatalf("the contract violation was not stated; the log read:\n%s", h.logText())
 	}
 }
