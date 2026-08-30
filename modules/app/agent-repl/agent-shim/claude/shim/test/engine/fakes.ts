@@ -294,9 +294,12 @@ export class RecordingFold implements EngineFold {
 /** A scheduler that never schedules; the suite fires the beat itself. */
 export class ManualScheduler implements KeepaliveScheduler {
   readonly handlers: (() => void)[] = [];
+  /** The interval each handler was scheduled at, in the same order. */
+  readonly intervals: number[] = [];
   cleared = 0;
-  setInterval(handler: () => void): unknown {
+  setInterval(handler: () => void, intervalMs: number): unknown {
     this.handlers.push(handler);
+    this.intervals.push(intervalMs);
     return this.handlers.length - 1;
   }
   clearInterval(): void {
