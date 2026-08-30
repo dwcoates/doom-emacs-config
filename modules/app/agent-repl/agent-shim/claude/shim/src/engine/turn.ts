@@ -601,7 +601,10 @@ export class TurnEngine {
   async stopBash(request: shimv1.StopBashRequest): Promise<shimv1.StopBashResponse> {
     const work = request.work;
     if (work === undefined) throw new Error("shim turn: StopBash reached the engine with no work id");
-    const entry = this.session.live.get(work.value);
+    // A HANDLE NAMES THE SPAWNING CALL (ruling, landing 3), not the vendor's
+    // task id — so the resolution is by tool_use_id, and the task id it finds is
+    // the internal address `stopTask` wants.
+    const entry = this.session.live.byToolUseId(work.value);
     if (entry === undefined) {
       return stopBashRefused(
         { kind: "unknownWork" },

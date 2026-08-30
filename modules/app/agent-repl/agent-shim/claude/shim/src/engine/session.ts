@@ -1333,10 +1333,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // RE-ADOPTED WORK IS ANNOUNCED `created`, NEVER `detached`: a daemon that
     // restarted was not there for the original announcement and has no element
     // to continue, so it must be told what the work IS.
-    const readopted = announceLiveWork(book, open.liveDetached.filter((work) => live.get(work.value) !== undefined || live.byToolUseId(work.value) !== undefined));
+    // A HANDLE NAMES THE SPAWNING CALL, so "does the revived vendor still have
+    // it" is a lookup by tool_use_id and never by the vendor's own task id.
+    const survives = (work: conversationv1.DetachedWorkId): boolean =>
+      live.byToolUseId(work.value) !== undefined;
+    const readopted = announceLiveWork(book, open.liveDetached.filter(survives));
 
     for (const work of open.liveDetached) {
-      if (live.get(work.value) !== undefined || live.byToolUseId(work.value) !== undefined) continue;
+      if (survives(work)) continue;
       // The vendor no longer has it and nobody stopped it: we simply stopped
       // being able to see it, which is what `lost.swept_up` says.
       //
