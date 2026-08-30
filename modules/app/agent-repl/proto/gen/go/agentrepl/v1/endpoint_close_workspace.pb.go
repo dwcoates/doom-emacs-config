@@ -205,11 +205,16 @@ func (*CloseWorkspaceSuccess) Descriptor() ([]byte, []int) {
 }
 
 // THE ARM IS THE REFUSAL.
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type CloseWorkspaceError struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Cause:
 	//
 	//	*CloseWorkspaceError_Blocked
+	//	*CloseWorkspaceError_UnknownWorkspace
+	//	*CloseWorkspaceError_WorkspaceRefMismatch
+	//	*CloseWorkspaceError_TransferringAway
+	//	*CloseWorkspaceError_NotYetAdopted
 	Cause         isCloseWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -261,17 +266,81 @@ func (x *CloseWorkspaceError) GetBlocked() *CloseWorkspaceBlocked {
 	return nil
 }
 
+func (x *CloseWorkspaceError) GetUnknownWorkspace() *CloseWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *CloseWorkspaceError) GetWorkspaceRefMismatch() *CloseWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *CloseWorkspaceError) GetTransferringAway() *CloseWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *CloseWorkspaceError) GetNotYetAdopted() *CloseWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
 type isCloseWorkspaceError_Cause interface {
 	isCloseWorkspaceError_Cause()
 }
 
 type CloseWorkspaceError_Blocked struct {
 	// Work is in flight; the footer's close-blocked state carries the
-	// reasons. Further arms DERIVED at the wave.
+	// reasons.
 	Blocked *CloseWorkspaceBlocked `protobuf:"bytes,1,opt,name=blocked,proto3,oneof"`
 }
 
+type CloseWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *CloseWorkspaceUnknownWorkspace `protobuf:"bytes,2,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type CloseWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *CloseWorkspaceWorkspaceRefMismatch `protobuf:"bytes,3,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type CloseWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *CloseWorkspaceTransferringAway `protobuf:"bytes,4,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type CloseWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *CloseWorkspaceNotYetAdopted `protobuf:"bytes,5,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
 func (*CloseWorkspaceError_Blocked) isCloseWorkspaceError_Cause() {}
+
+func (*CloseWorkspaceError_UnknownWorkspace) isCloseWorkspaceError_Cause() {}
+
+func (*CloseWorkspaceError_WorkspaceRefMismatch) isCloseWorkspaceError_Cause() {}
+
+func (*CloseWorkspaceError_TransferringAway) isCloseWorkspaceError_Cause() {}
+
+func (*CloseWorkspaceError_NotYetAdopted) isCloseWorkspaceError_Cause() {}
 
 type CloseWorkspaceBlocked struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -309,6 +378,168 @@ func (*CloseWorkspaceBlocked) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{4}
 }
 
+type CloseWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseWorkspaceUnknownWorkspace) Reset() {
+	*x = CloseWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *CloseWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*CloseWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+type CloseWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = CloseWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *CloseWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*CloseWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CloseWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type CloseWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseWorkspaceTransferringAway) Reset() {
+	*x = CloseWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *CloseWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*CloseWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *CloseWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type CloseWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseWorkspaceNotYetAdopted) Reset() {
+	*x = CloseWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *CloseWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*CloseWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{8}
+}
+
 var File_agentrepl_v1_endpoint_close_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc = "" +
@@ -320,11 +551,21 @@ const file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.CloseWorkspaceSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.CloseWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15CloseWorkspaceSuccess\"_\n" +
+	"\x15CloseWorkspaceSuccess\"\xd8\x03\n" +
 	"\x13CloseWorkspaceError\x12?\n" +
-	"\ablocked\x18\x01 \x01(\v2#.agentrepl.v1.CloseWorkspaceBlockedH\x00R\ablockedB\a\n" +
+	"\ablocked\x18\x01 \x01(\v2#.agentrepl.v1.CloseWorkspaceBlockedH\x00R\ablocked\x12[\n" +
+	"\x11unknown_workspace\x18\x02 \x01(\v2,.agentrepl.v1.CloseWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
+	"\x16workspace_ref_mismatch\x18\x03 \x01(\v20.agentrepl.v1.CloseWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
+	"\x11transferring_away\x18\x04 \x01(\v2,.agentrepl.v1.CloseWorkspaceTransferringAwayH\x00R\x10transferringAway\x12S\n" +
+	"\x0fnot_yet_adopted\x18\x05 \x01(\v2).agentrepl.v1.CloseWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
 	"\x05cause\"\x17\n" +
-	"\x15CloseWorkspaceBlockedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x15CloseWorkspaceBlocked\" \n" +
+	"\x1eCloseWorkspaceUnknownWorkspace\"G\n" +
+	"\"CloseWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
+	"\x1eCloseWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
+	"\x1bCloseWorkspaceNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_close_workspace_proto_rawDescOnce sync.Once
@@ -338,25 +579,33 @@ func file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_close_workspace_proto_goTypes = []any{
-	(*CloseWorkspaceRequest)(nil),  // 0: agentrepl.v1.CloseWorkspaceRequest
-	(*CloseWorkspaceResponse)(nil), // 1: agentrepl.v1.CloseWorkspaceResponse
-	(*CloseWorkspaceSuccess)(nil),  // 2: agentrepl.v1.CloseWorkspaceSuccess
-	(*CloseWorkspaceError)(nil),    // 3: agentrepl.v1.CloseWorkspaceError
-	(*CloseWorkspaceBlocked)(nil),  // 4: agentrepl.v1.CloseWorkspaceBlocked
-	(*v1.WorkspaceRef)(nil),        // 5: workspace.v1.WorkspaceRef
+	(*CloseWorkspaceRequest)(nil),              // 0: agentrepl.v1.CloseWorkspaceRequest
+	(*CloseWorkspaceResponse)(nil),             // 1: agentrepl.v1.CloseWorkspaceResponse
+	(*CloseWorkspaceSuccess)(nil),              // 2: agentrepl.v1.CloseWorkspaceSuccess
+	(*CloseWorkspaceError)(nil),                // 3: agentrepl.v1.CloseWorkspaceError
+	(*CloseWorkspaceBlocked)(nil),              // 4: agentrepl.v1.CloseWorkspaceBlocked
+	(*CloseWorkspaceUnknownWorkspace)(nil),     // 5: agentrepl.v1.CloseWorkspaceUnknownWorkspace
+	(*CloseWorkspaceWorkspaceRefMismatch)(nil), // 6: agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch
+	(*CloseWorkspaceTransferringAway)(nil),     // 7: agentrepl.v1.CloseWorkspaceTransferringAway
+	(*CloseWorkspaceNotYetAdopted)(nil),        // 8: agentrepl.v1.CloseWorkspaceNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                    // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_close_workspace_proto_depIdxs = []int32{
-	5, // 0: agentrepl.v1.CloseWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 0: agentrepl.v1.CloseWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.CloseWorkspaceResponse.success:type_name -> agentrepl.v1.CloseWorkspaceSuccess
 	3, // 2: agentrepl.v1.CloseWorkspaceResponse.error:type_name -> agentrepl.v1.CloseWorkspaceError
 	4, // 3: agentrepl.v1.CloseWorkspaceError.blocked:type_name -> agentrepl.v1.CloseWorkspaceBlocked
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: agentrepl.v1.CloseWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.CloseWorkspaceUnknownWorkspace
+	6, // 5: agentrepl.v1.CloseWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch
+	7, // 6: agentrepl.v1.CloseWorkspaceError.transferring_away:type_name -> agentrepl.v1.CloseWorkspaceTransferringAway
+	8, // 7: agentrepl.v1.CloseWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.CloseWorkspaceNotYetAdopted
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_close_workspace_proto_init() }
@@ -370,6 +619,10 @@ func file_agentrepl_v1_endpoint_close_workspace_proto_init() {
 	}
 	file_agentrepl_v1_endpoint_close_workspace_proto_msgTypes[3].OneofWrappers = []any{
 		(*CloseWorkspaceError_Blocked)(nil),
+		(*CloseWorkspaceError_UnknownWorkspace)(nil),
+		(*CloseWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*CloseWorkspaceError_TransferringAway)(nil),
+		(*CloseWorkspaceError_NotYetAdopted)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -377,7 +630,7 @@ func file_agentrepl_v1_endpoint_close_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

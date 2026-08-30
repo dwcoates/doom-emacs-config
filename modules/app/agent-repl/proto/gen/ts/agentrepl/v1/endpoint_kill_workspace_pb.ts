@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_kill_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_kill_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfa2lsbF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChRLaWxsV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVLaWxsV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRLaWxsV29ya3NwYWNlU3VjY2VzcyIUChJLaWxsV29ya3NwYWNlRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfa2lsbF93b3Jrc3BhY2UucHJvdG8SDGFnZW50cmVwbC52MSJFChRLaWxsV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIosBChVLaWxsV29ya3NwYWNlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlU3VjY2Vzc0gAEjEKBWVycm9yGAIgASgLMiAuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIWChRLaWxsV29ya3NwYWNlU3VjY2VzcyLJAgoSS2lsbFdvcmtzcGFjZUVycm9yEkgKEXVua25vd25fd29ya3NwYWNlGAEgASgLMisuYWdlbnRyZXBsLnYxLktpbGxXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASUQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIvLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJIChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIrLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkMKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIoLmFnZW50cmVwbC52MS5LaWxsV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIh8KHUtpbGxXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjkKIUtpbGxXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMAodS2lsbFdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIcChpLaWxsV29ya3NwYWNlTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.KillWorkspaceRequest
@@ -87,12 +87,48 @@ export const KillWorkspaceSuccessSchema: GenMessage<KillWorkspaceSuccess> = /*@_
   messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unregistered
- * workspace; nothing live to kill is a SUCCESS, not an error).
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.KillWorkspaceError
  */
 export type KillWorkspaceError = Message<"agentrepl.v1.KillWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.KillWorkspaceError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.KillWorkspaceUnknownWorkspace unknown_workspace = 1;
+     */
+    value: KillWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.KillWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: KillWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.KillWorkspaceTransferringAway transferring_away = 3;
+     */
+    value: KillWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.KillWorkspaceNotYetAdopted not_yet_adopted = 4;
+     */
+    value: KillWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -101,4 +137,68 @@ export type KillWorkspaceError = Message<"agentrepl.v1.KillWorkspaceError"> & {
  */
 export const KillWorkspaceErrorSchema: GenMessage<KillWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.KillWorkspaceUnknownWorkspace
+ */
+export type KillWorkspaceUnknownWorkspace = Message<"agentrepl.v1.KillWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.KillWorkspaceUnknownWorkspace.
+ * Use `create(KillWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const KillWorkspaceUnknownWorkspaceSchema: GenMessage<KillWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
+ */
+export type KillWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.KillWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.KillWorkspaceWorkspaceRefMismatch.
+ * Use `create(KillWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const KillWorkspaceWorkspaceRefMismatchSchema: GenMessage<KillWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.KillWorkspaceTransferringAway
+ */
+export type KillWorkspaceTransferringAway = Message<"agentrepl.v1.KillWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.KillWorkspaceTransferringAway.
+ * Use `create(KillWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const KillWorkspaceTransferringAwaySchema: GenMessage<KillWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.KillWorkspaceNotYetAdopted
+ */
+export type KillWorkspaceNotYetAdopted = Message<"agentrepl.v1.KillWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.KillWorkspaceNotYetAdopted.
+ * Use `create(KillWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const KillWorkspaceNotYetAdoptedSchema: GenMessage<KillWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_kill_workspace, 7);
 
