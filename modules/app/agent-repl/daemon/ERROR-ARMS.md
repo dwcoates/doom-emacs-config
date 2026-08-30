@@ -58,3 +58,15 @@ the same commit that switches the handler onto it.
 | Interrupt | `unknown_work` | the shim's `StopBashFailure.unknown_work`: the addressed detached shell is stale | workspace |
 | Interrupt | `live`, `not_the_open_turn`, `no_session` | the shim's `KillTurnFailure` cause, propagated by name | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `unspecified` | a shim failure whose `kind` oneof is unset — illegal on the wire, surfaced rather than guessed at | workspace |
+
+## Landing-4 batch must also answer (e2e seam, project lead request)
+
+1. Final names of the arms the suite asserts: `transferring_away{address}`,
+   `not_yet_adopted{}`, and the DaemonFault / SessionFault / HostFault kind
+   arms.
+2. The merge test-gate invocation: command line, cwd, env, how pass/fail is
+   read, and its AGENT_REPL_* fake knob.
+3. The `.claude.json` key path the daemon reads (and writes, if any) for the
+   CLAUDE_CONFIG_DIR project entry.
+4. The metaprompt sentinels (exact strings) the daemon wraps around a held or
+   merged prompt.
