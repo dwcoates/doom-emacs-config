@@ -51,6 +51,36 @@ message AnswerPermissionResponse {
 // Delivered. Empty on purpose: the card's new state is the feed's to push —
 // restating it here would be a second authority.
 message AnswerPermissionSuccess {}
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown card, already
-// answered, standing picked with none offered, no session).
-message AnswerPermissionError {}
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
+message AnswerPermissionError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AnswerPermissionUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AnswerPermissionWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    AnswerPermissionTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    AnswerPermissionNotYetAdopted not_yet_adopted = 4;
+    // The permission card is no longer standing.
+    AnswerPermissionAskNotStanding ask_not_standing = 5;
+    // A standing allow was picked where none was offered.
+    AnswerPermissionNoStandingOffer no_standing_offer = 6;
+    // The workspace has no session to answer to.
+    AnswerPermissionNoSession no_session = 7;
+  }
+}
+message AnswerPermissionUnknownWorkspace {}
+message AnswerPermissionWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message AnswerPermissionTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message AnswerPermissionNotYetAdopted {}
+message AnswerPermissionAskNotStanding {}
+message AnswerPermissionNoStandingOffer {}
+message AnswerPermissionNoSession {}
