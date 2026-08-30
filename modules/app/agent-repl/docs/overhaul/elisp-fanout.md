@@ -84,7 +84,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   on a signal. AGENTS.md owes a line on restoring a boundary in
   integration tests (R-SUITE-1 carries it). R-PUSHINVALID may be moot
   after the reader fix — re-run host/roster before dispatching it.
-- RUNNING: R-ARMS + R-LOGOP (`opus-low`) in elisp-agents/remed3.
+- R-ARMS + R-LOGOP MERGED (b00b2e58b): every `<Rpc>Error` arm set,
+  HostFault/SessionFault/DaemonFault kinds decoded and pinned; core.el
+  derives `operation` from the bare format string. Treatments still owed
+  (R-HANDOVER: transferring_away/not_yet_adopted in host.el).
+- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-VERBS (`opus-low`, remed5);
+  remediation-1 (opus-medium, remed1).
 - VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
   footer_allowance verbatim (f1132d3a7); merged, resolved to theirs; the
   files are identical on both branches. HostWorkspaceTransferred stays
