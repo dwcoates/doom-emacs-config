@@ -1,13 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import renderColors from "../../../proto/vocab/render-colors.json";
-import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import {
+  FooterAllowanceSchema,
+  FooterStatusSchema,
+} from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { FOOTER_STATUS_ARMS, protoArmName } from "../../src/vocab.js";
 import {
+  FOOTER_ALLOWANCE_STATUS_CASES,
   FOOTER_STATUS_CASES,
   STATUS_ARM_CLASS,
   activityDatumClass,
+  allowanceStatusClass,
   statusArmClass,
   type ActivityDatum,
 } from "../../src/footer/tones.js";
@@ -95,5 +100,48 @@ describe("activityDatumClass", () => {
     ["percent", "tone-yellow"],
   ])("gives %s the class %s", (datum, expected) => {
     expect(activityDatumClass(datum)).toBe(expected);
+  });
+});
+
+/** Every `FooterAllowance.status` arm, read off the generated schema. */
+const ALLOWANCE_SCHEMA_ARMS: readonly string[] = (
+  FooterAllowanceSchema.oneofs.find((oneof) => oneof.name === "status")?.fields ?? []
+).map((field) => field.localName);
+
+describe("FOOTER_ALLOWANCE_STATUS_CASES: the arm set is the schema's", () => {
+  it("names every arm the proto declares", () => {
+    expect([...FOOTER_ALLOWANCE_STATUS_CASES].sort()).toEqual([...ALLOWANCE_SCHEMA_ARMS].sort());
+  });
+
+  it("names the three arms the retired status string was replaced by", () => {
+    expect([...FOOTER_ALLOWANCE_STATUS_CASES].sort()).toEqual(
+      ["allowed", "allowedWarning", "rejected"].sort(),
+    );
+  });
+});
+
+describe("allowanceStatusClass", () => {
+  it.each(ALLOWANCE_SCHEMA_ARMS)("gives %s a colour", (arm) => {
+    expect(allowanceStatusClass(arm)).toMatch(/^tone-/);
+  });
+
+  it.each<[string, string]>([
+    // The traffic-light reading the arms already are: headroom, the vendor's
+    // own warning, and a call that would be refused.
+    ["allowed", "tone-green"],
+    ["allowedWarning", "tone-yellow"],
+    ["rejected", "tone-red"],
+  ])("gives %s the class %s", (arm, expected) => {
+    expect(allowanceStatusClass(arm)).toBe(expected);
+  });
+
+  it("refuses an allowance arm this table has no colour for", () => {
+    expect(() => allowanceStatusClass("throttled")).toThrow(MalformedView);
+  });
+
+  it("has no colour the schema does not declare an arm for", () => {
+    for (const arm of ["allowed", "allowedWarning", "rejected"]) {
+      expect(ALLOWANCE_SCHEMA_ARMS).toContain(arm);
+    }
   });
 });
