@@ -280,6 +280,22 @@ producer-side end that is a transport failure rather than a close."
                                                    (message . ,(cdr error))))))
                            (when abort '((abort . t)))))))
 
+(defun agent-repl-itest--gate (daemon method)
+  "Make DAEMON withhold METHOD\='s ANSWER until released.
+The request is still recorded and validated; only the response waits.
+This is how a scenario pins an ORDER — the handover\='s \"call
+AdoptHostWorkspace ... THEN cancel the old stream and re-subscribe\" is
+only observable while the adopt is in flight."
+  (agent-repl-itest--control-ok
+   daemon "/_fake/gate" (json-serialize `((method . ,method)))))
+
+(defun agent-repl-itest--release-gate (daemon method)
+  "Let every held call of METHOD on DAEMON answer, and disarm the gate.
+Releasing a gate nobody armed is a control-plane 400, so a scenario that
+lost track of what it held fails loudly."
+  (agent-repl-itest--control-ok
+   daemon "/_fake/gate" (json-serialize `((method . ,method) (release . t)))))
+
 (defun agent-repl-itest--calls (daemon &optional method)
   "Return DAEMON's recorded requests in order, optionally only METHOD's.
 Each entry is an alist with `method' and `body' (the request's protojson,
@@ -292,6 +308,16 @@ already parsed) — so an assertion reads the wire as the fake saw it."
 (defun agent-repl-itest--call-bodies (daemon method)
   "Return the recorded request bodies for METHOD on DAEMON, in order."
   (mapcar (lambda (call) (alist-get 'body call))
+          (agent-repl-itest--calls daemon method)))
+
+(defun agent-repl-itest--call-raw-bodies (daemon method)
+  "Return the RAW request bodies METHOD sent to DAEMON, in order.
+Each is the request string EXACTLY as the transport wrote it.  The
+parsed `body\=' is a re-marshal of the decoded message and so drops every
+zero-valued scalar — so an explicitly encoded `false\=' (which the
+contract requires for `force\=', `self_certified\=' and
+`add_to_merge_queue\=') can ONLY be asserted here."
+  (mapcar (lambda (call) (alist-get 'raw call))
           (agent-repl-itest--calls daemon method)))
 
 (defun agent-repl-itest--subscribers (daemon &optional stream workspace-id)
