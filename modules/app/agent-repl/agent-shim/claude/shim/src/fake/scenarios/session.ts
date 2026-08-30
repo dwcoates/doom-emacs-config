@@ -231,6 +231,11 @@ export const USAGE_FULL = usageScenario(
   "available",
   "SessionAccountUsage.outcome=available with EVERY window populated — five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage, each with utilization and resets_at — beside subscription_type",
 );
+export const USAGE_OPUS_ABSENT = usageScenario(
+  "usage-opus-absent",
+  "opus_absent",
+  "SessionAccountUsage.outcome=available with seven_day_opus UNSET — an absent optional window, which is not an unavailability",
+);
 export const USAGE_SERVICE_UNAVAILABLE = usageScenario(
   "usage-service-unavailable",
   "service_unavailable",
@@ -239,7 +244,7 @@ export const USAGE_SERVICE_UNAVAILABLE = usageScenario(
 export const USAGE_WINDOW_UNAVAILABLE = usageScenario(
   "usage-window-unavailable",
   "window_unavailable",
-  "SessionAccountUsage.outcome=unavailable reason=window_unavailable",
+  "SessionAccountUsage.outcome=unavailable reason=window_unavailable — the FIVE-HOUR window is null, which is what that reason means",
 );
 export const USAGE_UTILIZATION_UNAVAILABLE = usageScenario(
   "usage-utilization-unavailable",
@@ -499,6 +504,7 @@ export const SESSION_SCENARIOS = [
   MCP_HEALTHY,
   USAGE_AVAILABLE,
   USAGE_FULL,
+  USAGE_OPUS_ABSENT,
   USAGE_SERVICE_UNAVAILABLE,
   USAGE_WINDOW_UNAVAILABLE,
   USAGE_UTILIZATION_UNAVAILABLE,

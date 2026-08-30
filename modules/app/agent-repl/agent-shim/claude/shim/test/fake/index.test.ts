@@ -597,12 +597,34 @@ describe("the account-usage probe", () => {
     });
   });
 
-  it("answers a null WINDOW when one window is unavailable", async () => {
+  it("answers a null FIVE-HOUR window when the window is unavailable", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-window-unavailable"]);
+
+    // Assert. `SessionUsageWindowUnavailable` means "the service answered
+    // without a five-hour window" and nothing else, so nulling any other window
+    // would leave the reason unproducible while looking covered.
+    expect(answer.rate_limits?.five_hour).toBeNull();
+  });
+
+  it("leaves the OTHER windows present, so the two null shapes stay distinguishable", async () => {
     // Arrange + Act
     const answer = await usage(["!usage-window-unavailable"]);
 
     // Assert
-    expect(answer.rate_limits?.seven_day_opus).toBeNull();
+    expect(answer.rate_limits?.seven_day).toMatchObject({ utilization: 63 });
+  });
+
+  it("answers an ABSENT optional window under !usage-opus-absent, which is not an unavailability", async () => {
+    // Arrange + Act
+    const answer = await usage(["!usage-opus-absent"]);
+
+    // Assert. The service answered in full; this account simply has no opus
+    // window, so the arm is still the available one.
+    expect({
+      opus: answer.rate_limits?.seven_day_opus,
+      fiveHour: answer.rate_limits?.five_hour,
+    }).toEqual({ opus: null, fiveHour: { utilization: 41, resets_at: "2026-08-29T20:00:00.000Z" } });
   });
 
   it("answers a null UTILIZATION when the figure is unavailable", async () => {
