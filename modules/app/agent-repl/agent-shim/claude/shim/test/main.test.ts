@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from "vitest";
 import { LOCK_DIR_ENV, lockDir } from "../src/locks.js";
 import {
   DEFAULT_STATE_DIR_NAME,
+  FAKE_KEEPALIVE_INTERVAL_ENV,
+  resolveKeepaliveIntervalMs,
   OWNED_ENV,
   STORE_SOCKET_ENV,
   packageVersion,
@@ -515,5 +517,33 @@ describe("shutdownSignalHandlers", () => {
 
     // Assert.
     expect(handlers.standingDown()).toBeNull();
+  });
+});
+
+describe("the keep-alive interval override", () => {
+  it("is unset when the environment names none", () => {
+    expect(resolveKeepaliveIntervalMs({}, true)).toBeUndefined();
+  });
+
+  it("is honored under --fake", () => {
+    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "200" }, true)).toBe(200);
+  });
+
+  it("is REFUSED for a real session", () => {
+    // A production shim that took its cadence from the environment could be
+    // told to hammer the vendor or never to beat at all.
+    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "200" }, false)).toBeUndefined();
+  });
+
+  it("refuses a value that is not a whole number", () => {
+    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "1.5" }, true)).toBeUndefined();
+  });
+
+  it("refuses a value that is not positive", () => {
+    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "0" }, true)).toBeUndefined();
+  });
+
+  it("refuses a value that is not a number at all", () => {
+    expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "soon" }, true)).toBeUndefined();
   });
 });

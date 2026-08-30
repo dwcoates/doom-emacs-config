@@ -135,6 +135,13 @@ export interface EngineDeps {
   readonly acquireLock?: (sessionId: string) => () => void;
   /** How long StartSession waits for the vendor's own `system:init`. */
   readonly initTimeoutMs?: number;
+  /**
+   * The keep-alive cadence, when something overrode the module constant.
+   *
+   * `main.ts` fills this ONLY for a `--fake` process; a real session always
+   * beats on {@link KEEPALIVE_INTERVAL_MS}.
+   */
+  readonly keepaliveIntervalMs?: number;
 }
 
 /** How often the account's rate-limit windows are sampled. */
@@ -1221,7 +1228,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // prompted still has a cache worth keeping warm.
     cadence = new KeepaliveCadence(
       () => void keepaliveBeat(),
-      undefined,
+      deps.keepaliveIntervalMs,
       deps.scheduler ?? REAL_SCHEDULER,
     );
     cadence.start();
@@ -1556,6 +1563,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       deps.persistence.write([promptEntry(prompt, identity.agentId, true)]);
       await submit(said, true);
+      LOGGER.log(
+        { turn: turn.value, outcome: "keepalive_submitted" },
+        "submitted one of the shim's own keep-alive prompts; its rows are recorded and never served",
+      );
     } catch (err) {
       open = undefined;
       pushes.fault(

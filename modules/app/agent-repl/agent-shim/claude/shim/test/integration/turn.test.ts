@@ -43,6 +43,7 @@ import {
   watchAgentPage,
 } from "../integration-support/expect.js";
 import { writtenKeys } from "../integration-support/store.js";
+import { KEEPALIVE_PROMPT_MARKER as KEEPALIVE_MARKER } from "../../src/engine/keepalive.js";
 import { promptText, readTranscript, userPrompts } from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
@@ -775,21 +776,64 @@ describe("KillTurn", () => {
 describe("keep-alives", () => {
   // KEEP-ALIVES ARE ENTIRELY SHIM-INTERNAL: nothing keep-alive-shaped exists on
   // the wire (no PromptOrigin value, no rpc, no control-plane signal), so the
-  // only producer is the shim's OWN cadence — and its interval is a module
-  // constant (KEEPALIVE_INTERVAL_MS, four minutes) that `main.ts` does not
-  // expose through argv or the environment. From outside the process there is
-  // no way to make one fire, and waiting four real minutes is the sleep this
-  // suite refuses to write.
-  //
-  // SURFACED: if `main.ts` read an interval override in `--fake` mode (or
-  // `createEngine` took one from the environment), both of these become
-  // ordinary tests. Until then they are declared, not faked.
-  test.todo(
-    "no keep-alive row appears in any page and FakeStore.unserved holds them with the marker prefix — unprovokable: the 4-minute cadence has no argv/env override",
-  );
-  test.todo(
-    "a real prompt after keep-alives is delivered with the context rolled back — same reason: no keep-alive turn can be provoked from outside",
-  );
+  // only producer is the shim's OWN cadence. Its interval is a module constant
+  // (four minutes against the vendor's five-minute cache tier), and waiting
+  // four real minutes is the sleep this suite refuses to write — so `main.ts`
+  // honors `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS` under `--fake` and ONLY
+  // under `--fake`, which is what makes both obligations below observable.
+  // Every wait here is on the shim's own records, never on a clock.
+
+  /** A shim whose keep-alive cadence beats fast enough to observe. */
+  const spawnBeating = async (): Promise<Awaited<ReturnType<typeof spawnShim>>> =>
+    spawnShim({ env: { AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS: "200" } });
+
+  /** Resolves on the shim's record that it submitted a keep-alive. */
+  const keepaliveSubmitted = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+  ): Promise<void> => {
+    await shim.log.record((record) => record.context.outcome === "keepalive_submitted");
+  };
+
+  test("a keep-alive's rows land UNSERVED rather than in the book", async () => {
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+
+    await keepaliveSubmitted(shim);
+
+    const unserved = shim.store?.unserved() ?? [];
+    expect(unserved.some((item) => item.unservedItem.case === "keepalive")).toBe(true);
+  });
+
+  test("no keep-alive prompt appears in any page", async () => {
+    // The keep-alive made a real API call, so it is RECORDED; it has no book,
+    // so serving it would put a turn nobody asked for in the feed.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await keepaliveSubmitted(shim);
+
+    const page = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
+
+    const said = page.entries
+      .map(entryPrompt)
+      .flatMap((prompt) => prompt?.said?.content?.blocks ?? [])
+      .map((block) => (block.block.case === "text" ? block.block.value.text : ""));
+    expect(said.some((text) => text.startsWith(KEEPALIVE_MARKER))).toBe(false);
+  });
+
+  test("a real prompt after keep-alives is delivered with the context rolled back", async () => {
+    // A real prompt must never build on keep-alive context, so the query is
+    // replaced by one that resumes only THROUGH the last real record.
+    const shim = await spawnBeating();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello" }));
+    await keepaliveSubmitted(shim);
+
+    const rewound = shim.log.record((record) => record.context.resume_session_at !== undefined);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" }));
+    const record = await rewound;
+
+    expect(record.context.discarded_keepalive_turns).toBeDefined();
+  });
 
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {
     // The half of the yield obligation that IS observable: the shim's own

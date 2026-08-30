@@ -209,6 +209,53 @@ export const OWNED_ENV = "AGENT_REPL_OWNED";
  */
 export const SESSION_ID_ENV = "AGENT_REPL_SESSION_ID";
 
+/**
+ * The keep-alive interval override, honored ONLY under `--fake`.
+ *
+ * The cadence is four minutes against the vendor's five-minute cache tier, and
+ * from outside the process there was no way to make one fire — so the two
+ * keep-alive obligations could only be declared, never tested. The override
+ * exists for that and nothing else, which is why it is refused for a real
+ * session: a production shim that took its cadence from the environment could
+ * be told to hammer the vendor or to never beat at all.
+ */
+export const FAKE_KEEPALIVE_INTERVAL_ENV = "AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS";
+
+/**
+ * Resolve the keep-alive interval for this process.
+ *
+ * Answers `undefined` for "use the module constant". An override outside
+ * `--fake`, or one that is not a positive whole number of milliseconds, is
+ * IGNORED AND REPORTED rather than silently applied or silently dropped.
+ */
+export function resolveKeepaliveIntervalMs(
+  env: NodeJS.ProcessEnv,
+  fake: boolean,
+): number | undefined {
+  const raw = env[FAKE_KEEPALIVE_INTERVAL_ENV];
+  if (raw === undefined || raw === "") return undefined;
+  if (!fake) {
+    LIFECYCLE_LOGGER.log(
+      { level: "warn", env: FAKE_KEEPALIVE_INTERVAL_ENV, value: raw, outcome: "keepalive_override_refused" },
+      "the keep-alive interval override is honored only under --fake; ignoring it for this real session",
+    );
+    return undefined;
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    LIFECYCLE_LOGGER.log(
+      { level: "warn", env: FAKE_KEEPALIVE_INTERVAL_ENV, value: raw, outcome: "keepalive_override_invalid" },
+      "the keep-alive interval override is not a positive whole number of milliseconds; ignoring it",
+    );
+    return undefined;
+  }
+  LIFECYCLE_LOGGER.log(
+    { level: "info", env: FAKE_KEEPALIVE_INTERVAL_ENV, interval_ms: parsed, outcome: "keepalive_override_applied" },
+    "a fake session took its keep-alive interval from the environment",
+  );
+  return parsed;
+}
+
 /** Everything the process reads from its environment, resolved and checked. */
 export interface ShimEnvironment {
   /** The vendor account root the agent binary must read. */
@@ -507,6 +554,8 @@ export async function main(): Promise<void> {
     "exclusive workspace lock acquired",
   );
 
+  const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
+
   // THE SESSION ENGINE, with the real record plane behind it.
   //
   // The record plane is UNNAMED here on purpose: a writer is keyed by the
@@ -524,6 +573,7 @@ export async function main(): Promise<void> {
     runtime: { shimBuildSha: identity.shimBuildSha, sdkVersion: identity.sdkVersion },
     env: { stateDir: environment.stateDir, configDir: environment.claudeConfigDir, cwd },
     nowMs: () => Date.now(),
+    ...(keepaliveIntervalMs === undefined ? {} : { keepaliveIntervalMs }),
   });
 
   const server = await serve(args.listen, shimRoutes(engine));
