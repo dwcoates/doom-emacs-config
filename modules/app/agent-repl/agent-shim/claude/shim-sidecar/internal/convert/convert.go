@@ -169,6 +169,11 @@ const KeepaliveMarker = "<!--agent-repl:keepalive-->"
 // package: irrelevance to a reader is a consumption-side judgment, never a
 // reason to leave a record out of the database.
 func (c *Converter) Line(record map[string]any, at Attribution, next map[string]any) []*storev1.StoreEntry {
+	// SET ONCE, HERE, FOR THE WHOLE RECORD. Attribution travels by value, so
+	// every conversion this record fans out to carries the vendor's uuid without
+	// thirty call sites having to pass it — and residue minted anywhere in that
+	// fan-out keys on the same record the other plane keys on.
+	at.RecordUUID = str(record["uuid"])
 	kind := str(record["type"])
 	c.log.With(at.ctxFor("convert-line")).
 		LogVerbose("converting line type=%q", kind)

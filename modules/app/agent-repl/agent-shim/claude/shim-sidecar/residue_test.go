@@ -65,7 +65,10 @@ func TestResidueUpsertKeyIsItsSourceCoordinate(t *testing.T) {
 	entry := residueEntry("/private/tmp/b1.output", 128, "why", nil)
 
 	// Assert: a re-read supersedes the row whole rather than growing a second.
-	if got := entry.GetUpsertKey(); got != "residue:/private/tmp/b1.output:128" {
+	// A spool's bytes carry no vendor uuid — there is no record, only a byte
+	// range — so they key on where they live, in the `residue:file:` space that
+	// is kept visibly apart from the uuid space.
+	if got := entry.GetUpsertKey(); got != "residue:file:/private/tmp/b1.output:128" {
 		t.Fatalf("upsert key = %q, want the source coordinate", got)
 	}
 }

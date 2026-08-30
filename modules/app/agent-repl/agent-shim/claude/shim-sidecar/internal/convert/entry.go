@@ -64,6 +64,17 @@ type Attribution struct {
 	// names the file the same way the cursor does even across a rename.
 	FileID string
 
+	// RecordUUID is the vendor's own uuid for the record being converted, set
+	// once per record at the converter's entry point.
+	//
+	// IT IS THE RESIDUE KEY, AND THAT IS WHY IT EXISTS. Both planes see the same
+	// vendor record and both may store it as residue; keying it by the vendor's
+	// uuid is what makes the two writes collapse onto ONE row instead of
+	// standing beside each other as two copies of one unconvertible line.
+	// Empty for a record with no uuid — an unparsed line, a spool's bytes —
+	// which falls back to the file coordinates.
+	RecordUUID string
+
 	// TaskID is the vendor task id of a spool file (b*/a*/w*), empty for a
 	// transcript. It never crosses the contract; it is logging and owner
 	// resolution only.
@@ -255,7 +266,7 @@ func UnparsedEntry(at Attribution, raw []byte, cause error) *storev1.StoreEntry 
 // appending a second copy of the same bytes.
 func unservedEntry(at Attribution, discriminator, upsertKey string, frameAgent string, item *storev1.StoreUnservedItem) *storev1.StoreEntry {
 	if upsertKey == "" {
-		upsertKey = "residue:" + writeID(at, discriminator)
+		upsertKey = ResidueKey(at)
 	}
 	return entry(at, discriminator, upsertKey, frameAgent, func(u *storev1.StoreAgentUpdate) {
 		u.AgentInfo = &storev1.StoreAgentUpdate_UnservedItem{UnservedItem: item}
