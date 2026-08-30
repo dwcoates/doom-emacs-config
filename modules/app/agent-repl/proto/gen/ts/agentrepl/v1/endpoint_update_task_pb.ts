@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_task.proto.
  */
 export const file_agentrepl_v1_endpoint_update_task: GenFile = /*@__PURE__*/
-  fileDesc("CidhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3Rhc2sucHJvdG8SDGFnZW50cmVwbC52MSLjAQoRVXBkYXRlVGFza1JlcXVlc3QSIwoEdGFzaxgBIAEoCzIVLmFnZW50cmVwbC52MS5UYXNrUmVmEjUKCXNldF90aXRsZRgCIAEoCzIgLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrU2V0VGl0bGVIABIzCghzZXRfZG9uZRgDIAEoCzIfLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrU2V0RG9uZUgAEjMKCHNldF9vcGVuGAQgASgLMh8uYWdlbnRyZXBsLnYxLlVwZGF0ZVRhc2tTZXRPcGVuSABCCAoGY2hhbmdlIiMKElVwZGF0ZVRhc2tTZXRUaXRsZRINCgV0aXRsZRgBIAEoCSITChFVcGRhdGVUYXNrU2V0RG9uZSITChFVcGRhdGVUYXNrU2V0T3BlbiKCAQoSVXBkYXRlVGFza1Jlc3BvbnNlEjIKB3N1Y2Nlc3MYASABKAsyHy5hZ2VudHJlcGwudjEuVXBkYXRlVGFza1N1Y2Nlc3NIABIuCgVlcnJvchgCIAEoCzIdLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrRXJyb3JIAEIICgZyZXN1bHQiEwoRVXBkYXRlVGFza1N1Y2Nlc3MiEQoPVXBkYXRlVGFza0Vycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_task]);
+  fileDesc("CidhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3Rhc2sucHJvdG8SDGFnZW50cmVwbC52MSLjAQoRVXBkYXRlVGFza1JlcXVlc3QSIwoEdGFzaxgBIAEoCzIVLmFnZW50cmVwbC52MS5UYXNrUmVmEjUKCXNldF90aXRsZRgCIAEoCzIgLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrU2V0VGl0bGVIABIzCghzZXRfZG9uZRgDIAEoCzIfLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrU2V0RG9uZUgAEjMKCHNldF9vcGVuGAQgASgLMh8uYWdlbnRyZXBsLnYxLlVwZGF0ZVRhc2tTZXRPcGVuSABCCAoGY2hhbmdlIiMKElVwZGF0ZVRhc2tTZXRUaXRsZRINCgV0aXRsZRgBIAEoCSITChFVcGRhdGVUYXNrU2V0RG9uZSITChFVcGRhdGVUYXNrU2V0T3BlbiKCAQoSVXBkYXRlVGFza1Jlc3BvbnNlEjIKB3N1Y2Nlc3MYASABKAsyHy5hZ2VudHJlcGwudjEuVXBkYXRlVGFza1N1Y2Nlc3NIABIuCgVlcnJvchgCIAEoCzIdLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrRXJyb3JIAEIICgZyZXN1bHQiEwoRVXBkYXRlVGFza1N1Y2Nlc3MiyQEKD1VwZGF0ZVRhc2tFcnJvchI5CgtibGFua190aXRsZRgBIAEoCzIiLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrQmxhbmtUaXRsZUgAEjUKCW5vX2NoYW5nZRgCIAEoCzIgLmFnZW50cmVwbC52MS5VcGRhdGVUYXNrTm9DaGFuZ2VIABI7Cgx1bmtub3duX3Rhc2sYAyABKAsyIy5hZ2VudHJlcGwudjEuVXBkYXRlVGFza1Vua25vd25UYXNrSABCBwoFY2F1c2UiFgoUVXBkYXRlVGFza0JsYW5rVGl0bGUiFAoSVXBkYXRlVGFza05vQ2hhbmdlIhcKFVVwZGF0ZVRhc2tVbmtub3duVGFza0IqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_task]);
 
 /**
  * @generated from message agentrepl.v1.UpdateTaskRequest
@@ -157,12 +157,40 @@ export const UpdateTaskSuccessSchema: GenMessage<UpdateTaskSuccess> = /*@__PURE_
   messageDesc(file_agentrepl_v1_endpoint_update_task, 5);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown task, blank
- * title, …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.UpdateTaskError
  */
 export type UpdateTaskError = Message<"agentrepl.v1.UpdateTaskError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.UpdateTaskError.cause
+   */
+  cause: {
+    /**
+     * The new title is blank once trimmed.
+     *
+     * @generated from field: agentrepl.v1.UpdateTaskBlankTitle blank_title = 1;
+     */
+    value: UpdateTaskBlankTitle;
+    case: "blankTitle";
+  } | {
+    /**
+     * The change asked for is what the task already holds.
+     *
+     * @generated from field: agentrepl.v1.UpdateTaskNoChange no_change = 2;
+     */
+    value: UpdateTaskNoChange;
+    case: "noChange";
+  } | {
+    /**
+     * No task by that id.
+     *
+     * @generated from field: agentrepl.v1.UpdateTaskUnknownTask unknown_task = 3;
+     */
+    value: UpdateTaskUnknownTask;
+    case: "unknownTask";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -171,4 +199,43 @@ export type UpdateTaskError = Message<"agentrepl.v1.UpdateTaskError"> & {
  */
 export const UpdateTaskErrorSchema: GenMessage<UpdateTaskError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_task, 6);
+
+/**
+ * @generated from message agentrepl.v1.UpdateTaskBlankTitle
+ */
+export type UpdateTaskBlankTitle = Message<"agentrepl.v1.UpdateTaskBlankTitle"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateTaskBlankTitle.
+ * Use `create(UpdateTaskBlankTitleSchema)` to create a new message.
+ */
+export const UpdateTaskBlankTitleSchema: GenMessage<UpdateTaskBlankTitle> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_task, 7);
+
+/**
+ * @generated from message agentrepl.v1.UpdateTaskNoChange
+ */
+export type UpdateTaskNoChange = Message<"agentrepl.v1.UpdateTaskNoChange"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateTaskNoChange.
+ * Use `create(UpdateTaskNoChangeSchema)` to create a new message.
+ */
+export const UpdateTaskNoChangeSchema: GenMessage<UpdateTaskNoChange> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_task, 8);
+
+/**
+ * @generated from message agentrepl.v1.UpdateTaskUnknownTask
+ */
+export type UpdateTaskUnknownTask = Message<"agentrepl.v1.UpdateTaskUnknownTask"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateTaskUnknownTask.
+ * Use `create(UpdateTaskUnknownTaskSchema)` to create a new message.
+ */
+export const UpdateTaskUnknownTaskSchema: GenMessage<UpdateTaskUnknownTask> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_task, 9);
 
