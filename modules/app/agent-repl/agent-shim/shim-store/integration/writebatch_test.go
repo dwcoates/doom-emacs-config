@@ -7,6 +7,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -83,15 +84,33 @@ func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
 	sidecar := fileProducer(store.client())
 	cursor := cursorState("16777232:900002", "/transcripts/b.jsonl", 8192, nil)
 	good := sidecar.agentEntry("w-partial-1", "u-main-line-1", frameLine(agentID("main"), responseFrame("main", "act-1", "would-be-durable")))
-	// An entry with no upsert_key: the row has no identity, which is illegal.
-	bad := sidecar.agentEntry("w-partial-2", "", frameLine(agentID("main"), responseFrame("main", "act-2", "invalid")))
+	// THE OFFENDING ENTRY IS ONE ONLY THE STORAGE LAYER CAN CLASSIFY, and it is
+	// LAST. The server's envelope validation runs before any transaction opens,
+	// so a bad envelope proves nothing about the transaction — it proves the
+	// request never reached one. A frame whose agent_id is empty passes the
+	// envelope check and is refused inside the routing, with the good entry
+	// already written in the same transaction: only a rollback keeps it out.
+	bad := sidecar.agentEntry("w-partial-2", "u-main-line-2", &storev1.StoreAgentUpdate{
+		AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
+			ServeableFrame: &storev1.StorePageLine{
+				PageAgentId: agentID("main"),
+				AgentItem:   frameItem(responseFrame("", "act-2", "invalid")),
+			},
+		},
+	})
 
 	// Act.
 	failure := sidecar.writeExpectingFailure(ctx, t, cursor, good, bad)
 
 	// Assert: the arm names WHICH entry and which field, so the producer's own
 	// logs can say what it sent wrong without parsing prose.
-	assertWriteInvalidRequest(t, failure, "entries[1].upsert_key")
+	assertWriteInvalidRequest(t, failure, "entries[1].agent_frame.agent_id")
+	if !strings.Contains(failure.GetDetail(), "entries[1]") {
+		t.Errorf("the detail %q does not name the offending entry index", failure.GetDetail())
+	}
+	if !strings.Contains(failure.GetDetail(), "w-partial-2") && !strings.Contains(failure.GetDetail(), "entries[1]") {
+		t.Errorf("the detail %q identifies neither the entry nor its write_id", failure.GetDetail())
+	}
 	store.restart()
 
 	after, cancelAfter := callContext(t)
