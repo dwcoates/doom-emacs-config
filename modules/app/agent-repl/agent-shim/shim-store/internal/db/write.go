@@ -120,6 +120,10 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			continue
 		}
 
+		if err := d.requireStableIdentity(ctx, tx, r); err != nil {
+			return WriteResult{}, d.refuse(fields, err)
+		}
+
 		if r.workflowNotImplemented {
 			// DURABLE, NEVER DROPPED, and loud: the row lands whole so nothing
 			// is lost, and the warning says why nothing serves it yet.
@@ -256,6 +260,53 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq u
 		return storagef(err, "recording write_id %q in the write ledger", r.writeID)
 	}
 	return nil
+}
+
+// requireStableIdentity refuses an upsert that would move an existing row into
+// another book or turn it into another kind of thing.
+//
+// AN UPSERT SUPERSEDES A ROW'S CONTENT, NOT ITS IDENTITY. `upsert_key` names one
+// thing, and the whole page model rests on that: a pointer stays valid across
+// every write of the row it names, so a caller holding one must still be holding
+// a line of the book it read it from. Letting a write change `book_agent_id`
+// would silently teleport a served line out of one agent's page and into
+// another's — every pointer already handed out for it now naming a row in a book
+// the caller never asked about — and changing `kind` would make a served page
+// line become an unservable residue row under a pointer that still exists.
+// Neither is a supersession; both are a different thing wearing the same key.
+func (d *DB) requireStableIdentity(ctx context.Context, tx *sql.Tx, r routed) error {
+	var book sql.NullString
+	var kind string
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind); {
+	case errors.Is(err, sql.ErrNoRows):
+		// A first insert has no identity to change.
+		return nil
+	case err != nil:
+		return storagef(err, "reading the identity of row %q", r.upsertKey)
+	}
+	if book.Valid != r.book.Valid || book.String != r.book.String {
+		return invalidSitef(SiteUpsertChangesIdentity,
+			entryField(r.index, "agent_update.serveable_frame.page_agent_id"),
+			"entries[%d] (upsert_key=%q) would move the row from book %q to %q — an upsert supersedes a row's content, never its identity",
+			r.index, r.upsertKey, nullableBook(book), nullableBook(r.book))
+	}
+	if kind != r.kind {
+		return invalidSitef(SiteUpsertChangesIdentity,
+			entryField(r.index, "agent_update"),
+			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
+			r.index, r.upsertKey, kind, r.kind)
+	}
+	return nil
+}
+
+// nullableBook renders a book column for a human, distinguishing the never-served
+// NULL from an agent whose id happens to be empty (which cannot occur).
+func nullableBook(book sql.NullString) string {
+	if !book.Valid {
+		return "(none)"
+	}
+	return book.String
 }
 
 // upsertEntry writes the row and returns the position it occupies.
