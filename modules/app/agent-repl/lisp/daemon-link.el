@@ -529,6 +529,19 @@ connection."
           (agent-repl--info nil "elisp.link.successor-pending address=%S cause=%S"
                             address (plist-get cause :arm))))))))
 
+(defun agent-repl-link-dial-successor (address)
+  "Dial the successor daemon at ADDRESS outside a shutdown announcement.
+A PER-WORKSPACE rpc can refuse with `transferring_away{address}' before
+this Emacs has seen the daemon-scoped announcement at all — the refusal
+is then the first news of the handover, and the address it carries is the
+same fact the announcement would have carried.  Idempotent by address,
+exactly like the announced path: an already attached or already pending
+successor at ADDRESS is a no-op.  Returns `agent-repl-link-successor',
+which is still nil while the dial awaits acceptance."
+  (agent-repl--info nil "elisp.link.dial-successor address=%S" address)
+  (agent-repl-link--attach-successor (agent-repl-link-primary) address nil)
+  (agent-repl-link-successor))
+
 (defun agent-repl-link--accept-successor (old address cause)
   "Record the successor at ADDRESS as ADOPTABLE: it ACCEPTED its watch.
 Announced on OLD with CAUSE.  Until this runs `agent-repl-link-successor'
