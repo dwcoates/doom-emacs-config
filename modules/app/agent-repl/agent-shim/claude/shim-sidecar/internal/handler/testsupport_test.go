@@ -7,6 +7,8 @@ package handler
 // regression that reached for one would fail loudly rather than run.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -67,7 +69,7 @@ func framesFrom(t *testing.T, text string) []tail.Frame {
 func sessionContext(path, session string) *Context {
 	return &Context{
 		Path: path, SessionID: session, MainAgentID: session,
-		AgentID: session, FileID: "dev:1", Kind: tail.KindSessionTranscript,
+		AgentID: session, FileID: testFileID(path), Kind: tail.KindSessionTranscript,
 	}
 }
 
@@ -156,4 +158,14 @@ func vendorKinds(entries []*storev1.StoreEntry) []string {
 		}
 	}
 	return kinds
+}
+
+// testFileID spells a DISTINCT "dev:inode" per fixture path, the way the kernel
+// hands the reader one. The write identity is digested from the file id rather
+// than the path (R-S1), so a harness that gave every fixture the same id would
+// make two files' first records collide — which is a defect in the harness, not
+// in the rule.
+func testFileID(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return "16777232:" + hex.EncodeToString(sum[:4])
 }

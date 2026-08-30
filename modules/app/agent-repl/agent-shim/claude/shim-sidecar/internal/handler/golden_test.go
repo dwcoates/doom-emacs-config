@@ -371,7 +371,7 @@ func driveJournal(t *testing.T, path string) []*storev1.StoreEntry {
 	h := NewWorkflowJournalHandler(testLogger(t))
 	ctx := &Context{
 		Path: path, SessionID: "journal-session", MainAgentID: "journal-session",
-		Kind: tail.KindWorkflowJournal, RunID: "wf_golden", TaskID: "w1golden", FileID: "dev:2",
+		Kind: tail.KindWorkflowJournal, RunID: "wf_golden", TaskID: "w1golden", FileID: testFileID(path),
 	}
 	return h.Handle(framesFrom(t, readFixture(t, path)), ctx)
 }
@@ -383,7 +383,7 @@ func driveSidechain(t *testing.T, path string) []*storev1.StoreEntry {
 		Path: path, SessionID: "owning-session", MainAgentID: "owning-session",
 		// The book is the SPAWNING CALL, which the corpus's own meta file states
 		// as toolUseId; `agent-aef975b7bc3422d4b` is that file's locator.
-		AgentID: "toolu_019w534yMVsDAc3KqJYLGhP8", Kind: tail.KindAgentTranscript, FileID: "dev:3",
+		AgentID: "toolu_019w534yMVsDAc3KqJYLGhP8", Kind: tail.KindAgentTranscript, FileID: testFileID(path),
 	}
 	return h.Handle(framesFrom(t, readFixture(t, path)), ctx)
 }
@@ -403,7 +403,7 @@ func driveSpools(t *testing.T, dir string) []*storev1.StoreEntry {
 		ctx := &Context{
 			Path: path, SessionID: "spool-session", MainAgentID: "spool-session",
 			AgentID: "spool-session", TaskID: "b1golden", RunActivityID: goldenSpoolRun,
-			Kind: tail.KindShellSpool, FileID: "dev:4",
+			Kind: tail.KindShellSpool, FileID: testFileID(path),
 		}
 		raw := readFixture(t, path)
 		all = append(all, h.Handle([]tail.Frame{{Raw: []byte(raw), Offset: 0}}, ctx)...)

@@ -347,9 +347,15 @@ record MEANS.
   is not residue: it is a well-formed fact with no book and keeps the key of the
   unit it would have been.
 - `write_id` is DETERMINISTIC: hex sha256 of
-  `"shim-claude-sidecar|" + path + "|" + offset + "|" + discriminator`, where
-  the discriminator distinguishes multiple entries minted from one record.
-  RANDOMNESS IS FORBIDDEN — replay absorption rests on this.
+  `"shim-claude-sidecar|" + file_id + "|" + offset + "|" + discriminator`, where
+  `file_id` is the file's `dev:inode` identity and the discriminator
+  distinguishes multiple entries minted from one record. RANDOMNESS IS
+  FORBIDDEN — replay absorption rests on this. IT DIGESTS THE FILE ID, NEVER THE
+  PATH (ruling R-S1): the cursor is keyed by `dev:inode`, so a RENAMED file is
+  resumed from its cursor — and a path-derived write identity would mint fresh
+  ids for every record replayed after the rename, storing the whole re-read turn
+  a second time. The cursor's identity and the write's identity must be one
+  identity.
 - `upsert_key` maps the unit's identity and must equal the shim's for the same
   unit. Residue uses `residue:<path>:<offset>`.
 - `StorePageLine.page_agent_id` names the frame's own agent: a subagent's
@@ -514,11 +520,17 @@ the suite rather than quietly shrinking what the feed can show.
 
 ### Keys and the write identity
 
-- `write_id` = hex sha256 of `"shim-claude-sidecar|" + path + "|" + offset + "|"
-  + discriminator`. DETERMINISTIC: randomness is forbidden, because replay
-  idempotence at the store rests entirely on the same bytes minting the same id.
-  The discriminator separates the several entries one record mints (a block
-  index, `settle:<id>`, `terminal`, `diag`).
+- `write_id` = hex sha256 of `"shim-claude-sidecar|" + file_id + "|" + offset +
+  "|" + discriminator`, where `file_id` is the tailed file's `dev:inode`
+  identity — the SAME identity the store's cursor row is keyed by (ruling R-S1).
+  DETERMINISTIC: randomness is forbidden, because replay idempotence at the
+  store rests entirely on the same bytes minting the same id. The discriminator
+  separates the several entries one record mints (a block index, `settle:<id>`,
+  `terminal`, `diag`). A frame whose attribution carries no file id is a READER
+  defect and is raised as one; digesting an empty string would collapse every
+  file onto one identity space keyed only by offset. The residue `write_id`
+  minted in `residue.go` follows the same recipe with the `residue`
+  discriminator, while its `upsert_key` still names the path.
 - `upsert_key`, all of it in `internal/convert/keys.go` because the shim must
   mint the IDENTICAL key for the same unit:
   - `activity:<AgentActivityId>` — the vendor `tool_use_id` for a tool call;
