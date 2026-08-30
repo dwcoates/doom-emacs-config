@@ -115,18 +115,33 @@ func lastTurnStart(buf []byte, startOffset int64, skipFirst bool, isTurnStart fu
 }
 
 // IsUserPromptRecord reports whether a transcript record is the first record of
-// a turn: a `type: "user"` line carrying PROSE, as opposed to one carrying a
-// tool_result back to the model.
+// a turn: a REAL user prompt (ruling R-S3), meaning a `type: "user"` line
+// carrying PROSE that is neither a tool_result carrier nor a compaction summary.
 //
-// The distinction is structural rather than semantic: a tool_result carrier's
-// content is an array whose blocks are typed `tool_result`, while a real prompt
-// is either a bare string or an array carrying at least one text block. `isMeta`
-// records are the harness's own bookkeeping and never open a turn.
+// The distinctions are all structural rather than semantic:
+//
+//   - a tool_result carrier's content is an array whose blocks are typed
+//     `tool_result`, while a real prompt is either a bare string or an array
+//     carrying at least one text block;
+//   - `isMeta` records are the harness's own bookkeeping;
+//   - a COMPACTION SUMMARY is spelled `isCompactSummary: true`, and it is a
+//     `user` record carrying prose in exactly the shape a prompt does. It is
+//     the machine's own writing-down of the conversation so far, not a person
+//     asking for something, and treating it as a turn start rewound the reader
+//     to the summary line instead of to the prompt whose turn is genuinely
+//     in progress — re-warming none of the joins the rewind exists for.
+//
+// A KEEP-ALIVE PROMPT DOES COUNT. It is a real user prompt with a marker in its
+// first text block; the marker changes how the turn's records are STORED, not
+// whether a turn began.
 func IsUserPromptRecord(obj map[string]any) bool {
 	if kind, _ := obj["type"].(string); kind != "user" {
 		return false
 	}
 	if meta, ok := obj["isMeta"].(bool); ok && meta {
+		return false
+	}
+	if summary, ok := obj["isCompactSummary"].(bool); ok && summary {
 		return false
 	}
 	message, ok := obj["message"].(map[string]any)
