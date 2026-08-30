@@ -91,7 +91,16 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   EMPTY by design — the successor address is always WatchDaemon's
   announcement; the webview reload uses that address.
 - RE-RUN after the reader fix: host 24/32, roster 19/20, link 14/18,
-  connect 12/16, daemon 12/12. R-PUSHINVALID is RETIRED (the reader was
+  connect 12/16, daemon 12/12.
+- FIRST RUN composer 2/21 (17 on the suite's malformed host-push literal —
+  R-SUITE-1 fixes the fixture), verbs 10/30. R-VERBS (queued, worktree
+  elisp-agents/remed5): verbs.el hands the codec BARE keywords where §2
+  requires oneof plists — e.g. priority `:p05` must be `(:arm :p05 :value
+  nil)`; the same applies to create's form/finish/priority arms,
+  shutdown's action/reason arms, merge-queue's action arm. Fix verbs.el
+  (and the suite where it passes bare keywords), keep the codec as is;
+  also the close-success tab teardown and the transport-failure /
+  merge-refused log assertions. R-PUSHINVALID is RETIRED (the reader was
   the cause); its residue, if any, folds into R-NOTIFY.
 - QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
   new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
