@@ -68,9 +68,18 @@ type Target struct {
 	// path only. EMPTY for a spool: that path states where the bytes live, not
 	// whose they are.
 	SessionID string
-	// AgentID is the vendor agent id of a subagent or workflow-agent
-	// transcript, read from the `agent-<id>` file name.
+	// AgentID is the agent's IDENTITY: for a subagent transcript, the spawning
+	// call's tool_use_id read from the companion meta file (the cross-plane
+	// minting rule), NEVER the `agent-<id>` of the file name.
 	AgentID string
+	// VendorAgentID is the `agent-<id>` of the file name — a LOCATOR that names
+	// which file this is, and the id the parent transcript's sidechain records
+	// carry. It is deliberately kept apart from AgentID: it is not an identity
+	// and never reaches the wire.
+	VendorAgentID string
+	// Meta is the parsed companion file, present whenever MetaMissing is false
+	// for a target that requires one.
+	Meta Meta
 
 	TaskID   string // spool task id, and the subagent id for a sidechain file
 	RunID    string // workflow run id from the journal path
@@ -220,12 +229,12 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 		case len(segs) == 4 && segs[2] == "subagents" && isAgentTranscript(segs[3]):
 			// projects/<project>/<session>/subagents/agent-<id>.jsonl
 			return d.withMeta(Target{
-				Path:       path,
-				Kind:       tail.KindAgentTranscript,
-				SessionID:  segs[1],
-				AgentID:    agentIDOf(segs[3]),
-				TaskID:     agentIDOf(segs[3]),
-				ConfigRoot: root,
+				Path:          path,
+				Kind:          tail.KindAgentTranscript,
+				SessionID:     segs[1],
+				VendorAgentID: agentIDOf(segs[3]),
+				TaskID:        agentIDOf(segs[3]),
+				ConfigRoot:    root,
 			}), true
 		case len(segs) == 6 && segs[2] == "subagents" && segs[3] == "workflows" &&
 			strings.HasPrefix(segs[4], "wf_") && segs[5] == "journal.jsonl":
@@ -246,13 +255,13 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 			// file, but workflow conversion is kicked this wave, so its records
 			// land as residue rather than as feed rows.
 			return d.withMeta(Target{
-				Path:       path,
-				Kind:       tail.KindWorkflowJournal,
-				SessionID:  segs[1],
-				RunID:      segs[4],
-				AgentID:    agentIDOf(segs[5]),
-				TaskID:     agentIDOf(segs[5]),
-				ConfigRoot: root,
+				Path:          path,
+				Kind:          tail.KindWorkflowJournal,
+				SessionID:     segs[1],
+				RunID:         segs[4],
+				VendorAgentID: agentIDOf(segs[5]),
+				TaskID:        agentIDOf(segs[5]),
+				ConfigRoot:    root,
 			}), true
 		}
 		return Target{}, false
@@ -269,6 +278,22 @@ func (d *Discoverer) classifyConfig(path string) (Target, bool) {
 func (d *Discoverer) withMeta(target Target) Target {
 	target.MetaPath = strings.TrimSuffix(target.Path, ".jsonl") + ".meta.json"
 	if _, err := os.Stat(target.MetaPath); err == nil {
+		meta, err := ReadMeta(target.MetaPath)
+		if err != nil {
+			// A meta file that is THERE but unreadable is held exactly as a
+			// missing one is: the agent has no identity either way, and naming
+			// it by its filename would mint a second book for one agent. Loud,
+			// because unlike a missing file this one will not fix itself.
+			target.MetaMissing = true
+			d.log.With(logging.Context{
+				Operation: "discover-meta", Path: target.Path, Level: "error",
+			}).Log("transcript held: its meta file could not be read, so the agent has no identity and its records cannot be attributed: %v", err)
+			return target
+		}
+		// THE AGENT'S IDENTITY IS THE SPAWNING CALL, per the cross-plane minting
+		// rule: the same id the stream plane names this agent by.
+		target.Meta = meta
+		target.AgentID = meta.ToolUseID
 		if d.warnedMeta[target.Path] {
 			delete(d.warnedMeta, target.Path)
 			d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID}).
@@ -279,8 +304,8 @@ func (d *Discoverer) withMeta(target Target) Target {
 	target.MetaMissing = true
 	if !d.warnedMeta[target.Path] {
 		d.warnedMeta[target.Path] = true
-		d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID, Level: "warn"}).
-			Log("transcript held: its required meta file %s is not on disk yet, so its agent's type, depth and model are unknown; it is re-checked every rescan and never dropped", target.MetaPath)
+		d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID, Level: "warn"}).
+			Log("transcript held: its required meta file %s is not on disk yet, so the agent has no identity (its spawning call is stated only there); it is re-checked every rescan and never dropped", target.MetaPath)
 		return target
 	}
 	d.log.With(logging.Context{Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID}).

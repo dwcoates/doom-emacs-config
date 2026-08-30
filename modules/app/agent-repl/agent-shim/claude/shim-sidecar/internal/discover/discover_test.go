@@ -46,12 +46,41 @@ func (w sliceWriter) Write(p []byte) (int, error) {
 
 func write(t *testing.T, path string) {
 	t.Helper()
+	body := []byte("{}\n")
+	if strings.HasSuffix(path, ".meta.json") {
+		// A META FIXTURE MUST BE A META FILE. It is the only source of the
+		// agent's identity, so an empty object is not a lesser version of one —
+		// it is a file the reader must refuse, which is its own subject below.
+		body = []byte(metaBody(toolUseIDFor(path)))
+	}
+	writeRaw(t, path, body)
+}
+
+// writeRaw writes exactly the given bytes, for the subjects about a meta file
+// that is present and unusable.
+func writeRaw(t *testing.T, path string, body []byte) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("creating %s: %v", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatalf("writing %s: %v", path, err)
 	}
+}
+
+// metaBody spells the vendor's companion file: FOUR camelCase fields and no
+// model — the model is stated only by the transcript's own assistant lines.
+func metaBody(toolUseID string) string {
+	return `{"agentType":"general-purpose","description":"do the thing","toolUseId":"` +
+		toolUseID + `","spawnDepth":1}`
+}
+
+// toolUseIDFor is the spawning-call id this suite gives an agent-<id> fixture,
+// so an assertion can name the identity the meta file supplies WITHOUT it being
+// derivable from the file name in production.
+func toolUseIDFor(metaPath string) string {
+	base := strings.TrimSuffix(filepath.Base(metaPath), ".meta.json")
+	return "toolu_" + strings.TrimPrefix(base, "agent-")
 }
 
 // find returns the scanned target whose path ends with suffix.
@@ -90,8 +119,13 @@ func TestScanFindsSubagentTranscript(t *testing.T) {
 	got := find(t, d.Scan(), "agent-abc.jsonl")
 
 	// Assert.
-	if got.Kind != tail.KindAgentTranscript || got.AgentID != "abc" || got.SessionID != "sess-1" {
-		t.Fatalf("target = %+v, want a subagent transcript for agent abc of sess-1", got)
+	// THE IDENTITY IS THE SPAWNING CALL FROM THE META FILE; `agent-abc` is a
+	// locator that stays on VendorAgentID and never becomes an AgentId.
+	if got.Kind != tail.KindAgentTranscript || got.AgentID != "toolu_abc" || got.SessionID != "sess-1" {
+		t.Fatalf("target = %+v, want a subagent transcript identified toolu_abc under sess-1", got)
+	}
+	if got.VendorAgentID != "abc" {
+		t.Fatalf("vendor agent id = %q, want the file name's locator", got.VendorAgentID)
 	}
 }
 
@@ -119,8 +153,8 @@ func TestScanFindsWorkflowPerAgentTranscript(t *testing.T) {
 	got := find(t, d.Scan(), "agent-xyz.jsonl")
 
 	// Assert.
-	if got.Kind != tail.KindWorkflowJournal || got.RunID != "wf_7" || got.AgentID != "xyz" {
-		t.Fatalf("target = %+v, want workflow wf_7's per-agent transcript for xyz", got)
+	if got.Kind != tail.KindWorkflowJournal || got.RunID != "wf_7" || got.AgentID != "toolu_xyz" {
+		t.Fatalf("target = %+v, want workflow wf_7's per-agent transcript identified toolu_xyz", got)
 	}
 }
 
@@ -459,5 +493,93 @@ func TestClassifyRejectsASpoolWithNoTasksSegment(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatal("a path outside a tasks/ directory was classified as a spool")
+	}
+}
+
+func TestTheMetaFileSuppliesTheAgentsIdentity(t *testing.T) {
+	// Arrange. THE CROSS-PLANE MINTING RULE: a subagent's AgentId is the
+	// tool_use_id of the call that spawned it, which the file plane reads here
+	// and the stream plane reads off the SDK — one id for one agent.
+	d, _, _, _ := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/agent-abc.jsonl",
+		"config-a/projects/proj/sess-1/subagents/agent-abc.meta.json",
+	)
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if got.AgentID != got.Meta.ToolUseID {
+		t.Fatalf("AgentID = %q but the meta names toolUseId %q; the identity IS the spawning call",
+			got.AgentID, got.Meta.ToolUseID)
+	}
+	if got.AgentID == got.VendorAgentID {
+		t.Fatal("the agent's identity must not be its file name's locator")
+	}
+}
+
+func TestTheMetaFilesFourFieldsAreParsed(t *testing.T) {
+	// Arrange. Exactly four camelCase fields, and NO model: the model is not
+	// stated here at all, and the agent's models_used comes from its transcript's
+	// own assistant lines.
+	d, _, _, _ := fixture(t,
+		"config-a/projects/proj/sess-1/subagents/agent-abc.jsonl",
+		"config-a/projects/proj/sess-1/subagents/agent-abc.meta.json",
+	)
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if got.Meta.AgentType != "general-purpose" {
+		t.Errorf("agentType = %q", got.Meta.AgentType)
+	}
+	if got.Meta.Description != "do the thing" {
+		t.Errorf("description = %q", got.Meta.Description)
+	}
+	if got.Meta.ToolUseID != "toolu_abc" {
+		t.Errorf("toolUseId = %q", got.Meta.ToolUseID)
+	}
+	if got.Meta.SpawnDepth != 1 {
+		t.Errorf("spawnDepth = %d", got.Meta.SpawnDepth)
+	}
+}
+
+func TestAMetaFileWithNoToolUseIdHoldsTheTranscript(t *testing.T) {
+	// Arrange. Without it the agent has no identity the other plane would agree
+	// with, and naming it by its file name would mint a SECOND book for one
+	// agent that no consumer could reconcile. Held, exactly as a missing file is.
+	d, base, _, _ := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	writeRaw(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"),
+		[]byte(`{"agentType":"general-purpose","description":"d","spawnDepth":1}`))
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if !got.MetaMissing {
+		t.Fatal("a meta file that names no spawning call must hold its transcript, not name the agent by its file")
+	}
+	if got.AgentID != "" {
+		t.Fatalf("AgentID = %q; a held transcript has no identity to offer", got.AgentID)
+	}
+}
+
+func TestAnUnparsableMetaFileHoldsTheTranscriptLoudly(t *testing.T) {
+	// Arrange. Unlike a missing file this one will not fix itself, so it is an
+	// ERROR rather than the ordinary held warning.
+	d, base, _, logs := fixture(t, "config-a/projects/proj/sess-1/subagents/agent-abc.jsonl")
+	writeRaw(t, filepath.Join(base, "config-a/projects/proj/sess-1/subagents/agent-abc.meta.json"),
+		[]byte("not json at all"))
+
+	// Act.
+	got := find(t, d.Scan(), "agent-abc.jsonl")
+
+	// Assert.
+	if !got.MetaMissing {
+		t.Fatal("an unreadable meta file must hold its transcript")
+	}
+	if !strings.Contains(strings.Join(*logs, "\n"), `"level":"error"`) {
+		t.Fatalf("an unreadable meta file was not stated as an error: %v", *logs)
 	}
 }
