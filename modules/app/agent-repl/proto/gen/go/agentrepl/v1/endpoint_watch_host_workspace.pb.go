@@ -1815,16 +1815,27 @@ func (*HostComposerMergeParked) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{28}
 }
 
-// One standing fault — the dynamic account now; the kind oneof is added WITH
-// its first derived arms at the wave, from the controller's real fault sites
-// (the old RuntimeFault's component/fault_type/impact/cause strings become
-// arms then).
+// One standing fault — the same kinds SessionHealth's SessionFault carries,
+// the same messages: a session's fault classes do not change because the
+// host stream is what reports them. Kinds derived from the controller's real
+// fault sites (landing 4, 2026-08-29).
 type HostFault struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The dynamic account, verbatim — supplements the kind, never replaces it.
 	Detail string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
 	// When the fault window opened, epoch ms.
-	OpenedAtMs    int64 `protobuf:"varint,2,opt,name=opened_at_ms,json=openedAtMs,proto3" json:"opened_at_ms,omitempty"`
+	OpenedAtMs int64 `protobuf:"varint,2,opt,name=opened_at_ms,json=openedAtMs,proto3" json:"opened_at_ms,omitempty"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*HostFault_ShimStartFailed
+	//	*HostFault_ShimDied
+	//	*HostFault_LinkSevered
+	//	*HostFault_ResumeFailed
+	//	*HostFault_BounceDied
+	//	*HostFault_BounceUnknown
+	//	*HostFault_ClassifierFailed
+	//	*HostFault_ShimReported
+	Kind          isHostFault_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1873,11 +1884,150 @@ func (x *HostFault) GetOpenedAtMs() int64 {
 	return 0
 }
 
+func (x *HostFault) GetKind() isHostFault_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *HostFault) GetShimStartFailed() *SessionFaultShimStartFailed {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_ShimStartFailed); ok {
+			return x.ShimStartFailed
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetShimDied() *SessionFaultShimDied {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_ShimDied); ok {
+			return x.ShimDied
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetLinkSevered() *SessionFaultLinkSevered {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_LinkSevered); ok {
+			return x.LinkSevered
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetResumeFailed() *SessionFaultResumeFailed {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_ResumeFailed); ok {
+			return x.ResumeFailed
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetBounceDied() *SessionFaultBounceDied {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_BounceDied); ok {
+			return x.BounceDied
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetBounceUnknown() *SessionFaultBounceUnknown {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_BounceUnknown); ok {
+			return x.BounceUnknown
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetClassifierFailed() *SessionFaultClassifierFailed {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_ClassifierFailed); ok {
+			return x.ClassifierFailed
+		}
+	}
+	return nil
+}
+
+func (x *HostFault) GetShimReported() *SessionFaultShimReported {
+	if x != nil {
+		if x, ok := x.Kind.(*HostFault_ShimReported); ok {
+			return x.ShimReported
+		}
+	}
+	return nil
+}
+
+type isHostFault_Kind interface {
+	isHostFault_Kind()
+}
+
+type HostFault_ShimStartFailed struct {
+	// Starting the session's shim failed.
+	ShimStartFailed *SessionFaultShimStartFailed `protobuf:"bytes,3,opt,name=shim_start_failed,json=shimStartFailed,proto3,oneof"`
+}
+
+type HostFault_ShimDied struct {
+	// The shim exited while the session was live.
+	ShimDied *SessionFaultShimDied `protobuf:"bytes,4,opt,name=shim_died,json=shimDied,proto3,oneof"`
+}
+
+type HostFault_LinkSevered struct {
+	// The daemon-shim link was severed.
+	LinkSevered *SessionFaultLinkSevered `protobuf:"bytes,5,opt,name=link_severed,json=linkSevered,proto3,oneof"`
+}
+
+type HostFault_ResumeFailed struct {
+	// Resuming the vendor session failed.
+	ResumeFailed *SessionFaultResumeFailed `protobuf:"bytes,6,opt,name=resume_failed,json=resumeFailed,proto3,oneof"`
+}
+
+type HostFault_BounceDied struct {
+	// A bounce's replacement shim died before it came up.
+	BounceDied *SessionFaultBounceDied `protobuf:"bytes,7,opt,name=bounce_died,json=bounceDied,proto3,oneof"`
+}
+
+type HostFault_BounceUnknown struct {
+	// A bounce ended in a state the controller cannot name.
+	BounceUnknown *SessionFaultBounceUnknown `protobuf:"bytes,8,opt,name=bounce_unknown,json=bounceUnknown,proto3,oneof"`
+}
+
+type HostFault_ClassifierFailed struct {
+	// The turn classifier failed.
+	ClassifierFailed *SessionFaultClassifierFailed `protobuf:"bytes,9,opt,name=classifier_failed,json=classifierFailed,proto3,oneof"`
+}
+
+type HostFault_ShimReported struct {
+	// A shim-side SessionFault, relayed.
+	ShimReported *SessionFaultShimReported `protobuf:"bytes,10,opt,name=shim_reported,json=shimReported,proto3,oneof"`
+}
+
+func (*HostFault_ShimStartFailed) isHostFault_Kind() {}
+
+func (*HostFault_ShimDied) isHostFault_Kind() {}
+
+func (*HostFault_LinkSevered) isHostFault_Kind() {}
+
+func (*HostFault_ResumeFailed) isHostFault_Kind() {}
+
+func (*HostFault_BounceDied) isHostFault_Kind() {}
+
+func (*HostFault_BounceUnknown) isHostFault_Kind() {}
+
+func (*HostFault_ClassifierFailed) isHostFault_Kind() {}
+
+func (*HostFault_ShimReported) isHostFault_Kind() {}
+
 var File_agentrepl_v1_endpoint_watch_host_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\n" +
-	"0agentrepl/v1/endpoint_watch_host_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"U\n" +
+	"0agentrepl/v1/endpoint_watch_host_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a*agentrepl/v1/endpoint_session_health.proto\"U\n" +
 	"\x19WatchHostWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x8a\x03\n" +
 	"\x1aWatchHostWorkspaceResponse\x121\n" +
@@ -1969,11 +2119,22 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x13HostComposerMerging\"\x16\n" +
 	"\x14HostComposerDraining\"\x18\n" +
 	"\x16HostComposerRestarting\"\x19\n" +
-	"\x17HostComposerMergeParked\"E\n" +
+	"\x17HostComposerMergeParked\"\xc9\x05\n" +
 	"\tHostFault\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12 \n" +
 	"\fopened_at_ms\x18\x02 \x01(\x03R\n" +
-	"openedAtMsB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"openedAtMs\x12W\n" +
+	"\x11shim_start_failed\x18\x03 \x01(\v2).agentrepl.v1.SessionFaultShimStartFailedH\x00R\x0fshimStartFailed\x12A\n" +
+	"\tshim_died\x18\x04 \x01(\v2\".agentrepl.v1.SessionFaultShimDiedH\x00R\bshimDied\x12J\n" +
+	"\flink_severed\x18\x05 \x01(\v2%.agentrepl.v1.SessionFaultLinkSeveredH\x00R\vlinkSevered\x12M\n" +
+	"\rresume_failed\x18\x06 \x01(\v2&.agentrepl.v1.SessionFaultResumeFailedH\x00R\fresumeFailed\x12G\n" +
+	"\vbounce_died\x18\a \x01(\v2$.agentrepl.v1.SessionFaultBounceDiedH\x00R\n" +
+	"bounceDied\x12P\n" +
+	"\x0ebounce_unknown\x18\b \x01(\v2'.agentrepl.v1.SessionFaultBounceUnknownH\x00R\rbounceUnknown\x12Y\n" +
+	"\x11classifier_failed\x18\t \x01(\v2*.agentrepl.v1.SessionFaultClassifierFailedH\x00R\x10classifierFailed\x12M\n" +
+	"\rshim_reported\x18\n" +
+	" \x01(\v2&.agentrepl.v1.SessionFaultShimReportedH\x00R\fshimReportedB\x06\n" +
+	"\x04kindB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescOnce sync.Once
@@ -2020,6 +2181,14 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*HostComposerMergeParked)(nil),             // 28: agentrepl.v1.HostComposerMergeParked
 	(*HostFault)(nil),                           // 29: agentrepl.v1.HostFault
 	(*v1.WorkspaceRef)(nil),                     // 30: workspace.v1.WorkspaceRef
+	(*SessionFaultShimStartFailed)(nil),         // 31: agentrepl.v1.SessionFaultShimStartFailed
+	(*SessionFaultShimDied)(nil),                // 32: agentrepl.v1.SessionFaultShimDied
+	(*SessionFaultLinkSevered)(nil),             // 33: agentrepl.v1.SessionFaultLinkSevered
+	(*SessionFaultResumeFailed)(nil),            // 34: agentrepl.v1.SessionFaultResumeFailed
+	(*SessionFaultBounceDied)(nil),              // 35: agentrepl.v1.SessionFaultBounceDied
+	(*SessionFaultBounceUnknown)(nil),           // 36: agentrepl.v1.SessionFaultBounceUnknown
+	(*SessionFaultClassifierFailed)(nil),        // 37: agentrepl.v1.SessionFaultClassifierFailed
+	(*SessionFaultShimReported)(nil),            // 38: agentrepl.v1.SessionFaultShimReported
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	30, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
@@ -2051,11 +2220,19 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	21, // 26: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
 	22, // 27: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
 	23, // 28: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
-	29, // [29:29] is the sub-list for method output_type
-	29, // [29:29] is the sub-list for method input_type
-	29, // [29:29] is the sub-list for extension type_name
-	29, // [29:29] is the sub-list for extension extendee
-	0,  // [0:29] is the sub-list for field type_name
+	31, // 29: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
+	32, // 30: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
+	33, // 31: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
+	34, // 32: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
+	35, // 33: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
+	36, // 34: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
+	37, // 35: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
+	38, // 36: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -2063,6 +2240,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 	if File_agentrepl_v1_endpoint_watch_host_workspace_proto != nil {
 		return
 	}
+	file_agentrepl_v1_endpoint_session_health_proto_init()
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[1].OneofWrappers = []any{
 		(*WatchHostWorkspaceResponse_Host)(nil),
 		(*WatchHostWorkspaceResponse_Notification)(nil),
@@ -2098,6 +2276,16 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*HostBackfill_Pending)(nil),
 		(*HostBackfill_Done)(nil),
 		(*HostBackfill_Failed)(nil),
+	}
+	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[29].OneofWrappers = []any{
+		(*HostFault_ShimStartFailed)(nil),
+		(*HostFault_ShimDied)(nil),
+		(*HostFault_LinkSevered)(nil),
+		(*HostFault_ResumeFailed)(nil),
+		(*HostFault_BounceDied)(nil),
+		(*HostFault_BounceUnknown)(nil),
+		(*HostFault_ClassifierFailed)(nil),
+		(*HostFault_ShimReported)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
