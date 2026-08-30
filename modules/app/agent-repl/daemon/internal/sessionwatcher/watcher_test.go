@@ -258,6 +258,46 @@ func TestMonitorIsRetiredByItsOwnTerminal(t *testing.T) {
 	}
 }
 
+// TestACreatedMonitorIsRetiredByItsEndedFrame covers the re-adopted monitor:
+// it was never announced on this watch, so nothing ties an activity to its
+// handle — but DetachedWorkId.value IS the unit's AgentActivityId.value, so
+// the monitor's own ended frame retires it.
+func TestACreatedMonitorIsRetiredByItsEndedFrame(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+	if h.w.LiveWork().Empty() {
+		t.Fatal("the re-adopted monitor was not live")
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorActivity("act-1", true)))))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the ended monitor is still live: %+v", h.w.LiveWork())
+	}
+}
+
+// TestACreatedMonitorIsRetiredByItsFailureFrame covers the other terminal arm:
+// a watch that could not be armed is over, so it leaves the live set too.
+func TestACreatedMonitorIsRetiredByItsFailureFrame(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+	if h.w.LiveWork().Empty() {
+		t.Fatal("the re-adopted monitor was not live")
+	}
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorFailedActivity("act-1")))))
+
+	// Assert.
+	if !h.w.LiveWork().Empty() {
+		t.Fatalf("the failed monitor is still live: %+v", h.w.LiveWork())
+	}
+}
+
 // TestATerminalForUnannouncedWorkChangesNothing covers the levels rule: the
 // live set is the announcements and the terminals of what was announced, and
 // an unpaired terminal edge must not invent or retire membership.

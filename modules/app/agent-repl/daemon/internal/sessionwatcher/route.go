@@ -15,7 +15,7 @@ import (
 
 // routeSessionUpdateLocked routes one SessionUpdate arm to the views that
 // resolve from it. The split is per arm and stated once here: session identity
-// and health are the topbar's, accounting and the budget warning are the
+// and health are the topbar's, accounting and the rate-limit status are the
 // footer's, and the session's death is everyone's.
 func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
 	switch update.GetUpdate().(type) {
@@ -38,6 +38,7 @@ func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate)
 		w.sinks.Sidebar.OnSessionUpdate(w.ws, update)
 
 	case *conversationv1.SessionUpdate_AccountUsage,
+		*conversationv1.SessionUpdate_RateLimitStatus,
 		*conversationv1.SessionUpdate_Compacting:
 		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the footer", dlog.Context{
 			"arm": sessionArm(update),
@@ -108,6 +109,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "identity_rotated"
 	case *conversationv1.SessionUpdate_AccountUsage:
 		return "account_usage"
+	case *conversationv1.SessionUpdate_RateLimitStatus:
+		return "rate_limit_status"
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting"
 	case *conversationv1.SessionUpdate_QueryDied:
@@ -262,6 +265,15 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 		})
 		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), w.addr)
 		w.sinks.Footer.OnApiError(w.ws, agent, update.GetApiError())
+
+	case update.GetContextBudgetWarning() != nil:
+		// THE AGENT PLANE owns the budget warning: it is a transcript
+		// attachment the sidecar produces, and the footer's activity line is
+		// its only consumer.
+		w.log.Debug("daemon.sessionwatcher.context_budget_warning", "the vendor warned the context window is filling", dlog.Context{
+			"agent_id": agent.GetValue(),
+		})
+		w.sinks.Footer.OnContextBudgetWarning(w.ws, agent, update.GetContextBudgetWarning())
 
 	default:
 		w.log.Warn("daemon.sessionwatcher.update_unrouted", "an AgentUpdate arm has no route", dlog.Context{
@@ -536,16 +548,24 @@ func (w *watcher) reapEndedMonitorLocked(act *conversationv1.AgentActivity) {
 	if monitor == nil || (monitor.GetEnded() == nil && monitor.GetFailure() == nil) {
 		return
 	}
-	fact, ok := w.facts[act.GetActivityId().GetValue()]
-	if !ok || fact.work == nil {
+	// THE HANDLE IS THE ACTIVITY ID for a `created`-origin monitor:
+	// DetachedWorkId.value == the unit's AgentActivityId.value (same bytes),
+	// so a re-adopted monitor — which was never announced on this watch and
+	// therefore has no recorded fact — is retired by its own terminal. A
+	// `detached`-origin monitor keeps resolving through the recorded fact.
+	key := act.GetActivityId().GetValue()
+	if fact, ok := w.facts[key]; ok && fact.work != nil {
+		key = fact.work.GetValue()
+	}
+	if key == "" {
 		return
 	}
-	if _, live := w.monitors[fact.work.GetValue()]; !live {
+	if _, live := w.monitors[key]; !live {
 		return
 	}
-	delete(w.monitors, fact.work.GetValue())
+	delete(w.monitors, key)
 	w.log.Debug("daemon.sessionwatcher.reap", "a monitor was retired", dlog.Context{
-		"work_id": fact.work.GetValue(),
+		"work_id": key,
 	})
 	w.publishLiveWorkLocked()
 }

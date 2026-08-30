@@ -173,6 +173,21 @@ func TestRouteContextCut(t *testing.T) {
 	assertNames(t, got, []string{"feed.OnContextCut", "footer.OnContextCut"})
 }
 
+// TestRouteContextBudgetWarning covers the arm's plane: the vendor's
+// context-budget warning is a transcript attachment on the AGENT plane, and
+// the footer's activity line is its only consumer.
+func TestRouteContextBudgetWarning(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeUpdateLocked(agentID("main-1"), budgetWarningFrame()) })
+
+	// Assert.
+	assertNames(t, got, []string{"footer.OnContextBudgetWarning"})
+}
+
 // TestRouteApiError covers mid-turn evidence: it is a page line and a footer
 // retry notice, and never a terminal — the turn goes on.
 func TestRouteApiError(t *testing.T) {
@@ -451,8 +466,8 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
-			name:   "the context budget warning is the footer's",
-			update: budgetWarningUpdate(),
+			name:   "the rate-limit status is the footer's",
+			update: rateLimitStatusUpdate(),
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
