@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -348,6 +347,7 @@ type fakeMerge struct {
 	facts       map[ids.WorkspaceID]footer.MergeFacts
 	interrupted []ids.WorkspaceID
 	enqueued    []ids.WorkspaceID
+	enqueueErr  error
 }
 
 func newFakeMerge() *fakeMerge {
@@ -364,6 +364,9 @@ func (m *fakeMerge) OnInterrupt(_ context.Context, ws ids.WorkspaceID) {
 }
 
 func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID) error {
+	if m.enqueueErr != nil {
+		return m.enqueueErr
+	}
 	m.enqueued = append(m.enqueued, ws)
 	return nil
 }
@@ -653,6 +656,8 @@ type fakeSurfaces struct {
 	logger       *dlog.TestLogger
 	workspaceErr error
 	shimSinkErr  error
+	evictErr     error
+	evicted      []string
 }
 
 func newFakeSurfaces() *fakeSurfaces { return &fakeSurfaces{logger: dlog.NewTestLogger()} }
@@ -725,8 +730,6 @@ type fixture struct {
 	briefs map[string]prompts.Prompt
 	// briefErr fails every brief load.
 	briefErr error
-	// evicted records the log sinks the close verb evicted.
-	evicted []string
 }
 
 // newFixture arranges a verb surface with a live session, an owned workspace
@@ -800,8 +803,7 @@ func newFixture(t *testing.T) *fixture {
 			}
 			return out, nil
 		},
-		Now:          func() time.Time { return fixedNow },
-		EvictLogSink: func(dir string) error { f.evicted = append(f.evicted, dir); return nil },
+		Now: func() time.Time { return fixedNow },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -842,31 +844,6 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 type stubTopbar struct{ topbar.Resolver }
 type stubHolds struct{ holds.Resolver }
 
-// initGitRepo creates a real git repository, which the naming rule's worktree
-// derivation stats. It skips the test when git is unavailable rather than
-// asserting on the state of the machine.
-func initGitRepo(t *testing.T) string {
-	t.Helper()
-	git, err := exec.LookPath("git")
-	if err != nil {
-		t.Skip("git is not on PATH")
-	}
-	dir := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q"},
-		{"config", "user.email", "test@example.invalid"},
-		{"config", "user.name", "test"},
-		{"commit", "-q", "--allow-empty", "-m", "root"},
-	} {
-		cmd := exec.Command(git, args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	return dir
-}
-
 // asRefusal fails the test unless err is a refusal naming arm.
 func asRefusal(t *testing.T, err error, arm string) *Refusal {
 	t.Helper()
@@ -891,5 +868,12 @@ func containsString(set []string, want string) bool {
 	return false
 }
 
-// Evict satisfies dlog.Surfaces for the merged seam (the bootinfra agent added it).
-func (s *fakeSurfaces) Evict(_ string) error { return nil }
+// Evict records the sinks a close released, and fails when the test arranged
+// an eviction failure.
+func (s *fakeSurfaces) Evict(dir string) error {
+	if s.evictErr != nil {
+		return s.evictErr
+	}
+	s.evicted = append(s.evicted, dir)
+	return nil
+}

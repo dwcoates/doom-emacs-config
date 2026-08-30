@@ -598,7 +598,7 @@ func (a *shimAdapter) KillTurn(ctx context.Context, turn ids.TurnID, force bool)
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return fmt.Errorf("kill turn %q: %s", turn, failure.GetDetail())
+		return &ShimRefusal{Verb: "KillTurn", Arm: killTurnArm(failure), Detail: failure.GetDetail()}
 	}
 	return nil
 }
@@ -621,7 +621,7 @@ func (a *shimAdapter) updateAgent(ctx context.Context, agent *conversationv1.Age
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return fmt.Errorf("update agent %q: %s", agent.GetValue(), failure.GetDetail())
+		return &ShimRefusal{Verb: "UpdateAgent", Arm: updateAgentArm(failure), Detail: failure.GetDetail()}
 	}
 	return nil
 }
@@ -632,7 +632,7 @@ func (a *shimAdapter) StopBash(ctx context.Context, work *conversationv1.Detache
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return fmt.Errorf("stop bash %q: %s", work.GetValue(), failure.GetDetail())
+		return &ShimRefusal{Verb: "StopBash", Arm: stopBashArm(failure), Detail: failure.GetDetail()}
 	}
 	return nil
 }
@@ -643,7 +643,7 @@ func (a *shimAdapter) KillSession(ctx context.Context, force bool) error {
 		return err
 	}
 	if failure := response.GetFailure(); failure != nil {
-		return fmt.Errorf("kill session: %s", failure.GetDetail())
+		return &ShimRefusal{Verb: "KillSession", Arm: killSessionArm(failure), Detail: failure.GetDetail()}
 	}
 	return nil
 }

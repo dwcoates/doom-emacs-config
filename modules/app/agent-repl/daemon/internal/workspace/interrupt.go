@@ -96,6 +96,19 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 
 	if err := shim.KillTurn(ctx, *running.Turn, confirm); err != nil {
 		v.deps.Footer.SetInterrupting(ws, false)
+		if refusal, ok := AsShimRefusal(err); ok {
+			if refusal.Benign() {
+				// The turn ended between the freeness read and the kill. That
+				// is an ANSWER, not a failure.
+				log.Debug(opInterrupt, "nothing is running", dlog.Context{
+					"target": "turn", "shim_arm": refusal.Arm,
+				})
+				return InterruptOutcome{NothingRunning: true}, nil
+			}
+			// The shim's own arm is propagated verbatim: the caller learns
+			// WHICH refusal it was, not just that something refused.
+			return InterruptOutcome{}, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
+		}
 		log.Error(opInterrupt, "the turn kill failed", dlog.Context{
 			"turn": string(*running.Turn), "force": confirm, "cause": err.Error(),
 		})
@@ -122,6 +135,9 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 	case feedid.KindDetachedSubagent:
 		agent := &conversationv1.AgentId{Value: ref.Row.ID}
 		if err := shim.StopAgent(ctx, agent); err != nil {
+			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
+				return outcome, refusal
+			}
 			log.Error(opInterrupt, "could not stop the detached agent", withCause(fields, err))
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: stop agent %q: %w", ws, ref.Row.ID, err)
 		}
@@ -130,6 +146,9 @@ func (v *verbs) interruptDetached(ctx context.Context, log dlog.Logger, ws ids.W
 	case feedid.KindDetachedShell:
 		work := &conversationv1.DetachedWorkId{Value: ref.Row.ID}
 		if err := shim.StopBash(ctx, work); err != nil {
+			if outcome, refusal, handled := v.shimOutcome(log, opInterrupt, "Interrupt", fields, err); handled {
+				return outcome, refusal
+			}
 			log.Error(opInterrupt, "could not stop the detached shell", withCause(fields, err))
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: stop shell %q: %w", ws, ref.Row.ID, err)
 		}
@@ -152,9 +171,17 @@ func (v *verbs) interruptAllAgents(ctx context.Context, log dlog.Logger, ws ids.
 	stopped := 0
 	for _, agent := range running.LiveWork.Agents {
 		if err := shim.StopAgent(ctx, agent); err != nil {
-			log.Error(opInterrupt, "could not stop a detached agent", dlog.Context{
-				"agent": agent.GetValue(), "stopped_so_far": stopped, "cause": err.Error(),
-			})
+			fields := dlog.Context{"agent": agent.GetValue(), "stopped_so_far": stopped}
+			if refusal, ok := AsShimRefusal(err); ok {
+				if refusal.Benign() {
+					// One agent finishing on its own mid-sweep is not a failure
+					// of the sweep: it is simply no longer live.
+					log.Debug(opInterrupt, "a detached agent was already not running", withArm(fields, refusal))
+					continue
+				}
+				return InterruptOutcome{}, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
+			}
+			log.Error(opInterrupt, "could not stop a detached agent", withCause(fields, err))
 			return InterruptOutcome{}, fmt.Errorf("interrupt %q: stop agent %q: %w", ws, agent.GetValue(), err)
 		}
 		stopped++
@@ -171,5 +198,37 @@ func withCause(fields dlog.Context, err error) dlog.Context {
 		out[k] = val
 	}
 	out["cause"] = err.Error()
+	return out
+}
+
+// shimOutcome translates a single-target stop's error into an interrupt answer.
+// It reports handled=false for anything that is not a typed shim refusal, so
+// the caller still surfaces a transport failure as a failure.
+//
+// A BENIGN refusal is the "nothing running" answer: the thing the caller asked
+// to stop had already stopped, which is exactly what they wanted. Every other
+// arm is propagated by NAME, because "the row is stale" and "the SDK has no
+// route" are different answers and the caller acts on them differently.
+func (v *verbs) shimOutcome(log dlog.Logger, operation, rpc string, fields dlog.Context, err error) (InterruptOutcome, error, bool) {
+	refusal, ok := AsShimRefusal(err)
+	if !ok {
+		return InterruptOutcome{}, nil, false
+	}
+	if refusal.Benign() {
+		log.Debug(operation, "nothing is running", withArm(fields, refusal))
+		return InterruptOutcome{NothingRunning: true}, nil, true
+	}
+	return InterruptOutcome{}, refuse(log, rpc, refusal.Arm, refusal.Detail, false), true
+}
+
+// withArm adds a shim refusal's arm to a record's context without mutating the
+// caller's map.
+func withArm(fields dlog.Context, refusal *ShimRefusal) dlog.Context {
+	out := make(dlog.Context, len(fields)+2)
+	for k, val := range fields {
+		out[k] = val
+	}
+	out["shim_arm"] = refusal.Arm
+	out["shim_detail"] = refusal.Detail
 	return out
 }

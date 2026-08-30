@@ -13,9 +13,13 @@ import (
 )
 
 // UngatedPermissionModes are the permission modes that DISABLE the consent
-// gate: the agent acts without a permission card ever reaching the user. A
+// gate: the agent acts with no permission card reaching any decider at all. A
 // creation asking for one of them without the consent flag is REFUSED — the
 // gate is the user's, and it is never dropped by inference.
+//
+// `auto` is deliberately NOT one of them (ruled): it KEEPS a gate, with a
+// classifier deciding each ask instead of the user, so it needs no creation
+// consent.
 //
 // The spellings are the vendor's own, in both the camel-case form the CLI uses
 // and the snake-case form the mode oneof's arm names spell, because a mode
@@ -25,7 +29,6 @@ var UngatedPermissionModes = map[string]bool{
 	"bypass":            true,
 	"dontAsk":           true,
 	"dont_ask":          true,
-	"auto":              true,
 }
 
 // The merge-layout origins, which name the verb that recorded the geometry.
@@ -111,6 +114,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		BaseRef:              baseRef,
 		Materialized:         false,
 		OneShot:              spec.OneShot,
+		Finish:               finishOrigin(spec.Finish),
 		InitialPrompt:        spec.InitialPrompt,
 		ConsentedUngatedMode: spec.ConsentedUngatedMode,
 		CreatedAt:            v.now(),

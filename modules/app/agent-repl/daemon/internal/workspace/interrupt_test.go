@@ -301,3 +301,172 @@ func TestConfirmRequiredRendersTheIntendedArm(t *testing.T) {
 		t.Fatalf("Error() = %q, want %q", got, want)
 	}
 }
+
+func TestInterruptDetachedAgentPropagatesNotDeliverable(t *testing.T) {
+	// Arrange: landing 3's SDK limit is answered HONESTLY — the caller learns
+	// there is no route, rather than seeing a generic failure.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.shim.stopAgentErr = &ShimRefusal{
+		Verb: "UpdateAgent", Arm: ArmShimNotDeliverable, Detail: "no SDK route to a subagent",
+	}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedSubagent, ID: "agent-7"}}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmShimNotDeliverable)
+	if refusal.Rpc != "Interrupt" {
+		t.Fatalf("refusal rpc = %q, want Interrupt", refusal.Rpc)
+	}
+}
+
+func TestInterruptDetachedAgentAnswersNothingRunningOnABenignRefusal(t *testing.T) {
+	// Arrange: the agent finished on its own between the click and the stop.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.shim.stopAgentErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNothingRunning}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedSubagent, ID: "agent-7"}}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !outcome.NothingRunning {
+		t.Fatalf("outcome = %+v, want the nothing-running arm", outcome)
+	}
+}
+
+func TestInterruptDetachedAgentPropagatesAStaleRow(t *testing.T) {
+	// Arrange: "the row you clicked is stale" is a different answer from "the
+	// SDK has no route", so it keeps its own arm.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.shim.stopAgentErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimUnknownAgent}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedSubagent, ID: "agent-7"}}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimUnknownAgent)
+}
+
+func TestInterruptDetachedShellAnswersNothingRunningWhenAlreadyEnded(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimAlreadyEnded}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedShell, ID: "work-3"}}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !outcome.NothingRunning {
+		t.Fatalf("outcome = %+v, want the nothing-running arm", outcome)
+	}
+}
+
+func TestInterruptDetachedShellPropagatesUnknownWork(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.shim.stopBashErr = &ShimRefusal{Verb: "StopBash", Arm: ArmShimUnknownWork}
+	ref := feedid.Ref{WS: "w1", Row: feedid.RowKey{Kind: feedid.KindDetachedShell, ID: "work-3"}}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Detached: &ref}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimUnknownWork)
+}
+
+func TestInterruptTurnAnswersNothingRunningWhenTheTurnAlreadyEnded(t *testing.T) {
+	// Arrange: the turn ended between the freeness read and the kill.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimNoTurnOpen}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if !outcome.NothingRunning {
+		t.Fatalf("outcome = %+v, want the nothing-running arm", outcome)
+	}
+}
+
+func TestInterruptTurnPropagatesAnUninterruptibleTurn(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimTurnLive, Detail: "the query will not stop"}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimTurnLive)
+}
+
+func TestInterruptTurnRetiresTheFooterStatusOnAShimRefusal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimTurnLive}
+
+	// Act.
+	_, _ = f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	if f.footer.interrupting["w1"] {
+		t.Fatal("the footer's interrupting status was left raised after a refused kill")
+	}
+}
+
+func TestInterruptAllAgentsSkipsAnAgentThatAlreadyFinished(t *testing.T) {
+	// Arrange: one agent finishing mid-sweep is not a failure of the sweep.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 2)
+	f.shim.stopAgentErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNothingRunning}
+
+	// Act.
+	outcome, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if outcome.DetachedCount != 0 {
+		t.Fatalf("outcome = %+v, want no agents counted as stopped", outcome)
+	}
+}
+
+func TestInterruptAllAgentsPropagatesANonBenignRefusal(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 2)
+	f.shim.stopAgentErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNoSession}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{AllAgents: true}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimNoSession)
+}
