@@ -10,8 +10,10 @@ import (
 	"time"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
 func TestCycleBeginsOnlyAfterASuccessfulCursorRead(t *testing.T) {
@@ -861,5 +863,55 @@ func TestAKindLessFailureIsStatedAsAContractViolationAndSuspends(t *testing.T) {
 	}
 	if !strings.Contains(h.logText(), "refused with NO failure kind") {
 		t.Fatalf("the contract violation was not stated; the log read:\n%s", h.logText())
+	}
+}
+
+// ---- ruling R-S4: an a* spool's book is its SPAWNING CALL ----
+
+func TestAnAgentSpoolsBookIsItsSpawningCall(t *testing.T) {
+	// Arrange. An a* spool is a backgrounded subagent's transcript delivered
+	// through the task spool, so its PATH names a task and nothing else. The
+	// agent-transcript attribution has no filename fallback on purpose — naming
+	// a book by `agent-<id>` would give one agent two books, one per plane, that
+	// no consumer could reconcile — so the reader must supply the identity the
+	// subagent is announced under on BOTH planes: the spawning call's
+	// tool_use_id.
+	h := newHarness(t, &fakeStore{})
+	spool := h.spoolFile(t, "a1", promptLine+"\n")
+	h.sc.TaskSpawned("a1", "toolu_spawn_0001", "owner-agent", spool)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act.
+	w, watched := h.sc.watchers[spool]
+	if !watched {
+		t.Fatalf("the agent spool is not being watched; watchers=%v", h.sc.watchers)
+	}
+
+	// Assert.
+	if got := w.tailer.Context().AgentID; got != "toolu_spawn_0001" {
+		t.Fatalf("the agent spool's book is %q, want the spawning call's tool_use_id", got)
+	}
+}
+
+func TestAnAgentSpoolWithNoResolvedSpawnStatesTheReaderDefect(t *testing.T) {
+	// Arrange. A spool whose owner is unresolved is HELD rather than tailed, so
+	// reaching the book resolution without one is a reader defect. It is stated
+	// rather than silently producing records for a book nobody can open.
+	h := newHarness(t, &fakeStore{})
+	target := discover.Target{
+		Path: "/private/tmp/a9.output", TaskID: "a9", Kind: tail.KindAgentTranscript,
+	}
+
+	// Act.
+	got := h.sc.bookFor(target)
+
+	// Assert.
+	if got != "" {
+		t.Fatalf("bookFor = %q, want no book for an unresolved spawn", got)
+	}
+	if !strings.Contains(h.logText(), "would name no book") {
+		t.Fatalf("the reader defect was not stated; the log read:\n%s", h.logText())
 	}
 }

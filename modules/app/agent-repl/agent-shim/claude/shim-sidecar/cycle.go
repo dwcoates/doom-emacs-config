@@ -450,7 +450,7 @@ func (s *sidecar) watch(target discover.Target, now time.Time) {
 		SessionID:         target.SessionID,
 		Path:              target.Path,
 		Kind:              target.Kind,
-		AgentID:           target.AgentID,
+		AgentID:           s.bookFor(target),
 		MainAgentID:       s.owners.mainAgentFor(target),
 		SpawnBackgrounded: s.owners.spawnBackgrounded(target.TaskID),
 		MetaPath:          target.MetaPath,
@@ -485,6 +485,42 @@ func (s *sidecar) watch(target discover.Target, now time.Time) {
 				"the stopped task's spool is now being read; its terminal is minted once the spool's first batch is durable and can state the output")
 		}
 	}
+}
+
+// bookFor answers whose book a watched file's records land in.
+//
+// A TRANSCRIPT NAMES ITS OWN AGENT — discovery reads it out of the path. An a*
+// SPOOL DOES NOT: it is a backgrounded subagent's transcript delivered through
+// the task spool, so its path names a TASK and nothing else. Its book is the
+// SPAWNING CALL's tool_use_id, which is the identity a subagent is announced
+// under on both planes and the same one its `agent-<id>.meta.json` states as
+// toolUseId — resolved once by the owner index from the launch the converter
+// observed (R-S4).
+//
+// WITHOUT THIS THE BOOK IS EMPTY. The agent-transcript attribution has no
+// filename fallback on purpose (naming a book by `agent-<id>` would give one
+// agent two books, one per plane, that no consumer could reconcile), so an a*
+// spool tailed with no agent id produced records for a book nobody can open.
+func (s *sidecar) bookFor(target discover.Target) string {
+	if target.AgentID != "" {
+		return target.AgentID
+	}
+	if target.Kind != tail.KindAgentTranscript || target.TaskID == "" {
+		return ""
+	}
+	run := s.owners.activityFor(target.TaskID)
+	if run == "" {
+		// A spool whose owner is unresolved is HELD rather than tailed, so
+		// reaching here without one is a reader defect and is stated as one.
+		s.log.With(logging.Context{
+			Operation: "spool-book", Level: "error", Path: target.Path, TaskID: target.TaskID,
+		}).Log("an agent spool is being tailed with no spawning call resolved; its records would name no book")
+		return ""
+	}
+	s.log.With(logging.Context{
+		Operation: "spool-book", Path: target.Path, TaskID: target.TaskID, AgentID: run,
+	}).LogVerbose("the agent spool's book is its spawning call")
+	return run
 }
 
 // rewindOnce applies the boot rewind: ONE bounded backward scan per file per
