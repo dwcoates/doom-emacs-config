@@ -667,6 +667,76 @@ existing bug-capture path WITHOUT dropping ARGS on the floor."
       (agent-repl--warn nil "wrote this")
       (should (string-match-p "WARNING: wrote this" written)))))
 
+(defun agent-repl-test--recorded-log-field (field thunk)
+  "Return FIELD of the single JSONL record THUNK writes to the global sink."
+  (let ((written nil)
+        (agent-repl-log-to-file t))
+    (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
+               (lambda (text &rest _args) (setq written text)))
+              ((symbol-function 'message) #'ignore))
+      (funcall thunk))
+    (alist-get (intern field)
+               (json-parse-string written :object-type 'alist))))
+
+(ert-deftest agent-repl-test-warn-operation-drops-the-severity-tag ()
+  "A warned operation is recorded under its BARE slug, not a warning- one.
+logging-contract.md reserves `level' for severity and requires
+`operation' to be stable, so the same logical operation must not change
+name because the warn rung logged it."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--warn nil "elisp.daemon.stale-addr")))
+                 "agent-repl.elisp-daemon-stale-addr")))
+
+(ert-deftest agent-repl-test-warn-records-the-warn-level ()
+  "The severity a warn dropped from `operation' is carried by `level'."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "level"
+                  (lambda () (agent-repl--warn nil "elisp.daemon.stale-addr")))
+                 "warn")))
+
+(ert-deftest agent-repl-test-warn-record-keeps-the-displayed-tag ()
+  "Dropping the tag from `operation' does not drop it from the message."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "message"
+                  (lambda () (agent-repl--warn nil "elisp.daemon.stale-addr")))
+                 "WARNING: elisp.daemon.stale-addr")))
+
+(ert-deftest agent-repl-test-error-operation-drops-the-severity-tag ()
+  "An errored operation is recorded under its BARE slug too."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--error nil "elisp.rpc.push-invalid")))
+                 "agent-repl.elisp-rpc-push-invalid")))
+
+(ert-deftest agent-repl-test-error-records-the-error-level ()
+  "The error rung's severity lives in `level', as the contract says."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "level"
+                  (lambda () (agent-repl--error nil "elisp.rpc.push-invalid")))
+                 "error")))
+
+(ert-deftest agent-repl-test-error-record-keeps-the-displayed-tag ()
+  "The `ERROR: ' tag still reaches the recorded message."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "message"
+                  (lambda () (agent-repl--error nil "elisp.rpc.push-invalid")))
+                 "ERROR: elisp.rpc.push-invalid")))
+
+(ert-deftest agent-repl-test-debug-operation-is-unchanged ()
+  "The debug rung tags nothing, so its operation is untouched by the fix."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--log nil "elisp.daemon.stale-addr")))
+                 "agent-repl.elisp-daemon-stale-addr")))
+
+(ert-deftest agent-repl-test-info-operation-is-unchanged ()
+  "The info rung tags nothing either."
+  (should (equal (agent-repl-test--recorded-log-field
+                  "operation"
+                  (lambda () (agent-repl--info nil "elisp.daemon.stale-addr")))
+                 "agent-repl.elisp-daemon-stale-addr")))
+
 (ert-deftest agent-repl-test-log-never-reaches-echo-area-when-debug-on ()
   "Turning debug logging on must not turn the modeline into a firehose."
   (let* ((agent-repl-debug t)
@@ -733,7 +803,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   "`agent-repl--fatal' records at level \"error\" before it signals."
   (let ((captured nil))
     (cl-letf (((symbol-function 'agent-repl--persist-log-record)
-               (lambda (_ws level _verbosity _fmt _args) (setq captured level))))
+               (lambda (_ws level _verbosity _fmt _args &optional _op) (setq captured level))))
       (should-error (agent-repl--fatal nil "boom"))
       (should (equal captured "error")))))
 
@@ -798,7 +868,7 @@ one to its caller.  A caller that must abort signals for itself."
   (let ((captured nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
               ((symbol-function 'agent-repl--persist-log-record)
-               (lambda (_ws level _verbosity _fmt _args) (setq captured level))))
+               (lambda (_ws level _verbosity _fmt _args &optional _op) (setq captured level))))
       (agent-repl--error nil "boom")
       (should (equal captured "error")))))
 
@@ -807,7 +877,7 @@ one to its caller.  A caller that must abort signals for itself."
   (let ((captured nil))
     (cl-letf (((symbol-function 'agent-repl--emit-message) #'ignore)
               ((symbol-function 'agent-repl--persist-log-record)
-               (lambda (_ws _level verbosity _fmt _args) (setq captured verbosity))))
+               (lambda (_ws _level verbosity _fmt _args &optional _op) (setq captured verbosity))))
       (agent-repl--error nil "boom")
       (should (equal captured "normal")))))
 
