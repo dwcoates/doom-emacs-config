@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_close_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_close_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVQ2xvc2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFkNsb3NlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFUNsb3NlV29ya3NwYWNlU3VjY2VzcyJWChNDbG9zZVdvcmtzcGFjZUVycm9yEjYKB2Jsb2NrZWQYASABKAsyIy5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VCbG9ja2VkSABCBwoFY2F1c2UiFwoVQ2xvc2VXb3Jrc3BhY2VCbG9ja2VkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVQ2xvc2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFkNsb3NlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFUNsb3NlV29ya3NwYWNlU3VjY2VzcyKGAwoTQ2xvc2VXb3Jrc3BhY2VFcnJvchI2CgdibG9ja2VkGAEgASgLMiMuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlQmxvY2tlZEgAEkkKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyMC5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSIXChVDbG9zZVdvcmtzcGFjZUJsb2NrZWQiIAoeQ2xvc2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjoKIkNsb3NlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0Nsb3NlV29ya3NwYWNlTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.CloseWorkspaceRequest
@@ -97,6 +97,7 @@ export const CloseWorkspaceSuccessSchema: GenMessage<CloseWorkspaceSuccess> = /*
 
 /**
  * THE ARM IS THE REFUSAL.
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.CloseWorkspaceError
  */
@@ -107,12 +108,44 @@ export type CloseWorkspaceError = Message<"agentrepl.v1.CloseWorkspaceError"> & 
   cause: {
     /**
      * Work is in flight; the footer's close-blocked state carries the
-     * reasons. Further arms DERIVED at the wave.
+     * reasons.
      *
      * @generated from field: agentrepl.v1.CloseWorkspaceBlocked blocked = 1;
      */
     value: CloseWorkspaceBlocked;
     case: "blocked";
+  } | {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.CloseWorkspaceUnknownWorkspace unknown_workspace = 2;
+     */
+    value: CloseWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 3;
+     */
+    value: CloseWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.CloseWorkspaceTransferringAway transferring_away = 4;
+     */
+    value: CloseWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.CloseWorkspaceNotYetAdopted not_yet_adopted = 5;
+     */
+    value: CloseWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -135,4 +168,68 @@ export type CloseWorkspaceBlocked = Message<"agentrepl.v1.CloseWorkspaceBlocked"
  */
 export const CloseWorkspaceBlockedSchema: GenMessage<CloseWorkspaceBlocked> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_close_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.CloseWorkspaceUnknownWorkspace
+ */
+export type CloseWorkspaceUnknownWorkspace = Message<"agentrepl.v1.CloseWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseWorkspaceUnknownWorkspace.
+ * Use `create(CloseWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const CloseWorkspaceUnknownWorkspaceSchema: GenMessage<CloseWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch
+ */
+export type CloseWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseWorkspaceWorkspaceRefMismatch.
+ * Use `create(CloseWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const CloseWorkspaceWorkspaceRefMismatchSchema: GenMessage<CloseWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.CloseWorkspaceTransferringAway
+ */
+export type CloseWorkspaceTransferringAway = Message<"agentrepl.v1.CloseWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseWorkspaceTransferringAway.
+ * Use `create(CloseWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const CloseWorkspaceTransferringAwaySchema: GenMessage<CloseWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_workspace, 7);
+
+/**
+ * @generated from message agentrepl.v1.CloseWorkspaceNotYetAdopted
+ */
+export type CloseWorkspaceNotYetAdopted = Message<"agentrepl.v1.CloseWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseWorkspaceNotYetAdopted.
+ * Use `create(CloseWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const CloseWorkspaceNotYetAdoptedSchema: GenMessage<CloseWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_workspace, 8);
 

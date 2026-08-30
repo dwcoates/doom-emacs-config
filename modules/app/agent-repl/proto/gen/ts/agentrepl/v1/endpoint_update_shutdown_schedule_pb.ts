@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_update_shutdown_schedule.proto.
  */
 export const file_agentrepl_v1_endpoint_update_shutdown_schedule: GenFile = /*@__PURE__*/
-  fileDesc("CjRhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NodXRkb3duX3NjaGVkdWxlLnByb3RvEgxhZ2VudHJlcGwudjEi4QEKHVVwZGF0ZVNodXRkb3duU2NoZWR1bGVSZXF1ZXN0EkAKCHNjaGVkdWxlGAEgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZVNodXRkb3duU2NoZWR1bGVTY2hlZHVsZUgAEjwKBmNhbmNlbBgCIAEoCzIqLmFnZW50cmVwbC52MS5VcGRhdGVTaHV0ZG93blNjaGVkdWxlQ2FuY2VsSAASNgoDbm93GAMgASgLMicuYWdlbnRyZXBsLnYxLlVwZGF0ZVNodXRkb3duU2NoZWR1bGVOb3dIAEIICgZhY3Rpb24iWgoeVXBkYXRlU2h1dGRvd25TY2hlZHVsZVNjaGVkdWxlEg0KBWF0X21zGAEgASgDEikKBnJlYXNvbhgCIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiIeChxVcGRhdGVTaHV0ZG93blNjaGVkdWxlQ2FuY2VsIkYKGVVwZGF0ZVNodXRkb3duU2NoZWR1bGVOb3cSKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIqYBCh5VcGRhdGVTaHV0ZG93blNjaGVkdWxlUmVzcG9uc2USPgoHc3VjY2VzcxgBIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVTaHV0ZG93blNjaGVkdWxlU3VjY2Vzc0gAEjoKBWVycm9yGAIgASgLMikuYWdlbnRyZXBsLnYxLlVwZGF0ZVNodXRkb3duU2NoZWR1bGVFcnJvckgAQggKBnJlc3VsdCIfCh1VcGRhdGVTaHV0ZG93blNjaGVkdWxlU3VjY2VzcyIdChtVcGRhdGVTaHV0ZG93blNjaGVkdWxlRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_drain_reason]);
+  fileDesc("CjRhZ2VudHJlcGwvdjEvZW5kcG9pbnRfdXBkYXRlX3NodXRkb3duX3NjaGVkdWxlLnByb3RvEgxhZ2VudHJlcGwudjEi4QEKHVVwZGF0ZVNodXRkb3duU2NoZWR1bGVSZXF1ZXN0EkAKCHNjaGVkdWxlGAEgASgLMiwuYWdlbnRyZXBsLnYxLlVwZGF0ZVNodXRkb3duU2NoZWR1bGVTY2hlZHVsZUgAEjwKBmNhbmNlbBgCIAEoCzIqLmFnZW50cmVwbC52MS5VcGRhdGVTaHV0ZG93blNjaGVkdWxlQ2FuY2VsSAASNgoDbm93GAMgASgLMicuYWdlbnRyZXBsLnYxLlVwZGF0ZVNodXRkb3duU2NoZWR1bGVOb3dIAEIICgZhY3Rpb24iWgoeVXBkYXRlU2h1dGRvd25TY2hlZHVsZVNjaGVkdWxlEg0KBWF0X21zGAEgASgDEikKBnJlYXNvbhgCIAEoCzIZLmFnZW50cmVwbC52MS5EcmFpblJlYXNvbiIeChxVcGRhdGVTaHV0ZG93blNjaGVkdWxlQ2FuY2VsIkYKGVVwZGF0ZVNodXRkb3duU2NoZWR1bGVOb3cSKQoGcmVhc29uGAEgASgLMhkuYWdlbnRyZXBsLnYxLkRyYWluUmVhc29uIqYBCh5VcGRhdGVTaHV0ZG93blNjaGVkdWxlUmVzcG9uc2USPgoHc3VjY2VzcxgBIAEoCzIrLmFnZW50cmVwbC52MS5VcGRhdGVTaHV0ZG93blNjaGVkdWxlU3VjY2Vzc0gAEjoKBWVycm9yGAIgASgLMikuYWdlbnRyZXBsLnYxLlVwZGF0ZVNodXRkb3duU2NoZWR1bGVFcnJvckgAQggKBnJlc3VsdCIfCh1VcGRhdGVTaHV0ZG93blNjaGVkdWxlU3VjY2VzcyJ5ChtVcGRhdGVTaHV0ZG93blNjaGVkdWxlRXJyb3ISUQoRbm90aGluZ19zY2hlZHVsZWQYASABKAsyNC5hZ2VudHJlcGwudjEuVXBkYXRlU2h1dGRvd25TY2hlZHVsZU5vdGhpbmdTY2hlZHVsZWRIAEIHCgVjYXVzZSIoCiZVcGRhdGVTaHV0ZG93blNjaGVkdWxlTm90aGluZ1NjaGVkdWxlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_drain_reason]);
 
 /**
  * @generated from message agentrepl.v1.UpdateShutdownScheduleRequest
@@ -170,12 +170,24 @@ export const UpdateShutdownScheduleSuccessSchema: GenMessage<UpdateShutdownSched
   messageDesc(file_agentrepl_v1_endpoint_update_shutdown_schedule, 5);
 
 /**
- * EMPTY ON PURPOSE: arms DERIVED at the wave (nothing scheduled to cancel,
- * a newer schedule already stands), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.UpdateShutdownScheduleError
  */
 export type UpdateShutdownScheduleError = Message<"agentrepl.v1.UpdateShutdownScheduleError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.UpdateShutdownScheduleError.cause
+   */
+  cause: {
+    /**
+     * Nothing is scheduled to cancel.
+     *
+     * @generated from field: agentrepl.v1.UpdateShutdownScheduleNothingScheduled nothing_scheduled = 1;
+     */
+    value: UpdateShutdownScheduleNothingScheduled;
+    case: "nothingScheduled";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -184,4 +196,17 @@ export type UpdateShutdownScheduleError = Message<"agentrepl.v1.UpdateShutdownSc
  */
 export const UpdateShutdownScheduleErrorSchema: GenMessage<UpdateShutdownScheduleError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_update_shutdown_schedule, 6);
+
+/**
+ * @generated from message agentrepl.v1.UpdateShutdownScheduleNothingScheduled
+ */
+export type UpdateShutdownScheduleNothingScheduled = Message<"agentrepl.v1.UpdateShutdownScheduleNothingScheduled"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.UpdateShutdownScheduleNothingScheduled.
+ * Use `create(UpdateShutdownScheduleNothingScheduledSchema)` to create a new message.
+ */
+export const UpdateShutdownScheduleNothingScheduledSchema: GenMessage<UpdateShutdownScheduleNothingScheduled> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_update_shutdown_schedule, 7);
 
