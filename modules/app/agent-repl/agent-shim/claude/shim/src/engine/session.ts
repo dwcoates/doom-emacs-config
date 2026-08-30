@@ -66,6 +66,7 @@ import {
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
 import type { EngineFold, FoldContext } from "./fold-context.js";
+import { SYNTHETIC_MODEL } from "../model.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -325,6 +326,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         },
       }),
     );
+  }
+
+  /**
+   * THE MODEL THE VENDOR SAYS IT ANSWERED ON.
+   *
+   * The vendor can serve a model nobody asked for — a refusal fallback retries
+   * on another model and says so ONLY through the next assistant message's
+   * `message.model`. The chip a surface draws is the model in effect, not the
+   * last `SetSessionModel`, so the reported name is adopted as truth and pushed
+   * whenever it differs.
+   *
+   * A `<synthetic>` MARKER IS NEVER A MODEL: it is the CLI's stand-in for "no
+   * real nameable model", and adopting it would put an unspawnable id in the
+   * picker and in every later authoritative field.
+   */
+  function noteReportedModel(reported: unknown): void {
+    if (typeof reported !== "string") return;
+    const name = reported.trim();
+    if (name === "") return;
+    if (name === SYNTHETIC_MODEL) {
+      LOGGER.log(
+        { level: "warn", reported: name },
+        "the vendor reported the synthetic marker as its model; it is not a model and is not adopted",
+      );
+      return;
+    }
+    if (name === effectiveModel) return;
+    LOGGER.log(
+      { previous_model: effectiveModel, effective_model: name },
+      "the vendor answered on a model the shim did not ask for; adopting it as the effective model",
+    );
+    effectiveModel = name;
+    pushModel();
   }
 
   function pushPermissionMode(): void {
@@ -755,13 +789,26 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (message.type === "system" && message.subtype === "init") {
       setClaudeSessionId(message.session_id);
       recordAgentBinaryVersion(message.claude_code_version);
-      effectiveModel = message.model;
+      if (message.model.trim() === SYNTHETIC_MODEL) {
+        LOGGER.log(
+          { level: "warn" },
+          "the vendor's init reported the synthetic marker as its model; keeping the model already in effect",
+        );
+      } else {
+        effectiveModel = message.model;
+      }
       permissionMode = fromVendorPermissionMode(message.permissionMode);
       if (identity !== undefined && message.session_id !== identity.vendorSessionId) {
         void rotate(message.session_id);
       }
       initResolve?.(message);
       initResolve = undefined;
+      return;
+    }
+    if (message.type === "assistant") {
+      // UNSOLICITED CHANGES ARE STILL CHANGES: nothing called SetSessionModel,
+      // so this message is the only evidence the swap happened.
+      noteReportedModel((message.message as { model?: unknown } | undefined)?.model);
       return;
     }
     if (message.type === "conversation_reset") {
