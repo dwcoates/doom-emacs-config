@@ -41,7 +41,7 @@ import (
 // and there never will be: the store is nuked, never migrated, so the version
 // answers exactly one question — "did this binary create what is on disk?" —
 // and the only remedy for "no" is to recreate it.
-const SchemaVersion = 2
+const SchemaVersion = 5
 
 // nowMillis is the store's wall clock in unix millis.
 func nowMillis() int64 { return time.Now().UnixMilli() }
@@ -180,6 +180,7 @@ CREATE TABLE entry (
   plane                INTEGER NOT NULL,
   kind                 TEXT    NOT NULL,
   book_agent_id        TEXT,
+  run_id               TEXT,
   top_level            TEXT,
   frame                BLOB    NOT NULL,
   first_inserted_at_ms INTEGER NOT NULL,
@@ -188,6 +189,8 @@ CREATE TABLE entry (
 CREATE INDEX entry_book_position  ON entry(book_agent_id, position);
 CREATE INDEX entry_book_write_seq ON entry(book_agent_id, write_seq);
 CREATE INDEX entry_write_seq      ON entry(write_seq);
+CREATE INDEX entry_run_position  ON entry(run_id, position);
+CREATE INDEX entry_run_write_seq ON entry(run_id, write_seq);
 
 CREATE TABLE agent (
   agent_id              TEXT PRIMARY KEY,
@@ -223,17 +226,22 @@ CREATE TABLE workflow (
 );
 CREATE INDEX workflow_live ON workflow(ended_at_ms);
 
+-- detached_work holds THE JOIN AND NOTHING ELSE.
+--
+-- The announcement itself is a PAGE LINE of the announcing agent's book, and
+-- that page line is the one copy of what was announced: the spool path, the
+-- readability, the detach cause, the timeout. Unpacking any of it here as well
+-- would give the same fact two homes that can disagree, and the store would be
+-- re-deriving conversation content it is not entitled to interpret. What is
+-- left is exactly what the store itself filters and joins on: the handle, the
+-- kind, the origin unit a terminal closes the row through, the announcing
+-- agent, and the terminal columns.
 CREATE TABLE detached_work (
   work_id         TEXT PRIMARY KEY,
   kind            TEXT NOT NULL,
   origin_unit     TEXT,
   owner_agent     TEXT,
-  output_path     TEXT,
-  output_readable INTEGER,
-  cause           TEXT,
-  timeout_ms      INTEGER,
   announced_at_ms INTEGER NOT NULL,
-  latest_state    BLOB NOT NULL,
   ended_at_ms     INTEGER,
   terminal        BLOB
 );
@@ -248,6 +256,14 @@ CREATE TABLE cursor (
   updated_at_ms INTEGER NOT NULL
 );
 
+CREATE TABLE write_ledger (
+  write_id      TEXT    PRIMARY KEY,
+  upsert_key    TEXT    NOT NULL,
+  write_seq     INTEGER NOT NULL,
+  applied_at_ms INTEGER NOT NULL
+);
+CREATE INDEX write_ledger_upsert_key ON write_ledger(upsert_key);
+
 CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
 
@@ -255,7 +271,7 @@ CREATE TABLE schema_meta (version INTEGER NOT NULL);
 // compared against what is on disk so a database carrying the RIGHT version
 // stamp on the WRONG shape — a half-applied create, a hand-edited file, a
 // binary that crashed between DROP and CREATE — is nuked rather than trusted.
-var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow"}
+var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow", "write_ledger"}
 
 // ensureSchema brings the database to SchemaVersion by the only means this
 // package has: dropping everything and recreating it.

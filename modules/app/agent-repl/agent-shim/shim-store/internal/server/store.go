@@ -28,9 +28,11 @@ import (
 // read at, taken inside the page's own read transaction so the tail that
 // follows misses nothing and doubles nothing.
 type (
-	LineWritten = db.LineWritten
-	WriteResult = db.WriteResult
-	OpenedPage  = db.OpenedPage
+	LineWritten    = db.LineWritten
+	BashRowWritten = db.BashRowWritten
+	WriteResult    = db.WriteResult
+	OpenedPage     = db.OpenedPage
+	BashRunReplay  = db.BashRunReplay
 )
 
 // Store is the durable half of the store, as this package needs it.
@@ -43,6 +45,7 @@ type Store interface {
 	OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error)
 	ReadPage(ctx context.Context, agentID string, pageSize uint32, after *storev1.StoreItemPointer) (*storev1.ReadAgentPageSuccess, error)
 	LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([]LineWritten, error)
+	BashRun(ctx context.Context, runID string) (BashRunReplay, error)
 	LiveWork(ctx context.Context) (*storev1.GetLiveWorkSuccess, error)
 	Cursors(ctx context.Context, fileID *string) ([]*storev1.CursorState, error)
 	Close() error

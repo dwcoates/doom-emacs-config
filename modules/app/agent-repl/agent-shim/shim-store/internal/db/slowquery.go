@@ -38,6 +38,7 @@ const (
 	StatementLinesSince  = "lines_since"
 	StatementLiveWork    = "live_work"
 	StatementListCursors = "list_cursors"
+	StatementBashRun     = "bash_run"
 )
 
 // SlowQueryFromEnv resolves the slow-query threshold from the environment.
