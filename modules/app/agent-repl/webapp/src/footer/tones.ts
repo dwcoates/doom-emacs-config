@@ -20,7 +20,11 @@
  * vocabulary convention: a FIGURE the reader is tracking takes yellow (the
  * context figure's colour), and an IDENTITY takes blue.
  */
-import { FooterStatusSchema } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import {
+  FooterAllowanceSchema,
+  FooterStatusSchema,
+} from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import { MalformedView } from "../rpc/malformed.js";
 import { footerStatusColor, toneClass, type Color } from "../vocab.js";
 
 /**
@@ -51,6 +55,49 @@ export const STATUS_ARM_CLASS: Readonly<Record<string, Color>> = Object.freeze(
  */
 export function statusArmClass(arm: string): string {
   return toneClass(footerStatusColor(arm));
+}
+
+/**
+ * Every `FooterAllowance.status` arm, in the generated spelling.
+ *
+ * Read off the SCHEMA for the same reason the status cases are: the vendor's
+ * status word was a free string until the vocabulary landed in evidence, and
+ * now that it is an arm the client's set of arms is the proto's own.
+ */
+export const FOOTER_ALLOWANCE_STATUS_CASES: readonly string[] = (
+  FooterAllowanceSchema.oneofs.find((oneof) => oneof.name === "status")?.fields ?? []
+).map((field) => field.localName);
+
+/**
+ * The colour each allowance status paints its cell.
+ *
+ * THIS COMPONENT'S OWN, like the datum colours above and for the same reason:
+ * `render-colors.json` carries no `footer_allowance` section, so there is
+ * nothing upstream to read this from. The assignment is the traffic-light
+ * reading the arms already are — headroom is green, the vendor's own warning is
+ * the warning yellow, and a rejected call is the error red. Should the shared
+ * file grow a `footer_allowance` section, this table is the one place that
+ * changes to read it through `src/vocab.ts`.
+ */
+const ALLOWANCE_STATUS_COLOR: Readonly<Record<string, Color>> = Object.freeze({
+  allowed: "green",
+  allowedWarning: "yellow",
+  rejected: "red",
+});
+
+/**
+ * The CSS class an allowance cell wears for ARM.
+ *
+ * An arm with no colour is a MALFORMED VIEW rather than an unpainted cell: the
+ * table above and the schema are meant to agree, and the suite holds them to it
+ * row for row, so reaching here with an unknown arm means they have drifted.
+ */
+export function allowanceStatusClass(arm: string): string {
+  const color = ALLOWANCE_STATUS_COLOR[arm];
+  if (color === undefined) {
+    throw new MalformedView("FooterAllowance.status", `no colour for the allowance arm ${arm}`);
+  }
+  return toneClass(color);
 }
 
 /** The typed datums an activity line colours. */
