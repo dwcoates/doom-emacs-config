@@ -58,6 +58,7 @@
 (declare-function agent-repl-host-ref "agent-repl-host" (ws))
 (declare-function agent-repl-host-conn "agent-repl-host" (ws))
 (declare-function agent-repl-host-faults "agent-repl-host" (ws))
+(declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl-rpc-close-workspace "agent-repl-rpc" (conn request &rest keys))
@@ -99,6 +100,60 @@ call must reach the daemon that owns THAT workspace."
         (agent-repl--warn ws "elisp.verbs.no-conn ws=%s" ws)
         (user-error "agent-repl: no daemon connection"))))
 
+;;;; ---- Refusals --------------------------------------------------------
+;;
+;; EVERY `<Rpc>Error' Emacs calls spells its refusal the same way: a `cause'
+;; oneof whose ARM IS THE REASON, with whatever prose only that reason can
+;; carry living inside the arm that owns it.  So the handling here is
+;; ARM-GENERIC -- the arm keyword and its own fields go into the log context
+;; and into the message -- and there is deliberately no per-arm table to
+;; keep in step with the contract.  A new refusal arm reaches the user
+;; correctly the day the daemon starts sending it.
+;;
+;; TWO ARMS ARE NOT REFUSALS TO SHOW THE USER.  `transferring_away' and
+;; `not_yet_adopted' are the handover's ordering enforced BY REFUSAL: the
+;; first says this daemon released the workspace and names the successor,
+;; the second says the successor has not finished adopting it.  Both mean a
+;; lagging client should self-heal, and both are handed to host.el's
+;; handover path.  Reporting them would be telling the user something went
+;; wrong during the one rollout that is supposed to be invisible.
+
+(defconst agent-repl-verbs--handover-arms '(:transferring-away :not-yet-adopted)
+  "Refusal arms that are HANDOVER SIGNALS rather than user-facing failures.
+Handed to host.el's handover path; nothing is drawn for either.")
+
+(defun agent-repl-verbs--refusal-arm (value)
+  "Return VALUE's refusal oneof `(:arm KEYWORD :value FIELDS)'.
+Every error message Emacs decodes spells the oneof `cause', so one
+accessor serves them all."
+  (plist-get value :cause))
+
+(defun agent-repl-verbs--refusal-fields (arm)
+  "Render ARM's own fields for a log context and a message, or the empty string.
+An empty arm renders as nothing: being set is its whole assertion, and
+appending an empty pair of parentheses would suggest otherwise."
+  (let ((fields (plist-get arm :value)))
+    (if fields (format " %S" fields) "")))
+
+(defun agent-repl-verbs--on-refusal (ws op value)
+  "Report a daemon-authored refusal of OP for WS, or route it to the handover.
+The two handover arms are silent by design.  Every other arm is logged at
+WARNING with its keyword and its own fields in the context, and drawn to
+the user as the verb, the word refused, the arm keyword, and the fields."
+  (let* ((arm (agent-repl-verbs--refusal-arm value))
+         (keyword (plist-get arm :arm)))
+    (cond
+     ((memq keyword agent-repl-verbs--handover-arms)
+      (agent-repl--info ws "elisp.verbs.handover-refusal op=%s ws=%s arm=%S fields=%S"
+                        op ws keyword (plist-get arm :value))
+      (agent-repl-host-handle-refusal ws arm))
+     (t
+      (agent-repl--warn ws "elisp.verbs.refused op=%s ws=%s arm=%S fields=%S"
+                        op ws keyword (plist-get arm :value))
+      (message "%s refused: %s%s" op
+               (if keyword (substring (symbol-name keyword) 1) "unstated")
+               (agent-repl-verbs--refusal-fields arm))))))
+
 ;;;; ---- The one dispatcher ----------------------------------------------
 
 (cl-defun agent-repl-verbs--send (rpc conn request &key ws op on-success on-error)
@@ -118,11 +173,13 @@ are different facts."
                 (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=success" op ws)
                 (when on-success (funcall on-success (plist-get response :value))))
                (:error
+                ;; ON-ERROR, when given, may CLAIM the arm (answering
+                ;; non-nil); anything it does not claim falls through to the
+                ;; arm-generic handling, so a verb with a special case for
+                ;; one arm still reports every other arm correctly.
                 (let ((value (plist-get response :value)))
-                  (agent-repl--warn ws "elisp.verbs.refused op=%s ws=%s error=%S" op ws value)
-                  (if on-error
-                      (funcall on-error value)
-                    (message "agent-repl: %s refused by the daemon" op))))
+                  (unless (and on-error (funcall on-error value))
+                    (agent-repl-verbs--on-refusal ws op value))))
                (arm
                 (agent-repl--error ws "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
                                    op ws arm))))
@@ -228,13 +285,15 @@ reads them."
      :on-success (lambda (_) (agent-repl-verbs--teardown-tab ws "close"))
      :on-error
      (lambda (value)
-       (pcase (plist-get (plist-get value :cause) :arm)
-         (:blocked
-          (agent-repl--info ws "elisp.verbs.close-blocked ws=%s" ws)
-          (message "close blocked -- see the workspace footer"))
-         (arm
-          (agent-repl--error ws "elisp.verbs.close-unknown-cause ws=%s arm=%S" ws arm)
-          (message "close refused (%S)" arm)))))))
+       ;; `blocked' is the ONE arm this verb draws itself, because its
+       ;; treatment is prescribed: no dialog, the tab stays, and the reasons
+       ;; are read from the footer the daemon composed them onto.  Every
+       ;; other arm is not claimed, and falls through to the generic
+       ;; refusal handling.
+       (when (eq (plist-get (agent-repl-verbs--refusal-arm value) :arm) :blocked)
+         (agent-repl--info ws "elisp.verbs.close-blocked ws=%s" ws)
+         (message "close blocked -- see the workspace footer")
+         t)))))
 
 (defun agent-repl-verb-kill (ws)
   "Kill WS's session by force.  The worktree and branch survive."

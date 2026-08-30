@@ -32,6 +32,9 @@
 (defvar agent-repl-test-verbs--messages nil
   "Strings passed to `message' during a test.")
 
+(defvar agent-repl-test-verbs--handover nil
+  "Refusal arms handed to host.el's handover path, as (WS ARM).")
+
 (defun agent-repl-test-verbs--ref (&optional id dir)
   "Return a decoded `WorkspaceRef' plist, echoed verbatim by production."
   (list :id (or id "ws-id-1") :dir (or dir "/tmp/agent-repl-test/ws-1")))
@@ -79,11 +82,14 @@ answers a bare success, which is what almost every verb's success is."
   `(let ((agent-repl-test-verbs--sent nil)
          (agent-repl-test-verbs--torn-down nil)
          (agent-repl-test-verbs--messages nil)
+         (agent-repl-test-verbs--handover nil)
          (agent-repl-test-verbs--answers ,answers))
      (cl-letf* (((symbol-function 'agent-repl-host-ref)
                  (lambda (_ws) (agent-repl-test-verbs--ref)))
                 ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'test-conn))
                 ((symbol-function 'agent-repl-host-faults) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (ws arm) (push (list ws arm) agent-repl-test-verbs--handover)))
                 ((symbol-function 'agent-repl-link-primary) (lambda () 'test-conn))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws-one"))
                 ((symbol-function 'agent-repl--kill-one-workspace)
@@ -259,9 +265,119 @@ answers a bare success, which is what almost every verb's success is."
 
 (ert-deftest agent-repl-verbs-error-arm-does-not-tear-the-tab-down ()
   "A daemon-authored refusal changes no editor state."
-  (agent-repl-test-verbs--with '((:kill . (:response (:arm :error :value nil))))
+  (agent-repl-test-verbs--with
+      '((:kill . (:response (:arm :error
+                             :value (:cause (:arm :unknown-workspace :value nil))))))
     (agent-repl-verb-kill "ws-one")
     (should-not agent-repl-test-verbs--torn-down)))
+
+;;;; ---- Arm-generic refusal handling ----
+;;
+;; Every `<Rpc>Error' spells its refusal as a `cause' oneof whose ARM IS THE
+;; REASON, so the handling is generic over the arm rather than a table this
+;; file would have to keep in step with the contract.
+
+(ert-deftest agent-repl-verbs-refusal-names-the-arm ()
+  "A refusal draws the arm keyword, whatever arm the daemon chose."
+  (agent-repl-test-verbs--with
+      '((:merge . (:response (:arm :error
+                              :value (:cause (:arm :already-queued :value nil))))))
+    (agent-repl-verb-merge "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "merge refused: already-queued"))))
+
+(ert-deftest agent-repl-verbs-refusal-draws-an-unmodelled-arm-too ()
+  "An arm this file has never heard of still reaches the user by name.
+The point of arm-generic handling: a new refusal arm works the day the
+daemon starts sending it, with no table to update here."
+  (agent-repl-test-verbs--with
+      '((:restart . (:response (:arm :error
+                                :value (:cause (:arm :some-future-arm :value nil))))))
+    (agent-repl-verb-restart "ws-one" nil)
+    (should (agent-repl-test-verbs--messaged-p "restart refused: some-future-arm"))))
+
+(ert-deftest agent-repl-verbs-refusal-carries-the-arms-own-fields ()
+  "Fields living inside the arm are drawn beside it."
+  (agent-repl-test-verbs--with
+      '((:kill . (:response (:arm :error
+                             :value (:cause (:arm :workspace-ref-mismatch
+                                             :value (:registry-dir "/tmp/real")))))))
+    (agent-repl-verb-kill "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "/tmp/real"))))
+
+(ert-deftest agent-repl-verbs-empty-arm-draws-no-empty-fields ()
+  "An empty arm is its own whole assertion and renders no trailing payload."
+  (agent-repl-test-verbs--with
+      '((:merge . (:response (:arm :error
+                              :value (:cause (:arm :already-merging :value nil))))))
+    (agent-repl-verb-merge "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "merge refused: already-merging"))
+    (should-not (agent-repl-test-verbs--messaged-p "already-merging ("))))
+
+(ert-deftest agent-repl-verbs-transferring-away-goes-to-the-handover ()
+  "`transferring_away' is the handover's ordering, not a user-facing failure."
+  (agent-repl-test-verbs--with
+      '((:merge . (:response (:arm :error
+                              :value (:cause (:arm :transferring-away
+                                              :value (:address "127.0.0.1:9999")))))))
+    (agent-repl-verb-merge "ws-one")
+    (should (equal (length agent-repl-test-verbs--handover) 1))
+    (should (equal (car (car agent-repl-test-verbs--handover)) "ws-one"))
+    (should (equal (plist-get (nth 1 (car agent-repl-test-verbs--handover)) :value)
+                   '(:address "127.0.0.1:9999")))))
+
+(ert-deftest agent-repl-verbs-transferring-away-draws-nothing ()
+  "The rollout it belongs to is supposed to be invisible, so it is silent."
+  (agent-repl-test-verbs--with
+      '((:merge . (:response (:arm :error
+                              :value (:cause (:arm :transferring-away
+                                              :value (:address "127.0.0.1:9999")))))))
+    (agent-repl-verb-merge "ws-one")
+    (should-not (agent-repl-test-verbs--messaged-p "refused"))))
+
+(ert-deftest agent-repl-verbs-not-yet-adopted-goes-to-the-handover ()
+  "`not_yet_adopted' is the successor's own too-early refusal, also silent."
+  (agent-repl-test-verbs--with
+      '((:kill . (:response (:arm :error
+                             :value (:cause (:arm :not-yet-adopted :value nil))))))
+    (agent-repl-verb-kill "ws-one")
+    (should (equal (length agent-repl-test-verbs--handover) 1))
+    (should-not (agent-repl-test-verbs--messaged-p "refused"))))
+
+(ert-deftest agent-repl-verbs-handover-refusal-changes-no-editor-state ()
+  "A handover refusal is not a close: the tab stays where it is."
+  (agent-repl-test-verbs--with
+      '((:close . (:response (:arm :error
+                              :value (:cause (:arm :not-yet-adopted :value nil))))))
+    (agent-repl-verb-close "ws-one")
+    (should-not agent-repl-test-verbs--torn-down)))
+
+(ert-deftest agent-repl-verbs-close-non-blocked-arm-falls-through ()
+  "Close claims only `blocked'; every other arm gets the generic report."
+  (agent-repl-test-verbs--with
+      '((:close . (:response (:arm :error
+                              :value (:cause (:arm :unknown-workspace :value nil))))))
+    (agent-repl-verb-close "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "close refused: unknown-workspace"))
+    (should-not agent-repl-test-verbs--torn-down)))
+
+(ert-deftest agent-repl-verbs-close-blocked-still-draws-the-footer-message ()
+  "Close's one claimed arm keeps its prescribed treatment."
+  (agent-repl-test-verbs--with
+      '((:close . (:response (:arm :error
+                              :value (:cause (:arm :blocked :value nil))))))
+    (agent-repl-verb-close "ws-one")
+    (should (agent-repl-test-verbs--messaged-p
+             "close blocked -- see the workspace footer"))
+    (should-not (agent-repl-test-verbs--messaged-p "close refused"))))
+
+(ert-deftest agent-repl-verbs-create-refusal-names-its-arm ()
+  "A create refusal reports the daemon's own reason, e.g. an unknown repo."
+  (agent-repl-test-verbs--with
+      '((:create . (:response (:arm :error
+                               :value (:cause (:arm :unknown-repository :value nil))))))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref)
+                            (list :arm :standard :value nil))
+    (should (agent-repl-test-verbs--messaged-p "create refused: unknown-repository"))))
 
 (ert-deftest agent-repl-verbs-missing-ref-refuses-before-sending ()
   "A workspace with no daemon identity cannot be addressed at all."
