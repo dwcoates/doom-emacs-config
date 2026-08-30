@@ -485,3 +485,11 @@ every UX or contract gap you surfaced instead of improvising.
   message.model, (c) fast_mode producer, (d) `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS`
   under --fake, (e) fake-store read ledger, then integration failures and
   auditor #1 critiques as they arrive.
+- RECONCILIATION RULINGS (project lead): (1) a live unit the record cannot
+  DESCRIBE is never left open — its KIND is known from where GetLiveWork
+  found it (bash rows → bash, agent book → subagent, workflow table →
+  workflow); reconciliation CLOSES it with `lost.swept_up` and logs at WARN
+  naming the id; no kind-free terminal exists. (2) `file_vanished` is the
+  sidecar's arm only. (3) landing 5 adds a `not_observed` arm to
+  `AgentBashInterrupted.output`; until it lands the current shape stays,
+  then lost/reconciled runs state `not_observed`.
