@@ -38,7 +38,8 @@
 // call that launched it (see the root package's owner index).
 //
 // A SPOOL'S KIND IS ITS TASK-ID PREFIX: b* shell output, a* an agent
-// transcript, w* a workflow journal. Any other prefix is a TOTAL-INGESTION
+// transcript, w* a workflow spool (declared residue — workflow is kicked this
+// wave). Any other prefix is a TOTAL-INGESTION
 // VIOLATION — logged at error, and still discovered as KindResidueSpool so its
 // bytes land whole as residue. Dropping the file from discovery, which is what
 // this package used to do, is the one outcome the mandate forbids.
@@ -347,7 +348,13 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	case strings.HasPrefix(taskID, "a"):
 		target.Kind = tail.KindAgentTranscript
 	case strings.HasPrefix(taskID, "w"):
-		target.Kind = tail.KindWorkflowJournal
+		// R-S4: workflow is KICKED this wave, so a w* spool is discovered and
+		// cursor-tailed like any other file but converted only to DECLARED
+		// residue. It is read RAW because there is no conversion that would use
+		// its record structure, and reading it as JSONL would refuse lines a
+		// workflow spool is under no obligation to make parseable.
+		target.Kind = tail.KindWorkflowSpool
+		target.Raw = true
 	default:
 		// THE PREFIX IS HOW A SPOOL'S CONVERSION IS SELECTED, so one we do not
 		// recognize means the bytes cannot be converted. They are still

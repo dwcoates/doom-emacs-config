@@ -8,7 +8,7 @@ type Kind int
 const (
 	KindSessionTranscript Kind = iota // projects/*/<session>.jsonl
 	KindAgentTranscript               // .../subagents/agent-*.jsonl (+ a*.output spool)
-	KindWorkflowJournal               // .../workflows/wf_*/journal.jsonl (+ w*.output spool)
+	KindWorkflowJournal               // .../workflows/wf_*/journal.jsonl
 	KindShellSpool                    // <spool root>/.../tasks/b*.output
 	// KindResidueSpool is a spool whose task id carries no a/b/w kind prefix.
 	// It is a TOTAL-INGESTION VIOLATION rather than a file to skip: the prefix
@@ -16,6 +16,11 @@ const (
 	// bytes cannot be converted — but they are still ingested, whole, as
 	// unparsed residue, because nothing on disk is ever dropped.
 	KindResidueSpool
+	// KindWorkflowSpool is a w*.output task spool. Workflow is KICKED this wave,
+	// so its bytes are ingested WHOLE as declared residue rather than converted
+	// — it is not an unrecognized prefix (that is KindResidueSpool) but a
+	// recognized one whose conversion deliberately does not exist yet.
+	KindWorkflowSpool
 )
 
 // String renders a kind for a log record.
@@ -31,6 +36,8 @@ func (k Kind) String() string {
 		return "shell-spool"
 	case KindResidueSpool:
 		return "residue-spool"
+	case KindWorkflowSpool:
+		return "workflow-spool"
 	default:
 		return "unknown-kind"
 	}
