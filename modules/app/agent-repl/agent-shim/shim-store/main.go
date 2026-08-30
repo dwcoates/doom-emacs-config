@@ -123,6 +123,20 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 		}
 	}()
 
+	// THE SIGNAL HANDLER IS INSTALLED BEFORE ANYTHING IS BINDABLE OR OPENABLE.
+	//
+	// Installed after Listen, there was a window in which the socket already
+	// ACCEPTED — the kernel queues connections from the listen(2) call onward,
+	// so a supervisor or a test that waits for the socket sees a ready store —
+	// while SIGTERM still had its default disposition and killed the process
+	// outright. The listener never closed, so the socket file survived, and the
+	// successor met a corpse it had to reclaim. Notify is cheap and the channel
+	// is buffered, so a signal arriving during db.Open or Listen simply waits
+	// there and is answered by the select below the moment serving starts.
+	sigc := make(chan os.Signal, 1)
+	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigc)
+
 	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db"}))
 	if err != nil {
 		return err
@@ -134,10 +148,6 @@ func runWithLogger(socketPath, dbPath, pprofAddr string, watchBuffer int, log *l
 		return err
 	}
 	srv := server.New(database, log.With(logging.Fields{Component: "server"}), watchBuffer)
-
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sigc)
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()

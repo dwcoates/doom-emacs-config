@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"time"
@@ -60,6 +61,27 @@ func SlowQueryFromEnv() (time.Duration, error) {
 		return 0, invalidf("%s=%q must be a positive number of milliseconds", EnvSlowQueryMs, raw)
 	}
 	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// traceStatement records that one statement family RAN, for this request.
+//
+// IT IS THE EVIDENCE THAT A REQUEST REACHED STORAGE, and it exists because the
+// negative is what the suite needs to assert: "a refused request never opened a
+// transaction" is only checkable if a request that DID reach storage leaves a
+// mark tied to it. The slow-query record could not serve — it fires only past a
+// threshold, so its absence means "fast", not "never ran".
+//
+// Verbose, because it is per-operation narration on the hot path; the request id
+// comes off the context, which is the one parameter that already crosses every
+// storage signature and already means "this call".
+func (d *DB) traceStatement(ctx context.Context, statement, table string, fields logging.Fields, rows int64) {
+	fields.Operation = "store.db.statement"
+	fields.Level = "debug"
+	fields.Table = table
+	fields.Statement = statement
+	fields.Rows = rows
+	fields.RequestID = logging.RequestIDFrom(ctx)
+	d.log.LogVerbose(fields, "statement ran statement=%s rows=%d", statement, rows)
 }
 
 // observeQuery reports one completed statement that took longer than the

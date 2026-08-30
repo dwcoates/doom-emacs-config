@@ -102,8 +102,41 @@ func TestRotationDoesNotSplitTheWatchedTail(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
+// TestAKeepAlivesRowItselfSurvivesARestart proves the ROW, not the ledger.
+//
+// Absorption alone became a weak proof once write_ids got their own ledger
+// table: a replay is absorbed because the LEDGER remembers the write, which
+// would still hold if the entry row itself had been lost. What cannot happen
+// unless the row survived is an identity refusal — the store can only object
+// that this upsert_key would change kind if it still holds a row under that key.
+func TestAKeepAlivesRowItselfSurvivesARestart(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	shim.write(ctx, t, shim.agentEntry("w-ka-row", "u-ka-row",
+		keepaliveLine(agentID("main"), promptFact("turn-ka-row", "main", "warm"))))
+
+	// Act: after a restart, claim the same key for a PAGE LINE.
+	store.restart()
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	revived := streamProducer(store.client())
+	failure := revived.writeExpectingFailure(after, t, nil,
+		revived.agentEntry("w-ka-row-2", "u-ka-row",
+			frameLine(agentID("main"), responseFrame("main", "act-1", "would overwrite the keep-alive"))))
+
+	// Assert: the refusal can only exist because the row is still there. It is
+	// the BOOK half of the identity check that fires — a never-served row's book
+	// is NULL, and a page line's is the agent.
+	assertWriteInvalidRequest(t, failure, "entries[0].agent_update.serveable_frame.page_agent_id")
+	page := openSession(after, t, store.client(), "main", 10, nil)
+	assertTexts(t, "the book after the refused overwrite", pageTexts(page.GetPage()), nil)
+}
+
 // TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed: never-served is not
-// dropped — the row survives a restart, it simply has no book.
+// dropped — the write is still absorbed after a restart, so the store kept it.
 func TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
