@@ -15,7 +15,10 @@
 ;; The build and daemon commands are stub SHELL SCRIPTS written into the test's
 ;; own temp dir: cold start's contract is "run this script, then wait for
 ;; daemon.addr", and a stub that publishes an address exercises exactly that
-;; without pulling the real daemon (another system) into the run.
+;; without pulling the real daemon (another system) into the run.  Reaching
+;; those boundaries for real is what `agent-repl-itest--with-cold-start' is
+;; for; it also reaps the poll timer, the spawned daemon and the link a cold
+;; start leaves behind, so no scenario inherits another's in-flight boot.
 
 ;;; Code:
 
@@ -30,7 +33,6 @@
 (declare-function agent-repl-daemon-ensure "daemon")
 (declare-function agent-repl-link-up-p "daemon-link")
 (declare-function agent-repl-link-primary "daemon-link")
-(declare-function agent-repl-connect-close "connect")
 (defvar agent-repl-daemon-build-script)
 (defvar agent-repl-daemon-command)
 (defvar agent-repl-daemon-boot-timeout-seconds)
@@ -68,27 +70,24 @@ Ruled at kickoff: Emacs adopts any daemon that answers and only builds
 and starts one when daemon.addr is absent or answers nothing."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-daemon--with-stubs boot-dir
-      (let* ((build (agent-repl-itest-daemon--write-script
-                     (expand-file-name "build.sh" boot-dir)
-                     (format "touch %sbuild-ran" boot-dir)))
-             (start (agent-repl-itest-daemon--write-script
-                     (expand-file-name "start.sh" boot-dir)
-                     (format "touch %sstart-ran" boot-dir)))
-             (agent-repl-daemon-build-script build)
-             (agent-repl-daemon-command (list start))
-             (agent-repl-link-up-functions nil)
-             (agent-repl-link-no-daemon-functions nil))
-        (unwind-protect
-            (progn
-              ;; Act.
-              (agent-repl-daemon-ensure)
-              (agent-repl-itest--await-call daemon "DaemonHealth")
-              ;; Assert.
-              (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
-              (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))
-          (when (agent-repl-link-primary)
-            (ignore-errors (agent-repl-connect-close (agent-repl-link-primary)))))))))
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       (format "touch %sbuild-ran" boot-dir)))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--await-call daemon "DaemonHealth")
+          ;; Assert.
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
 
 (ert-deftest agent-repl-itest-daemon-unhealthy-daemon-is-still-adopted ()
   "An UNHEALTHY daemon is still a daemon: adopted, never killed.
@@ -99,22 +98,19 @@ daemon there."
     (let* ((fault '((detail . "store socket unreachable")))
            (response `((success . ((unhealthy . ((faults . [,fault]))))))))
       (agent-repl-itest--script daemon "DaemonHealth" response))
-    (agent-repl-itest-daemon--with-stubs boot-dir
-      (let* ((start (agent-repl-itest-daemon--write-script
-                     (expand-file-name "start.sh" boot-dir)
-                     (format "touch %sstart-ran" boot-dir)))
-             (agent-repl-daemon-command (list start))
-             (agent-repl-link-up-functions nil)
-             (agent-repl-link-no-daemon-functions nil))
-        (unwind-protect
-            (progn
-              ;; Act.
-              (agent-repl-daemon-ensure)
-              (agent-repl-itest--await-call daemon "DaemonHealth")
-              ;; Assert.
-              (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))
-          (when (agent-repl-link-primary)
-            (ignore-errors (agent-repl-connect-close (agent-repl-link-primary)))))))))
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-command (list start))
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--await-call daemon "DaemonHealth")
+          ;; Assert.
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
 
 (ert-deftest agent-repl-itest-daemon-unhealthy-faults-reach-the-health-buffer ()
   "An adopted-but-unhealthy daemon's faults are surfaced, not swallowed.
@@ -125,21 +121,18 @@ what is wrong with the daemon they just adopted."
     (let* ((fault '((detail . "store socket unreachable")))
            (response `((success . ((unhealthy . ((faults . [,fault]))))))))
       (agent-repl-itest--script daemon "DaemonHealth" response))
-    (let ((agent-repl-link-up-functions nil)
-          (agent-repl-link-no-daemon-functions nil))
-      (unwind-protect
-          (progn
-            ;; Act.
-            (agent-repl-daemon-ensure)
-            (agent-repl-itest--await-call daemon "DaemonHealth")
-            ;; Assert.
-            (agent-repl-itest--wait-until
-             (lambda () (get-buffer "*agent-repl-health*"))
-             nil "the health buffer")
-            (with-current-buffer "*agent-repl-health*"
-              (should (string-match-p "store socket unreachable" (buffer-string)))))
-        (when (agent-repl-link-primary)
-          (ignore-errors (agent-repl-connect-close (agent-repl-link-primary))))))))
+    (agent-repl-itest--with-cold-start
+      (let ((agent-repl-link-up-functions nil)
+            (agent-repl-link-no-daemon-functions nil))
+        ;; Act.
+        (agent-repl-daemon-ensure)
+        (agent-repl-itest--await-call daemon "DaemonHealth")
+        ;; Assert.
+        (agent-repl-itest--wait-until
+         (lambda () (get-buffer "*agent-repl-health*"))
+         nil "the health buffer")
+        (with-current-buffer "*agent-repl-health*"
+          (should (string-match-p "store socket unreachable" (buffer-string))))))))
 
 (ert-deftest agent-repl-itest-daemon-foreign-daemon-adoption-is-logged ()
   "Adopting a daemon this Emacs did not spawn is logged at INFO.
@@ -147,18 +140,16 @@ It is the normal path, not a fault — but it is worth being able to see in
 the log which daemon a session attached to."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (let ((agent-repl-link-up-functions nil)
-          (agent-repl-link-no-daemon-functions nil))
-      (unwind-protect
-          (progn
-            ;; Act.
-            (agent-repl-daemon-ensure)
-            (agent-repl-itest--await-call daemon "DaemonHealth")
-            ;; Assert.
-            (agent-repl-itest--await-log daemon "elisp.daemon.foreign-adopted" "info")
-            (should (agent-repl-itest--logged-p daemon "elisp.daemon.foreign-adopted" "info")))
-        (when (agent-repl-link-primary)
-          (ignore-errors (agent-repl-connect-close (agent-repl-link-primary))))))))
+    (agent-repl-itest--with-cold-start
+      (let ((agent-repl-link-up-functions nil)
+            (agent-repl-link-no-daemon-functions nil))
+        ;; Act.
+        (agent-repl-daemon-ensure)
+        (agent-repl-itest--await-call daemon "DaemonHealth")
+        ;; Assert.
+        (agent-repl-itest--await-log daemon "elisp.daemon.foreign-adopted" "info")
+        (should (agent-repl-itest--logged-p daemon "elisp.daemon.foreign-adopted"
+                                            "info"))))))
 
 ;;;; ---- No daemon.addr: build, then start ----
 
@@ -168,8 +159,8 @@ The build script does its own build-if-stale work; Emacs only invokes
 it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (let ((state-dir (agent-repl-itest-daemon-state-dir daemon)))
-      (agent-repl-itest--stop-daemon daemon t)
+    (agent-repl-itest--stop-daemon daemon t)
+    (agent-repl-itest--with-cold-start
       (agent-repl-itest-daemon--with-stubs boot-dir
         (let* ((build (agent-repl-itest-daemon--write-script
                        (expand-file-name "build.sh" boot-dir)
@@ -182,9 +173,8 @@ it."
                (agent-repl-daemon-boot-timeout-seconds 2)
                (agent-repl-link-up-functions nil)
                (agent-repl-link-no-daemon-functions nil))
-          (ignore state-dir)
           ;; Act.
-          (ignore-errors (agent-repl-daemon-ensure))
+          (agent-repl-daemon-ensure)
           ;; Assert.
           (agent-repl-itest--wait-until
            (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
@@ -198,24 +188,25 @@ travels in the environment, never on the command line."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--stop-daemon daemon t)
-    (agent-repl-itest-daemon--with-stubs boot-dir
-      (let* ((build (agent-repl-itest-daemon--write-script
-                     (expand-file-name "build.sh" boot-dir) "exit 0"))
-             (start (agent-repl-itest-daemon--write-script
-                     (expand-file-name "start.sh" boot-dir)
-                     (format "touch %sstart-ran" boot-dir)))
-             (agent-repl-daemon-build-script build)
-             (agent-repl-daemon-command (list start))
-             (agent-repl-daemon-boot-timeout-seconds 2)
-             (agent-repl-link-up-functions nil)
-             (agent-repl-link-no-daemon-functions nil))
-        ;; Act.
-        (ignore-errors (agent-repl-daemon-ensure))
-        ;; Assert.
-        (agent-repl-itest--wait-until
-         (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
-         nil "the daemon command to run")
-        (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir) "exit 0"))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 2)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+           nil "the daemon command to run")
+          (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
 
 (ert-deftest agent-repl-itest-daemon-start-exports-the-state-dir ()
   "The daemon command is started with AGENT_REPL_STATE_DIR exported.
@@ -225,29 +216,31 @@ inherited a different one would publish its address where nobody looks."
   (agent-repl-itest--with-fake-daemon daemon
     (let ((state-dir (agent-repl-itest-daemon-state-dir daemon)))
       (agent-repl-itest--stop-daemon daemon t)
-      (agent-repl-itest-daemon--with-stubs boot-dir
-        (let* ((build (agent-repl-itest-daemon--write-script
-                       (expand-file-name "build.sh" boot-dir) "exit 0"))
-               (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir)
-                       (format "printf '%%s' \"$AGENT_REPL_STATE_DIR\" > %sstate-dir"
-                               boot-dir)))
-               (agent-repl-daemon-build-script build)
-               (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 2)
-               (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil))
-          ;; Act.
-          (ignore-errors (agent-repl-daemon-ensure))
-          ;; Assert.
-          (agent-repl-itest--wait-until
-           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "state-dir"))
-           nil "the daemon command to record its state dir")
-          (with-temp-buffer
-            (insert-file-contents (expand-file-name "state-dir" boot-dir))
-            (should (equal (file-name-as-directory
-                            (expand-file-name (string-trim (buffer-string))))
-                           (file-name-as-directory (expand-file-name state-dir))))))))))
+      (agent-repl-itest--with-cold-start
+        (agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+                         (expand-file-name "build.sh" boot-dir) "exit 0"))
+                 (start (agent-repl-itest-daemon--write-script
+                         (expand-file-name "start.sh" boot-dir)
+                         (format "printf '%%s' \"$AGENT_REPL_STATE_DIR\" > %sstate-dir"
+                                 boot-dir)))
+                 (agent-repl-daemon-build-script build)
+                 (agent-repl-daemon-command (list start))
+                 (agent-repl-daemon-boot-timeout-seconds 2)
+                 (agent-repl-link-up-functions nil)
+                 (agent-repl-link-no-daemon-functions nil))
+            ;; Act.
+            (agent-repl-daemon-ensure)
+            ;; Assert.
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "state-dir"))
+             nil "the daemon command to record its state dir")
+            (with-temp-buffer
+              (insert-file-contents (expand-file-name "state-dir" boot-dir))
+              (should (equal (file-name-as-directory
+                              (expand-file-name (string-trim (buffer-string))))
+                             (file-name-as-directory
+                              (expand-file-name state-dir)))))))))))
 
 (ert-deftest agent-repl-itest-daemon-links-up-once-the-addr-appears ()
   "Cold start finishes by connecting, once the started daemon publishes.
@@ -255,34 +248,31 @@ Waiting is done with a timer against a deadline, never a sleep — the
 whole point is that Emacs stays responsive while the daemon boots."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (let ((state-dir (agent-repl-itest-daemon-state-dir daemon))
-          (binary (agent-repl-itest--ensure-binary)))
+    (let ((binary (agent-repl-itest--ensure-binary)))
       (agent-repl-itest--stop-daemon daemon t)
-      (agent-repl-itest-daemon--with-stubs boot-dir
-        (let* ((build (agent-repl-itest-daemon--write-script
-                       (expand-file-name "build.sh" boot-dir) "exit 0"))
-               ;; The stub daemon IS the fake: it publishes daemon.addr into
-               ;; the one state root exactly as the real daemon does.
-               (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir)
-                       (format "exec %s &" (shell-quote-argument binary))))
-               (agent-repl-daemon-build-script build)
-               (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 10)
-               (agent-repl-link-reconnect-interval-seconds 0.05)
-               (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil))
-          (ignore state-dir)
-          (unwind-protect
-              (progn
-                ;; Act.
-                (agent-repl-daemon-ensure)
-                ;; Assert.
-                (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
-                                              nil "the link to come up")
-                (should (agent-repl-link-up-p)))
-            (when (agent-repl-link-primary)
-              (ignore-errors (agent-repl-connect-close (agent-repl-link-primary))))))))))
+      (agent-repl-itest--with-cold-start
+        (agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+                         (expand-file-name "build.sh" boot-dir) "exit 0"))
+                 ;; The stub daemon IS the fake: `exec' replaces the stub, so
+                 ;; the process Emacs spawned and supervises is the fake
+                 ;; itself, and it publishes daemon.addr into the one state
+                 ;; root exactly as the real daemon does.
+                 (start (agent-repl-itest-daemon--write-script
+                         (expand-file-name "start.sh" boot-dir)
+                         (format "exec %s" (shell-quote-argument binary))))
+                 (agent-repl-daemon-build-script build)
+                 (agent-repl-daemon-command (list start))
+                 (agent-repl-daemon-boot-timeout-seconds 10)
+                 (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-up-functions nil)
+                 (agent-repl-link-no-daemon-functions nil))
+            ;; Act.
+            (agent-repl-daemon-ensure)
+            ;; Assert.
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            (should (agent-repl-link-up-p))))))))
 
 ;;;; ---- A stale address ----
 
@@ -297,24 +287,29 @@ is a different fact from an unhealthy one."
       (agent-repl-itest--stop-daemon daemon t)
       ;; A leftover address pointing at a port nothing listens on.
       (with-temp-file addr-file (insert "127.0.0.1:1\n"))
-      (agent-repl-itest-daemon--with-stubs boot-dir
-        (let* ((build (agent-repl-itest-daemon--write-script
-                       (expand-file-name "build.sh" boot-dir)
-                       (format "touch %sbuild-ran" boot-dir)))
-               (start (agent-repl-itest-daemon--write-script
-                       (expand-file-name "start.sh" boot-dir) "exit 0"))
-               (agent-repl-daemon-build-script build)
-               (agent-repl-daemon-command (list start))
-               (agent-repl-daemon-boot-timeout-seconds 2)
-               (agent-repl-link-up-functions nil)
-               (agent-repl-link-no-daemon-functions nil))
-          ;; Act.
-          (ignore-errors (agent-repl-daemon-ensure))
-          ;; Assert: the stale file is warned about and the build proceeds.
-          (agent-repl-itest--wait-until
-           (lambda () (agent-repl-itest--logged-p daemon "elisp.daemon.stale-addr" "warn"))
-           nil "the stale-addr warning")
-          (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran")))))))
+      (agent-repl-itest--with-cold-start
+        (agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+                         (expand-file-name "build.sh" boot-dir)
+                         (format "touch %sbuild-ran" boot-dir)))
+                 (start (agent-repl-itest-daemon--write-script
+                         (expand-file-name "start.sh" boot-dir) "exit 0"))
+                 (agent-repl-daemon-build-script build)
+                 (agent-repl-daemon-command (list start))
+                 (agent-repl-daemon-boot-timeout-seconds 2)
+                 (agent-repl-link-up-functions nil)
+                 (agent-repl-link-no-daemon-functions nil))
+            ;; Act.
+            (agent-repl-daemon-ensure)
+            ;; Assert: the stale file is warned about and the build proceeds.
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest--logged-p daemon "elisp.daemon.stale-addr"
+                                                    "warn"))
+             nil "the stale-addr warning")
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+             nil "the build script to run")
+            (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))))))))
 
 ;;;; ---- A build failure ----
 
@@ -325,25 +320,27 @@ binary and call it success."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--stop-daemon daemon t)
-    (agent-repl-itest-daemon--with-stubs boot-dir
-      (let* ((build (agent-repl-itest-daemon--write-script
-                     (expand-file-name "build.sh" boot-dir)
-                     "echo 'compile error: undefined symbol' >&2\nexit 1"))
-             (start (agent-repl-itest-daemon--write-script
-                     (expand-file-name "start.sh" boot-dir)
-                     (format "touch %sstart-ran" boot-dir)))
-             (agent-repl-daemon-build-script build)
-             (agent-repl-daemon-command (list start))
-             (agent-repl-daemon-boot-timeout-seconds 2)
-             (agent-repl-link-up-functions nil)
-             (agent-repl-link-no-daemon-functions nil))
-        ;; Act.
-        (ignore-errors (agent-repl-daemon-ensure))
-        ;; Assert.
-        (agent-repl-itest--wait-until
-         (lambda () (agent-repl-itest--logged-p daemon "elisp.daemon.build-failed" "warn"))
-         nil "the build-failure warning")
-        (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       "echo 'compile error: undefined symbol' >&2\nexit 1"))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 2)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-itest--logged-p daemon "elisp.daemon.build-failed"
+                                                  "warn"))
+           nil "the build-failure warning")
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
 
 (ert-deftest agent-repl-itest-daemon-build-failure-surfaces-the-output ()
   "A failed build's output is put in a buffer the user can read.
@@ -352,25 +349,26 @@ the message is the whole recovery path."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--stop-daemon daemon t)
-    (agent-repl-itest-daemon--with-stubs boot-dir
-      (let* ((build (agent-repl-itest-daemon--write-script
-                     (expand-file-name "build.sh" boot-dir)
-                     "echo 'compile error: undefined symbol' >&2\nexit 1"))
-             (start (agent-repl-itest-daemon--write-script
-                     (expand-file-name "start.sh" boot-dir) "exit 0"))
-             (agent-repl-daemon-build-script build)
-             (agent-repl-daemon-command (list start))
-             (agent-repl-daemon-boot-timeout-seconds 2)
-             (agent-repl-link-up-functions nil)
-             (agent-repl-link-no-daemon-functions nil))
-        ;; Act.
-        (ignore-errors (agent-repl-daemon-ensure))
-        ;; Assert.
-        (agent-repl-itest--wait-until
-         (lambda () (get-buffer "*agent-repl-build-frontend*"))
-         nil "the build-output buffer")
-        (with-current-buffer "*agent-repl-build-frontend*"
-          (should (string-match-p "compile error" (buffer-string))))))))
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       "echo 'compile error: undefined symbol' >&2\nexit 1"))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir) "exit 0"))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 2)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          ;; Act.
+          (agent-repl-daemon-ensure)
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (get-buffer "*agent-repl-build-frontend*"))
+           nil "the build-output buffer")
+          (with-current-buffer "*agent-repl-build-frontend*"
+            (should (string-match-p "compile error" (buffer-string)))))))))
 
 (provide 'test-integration-daemon)
 
