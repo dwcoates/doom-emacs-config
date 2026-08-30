@@ -644,3 +644,41 @@ Rulings already binding; code swaps to the generated arms when it lands:
 - The landing-4 batch also carries the ERROR-ARMS.md arms and the four e2e
   seam answers (arm names; the merge test-gate invocation; the .claude.json
   key path; the metaprompt sentinels — the last two are pinned above).
+
+## Handover: the web side never redials (project lead ruling)
+
+- On `transferring_away{address}` / `transferred{address}` the WEBAPP does
+  not dial the successor; Emacs reloads the webview at the successor's
+  address and the FRESH page calls `AdoptWebWorkspace` ONCE AT BOOT, before
+  opening any view stream. The host side is unchanged (Emacs calls
+  `AdoptHostWorkspace` on the announcement).
+- Consequences for `rollout.AdoptWeb` and the server handler:
+  `no_transfer_announced{}` is the ORDINARY answer on every non-handover
+  page boot — logged at INFO at most, never WARN/ERROR, never a fault;
+  `not_yet_adopted{}` is answered while adoption is in progress (the page
+  retries with backoff); the successor's expected-participant count for the
+  web side is satisfied by the reloaded page's adopt call, not by a
+  surviving stream (record the web participant as "expected" from the old
+  daemon's snapshot, and mark it satisfied by the first AdoptWebWorkspace
+  from any connection).
+- Vocab merge note: `footer_allowance` also landed on overhaul/integration
+  (8c56dece8) directly; when overhaul/daemon merges into integration the
+  render-colors.json conflict resolves to the daemon's version.
+
+## FooterAllowance sourcing (project lead ruling, supersedes the landing-4 adaptation)
+
+- `SessionUpdate.account_usage` is NOT retired. FIGURES (utilization,
+  resets_at) come from account_usage: five_hour → `session`, seven_day →
+  `weekly`; sampled at a cadence and complete from the first sample.
+- The VERDICT (`FooterAllowance.status` arm) comes from
+  `SessionUpdate.rate_limit_status`, matched by window: five_hour →
+  session; seven_day / seven_day_opus / seven_day_sonnet /
+  seven_day_overage_included → weekly; `overage` → the overage note. It
+  stays UNSET until a rate-limit event for that window has been seen — an
+  unset status oneof is LEGAL ("no vendor verdict observed yet").
+- The allowance line draws as soon as a usage sample exists; the verdict
+  arm joins when it arrives.
+- A rate-limit event carrying a utilization for the same window that is
+  NEWER than the last sample wins for the figure.
+- Footer remediation owed: replace the "both windows from rate_limit_status"
+  rule with the above (tests per bullet).

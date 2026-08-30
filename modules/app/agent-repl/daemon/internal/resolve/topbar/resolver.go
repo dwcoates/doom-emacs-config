@@ -509,8 +509,8 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 		return "fast_mode", func(*wsState) {}
 	case *conversationv1.SessionUpdate_McpServer:
 		return "mcp_server", func(*wsState) {}
-	case *conversationv1.SessionUpdate_ContextBudgetWarning:
-		return "context_budget_warning", func(*wsState) {}
+	case *conversationv1.SessionUpdate_RateLimitStatus:
+		return "rate_limit_status", func(*wsState) {}
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(*wsState) {}
 	default:

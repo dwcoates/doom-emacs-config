@@ -3,6 +3,7 @@ package footer
 import (
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
@@ -32,10 +33,13 @@ func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivity
 }
 
 // rateLine is the standing rate-limit report, or nil. A report is drawn only
-// once at least one allowance is newsworthy: an unremarkable allowance is not
-// news and would crowd out the lines that are.
+// once BOTH windows have been reported and at least one allowance is
+// newsworthy: the line states both figures so a reader can tell which
+// allowance the newsworthy percentage belongs to, synthesizing an unreported
+// window would state a figure nobody reported, and an unremarkable allowance
+// is not news and would crowd out the lines that are.
 func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimited {
-	if s.rate == nil {
+	if s.rate.session == nil || s.rate.weekly == nil {
 		return nil
 	}
 	session := r.allowance(s.rate.session)
@@ -46,23 +50,31 @@ func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimi
 	return &frontendv1.FooterStatusActivityRateLimited{Session: session, Weekly: weekly}
 }
 
-// allowance projects one vendor usage window onto the drawn allowance. The
-// vendor reports utilization as a percentage and a reset in millis; the
+// allowance projects one window's rate-limit status onto the drawn allowance.
+// The vendor reports utilization as a percentage and a reset in millis; the
 // contract carries a 0..1 fraction and epoch SECONDS, so the conversion is the
-// daemon's and never the client's.
-//
-// `status` is deliberately empty: SessionUsageWindow carries no status word,
-// and inventing one would state a vendor vocabulary nobody reported.
-func (r *resolver) allowance(w interface {
-	GetUtilizationPercent() float64
-	GetResetsAtMs() int64
-}) *frontendv1.FooterAllowance {
-	utilization := w.GetUtilizationPercent() / 100
-	return &frontendv1.FooterAllowance{
+// daemon's and never the client's. The vocabulary is the vendor's own three
+// values and the drawn allowance carries the same three, so nothing is
+// invented and nothing is flattened to a word.
+func (r *resolver) allowance(status *conversationv1.SessionRateLimitStatus) *frontendv1.FooterAllowance {
+	utilization := status.GetUtilizationPercent() / 100
+	allowance := &frontendv1.FooterAllowance{
 		Newsworthy:  utilization >= r.opts.rateNewsworth,
-		ResetsAtS:   w.GetResetsAtMs() / 1000,
+		ResetsAtS:   status.GetResetsAtMs() / 1000,
 		Utilization: utilization,
 	}
+	// The status arm is COPIED, arm for arm. A status the vendor left unset
+	// draws no arm: the field is a oneof and an absent status is
+	// representable, so nothing is defaulted to "allowed".
+	switch status.GetStatus().(type) {
+	case *conversationv1.SessionRateLimitStatus_Allowed:
+		allowance.Status = &frontendv1.FooterAllowance_Allowed{Allowed: &frontendv1.FooterAllowanceAllowed{}}
+	case *conversationv1.SessionRateLimitStatus_AllowedWarning:
+		allowance.Status = &frontendv1.FooterAllowance_AllowedWarning{AllowedWarning: &frontendv1.FooterAllowanceAllowedWarning{}}
+	case *conversationv1.SessionRateLimitStatus_Rejected:
+		allowance.Status = &frontendv1.FooterAllowance_Rejected{Rejected: &frontendv1.FooterAllowanceRejected{}}
+	}
+	return allowance
 }
 
 // budgetLine is the vendor's standing context-budget warning, or nil.
