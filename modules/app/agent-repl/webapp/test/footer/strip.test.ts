@@ -9,7 +9,11 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { protoArmName } from "../../src/vocab.js";
-import { FOOTER_STATUS_CASES } from "../../src/footer/tones.js";
+import {
+  FOOTER_ALLOWANCE_STATUS_CASES,
+  FOOTER_STATUS_CASES,
+  allowanceStatusClass,
+} from "../../src/footer/tones.js";
 import {
   IDLE_CLOCK_LABEL,
   drawFooterStrip,
@@ -369,8 +373,8 @@ describe("the ticking activity figures", () => {
   it("draws BOTH rate-limit allowances as percentages", () => {
     const { row } = drawStrip({
       status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000), status: "allowed_warning" },
-        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000), status: "allowed" },
+        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000), status: { case: "allowedWarning", value: {} } },
+        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000), status: { case: "allowed", value: {} } },
       }),
     });
     expect(row.querySelector(".footer-activity-rate-limited")?.textContent).toBe(
@@ -381,8 +385,8 @@ describe("the ticking activity figures", () => {
   it("emphasizes the newsworthy allowance", () => {
     const { row } = drawStrip({
       status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000), status: "allowed_warning" },
-        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000), status: "allowed" },
+        session: { newsworthy: true, utilization: 0.72, resetsAtS: BigInt((NOW + 3_900_000) / 1000), status: { case: "allowedWarning", value: {} } },
+        weekly: { newsworthy: false, utilization: 0.31, resetsAtS: BigInt((NOW + 259_200_000) / 1000), status: { case: "allowed", value: {} } },
       }),
     });
     expect(row.querySelector('[data-allowance="session"]')?.getAttribute("data-newsworthy")).toBe(
@@ -393,16 +397,63 @@ describe("the ticking activity figures", () => {
     );
   });
 
-  it("keeps the vendor's status word verbatim, in a title", () => {
+  /** One rate-limit line whose SESSION allowance stands at ARM. */
+  function allowanceRow(arm: string): HTMLElement {
     const { row } = drawStrip({
       status: withActivity("idle", null, "rateLimited", {
-        session: { newsworthy: true, utilization: 0.5, resetsAtS: BigInt(NOW / 1000), status: "allowed_warning" },
-        weekly: { newsworthy: false, utilization: 0.1, resetsAtS: BigInt(NOW / 1000), status: "allowed" },
+        session: {
+          newsworthy: true,
+          utilization: 0.5,
+          resetsAtS: BigInt(NOW / 1000),
+          status: { case: arm as never, value: {} },
+        },
+        weekly: {
+          newsworthy: false,
+          utilization: 0.1,
+          resetsAtS: BigInt(NOW / 1000),
+          status: { case: "allowed", value: {} },
+        },
       }),
     });
-    expect(row.querySelector<HTMLElement>('[data-allowance="session"]')?.title).toBe(
-      "allowed_warning",
+    return row;
+  }
+
+  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("carries the %s arm on the cell", (arm) => {
+    expect(allowanceRow(arm).querySelector('[data-allowance="session"]')?.getAttribute("data-arm")).toBe(
+      arm,
     );
+  });
+
+  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("paints the %s arm its own colour", (arm) => {
+    const cell = allowanceRow(arm).querySelector('[data-allowance="session"]');
+    expect(cell?.className).toContain(allowanceStatusClass(arm));
+  });
+
+  it.each(FOOTER_ALLOWANCE_STATUS_CASES)("titles the %s arm with its own sentence", (arm) => {
+    const cell = allowanceRow(arm).querySelector<HTMLElement>('[data-allowance="session"]');
+    expect(cell?.title).not.toBe("");
+  });
+
+  it("draws a rejected allowance in the error register, not the warning one", () => {
+    const rejected = allowanceRow("rejected").querySelector('[data-allowance="session"]');
+    const warning = allowanceRow("allowedWarning").querySelector('[data-allowance="session"]');
+    expect(rejected?.className).not.toBe(warning?.className);
+  });
+
+  it("refuses an allowance whose vendor status is unset", () => {
+    expect(() =>
+      drawStrip({
+        status: withActivity("idle", null, "rateLimited", {
+          session: { newsworthy: true, utilization: 0.5, resetsAtS: BigInt(NOW / 1000) },
+          weekly: {
+            newsworthy: false,
+            utilization: 0.1,
+            resetsAtS: BigInt(NOW / 1000),
+            status: { case: "allowed", value: {} },
+          },
+        }),
+      }),
+    ).toThrow(MalformedView);
   });
 
   it("ticks the activity's relative age", () => {
