@@ -287,13 +287,13 @@ const mockBlockedCancelAll = "the mocked vendor writes `EXIT=143` into the AGENT
 	"line as unparsed residue — nothing is dropped — but every universal residue assertion fails on it, so the " +
 	"whole row waits on the shim lead reconciling the two statements."
 
-// TestAKeepAliveTurnNeverReachesAPage covers the keep-alive edge, which no
+// TestMockKeepAliveTurnsNeverReachAPage covers the keep-alive edge, which no
 // `!scenario` can: the marker is the SHIM's and the mocked vendor neither adds
 // nor removes it, while the scenario selector needs the `!name` at position 0.
 // So the marker rides an ORDINARY prose prompt — which is exactly the shape the
 // sidecar sees in production — and the turn's every record must land on
 // `unserved_item.keepalive`, structurally unable to reach a page.
-func TestAKeepAliveTurnNeverReachesAPage(t *testing.T) {
+func TestMockKeepAliveTurnsNeverReachAPage(t *testing.T) {
 	tree := generateMock(t, keepaliveMarker+" say something short", waitTerminal)
 	in := ingestMock(t, tree)
 	entries := in.Entries()
