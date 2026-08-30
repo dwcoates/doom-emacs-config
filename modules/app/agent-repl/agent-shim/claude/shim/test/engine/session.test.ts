@@ -17,6 +17,7 @@ import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../
 import { cwdSlug } from "../../src/engine/cold.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { textSaid } from "../../src/engine/turn.js";
+import { SYNTHETIC_MODEL } from "../../src/model.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -1183,5 +1184,80 @@ describe("the converter's own health", () => {
     await h.engine.onSdkMessage(resultMessage("u-result"));
 
     expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("closed");
+  });
+});
+
+describe("the model the vendor answers on", () => {
+  /** An assistant message reporting the model that produced it. */
+  const answeredOn = (model: string): never =>
+    ({
+      type: "assistant",
+      uuid: `u-${model}`,
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model, content: [] },
+    }) as never;
+
+  /** Every model name the engine pushed, in order. */
+  async function pushedModels(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const names: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "modelChanged") names.push(update.value.effectiveModel?.name ?? "");
+      }
+    })();
+    await act();
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+    return names;
+  }
+
+  it("pushes model_changed for a model nothing asked for", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names).toContain("claude-haiku-4-5");
+  });
+
+  it("pushes nothing when the reported model is the one in effect", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-opus-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-opus-5").length).toBe(1);
+  });
+
+  it("never adopts the synthetic marker as a model", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn(SYNTHETIC_MODEL));
+    });
+
+    expect(names).not.toContain(SYNTHETIC_MODEL);
+  });
+
+  it("keeps the adopted model for the next message that agrees with it", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-haiku-4-5").length).toBe(1);
   });
 });
