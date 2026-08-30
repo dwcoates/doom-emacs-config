@@ -585,15 +585,10 @@ scenario."
          (agent-repl-daemon-build-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
          (agent-repl--frontend-daemon-process nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
-                (agent-repl-itest--real-boundary
-                 'agent-repl--frontend-run-build-script))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (agent-repl-itest--real-boundary
-                 'agent-repl--frontend-spawn-daemon))
-               ((symbol-function 'agent-repl--frontend-artifact-exists-p)
-                (agent-repl-itest--real-boundary
-                 'agent-repl--frontend-artifact-exists-p)))
+     (cl-letf ,(mapcar (lambda (boundary)
+                         `((symbol-function ',boundary)
+                           (agent-repl-itest--real-boundary ',boundary)))
+                       agent-repl-itest--cold-start-boundaries)
        (unwind-protect (progn ,@body)
          (agent-repl-itest--reset-cold-start)))))
 
