@@ -35,6 +35,8 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 		return []*storev1.StoreEntry{c.injectedMemory(attachment, at, env, agent)}
 	case "dynamic_skill", "invoked_skills", "skill_listing":
 		return []*storev1.StoreEntry{c.injectedSkills(kind, attachment, at, env, agent)}
+	case contextBudgetAttachment:
+		return []*storev1.StoreEntry{c.contextBudgetWarning(attachment, at, env, agent)}
 	default:
 		// Context-cut exclusions and CLI machinery: understood, and deliberately
 		// not carried into a vendor-agnostic feed.
@@ -75,8 +77,14 @@ func (c *Converter) hookAttachment(kind string, attachment map[string]any, at At
 			Command:      firstNonEmpty(str(blocking["command"]), str(attachment["command"])),
 			BlockingText: firstNonEmpty(str(blocking["blockingError"]), str(attachment["blockingError"])),
 		}}
-		c.log.With(at.ctxWarn("hook")).With(logging.Context{ActivityID: unitID}).
-			Log("hook %q BLOCKED the gated call; the agent proceeds without it", str(pick(attachment, "hookName", "hook_name")))
+		// VERBOSE, NOT A WARNING. A hook the vendor recorded as blocking is
+		// CONTENT this copier is faithfully carrying into the blocking_error
+		// arm — the conversion went perfectly. A warning here would say "the
+		// sidecar is degraded" about a transcript that merely describes a
+		// blocked call, and the census that drives the reader's warnings to zero
+		// could then never reach zero over a real capture.
+		c.log.With(at.ctxFor("hook")).With(logging.Context{ActivityID: unitID}).
+			LogVerbose("hook %q BLOCKED the gated call; carried on the blocking_error arm", str(pick(attachment, "hookName", "hook_name")))
 	case "hook_non_blocking_error":
 		hook.Result = &conversationv1.AgentHook_NonBlockingError{NonBlockingError: &conversationv1.AgentHookNonBlockingError{
 			Command:    str(attachment["command"]),
@@ -84,8 +92,8 @@ func (c *Converter) hookAttachment(kind string, attachment map[string]any, at At
 			DurationMs: int64(number(attachment["durationMs"])),
 			Output:     hookOutput(attachment),
 		}}
-		c.log.With(at.ctxWarn("hook")).With(logging.Context{ActivityID: unitID}).
-			Log("hook %q failed without blocking", str(pick(attachment, "hookName", "hook_name")))
+		c.log.With(at.ctxFor("hook")).With(logging.Context{ActivityID: unitID}).
+			LogVerbose("hook %q failed without blocking; carried on the non_blocking_error arm", str(pick(attachment, "hookName", "hook_name")))
 	default:
 		hook.Result = &conversationv1.AgentHook_Cancelled{Cancelled: &conversationv1.AgentHookCancelled{}}
 	}
@@ -215,6 +223,55 @@ func (c *Converter) injectedMemory(attachment map[string]any, at Attribution, en
 	}})
 	activity.ActivityId = activityID(unitID)
 	return c.landFrame(at, agent, ActivityKey(unitID), "context_injected", activityFrame(agent, activity))
+}
+
+// ---------------------------------------------------------------------------
+// the context-budget warning
+// ---------------------------------------------------------------------------
+
+// contextBudgetAttachment is the vendor's attachment type for the warning it
+// injects into the prompt as the context window fills.
+//
+// SYNTHETIC, AND SAID SO. No capture in testdata/corpus or in the checked-in
+// transcript carries this record, so the spelling is taken from the proto's
+// description of it (a prompt-injected attachment whose text is the warning)
+// rather than from an observed line. It is the one conversion here not grounded
+// in a real fixture, and it is a CONCERN for the next capture run: if the vendor
+// names the type differently, this converter withholds the record as
+// vendor_specific like any other unmodeled attachment, which is a visible
+// residue entry rather than a silent loss.
+const contextBudgetAttachment = "context_budget_warning"
+
+// contextBudgetWarning converts the vendor's context-budget warning.
+//
+// A FILE-PLANE FACT WITH NO STREAM PRODUCER: it exists only as an attachment
+// line in the agent's transcript, so the sidecar is its ONLY producer (landing 4
+// moved it off SessionUpdate, which had no producer on the live session stream).
+// It is a page line of the agent's own book, instantaneous, with no lifecycle:
+// the footer's activity line draws it and nothing settles it later.
+func (c *Converter) contextBudgetWarning(attachment map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
+	// The vendor composes the sentence; no structured figure rides the record,
+	// so the text is carried verbatim and nothing is parsed out of it.
+	text := firstNonEmpty(
+		str(attachment["text"]),
+		str(pick(attachment, "warning", "message")),
+		str(obj(attachment["content"])["text"]),
+	)
+	key := SessionKey(contextBudgetAttachment, env.uuid)
+	if text == "" {
+		// The record's whole content IS the sentence, so one without it carries
+		// nothing to draw. Stored whole rather than landed as an empty warning.
+		c.log.With(at.ctxWarn("context-budget-warning")).With(logging.Context{UpsertKey: key}).
+			Log("context-budget warning carries no text; there is nothing to draw and the record is stored as vendor_specific")
+		return VendorSpecificEntry(at, "attachment/"+contextBudgetAttachment, attachment)
+	}
+	c.log.With(at.ctxFor("context-budget-warning")).With(logging.Context{UpsertKey: key}).
+		LogVerbose("context-budget warning injected chars=%d", len(text))
+	return c.landFrame(at, agent, key, "context_budget_warning", updateFrame(agent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_ContextBudgetWarning{
+			ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: text},
+		},
+	}))
 }
 
 // injectedSkills carries skills discovered or invoked WITHOUT a tool call.
