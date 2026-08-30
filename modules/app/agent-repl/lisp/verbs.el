@@ -81,13 +81,16 @@
 
 ;;;; ---- Logging ----------------------------------------------------------
 ;;
-;; EVERY VERB LINE GOES TO THE GLOBAL SINK, with the workspace named in the
-;; context rather than passed as the line's owner.  core.el routes a line
-;; that OWNS a workspace into that workspace's own file, and a verb's record
-;; is not that: the reader of `elisp.verbs.*' is auditing the verb -- every
-;; refusal of one op across every workspace -- and a transport failure is
-;; precisely the case where the workspace's own sink is the wrong place to
-;; put the news.  `ws=%s' in the context keeps the fact without the routing.
+;; A VERB LINE THAT IS ABOUT A WORKSPACE IS OWNED BY IT, and so is passed WS
+;; as the record's owner: logging-contract.md routes an owned record into
+;; that workspace's own `emacs.log', and failing to resolve a workspace for
+;; an owned record is a routing invariant violation rather than permission
+;; to write it globally.  The global sink is for the lines that genuinely
+;; have no workspace -- the daemon-admin verbs and the health pull.
+;;
+;; THE SLUG NAMES THE VERB (`elisp.verbs.<op>-refused'), because the reader
+;; of a refusal wants every refusal of ONE verb rather than a full-text
+;; search over the context of a slug all of them share.
 
 ;;;; ---- Resolution -------------------------------------------------------
 
@@ -98,7 +101,7 @@ the roster; there is no spelling of it Emacs could construct from a path,
 so a workspace without one cannot be addressed at all."
   (or (agent-repl-host-ref ws)
       (progn
-        (agent-repl--warn nil "elisp.verbs.no-ref ws=%s" ws)
+        (agent-repl--warn ws "elisp.verbs.no-ref ws=%s" ws)
         (user-error "agent-repl: workspace %s has no daemon identity yet" ws))))
 
 (defun agent-repl-verbs--conn (&optional ws)
@@ -113,7 +116,7 @@ call must reach the daemon that owns THAT workspace."
       ;; standing -- so the link is stood here rather than refused.
       (agent-repl-link-connect)
       (progn
-        (agent-repl--warn nil "elisp.verbs.no-conn ws=%s" ws)
+        (agent-repl--warn ws "elisp.verbs.no-conn ws=%s" ws)
         (user-error "agent-repl: no daemon connection"))))
 
 
@@ -186,14 +189,14 @@ the user as the verb, the word refused, the arm keyword, and the fields."
          (keyword (plist-get arm :arm)))
     (cond
      ((memq keyword agent-repl-verbs--handover-arms)
-      (agent-repl--info nil (format "elisp.verbs.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
+      (agent-repl--info ws (format "elisp.verbs.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
                         ws keyword (plist-get arm :value))
       (agent-repl-host-handle-refusal ws arm))
      (t
       ;; THE SLUG NAMES THE VERB: `elisp.verbs.<op>-refused'.  A refusal
       ;; reader wants every refusal of ONE verb, and a slug shared by all of
       ;; them would make that a full-text search over the context instead.
-      (agent-repl--warn nil (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
+      (agent-repl--warn ws (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
                         ws keyword (plist-get arm :value))
       (message "%s refused: %s%s" op
                (if keyword (substring (symbol-name keyword) 1) "unstated")
@@ -209,13 +212,13 @@ receives the decoded error value and OWNS the reporting for that verb;
 without it a daemon-authored refusal is reported generically.  A transport
 failure never reaches ON-ERROR: nobody answering and the daemon refusing
 are different facts."
-  (agent-repl--info nil "elisp.verbs.send op=%s ws=%s" op ws)
+  (agent-repl--info ws "elisp.verbs.send op=%s ws=%s" op ws)
   (funcall rpc conn request
            :on-response
            (lambda (response)
              (pcase (plist-get response :arm)
                (:success
-                (agent-repl--info nil "elisp.verbs.ack op=%s ws=%s outcome=success" op ws)
+                (agent-repl--info ws "elisp.verbs.ack op=%s ws=%s outcome=success" op ws)
                 (when on-success (funcall on-success (plist-get response :value))))
                (:error
                 ;; ON-ERROR, when given, may CLAIM the arm (answering
@@ -226,11 +229,11 @@ are different facts."
                   (unless (and on-error (funcall on-error value))
                     (agent-repl-verbs--on-refusal ws op value))))
                (arm
-                (agent-repl--error nil "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
+                (agent-repl--error ws "elisp.verbs.unknown-response-arm op=%s ws=%s arm=%S"
                                    op ws arm))))
            :on-failure
            (lambda (detail)
-             (agent-repl--error nil "elisp.verbs.transport-failure op=%s ws=%s detail=%S"
+             (agent-repl--error ws "elisp.verbs.transport-failure op=%s ws=%s detail=%S"
                                 op ws detail)
              (message "agent-repl: %s failed -- the daemon did not answer" op))))
 
@@ -241,7 +244,7 @@ are different facts."
 Idempotent, and deliberately so: the roster's own reconciliation tears the
 same tab down when the closed row arrives, and whichever gets there first
 must leave the other a no-op."
-  (agent-repl--info nil "elisp.verbs.teardown ws=%s op=%s" ws op)
+  (agent-repl--info ws "elisp.verbs.teardown ws=%s op=%s" ws op)
   (agent-repl--kill-one-workspace ws))
 
 ;;;; ---- Roster reading ---------------------------------------------------
@@ -336,7 +339,7 @@ reads them."
        ;; other arm is not claimed, and falls through to the generic
        ;; refusal handling.
        (when (eq (plist-get (agent-repl-verbs--refusal-arm value) :arm) :blocked)
-         (agent-repl--info nil "elisp.verbs.close-blocked ws=%s" ws)
+         (agent-repl--info ws "elisp.verbs.close-blocked ws=%s" ws)
          (message "close blocked -- see the workspace footer")
          t)))))
 
@@ -602,7 +605,7 @@ unrecoverable by design."
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (if (yes-or-no-p (format "Nuke %s?  Its worktree and branch are DELETED: " ws))
         (agent-repl-verb-nuke ws)
-      (agent-repl--info nil "elisp.verbs.nuke-declined ws=%s" ws))))
+      (agent-repl--info ws "elisp.verbs.nuke-declined ws=%s" ws))))
 
 (defun agent-repl-open-workspace ()
   "Re-open a closed workspace, chosen from the roster's closed rows."
