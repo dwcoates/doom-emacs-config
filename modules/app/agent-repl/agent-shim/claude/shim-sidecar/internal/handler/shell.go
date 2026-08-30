@@ -63,10 +63,31 @@ type ShellOutputHandler struct {
 	// never settled on evidence at all and waited out a staleness window.
 	read           bool
 	endedOnNewline bool
+	// coords are the FILE COORDINATES of the last batch this handler read, kept
+	// so a terminal minted from the READER'S conclusion — a LOST sweep, a
+	// person's stop — is stated at a real position in a real file.
+	//
+	// WITHOUT THEM THE WRITE IDENTITY COLLAPSES. A seam-minted terminal built
+	// from an attribution carrying no file id and no offset digests
+	// "producer||0|terminal" for EVERY run in the process, so the second spool
+	// concluded LOST mints the write id the first one already used and the store
+	// — whose absorption is write_id equality — swallows it as a replay. One of
+	// the two runs then has no terminal at all and stays open in every reader
+	// downstream. They are set on every Handle and are the same coordinates the
+	// cursor is stated in.
+	coords fileCoords
 	// onTerminal reports that this handler READ the run's own terminal off the
 	// file. The reader owns what that means for the LOST policy; all this side
 	// states is that the run ended on evidence rather than on silence.
 	onTerminal func(path, run string)
+}
+
+// fileCoords is where a handler last read: the cursor's own identity for the
+// file, and how far into it the handler has seen.
+type fileCoords struct {
+	Path   string
+	FileID string
+	Offset int64
 }
 
 // NewShellOutputHandler builds a handler.
@@ -98,6 +119,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		h.log.With(handleErr("shell-handle", ctx)).
 			Log("shell spool reached the handler with no spawning-call identity; its bytes have no run to append to and are stored as residue")
 		at := attribute(ctx, frames[0].Offset)
+		h.rememberCoords(ctx)
 		var raw bytes.Buffer
 		for _, frame := range frames {
 			raw.Write(frame.Raw)
@@ -110,6 +132,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	}
 
 	at := attribute(ctx, frames[0].Offset)
+	h.rememberCoords(ctx)
 
 	var output bytes.Buffer
 	for _, frame := range frames {
@@ -146,6 +169,13 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 func (h *ShellOutputHandler) Lost(ctx *Context, reason convert.LostReason) *storev1.StoreEntry {
 	at := attribute(ctx, ctx.BytesObserved)
 	return h.conv.BashLost(at, ctx.RunActivityID, string(h.seen), h.omitted, reason)
+}
+
+// rememberCoords records where this handler has read to, so a terminal the
+// READER concludes can be stated at a real file position rather than at the
+// zero value every such terminal would otherwise share.
+func (h *ShellOutputHandler) rememberCoords(ctx *Context) {
+	h.coords = fileCoords{Path: ctx.Path, FileID: ctx.FileID, Offset: ctx.BytesObserved}
 }
 
 // atLineStart answers whether a batch beginning at offset starts a line.
