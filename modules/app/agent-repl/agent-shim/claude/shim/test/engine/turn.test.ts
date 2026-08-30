@@ -586,7 +586,7 @@ describe("StopBash", () => {
       work: create(conversationv1.DetachedWorkIdSchema, { value: work }),
     });
 
-  it("stops the run by its task id", async () => {
+  it("resolves the HANDLE to the vendor's task id, which is what stopTask wants", async () => {
     const h = await harness();
     h.live.onTaskStarted({
       type: "system",
@@ -598,7 +598,9 @@ describe("StopBash", () => {
       session_id: "s",
     } as SdkTaskStartedMessage);
 
-    await h.turns.stopBash(stop("b01"));
+    // The handle names the SPAWNING CALL (ruling, landing 3); the task id stays
+    // shim-side as the internal address.
+    await h.turns.stopBash(stop("t"));
 
     expect(h.query.stoppedTasks).toEqual(["b01"]);
   });
