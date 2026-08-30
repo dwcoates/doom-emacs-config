@@ -28,7 +28,12 @@ message CreateTaskSuccess {
   TaskRef task = 1;
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (blank title, …),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message CreateTaskError {
+  oneof cause {
+    // The title is blank once trimmed.
+    CreateTaskBlankTitle blank_title = 1;
+  }
 }
+message CreateTaskBlankTitle {}
