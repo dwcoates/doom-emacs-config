@@ -233,6 +233,12 @@ const (
 	// drive ends when the stream has delivered at least one entry, which is
 	// still a real signal and never a duration.
 	waitEntries
+	// waitAnswer — a scenario that BLOCKS ON THE USER: a permission gate or an
+	// AskUserQuestion batch. The drive answers each ask as its start frame
+	// arrives (through UpdateAgent, the one verb for speaking to an existing
+	// agent) and then goes on waiting for the turn's terminal. Without this the
+	// turn parks forever and the mock writes only the records before the gate.
+	waitAnswer
 )
 
 // generateMock runs ONE scenario through the real mocked vendor and answers the
@@ -465,19 +471,24 @@ func awaitMockTurnEnd(
 	}
 
 	seen := 0
+	answered := map[string]bool{}
 	for stream.Receive() {
+		var entries []*conversationv1.HistoryEntry
 		switch frame := stream.Msg().GetFrame().(type) {
 		case *shimv1.WatchAgentResponse_Page:
 			for _, e := range frame.Page.GetEntries() {
-				seen++
-				if isMockTerminal(e.GetEntry()) && wait == waitTerminal {
-					return
-				}
+				entries = append(entries, e.GetEntry())
 			}
 		case *shimv1.WatchAgentResponse_Entry:
+			entries = append(entries, stream.Msg().GetEntry().GetEntry())
+		}
+		for _, entry := range entries {
 			seen++
-			if isMockTerminal(stream.Msg().GetEntry().GetEntry()) && wait == waitTerminal {
+			if isMockTerminal(entry) && wait != waitEntries {
 				return
+			}
+			if wait == waitAnswer {
+				answerOpenAsk(ctx, t, c, target, entry, prompt, answered, tree)
 			}
 		}
 		if wait == waitEntries && seen > 0 {
@@ -487,8 +498,95 @@ func awaitMockTurnEnd(
 	if err := stream.Err(); err != nil && ctx.Err() == nil {
 		t.Fatalf("WatchAgent for %q ended: %v (log: %s)", prompt, err, tree.LogPath)
 	}
-	if wait == waitTerminal {
+	if wait != waitEntries {
 		t.Fatalf("the turn for %q never reached a terminal frame (log: %s)", prompt, tree.LogPath)
+	}
+}
+
+// answerOpenAsk decides one open permission gate or answers one open question
+// batch, so a scenario that blocks on the user can reach its terminal.
+//
+// The DECISION follows the scenario's own name, because the scenario table
+// declares what the user did: a `!perm-deny-*` row is the row where the user
+// denies, and answering it with an allow would generate the wrong fixture.
+// Every other gate is allowed once, and every question is answered with the
+// FIRST option each of its questions offered.
+func answerOpenAsk(
+	ctx context.Context,
+	t *testing.T,
+	c shimv1connect.ShimClient,
+	target *conversationv1.AgentId,
+	entry *conversationv1.HistoryEntry,
+	prompt string,
+	answered map[string]bool,
+	tree *mockTree,
+) {
+	t.Helper()
+	update := entry.GetAgentFrame().GetUpdate()
+	var input *conversationv1.AgentInput
+	switch {
+	case update.GetPermission().GetStart() != nil:
+		ask := update.GetPermission().GetId()
+		if answered["permission:"+ask.GetValue()] {
+			return
+		}
+		answered["permission:"+ask.GetValue()] = true
+		decision := &conversationv1.AgentPermissionDecision{Ask: ask}
+		if strings.HasPrefix(prompt, "!perm-deny") {
+			decision.Decision = &conversationv1.AgentPermissionDecision_Denied{
+				Denied: &conversationv1.AgentPermissionDeniedByUser{Message: "the user declined this call"},
+			}
+		} else {
+			decision.Decision = &conversationv1.AgentPermissionDecision_Allowed{
+				Allowed: &conversationv1.AgentPermissionAllowed{
+					Scope: &conversationv1.AgentPermissionAllowed_Once{Once: &conversationv1.AgentPermissionAllowedOnce{}},
+				},
+			}
+		}
+		input = &conversationv1.AgentInput{Input: &conversationv1.AgentInput_Answer{
+			Answer: &conversationv1.AgentAnswer{
+				Answer: &conversationv1.AgentAnswer_PermissionDecision{PermissionDecision: decision},
+			},
+		}}
+	case update.GetQuestion().GetStart() != nil:
+		ask := update.GetQuestion().GetId()
+		if answered["question:"+ask.GetValue()] {
+			return
+		}
+		answered["question:"+ask.GetValue()] = true
+		answers := &conversationv1.AgentQuestionAnswers{}
+		for _, asked := range update.GetQuestion().GetStart().GetBatch().GetQuestions() {
+			selection := &conversationv1.AgentQuestionSelection{Question: asked.GetQuestion()}
+			options := asked.GetSingleSelect().GetOptions()
+			if options == nil {
+				options = asked.GetMultiSelect().GetOptions()
+			}
+			if len(options) == 0 {
+				// No option to echo: the ask's own free-text escape is the only
+				// answer available, and it is always offered.
+				selection.FreeText = &conversationv1.AgentQuestionFreeText{Text: "no options were offered"}
+			} else {
+				selection.Chosen = []*conversationv1.AgentQuestionChoice{{Label: options[0].GetLabel()}}
+			}
+			answers.Answers = append(answers.Answers, selection)
+		}
+		input = &conversationv1.AgentInput{Input: &conversationv1.AgentInput_Answer{
+			Answer: &conversationv1.AgentAnswer{
+				Answer: &conversationv1.AgentAnswer_QuestionAnswer{
+					QuestionAnswer: &conversationv1.AgentQuestionAnswer{Ask: ask, Answers: answers},
+				},
+			},
+		}}
+	default:
+		return
+	}
+	resp, err := c.UpdateAgent(ctx, connect.NewRequest(&shimv1.UpdateAgentRequest{Target: target, Input: input}))
+	if err != nil {
+		t.Fatalf("UpdateAgent answering the ask %q blocked on: %v (log: %s)", prompt, err, tree.LogPath)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("the mocked vendor REFUSED the answer to %q: %v (log: %s)",
+			prompt, resp.Msg.GetFailure(), tree.LogPath)
 	}
 }
 
@@ -913,6 +1011,14 @@ type blockUnit struct {
 	messageID string
 	ordinal   int
 	hasUsage  bool
+	// kind is the activity arm the unit carries, so two entries sharing an
+	// identity can be told apart: the same arm twice is an UPSERT (the mock
+	// duplicates a backgrounded agent's transcript into its spool, so the same
+	// unit is legitimately written from two files), while two DIFFERENT arms
+	// under one identity is a collision — one of them is unaddressable.
+	kind string
+	// activityID is the unit's own AgentActivityId, which must equal the key.
+	activityID string
 }
 
 // mockBlockUnits reads every `activity:<message.id>:<ordinal>` unit off the wire.
@@ -937,7 +1043,13 @@ func mockBlockUnits(t *testing.T, entries []*storev1.StoreEntry) []blockUnit {
 			continue // likewise: a tool_use_id that happens to contain a colon
 		}
 		activity := e.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity()
-		out = append(out, blockUnit{messageID: id[:cut], ordinal: ordinal, hasUsage: activity.GetUsage() != nil})
+		out = append(out, blockUnit{
+			messageID:  id[:cut],
+			ordinal:    ordinal,
+			hasUsage:   activity.GetUsage() != nil,
+			kind:       fmt.Sprintf("%T", activity.GetItem()),
+			activityID: activity.GetActivityId().GetValue(),
+		})
 	}
 	return out
 }
@@ -954,20 +1066,22 @@ func mockBlockUnits(t *testing.T, entries []*storev1.StoreEntry) []blockUnit {
 // property that matters — it is what makes the identity a per-block address.
 func requireBlockUnitsAreAddressedByBlock(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
 	t.Helper()
-	seen := map[string]map[int]bool{}
+	seen := map[string]blockUnit{}
 	for _, unit := range mockBlockUnits(t, entries) {
 		if unit.ordinal < 0 {
 			t.Errorf("%s: block unit %s:%d has a negative ordinal", scenario, unit.messageID, unit.ordinal)
 			continue
 		}
-		if seen[unit.messageID] == nil {
-			seen[unit.messageID] = map[int]bool{}
+		if unit.activityID != fmt.Sprintf("%s:%d", unit.messageID, unit.ordinal) {
+			t.Errorf("%s: the unit keyed %s:%d carries the activity id %q, so its key and its identity disagree",
+				scenario, unit.messageID, unit.ordinal, unit.activityID)
 		}
-		if seen[unit.messageID][unit.ordinal] {
-			t.Errorf("%s: two units share the identity %s:%d, so one of them is unaddressable",
-				scenario, unit.messageID, unit.ordinal)
+		identity := fmt.Sprintf("%s:%d", unit.messageID, unit.ordinal)
+		if prior, ok := seen[identity]; ok && prior.kind != unit.kind {
+			t.Errorf("%s: the identity %s addresses two DIFFERENT units (%s and %s), so one of them is unaddressable",
+				scenario, identity, prior.kind, unit.kind)
 		}
-		seen[unit.messageID][unit.ordinal] = true
+		seen[identity] = unit
 	}
 }
 
