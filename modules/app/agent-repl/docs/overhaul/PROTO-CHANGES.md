@@ -125,7 +125,7 @@ OWN ACCORD:
   `<Rpc>Error` in agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
   DaemonFault/SessionFault/HostFault kind oneofs).
 
-## Landing 4 — STAGED on overhaul/landing-4 (e226e9d4f; not yet landed)
+## Landing 4 — overhaul/integration 78479349f (2026-08-29; protos e226e9d4f, 882e1208b, 662bb16ad, 7983d2601, 728c3e016)
 
 OWN ACCORD:
 - AgentUpdate.context_budget_warning = 7 (ContextBudgetWarning{text}) and
@@ -135,9 +135,24 @@ OWN ACCORD:
 - Comment-only: DetachedWorkId carries the MINTING RULE (value == the unit's
   AgentActivityId, i.e. the spawning call's tool_use_id) so a `created`-origin
   monitor/bash/subagent is retired by its own terminal frame.
-- PENDING: the daemon's derived error arms (every empty `<Rpc>Error` in
-  agentrepl.v1, `transferring_away`, `not_yet_adopted`, the
-  DaemonFault/SessionFault/HostFault kind oneofs).
+- agentrepl.v1 error arms, DERIVED from the daemon lead's refusal-site
+  batch (settled sites landed as-is; sites still prescribed in unlanded
+  briefs landed too, to spare consumers a later re-work — any that end up
+  unused get retired): cross-cutting unknown_workspace /
+  workspace_ref_mismatch{registry_dir} / transferring_away{address} /
+  not_yet_adopted on 30 per-workspace rpcs (CreateWorkspace and
+  RegisterWorkspace excluded: no existing workspace is their subject);
+  per-rpc arms on every unary endpoint (see the endpoint files);
+  DaemonFault.kind (6 arms), SessionFault.kind (8 arms), HostFault.kind
+  (same 8, reusing SessionFault's messages, tags 3–10). Typed in by an
+  opus-low writer from the lead's table; reviewed by the project lead.
+- SessionUpdate.rate_limit_status = 28 (SessionRateLimitStatus: typed status
+  allowed|allowed_warning|rejected, optional window/utilization/overage
+  fields) — the SDK's stream-only `rate_limit_event`, evidenced by the shim
+  lead's probe corpus; the footer's allowance cell had no producer.
+- FooterAllowance.status: verbatim string (tag 4) RETIRED → typed oneof
+  allowed|allowed_warning|rejected (tags 5–7), the vocabulary now in
+  evidence.
 
 ## Explicitly NOT changed (rulings recorded instead)
 

@@ -490,3 +490,7 @@ These are not host-natured; elisp is the plumbing that reaches them.
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Landing 4 relay (2026-08-29, project lead)
+
+- The host decoder accepts every new `<Rpc>Error` arm on the rpcs Emacs calls and HostFault.kind's eight arms; `transferring_away{address}` is the handover redial signal.
