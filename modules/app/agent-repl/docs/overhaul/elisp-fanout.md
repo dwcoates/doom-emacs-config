@@ -85,6 +85,14 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   integration tests (R-SUITE-1 carries it). R-PUSHINVALID may be moot
   after the reader fix — re-run host/roster before dispatching it.
 - RUNNING: R-ARMS + R-LOGOP (`opus-low`) in elisp-agents/remed3.
+- VOCAB SEAM (escalated): overhaul/integration carries the UNTRIMMED
+  render-colors.json (+ footer_allowance); overhaul/elisp keeps the daemon
+  lead's trimmed file unioned with footer_allowance (015bec1b1). Every
+  merge from integration conflicts on that file until reconciled: resolve
+  to the union (trimmed keys + footer_allowance), never to theirs.
+- RE-RUN after the reader fix: host 24/32, roster 19/20, link 14/18,
+  connect 12/16, daemon 12/12. R-PUSHINVALID is RETIRED (the reader was
+  the cause); its residue, if any, folds into R-NOTIFY.
 - QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
   new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
   arm sets pinned against the regenerated Go bindings; unit tests only —
