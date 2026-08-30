@@ -10,10 +10,12 @@ import {
   drawInterruptSuccess,
   drawTurnStopControl,
 } from "../../src/footer/stop.js";
+import { INTERRUPT_ERROR_ARMS } from "../../src/interrupt-error.js";
 import {
   WORKSPACE,
   confirmRequired,
   harness,
+  interruptRefused,
   interruptSuccess,
   type Harness,
 } from "./harness.js";
@@ -153,6 +155,64 @@ describe("drawTurnStopControl", () => {
     press(control);
     await settle();
     press(control, "[data-interrupt-confirm]");
+    await settle();
+    expect(control.querySelector("[data-interrupt-confirm]")).toBeNull();
+  });
+
+  it.each(INTERRUPT_ERROR_ARMS.filter((arm) => arm !== "confirmRequired"))(
+    "draws the %s refusal at the control, by its own arm",
+    async (arm) => {
+      const h = harness({ interrupt: () => interruptRefused(arm) });
+      const control = drawTurnStopControl(h.ctx);
+      press(control);
+      await settle();
+      expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe(arm);
+    },
+  );
+
+  it.each(INTERRUPT_ERROR_ARMS.filter((arm) => arm !== "confirmRequired"))(
+    "offers no confirm step on the %s refusal",
+    async (arm) => {
+      const h = harness({ interrupt: () => interruptRefused(arm) });
+      const control = drawTurnStopControl(h.ctx);
+      press(control);
+      await settle();
+      expect(control.querySelector("[data-interrupt-confirm]")).toBeNull();
+    },
+  );
+
+  it("names the registry's directory when the workspace ref disagrees with it", async () => {
+    const h = harness({
+      interrupt: () => interruptRefused("workspaceRefMismatch", { registryDir: "/w/other" }),
+    });
+    const control = drawTurnStopControl(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector(".refusal")?.textContent).toContain("/w/other");
+  });
+
+  it("names the successor's address when the workspace has been handed on", async () => {
+    const h = harness({
+      interrupt: () => interruptRefused("transferringAway", { address: "127.0.0.1:9931" }),
+    });
+    const control = drawTurnStopControl(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector(".refusal")?.textContent).toContain("127.0.0.1:9931");
+  });
+
+  it("draws the challenge as a plain refusal at the fan-wide stop, which cannot answer it", async () => {
+    const h = harness({ interrupt: () => confirmRequired(2n) });
+    const control = drawAgentsPanelStopAll(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe("confirmRequired");
+  });
+
+  it("offers no confirm step at the fan-wide stop", async () => {
+    const h = harness({ interrupt: () => confirmRequired(2n) });
+    const control = drawAgentsPanelStopAll(h.ctx);
+    press(control);
     await settle();
     expect(control.querySelector("[data-interrupt-confirm]")).toBeNull();
   });
