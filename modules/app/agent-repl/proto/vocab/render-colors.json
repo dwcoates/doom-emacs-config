@@ -210,5 +210,15 @@
     "machinery": "blue",
     "vendor": "purple",
     "client_local": "blue"
+  },
+  "_footer_allowance_comment": [
+    "FooterAllowance.status, keyed by its oneof arm names. The allowance cell",
+    "colors by arm: allowed is the ordinary state, allowed_warning is the",
+    "newsworthy rung, rejected is the vendor refusing."
+  ],
+  "footer_allowance": {
+    "allowed": "green",
+    "allowed_warning": "yellow",
+    "rejected": "red"
   }
 }
