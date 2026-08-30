@@ -25,6 +25,11 @@ type pushRequest struct {
 	Snapshot    bool            `json:"snapshot"`
 }
 
+type gateRequest struct {
+	Method  string `json:"method"`
+	Release bool   `json:"release"`
+}
+
 type endErrorSpec struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -167,6 +172,32 @@ func (s *fakeServer) handleEnd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ended": ended})
 }
 
+func (s *fakeServer) handleGate(w http.ResponseWriter, r *http.Request) {
+	var body gateRequest
+	if err := decodeControlBody(r, &body); err != nil {
+		badRequest(w, "fakedaemon.control.gate-unparseable", err)
+		return
+	}
+	if _, ok := unaryResponseTypes[body.Method]; !ok {
+		badRequest(w, "fakedaemon.control.gate-unknown-method",
+			fmt.Errorf("unknown unary method %q", body.Method))
+		return
+	}
+	if body.Release {
+		if !s.releaseGate(body.Method) {
+			// Releasing a gate nobody armed means the scenario and the fake
+			// disagree about what is held; that must fail loudly.
+			badRequest(w, "fakedaemon.control.gate-not-armed",
+				fmt.Errorf("no gate is armed for %q", body.Method))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"released": body.Method})
+		return
+	}
+	s.armGate(body.Method)
+	writeJSON(w, http.StatusOK, map[string]any{"gated": body.Method})
+}
+
 func (s *fakeServer) handleCalls(w http.ResponseWriter, _ *http.Request) {
 	calls := s.recordedCalls()
 	if calls == nil {
@@ -195,6 +226,7 @@ func (s *fakeServer) registerControlPlane(mux *http.ServeMux, exit func()) {
 	mux.HandleFunc("/_fake/script", post("/_fake/script", s.handleScript))
 	mux.HandleFunc("/_fake/push", post("/_fake/push", s.handlePush))
 	mux.HandleFunc("/_fake/end", post("/_fake/end", s.handleEnd))
+	mux.HandleFunc("/_fake/gate", post("/_fake/gate", s.handleGate))
 	mux.HandleFunc("/_fake/calls", s.handleCalls)
 	mux.HandleFunc("/_fake/subscribers", s.handleSubscribers)
 	mux.HandleFunc("/_fake/exit", post("/_fake/exit", func(w http.ResponseWriter, _ *http.Request) {
