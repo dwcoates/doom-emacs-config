@@ -87,12 +87,11 @@ func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
 	bad := sidecar.agentEntry("w-partial-2", "", frameLine(agentID("main"), responseFrame("main", "act-2", "invalid")))
 
 	// Act.
-	detail := sidecar.writeExpectingFailure(ctx, t, cursor, good, bad)
+	failure := sidecar.writeExpectingFailure(ctx, t, cursor, good, bad)
 
-	// Assert.
-	if detail == "" {
-		t.Errorf("the refusal carried no detail; the store owes a human account naming the offending entry")
-	}
+	// Assert: the arm names WHICH entry and which field, so the producer's own
+	// logs can say what it sent wrong without parsing prose.
+	assertWriteInvalidRequest(t, failure, "entries[1].upsert_key")
 	store.restart()
 
 	after, cancelAfter := callContext(t)

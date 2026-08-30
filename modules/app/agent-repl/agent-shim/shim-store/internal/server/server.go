@@ -10,6 +10,7 @@ import (
 
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-store/internal/db"
 	"agentrepl/shim-store/internal/logging"
 
 	"connectrpc.com/connect"
@@ -132,17 +133,29 @@ func (s *Server) logRefusal(log *logging.Logger, operation string, ref *refusal,
 	log.Log(fields, "refused: %s", ref.detail)
 }
 
-// storeRefusal maps a storage-layer error onto a refusal site. A failure the
-// storage layer did not classify is a database failure: it is never softened
-// into a success, and never guessed at.
+// storeRefusal maps a storage-layer error onto this layer's refusal.
+//
+// THE SITE AND THE FIELD COME FROM THE STORAGE LAYER when it named them,
+// because it is the layer that decided them: this one never opens a frame, so
+// it cannot know that the upsert changed a row's book or that the residue
+// carried no raw record. A failure the storage layer did not classify at all is
+// a database failure — never softened into a success, and never guessed at.
 func storeRefusal(err error) *refusal {
+	site := db.RefusalSite(err)
+	field := db.RefusalField(err)
 	switch {
 	case errors.Is(err, ErrStalePointer):
-		return &refusal{site: SiteStalePointer, detail: err.Error()}
+		if site == "" {
+			site = SiteStalePointer
+		}
+		return refuseClass(classStalePointer, site, field, err.Error())
 	case errors.Is(err, ErrInvalid):
-		return &refusal{site: SiteStoreRefusedRequest, detail: err.Error()}
+		if site == "" {
+			site = SiteStoreRefusedRequest
+		}
+		return &refusal{site: site, field: field, detail: err.Error(), class: classInvalid}
 	default:
-		return &refusal{site: SiteDatabaseFailure, detail: err.Error()}
+		return refuseClass(classStorage, SiteDatabaseFailure, "", err.Error())
 	}
 }
 
@@ -160,7 +173,7 @@ func storeRefusal(err error) *refusal {
 // owns it; both stay verbose traces.
 func (s *Server) storeFailure(log *logging.Logger, operation string, err error, fields logging.Fields) *refusal {
 	ref := storeRefusal(err)
-	if ref.site == SiteStoreRefusedRequest {
+	if ref.class == classInvalid {
 		s.logRefusal(log, operation, ref, fields)
 		return ref
 	}
@@ -220,9 +233,24 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 	}), nil
 }
 
+// writeBatchFailure builds the typed failure. THE ARM IS WHY, and it is never
+// left unset: a caller that received a failure with no kind would have to parse
+// `detail` to decide whether retrying its bytes could ever help.
+//
+// WriteBatch has exactly two arms, and a stale pointer is unreachable on it —
+// the verb names no position — so everything that is not a storage failure is a
+// request the caller must fix.
 func writeBatchFailure(ref *refusal) *connect.Response[storev1.WriteBatchResponse] {
+	failure := &storev1.WriteBatchFailure{Detail: ref.detail}
+	if ref.class == classStorage {
+		failure.Kind = &storev1.WriteBatchFailure_StorageFailure{StorageFailure: &storev1.WriteBatchStorageFailure{}}
+	} else {
+		failure.Kind = &storev1.WriteBatchFailure_InvalidRequest{
+			InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: ref.field},
+		}
+	}
 	return connect.NewResponse(&storev1.WriteBatchResponse{
-		Result: &storev1.WriteBatchResponse_Failure{Failure: &storev1.WriteBatchFailure{Detail: ref.detail}},
+		Result: &storev1.WriteBatchResponse_Failure{Failure: failure},
 	})
 }
 
@@ -263,14 +291,14 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 		return openFailure(ref), nil
 	}
 	if opened.Page == nil {
-		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no page for this open"}
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no page for this open")
 		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
 
 	token, err := s.tokens.mint(agentID, opened.PinSeq)
 	if err != nil {
-		ref := &refusal{site: SiteDatabaseFailure, detail: err.Error()}
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", err.Error())
 		s.logOwnFailure(log, "store.rpc.open-agent-session", ref, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
 	}
@@ -285,8 +313,19 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 }
 
 func openFailure(ref *refusal) *connect.Response[storev1.OpenAgentSessionResponse] {
+	failure := &storev1.OpenAgentSessionFailure{Detail: ref.detail}
+	switch ref.class {
+	case classStalePointer:
+		failure.Kind = &storev1.OpenAgentSessionFailure_StalePointer{StalePointer: &storev1.OpenAgentSessionStalePointer{}}
+	case classStorage:
+		failure.Kind = &storev1.OpenAgentSessionFailure_StorageFailure{StorageFailure: &storev1.OpenAgentSessionStorageFailure{}}
+	default:
+		failure.Kind = &storev1.OpenAgentSessionFailure_InvalidRequest{
+			InvalidRequest: &storev1.OpenAgentSessionInvalidRequest{Field: ref.field},
+		}
+	}
 	return connect.NewResponse(&storev1.OpenAgentSessionResponse{
-		Result: &storev1.OpenAgentSessionResponse_Failure{Failure: &storev1.OpenAgentSessionFailure{Detail: ref.detail}},
+		Result: &storev1.OpenAgentSessionResponse_Failure{Failure: failure},
 	})
 }
 
@@ -309,7 +348,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 	hash := tokenHash(token)
 	entry, ok := s.tokens.consume(token)
 	if !ok {
-		ref := refuse(SiteUnknownWatchToken, "watch: this token was never minted by this store, or has already been spent")
+		ref := refuse(SiteUnknownWatchToken, "watch", "watch: this token was never minted by this store, or has already been spent")
 		s.logRefusal(log, "store.rpc.watch-agent-session", ref, logging.Fields{WatchTokenHash: hash})
 		return connect.NewError(connect.CodeNotFound, ref)
 	}
@@ -392,7 +431,7 @@ func (s *Server) send(log *logging.Logger, stream *connect.ServerStream[storev1.
 func (s *Server) endOverflowed(log *logging.Logger, sub *sink[LineWritten]) error {
 	log.Log(logging.Fields{Operation: "store.rpc.watch-agent-session", Level: "warn"},
 		"watch ended: this subscriber overflowed its buffer and must re-open with known_through dropped=%d", sub.dropped)
-	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow,
+	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow, "watch",
 		"watch: the subscriber fell too far behind its buffer; re-open with known_through"))
 }
 
@@ -416,7 +455,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 		return readPageFailure(ref), nil
 	}
 	if page == nil {
-		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no page for this read"}
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no page for this read")
 		s.logOwnFailure(log, "store.rpc.read-agent-page", ref, logging.Fields{AgentID: agentID})
 		return readPageFailure(ref), nil
 	}
@@ -427,8 +466,19 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 }
 
 func readPageFailure(ref *refusal) *connect.Response[storev1.ReadAgentPageResponse] {
+	failure := &storev1.ReadAgentPageFailure{Detail: ref.detail}
+	switch ref.class {
+	case classStalePointer:
+		failure.Kind = &storev1.ReadAgentPageFailure_StalePointer{StalePointer: &storev1.ReadAgentPageStalePointer{}}
+	case classStorage:
+		failure.Kind = &storev1.ReadAgentPageFailure_StorageFailure{StorageFailure: &storev1.ReadAgentPageStorageFailure{}}
+	default:
+		failure.Kind = &storev1.ReadAgentPageFailure_InvalidRequest{
+			InvalidRequest: &storev1.ReadAgentPageInvalidRequest{Field: ref.field},
+		}
+	}
 	return connect.NewResponse(&storev1.ReadAgentPageResponse{
-		Result: &storev1.ReadAgentPageResponse_Failure{Failure: &storev1.ReadAgentPageFailure{Detail: ref.detail}},
+		Result: &storev1.ReadAgentPageResponse_Failure{Failure: failure},
 	})
 }
 
@@ -439,10 +489,17 @@ func readPageFailure(ref *refusal) *connect.Response[storev1.ReadAgentPageRespon
 // synthesized answer would be an invention; the refusal is the honest reply.
 func (s *Server) GetWorkflow(_ context.Context, req *connect.Request[storev1.GetWorkflowRequest]) (*connect.Response[storev1.GetWorkflowResponse], error) {
 	log := s.rpcLogger(storev1connect.ShimStoreGetWorkflowProcedure, req.Header())
-	ref := refuse(SiteWorkflowNotImplemented, "workflow is not implemented this wave")
+	ref := refuseClass(classNotImplemented, SiteWorkflowNotImplemented, "work", "workflow is not implemented this wave")
 	s.logRefusal(log, "store.rpc.get-workflow", ref, logging.Fields{TaskID: req.Msg.GetWork().GetValue()})
 	return connect.NewResponse(&storev1.GetWorkflowResponse{
-		Result: &storev1.GetWorkflowResponse_Failure{Failure: &storev1.GetWorkflowFailure{Detail: ref.detail}},
+		Result: &storev1.GetWorkflowResponse_Failure{Failure: &storev1.GetWorkflowFailure{
+			Detail: ref.detail,
+			// `unknown_run` and `invalid_request` are RESERVED FOR THE WORKFLOW
+			// WAVE. Nothing routes into the workflow table, so this verb has
+			// exactly one honest answer and answering any other arm would be an
+			// invention.
+			Kind: &storev1.GetWorkflowFailure_NotImplemented{NotImplemented: &storev1.GetWorkflowNotImplemented{}},
+		}},
 	}), nil
 }
 
@@ -458,7 +515,7 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 		return liveWorkFailure(ref), nil
 	}
 	if live == nil {
-		ref := &refusal{site: SiteDatabaseFailure, detail: "the store produced no live-work answer"}
+		ref := refuseClass(classStorage, SiteDatabaseFailure, "", "the store produced no live-work answer")
 		s.logOwnFailure(log, "store.rpc.get-live-work", ref, logging.Fields{})
 		return liveWorkFailure(ref), nil
 	}
@@ -469,9 +526,15 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 	}), nil
 }
 
+// liveWorkFailure has ONE arm, because GetLiveWork takes no request fields:
+// there is nothing a caller can have sent wrong, so every way this verb fails
+// is the database failing.
 func liveWorkFailure(ref *refusal) *connect.Response[storev1.GetLiveWorkResponse] {
 	return connect.NewResponse(&storev1.GetLiveWorkResponse{
-		Result: &storev1.GetLiveWorkResponse_Failure{Failure: &storev1.GetLiveWorkFailure{Detail: ref.detail}},
+		Result: &storev1.GetLiveWorkResponse_Failure{Failure: &storev1.GetLiveWorkFailure{
+			Detail: ref.detail,
+			Kind:   &storev1.GetLiveWorkFailure_StorageFailure{StorageFailure: &storev1.GetLiveWorkStorageFailure{}},
+		}},
 	})
 }
 
@@ -502,7 +565,15 @@ func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[sto
 }
 
 func cursorsFailure(ref *refusal) *connect.Response[storev1.GetSidecarCursorsResponse] {
+	failure := &storev1.GetSidecarCursorsFailure{Detail: ref.detail}
+	if ref.class == classStorage {
+		failure.Kind = &storev1.GetSidecarCursorsFailure_StorageFailure{StorageFailure: &storev1.GetSidecarCursorsStorageFailure{}}
+	} else {
+		failure.Kind = &storev1.GetSidecarCursorsFailure_InvalidRequest{
+			InvalidRequest: &storev1.GetSidecarCursorsInvalidRequest{Field: ref.field},
+		}
+	}
 	return connect.NewResponse(&storev1.GetSidecarCursorsResponse{
-		Result: &storev1.GetSidecarCursorsResponse_Failure{Failure: &storev1.GetSidecarCursorsFailure{Detail: ref.detail}},
+		Result: &storev1.GetSidecarCursorsResponse_Failure{Failure: failure},
 	})
 }
