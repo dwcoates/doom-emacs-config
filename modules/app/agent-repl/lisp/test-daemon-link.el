@@ -929,6 +929,62 @@ gate is the point, so it is exercised here rather than bypassed."
     ;; Assert
     (should (null agent-repl-link--pending))))
 
+
+;;;; ---- Dialing a successor from a per-workspace refusal ----
+
+(ert-deftest agent-repl-test-link-dial-successor-stands-a-pending-successor ()
+  "A refusal can be the first news of a handover: the dial opens the watch."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Assert
+    (should (equal (agent-repl-connect-connection-address
+                    agent-repl-link--pending-successor)
+                   "127.0.0.1:9100"))))
+
+(ert-deftest agent-repl-test-link-dial-successor-answers-nil-before-acceptance ()
+  "The acceptance gate holds for a dialed successor exactly as for an announced one."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act / Assert
+    (should (null (agent-repl-link-dial-successor "127.0.0.1:9100")))))
+
+(ert-deftest agent-repl-test-link-dial-successor-answers-the-accepted-connection ()
+  "Once accepted the dial's successor is the adoptable connection."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Act
+    (agent-repl-test-link--accept agent-repl-link--pending-successor)
+    ;; Assert
+    (should (equal (agent-repl-connect-connection-address (agent-repl-link-successor))
+                   "127.0.0.1:9100"))))
+
+(ert-deftest agent-repl-test-link-dial-successor-is-idempotent-by-address ()
+  "Two refusals naming the same successor must not open two connections."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Act
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Assert — the primary's stream plus exactly one successor stream
+    (should (= (length agent-repl-test-link--streams) 2))))
+
+(ert-deftest agent-repl-test-link-dial-successor-logs-the-dial ()
+  "The dial is on the record, since it is a handover Emacs learned sideways."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Act
+    (agent-repl-link-dial-successor "127.0.0.1:9100")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p :info "elisp.link.dial-successor"))))
+
 (provide 'test-daemon-link)
 
 ;;; test-daemon-link.el ends here
