@@ -455,3 +455,12 @@ every UX or contract gap you surfaced instead of improvising.
   `a699887424d695c83` (steps 1–10 + landing-4 mappings), integration author
   `a4e55fa0df5a8d8c9`. One slot free; the engine-gap remediation waits for
   the record plane to land (shared engine files).
+- LEDGER: integration suite merged (worktree/branch retired): seven suites
+  under test/integration (~185 tests, 4 todos) + test/integration-support;
+  `npm run test:integration` (pretest builds). REMEDIATION LIST for the
+  opus-low agent after the record plane lands: the three engine gaps above;
+  a keep-alive interval override honored ONLY under --fake
+  (`AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS`) so the two keep-alive todos
+  become real tests; a read-call ledger on test/fakes/store-server.ts
+  (GetLiveWork/OpenAgentSession/ReadAgentPage/WatchBashRun counts) for the
+  detached todo; then every integration failure the first run surfaces.
