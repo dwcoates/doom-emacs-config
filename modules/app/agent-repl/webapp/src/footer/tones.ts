@@ -12,6 +12,10 @@
  * landing in the proto without a colour — or a colour landing in the file
  * without an arm — fails the suite rather than the screen.
  *
+ * THE ALLOWANCE TABLE IS NOT A TABLE EITHER, for the same reason: the vendor's
+ * status arms are keyed in `render-colors.json#footer_allowance`, so the map is
+ * built from `footerAllowanceColor` at load and never restated here.
+ *
  * THE DATUM COLOURS ARE THIS COMPONENT'S OWN. footer.proto's rendering rules
  * say a STATICALLY TYPED datum inside an activity (a count, an instant, a sha)
  * deserves colour, but the shared vocabulary files scope only whole-state
@@ -24,8 +28,7 @@ import {
   FooterAllowanceSchema,
   FooterStatusSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { MalformedView } from "../rpc/malformed.js";
-import { footerStatusColor, toneClass, type Color } from "../vocab.js";
+import { footerAllowanceColor, footerStatusColor, toneClass, type Color } from "../vocab.js";
 
 /**
  * Every `FooterStatus.status` arm, in the generated spelling.
@@ -69,35 +72,25 @@ export const FOOTER_ALLOWANCE_STATUS_CASES: readonly string[] = (
 ).map((field) => field.localName);
 
 /**
- * The colour each allowance status paints its cell.
- *
- * THIS COMPONENT'S OWN, like the datum colours above and for the same reason:
- * `render-colors.json` carries no `footer_allowance` section, so there is
- * nothing upstream to read this from. The assignment is the traffic-light
- * reading the arms already are — headroom is green, the vendor's own warning is
- * the warning yellow, and a rejected call is the error red. Should the shared
- * file grow a `footer_allowance` section, this table is the one place that
- * changes to read it through `src/vocab.ts`.
+ * The colour each allowance status paints its cell, resolved through the shared
+ * vocabulary exactly as the status arms are. Built eagerly: an arm the file has
+ * no colour for throws HERE, at import, rather than drawing an unpainted cell.
  */
-const ALLOWANCE_STATUS_COLOR: Readonly<Record<string, Color>> = Object.freeze({
-  allowed: "green",
-  allowedWarning: "yellow",
-  rejected: "red",
-});
+export const ALLOWANCE_ARM_CLASS: Readonly<Record<string, Color>> = Object.freeze(
+  Object.fromEntries(
+    FOOTER_ALLOWANCE_STATUS_CASES.map((arm) => [arm, footerAllowanceColor(arm)]),
+  ),
+);
 
 /**
  * The CSS class an allowance cell wears for ARM.
  *
- * An arm with no colour is a MALFORMED VIEW rather than an unpainted cell: the
- * table above and the schema are meant to agree, and the suite holds them to it
- * row for row, so reaching here with an unknown arm means they have drifted.
+ * A thin wrapper over the shared vocabulary, like `statusArmClass`: there is
+ * exactly one call path from an arm to a class, and an arm `render-colors.json`
+ * has no row for is a MalformedView rather than a silently grey cell.
  */
 export function allowanceStatusClass(arm: string): string {
-  const color = ALLOWANCE_STATUS_COLOR[arm];
-  if (color === undefined) {
-    throw new MalformedView("FooterAllowance.status", `no colour for the allowance arm ${arm}`);
-  }
-  return toneClass(color);
+  return toneClass(footerAllowanceColor(arm));
 }
 
 /** The typed datums an activity line colours. */

@@ -440,20 +440,44 @@ describe("the ticking activity figures", () => {
     expect(rejected?.className).not.toBe(warning?.className);
   });
 
-  it("refuses an allowance whose vendor status is unset", () => {
-    expect(() =>
-      drawStrip({
-        status: withActivity("idle", null, "rateLimited", {
-          session: { newsworthy: true, utilization: 0.5, resetsAtS: BigInt(NOW / 1000) },
-          weekly: {
-            newsworthy: false,
-            utilization: 0.1,
-            resetsAtS: BigInt(NOW / 1000),
-            status: { case: "allowed", value: {} },
-          },
-        }),
+  /** The same line with the session allowance carrying NO vendor verdict. */
+  function unverdictedRow(): HTMLElement {
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "rateLimited", {
+        session: { newsworthy: true, utilization: 0.5, resetsAtS: BigInt(NOW / 1000) },
+        weekly: {
+          newsworthy: false,
+          utilization: 0.1,
+          resetsAtS: BigInt(NOW / 1000),
+          status: { case: "allowed", value: {} },
+        },
       }),
-    ).toThrow(MalformedView);
+    });
+    return row;
+  }
+
+  it("draws the figures of an allowance the vendor has not yet ruled on", () => {
+    expect(
+      unverdictedRow().querySelector('[data-allowance="session"]')?.textContent,
+    ).toContain("50%");
+  });
+
+  it("marks no arm on an allowance with no vendor verdict yet", () => {
+    expect(
+      unverdictedRow().querySelector('[data-allowance="session"]')?.hasAttribute("data-arm"),
+    ).toBe(false);
+  });
+
+  it("paints no verdict colour before the vendor has given one", () => {
+    expect(unverdictedRow().querySelector('[data-allowance="session"]')?.className).toBe(
+      "footer-allowance footer-allowance-newsworthy",
+    );
+  });
+
+  it("titles nothing on an allowance with no vendor verdict yet", () => {
+    expect(
+      unverdictedRow().querySelector<HTMLElement>('[data-allowance="session"]')?.title,
+    ).toBe("");
   });
 
   it("ticks the activity's relative age", () => {
