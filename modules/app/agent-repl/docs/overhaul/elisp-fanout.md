@@ -36,6 +36,67 @@ the proto wins and the agent reports the conflict.
   validation once; one dedicated function per non-primitive use site
   delegating to the child's base; primitives get no wrappers.
 
+## 0b. Dispatch policy (user ruling, binding from 2026-08-29 evening)
+
+- Every NEW implementation dispatch is Opus at LOW effort (`opus-low`; if
+  the type is not offered, `subagent_type: "claude"` with `model: "opus"`
+  and the effort stated in the brief). Agents already running or resumed
+  keep their tier.
+- Implementers MAY offload mechanical, fully specified writes (boilerplate,
+  tests from a settled table, rote conversions, doc sections) to Sonnet at
+  MEDIUM effort (`sonnet-medium`; both types are offered in this session). The
+  offloading agent stays accountable: it reviews the output, runs the
+  suites, and reports every offload in its completion report.
+- Adversarial auditors stay `claude` + `model: "fable"`, fresh context.
+
+## 0c. Teamlead live ledger (update at every dispatch / merge / ruling)
+
+COMPACTION RULE (user ruling): if the teamlead's context is compacted, it
+drops to LOW effort at once (`/effort low` if offered, else explicitly:
+no re-derivation, no exploration; act on this ledger + the docs + the
+summary) and says "compacted" in its next message to the project lead.
+
+STATE as of 2026-08-29 evening (tip after 6d97fe768):
+- Merged and green at the tip: connect/rpc; wire-common/host/roster/verbs;
+  pre-pass; W2-A (daemon-link, host, daemon, services, notifications);
+  W2-B (roster, status, popup, workspace, session, frontend,
+  webview-recovery, open-progress, panels, window); integration suite +
+  Go fake daemon (lisp/testsupport/fakedaemon). Landings 1–3 merged.
+- RUNNING (keep their opus-medium tier): W2-C composer+verbs in
+  elisp-agents/w2c (branch overhaul/elisp-w2c); remediation-1
+  (R-ACCEPT, R-QUESTION, R-STREAMCLOSE) in elisp-agents/remed1;
+  R-DAEMON in elisp-agents/remed2. Resume by SendMessage to the existing
+  agent, never re-dispatch.
+- PRE-CUT, unassigned: elisp-agents/suite2 (overhaul/elisp-suite2) for
+  R-SUITE-1 (the 92 audit findings, docs/overhaul/reports/
+  elisp-suite-audit-1.md) — dispatch as `opus-low` when a slot frees.
+- LANDING 4 merged (41d7c3321): typed `<Rpc>Error` arms on every rpc
+  Emacs calls (cross-cutting unknown_workspace / workspace_ref_mismatch
+  {registry_dir} / transferring_away{address} / not_yet_adopted + per-rpc
+  arms) and HostFault.kind's eight arms. The codec refuses them until
+  R-ARMS lands (test-wire-verbs 109/111 by design).
+- PRE-CUT: elisp-agents/remed3 (overhaul/elisp-remed3) for R-ARMS.
+- QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
+  new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
+  arm sets pinned against the regenerated Go bindings; unit tests only —
+  treatments live in host.el (remediation-1) and verbs.el (W2-C)) →
+  R-SUITE-1 →
+  R-PUSHINVALID → R-NOTIFY (incl. R-CLICK, gate `:unknown`) → R-HANDOVER
+  (re-run link/host first; remediate the remainder) → second adversarial
+  audit (fable, fresh context) → loop until green.
+- PER-MERGE ROUTINE: `git merge overhaul/elisp-<slug>` into overhaul/elisp
+  (worktree /Users/dodgecoates/.config/doom-overhaul/elisp); resolve
+  config.el/core.el/test-agent-repl.el seams keeping both sides; verify
+  `load-errors=nil` and the touched suites; `git worktree remove
+  elisp-agents/<slug>` + `git branch -d`; re-run the integration suites
+  (`emacs -batch -Q -l ert -l lisp/test-integration-<m>.el
+  -f ert-run-tests-batch-and-exit`, AGENT_REPL_FORBID_VENDOR_CALLS=1,
+  collect every failure); update this ledger.
+- CAP: at most three running agents (auditors count).
+- FINAL REPORT owes: commit range, every suite + result, overrides of
+  prescribed details, escalations outstanding, what was left out, the UX
+  gaps filled from the API (one line each), the toss-ups for the user.
+
 ## 1. Module map (final tree of lisp/)
 
 New files:
@@ -640,6 +701,35 @@ names; each brief owns every file listed for its constituent rows.
   blink; selected → log only), with `header` in the log context. Tests: one
   per decode edge (present, missing header = proto3 default "", unknown
   sibling arm still refused) and one per policy branch.
+
+- R-CLICK (integration suite finding): the desktop notification's click
+  has no activation channel — `agent-repl--notify` takes `(WS TITLE
+  MESSAGE)` and host.el passes no callback, so "click raises the frame and
+  selects the workspace's tab" is unimplemented. notifications.el gains a
+  per-notification activation (the existing emacsclient click round-trip
+  carrying the workspace name → `agent-repl--notification-activate` raises
+  the frame and `agent-repl--ws-switch`es), host.el's unfocused branch uses
+  it for every notification kind. Tests: notifications (activation selects
+  the tab; unknown workspace → WARNING, no switch), host (unfocused branch
+  passes the workspace), the integration host suite's click case.
+
+- FIRST INTEGRATION RUN (tip 942659cd6 + landing 3): connect 12/16, link
+  14/18, host 21/32, roster 17/20, daemon 1/12; composer/verbs not run
+  (W2-C pending). Clusters, dispatched in this order as slots free:
+  R-DAEMON (the cold-start suite, 11 timeouts — independent of every other
+  cluster); R-PUSHINVALID (host ×2, roster ×2: an invalid push must log
+  `elisp.rpc.push-invalid` at ERROR and leave the stream standing, and the
+  suite's log reader must find the record — verify where core.el writes
+  global records versus where test-integration-helpers reads them);
+  R-NOTIFY (host banner/blink/click + roster attention blink + R-CLICK +
+  the `:unknown` gate before any push — after the R-QUESTION agent leaves
+  host.el); R-HANDOVER (link dual attach/promotion, host transferred ×4 —
+  re-run after R-ACCEPT/R-STREAMCLOSE land; remediate what remains).
+
+- R-SUITE-1 (adversarial audit 1, docs/overhaul/reports/elisp-suite-audit-1.md):
+  92 findings, all accepted; a suite-extension agent implements them
+  (MISSING first, then WEAK), never running the suite itself. Ruling folded
+  in: a drained resend reuses the failed attempt's idempotency key.
 
 ## 16. Escalations sent to the project lead (defaults in force meanwhile)
 

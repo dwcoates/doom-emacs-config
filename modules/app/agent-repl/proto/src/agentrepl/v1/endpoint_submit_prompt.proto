@@ -115,8 +115,8 @@ message SubmitPromptCommandPanel {
   }
 }
 
-// The submission was refused. The reason oneof gains further arms as they
-// are derived from the daemon's real refusal sites.
+// The submission was refused. Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message SubmitPromptError {
   // WHY the submission was refused.
   oneof reason {
@@ -127,9 +127,39 @@ message SubmitPromptError {
     // when the merge began stay held and are unaffected. The composer
     // keeps the text; the user resubmits after the merge resolves.
     SubmitPromptRefusedMerging merging = 1;
+    // The workspace id is not in the daemon's registry.
+    SubmitPromptUnknownWorkspace unknown_workspace = 2;
+    // The echoed dir disagrees with the registry's dir for this id.
+    SubmitPromptWorkspaceRefMismatch workspace_ref_mismatch = 3;
+    // This daemon released the workspace to a successor; dial `address`.
+    SubmitPromptTransferringAway transferring_away = 4;
+    // A joining daemon has not finished adopting this workspace yet.
+    SubmitPromptNotYetAdopted not_yet_adopted = 5;
+    // The FeedId decodes to another workspace.
+    SubmitPromptFeedNotInWorkspace feed_not_in_workspace = 6;
+    // The FeedId does not decode.
+    SubmitPromptFeedUndecodable feed_undecodable = 7;
+    // A bubble-addressed submit while that agent's turn runs.
+    SubmitPromptTurnAlreadyOpen turn_already_open = 8;
+    // The workspace has no session to submit to.
+    SubmitPromptNoSession no_session = 9;
   }
 }
 // The merge-in-flight refusal. Empty: the set arm is the whole assertion —
 // the footer's merging status and the feed's merge bubble already show
 // which merge, so the refusal carries no duplicate account of it.
 message SubmitPromptRefusedMerging {}
+message SubmitPromptUnknownWorkspace {}
+message SubmitPromptWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message SubmitPromptTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message SubmitPromptNotYetAdopted {}
+message SubmitPromptFeedNotInWorkspace {}
+message SubmitPromptFeedUndecodable {}
+message SubmitPromptTurnAlreadyOpen {}
+message SubmitPromptNoSession {}
