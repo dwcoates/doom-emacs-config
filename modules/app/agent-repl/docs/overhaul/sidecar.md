@@ -351,3 +351,8 @@ orchestration chain. Cross-cutting conventions are in
 - `handler.LostTerminal` produces the `lost` cause arms (DetachedLost {file_vanished|went_silent|swept_up}).
 - Bash rows the sidecar writes are read back through store.v1 WatchBashRun; the shim's WatchBash is the consumer.
 - The sidecar is the ONLY producer of AgentContextInjected (memory files, skills), the write/edit `diagnostics` consequence arm and SessionUpdate.context_budget_warning: the pinned SDK stream carries no attachment records.
+
+## Landing 4 relay (2026-08-29, project lead)
+
+- The transcript's context-budget attachment converts to AgentUpdate.context_budget_warning{text}, a page line of the agent's book.
+- Bash rows and handles use DetachedWorkId.value == the unit's AgentActivityId (the spawning call's tool_use_id).

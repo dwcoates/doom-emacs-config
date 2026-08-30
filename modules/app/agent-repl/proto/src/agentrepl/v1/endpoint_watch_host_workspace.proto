@@ -10,6 +10,7 @@ syntax = "proto3";
 package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
+import "agentrepl/v1/endpoint_session_health.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -250,14 +251,32 @@ message HostComposerDraining {}
 message HostComposerRestarting {}
 message HostComposerMergeParked {}
 
-// One standing fault — the dynamic account now; the kind oneof is added WITH
-// its first derived arms at the wave, from the controller's real fault sites
-// (the old RuntimeFault's component/fault_type/impact/cause strings become
-// arms then).
+// One standing fault — the same kinds SessionHealth's SessionFault carries,
+// the same messages: a session's fault classes do not change because the
+// host stream is what reports them. Kinds derived from the controller's real
+// fault sites (landing 4, 2026-08-29).
 message HostFault {
   // The dynamic account, verbatim — supplements the kind, never replaces it.
   string detail = 1;
   // When the fault window opened, epoch ms.
   int64 opened_at_ms = 2;
+  oneof kind {
+    // Starting the session's shim failed.
+    SessionFaultShimStartFailed shim_start_failed = 3;
+    // The shim exited while the session was live.
+    SessionFaultShimDied shim_died = 4;
+    // The daemon-shim link was severed.
+    SessionFaultLinkSevered link_severed = 5;
+    // Resuming the vendor session failed.
+    SessionFaultResumeFailed resume_failed = 6;
+    // A bounce's replacement shim died before it came up.
+    SessionFaultBounceDied bounce_died = 7;
+    // A bounce ended in a state the controller cannot name.
+    SessionFaultBounceUnknown bounce_unknown = 8;
+    // The turn classifier failed.
+    SessionFaultClassifierFailed classifier_failed = 9;
+    // A shim-side SessionFault, relayed.
+    SessionFaultShimReported shim_reported = 10;
+  }
 }
 
