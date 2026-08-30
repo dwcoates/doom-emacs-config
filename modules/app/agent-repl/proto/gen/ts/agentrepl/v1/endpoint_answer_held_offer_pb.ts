@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_answer_held_offer.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_held_offer: GenFile = /*@__PURE__*/
-  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2hlbGRfb2ZmZXIucHJvdG8SDGFnZW50cmVwbC52MSKVAQoWQW5zd2VySGVsZE9mZmVyUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkIKDW1lcmdlX2RlcXVldWUYAiABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VySGVsZE9mZmVyTWVyZ2VEZXF1ZXVlSABCCAoGYW5zd2VyIpUBChtBbnN3ZXJIZWxkT2ZmZXJNZXJnZURlcXVldWUSMQoEa2VlcBgBIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJLZWVwSAASNwoHcmVsZWFzZRgCIAEoCzIkLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJSZWxlYXNlSABCCgoIZGVjaXNpb24iFQoTQW5zd2VySGVsZE9mZmVyS2VlcCIYChZBbnN3ZXJIZWxkT2ZmZXJSZWxlYXNlIpEBChdBbnN3ZXJIZWxkT2ZmZXJSZXNwb25zZRI3CgdzdWNjZXNzGAEgASgLMiQuYWdlbnRyZXBsLnYxLkFuc3dlckhlbGRPZmZlclN1Y2Nlc3NIABIzCgVlcnJvchgCIAEoCzIiLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJFcnJvckgAQggKBnJlc3VsdCIYChZBbnN3ZXJIZWxkT2ZmZXJTdWNjZXNzIhYKFEFuc3dlckhlbGRPZmZlckVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("Ci1hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX2hlbGRfb2ZmZXIucHJvdG8SDGFnZW50cmVwbC52MSKVAQoWQW5zd2VySGVsZE9mZmVyUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEkIKDW1lcmdlX2RlcXVldWUYAiABKAsyKS5hZ2VudHJlcGwudjEuQW5zd2VySGVsZE9mZmVyTWVyZ2VEZXF1ZXVlSABCCAoGYW5zd2VyIpUBChtBbnN3ZXJIZWxkT2ZmZXJNZXJnZURlcXVldWUSMQoEa2VlcBgBIAEoCzIhLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJLZWVwSAASNwoHcmVsZWFzZRgCIAEoCzIkLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJSZWxlYXNlSABCCgoIZGVjaXNpb24iFQoTQW5zd2VySGVsZE9mZmVyS2VlcCIYChZBbnN3ZXJIZWxkT2ZmZXJSZWxlYXNlIpEBChdBbnN3ZXJIZWxkT2ZmZXJSZXNwb25zZRI3CgdzdWNjZXNzGAEgASgLMiQuYWdlbnRyZXBsLnYxLkFuc3dlckhlbGRPZmZlclN1Y2Nlc3NIABIzCgVlcnJvchgCIAEoCzIiLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJFcnJvckgAQggKBnJlc3VsdCIYChZBbnN3ZXJIZWxkT2ZmZXJTdWNjZXNzIugDChRBbnN3ZXJIZWxkT2ZmZXJFcnJvchJKChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzItLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJVbmtub3duV29ya3NwYWNlSAASUwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIxLmFnZW50cmVwbC52MS5BbnN3ZXJIZWxkT2ZmZXJXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkoKEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMi0uYWdlbnRyZXBsLnYxLkFuc3dlckhlbGRPZmZlclRyYW5zZmVycmluZ0F3YXlIABJFCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKi5hZ2VudHJlcGwudjEuQW5zd2VySGVsZE9mZmVyTm90WWV0QWRvcHRlZEgAEkkKEW5vX29mZmVyX3N0YW5kaW5nGAUgASgLMiwuYWdlbnRyZXBsLnYxLkFuc3dlckhlbGRPZmZlck5vT2ZmZXJTdGFuZGluZ0gAEkgKEG9mZmVyX3N1cGVyc2VkZWQYBiABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VySGVsZE9mZmVyT2ZmZXJTdXBlcnNlZGVkSABCBwoFY2F1c2UiIQofQW5zd2VySGVsZE9mZmVyVW5rbm93bldvcmtzcGFjZSI7CiNBbnN3ZXJIZWxkT2ZmZXJXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMgofQW5zd2VySGVsZE9mZmVyVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh4KHEFuc3dlckhlbGRPZmZlck5vdFlldEFkb3B0ZWQiIAoeQW5zd2VySGVsZE9mZmVyTm9PZmZlclN0YW5kaW5nIiAKHkFuc3dlckhlbGRPZmZlck9mZmVyU3VwZXJzZWRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.AnswerHeldOfferRequest
@@ -159,12 +159,64 @@ export const AnswerHeldOfferSuccessSchema: GenMessage<AnswerHeldOfferSuccess> = 
   messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 5);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (no offer standing,
- * offer superseded), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.AnswerHeldOfferError
  */
 export type AnswerHeldOfferError = Message<"agentrepl.v1.AnswerHeldOfferError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.AnswerHeldOfferError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.AnswerHeldOfferUnknownWorkspace unknown_workspace = 1;
+     */
+    value: AnswerHeldOfferUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: AnswerHeldOfferWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.AnswerHeldOfferTransferringAway transferring_away = 3;
+     */
+    value: AnswerHeldOfferTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.AnswerHeldOfferNotYetAdopted not_yet_adopted = 4;
+     */
+    value: AnswerHeldOfferNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * No offer is standing for this workspace.
+     *
+     * @generated from field: agentrepl.v1.AnswerHeldOfferNoOfferStanding no_offer_standing = 5;
+     */
+    value: AnswerHeldOfferNoOfferStanding;
+    case: "noOfferStanding";
+  } | {
+    /**
+     * A newer offer has superseded the one answered.
+     *
+     * @generated from field: agentrepl.v1.AnswerHeldOfferOfferSuperseded offer_superseded = 6;
+     */
+    value: AnswerHeldOfferOfferSuperseded;
+    case: "offerSuperseded";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -173,4 +225,94 @@ export type AnswerHeldOfferError = Message<"agentrepl.v1.AnswerHeldOfferError"> 
  */
 export const AnswerHeldOfferErrorSchema: GenMessage<AnswerHeldOfferError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 6);
+
+/**
+ * @generated from message agentrepl.v1.AnswerHeldOfferUnknownWorkspace
+ */
+export type AnswerHeldOfferUnknownWorkspace = Message<"agentrepl.v1.AnswerHeldOfferUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerHeldOfferUnknownWorkspace.
+ * Use `create(AnswerHeldOfferUnknownWorkspaceSchema)` to create a new message.
+ */
+export const AnswerHeldOfferUnknownWorkspaceSchema: GenMessage<AnswerHeldOfferUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 7);
+
+/**
+ * @generated from message agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatch
+ */
+export type AnswerHeldOfferWorkspaceRefMismatch = Message<"agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerHeldOfferWorkspaceRefMismatch.
+ * Use `create(AnswerHeldOfferWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const AnswerHeldOfferWorkspaceRefMismatchSchema: GenMessage<AnswerHeldOfferWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 8);
+
+/**
+ * @generated from message agentrepl.v1.AnswerHeldOfferTransferringAway
+ */
+export type AnswerHeldOfferTransferringAway = Message<"agentrepl.v1.AnswerHeldOfferTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerHeldOfferTransferringAway.
+ * Use `create(AnswerHeldOfferTransferringAwaySchema)` to create a new message.
+ */
+export const AnswerHeldOfferTransferringAwaySchema: GenMessage<AnswerHeldOfferTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 9);
+
+/**
+ * @generated from message agentrepl.v1.AnswerHeldOfferNotYetAdopted
+ */
+export type AnswerHeldOfferNotYetAdopted = Message<"agentrepl.v1.AnswerHeldOfferNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerHeldOfferNotYetAdopted.
+ * Use `create(AnswerHeldOfferNotYetAdoptedSchema)` to create a new message.
+ */
+export const AnswerHeldOfferNotYetAdoptedSchema: GenMessage<AnswerHeldOfferNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 10);
+
+/**
+ * @generated from message agentrepl.v1.AnswerHeldOfferNoOfferStanding
+ */
+export type AnswerHeldOfferNoOfferStanding = Message<"agentrepl.v1.AnswerHeldOfferNoOfferStanding"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerHeldOfferNoOfferStanding.
+ * Use `create(AnswerHeldOfferNoOfferStandingSchema)` to create a new message.
+ */
+export const AnswerHeldOfferNoOfferStandingSchema: GenMessage<AnswerHeldOfferNoOfferStanding> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 11);
+
+/**
+ * @generated from message agentrepl.v1.AnswerHeldOfferOfferSuperseded
+ */
+export type AnswerHeldOfferOfferSuperseded = Message<"agentrepl.v1.AnswerHeldOfferOfferSuperseded"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerHeldOfferOfferSuperseded.
+ * Use `create(AnswerHeldOfferOfferSupersededSchema)` to create a new message.
+ */
+export const AnswerHeldOfferOfferSupersededSchema: GenMessage<AnswerHeldOfferOfferSuperseded> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_held_offer, 12);
 

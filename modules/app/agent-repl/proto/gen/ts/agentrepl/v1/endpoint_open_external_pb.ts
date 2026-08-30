@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_external.proto.
  */
 export const file_agentrepl_v1_endpoint_open_external: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9leHRlcm5hbC5wcm90bxIMYWdlbnRyZXBsLnYxIlEKE09wZW5FeHRlcm5hbFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhILCgN1cmwYAiABKAkiiAEKFE9wZW5FeHRlcm5hbFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkV4dGVybmFsU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5FeHRlcm5hbEVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5FeHRlcm5hbFN1Y2Nlc3MiEwoRT3BlbkV4dGVybmFsRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9leHRlcm5hbC5wcm90bxIMYWdlbnRyZXBsLnYxIlEKE09wZW5FeHRlcm5hbFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhILCgN1cmwYAiABKAkiiAEKFE9wZW5FeHRlcm5hbFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkV4dGVybmFsU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5FeHRlcm5hbEVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5FeHRlcm5hbFN1Y2Nlc3MikgQKEU9wZW5FeHRlcm5hbEVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5FeHRlcm5hbFVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLk9wZW5FeHRlcm5hbFdvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkV4dGVybmFsVHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzInLmFnZW50cmVwbC52MS5PcGVuRXh0ZXJuYWxOb3RZZXRBZG9wdGVkSAASOwoLaW52YWxpZF91cmwYBSABKAsyJC5hZ2VudHJlcGwudjEuT3BlbkV4dGVybmFsSW52YWxpZFVybEgAEk4KFW5vX2Jyb3dzZXJfY29uZmlndXJlZBgGIAEoCzItLmFnZW50cmVwbC52MS5PcGVuRXh0ZXJuYWxOb0Jyb3dzZXJDb25maWd1cmVkSAASPwoNbGF1bmNoX2ZhaWxlZBgHIAEoCzImLmFnZW50cmVwbC52MS5PcGVuRXh0ZXJuYWxMYXVuY2hGYWlsZWRIAEIHCgVjYXVzZSIeChxPcGVuRXh0ZXJuYWxVbmtub3duV29ya3NwYWNlIjgKIE9wZW5FeHRlcm5hbFdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIvChxPcGVuRXh0ZXJuYWxUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGwoZT3BlbkV4dGVybmFsTm90WWV0QWRvcHRlZCIYChZPcGVuRXh0ZXJuYWxJbnZhbGlkVXJsIiEKH09wZW5FeHRlcm5hbE5vQnJvd3NlckNvbmZpZ3VyZWQiKgoYT3BlbkV4dGVybmFsTGF1bmNoRmFpbGVkEg4KBmRldGFpbBgBIAEoCUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenExternalRequest
@@ -91,12 +91,72 @@ export const OpenExternalSuccessSchema: GenMessage<OpenExternalSuccess> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_open_external, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (browser missing,
- * launch failed, …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.OpenExternalError
  */
 export type OpenExternalError = Message<"agentrepl.v1.OpenExternalError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.OpenExternalError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalUnknownWorkspace unknown_workspace = 1;
+     */
+    value: OpenExternalUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: OpenExternalWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalTransferringAway transferring_away = 3;
+     */
+    value: OpenExternalTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalNotYetAdopted not_yet_adopted = 4;
+     */
+    value: OpenExternalNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The url does not parse.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalInvalidUrl invalid_url = 5;
+     */
+    value: OpenExternalInvalidUrl;
+    case: "invalidUrl";
+  } | {
+    /**
+     * No browser is configured to open it with.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalNoBrowserConfigured no_browser_configured = 6;
+     */
+    value: OpenExternalNoBrowserConfigured;
+    case: "noBrowserConfigured";
+  } | {
+    /**
+     * Launching the browser failed.
+     *
+     * @generated from field: agentrepl.v1.OpenExternalLaunchFailed launch_failed = 7;
+     */
+    value: OpenExternalLaunchFailed;
+    case: "launchFailed";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -105,4 +165,113 @@ export type OpenExternalError = Message<"agentrepl.v1.OpenExternalError"> & {
  */
 export const OpenExternalErrorSchema: GenMessage<OpenExternalError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_external, 3);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalUnknownWorkspace
+ */
+export type OpenExternalUnknownWorkspace = Message<"agentrepl.v1.OpenExternalUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalUnknownWorkspace.
+ * Use `create(OpenExternalUnknownWorkspaceSchema)` to create a new message.
+ */
+export const OpenExternalUnknownWorkspaceSchema: GenMessage<OpenExternalUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 4);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalWorkspaceRefMismatch
+ */
+export type OpenExternalWorkspaceRefMismatch = Message<"agentrepl.v1.OpenExternalWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalWorkspaceRefMismatch.
+ * Use `create(OpenExternalWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const OpenExternalWorkspaceRefMismatchSchema: GenMessage<OpenExternalWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 5);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalTransferringAway
+ */
+export type OpenExternalTransferringAway = Message<"agentrepl.v1.OpenExternalTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalTransferringAway.
+ * Use `create(OpenExternalTransferringAwaySchema)` to create a new message.
+ */
+export const OpenExternalTransferringAwaySchema: GenMessage<OpenExternalTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 6);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalNotYetAdopted
+ */
+export type OpenExternalNotYetAdopted = Message<"agentrepl.v1.OpenExternalNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalNotYetAdopted.
+ * Use `create(OpenExternalNotYetAdoptedSchema)` to create a new message.
+ */
+export const OpenExternalNotYetAdoptedSchema: GenMessage<OpenExternalNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 7);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalInvalidUrl
+ */
+export type OpenExternalInvalidUrl = Message<"agentrepl.v1.OpenExternalInvalidUrl"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalInvalidUrl.
+ * Use `create(OpenExternalInvalidUrlSchema)` to create a new message.
+ */
+export const OpenExternalInvalidUrlSchema: GenMessage<OpenExternalInvalidUrl> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 8);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalNoBrowserConfigured
+ */
+export type OpenExternalNoBrowserConfigured = Message<"agentrepl.v1.OpenExternalNoBrowserConfigured"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalNoBrowserConfigured.
+ * Use `create(OpenExternalNoBrowserConfiguredSchema)` to create a new message.
+ */
+export const OpenExternalNoBrowserConfiguredSchema: GenMessage<OpenExternalNoBrowserConfigured> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 9);
+
+/**
+ * @generated from message agentrepl.v1.OpenExternalLaunchFailed
+ */
+export type OpenExternalLaunchFailed = Message<"agentrepl.v1.OpenExternalLaunchFailed"> & {
+  /**
+   * The launch's own account of the failure.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenExternalLaunchFailed.
+ * Use `create(OpenExternalLaunchFailedSchema)` to create a new message.
+ */
+export const OpenExternalLaunchFailedSchema: GenMessage<OpenExternalLaunchFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_external, 10);
 
