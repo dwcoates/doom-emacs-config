@@ -418,6 +418,10 @@ func (s *footerSink) OnBash(_ ids.WorkspaceID, work *conversationv1.DetachedWork
 	s.rec.emit(event{sink: "footer", method: "OnBash", detail: work.GetValue()})
 }
 
+func (s *footerSink) OnContextBudgetWarning(_ ids.WorkspaceID, agent *conversationv1.AgentId, w *conversationv1.ContextBudgetWarning) {
+	s.rec.emit(event{sink: "footer", method: "OnContextBudgetWarning", agent: agent.GetValue(), detail: w.GetText()})
+}
+
 func (s *footerSink) OnSessionUpdate(_ ids.WorkspaceID, update *conversationv1.SessionUpdate) {
 	s.rec.emit(event{sink: "footer", method: "OnSessionUpdate", detail: sessionArm(update)})
 }
@@ -776,6 +780,16 @@ func monitorActivity(activityID string, ended bool) *conversationv1.AgentActivit
 	}
 }
 
+// monitorFailedActivity is a background watcher that could not be armed.
+func monitorFailedActivity(activityID string) *conversationv1.AgentActivity {
+	return &conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: activityID},
+		Item: &conversationv1.AgentActivity_Monitor{Monitor: &conversationv1.AgentMonitor{
+			Result: &conversationv1.AgentMonitor_Failure{Failure: &conversationv1.AgentMonitorFailure{}},
+		}},
+	}
+}
+
 // createdWork is a detached-work announcement whose origin STATES the kind.
 func createdWork(work string, created *conversationv1.DetachableWork) *conversationv1.AgentDetachedWork {
 	return &conversationv1.AgentDetachedWork{
@@ -1011,9 +1025,19 @@ func accountUsageUpdate() *conversationv1.SessionUpdate {
 	}}
 }
 
-func budgetWarningUpdate() *conversationv1.SessionUpdate {
-	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_ContextBudgetWarning{
-		ContextBudgetWarning: &conversationv1.SessionContextBudgetWarning{Text: "the context is filling"},
+func rateLimitStatusUpdate() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_RateLimitStatus{
+		RateLimitStatus: &conversationv1.SessionRateLimitStatus{
+			Status: &conversationv1.SessionRateLimitStatus_Allowed{Allowed: &conversationv1.SessionRateLimitAllowed{}},
+		},
+	}}
+}
+
+// budgetWarningFrame is the vendor's context-budget warning on the AGENT
+// plane, which is where the arm lives.
+func budgetWarningFrame() *conversationv1.AgentUpdate {
+	return &conversationv1.AgentUpdate{Update: &conversationv1.AgentUpdate_ContextBudgetWarning{
+		ContextBudgetWarning: &conversationv1.ContextBudgetWarning{Text: "the context is filling"},
 	}}
 }
 
