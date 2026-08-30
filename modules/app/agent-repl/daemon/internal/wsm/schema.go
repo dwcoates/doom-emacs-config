@@ -76,6 +76,7 @@ CREATE TABLE sessions (
   permission_mode    TEXT NOT NULL,
   started_at         INTEGER NOT NULL,
   last_engagement_at INTEGER NOT NULL,
+  shim_pid           INTEGER,
   terminal_kind      TEXT,
   terminal_detail    TEXT,
   terminal_at        INTEGER
