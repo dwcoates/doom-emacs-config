@@ -95,7 +95,8 @@ UNHEALTHY IS AN ANSWER; only a transport failure means there is no
 daemon there."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (let* ((fault '((detail . "store socket unreachable")))
+    (let* ((fault '((detail . "store socket unreachable")
+                    (wsmReadOnly . ())))
            (response `((success . ((unhealthy . ((faults . [,fault]))))))))
       (agent-repl-itest--script daemon "DaemonHealth" response))
     (agent-repl-itest--with-cold-start
@@ -118,7 +119,8 @@ The faults carry dynamic detail strings; the user must be able to see
 what is wrong with the daemon they just adopted."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (let* ((fault '((detail . "store socket unreachable")))
+    (let* ((fault '((detail . "store socket unreachable")
+                    (wsmReadOnly . ())))
            (response `((success . ((unhealthy . ((faults . [,fault]))))))))
       (agent-repl-itest--script daemon "DaemonHealth" response))
     (agent-repl-itest--with-cold-start
