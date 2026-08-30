@@ -535,3 +535,39 @@ func TestMergeTargetDirRefusesAnUnknownParent(t *testing.T) {
 		t.Fatal("Create(unknown parent) = nil error, want the lookup failure surfaced")
 	}
 }
+
+func TestCreateAcceptsAutoWithoutConsent(t *testing.T) {
+	// Arrange: `auto` KEEPS a gate — a classifier decides each ask instead of
+	// the user — so it is not an ungated mode and needs no creation consent.
+	f := newFixture(t)
+	spec := standardSpec(t)
+	spec.PermissionMode = "auto"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Create(auto): %v", err)
+	}
+}
+
+func TestCreateRecordsTheOneShotFinishAction(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	oneShotBriefs(f)
+	spec := standardSpec(t)
+	spec.OneShot = true
+	spec.Finish = &OneShotFinish{OpenPr: &OneShotOpenPr{AddToMergeQueue: true}}
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert: the action is durable before the worktree exists, because the
+	// turn that takes it may run after a restart.
+	if f.db.putJobs[0].Finish != "open_pr+add_to_merge_queue" {
+		t.Fatalf("recorded finish = %q, want open_pr+add_to_merge_queue", f.db.putJobs[0].Finish)
+	}
+}

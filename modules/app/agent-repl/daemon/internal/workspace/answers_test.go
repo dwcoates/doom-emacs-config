@@ -480,3 +480,77 @@ func TestAnswerColdGateRefusesAnAnswerNamingNoChoice(t *testing.T) {
 	// Assert.
 	asRefusal(t, err, ArmUnservedRemediation)
 }
+
+func TestAnswerPermissionPropagatesNotDeliverable(t *testing.T) {
+	// Arrange: the SDK has no route to that agent. The caller is told so,
+	// rather than seeing a generic failure or nothing at all.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.permissions["ask-1"] = ServedPermission{Agent: &conversationv1.AgentId{Value: "agent-9"}}
+	f.shim.answerErr = &ShimRefusal{
+		Verb: "UpdateAgent", Arm: ArmShimNotDeliverable, Detail: "no SDK route to a subagent",
+	}
+
+	// Act.
+	err := f.verbs.AnswerPermission(context.Background(), "w1", permissionAnswer("ask-1", allowedOnce()))
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmShimNotDeliverable)
+	if refusal.Rpc != "AnswerPermission" {
+		t.Fatalf("refusal rpc = %q, want AnswerPermission", refusal.Rpc)
+	}
+}
+
+func TestAnswerPermissionPropagatesAStaleCard(t *testing.T) {
+	// Arrange: a closed ask keeps its own arm, distinct from an absent route.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.permissions["ask-1"] = ServedPermission{Agent: &conversationv1.AgentId{Value: "agent-9"}}
+	f.shim.answerErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimNoOpenAsk}
+
+	// Act.
+	err := f.verbs.AnswerPermission(context.Background(), "w1", permissionAnswer("ask-1", allowedOnce()))
+
+	// Assert.
+	asRefusal(t, err, ArmShimNoOpenAsk)
+}
+
+func TestAnswerQuestionPropagatesTheShimArm(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.questions["q-1"] = ServedQuestion{
+		Agent: &conversationv1.AgentId{Value: "agent-2"}, Batch: servedBatch(),
+	}
+	f.shim.answerErr = &ShimRefusal{Verb: "UpdateAgent", Arm: ArmShimAnswerMismatch}
+
+	// Act.
+	err := f.verbs.AnswerQuestion(context.Background(), "w1", questionAnswer("q-1", selection("pick one", "a")))
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmShimAnswerMismatch)
+	if refusal.Rpc != "AnswerQuestion" {
+		t.Fatalf("refusal rpc = %q, want AnswerQuestion", refusal.Rpc)
+	}
+}
+
+func TestAnswerQuestionStillSurfacesATransportFailure(t *testing.T) {
+	// Arrange: a broken link is a FAILURE, not a named refusal.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.questions["q-1"] = ServedQuestion{
+		Agent: &conversationv1.AgentId{Value: "agent-2"}, Batch: servedBatch(),
+	}
+	f.shim.answerErr = errors.New("connection reset")
+
+	// Act.
+	err := f.verbs.AnswerQuestion(context.Background(), "w1", questionAnswer("q-1", selection("pick one", "a")))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("AnswerQuestion() = nil error, want the transport failure surfaced")
+	}
+	if _, ok := AsRefusal(err); ok {
+		t.Fatalf("AnswerQuestion() = %v, want a failure rather than a refusal", err)
+	}
+}

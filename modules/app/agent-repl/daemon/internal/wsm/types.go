@@ -125,6 +125,11 @@ type CreationJob struct {
 	Materialized bool
 	// OneShot marks a one-shot workspace (created, prompted, merged, closed).
 	OneShot bool
+	// Finish is the one-shot's FINISH ACTION, recorded before materialization
+	// so the turn that concludes with the success marker can act on it even
+	// after a daemon restart. It is CLEARED once the action has been taken,
+	// which is what makes the finish happen exactly once.
+	Finish string
 	// InitialPrompt is the prompt the workspace was created with, empty when
 	// created without one.
 	InitialPrompt string
@@ -442,10 +447,17 @@ type Fault struct {
 	ID FaultID
 	// Workspace is the faulting workspace, nil for a daemon-scoped fault.
 	Workspace *WorkspaceID
-	// Kind names the fault, from the frontend.v1 failure vocabulary.
+	// Kind names the fault. It is the arm name of the typed DaemonFault /
+	// SessionFault kind oneof the health reporter answers with, so the record
+	// and the wire cannot disagree about which fault this is.
 	Kind string
-	// Detail is the evidence.
+	// Detail is the human-readable evidence.
 	Detail string
+	// Evidence carries the typed kind's OWN fields — a shim exit code, a
+	// stderr tail, a resume cause — keyed by the proto field name. It exists
+	// so the reporter fills the typed arm from a record rather than parsing
+	// them back out of Detail, which is prose and is allowed to change.
+	Evidence map[string]string
 	// OpenedAt is when it was raised.
 	OpenedAt time.Time
 	// ResolvedAt is when it was closed, nil while open.

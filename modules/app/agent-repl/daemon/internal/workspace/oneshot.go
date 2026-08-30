@@ -114,26 +114,18 @@ func (v *verbs) oneShotSuffix(finish *OneShotFinish) (string, error) {
 		return text, nil
 
 	case finish.OpenPr != nil:
-		prCommand := createPrCommand(finish.OpenPr)
-		first, err := v.splice(success, map[string]string{
-			"invocation":    "`" + prCommand + "`",
+		// Only the FIRST gate rides the opening prompt: implementation, tests
+		// and commits, then the pr command. The second gate — the CICD-gated
+		// wrap-up — is submitted as a POST-PROMPT when the turn concludes, so
+		// the agent is never told how to finish before it has started.
+		text, err := v.splice(success, map[string]string{
+			"invocation":    "`" + createPrCommand(finish.OpenPr) + "`",
 			"action_phrase": openPrActionPhrase,
 		})
 		if err != nil {
 			return "", fmt.Errorf("splice the %s brief: %w", BriefOneShotSuccessSuffix, err)
 		}
-		followup, err := v.load(v.deps.PromptsDir, BriefOneShotCreatePrFollowup)
-		if err != nil {
-			return "", fmt.Errorf("read the %s brief: %w", BriefOneShotCreatePrFollowup, err)
-		}
-		second, err := v.splice(followup, map[string]string{
-			"create_pr_command": prCommand,
-			"wrapup_command":    WorkspaceSkill + " close",
-		})
-		if err != nil {
-			return "", fmt.Errorf("splice the %s brief: %w", BriefOneShotCreatePrFollowup, err)
-		}
-		return first + second, nil
+		return text, nil
 
 	default:
 		return "", fmt.Errorf("a one-shot finish names neither a self merge nor a pull request")
@@ -160,5 +152,59 @@ func finishOrigin(finish *OneShotFinish) string {
 		return strings.Join(flags, "+")
 	default:
 		return ""
+	}
+}
+
+// openPrFollowup composes the CICD-gated SECOND stage of the open-pr finish:
+// once the pr command's own /check-cicd reports PASS, close the workspace
+// rather than merging it, because the change lands through CICD and a local
+// merge would duplicate the commits the merge queue already owns.
+//
+// It is composed at CONCLUSION, not at creation, so an edited brief takes
+// effect on the very next one-shot that finishes.
+func (v *verbs) openPrFollowup(pr *OneShotOpenPr) (string, error) {
+	followup, err := v.load(v.deps.PromptsDir, BriefOneShotCreatePrFollowup)
+	if err != nil {
+		return "", fmt.Errorf("read the %s brief: %w", BriefOneShotCreatePrFollowup, err)
+	}
+	text, err := v.splice(followup, map[string]string{
+		"create_pr_command": createPrCommand(pr),
+		"wrapup_command":    WorkspaceSkill + " close",
+	})
+	if err != nil {
+		return "", fmt.Errorf("splice the %s brief: %w", BriefOneShotCreatePrFollowup, err)
+	}
+	return text, nil
+}
+
+// parseFinishOrigin reads back the finish a creation job recorded. It is
+// finishOrigin's inverse, and they live beside each other so the recorded
+// spelling and the acted-on action cannot drift.
+func parseFinishOrigin(recorded string) (*OneShotFinish, error) {
+	if recorded == "" {
+		return nil, nil
+	}
+	parts := strings.Split(recorded, "+")
+	switch parts[0] {
+	case "self_merge":
+		if len(parts) > 1 {
+			return nil, fmt.Errorf("the self-merge finish takes no flags, got %q", recorded)
+		}
+		return &OneShotFinish{SelfMerge: true}, nil
+	case "open_pr":
+		pr := &OneShotOpenPr{}
+		for _, flag := range parts[1:] {
+			switch flag {
+			case "self_certified":
+				pr.SelfCertified = true
+			case "add_to_merge_queue":
+				pr.AddToMergeQueue = true
+			default:
+				return nil, fmt.Errorf("unknown finish flag %q in %q", flag, recorded)
+			}
+		}
+		return &OneShotFinish{OpenPr: pr}, nil
+	default:
+		return nil, fmt.Errorf("unknown finish action %q", recorded)
 	}
 }
