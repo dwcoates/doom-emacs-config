@@ -51,7 +51,7 @@ func probeWorkspaceLock(runDir, workspaceDir string) (sessionlock.State, error) 
 }
 
 // WatcherStarter opens one workspace's watch fleet against its shim client.
-type WatcherStarter func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, sinks sessionwatcher.Sinks, log dlog.Logger) (sessionwatcher.Watcher, error)
+type WatcherStarter func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, session sessionwatcher.Session, sinks sessionwatcher.Sinks, log dlog.Logger) (sessionwatcher.Watcher, error)
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
@@ -310,7 +310,10 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		return nil
 	}
 
-	watcher, err := f.watch(ctx, ws, client, f.deps.Sinks, log)
+	// The watcher is handed the opening LEVEL: the turn in flight and every
+	// live detached item are what it opens its watches for, and nothing else
+	// states them.
+	watcher, err := f.watch(ctx, ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)

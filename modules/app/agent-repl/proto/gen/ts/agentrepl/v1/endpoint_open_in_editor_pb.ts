@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_in_editor.proto.
  */
 export const file_agentrepl_v1_endpoint_open_in_editor: GenFile = /*@__PURE__*/
-  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSJuChNPcGVuSW5FZGl0b3JSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEcGF0aBgCIAEoCRIRCgRsaW5lGAMgASgNSACIAQFCBwoFX2xpbmUiiAEKFE9wZW5JbkVkaXRvclJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5JbkVkaXRvclN1Y2Nlc3MiEwoRT3BlbkluRWRpdG9yRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiphZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9pbl9lZGl0b3IucHJvdG8SDGFnZW50cmVwbC52MSJuChNPcGVuSW5FZGl0b3JSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSDAoEcGF0aBgCIAEoCRIRCgRsaW5lGAMgASgNSACIAQFCBwoFX2xpbmUiiAEKFE9wZW5JbkVkaXRvclJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yU3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvckVycm9ySABCCAoGcmVzdWx0IhUKE09wZW5JbkVkaXRvclN1Y2Nlc3MilgMKEU9wZW5JbkVkaXRvckVycm9yEkcKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiouYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2VIABJQChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMi4uYWdlbnRyZXBsLnYxLk9wZW5JbkVkaXRvcldvcmtzcGFjZVJlZk1pc21hdGNoSAASRwoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKi5hZ2VudHJlcGwudjEuT3BlbkluRWRpdG9yVHJhbnNmZXJyaW5nQXdheUgAEkIKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzInLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkSAASUAoWcGF0aF9lc2NhcGVzX3dvcmtzcGFjZRgFIAEoCzIuLmFnZW50cmVwbC52MS5PcGVuSW5FZGl0b3JQYXRoRXNjYXBlc1dvcmtzcGFjZUgAQgcKBWNhdXNlIh4KHE9wZW5JbkVkaXRvclVua25vd25Xb3Jrc3BhY2UiOAogT3BlbkluRWRpdG9yV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIi8KHE9wZW5JbkVkaXRvclRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIbChlPcGVuSW5FZGl0b3JOb3RZZXRBZG9wdGVkIiIKIE9wZW5JbkVkaXRvclBhdGhFc2NhcGVzV29ya3NwYWNlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenInEditorRequest
@@ -104,12 +104,56 @@ export const OpenInEditorSuccessSchema: GenMessage<OpenInEditorSuccess> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace, no
- * host stream open for it, …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.OpenInEditorError
  */
 export type OpenInEditorError = Message<"agentrepl.v1.OpenInEditorError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.OpenInEditorError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorUnknownWorkspace unknown_workspace = 1;
+     */
+    value: OpenInEditorUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: OpenInEditorWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorTransferringAway transferring_away = 3;
+     */
+    value: OpenInEditorTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorNotYetAdopted not_yet_adopted = 4;
+     */
+    value: OpenInEditorNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The path resolves outside the workspace's worktree.
+     *
+     * @generated from field: agentrepl.v1.OpenInEditorPathEscapesWorkspace path_escapes_workspace = 5;
+     */
+    value: OpenInEditorPathEscapesWorkspace;
+    case: "pathEscapesWorkspace";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -118,4 +162,81 @@ export type OpenInEditorError = Message<"agentrepl.v1.OpenInEditorError"> & {
  */
 export const OpenInEditorErrorSchema: GenMessage<OpenInEditorError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 3);
+
+/**
+ * @generated from message agentrepl.v1.OpenInEditorUnknownWorkspace
+ */
+export type OpenInEditorUnknownWorkspace = Message<"agentrepl.v1.OpenInEditorUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorUnknownWorkspace.
+ * Use `create(OpenInEditorUnknownWorkspaceSchema)` to create a new message.
+ */
+export const OpenInEditorUnknownWorkspaceSchema: GenMessage<OpenInEditorUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 4);
+
+/**
+ * @generated from message agentrepl.v1.OpenInEditorWorkspaceRefMismatch
+ */
+export type OpenInEditorWorkspaceRefMismatch = Message<"agentrepl.v1.OpenInEditorWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorWorkspaceRefMismatch.
+ * Use `create(OpenInEditorWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const OpenInEditorWorkspaceRefMismatchSchema: GenMessage<OpenInEditorWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 5);
+
+/**
+ * @generated from message agentrepl.v1.OpenInEditorTransferringAway
+ */
+export type OpenInEditorTransferringAway = Message<"agentrepl.v1.OpenInEditorTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorTransferringAway.
+ * Use `create(OpenInEditorTransferringAwaySchema)` to create a new message.
+ */
+export const OpenInEditorTransferringAwaySchema: GenMessage<OpenInEditorTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 6);
+
+/**
+ * @generated from message agentrepl.v1.OpenInEditorNotYetAdopted
+ */
+export type OpenInEditorNotYetAdopted = Message<"agentrepl.v1.OpenInEditorNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorNotYetAdopted.
+ * Use `create(OpenInEditorNotYetAdoptedSchema)` to create a new message.
+ */
+export const OpenInEditorNotYetAdoptedSchema: GenMessage<OpenInEditorNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 7);
+
+/**
+ * @generated from message agentrepl.v1.OpenInEditorPathEscapesWorkspace
+ */
+export type OpenInEditorPathEscapesWorkspace = Message<"agentrepl.v1.OpenInEditorPathEscapesWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenInEditorPathEscapesWorkspace.
+ * Use `create(OpenInEditorPathEscapesWorkspaceSchema)` to create a new message.
+ */
+export const OpenInEditorPathEscapesWorkspaceSchema: GenMessage<OpenInEditorPathEscapesWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_in_editor, 8);
 
