@@ -1,0 +1,256 @@
+/**
+ * engine/pushes.ts — the WatchSession fan-out.
+ *
+ * RESPONSIBILITY. One standing stream per consumer, fed by every session-level
+ * fact: the vendor's own (`identity_rotated`, `query_died`, `model_changed`,
+ * `permission_mode_changed`, `fast_mode`, `mcp_server`, `account_usage`,
+ * `context_budget_warning`, `compacting`) and the shim's own about itself
+ * (`diagnostics`, `context_usage`).
+ *
+ * THE FIRST PUSH IS READINESS, AND IT IS SYNCHRONOUS WITH THE OPEN. After
+ * `StartSession`, the first frame every WatchSession receives is `diagnostics` —
+ * that push IS the daemon's readiness signal, and there is no other. It is
+ * seeded into the subscriber's queue BEFORE the iterable is returned, because
+ * connect-go surfaces a server-stream refusal only at the first Receive: a
+ * consumer that blocks waiting for a first frame cannot tell "not ready" from
+ * "refused", and a silent WatchSession stalls the daemon's whole bring-up.
+ *
+ * THEN THE CURRENT VIEW, THEN CHANGES ONLY. A joining subscriber also gets the
+ * current `context_usage`, `model_changed` and `permission_mode_changed` — a
+ * consumer that attached late is not entitled to a blank session — and after
+ * that, an arm is pushed only when its value actually CHANGED. A periodic push
+ * of an unchanged view is indistinguishable from a change at the consumer and
+ * defeats every "on change" optimization above it; the client ticks locally
+ * from the instants already shipped.
+ *
+ * SYNTHESIZED FACTS ARE NEVER WRITTEN. `diagnostics` and `context_usage` are
+ * the shim's report about ITSELF, not vendor conversation, so they are pushed
+ * and never landed in the store.
+ */
+import { create, toBinary } from "@bufbuild/protobuf";
+import { bindLog } from "../log.js";
+import { conversationv1 } from "../proto.js";
+
+const LOGGER = bindLog({ component: "shim-engine-pushes", operation: "shim.engine.pushes" });
+
+/**
+ * How many undelivered facts one subscriber may hold.
+ *
+ * Session facts are rare — a mode change, a usage sample, an mcp health flip —
+ * so a subscriber this far behind is not slow, it is gone. The overflow is
+ * reported as a degraded window rather than silently dropped, because a
+ * consumer that missed a `query_died` and was never told it missed one is worse
+ * off than one that saw the gap.
+ */
+export const SUBSCRIBER_QUEUE_LIMIT = 256;
+
+/** Which arm an update carries — the key "on change only" is computed per. */
+function armOf(update: conversationv1.SessionUpdate): string {
+  return update.update.case ?? "";
+}
+
+function sameUpdate(a: conversationv1.SessionUpdate, b: conversationv1.SessionUpdate): boolean {
+  const left = toBinary(conversationv1.SessionUpdateSchema, a);
+  const right = toBinary(conversationv1.SessionUpdateSchema, b);
+  if (left.length !== right.length) return false;
+  return left.every((byte, index) => byte === right[index]);
+}
+
+class Subscriber {
+  private readonly queue: conversationv1.SessionUpdate[] = [];
+  private waiting: ((value: IteratorResult<conversationv1.SessionUpdate>) => void) | undefined;
+  private closed = false;
+
+  offer(update: conversationv1.SessionUpdate): boolean {
+    if (this.closed) return false;
+    if (this.waiting !== undefined) {
+      const resolve = this.waiting;
+      this.waiting = undefined;
+      resolve({ value: update, done: false });
+      return true;
+    }
+    if (this.queue.length >= SUBSCRIBER_QUEUE_LIMIT) return false;
+    this.queue.push(update);
+    return true;
+  }
+
+  close(): void {
+    this.closed = true;
+    if (this.waiting !== undefined) {
+      const resolve = this.waiting;
+      this.waiting = undefined;
+      resolve({ value: undefined, done: true });
+    }
+  }
+
+  iterator(): AsyncIterator<conversationv1.SessionUpdate> {
+    return {
+      next: (): Promise<IteratorResult<conversationv1.SessionUpdate>> => {
+        const next = this.queue.shift();
+        if (next !== undefined) return Promise.resolve({ value: next, done: false });
+        if (this.closed) return Promise.resolve({ value: undefined, done: true });
+        return new Promise((resolve) => {
+          this.waiting = resolve;
+        });
+      },
+      return: (): Promise<IteratorResult<conversationv1.SessionUpdate>> => {
+        this.close();
+        return Promise.resolve({ value: undefined, done: true });
+      },
+    };
+  }
+}
+
+/** The fan-out, and the session's own diagnostic memory. */
+export class SessionPushes {
+  private readonly subscribers = new Set<Subscriber>();
+  private readonly faults: conversationv1.SessionFault[] = [];
+  private readonly degradedWindows: conversationv1.SessionDegradedWindow[] = [];
+  /** The current value of each replayed arm, so a late subscriber is not blind. */
+  private readonly current = new Map<string, conversationv1.SessionUpdate>();
+  private standingDown = false;
+
+  constructor(private readonly nowMs: () => number = () => Date.now()) {}
+
+  /** The arms a joining subscriber is caught up on, in the order it gets them. */
+  private static readonly REPLAYED = ["contextUsage", "modelChanged", "permissionModeChanged"];
+
+  /**
+   * Open one standing stream.
+   *
+   * The diagnostics frame is queued HERE, synchronously, so the returned
+   * iterable's first `next()` resolves without waiting on anything.
+   */
+  subscribe(): AsyncIterable<conversationv1.SessionUpdate> {
+    const subscriber = new Subscriber();
+    subscriber.offer(this.diagnostics());
+    for (const arm of SessionPushes.REPLAYED) {
+      const update = this.current.get(arm);
+      if (update !== undefined) subscriber.offer(update);
+    }
+    this.subscribers.add(subscriber);
+    LOGGER.log({ subscribers: this.subscribers.size }, "opened a WatchSession stream; diagnostics pushed first");
+    if (this.standingDown) subscriber.close();
+    const self = this;
+    return {
+      [Symbol.asyncIterator](): AsyncIterator<conversationv1.SessionUpdate> {
+        const iterator = subscriber.iterator();
+        return {
+          next: () => iterator.next(),
+          return: async () => {
+            self.subscribers.delete(subscriber);
+            LOGGER.log({ subscribers: self.subscribers.size }, "a WatchSession consumer went away");
+            return iterator.return === undefined
+              ? { value: undefined, done: true as const }
+              : iterator.return();
+          },
+        };
+      },
+    };
+  }
+
+  /** How many consumers are attached. */
+  get subscriberCount(): number {
+    return this.subscribers.size;
+  }
+
+  /**
+   * Push a fact.
+   *
+   * ON CHANGE ONLY for the replayed arms: an identical value is dropped without
+   * reaching anyone. Event arms (`identity_rotated`, `query_died`,
+   * `compacting`, `account_usage`, `context_budget_warning`) always go out —
+   * two identical rotations are two rotations.
+   */
+  push(update: conversationv1.SessionUpdate): boolean {
+    const arm = armOf(update);
+    if (SessionPushes.REPLAYED.includes(arm) || arm === "diagnostics") {
+      const previous = this.current.get(arm);
+      if (previous !== undefined && sameUpdate(previous, update)) {
+        LOGGER.logVerbose({ arm }, "dropped an unchanged session fact");
+        return false;
+      }
+    }
+    if (SessionPushes.REPLAYED.includes(arm) || arm === "diagnostics") {
+      this.current.set(arm, update);
+    }
+    this.fanOut(update, arm);
+    return true;
+  }
+
+  private fanOut(update: conversationv1.SessionUpdate, arm: string): void {
+    for (const subscriber of this.subscribers) {
+      if (subscriber.offer(update)) continue;
+      // A subscriber that cannot take a session fact is REPORTED, never
+      // silently skipped: the consumer needs to know its view has a hole.
+      LOGGER.log(
+        { level: "warn", arm, queue_limit: SUBSCRIBER_QUEUE_LIMIT },
+        "a WatchSession consumer's queue is full; the fact could not be delivered",
+      );
+      this.openDegradedWindow("shim-engine-pushes", `a WatchSession consumer could not take a ${arm} fact`);
+    }
+    LOGGER.logVerbose({ arm, subscribers: this.subscribers.size }, "pushed a session fact");
+  }
+
+  // -- diagnostics ----------------------------------------------------------
+
+  /** The current verdict, with every fault and degraded window kept since start. */
+  diagnostics(): conversationv1.SessionUpdate {
+    return create(conversationv1.SessionUpdateSchema, {
+      update: {
+        case: "diagnostics",
+        value: create(conversationv1.SessionDiagnosticsSchema, {
+          degradedWindows: [...this.degradedWindows],
+          health:
+            this.faults.length === 0
+              ? { case: "healthy", value: create(conversationv1.SessionHealthySchema, {}) }
+              : {
+                  case: "unhealthy",
+                  value: create(conversationv1.SessionUnhealthySchema, { faults: [...this.faults] }),
+                },
+        }),
+      },
+    });
+  }
+
+  /** Record a fault and restate the diagnostics. */
+  fault(fault: conversationv1.SessionFault): void {
+    this.faults.push(fault);
+    LOGGER.log(
+      { level: "error", component: fault.component, kind: fault.kind.case ?? "", detail: fault.detail },
+      "recorded a session fault",
+    );
+    this.push(this.diagnostics());
+  }
+
+  /** Record an OPEN degraded window and restate the diagnostics. */
+  openDegradedWindow(component: string, reason: string): conversationv1.SessionDegradedWindow {
+    const window = create(conversationv1.SessionDegradedWindowSchema, {
+      component,
+      reason,
+      beganAtMs: BigInt(this.nowMs()),
+      extent: { case: "open", value: create(conversationv1.SessionDegradedOpenSchema, {}) },
+    });
+    this.degradedWindows.push(window);
+    return window;
+  }
+
+  /** Record a window the record plane already closed. */
+  recordDegradedWindow(window: conversationv1.SessionDegradedWindow): void {
+    this.degradedWindows.push(window);
+    this.push(this.diagnostics());
+  }
+
+  /** Everything kept since start, for the SessionDiagnostics arm's own tests. */
+  get faultCount(): number {
+    return this.faults.length;
+  }
+
+  /** Every consumer's stream ends; nothing new is accepted. */
+  standDown(): void {
+    this.standingDown = true;
+    for (const subscriber of this.subscribers) subscriber.close();
+    this.subscribers.clear();
+    LOGGER.log({}, "closed every WatchSession stream");
+  }
+}

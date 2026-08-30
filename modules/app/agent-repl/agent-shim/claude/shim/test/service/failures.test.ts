@@ -1,0 +1,538 @@
+/**
+ * Every refusal the shim can mint, asserted arm by arm.
+ *
+ * WHAT THESE GUARD. A failure message whose oneof is UNSET is illegal on the
+ * wire and unactionable at the daemon, and it is exactly what an inline
+ * `create(FailureSchema, { detail })` produces when someone forgets the arm.
+ * One row per arm is what proves the closed union and the proto oneof still
+ * line up: a proto arm that is renamed or removed fails to compile here, and
+ * an arm nobody constructs shows up as a missing row.
+ */
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { describe, expect, it } from "vitest";
+import { conversationv1, shimv1 } from "../../src/proto.js";
+import * as failures from "../../src/service/failures.js";
+
+describe("startSessionFailure", () => {
+  it.each([
+    ["vendorStartFailed"],
+    ["unknownSession"],
+    ["alreadyStarted"],
+    ["conversationOwned"],
+  ] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.startSessionFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.cause.case).toBe(kind);
+  });
+
+  it("carries the cold evidence verbatim so the daemon can offer a remediation", () => {
+    // Arrange.
+    const cold = create(conversationv1.SessionColdSchema, { contextTokens: 40_000n });
+
+    // Act.
+    const failure = failures.startSessionFailure({ kind: "cold", cold }, "too cold");
+
+    // Assert.
+    expect(failure.cause).toEqual({ case: "cold", value: cold });
+  });
+
+  it("carries the human detail alongside the machine-readable arm", () => {
+    // Arrange, Act.
+    const failure = failures.startSessionFailure({ kind: "alreadyStarted" }, "already up");
+
+    // Assert.
+    expect(failure.detail).toBe("already up");
+  });
+});
+
+describe("startSessionRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.startSessionRefused({ kind: "unknownSession" }, "gone");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("startSessionStarted", () => {
+  it("wraps the session's opening facts as the response's success arm", () => {
+    // Arrange.
+    const session = create(conversationv1.SessionStartedSchema, { vendorSessionId: "v-1" });
+
+    // Act.
+    const response = failures.startSessionStarted(session);
+
+    // Assert.
+    expect(response.result).toEqual({
+      case: "success",
+      value: expect.objectContaining({ session }),
+    });
+  });
+});
+
+describe("setSessionModelFailure", () => {
+  it.each([["modelNotInCatalog"], ["noSession"], ["vendorRefused"]] as const)(
+    "states the %s arm",
+    (kind) => {
+      // Arrange, Act.
+      const failure = failures.setSessionModelFailure({ kind }, "why");
+
+      // Assert.
+      expect(failure.cause.case).toBe(kind);
+    },
+  );
+
+  it("carries the cold evidence when the switch itself would go cold", () => {
+    // Arrange.
+    const cold = create(conversationv1.SessionColdSchema, { contextTokens: 1n });
+
+    // Act.
+    const failure = failures.setSessionModelFailure({ kind: "cold", cold }, "cold");
+
+    // Assert.
+    expect(failure.cause).toEqual({ case: "cold", value: cold });
+  });
+});
+
+describe("setSessionModelRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.setSessionModelRefused({ kind: "noSession" }, "no session");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("setSessionPermissionModeFailure", () => {
+  it.each([["noSession"], ["vendorRefused"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.setSessionPermissionModeFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.kind.case).toBe(kind);
+  });
+});
+
+describe("setSessionPermissionModeRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.setSessionPermissionModeRefused({ kind: "vendorRefused" }, "no");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("hibernateError", () => {
+  it.each([["turnInFlight"], ["noSession"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const error = failures.hibernateError({ kind });
+
+    // Assert.
+    expect(error.kind.case).toBe(kind);
+  });
+
+  it("carries the vendor's wording inside the compaction arm, which owns it", () => {
+    // Arrange, Act.
+    const error = failures.hibernateError({ kind: "compactionFailed", error: "context too big" });
+
+    // Assert.
+    expect(error.kind).toEqual({
+      case: "compactionFailed",
+      value: expect.objectContaining({ error: "context too big" }),
+    });
+  });
+});
+
+describe("hibernateRefused", () => {
+  it("wraps the error as the response's error arm", () => {
+    // Arrange, Act.
+    const response = failures.hibernateRefused({ kind: "turnInFlight" });
+
+    // Assert.
+    expect(response.result.case).toBe("error");
+  });
+});
+
+describe("hibernateAcked", () => {
+  it("acks so the daemon may stand the shim down", () => {
+    // Arrange, Act.
+    const response = failures.hibernateAcked();
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+});
+
+describe("killSessionFailure", () => {
+  it.each([["noSession"], ["queryRefusedToEnd"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.killSessionFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.cause.case).toBe(kind);
+  });
+
+  it("NAMES what is live so the daemon can say what forcing would destroy", () => {
+    // Arrange.
+    const live = create(conversationv1.SessionLiveSchema, {
+      turnInFlight: create(conversationv1.TurnIdSchema, { value: "t-1" }),
+    });
+
+    // Act.
+    const failure = failures.killSessionFailure({ kind: "live", live }, "busy");
+
+    // Assert.
+    expect(failure.cause).toEqual({ case: "live", value: live });
+  });
+});
+
+describe("killSessionRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.killSessionRefused({ kind: "noSession" }, "none");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("killSessionClosed", () => {
+  it("says HOW the session ended", () => {
+    // Arrange.
+    const closed = create(conversationv1.SessionKilledSchema, {
+      how: { case: "idle", value: create(conversationv1.SessionKilledIdleSchema, {}) },
+    });
+
+    // Act.
+    const response = failures.killSessionClosed(closed);
+
+    // Assert.
+    expect(response.result).toEqual({
+      case: "success",
+      value: expect.objectContaining({ closed }),
+    });
+  });
+});
+
+describe("startTurnFailure", () => {
+  it.each([["turnAlreadyOpen"], ["noSession"], ["vendorRefused"], ["queryDead"]] as const)(
+    "states the %s arm",
+    (kind) => {
+      // Arrange, Act.
+      const failure = failures.startTurnFailure({ kind }, "why");
+
+      // Assert.
+      expect(failure.kind.case).toBe(kind);
+    },
+  );
+});
+
+describe("startTurnRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.startTurnRefused({ kind: "queryDead" }, "dead");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("startTurnAccepted", () => {
+  it("returns the delivered prompt as the record the daemon persists", () => {
+    // Arrange.
+    const prompt = create(conversationv1.AgentPromptSchema, {
+      id: create(conversationv1.TurnIdSchema, { value: "t-7" }),
+    });
+
+    // Act.
+    const response = failures.startTurnAccepted(prompt, failures.emptyOpeningPage());
+
+    // Assert.
+    expect(response.result).toEqual({
+      case: "success",
+      value: expect.objectContaining({ prompt }),
+    });
+  });
+
+  it("always carries a page, because an absent one and an empty one look alike", () => {
+    // Arrange.
+    const prompt = create(conversationv1.AgentPromptSchema, {
+      id: create(conversationv1.TurnIdSchema, { value: "t-7" }),
+    });
+
+    // Act.
+    const response = failures.startTurnAccepted(prompt, failures.emptyOpeningPage());
+
+    // Assert.
+    const success = response.result.value as shimv1.StartTurnSuccess;
+    expect(success.page).toBeDefined();
+    expect(success.page?.boundary.case).toBe("floor");
+  });
+});
+
+describe("updateAgentFailure", () => {
+  it.each([
+    ["unknownAgent"],
+    ["noOpenAsk"],
+    ["answerMismatch"],
+    ["nothingRunning"],
+    ["noSession"],
+  ] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.updateAgentFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.kind.case).toBe(kind);
+  });
+});
+
+describe("updateAgentRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.updateAgentRefused({ kind: "answerMismatch" }, "echo mismatch");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("updateAgentDelivered", () => {
+  it("says only that it was delivered; the effects arrive on the agent's stream", () => {
+    // Arrange, Act.
+    const response = failures.updateAgentDelivered();
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+});
+
+describe("killTurnFailure", () => {
+  it.each([["notTheOpenTurn"], ["noTurnOpen"], ["noSession"]] as const)(
+    "states the %s arm",
+    (kind) => {
+      // Arrange, Act.
+      const failure = failures.killTurnFailure({ kind }, "why");
+
+      // Assert.
+      expect(failure.cause.case).toBe(kind);
+    },
+  );
+
+  it("names the transitive refusal set when the turn still has live work", () => {
+    // Arrange.
+    const live = create(conversationv1.TurnLiveSchema, {
+      liveWork: [create(conversationv1.DetachedWorkIdSchema, { value: "b1" })],
+    });
+
+    // Act.
+    const failure = failures.killTurnFailure({ kind: "live", live }, "busy");
+
+    // Assert.
+    expect(failure.cause).toEqual({ case: "live", value: live });
+  });
+});
+
+describe("killTurnRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.killTurnRefused({ kind: "noTurnOpen" }, "idle");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("killTurnKilled", () => {
+  it("says whether anything died with the turn", () => {
+    // Arrange.
+    const killed = create(conversationv1.TurnKilledSchema, {
+      how: { case: "agentOnly", value: create(conversationv1.TurnKilledAgentOnlySchema, {}) },
+    });
+
+    // Act.
+    const response = failures.killTurnKilled(killed);
+
+    // Assert.
+    expect(response.result).toEqual({
+      case: "success",
+      value: expect.objectContaining({ killed }),
+    });
+  });
+});
+
+describe("stopBashFailure", () => {
+  it.each([["unknownWork"], ["alreadyEnded"]] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.stopBashFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.kind.case).toBe(kind);
+  });
+});
+
+describe("stopBashRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.stopBashRefused({ kind: "alreadyEnded" }, "over");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("stopBashStopped", () => {
+  it("acks the stop; the run's terminal arrives on its own stream", () => {
+    // Arrange, Act.
+    const response = failures.stopBashStopped();
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+});
+
+describe("detachForegroundFailure", () => {
+  it.each([
+    ["unknownUnit"],
+    ["alreadyConcluded"],
+    ["notDetachable"],
+    ["noSession"],
+  ] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const failure = failures.detachForegroundFailure({ kind }, "why");
+
+    // Assert.
+    expect(failure.kind.case).toBe(kind);
+  });
+});
+
+describe("detachForegroundRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.detachForegroundRefused({ kind: "notDetachable" }, "no");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("detachForegroundDetached", () => {
+  it("acks the detach; the turn announces the work itself", () => {
+    // Arrange, Act.
+    const response = failures.detachForegroundDetached();
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+});
+
+describe("readHistoryFailure", () => {
+  it.each([["unknownAgent"], ["stalePointer"], ["storeUnavailable"]] as const)(
+    "states the %s arm",
+    (kind) => {
+      // Arrange, Act.
+      const failure = failures.readHistoryFailure({ kind }, "why");
+
+      // Assert.
+      expect(failure.kind.case).toBe(kind);
+    },
+  );
+});
+
+describe("readHistoryRefused", () => {
+  it("wraps the failure as the response's failure arm", () => {
+    // Arrange, Act.
+    const response = failures.readHistoryRefused({ kind: "storeUnavailable" }, "store down");
+
+    // Assert.
+    expect(response.result.case).toBe("failure");
+  });
+});
+
+describe("readHistoryPage", () => {
+  it("returns the page as the response's success arm", () => {
+    // Arrange.
+    const page = create(conversationv1.HistoryPageSchema, {
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+
+    // Act.
+    const response = failures.readHistoryPage(page);
+
+    // Assert.
+    expect(response.result).toEqual({
+      case: "success",
+      value: expect.objectContaining({ page }),
+    });
+  });
+});
+
+describe("sessionFault", () => {
+  it.each([
+    ["storeUnreachable"],
+    ["converterDefect"],
+    ["logSinkPoisoned"],
+    ["keepaliveFailed"],
+    ["vendorQueryFailed"],
+  ] as const)("states the %s arm", (kind) => {
+    // Arrange, Act.
+    const fault = failures.sessionFault({ kind }, "store-client", "why");
+
+    // Assert.
+    expect(fault.kind.case).toBe(kind);
+  });
+
+  it("names the component that broke, not just the kind", () => {
+    // Arrange, Act.
+    const fault = failures.sessionFault({ kind: "storeUnreachable" }, "store-client", "ECONNREFUSED");
+
+    // Assert.
+    expect({ component: fault.component, detail: fault.detail }).toEqual({
+      component: "store-client",
+      detail: "ECONNREFUSED",
+    });
+  });
+});
+
+describe("invalidArgument", () => {
+  it("refuses a malformed request at the transport rather than answering it", () => {
+    // Arrange, Act.
+    const error = failures.invalidArgument("turn is unset");
+
+    // Assert.
+    expect(ConnectError.from(error).code).toBe(Code.InvalidArgument);
+  });
+});
+
+describe("notFound", () => {
+  it("closes a refused stream open at the transport, where a stream can say it", () => {
+    // Arrange, Act.
+    const error = failures.notFound("no such work");
+
+    // Assert.
+    expect(ConnectError.from(error).code).toBe(Code.NotFound);
+  });
+});
+
+describe("unimplemented", () => {
+  it("answers Unimplemented rather than an empty success the caller cannot read", () => {
+    // Arrange, Act.
+    const error = failures.unimplemented("GetWorkflow");
+
+    // Assert.
+    expect(ConnectError.from(error).code).toBe(Code.Unimplemented);
+  });
+
+  it("names the rpc so a log says which verb was refused", () => {
+    // Arrange, Act.
+    const error = failures.unimplemented("StopWorkflow");
+
+    // Assert.
+    expect(error.message).toContain("shim.v1.StopWorkflow");
+  });
+});

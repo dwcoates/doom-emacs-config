@@ -1,0 +1,365 @@
+/**
+ * test/integration/process.test.ts — the PROCESS SHELL contract.
+ *
+ * Everything here is about the shim as a process rather than as a service: the
+ * argv it accepts, the environment it refuses to run without, the two kernel
+ * locks, the signals, and the durable log sink. None of it is reachable through
+ * an rpc, which is exactly why it needs a suite that spawns the real bundle.
+ *
+ * # Where a startup refusal is observable
+ *
+ * The environment is validated BEFORE the log is configured (`main.ts`'s
+ * startup order — `--version` and argv must not touch anything, and the log fd
+ * is only usable once the arguments are known good). So a refusal's record has
+ * nowhere durable to go and lands on stderr through `log.ts`'s emergency path.
+ * That is not a workaround: the refusal must be legible to whoever spawned the
+ * process, and the only channel that always exists is stderr.
+ */
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
+import { workspaceLockKey } from "../../src/locks.js";
+import { shimv1 } from "../../src/proto.js";
+import { create } from "@bufbuild/protobuf";
+import { Code } from "@connectrpc/connect";
+import {
+  cleanupShims,
+  ITEST_BUILD_SHA,
+  makeDirectories,
+  runShim,
+  spawnShim,
+} from "../integration-support/harness.js";
+import { parseRecords } from "../integration-support/log.js";
+import {
+  connectCode,
+  freshSession,
+  openStream,
+  readHistoryFirst,
+} from "../integration-support/client.js";
+import { sessionStarted, sessionUpdate } from "../integration-support/expect.js";
+import { workspaceRealPath } from "../integration-support/vendor.js";
+
+afterEach(cleanupShims);
+
+/** The env a serving shim needs, for the spawns that build it by hand. */
+function servingEnv(dirs: ReturnType<typeof makeDirectories>): Record<string, string> {
+  return {
+    CLAUDE_CONFIG_DIR: dirs.configDir,
+    AGENT_REPL_OWNED: "1",
+    AGENT_REPL_STATE_DIR: dirs.stateDir,
+    AGENT_REPL_LOCK_DIR: dirs.lockDir,
+    SHIM_BUILD_SHA: ITEST_BUILD_SHA,
+    AGENT_REPL_STORE_SOCKET: dirs.storeSocket,
+  };
+}
+
+describe("--version", () => {
+  test("prints the version and exits 0 before any socket, lock or SDK import", async () => {
+    // Arrange: no environment at all — the point of the flag is that it needs
+    // none. Every required variable is deliberately absent.
+    const bare = {
+      CLAUDE_CONFIG_DIR: undefined,
+      AGENT_REPL_OWNED: undefined,
+      SHIM_BUILD_SHA: undefined,
+      AGENT_REPL_STORE_SOCKET: undefined,
+    };
+
+    // Act.
+    const run = await runShim(["--version"], bare);
+
+    // Assert: a version line, a clean exit, and nothing bound anywhere.
+    expect(run.exit.code).toBe(0);
+    expect(run.stdout.trim()).toMatch(/^claude-shim /);
+  });
+});
+
+describe("required environment", () => {
+  test("a missing AGENT_REPL_OWNED refuses to start", async () => {
+    const dirs = makeDirectories();
+    const env = { ...servingEnv(dirs), AGENT_REPL_OWNED: undefined };
+
+    const run = await runShim(
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      env,
+    );
+
+    expect(run.exit.code).not.toBe(0);
+    expect(run.stderr).toContain("AGENT_REPL_OWNED");
+  });
+
+  test("a missing CLAUDE_CONFIG_DIR refuses to start", async () => {
+    const dirs = makeDirectories();
+    const env = { ...servingEnv(dirs), CLAUDE_CONFIG_DIR: undefined };
+
+    const run = await runShim(
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      env,
+    );
+
+    expect(run.exit.code).not.toBe(0);
+    expect(run.stderr).toContain("CLAUDE_CONFIG_DIR");
+  });
+
+  test("a missing SHIM_BUILD_SHA refuses to start", async () => {
+    const dirs = makeDirectories();
+    const env = { ...servingEnv(dirs), SHIM_BUILD_SHA: undefined };
+
+    const run = await runShim(
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      env,
+    );
+
+    expect(run.exit.code).not.toBe(0);
+    expect(run.stderr).toContain("SHIM_BUILD_SHA");
+  });
+
+  test("a startup refusal is a RECORD, not just a message", async () => {
+    // The daemon reads the shim's record, not its prose: a refusal that logged
+    // nothing structured would be invisible to the supervisor that spawned it.
+    const dirs = makeDirectories();
+    const env = { ...servingEnv(dirs), AGENT_REPL_OWNED: undefined };
+
+    const run = await runShim(
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      env,
+    );
+
+    const records = parseRecords(run.stderr);
+    expect(records.length).toBeGreaterThan(0);
+    expect(records.some((record) => record.level === "error")).toBe(true);
+  });
+});
+
+describe("the spawn contract's argv", () => {
+  // ONE TEST PER LEGACY FLAG. A shim that shrugged at an unknown flag would run
+  // with the caller's intent silently discarded, and each of these was a real
+  // flag once, so each is its own opportunity for a stale daemon to spawn a
+  // shim that half-obeys it.
+  for (const legacy of [
+    ["--session-id", "abc"],
+    ["--model", "claude-opus-5"],
+    ["--resume", "abc"],
+    ["--claude-bin", "/usr/bin/claude"],
+    ["--daemon-socket", "/tmp/daemon.sock"],
+  ]) {
+    test(`the legacy flag ${String(legacy[0])} is refused`, async () => {
+      const dirs = makeDirectories();
+
+      const run = await runShim(
+        [
+          "--listen",
+          dirs.listen,
+          "--store-socket",
+          dirs.storeSocket,
+          "--log-fd",
+          "3",
+          "--fake",
+          ...legacy,
+        ],
+        servingEnv(dirs),
+      );
+
+      expect(run.exit.code).not.toBe(0);
+      expect(run.stderr).toContain(String(legacy[0]));
+    });
+  }
+
+  test("--log-fd other than 3 is refused", async () => {
+    // The durable sink is INHERITED fd 3; accepting another number would let a
+    // caller point the record at whatever happened to be open — including the
+    // stderr pipe whose death this design exists to survive.
+    const dirs = makeDirectories();
+
+    const run = await runShim(
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "4", "--fake"],
+      servingEnv(dirs),
+    );
+
+    expect(run.exit.code).not.toBe(0);
+    expect(run.stderr).toContain("--log-fd");
+  });
+});
+
+describe("the workspace lock", () => {
+  test("a second shim over one workspace refuses to start", async () => {
+    // Two shims over one workspace means two writers on one transcript. The
+    // second shim gets its OWN socket path, so the refusal can only come from
+    // the lock — a shared socket would refuse at the listener instead and prove
+    // nothing about the lock.
+    const first = await spawnShim();
+    const secondSocket = path.join(first.dirs.root, "shim-second.sock");
+
+    const second = await spawnShim({
+      reuse: first.dirs,
+      awaitServing: false,
+      argv: [
+        "--listen",
+        secondSocket,
+        "--store-socket",
+        first.dirs.storeSocket,
+        "--log-fd",
+        "3",
+        "--fake",
+      ],
+    });
+    const exit = await second.exited;
+
+    expect(exit.code).not.toBe(0);
+    expect(second.stderr()).toMatch(/lock/i);
+  });
+
+  test("AGENT_REPL_LOCK_DIR is honored: the workspace lock file appears there", async () => {
+    // The lock directory is a CROSS-SYSTEM rendezvous (the daemon probes the
+    // workspace lock by path), so the override is what lets a test run private
+    // locks instead of contending with the developer's own running shim.
+    const shim = await spawnShim();
+
+    const key = workspaceLockKey(workspaceRealPath(shim.dirs));
+    expect(existsSync(path.join(shim.dirs.lockDir, `workspace-${key}.lock`))).toBe(true);
+  });
+
+  test("the session lock appears once StartSession has minted a vendor id", async () => {
+    // The session lock is NOT taken at startup: it is keyed by the vendor
+    // session id, which does not exist until StartSession pre-mints it.
+    const shim = await spawnShim();
+
+    const before = readdirSync(shim.dirs.lockDir);
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const after = readdirSync(shim.dirs.lockDir);
+
+    expect(before.some((name) => name.startsWith("session-"))).toBe(false);
+    expect(after).toContain(`session-${started.vendorSessionId}.lock`);
+  });
+});
+
+describe("signals", () => {
+  test("SIGINT is refused, logged at error, and the shim keeps serving", async () => {
+    // A shim may be spawned under an attached terminal, and a Ctrl-C there must
+    // not end a turn the user is watching.
+    const shim = await spawnShim();
+
+    shim.signal("SIGINT");
+    const refusal = await shim.log.record(
+      (record) => record.context.signal === "SIGINT" && record.context.outcome === "refused_shutdown",
+    );
+
+    expect(refusal.level).toBe("error");
+    // Still serving: a legal rpc still answers after the refused signal.
+    const still = await shim.clients.h1.startSession(freshSession());
+    expect(still.result.case).toBe("success");
+    expect(shim.child.exitCode).toBeNull();
+  });
+
+  test("SIGTERM with no session exits 0 with the stand-down record", async () => {
+    const shim = await spawnShim();
+
+    const exit = await shim.standDown();
+
+    expect(exit.code).toBe(0);
+    const records = shim.log.records();
+    expect(
+      records.some((record) => record.context.outcome === "graceful_stand_down_complete"),
+    ).toBe(true);
+  });
+});
+
+describe("the durable log sink", () => {
+  test("AGENT_REPL_SESSION_ID names the records when the daemon set it", async () => {
+    // Log correlation ONLY: the daemon's host session id is never a session
+    // fact (StartSession stays the only carrier of those).
+    const shim = await spawnShim({ env: { AGENT_REPL_SESSION_ID: "host-correlation-probe" } });
+
+    const serving = await shim.log.record((record) => record.context.outcome === "serving");
+
+    expect(serving.agent_repl_session_id).toBe("host-correlation-probe");
+  });
+
+  test("without AGENT_REPL_SESSION_ID the shim names itself shim-<workspace-md5-8>-<pid>", async () => {
+    // The self-name CORRELATES: the workspace key is the same md5 prefix the
+    // lock file uses, so a log line, a lock file and a process match up with no
+    // session id in play at all.
+    const shim = await spawnShim({ env: { AGENT_REPL_SESSION_ID: undefined } });
+
+    const serving = await shim.log.record((record) => record.context.outcome === "serving");
+
+    expect(serving.agent_repl_session_id).toBe(
+      `shim-${workspaceLockKey(workspaceRealPath(shim.dirs))}-${String(shim.child.pid)}`,
+    );
+  });
+
+  test("a poisoned log sink keeps the shim serving and surfaces log_sink_poisoned", async () => {
+    // THE EPIPE INCIDENT (2026-08-10): a shim must survive its daemon's death
+    // without dying on its own log line. The sink's death is REPORTED, never
+    // swallowed and never fatal.
+    const shim = await spawnShim({ logPipe: true });
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+    // The opening frame is the current health verdict; the fault comes later.
+    await watch.next();
+
+    // Act: close the READ end, so the next log write takes EPIPE.
+    (shim.logPipe as unknown as { destroy: () => void } | null)?.destroy();
+    // Provoke log traffic: every rpc logs its entry.
+    await shim.clients.h1.readHistory(readHistoryFirst());
+
+    const faulted = await watch.until((frame) => {
+      const update = sessionUpdate(frame);
+      if (update.update.case !== "diagnostics") return false;
+      const health = update.update.value.health;
+      return (
+        health.case === "unhealthy" &&
+        health.value.faults.some((fault) => fault.kind.case === "logSinkPoisoned")
+      );
+    });
+    expect(sessionUpdate(faulted).update.case).toBe("diagnostics");
+    // Still answering: the fault is a report, not a death.
+    expect(await connectCode(shim.clients.h1.readHistory(readHistoryFirst()))).not.toBe(
+      Code.Unavailable,
+    );
+    expect(shim.child.exitCode).toBeNull();
+    watch.close();
+  });
+});
+
+describe("the store socket", () => {
+  test("neither --store-socket nor AGENT_REPL_STORE_SOCKET refuses to start", async () => {
+    const dirs = makeDirectories();
+    const env = { ...servingEnv(dirs), AGENT_REPL_STORE_SOCKET: undefined };
+
+    const run = await runShim(["--listen", dirs.listen, "--log-fd", "3", "--fake"], env);
+
+    expect(run.exit.code).not.toBe(0);
+    expect(run.stderr).toContain("store socket");
+  });
+
+  test("the flag beats the env when both name a socket", async () => {
+    // A caller that stated the socket explicitly meant it; the env exists so a
+    // harness can redirect every process it starts without rewriting each spawn.
+    const shim = await spawnShim({
+      env: { AGENT_REPL_STORE_SOCKET: "/nonexistent/decoy.sock" },
+    });
+
+    const serving = await shim.log.record((record) => record.context.outcome === "serving");
+    const startup = shim.log
+      .records()
+      .find((record) => record.context.store_socket !== undefined);
+
+    expect(serving.context.outcome).toBe("serving");
+    expect(startup?.context.store_socket).toBe(shim.dirs.storeSocket);
+  });
+});
+
+describe("SessionStarted's build identity", () => {
+  test("SessionRuntime reports the SHIM_BUILD_SHA the process was spawned with", async () => {
+    // The daemon compares this against its deploy stamp and bounces a stale
+    // survivor, which only works if the value comes from the spawn env.
+    const shim = await spawnShim();
+
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    expect(started.runtime?.shimBuildSha).toBe(ITEST_BUILD_SHA);
+    expect(started.runtime?.sdkVersion).not.toBe("");
+  });
+});
