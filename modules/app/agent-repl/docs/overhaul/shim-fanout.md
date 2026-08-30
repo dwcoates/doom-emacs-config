@@ -498,3 +498,14 @@ every UX or contract gap you surfaced instead of improvising.
   `session:context_budget_warning:<record uuid>` (the transcript line's
   uuid, identical to the sidecar's), never `budget:<uuid>`; a test pins the
   spelling. Assigned to remediation #1 as item (g).
+- BASH ROW KEYS (project lead amendment, binding): the start row is
+  `bash:<run id>`, each output delta `bash:<run id>:<from_offset>`, the
+  terminal `bash:<run id>:terminal`; WatchBashRun replays in write order;
+  one row never supersedes another. Assigned to remediation #1 as item (h).
+- RESIDUE KEY: awaiting the lead's cross-plane spelling (proposal
+  `residue:<vendor record uuid>`); the shim currently mints
+  `residue:<kind>:<uuid>`.
+- STORE FAILURE ARMS now typed (invalid_request | stale_pointer |
+  storage_failure on Open/ReadAgentPage; storage_failure on GetLiveWork;
+  invalid_request | storage_failure on WriteBatch): the shim's reader must
+  switch on them, never on detail prose (remediation #2).
