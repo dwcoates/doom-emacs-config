@@ -16,7 +16,7 @@ import { createGrpcWebTransport, createConnectTransport } from "@connectrpc/conn
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { create } from "@bufbuild/protobuf";
 import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
-import { createFakeDaemon, ROOT_FEED, type FakeDaemon } from "./fake-daemon";
+import { createFakeDaemon, ROOT_FEED, REFUSAL_FACTS, type FakeDaemon } from "./fake-daemon";
 import {
   WEBAPP_ORIGIN,
   feedPageSuccess,
@@ -32,6 +32,8 @@ import {
   userSaid,
   workspaceRef,
   drainReason,
+  daemonUnhealthy,
+  sessionUnhealthy,
   WORKSPACE_ID,
 } from "./fixtures";
 
@@ -600,5 +602,118 @@ describe("headers flush on accept", () => {
     }
     // Assert
     expect(fake.liveStreams("watchDaemon")).toBe(0);
+  });
+});
+
+describe("typed refusals", () => {
+  /** Every per-workspace rpc declares the four cross-cutting arms. */
+  const CROSS_CUTTING = ["unknownWorkspace", "workspaceRefMismatch", "transferringAway", "notYetAdopted"];
+
+  it("reads an rpc's arms off its error descriptor", () => {
+    // Assert
+    expect(fake.refusalArms("setModel")).toEqual(expect.arrayContaining(CROSS_CUTTING));
+  });
+
+  it("reads the arm oneof even when it is not spelled `cause`", () => {
+    // Assert: Interrupt spells it `kind`, SubmitPrompt spells it `reason`.
+    expect(fake.refusalArms("interrupt")).toContain("confirmRequired");
+    expect(fake.refusalArms("submitPrompt")).toContain("merging");
+  });
+
+  it("serves the scripted arm on the error result", async () => {
+    // Arrange
+    fake.refuse("setModel", "notInCatalog");
+    // Act
+    const response = await client.setModel({ workspace: workspaceRef() });
+    // Assert
+    const error = response.result.case === "error" ? response.result.value : undefined;
+    expect(error?.cause.case).toBe("notInCatalog");
+  });
+
+  it("builds the ref-mismatch arm complete, carrying its registry dir", async () => {
+    // Arrange
+    fake.refuse("setModel", "workspaceRefMismatch");
+    // Act
+    const response = await client.setModel({ workspace: workspaceRef() });
+    // Assert
+    const error = response.result.case === "error" ? response.result.value : undefined;
+    const arm = error?.cause.case === "workspaceRefMismatch" ? error.cause.value : undefined;
+    expect(arm?.registryDir).toBe(REFUSAL_FACTS.registryDir);
+  });
+
+  it("builds the transferring-away arm complete, carrying its address", async () => {
+    // Arrange
+    fake.refuse("setModel", "transferringAway");
+    // Act
+    const response = await client.setModel({ workspace: workspaceRef() });
+    // Assert
+    const error = response.result.case === "error" ? response.result.value : undefined;
+    const arm = error?.cause.case === "transferringAway" ? error.cause.value : undefined;
+    expect(arm?.address).toBe(REFUSAL_FACTS.address);
+  });
+
+  it("serves a refusal on the rpc whose oneof is spelled `reason`", async () => {
+    // Arrange
+    fake.refuse("submitPrompt", "turnAlreadyOpen");
+    // Act
+    const response = await client.submitPrompt({
+      workspace: workspaceRef(),
+      said: userSaid(),
+      idempotencyKey: "k",
+      origin: WEBAPP_ORIGIN,
+    });
+    // Assert
+    const error = response.result.case === "error" ? response.result.value : undefined;
+    expect(error?.reason.case).toBe("turnAlreadyOpen");
+  });
+
+  it("refuses to script an arm the schema does not declare", () => {
+    // Act / Assert: a typo must fail loudly rather than serve an empty error.
+    expect(() => fake.refuse("setModel", "notAnArm")).toThrow(/has no arm/);
+  });
+
+  it("serves every declared arm of every rpc it is asked for", async () => {
+    // Arrange: the whole cross-cutting set on a representative rpc.
+    const served: string[] = [];
+    for (const arm of CROSS_CUTTING) {
+      fake.refuse("closeWorkspace", arm);
+      const response = await client.closeWorkspace({ workspace: workspaceRef() });
+      if (response.result.case === "error") served.push(response.result.value.cause.case ?? "");
+    }
+    // Assert
+    expect(served).toEqual(CROSS_CUTTING);
+  });
+});
+
+describe("typed faults", () => {
+  it("answers unhealthy on the SUCCESS arm", async () => {
+    // Arrange
+    fake.answer("daemonHealth", daemonUnhealthy(["logSinkPoisoned"]));
+    // Act
+    const response = await client.daemonHealth({});
+    // Assert: unhealthy is an answer, not an error.
+    expect(response.result.case).toBe("success");
+  });
+
+  it("carries the fault's typed kind", async () => {
+    // Arrange
+    fake.answer("daemonHealth", daemonUnhealthy(["logSinkPoisoned"]));
+    // Act
+    const response = await client.daemonHealth({});
+    // Assert
+    const health = response.result.case === "success" ? response.result.value.health : undefined;
+    const faults = health?.case === "unhealthy" ? health.value.faults : [];
+    expect(faults[0]?.kind.case).toBe("logSinkPoisoned");
+  });
+
+  it("carries a session fault's typed kind", async () => {
+    // Arrange
+    fake.answer("sessionHealth", sessionUnhealthy(["shimDied"]));
+    // Act
+    const response = await client.sessionHealth({ workspace: workspaceRef() });
+    // Assert
+    const health = response.result.case === "success" ? response.result.value.health : undefined;
+    const faults = health?.case === "unhealthy" ? health.value.faults : [];
+    expect(faults[0]?.kind.case).toBe("shimDied");
   });
 });
