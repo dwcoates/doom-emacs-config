@@ -16,7 +16,13 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
+import {
+  ScalarType,
+  create,
+  type DescField,
+  type DescMessage,
+  type MessageInitShape,
+} from "@bufbuild/protobuf";
 import { connectNodeAdapter } from "@connectrpc/connect-node";
 import type { ConnectRouter } from "@connectrpc/connect";
 import { Code, ConnectError } from "@connectrpc/connect";
@@ -208,8 +214,20 @@ export interface FakeDaemon {
   // --- scripted unary answers ---------------------------------------------
   /** Serve `response` for every later call of `rpc` (replaces the default). */
   answer(rpc: RpcName, response: unknown): void;
-  /** Serve a transport-level error for the NEXT call of `rpc` only. */
+  /**
+   * Serve a transport-level error for the NEXT call of `rpc` only. This is a
+   * TRANSPORT death, not a refusal: the rpc never answered.
+   */
   failNext(rpc: RpcName, errorMessage: string): void;
+  /**
+   * Serve `rpc`'s typed `<Rpc>Error` carrying ARM, built complete from the
+   * schema. This is a domain REFUSAL: the rpc answered, and said no. Kept
+   * apart from `failNext` because the two land differently in the app and the
+   * refusals suite exists to tell them apart.
+   */
+  refuse(rpc: RpcName, arm: string): void;
+  /** Every arm `refuse` accepts for `rpc`, read off the descriptor. */
+  refusalArms(rpc: RpcName): string[];
   /** Put an unknown field on the next response or push of `rpc`. */
   injectUnknown(rpc: RpcName): void;
 
@@ -276,6 +294,129 @@ function flushHeadersOnAccept(req: IncomingMessage, res: ServerResponse): void {
     res.headersSent ? res : writeHead(...args)) as ServerResponse["writeHead"];
   res.writeHead(200, { "content-type": contentType });
   res.flushHeaders();
+}
+
+// ---------------------------------------------------------------------------
+// TYPED REFUSALS, DERIVED FROM THE SCHEMAS
+// ---------------------------------------------------------------------------
+
+/**
+ * The facts the cross-cutting arms carry, fixed so a suite can assert the
+ * exact string it expects to see drawn at the call site.
+ */
+export const REFUSAL_FACTS: Readonly<Record<string, string>> = {
+  registryDir: "/registry/elsewhere",
+  address: "http://127.0.0.1:9999",
+  detail: "the daemon said why",
+  sink: "the durable log",
+  path: "/no/such/path",
+  ref: "origin/nope",
+  name: "the-brief",
+  text: "an unserved value",
+  command: "/nope",
+  url: "not-a-url",
+  mode: "no-such-mode",
+  reason: "the reason",
+  cause: "the cause",
+  summary: "the summary",
+};
+
+/** A deterministic string for a field the table above does not name. */
+const refusalString = (fieldName: string): string => REFUSAL_FACTS[fieldName] ?? `${fieldName}-value`;
+
+/**
+ * Build a COMPLETE init for DESC: every field set, the first arm of every
+ * oneof chosen, nested messages filled recursively.
+ *
+ * The client refuses a malformed view by contract, so a refusal the fake
+ * serves half-built would fail a test for the wrong reason. Deriving the shape
+ * from the descriptor rather than hand-writing ~40 error messages also means a
+ * newly landed arm is servable the moment it lands.
+ */
+function completeInit(desc: DescMessage, depth = 0): Record<string, unknown> {
+  const init: Record<string, unknown> = {};
+  if (depth > 5) return init;
+  const filledOneofs = new Set<string>();
+  for (const field of desc.fields) {
+    const oneof = field.oneof;
+    if (oneof) {
+      // The first field of a oneof is the arm the fake picks.
+      if (filledOneofs.has(oneof.localName)) continue;
+      filledOneofs.add(oneof.localName);
+      init[oneof.localName] = { case: field.localName, value: fieldValue(field, depth) };
+      continue;
+    }
+    init[field.localName] = fieldValue(field, depth);
+  }
+  return init;
+}
+
+/** A complete value for one field, by its kind. */
+function fieldValue(field: DescField, depth: number): unknown {
+  if (field.fieldKind === "list") return [];
+  if (field.fieldKind === "map") return {};
+  if (field.fieldKind === "message") return completeInit(field.message, depth + 1);
+  if (field.fieldKind === "enum") {
+    const values = field.enum.values;
+    return (values.find((v) => v.number !== 0) ?? values[0])?.number ?? 0;
+  }
+  switch (field.scalar) {
+    case ScalarType.STRING:
+      return refusalString(field.localName);
+    case ScalarType.BOOL:
+      return true;
+    case ScalarType.BYTES:
+      return new Uint8Array([1]);
+    case ScalarType.INT64:
+    case ScalarType.UINT64:
+    case ScalarType.SINT64:
+    case ScalarType.FIXED64:
+    case ScalarType.SFIXED64:
+      return 1n;
+    default:
+      return 1;
+  }
+}
+
+/** The `<Rpc>Error` descriptor and the name of its arm oneof, off the schema. */
+function errorShapeOf(rpc: RpcName): { response: DescMessage; error: DescMessage; oneof: string } {
+  const response = AgentRepl.method[rpc].output;
+  const errorField = response.fields.find((f) => f.localName === "error" && f.fieldKind === "message");
+  if (!errorField || errorField.fieldKind !== "message") {
+    throw new Error(`${rpc} has no error field on its response`);
+  }
+  const error = errorField.message;
+  // The oneof is spelled `cause` on most rpcs, `kind` on Interrupt and
+  // `reason` on SubmitPrompt, so it is READ off the descriptor rather than
+  // assumed — a wrong guess would silently build an empty error.
+  const oneof = error.oneofs[0]?.localName;
+  if (!oneof) throw new Error(`${error.typeName} declares no arm oneof`);
+  return { response, error, oneof };
+}
+
+/** Every arm name `refuse` accepts for RPC, straight off the schema. */
+export function refusalArmsOf(rpc: RpcName): string[] {
+  const { error, oneof } = errorShapeOf(rpc);
+  const declared = error.oneofs.find((o) => o.localName === oneof);
+  return declared ? declared.fields.map((f) => f.localName) : [];
+}
+
+/** Build the complete `<Rpc>Response` carrying ARM's typed refusal. */
+function buildRefusal(rpc: RpcName, arm: string): unknown {
+  const { response, error, oneof } = errorShapeOf(rpc);
+  const declared = error.oneofs.find((o) => o.localName === oneof);
+  const field = declared?.fields.find((f) => f.localName === arm);
+  if (!field || field.fieldKind !== "message") {
+    throw new Error(
+      `${error.typeName}.${oneof} has no arm ${JSON.stringify(arm)}; it has [${refusalArmsOf(rpc).join(", ")}]`,
+    );
+  }
+  return create(response, {
+    result: {
+      case: "error",
+      value: { [oneof]: { case: arm, value: completeInit(field.message) } },
+    },
+  } as MessageInitShape<DescMessage>);
 }
 
 export function createFakeDaemon(): FakeDaemon {
@@ -954,6 +1095,12 @@ export function createFakeDaemon(): FakeDaemon {
       const queue = failures.get(rpc) ?? [];
       queue.push(errorMessage);
       failures.set(rpc, queue);
+    },
+    refuse(rpc, arm) {
+      scripted.set(rpc, buildRefusal(rpc, arm));
+    },
+    refusalArms(rpc) {
+      return refusalArmsOf(rpc);
     },
     injectUnknown(rpc) {
       unknowns.add(rpc);

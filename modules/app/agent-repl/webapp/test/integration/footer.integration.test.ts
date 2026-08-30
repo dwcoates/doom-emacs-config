@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  FooterAllowanceSchema,
   FooterStatusSchema,
   FooterTokensCellVerdictSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
@@ -19,6 +20,7 @@ import { startHarness, type Harness } from "./harness";
 import { assertVocabCoversArms, RENDER_COLORS, footerStatusColor } from "./vocab";
 import {
   FOOTER_ACTIVITY_KINDS,
+  FOOTER_ALLOWANCE_ARMS,
   FOOTER_CHIPS,
   FOOTER_PANELS,
   FOOTER_STATUS_ACTIVITIES,
@@ -33,6 +35,7 @@ import {
   feedId,
   feedPageSuccess,
   footerView,
+  rateLimitedActivity,
   subagentUnit,
   assertCoversOneof,
 } from "./fixtures";
@@ -57,6 +60,10 @@ describe("arm coverage", () => {
 
   it("gives every status arm a color in the vocabulary", () => {
     assertVocabCoversArms(RENDER_COLORS.footer_status, FOOTER_STATUS_ARMS, "footer_status");
+  });
+
+  it("covers every allowance verdict arm", () => {
+    assertCoversOneof(FooterAllowanceSchema, "status", [...FOOTER_ALLOWANCE_ARMS]);
   });
 
   it("covers every tokens-cell verdict", () => {
@@ -205,11 +212,38 @@ describe("the activity cell", () => {
     expect(harness.$(".footer-activity [data-datum='attempt']")?.textContent).toContain("3");
   });
 
-  it("draws the rate-limit allowance's served status word", async () => {
+  it.each(FOOTER_ALLOWANCE_ARMS)("draws the %s allowance verdict as its own arm", async (arm) => {
+    // Arrange: the free-text status string was retired for a typed oneof, so
+    // the verdict is an ARM the client draws, never a word it echoes.
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setFooter(
+          WORKSPACE_ID,
+          footerView({
+            status: "idle",
+            activity: "rateLimited",
+            activityOverride: rateLimitedActivity(arm),
+          }),
+        ),
+    });
+    // Assert
+    expect(harness.$(`.footer-activity [data-allowance][data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it("draws both the session and the weekly allowance", async () => {
     // Arrange / Act
     await withFooter({ status: "idle", activity: "rateLimited" });
     // Assert
-    expect(harness.text(".footer-activity")).toContain("warn");
+    expect(harness.$$(".footer-activity [data-allowance]")).toHaveLength(2);
+  });
+
+  it("marks the session allowance apart from the weekly one", async () => {
+    // Arrange / Act
+    await withFooter({ status: "idle", activity: "rateLimited" });
+    // Assert
+    expect(
+      harness.$$(".footer-activity [data-allowance]").map((el) => el.dataset.allowance),
+    ).toEqual(["session", "weekly"]);
   });
 
   it("counts down the wakeup activity from its served instant", async () => {
