@@ -238,6 +238,20 @@ func (r *resolver) retireMomentary(ws ids.WorkspaceID) {
 
 // ---- FooterSink -----------------------------------------------------------
 
+// OnContextBudgetWarning installs the vendor's standing context-budget
+// warning. It is an AGENT-PLANE fact — a page line of the agent's book — but
+// the footer's activity line is session-scoped, so the warning stands for the
+// workspace whichever agent's transcript carried it.
+func (r *resolver) OnContextBudgetWarning(ws ids.WorkspaceID, agent *conversationv1.AgentId, warning *conversationv1.ContextBudgetWarning) {
+	if warning == nil {
+		return
+	}
+	r.mutate(ws, "daemon.footer.on_context_budget_warning", "the footer took a context-budget warning",
+		dlog.Context{"agent_id": agent.GetValue()}, func(s *wsState) {
+			s.contextBudget = &standing{text: warning.GetText(), at: r.opts.clock.Now()}
+		})
+}
+
 // OnLink is the connectivity change the footer reflects.
 func (r *resolver) OnLink(ws ids.WorkspaceID, link sessionwatcher.LinkState) {
 	r.mutate(ws, "daemon.footer.on_link", "the footer took a link state",
@@ -275,11 +289,14 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 			s.tok.settled = true
 		}
 	case *conversationv1.SessionUpdate_AccountUsage:
-		return "account_usage", func(s *wsState) { r.observeAccountUsage(s, u.AccountUsage) }
-	case *conversationv1.SessionUpdate_ContextBudgetWarning:
-		return "context_budget_warning", func(s *wsState) {
-			s.contextBudget = &standing{text: u.ContextBudgetWarning.GetText(), at: r.opts.clock.Now()}
-		}
+		// NOTHING IN THE FOOTER DRAWS THE ACCOUNT'S USAGE any more: the two
+		// allowance figures the rate-limited line states are sourced from
+		// SessionUpdate.rate_limit_status, the vendor's own rate-limit event,
+		// which is the only thing that carries the typed status the drawn
+		// allowance copies. The branch stands because every arm has one.
+		return "account_usage", func(*wsState) {}
+	case *conversationv1.SessionUpdate_RateLimitStatus:
+		return "rate_limit_status", func(s *wsState) { r.observeRateLimitStatus(s, u.RateLimitStatus) }
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) { s.compacting = true }
 	case *conversationv1.SessionUpdate_Diagnostics:
@@ -312,23 +329,24 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 	return false
 }
 
-// observeAccountUsage takes one allowance sample. Only a sample carrying BOTH
-// the five-hour and the seven-day windows is drawable: the rate-limited line
-// states both figures so a reader can tell which allowance is newsworthy, and
-// synthesizing the missing one would state a figure nobody reported.
-func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.SessionAccountUsage) {
-	available, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Available)
-	if !ok {
-		s.rate = nil
+// observeRateLimitStatus takes one rate-limit event and files it under the
+// window it is about. The event reports ONE window at a time, and the drawn
+// line states both allowances, so each window's latest status is kept until a
+// newer one for the same window replaces it. A status naming no window, or a
+// window the drawn line has no cell for, is not drawable and is dropped.
+func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.SessionRateLimitStatus) {
+	if status == nil {
 		return
 	}
-	five := available.Available.GetFiveHour()
-	seven := available.Available.GetSevenDay()
-	if five == nil || seven == nil {
-		s.rate = nil
+	switch status.GetRateLimitType().GetWindow().(type) {
+	case *conversationv1.SessionRateLimitType_FiveHour:
+		s.rate.session = status
+	case *conversationv1.SessionRateLimitType_SevenDay:
+		s.rate.weekly = status
+	default:
 		return
 	}
-	s.rate = &rateState{session: five, weekly: seven, at: r.opts.clock.Now()}
+	s.rate.at = r.opts.clock.Now()
 }
 
 // OnQuestion moves the footer to waiting.
