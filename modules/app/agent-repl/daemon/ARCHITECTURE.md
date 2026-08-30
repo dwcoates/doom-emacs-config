@@ -644,3 +644,23 @@ Rulings already binding; code swaps to the generated arms when it lands:
 - The landing-4 batch also carries the ERROR-ARMS.md arms and the four e2e
   seam answers (arm names; the merge test-gate invocation; the .claude.json
   key path; the metaprompt sentinels — the last two are pinned above).
+
+## Handover: the web side never redials (project lead ruling)
+
+- On `transferring_away{address}` / `transferred{address}` the WEBAPP does
+  not dial the successor; Emacs reloads the webview at the successor's
+  address and the FRESH page calls `AdoptWebWorkspace` ONCE AT BOOT, before
+  opening any view stream. The host side is unchanged (Emacs calls
+  `AdoptHostWorkspace` on the announcement).
+- Consequences for `rollout.AdoptWeb` and the server handler:
+  `no_transfer_announced{}` is the ORDINARY answer on every non-handover
+  page boot — logged at INFO at most, never WARN/ERROR, never a fault;
+  `not_yet_adopted{}` is answered while adoption is in progress (the page
+  retries with backoff); the successor's expected-participant count for the
+  web side is satisfied by the reloaded page's adopt call, not by a
+  surviving stream (record the web participant as "expected" from the old
+  daemon's snapshot, and mark it satisfied by the first AdoptWebWorkspace
+  from any connection).
+- Vocab merge note: `footer_allowance` also landed on overhaul/integration
+  (8c56dece8) directly; when overhaul/daemon merges into integration the
+  render-colors.json conflict resolves to the daemon's version.
