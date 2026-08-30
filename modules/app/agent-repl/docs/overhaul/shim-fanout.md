@@ -464,3 +464,6 @@ every UX or contract gap you surfaced instead of improvising.
   become real tests; a read-call ledger on test/fakes/store-server.ts
   (GetLiveWork/OpenAgentSession/ReadAgentPage/WatchBashRun counts) for the
   detached todo; then every integration failure the first run surfaces.
+- LEDGER: fable auditor #1 `aa66e99f6df4f018c` running read-only over the
+  merged suite (04703c1c3) vs docs/overhaul specs; its critiques feed the
+  first remediation dispatch together with the first integration run.
