@@ -134,9 +134,9 @@ type fakeStore struct {
 
 func newFakeStore() *fakeStore {
 	return &fakeStore{
-		opened:       OpenedPage{Page: &storev1.AgentSessionPage{Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}}}},
-		page:         &storev1.ReadAgentPageSuccess{Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}},
-		live:         &storev1.GetLiveWorkSuccess{},
+		opened:         OpenedPage{Page: &storev1.AgentSessionPage{Boundary: &storev1.AgentSessionPage_Floor{Floor: &storev1.ReadAgentPageFloor{}}}},
+		page:           &storev1.ReadAgentPageSuccess{Boundary: &storev1.ReadAgentPageSuccess_Floor{Floor: &storev1.ReadAgentPageFloor{}}},
+		live:           &storev1.GetLiveWorkSuccess{},
 		sinceEntered:   make(chan struct{}),
 		bashRunEntered: make(chan struct{}),
 	}
@@ -522,9 +522,17 @@ func TestOpenAgentSessionMapsAStalePointerToTheFailureArm(t *testing.T) {
 	if res.Msg.GetFailure() == nil {
 		t.Fatalf("result = %v, want the failure arm", res.Msg.GetResult())
 	}
-	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "debug")
+	// A REFUSED REQUEST IS THIS LAYER'S RECORD TO WRITE, at warn: the storage
+	// layer's own trace names a statement and a table and ties the refusal to
+	// nothing, while only this layer knows the rpc, the request id and the
+	// producer it belongs to. It is a `warn` and never an `error`, because a
+	// pointer that has moved is an ordinary race whose recovery is a repaint.
+	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "warn")
 	if !ok || rec.Context["refusal_site"] != SiteStalePointer {
-		t.Fatalf("records = %+v, want a verbose trace at site %q", records(t, h.logs), SiteStalePointer)
+		t.Fatalf("records = %+v, want one warn record at site %q", records(t, h.logs), SiteStalePointer)
+	}
+	if _, isError := findRecord(t, h.logs, "store.rpc.open-agent-session", "error"); isError {
+		t.Fatalf("a stale pointer produced an error record: %+v", records(t, h.logs))
 	}
 }
 

@@ -54,7 +54,7 @@ func (d *DB) applyServeableFrameLifecycle(ctx context.Context, tx *sql.Tx, r rou
 		// the datalayer's model to recover the protocol's.
 		blob, err := proto.Marshal(frame)
 		if err != nil {
-			return invalidf("frame of agent %q cannot be re-serialized: %v", agentID, err)
+			return invalidFieldf("agent_update.serveable_frame.agent_item.agent_frame", "frame of agent %q cannot be re-serialized: %v", agentID, err)
 		}
 		switch arm := frame.GetResult().(type) {
 		case *conversationv1.AgentFrame_Update:
@@ -102,7 +102,7 @@ func (d *DB) ensureAgent(ctx context.Context, tx *sql.Tx, agentID string, now in
 		// Unreachable: classify refuses an empty agent identity before this
 		// runs. The guard stays because a silent INSERT of "" would create a
 		// book nothing can ever address.
-		return invalidf("refusing to record an agent with an empty identity")
+		return invalidFieldf("agent_update.serveable_frame.agent_item.agent_frame.agent_id", "refusing to record an agent with an empty identity")
 	}
 	const upsertSQL = `INSERT INTO agent (agent_id, started_at_ms) VALUES (?, ?)
 	  ON CONFLICT(agent_id) DO NOTHING`
@@ -122,7 +122,7 @@ func (d *DB) ensureAgent(ctx context.Context, tx *sql.Tx, agentID string, now in
 func (d *DB) createSpawnedAgent(ctx context.Context, tx *sql.Tx, spawnedBy string, start *conversationv1.AgentSubagentStart) error {
 	created := start.GetCreatedAgentId().GetValue()
 	if created == "" {
-		return invalidf("a subagent start names no created_agent_id — the created agent could never be addressed")
+		return invalidFieldf("agent_update.serveable_frame.agent_item.agent_frame.update.activity.subagent.start.created_agent_id", "a subagent start names no created_agent_id — the created agent could never be addressed")
 	}
 	prompt := start.GetPrompt()
 	const upsertSQL = `INSERT INTO agent (
@@ -231,7 +231,7 @@ func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, bash *storev1.S
 	runID := bash.GetRun().GetValue()
 	state, err := proto.Marshal(bash.GetFrame())
 	if err != nil {
-		return invalidf("bash frame for run %q cannot be re-serialized: %v", runID, err)
+		return invalidFieldf("agent_update.bash.frame", "bash frame for run %q cannot be re-serialized: %v", runID, err)
 	}
 	// The run IS the unit, so the origin join is the identity itself — which is
 	// what lets a terminal on the spawning stream close this row. The row may

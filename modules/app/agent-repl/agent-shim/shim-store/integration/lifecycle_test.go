@@ -150,3 +150,32 @@ func assertPprofServed(t *testing.T, socket string) {
 		}
 	}
 }
+
+// TestSigtermTheInstantTheSocketAcceptsIsStillAnOrderlyExit pins the window
+// between binding the socket and being able to answer a signal.
+//
+// The kernel queues connections from listen(2) onward, so a supervisor — or
+// this harness — sees a READY store the moment the socket is bound. If the
+// signal handler is installed after that, SIGTERM in the gap still has its
+// default disposition and kills the process outright: no listener close, so the
+// socket file survives and the successor meets a corpse. The handler is
+// therefore installed before anything is bound, which makes "the socket
+// accepts" imply "signals are answered" — and makes this subject deterministic
+// rather than a race. It is hammered because the pre-fix window is narrow.
+func TestSigtermTheInstantTheSocketAcceptsIsStillAnOrderlyExit(t *testing.T) {
+	for attempt := 0; attempt < 8; attempt++ {
+		// Arrange: startStore returns only once the socket has accepted.
+		store := startStore(t, storeOptions{})
+
+		// Act.
+		store.signal(syscall.SIGTERM)
+
+		// Assert.
+		if err := store.awaitExit(); err != nil {
+			t.Fatalf("attempt %d: SIGTERM right after the socket accepted was not an orderly exit: %v", attempt, err)
+		}
+		if store.socketExists() {
+			t.Fatalf("attempt %d: the socket %q survived; a hard kill left it behind", attempt, store.socket)
+		}
+	}
+}

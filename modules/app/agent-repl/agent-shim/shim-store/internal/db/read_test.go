@@ -153,7 +153,7 @@ func TestOpenPageRefusesAPointerFromAnotherBook(t *testing.T) {
 	if !errors.Is(err, ErrStalePointer) {
 		t.Fatalf("error = %v, want ErrStalePointer", err)
 	}
-	s.assertLogged(t, "error", "names no line of book")
+	s.assertTracedRefusal(t, "names no line of book")
 }
 
 func TestOpenPageRefusesAPointerThatNamesNoRow(t *testing.T) {
@@ -181,7 +181,7 @@ func TestOpenPageRefusesAnEmptyAgentValue(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "agent id value is empty")
+	s.assertTracedRefusal(t, "agent id value is empty")
 }
 
 func TestOpenPageRefusesAZeroPageSize(t *testing.T) {
@@ -195,7 +195,7 @@ func TestOpenPageRefusesAZeroPageSize(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "page_size is zero")
+	s.assertTracedRefusal(t, "page_size is zero")
 }
 
 func TestOpenPagePinsTheWatchAtTheGlobalWriteOrdinal(t *testing.T) {
@@ -296,7 +296,7 @@ func TestReadPageRefusesAnUnsetAfterPointer(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "after is unset")
+	s.assertTracedRefusal(t, "after is unset")
 }
 
 func TestReadPageRefusesAPointerFromAnotherBook(t *testing.T) {
@@ -426,7 +426,7 @@ func TestLinesSinceRefusesAnEmptyAgentValue(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "agent id value is empty")
+	s.assertTracedRefusal(t, "agent id value is empty")
 }
 
 func TestLinesSinceReportsAStorageFailureOnAClosedDatabase(t *testing.T) {

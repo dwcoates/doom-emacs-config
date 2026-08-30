@@ -331,9 +331,9 @@ func TestWriteBatchLandsAnUnservedItemWithNoBook(t *testing.T) {
 		kind string
 	}{
 		{name: "keepalive", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Keepalive{Keepalive: promptItem("agent-1")}}, kind: kindKeepalive},
-		{name: "vendor specific", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook"}}}, kind: kindVendorSpecific},
-		{name: "unknown", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{Discriminator: "widget"}}}, kind: kindUnknown},
-		{name: "unparsed", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "t.jsonl"}}}, kind: kindUnparsed},
+		{name: "vendor specific", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{VendorSpecific: &storev1.StoreVendorSpecific{Kind: "hook", Raw: rawRecord("hook")}}}, kind: kindVendorSpecific},
+		{name: "unknown", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unknown{Unknown: &storev1.StoreUnknown{Discriminator: "widget", Raw: rawRecord("widget")}}}, kind: kindUnknown},
+		{name: "unparsed", item: &storev1.StoreUnservedItem{UnservedItem: &storev1.StoreUnservedItem_Unparsed{Unparsed: &storev1.StoreUnparsed{Source: "t.jsonl", Raw: "{\"broken\":"}}}, kind: kindUnparsed},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -544,7 +544,7 @@ func TestWriteBatchCommitsNothingWhenALaterEntryIsInvalid(t *testing.T) {
 	if got := scalar[int](t, d, `SELECT COUNT(*) FROM cursor`); got != 0 {
 		t.Fatalf("cursor rows = %d, want 0 — the cursor moved on a failed batch", got)
 	}
-	s.assertLogged(t, "error", "refused")
+	s.assertTracedRefusal(t, "refused")
 }
 
 func TestWriteBatchLeavesTheCursorUnchangedWhenTheBatchFails(t *testing.T) {
@@ -583,7 +583,7 @@ func TestWriteBatchRefusesAnEmptyProducer(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "producer is empty")
+	s.assertTracedRefusal(t, "producer is empty")
 }
 
 func TestWriteBatchRefusesAnUnsetBatch(t *testing.T) {
@@ -597,7 +597,7 @@ func TestWriteBatchRefusesAnUnsetBatch(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "batch is unset")
+	s.assertTracedRefusal(t, "batch is unset")
 }
 
 func TestWriteBatchRefusesABatchThatCarriesNothing(t *testing.T) {
@@ -611,7 +611,7 @@ func TestWriteBatchRefusesABatchThatCarriesNothing(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "neither entries nor a cursor advance")
+	s.assertTracedRefusal(t, "neither entries nor a cursor advance")
 }
 
 func TestWriteBatchRefusesACursorWithNoFileIdentity(t *testing.T) {
@@ -627,7 +627,7 @@ func TestWriteBatchRefusesACursorWithNoFileIdentity(t *testing.T) {
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
-	s.assertLogged(t, "error", "cursor_advance.file_id is empty")
+	s.assertTracedRefusal(t, "cursor_advance.file_id is empty")
 }
 
 func TestWriteBatchRefusesACursorWithNoPath(t *testing.T) {
@@ -674,7 +674,10 @@ func TestWriteBatchReportsAStorageFailureOnAClosedDatabase(t *testing.T) {
 	if !errors.Is(err, ErrStorage) {
 		t.Fatalf("error = %v, want ErrStorage", err)
 	}
-	s.assertLogged(t, "error", "refused")
+	// A STORAGE FAILURE IS THIS LAYER'S OWN: it names the statement and the
+	// table, which nothing above can supply, so the normal-level record belongs
+	// here and the server adds only a verbose trace.
+	s.assertLogged(t, "error", "storage failure")
 }
 
 func TestWriteBatchCorrelatesTheRefusalWithTheOffendingWrite(t *testing.T) {
@@ -749,7 +752,6 @@ func TestWriteBatchStoresTheAgentFrameItselfAsTheTerminal(t *testing.T) {
 		t.Fatalf("terminal frame = %v", frame)
 	}
 }
-
 
 // ---- the write ledger ----
 

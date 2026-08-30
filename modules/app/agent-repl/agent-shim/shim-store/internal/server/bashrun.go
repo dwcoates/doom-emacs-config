@@ -41,13 +41,13 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 	sub := s.bashFan.subscribe(runID, "")
 	defer s.bashFan.unsubscribe(sub)
 
-	replay, err := s.store.BashRun(ctx, runID)
+	replay, err := s.store.BashRun(correlated(ctx, req.Header()), runID)
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.watch-bash-run", err, logging.Fields{})
 		return connect.NewError(connect.CodeInternal, ref)
 	}
 	if len(replay.Rows) == 0 {
-		ref := refuse(SiteUnknownBashRun, "watch: this store holds no row for run %q, so there is no run to follow", runID)
+		ref := refuse(SiteUnknownBashRun, "run", "watch: this store holds no row for run %q, so there is no run to follow", runID)
 		s.logRefusal(log, "store.rpc.watch-bash-run", ref, logging.Fields{})
 		return connect.NewError(connect.CodeNotFound, ref)
 	}
@@ -129,7 +129,7 @@ func (s *Server) sendBashRow(log *logging.Logger, stream *connect.ServerStream[s
 func (s *Server) endBashOverflowed(log *logging.Logger, sub *sink[BashRowWritten]) error {
 	log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", Level: "warn"},
 		"bash run watch ended: this subscriber overflowed its buffer and must re-open dropped=%d", sub.dropped)
-	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow,
+	return connect.NewError(connect.CodeResourceExhausted, refuse(SiteWatchBufferOverflow, "run",
 		"watch: the subscriber fell too far behind its buffer; re-open to replay the run"))
 }
 

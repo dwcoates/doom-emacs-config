@@ -37,6 +37,8 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const (
@@ -117,6 +119,10 @@ type storeOptions struct {
 	// noWait starts the process without waiting for the socket, for the
 	// bootstrap-failure subjects.
 	noWait bool
+	// verbose runs the store with AGENT_REPL_LOG_VERBOSE=1, which is what makes
+	// its per-statement traces durable — the only way a test can assert that a
+	// refused request never reached storage.
+	verbose bool
 }
 
 // storeProcess is one running (or crashed) store, with everything a test needs
@@ -191,7 +197,7 @@ func (s *storeProcess) launch() {
 	}
 
 	cmd := exec.Command(storeBinary, args...)
-	cmd.Env = storeEnv(s.socket)
+	cmd.Env = storeEnv(s.socket, s.opts.verbose)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 
@@ -217,9 +223,10 @@ func (s *storeProcess) launch() {
 }
 
 // storeEnv is the child's environment: the private socket as the documented
-// default, the vendor-call guard on, and verbose logging explicitly absent.
-func storeEnv(socket string) []string {
-	env := make([]string, 0, len(os.Environ())+2)
+// default, the vendor-call guard on, and verbose logging off unless the subject
+// asked for it.
+func storeEnv(socket string, verbose bool) []string {
+	env := make([]string, 0, len(os.Environ())+3)
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "AGENT_REPL_LOG_VERBOSE=") ||
 			strings.HasPrefix(kv, "AGENT_REPL_STORE_SOCKET=") ||
@@ -228,10 +235,14 @@ func storeEnv(socket string) []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env,
+	env = append(env,
 		"AGENT_REPL_STORE_SOCKET="+socket,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 	)
+	if verbose {
+		env = append(env, "AGENT_REPL_LOG_VERBOSE=1")
+	}
+	return env
 }
 
 // awaitReady polls the socket under a deadline, failing at once if the process
@@ -518,11 +529,57 @@ func (s *storeProcess) assertNoErrorRecords() {
 	}
 }
 
+// assertExactlyOneNormalRecord asserts that a refusal produced exactly ONE
+// normal-verbosity record, and returns it.
+//
+// EVERY ERROR IS LOGGED EXACTLY ONCE BY ITS OWNING LAYER. Two layers each
+// writing a normal-level record for one refusal is not redundancy — it is a
+// count that lies to anyone who alerts on it, and a reader who cannot tell one
+// refusal from two.
+func assertExactlyOneNormalRecord(t *testing.T, records []logRecord, what string) logRecord {
+	t.Helper()
+	var normal []logRecord
+	for _, rec := range records {
+		if rec.Verbosity == "normal" && (rec.Level == "warn" || rec.Level == "error") {
+			normal = append(normal, rec)
+		}
+	}
+	if len(normal) != 1 {
+		t.Fatalf("%s produced %d normal-level records, want exactly 1: %v", what, len(normal), normal)
+	}
+	return normal[0]
+}
+
+// assertNoErrorRecordIn fails if any record in the window is an error.
+func assertNoErrorRecordIn(t *testing.T, records []logRecord, what string) {
+	t.Helper()
+	for _, rec := range records {
+		if rec.Level == "error" {
+			t.Errorf("%s logged an error record: operation=%q message=%q context=%v", what, rec.Operation, rec.Message, rec.Context)
+		}
+	}
+}
+
 // recordsAtLevel filters records by level ("warn", "error").
 func recordsAtLevel(records []logRecord, level string) []logRecord {
 	var out []logRecord
 	for _, rec := range records {
 		if rec.Level == level {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// recordsAtOperation filters records by their stable operation name.
+//
+// A LEVEL FILTER ALONE IS NOT AN ASSERTION. "Some warn was logged" passes for a
+// reclaimed socket or a slow query as readily as for the thing under test, so
+// every warning subject narrows to the operation it means.
+func recordsAtOperation(records []logRecord, operation string) []logRecord {
+	var out []logRecord
+	for _, rec := range records {
+		if rec.Operation == operation {
 			out = append(out, rec)
 		}
 	}
@@ -540,17 +597,51 @@ func recordsWithContextKey(records []logRecord, key string) []logRecord {
 	return out
 }
 
-// assertNoDatabaseTouch asserts that a refused request never reached storage.
-// The store's own contract is that a database operation is logged with a
-// `statement` family in its context; a refusal that never reached the database
-// therefore has none.
-func assertNoDatabaseTouch(t *testing.T, records []logRecord) {
+// assertNoDatabaseTouch asserts that ONE refused request never reached storage.
+//
+// IT SCOPES BY request_id, WHICH IS WHAT MAKES IT MEAN ANYTHING. The old version
+// looked for any record carrying a `statement` family at all — and the only
+// record that carried one was the slow-query warning, which fires past a
+// threshold, so its absence meant "nothing was slow", not "nothing ran". Every
+// validation subject passed it without ever exercising the claim. The store now
+// traces each statement family it runs, at verbose, with the request id the
+// caller sent; a refusal that never opened a transaction leaves none carrying
+// that id.
+//
+// The store must be started with `verbose: true` for this to be a real
+// assertion, and the caller must have sent a request id — assertRefusedRequest
+// below does both.
+func assertNoDatabaseTouch(t *testing.T, records []logRecord, requestID string) {
 	t.Helper()
+	if requestID == "" {
+		t.Fatal("assertNoDatabaseTouch needs the refused request's id; without it the assertion is vacuous")
+	}
+	sawAnyStatement := false
 	for _, rec := range records {
-		if _, ok := rec.Context["statement"]; ok {
-			t.Errorf("a refused request reached the database: operation=%q message=%q context=%v", rec.Operation, rec.Message, rec.Context)
+		if _, ok := rec.Context["statement"]; !ok {
+			continue
+		}
+		sawAnyStatement = true
+		if rec.RequestID == requestID {
+			t.Errorf("a refused request reached the database: operation=%q statement=%v request_id=%q",
+				rec.Operation, rec.Context["statement"], rec.RequestID)
 		}
 	}
+	_ = sawAnyStatement
+}
+
+// requestIDHeader is the header the store reads a caller's correlation id from.
+const requestIDHeader = "X-Agent-Repl-Request-Id"
+
+// newRequestID mints a correlation id unique to one subject, so a log scan can
+// isolate exactly one call.
+func newRequestID(t *testing.T) string {
+	t.Helper()
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		t.Fatalf("generating a request id: %v", err)
+	}
+	return "req-itest-" + hex.EncodeToString(raw[:])
 }
 
 // ---- fake producers ----
@@ -563,6 +654,18 @@ type producer struct {
 	name string
 	file bool
 	cli  storev1connect.ShimStoreClient
+	// requestID, when set, rides every write as the caller's correlation
+	// header. A subject that must prove a refusal never reached storage needs
+	// it: the proof is scoped by request id.
+	requestID string
+}
+
+// correlated returns a copy of this producer that stamps every write with one
+// correlation id.
+func (p *producer) correlated(requestID string) *producer {
+	copied := *p
+	copied.requestID = requestID
+	return &copied
 }
 
 // streamProducer writes as the shim does: plane stream, never a cursor.
@@ -604,10 +707,14 @@ func (p *producer) sessionEntry(writeID, upsertKey string, update *conversationv
 
 // attempt sends one batch and returns whatever came back, refusals included.
 func (p *producer) attempt(ctx context.Context, batch *storev1.EntryBatch) (*storev1.WriteBatchResponse, error) {
-	resp, err := p.cli.WriteBatch(ctx, connect.NewRequest(&storev1.WriteBatchRequest{
+	req := connect.NewRequest(&storev1.WriteBatchRequest{
 		Producer: p.name,
 		Batch:    batch,
-	}))
+	})
+	if p.requestID != "" {
+		req.Header().Set(requestIDHeader, p.requestID)
+	}
+	resp, err := p.cli.WriteBatch(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -638,8 +745,9 @@ func (p *producer) writeWithCursor(ctx context.Context, t *testing.T, cursor *st
 }
 
 // writeExpectingFailure sends one batch and asserts the typed failure arm,
-// returning its detail for the caller's own assertions.
-func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, cursor *storev1.CursorState, entries ...*storev1.StoreEntry) string {
+// returning the whole failure so the caller can assert its KIND and its FIELD —
+// not only its human detail, which nothing may switch on.
+func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, cursor *storev1.CursorState, entries ...*storev1.StoreEntry) *storev1.WriteBatchFailure {
 	t.Helper()
 	resp, err := p.attempt(ctx, &storev1.EntryBatch{Entries: entries, CursorAdvance: cursor})
 	if err != nil {
@@ -649,7 +757,86 @@ func (p *producer) writeExpectingFailure(ctx context.Context, t *testing.T, curs
 	if failure == nil {
 		t.Fatalf("WriteBatch accepted a batch it owed a typed failure for: %v", resp)
 	}
-	return failure.GetDetail()
+	return failure
+}
+
+// ---- failure-arm assertions ----
+//
+// A FAILURE WITH AN UNSET KIND IS ITSELF A DEFECT. `detail` is prose for a
+// human and is never switched on, so a caller that received no arm would have
+// to parse it to learn whether retrying the same bytes could ever help. Every
+// refusal subject therefore asserts the arm, and every invalid_request asserts
+// the FIELD the store blames.
+
+func assertDetail(t *testing.T, what, detail string) {
+	t.Helper()
+	if detail == "" {
+		t.Errorf("%s carried no detail", what)
+	}
+}
+
+func assertWriteInvalidRequest(t *testing.T, failure *storev1.WriteBatchFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the WriteBatch refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("WriteBatch failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("WriteBatch invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
+}
+
+func assertOpenInvalidRequest(t *testing.T, failure *storev1.OpenAgentSessionFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the OpenAgentSession refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("OpenAgentSession failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("OpenAgentSession invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
+}
+
+func assertOpenStalePointer(t *testing.T, failure *storev1.OpenAgentSessionFailure) {
+	t.Helper()
+	assertDetail(t, "the OpenAgentSession refusal", failure.GetDetail())
+	if failure.GetStalePointer() == nil {
+		t.Fatalf("OpenAgentSession failure kind = %v, want stale_pointer (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+}
+
+func assertReadInvalidRequest(t *testing.T, failure *storev1.ReadAgentPageFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the ReadAgentPage refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("ReadAgentPage failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("ReadAgentPage invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
+}
+
+func assertReadStalePointer(t *testing.T, failure *storev1.ReadAgentPageFailure) {
+	t.Helper()
+	assertDetail(t, "the ReadAgentPage refusal", failure.GetDetail())
+	if failure.GetStalePointer() == nil {
+		t.Fatalf("ReadAgentPage failure kind = %v, want stale_pointer (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+}
+
+func assertCursorsInvalidRequest(t *testing.T, failure *storev1.GetSidecarCursorsFailure, wantField string) {
+	t.Helper()
+	assertDetail(t, "the GetSidecarCursors refusal", failure.GetDetail())
+	invalid := failure.GetInvalidRequest()
+	if invalid == nil {
+		t.Fatalf("GetSidecarCursors failure kind = %v, want invalid_request (detail: %s)", failure.GetKind(), failure.GetDetail())
+	}
+	if invalid.GetField() != wantField {
+		t.Errorf("GetSidecarCursors invalid_request.field = %q, want %q (detail: %s)", invalid.GetField(), wantField, failure.GetDetail())
+	}
 }
 
 // ---- conversation.v1 fact builders ----
@@ -1023,13 +1210,25 @@ func keepaliveLine(topLevel *conversationv1.AgentId, p *conversationv1.AgentProm
 	}
 }
 
+// rawResidue is the VERBATIM record every residue arm exists to carry. Residue
+// with no raw record is the drop it was meant to prevent, dressed up as
+// durability — the store refuses it, and a fixture that omitted it was testing
+// that refusal by accident.
+func rawResidue(kind string) *structpb.Struct {
+	raw, err := structpb.NewStruct(map[string]any{"type": kind, "verbatim": true})
+	if err != nil {
+		panic("shim-store integration: building a raw residue record: " + err.Error())
+	}
+	return raw
+}
+
 // vendorSpecificLine is understood residue: carried, never served.
 func vendorSpecificLine(kind string) *storev1.StoreAgentUpdate {
 	return &storev1.StoreAgentUpdate{
 		AgentInfo: &storev1.StoreAgentUpdate_UnservedItem{
 			UnservedItem: &storev1.StoreUnservedItem{
 				UnservedItem: &storev1.StoreUnservedItem_VendorSpecific{
-					VendorSpecific: &storev1.StoreVendorSpecific{Kind: kind},
+					VendorSpecific: &storev1.StoreVendorSpecific{Kind: kind, Raw: rawResidue(kind)},
 				},
 			},
 		},
@@ -1045,6 +1244,7 @@ func unknownLine(discriminator, field string) *storev1.StoreAgentUpdate {
 					Unknown: &storev1.StoreUnknown{
 						Discriminator:      discriminator,
 						DiscriminatorField: field,
+						Raw:                rawResidue(discriminator),
 					},
 				},
 			},
@@ -1154,9 +1354,13 @@ func openSession(ctx context.Context, t *testing.T, cli storev1connect.ShimStore
 	return success
 }
 
-func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest) string {
+func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.OpenAgentSessionRequest, requestID ...string) *storev1.OpenAgentSessionFailure {
 	t.Helper()
-	resp, err := cli.OpenAgentSession(ctx, connect.NewRequest(req))
+	call := connect.NewRequest(req)
+	if len(requestID) == 1 && requestID[0] != "" {
+		call.Header().Set(requestIDHeader, requestID[0])
+	}
+	resp, err := cli.OpenAgentSession(ctx, call)
 	if err != nil {
 		t.Fatalf("OpenAgentSession answered a transport error where a typed failure was owed: %v", err)
 	}
@@ -1164,7 +1368,7 @@ func openSessionExpectingFailure(ctx context.Context, t *testing.T, cli storev1c
 	if failure == nil {
 		t.Fatalf("OpenAgentSession accepted a request it owed a typed failure for: %v", resp.Msg)
 	}
-	return failure.GetDetail()
+	return failure
 }
 
 func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, book string, pageSize uint32, after *storev1.StoreItemPointer) *storev1.ReadAgentPageSuccess {
@@ -1187,9 +1391,13 @@ func readPage(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreCli
 	return success
 }
 
-func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.ReadAgentPageRequest) string {
+func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, req *storev1.ReadAgentPageRequest, requestID ...string) *storev1.ReadAgentPageFailure {
 	t.Helper()
-	resp, err := cli.ReadAgentPage(ctx, connect.NewRequest(req))
+	call := connect.NewRequest(req)
+	if len(requestID) == 1 && requestID[0] != "" {
+		call.Header().Set(requestIDHeader, requestID[0])
+	}
+	resp, err := cli.ReadAgentPage(ctx, call)
 	if err != nil {
 		t.Fatalf("ReadAgentPage answered a transport error where a typed failure was owed: %v", err)
 	}
@@ -1197,7 +1405,7 @@ func readPageExpectingFailure(ctx context.Context, t *testing.T, cli storev1conn
 	if failure == nil {
 		t.Fatalf("ReadAgentPage accepted a request it owed a typed failure for: %v", resp.Msg)
 	}
-	return failure.GetDetail()
+	return failure
 }
 
 func liveWork(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient) *storev1.GetLiveWorkSuccess {
@@ -1230,6 +1438,24 @@ func sidecarCursors(ctx context.Context, t *testing.T, cli storev1connect.ShimSt
 		t.Fatalf("GetSidecarCursors answered neither arm: %v", resp.Msg)
 	}
 	return success.GetCursors()
+}
+
+// cursorsExpectingFailure asks for cursors with a request the store must refuse.
+func cursorsExpectingFailure(ctx context.Context, t *testing.T, cli storev1connect.ShimStoreClient, fileID *string, requestID ...string) *storev1.GetSidecarCursorsFailure {
+	t.Helper()
+	call := connect.NewRequest(&storev1.GetSidecarCursorsRequest{FileId: fileID})
+	if len(requestID) == 1 && requestID[0] != "" {
+		call.Header().Set(requestIDHeader, requestID[0])
+	}
+	resp, err := cli.GetSidecarCursors(ctx, call)
+	if err != nil {
+		t.Fatalf("GetSidecarCursors answered a transport error where a typed failure was owed: %v", err)
+	}
+	failure := resp.Msg.GetFailure()
+	if failure == nil {
+		t.Fatalf("GetSidecarCursors accepted a request it owed a typed failure for: %v", resp.Msg)
+	}
+	return failure
 }
 
 // watch is one open tail plus the cancellation that ends it.
@@ -1376,6 +1602,27 @@ func receiveBashRows(t *testing.T, stream *bashWatch, n int) []string {
 		return res.labels
 	case <-time.After(streamTimeout):
 		t.Fatalf("the bash run stream delivered fewer than %d rows within %s", n, streamTimeout)
+		return nil
+	}
+}
+
+// awaitBashRunEnd drains a run's stream and returns why it ended.
+func awaitBashRunEnd(t *testing.T, stream *bashWatch) error {
+	t.Helper()
+
+	done := make(chan error, 1)
+	go func() {
+		for stream.Receive() {
+			// Drain: the subject is how the stream ENDS.
+		}
+		done <- stream.Err()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(streamTimeout):
+		t.Fatalf("the bash run stream did not end within %s", streamTimeout)
 		return nil
 	}
 }
