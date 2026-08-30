@@ -264,9 +264,14 @@ armed: it is an agent's own record and its silence concludes nothing.
 The package MINTS NO RECORDS. A sweep returns OBSERVATIONS; spelling one as the
 run's terminal is conversion and happens behind the seam.
 
-- CONTRACT GAP: there is no `DetachedLost` message on the wire this wave, so
-  HOW we stopped seeing a run survives only in the log record. Do not invent an
-  arm that means something else.
+- THE ARM IS ON THE WIRE (landing 3): `DetachedLost {file_vanished |
+  went_silent | swept_up}` rides `AgentBashInterrupted.cause.lost` and
+  `AgentSubagentFailure.cause.lost`, so HOW we stopped seeing a run is a
+  STATEMENT rather than a log-only fact. An unrecognized reason PANICS rather
+  than resolving to an arm: the three arms are the reader's whole vocabulary, so
+  a fourth means this package and the policy have drifted, and picking one would
+  have the wire assert something nobody observed. `by_user` and `timed_out` name
+  DECISIONS and are never used for a LOST run.
 
 ## The reader/converter seam
 
@@ -281,18 +286,33 @@ record MEANS.
   The reader may ADD `tail.Context` fields; it never removes or renames one.
 - `tail.Context` carries, beyond the counters and the hold protocol: `FileID`,
   `MainAgentID`, `AgentID`, `SpawnBackgrounded`, `MetaPath`, `ConfigRoots`,
-  `SessionID`, `Path`, `Kind`, `TaskID`, `SpoolDir`, `RunID`.
-- Two OPTIONAL interfaces, adopted by adding a method. Both take plain function
+  `SessionID`, `Path`, `Kind`, `TaskID`, `SpoolDir`, `RunID`, `RunActivityID`.
+- FOUR OPTIONAL interfaces, adopted by adding a method. All take plain function
   and string arguments so neither package imports the other:
   - `SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string))` —
     the converter reports each spawn it reads off a tool result; the reader
     turns it into a spool's owner. ONE CALL PER OBSERVATION, never a map two
     packages share.
+  - `SetTaskStopObserver(func(taskID string))` — the converter reports each
+    TaskStop result it reads; the reader mints the cancelled terminal through
+    the spool's OWN handler, because the terminal owes the output the spool
+    holds and the transcript's converter never reads those bytes.
   - `LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry`
     — the converter spells the reader's LOST conclusion as the run's terminal.
-- A converter that has adopted NEITHER is not a silent degradation: the reader
-  states exactly what it could not hand over, at ERROR level, every time it had
-  something to hand.
+    It REFUSES without a run activity id and never falls back to the task id: a
+    terminal on a row no reader can join to the call is worse than none.
+  - `CancelTerminal(taskID, run, ownerAgentID string, settledAtMs int64) []*storev1.StoreEntry`
+    — the same shape for a person's stop, carrying the bytes read so far.
+  - `SetTerminalObserver(func(path, run string))` — the converter reports that
+    it READ a run's own terminal off the file, and the reader untracks the run
+    so the staleness sweep can never restate a finished run as LOST. The report
+    is honored only once the batch carrying the terminal is DURABLE.
+- ONLY A TRANSCRIPT CARRIES A LAUNCH OR A STOP (both are tool results), so a
+  transcript converter adopting neither observer is an ERROR — it is the only
+  source the reader has — while a spool or journal converter's silence is
+  ordinary and recorded at verbose.
+- A converter that should have adopted one and did not is never a silent
+  degradation: the reader states exactly what it could not hand over.
 
 ## Identity and keys
 
@@ -300,8 +320,20 @@ record MEANS.
   (the `<vendor session>.jsonl` basename), NEVER the per-record `sessionId`
   field, which diverges from it in roughly a fifth of records. Transcript
   divergence never rides the wire.
-- SUBAGENT identity: the vendor `agentId` of sidechain records, which is also
-  the `agent-<id>` file name. An agent is NOT its spawning call.
+- SUBAGENT identity (the CROSS-PLANE MINTING RULE, binding on every producer):
+  `AgentId.value` is the `tool_use_id` of the call that SPAWNED the agent, read
+  from the companion `agent-<id>.meta.json`'s `toolUseId`. The `agent-<id>` of
+  the file name is a LOCATOR (kept as `Target.VendorAgentID`) and NEVER an
+  identity, and neither is the per-record `agentId` — reading either as one
+  gives an agent a file-plane book the stream plane never writes to, which no
+  consumer can reconcile. The bytes coincide with the spawn unit's activity id;
+  the spaces stay distinct. THERE IS NO FALLBACK: a meta file that is missing,
+  unparsable, or names no `toolUseId` HOLDS its transcript, and a sidechain that
+  reaches the handler with no identity converts NOTHING.
+- The meta file's parse is exactly four camelCase fields — `agentType`,
+  `description`, `toolUseId`, `spawnDepth` — and NO model: the model is not
+  stated there at all and comes only from the transcript's own assistant lines
+  (`message.model`).
 - `top_level`: main-agent frames name the main agent; sidechain frames name the
   owning session's main agent UNLESS the spawn was backgrounded, in which case
   the subagent itself. UNSET only when genuinely unresolvable — residue that
@@ -484,7 +516,7 @@ the suite rather than quietly shrinking what the feed can show.
   - `activity:<AgentActivityId>` — the vendor `tool_use_id` for a tool call;
     `<message.id>:<block ordinal>` for a text or thinking block.
   - `question:<tool_use_id of the AskUserQuestion call>` — its own identity space.
-  - `terminal:<AgentId>:<record uuid>`, `bash:<run activity id>`,
+  - `terminal:<AgentId>:<record uuid>`, the bash row keys below,
     `session:context_cut:<uuid>`, `session:api_error:<uuid>`.
   - Residue with no unit identity is keyed `residue:<write_id>`, so a re-read
     supersedes its own row instead of appending a second copy of the same bytes.
@@ -549,10 +581,25 @@ A drop is not residue: filing a known built-in as `unknown` would pollute the
 query that finds real modelling gaps.
 
 CARVE-OUT: the `TaskStop` CALL stays dropped, but its RESULT is CONSUMED as the
-owning task's CANCELLED terminal before the drop — a bash task becomes
-`AgentBash.success.interrupted.by_user` on a `bash:` frame, an agent task
-becomes `AgentSubagent.failure.stopped_by_user` on the spawn unit.
-Deliberately-stopped work must resolve cancelled, never LOST.
+owning task's CANCELLED terminal before the drop. Deliberately-stopped work must
+resolve cancelled, never LOST.
+
+WHERE each is minted differs, and the reason is which producer holds the
+evidence:
+
+- AN AGENT TASK settles IN THE CONVERTER — the spawn unit is a line in this
+  stream's own book — as `AgentSubagent.failure.stopped_by_user`, keyed by the
+  CALL that spawned it (`activity:<tool_use_id>`), never by the vendor task id.
+- A SHELL TASK does NOT: its terminal owes the output the run produced, and
+  those bytes are in a spool this converter never reads. The converter reports
+  `TaskStopped(taskID)` and the READER mints
+  `AgentBash.success.interrupted.by_user` through the spool's own handler,
+  keyed `bash:<run>:terminal`, carrying the bytes read so far.
+
+Both branches REFUSE rather than guess when no launch on this stream opened the
+task: the record is stored whole as `vendor_specific` (`task_stop/unlaunched`),
+because keying a terminal on a vendor task id would settle a row no reader can
+join to a call.
 
 ### Withholding classes (`vendor_specific`)
 
@@ -608,23 +655,53 @@ type at all) is named `connection/<code>` rather than guessing a modeled kind.
 
 ### Detached shell spools
 
-Bytes → `StoreAgentUpdate.bash` with `AgentBash.update{new_output, from_offset}`,
-keyed `bash:<run>`. `from_offset` is a GAP DETECTOR, not addressing: it must
-equal what the consumer has already accumulated, and a mismatch means the
-consumer REFUSES the frame rather than concatenating across a hole.
+THE RUN IS THE SPAWNING CALL'S `tool_use_id`, never the vendor task id — the one
+identity a detached command is announced under on BOTH planes, and equal to the
+`DetachedWorkId` a consumer addresses the run by. The reader resolves it from the
+launch it observed and hands it over as `tail.Context.RunActivityID`; a spool
+that reaches the handler without one is a reader defect (an unclaimed spool is
+HELD, not tailed), refused loudly with its bytes still landing as residue.
+
+ONE ROW PER WRITE, never one row superseded:
+
+- `bash:<run>:start` — a start row, if a producer ever mints one. The sidecar
+  does not: a spool exists only after the STREAM plane announced the launch.
+- `bash:<run>:<from_offset>` — one per delta. The offset IS the delta's
+  identity, so the same bytes re-read after a restart supersede their own row
+  instead of appending a second copy of the run's output.
+- `bash:<run>:terminal` — the single terminal, however often it is restated.
+
+A single `bash:<run>` key would leave the run holding only its most recent
+delta, every earlier chunk erased by the next; store.v1 `WatchBashRun` replays a
+run's rows in write order, which is only possible if each write is a row.
+
+`from_offset` is a GAP DETECTOR, not addressing: it must equal what the consumer
+has already accumulated, and a mismatch means the consumer REFUSES the frame
+rather than concatenating across a hole.
 
 `EXIT=<code>` → `AgentBash.success.completed` with `termination.exited`. The
 matching is strict (last line of the batch, newline-terminated, line-start, at
 most three digits) because `EXIT=` is common as ordinary output — 23 of the 44
-real spools carrying it have it only mid-line.
+real spools carrying it have it only mid-line. The raw codec carries nothing, so
+whether a batch BEGINS a line is answered from whether the previous batch ended
+on a newline — which the handler alone knows, and without which a marker
+arriving on its own poll (the ordinary case) was never detected at all.
+
+A TERMINAL CARRIES THE RUN'S OUTPUT, not the batch's: the handler holds what the
+run has said, bounded, and states `partial{bytes_omitted}` past the bound rather
+than claiming `whole` over a prefix a consumer cannot detect.
 
 LOST (`file_vanished` | `went_silent` | `swept_up`) →
-`AgentBash.success.interrupted` with NO cause arm. `by_user` and `timed_out` are
-the only causes available and neither is what happened, so setting one would be
-an accusation with no evidence. HOW we concluded it survives only in the log
-record. The wire has no `DetachedLost` this wave — a stated contract gap. The
-LOST terminal shares the exited terminal's write identity, so a late LOST verdict
-is absorbed rather than appended beside an observed exit.
+`AgentBash.success.interrupted` with `cause.lost` naming the arm (landing 3).
+`by_user` and `timed_out` name DECISIONS and neither is what happened. A stop the
+vendor recorded IS a decision and is the one place `by_user` is set — minted by
+the SPOOL's handler, not by the transcript's converter, because the terminal owes
+the bytes only the spool holds. A stop for a spool not yet claimed is held as one
+pending value per task and applied on claim; it is retired only on a durable
+write, and untracks the run at the same moment.
+
+The LOST terminal shares the exited terminal's write identity, so a late LOST
+verdict is absorbed rather than appended beside an observed exit.
 
 A non-zero shell exit is COMPLETED, not a failure arm; empty search results are
 SUCCESS with an empty answer.
