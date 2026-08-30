@@ -88,7 +88,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   HostFault/SessionFault/DaemonFault kinds decoded and pinned; core.el
   derives `operation` from the bare format string. Treatments still owed
   (R-HANDOVER: transferring_away/not_yet_adopted in host.el).
-- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-VERBS (`opus-low`, remed5);
+- R-VERBS MERGED (1f433f54d): integration-verbs 30/30 (oneof shapes built
+  at the verb boundary; verbs fall back to `agent-repl-link-connect`).
+  REVERSED deviation in flight (same agent, remed5): verb records must
+  stay WORKSPACE-owned per logging-contract.md; the harness reader now
+  searches the workspace sinks too; link teardown added to the fixture.
+- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-VERBS follow-up (remed5);
   remediation-1 (opus-medium, remed1).
 - VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
   footer_allowance verbatim (f1132d3a7); merged, resolved to theirs; the
