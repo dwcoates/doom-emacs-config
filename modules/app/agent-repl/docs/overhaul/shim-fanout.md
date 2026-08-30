@@ -502,9 +502,12 @@ every UX or contract gap you surfaced instead of improvising.
   `bash:<run id>`, each output delta `bash:<run id>:<from_offset>`, the
   terminal `bash:<run id>:terminal`; WatchBashRun replays in write order;
   one row never supersedes another. Assigned to remediation #1 as item (h).
-- RESIDUE KEY: awaiting the lead's cross-plane spelling (proposal
-  `residue:<vendor record uuid>`); the shim currently mints
-  `residue:<kind>:<uuid>`.
+- RESIDUE KEY (project lead ruling): `residue:<vendor record uuid>` on both
+  planes when the record has a uuid; without one the shim mints
+  `residue:stream:<sequence>` and the sidecar `residue:file:<path>:<offset>`
+  (they must not collide). Assigned to remediation #1 as item (i); item (j)
+  adds `!rate-limit-five-hour` / `!rate-limit-seven-day` to the mock for the
+  e2e footer-join case.
 - STORE FAILURE ARMS now typed (invalid_request | stale_pointer |
   storage_failure on Open/ReadAgentPage; storage_failure on GetLiveWork;
   invalid_request | storage_failure on WriteBatch): the shim's reader must

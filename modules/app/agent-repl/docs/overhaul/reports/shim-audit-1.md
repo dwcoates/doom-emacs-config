@@ -92,8 +92,9 @@ store.md, sidecar.md, the protos, the shim AGENTS.md.
    switch on the typed arm, never on detail substrings; map stale_pointer →
    stale_pointer, invalid_request on an unknown book → unknown_agent,
    storage_failure/transport → store_unavailable.
-3. record "every upsert_key uses a ruled prefix": drop `residue:` from the
-   allowlist until the lead's spelling lands (then pin it).
+3. record "every upsert_key uses a ruled prefix": pin the RULED residue
+   spellings `residue:<vendor record uuid>` / `residue:stream:<sequence>`
+   (remediation #1 lands them) instead of an open `residue:` prefix.
 4. session "SetSessionModel resolves only after the turn ends": a race across
    connections. Stronger: after the turn ends assert the next turn-end
    context_usage.model / the mock's recorded setModel instant vs the
