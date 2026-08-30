@@ -60,14 +60,10 @@ summariser, which has its own model variable."
                  (string :tag "Model alias"))
   :group 'agent-repl)
 
-(defcustom agent-repl-oneshot-model-candidates '("opus" "sonnet" "haiku")
-  "The models offered when creating a ONE-SHOT workspace, in order.
-One-shots ride the wire — Emacs supplies prompt, model and parentage
-through the dedicated one-shot creation form and the daemon owns naming,
-the worktree, decoration and the merge/PR postprocessing — so this list
-is a picker's contents and nothing more."
-  :type '(repeat string)
-  :group 'agent-repl)
+;; `agent-repl-oneshot-model-candidates' lives in verbs.el, beside the
+;; one-shot creation commands that are its only consumer (ruled at the
+;; wave-2 seam).  It is deliberately NOT a model preference of the
+;; interactive session, which is what this section otherwise holds.
 
 (defun agent-repl--effective-model (model)
   "Return MODEL, or `agent-repl-interactive-model' when MODEL is nil.

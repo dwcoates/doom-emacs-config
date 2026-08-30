@@ -43,10 +43,15 @@
   :type 'boolean
   :group 'agent-repl)
 
-;; NOTE: the headless executable is no longer a defcustom here — it is
-;; resolved from the workspace's agent backend (see
-;; `agent-repl--backend-headless-cmd'), so a codex workspace summarizes
-;; via codex and a claude workspace via claude.
+(defcustom agent-repl-prompt-summary-program "claude"
+  "The headless vendor executable prompt summaries shell out to.
+This file is the module's ONE real vendor exec site, and it is guarded:
+see `agent-repl--prompt-summary-forbidden-p'.  A single program rather
+than a per-workspace backend lookup, because the second backend left the
+contract -- the vendor oneof stays extensible and a future vendor is a
+future shim, not a second exec site here."
+  :type 'string
+  :group 'agent-repl)
 
 (defcustom agent-repl-prompt-summary-model "haiku"
   "Model alias or ID passed to `--model' for prompt summaries."
@@ -528,8 +533,9 @@ the process exits."
 (defun agent-repl--prompt-summary-process-start (ws out-buf cmd sentinel)
   "Start the headless summary process for WS.
 This is the external-process boundary for prompt summaries; callers own
-command construction and error handling, while tests stub this function."
-  (make-process
+command construction and error handling, while tests stub this function.
+Registered in `agent-repl--external-boundary-functions' (core.el)."
+  (make-process ;; ALLOW-EXTERNAL-BOUNDARY
    :name (format "agent-prompt-summary-%s" ws)
    :buffer out-buf
    :command cmd
@@ -540,9 +546,40 @@ command construction and error handling, while tests stub this function."
 (defun agent-repl--prompt-summary-process-send-input (proc input)
   "Send INPUT to headless summary PROC, then close its standard input.
 This is the external-process boundary paired with
-`agent-repl--prompt-summary-process-start'."
-  (process-send-string proc input)
+`agent-repl--prompt-summary-process-start'.  Registered in
+`agent-repl--external-boundary-functions' (core.el)."
+  (process-send-string proc input) ;; ALLOW-EXTERNAL-BOUNDARY
   (process-send-eof proc))
+
+(defconst agent-repl--prompt-summary-forbid-env "AGENT_REPL_FORBID_VENDOR_CALLS"
+  "Environment variable that forbids every real vendor call.
+Set in every test and every integration run.  This file is the module's
+only real vendor exec site, so it is the only place that has to honour
+it -- and it honours it by REFUSING, never by faking a summary.")
+
+(defvar agent-repl--prompt-summary-forbid-warned nil
+  "Non-nil once the vendor-call refusal has been reported.
+The refusal is reported ONCE per session: it is a standing configuration
+fact, not a per-prompt event, and a warning on every keystroke-driven
+send would bury everything else in the log.")
+
+(defun agent-repl--prompt-summary-forbidden-p (ws)
+  "Return non-nil when a real vendor call is forbidden in this process.
+Reports the refusal at WARNING the first time and stays silent after."
+  (when (getenv agent-repl--prompt-summary-forbid-env)
+    (unless agent-repl--prompt-summary-forbid-warned
+      (setq agent-repl--prompt-summary-forbid-warned t)
+      (agent-repl--warn ws "elisp.prompt-summary.vendor-calls-forbidden env=%s -- prompt summaries are disabled for this process"
+                        agent-repl--prompt-summary-forbid-env))
+    t))
+
+(defun agent-repl--prompt-summary-command ()
+  "Return the argv of the headless summary run.
+`-p' is the headless print mode: one prompt on stdin, one answer on
+stdout, no session and no tools."
+  (list agent-repl-prompt-summary-program
+        "-p"
+        "--model" agent-repl-prompt-summary-model))
 
 (defun agent-repl--prompt-summary-spawn (ws raw)
   "Spawn the async claude process to summarize RAW for WS.
@@ -559,9 +596,7 @@ state-mutation entry point."
         ;; sentinel watcher attributes them to the calling workspace and
         ;; flips :agent-state to :done while the user's interactive Claude
         ;; is still mid-turn.
-        (let* ((cmd (agent-repl--backend-headless-cmd
-                     (agent-repl--ws-backend ws)
-                     agent-repl-prompt-summary-model nil))
+        (let* ((cmd (agent-repl--prompt-summary-command))
                (context (agent-repl--prompt-summary-collect-context ws))
                (proc-input (agent-repl--prompt-summary-build-input raw context))
                (sentinel (agent-repl--prompt-summary-make-sentinel ws raw out-buf))
@@ -587,6 +622,11 @@ even if the user has switched perspectives by the time it resolves."
   (cond
    ((not agent-repl-prompt-summary-enabled)
     (agent-repl--log ws "prompt-summary: kickoff skipped reason=disabled"))
+   ((agent-repl--prompt-summary-forbidden-p ws)
+    ;; Refuse outright: no spawn, no pending placeholder, no fabricated
+    ;; summary.  A faked one would be a fallback, and this is a real
+    ;; vendor call or it is nothing.
+    (agent-repl--log ws "prompt-summary: kickoff skipped reason=vendor-calls-forbidden"))
    ((not ws)
     (agent-repl--log nil "prompt-summary: kickoff skipped reason=no-workspace raw-type=%S" (type-of raw)))
    ((not (stringp raw))

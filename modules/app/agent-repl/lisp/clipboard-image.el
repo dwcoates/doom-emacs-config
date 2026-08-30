@@ -1,22 +1,31 @@
-;;; clipboard-image.el --- Attach clipboard images to the agent input buffer -*- lexical-binding: t; -*-
+;;; clipboard-image.el --- attach clipboard images to the composer -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Capture the system clipboard image into the workspace and drop its path
-;; into the current agent input buffer, overlaid with a thumbnail.  This
-;; covers the macOS screenshot-to-clipboard gesture (Cmd-Ctrl-Shift-4),
-;; which puts RAW image bytes on the pasteboard (a `«class PNGf»' and
-;; usually a `«class TIFF»' flavor) rather than a file on disk.
+;; Capture the system clipboard image into the workspace and ATTACH it to
+;; the current composer, overlaid with a thumbnail.  This covers the macOS
+;; screenshot-to-clipboard gesture (Cmd-Ctrl-Shift-4), which puts RAW
+;; image bytes on the pasteboard (a `«class PNGf»' and usually a
+;; `«class TIFF»' flavor) rather than a file on disk.
 ;;
-;; The inserted text IS the image's file path, so it rides the normal
-;; text send unchanged and the agent reads the image with its Read tool.
-;; No daemon/shim/webapp changes are needed -- this is an Emacs-side,
-;; input-buffer-only capability.
+;; THE IMAGE IS AN ATTACHMENT, NOT TEXT.  The captured file is registered
+;; on the input buffer through `agent-repl-input-attach-image', and the
+;; composer turns each attachment into one `ImageBlock{path, media_type}'
+;; beside the text block of the `UserSaid' it submits.  Nothing is
+;; inserted into the buffer text: a path token would have travelled as
+;; WORDS and left the agent to guess that they named an image, where the
+;; content model states it by ARM.
+;;
+;; The thumbnail is still drawn -- as an overlay on a marker line the
+;; capture inserts -- so the user can see what they attached.  That line
+;; is stripped from the composer along with everything else the moment the
+;; daemon accepts the submission.
 ;;
 ;; Capture strategy (macOS): an AppleScript writes the clipboard's PNG
 ;; flavor straight to a file; when only a TIFF flavor is present, the TIFF
-;; is written and then converted to PNG with `sips'.  Every shell-out goes
-;; through the single external-boundary wrapper
+;; is written and then converted to PNG with `sips'.  The MIME type is
+;; read from the FLAVOR that won, never sniffed from the extension.  Every
+;; shell-out goes through the single external-boundary wrapper
 ;; `agent-repl--image-call-process', registered in
 ;; `agent-repl--external-boundary-functions' (core.el) so the batch test
 ;; harness stubs the boundary instead of shelling out.
@@ -26,8 +35,11 @@
 (require 'image)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
+(declare-function agent-repl-input-attach-image "agent-repl-input" (path media-type))
+(declare-function agent-repl--input-buffer "agent-repl-input" (ws))
 (defvar agent-repl-input-mode-map)
 
 (defcustom agent-repl-image-thumbnail-max-height 220
@@ -105,11 +117,19 @@ non-nil only when the write leaves a non-empty DEST."
                        as-class dest exit-code nonempty written)
       written)))
 
+(defconst agent-repl--image-media-type "image/png"
+  "The MIME type every capture produces.
+Both flavors land as PNG: the PNG flavor is written straight out, and the
+TIFF flavor is converted by `sips' before it is attached.  The type is
+therefore stated by the capture, never sniffed from the extension by a
+later reader.")
+
 (defun agent-repl--image-capture-clipboard (dest &optional ws)
   "Capture the clipboard image to DEST (a .png path); return DEST or signal.
 Tries the PNG pasteboard flavor first (what a macOS screenshot provides),
 then a TIFF flavor converted to PNG with `sips'.  Signals a `user-error'
-when the clipboard holds no image at all."
+when the clipboard holds no image at all -- an empty attachment would be
+a silent no-op the user could not tell from a successful one."
   (agent-repl--log ws "clipboard-image: capture started destination=%s" dest)
   (let ((png-written (agent-repl--image-write-flavor "«class PNGf»" dest ws)))
     (cond
@@ -134,12 +154,12 @@ when the clipboard holds no image at all."
                        dest png-written)
       (user-error "agent-repl: no image found on the clipboard")))))
 
-;;;; ---- Buffer insertion -----------------------------------------------------
+;;;; ---- Buffer marker and attachment ---------------------------------------
 
 (defun agent-repl--image-thumbnail (path &optional ws)
   "Return an image descriptor for PATH scaled to the thumbnail height, or nil.
 Nil when this frame cannot render PNG images (e.g. a TTY frame), so callers
-fall back to the plain path text."
+fall back to the plain marker text."
   (let* ((graphic (display-graphic-p))
          (png-available (and graphic (image-type-available-p 'png)))
          (thumbnail (and png-available
@@ -151,15 +171,23 @@ fall back to the plain path text."
                      agent-repl-image-thumbnail-max-height)
     thumbnail))
 
-(defun agent-repl--image-insert-token (path &optional ws)
-  "Insert PATH on its own line at point, overlaying a thumbnail when possible.
-The inserted buffer text is exactly PATH, so the normal text send carries
-it unchanged; the thumbnail is an overlay `display' that never alters the
-buffer text.  Return the overlay, or nil when no thumbnail was drawn."
+(defun agent-repl--image-marker-text (path)
+  "Return the composer marker line drawn for the attached image at PATH.
+It is a MARKER, not the payload: the image travels as its own
+`ImageBlock', and this line exists so the user can see that they attached
+something.  It is cleared with the rest of the composer once the daemon
+accepts the submission."
+  (format "[image attached: %s]" (file-name-nondirectory path)))
+
+(defun agent-repl--image-insert-marker (path &optional ws)
+  "Insert the attachment marker for PATH at point, overlaying a thumbnail.
+Returns the overlay, or nil when no thumbnail could be drawn.  The
+inserted text is the marker and never the path: the composer does not
+read this text to find the image."
   (let ((started-at-bol (bolp)))
     (unless started-at-bol (insert "\n"))
     (let ((start (point)))
-      (insert path)
+      (insert (agent-repl--image-marker-text path))
       (let ((overlay
              (when-let ((thumb (agent-repl--image-thumbnail path ws)))
                (let ((ov (make-overlay start (point))))
@@ -169,24 +197,28 @@ buffer text.  Return the overlay, or nil when no thumbnail was drawn."
                  ov))))
         (insert "\n")
         (agent-repl--log ws
-                         "clipboard-image: inserted token path=%s started-at-bol=%s thumbnail-overlay=%s"
+                         "clipboard-image: inserted marker path=%s started-at-bol=%s thumbnail-overlay=%s"
                          path started-at-bol (not (null overlay)))
         overlay))))
 
 ;;;###autoload
 (defun agent-repl-attach-clipboard-image ()
-  "Attach the clipboard image to this workspace's input buffer.
+  "Attach the clipboard image to this workspace's composer.
 Writes the clipboard image (a pasted file OR a macOS screenshot) into the
-workspace image dir, inserts its path at point, and overlays a thumbnail.
-The path rides the normal text send, so the agent reads the image via its
-Read tool.  Signals a `user-error' when the clipboard holds no image."
+workspace image dir, REGISTERS it as an attachment on the input buffer,
+and draws a thumbnail marker at point.  The composer submits it as an
+`ImageBlock{path, media_type}' beside its text block; nothing about the
+image rides the words.  Signals a `user-error' when the clipboard holds
+no image."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (dir (agent-repl--image-dir ws))
          (path (agent-repl--image-new-path dir ws))
          (dest (agent-repl--image-capture-clipboard path ws)))
-    (agent-repl--image-insert-token dest ws)
-    (agent-repl--log ws "attach-clipboard-image: wrote %s" dest)
+    (agent-repl-input-attach-image dest agent-repl--image-media-type)
+    (agent-repl--image-insert-marker dest ws)
+    (agent-repl--info ws "clipboard-image: attached ws=%s path=%s media-type=%s"
+                      ws dest agent-repl--image-media-type)
     (message "agent-repl: attached image %s" (file-name-nondirectory dest))
     dest))
 
