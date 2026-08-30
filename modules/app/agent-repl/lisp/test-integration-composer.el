@@ -58,7 +58,7 @@
                           (claude . ((sessionId . "vendor-1")
                                      (configDir . "/home/itest/.claude")))
                           (backfill . ((done . ())))
-                          (,composer . [])))))
+                          (,composer . ())))))
     (naming . ())))
 
 (defmacro agent-repl-itest-composer--with-composer (daemon gate ref &rest body)
