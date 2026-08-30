@@ -1481,27 +1481,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // The vendor no longer has it and nobody stopped it: we simply stopped
       // being able to see it, which is what `lost.swept_up` says.
       //
-      // THE KIND COMES FROM THE RECORD, never from a guess: every terminal arm
-      // is kind-specific, so closing an unknown unit as a shell would claim it
-      // ran a command and closing it as a spawn would claim it made an agent.
-      // A unit the record cannot describe is reported and left open — the
-      // obligation is real, and inventing its kind would not discharge it.
+      // THE KIND COMES FROM WHERE THE WORK WAS FOUND (ruling, landing 5).
+      // `live_detached` is the store's NON-AGENT detached table — shell runs —
+      // so a row there is a shell run whether or not the book still describes
+      // its start, and a spawn unit found in the book is a spawn. NOTHING IS
+      // EVER LEFT OPEN: an obligation the shim declines to close is one that
+      // never gets a terminal at all, which breaks the whole invariant this
+      // reconciliation exists to hold.
       const run = toolCallActivityId(work.value);
       const item = findUnit(book, run);
-      if (item?.case === "bash") {
-        const recorded = findBashStart(book, run);
-        if (recorded !== undefined) {
-          closing.push(closingBashTerminal(agentId, run, recorded));
-          continue;
-        }
-      }
       if (item?.case === "subagent") {
         closing.push(closingSubagentTerminal(agentId, run));
         continue;
       }
-      LOGGER.log(
-        { level: "warn", work_id: work.value, kind: item?.case },
-        "the record cannot describe this live work; its terminal would have to invent the unit's kind, so it stays open",
+      const recorded = findBashStart(book, run);
+      if (recorded === undefined) {
+        LOGGER.log(
+          { level: "warn", work_id: work.value, kind: item?.case ?? "" },
+          "the record holds no describable start for this live shell run; closing it as swept up with no command stated",
+        );
+      }
+      closing.push(
+        closingBashTerminal(
+          agentId,
+          run,
+          recorded ??
+            // AN EMPTY LINE IS THE RECORD SAYING IT NEVER SAW ONE, which is
+            // exactly the situation; a terminal naming a command nobody
+            // observed would be the invention. The WARN above names the run so
+            // the gap is investigable rather than merely present.
+            create(conversationv1.AgentBashStartSchema, {
+              command: create(conversationv1.AgentBashCommandSchema, { line: "" }),
+            }),
+        ),
       );
     }
     for (const agent of open.liveAgents) {

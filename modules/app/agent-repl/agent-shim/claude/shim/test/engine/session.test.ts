@@ -1041,7 +1041,10 @@ describe("GetLiveWork reconciliation", () => {
     expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
   });
 
-  it("leaves work the record cannot describe OPEN rather than inventing its kind", async () => {
+  it("closes work the record cannot describe rather than leaving it open", async () => {
+    // RULING (landing 5): `live_detached` is the store's shell table, so a row
+    // there IS a shell run and its kind is known from where it was found. An
+    // obligation the shim declines to close never gets a terminal at all.
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
@@ -1049,9 +1052,43 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    // Every terminal arm is kind-specific: closing an unknown unit as a shell
-    // would claim it ran a command, and as a spawn that it made an agent.
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey.includes("b01"))).toBe(false);
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
+  });
+
+  it("closes an undescribable run with lost.swept_up", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01");
+    const outcome =
+      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
+        ? entry.item.frame.result.value.outcome
+        : undefined;
+    expect(
+      outcome?.case === "interrupted" && outcome.value.cause.case === "lost"
+        ? outcome.value.cause.value.how.case
+        : "",
+    ).toBe("sweptUp");
+  });
+
+  it("states no command for a run whose start the record never held", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01");
+    const command =
+      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
+        ? entry.item.frame.result.value.command
+        : undefined;
+    expect(command?.line).toBe("");
   });
 
   it("writes a closing terminal for a subagent that did not survive", async () => {
