@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_merge_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_merge_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfbWVyZ2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVTWVyZ2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFk1lcmdlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFU1lcmdlV29ya3NwYWNlU3VjY2VzcyIVChNNZXJnZVdvcmtzcGFjZUVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfbWVyZ2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVTWVyZ2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFk1lcmdlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFU1lcmdlV29ya3NwYWNlU3VjY2VzcyLnBAoTTWVyZ2VXb3Jrc3BhY2VFcnJvchJJChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2VIABJSChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjAuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJJChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIsLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVRyYW5zZmVycmluZ0F3YXlIABJECg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyKS5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkSAASRAoPbm9fbGF5b3V0X2ZhY3RzGAUgASgLMikuYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlTm9MYXlvdXRGYWN0c0gAEkUKD3Nlc3Npb25fZGVsZXRlZBgGIAEoCzIqLmFnZW50cmVwbC52MS5NZXJnZVdvcmtzcGFjZVNlc3Npb25EZWxldGVkSAASQwoOYWxyZWFkeV9xdWV1ZWQYByABKAsyKS5hZ2VudHJlcGwudjEuTWVyZ2VXb3Jrc3BhY2VBbHJlYWR5UXVldWVkSAASRQoPYWxyZWFkeV9tZXJnaW5nGAggASgLMiouYWdlbnRyZXBsLnYxLk1lcmdlV29ya3NwYWNlQWxyZWFkeU1lcmdpbmdIAEIHCgVjYXVzZSIgCh5NZXJnZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOgoiTWVyZ2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeTWVyZ2VXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobTWVyZ2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkIh0KG01lcmdlV29ya3NwYWNlTm9MYXlvdXRGYWN0cyIeChxNZXJnZVdvcmtzcGFjZVNlc3Npb25EZWxldGVkIh0KG01lcmdlV29ya3NwYWNlQWxyZWFkeVF1ZXVlZCIeChxNZXJnZVdvcmtzcGFjZUFscmVhZHlNZXJnaW5nQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.MergeWorkspaceRequest
@@ -81,11 +81,80 @@ export const MergeWorkspaceSuccessSchema: GenMessage<MergeWorkspaceSuccess> = /*
   messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.MergeWorkspaceError
  */
 export type MergeWorkspaceError = Message<"agentrepl.v1.MergeWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.MergeWorkspaceError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceUnknownWorkspace unknown_workspace = 1;
+     */
+    value: MergeWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: MergeWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceTransferringAway transferring_away = 3;
+     */
+    value: MergeWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceNotYetAdopted not_yet_adopted = 4;
+     */
+    value: MergeWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The daemon holds no layout facts for this workspace to merge with.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceNoLayoutFacts no_layout_facts = 5;
+     */
+    value: MergeWorkspaceNoLayoutFacts;
+    case: "noLayoutFacts";
+  } | {
+    /**
+     * The workspace's session has been deleted.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceSessionDeleted session_deleted = 6;
+     */
+    value: MergeWorkspaceSessionDeleted;
+    case: "sessionDeleted";
+  } | {
+    /**
+     * This workspace's merge is already in the queue.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceAlreadyQueued already_queued = 7;
+     */
+    value: MergeWorkspaceAlreadyQueued;
+    case: "alreadyQueued";
+  } | {
+    /**
+     * This workspace's merge is already in flight.
+     *
+     * @generated from field: agentrepl.v1.MergeWorkspaceAlreadyMerging already_merging = 8;
+     */
+    value: MergeWorkspaceAlreadyMerging;
+    case: "alreadyMerging";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -94,4 +163,120 @@ export type MergeWorkspaceError = Message<"agentrepl.v1.MergeWorkspaceError"> & 
  */
 export const MergeWorkspaceErrorSchema: GenMessage<MergeWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceUnknownWorkspace
+ */
+export type MergeWorkspaceUnknownWorkspace = Message<"agentrepl.v1.MergeWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceUnknownWorkspace.
+ * Use `create(MergeWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const MergeWorkspaceUnknownWorkspaceSchema: GenMessage<MergeWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch
+ */
+export type MergeWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceWorkspaceRefMismatch.
+ * Use `create(MergeWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const MergeWorkspaceWorkspaceRefMismatchSchema: GenMessage<MergeWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceTransferringAway
+ */
+export type MergeWorkspaceTransferringAway = Message<"agentrepl.v1.MergeWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceTransferringAway.
+ * Use `create(MergeWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const MergeWorkspaceTransferringAwaySchema: GenMessage<MergeWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceNotYetAdopted
+ */
+export type MergeWorkspaceNotYetAdopted = Message<"agentrepl.v1.MergeWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceNotYetAdopted.
+ * Use `create(MergeWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const MergeWorkspaceNotYetAdoptedSchema: GenMessage<MergeWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 7);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceNoLayoutFacts
+ */
+export type MergeWorkspaceNoLayoutFacts = Message<"agentrepl.v1.MergeWorkspaceNoLayoutFacts"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceNoLayoutFacts.
+ * Use `create(MergeWorkspaceNoLayoutFactsSchema)` to create a new message.
+ */
+export const MergeWorkspaceNoLayoutFactsSchema: GenMessage<MergeWorkspaceNoLayoutFacts> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 8);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceSessionDeleted
+ */
+export type MergeWorkspaceSessionDeleted = Message<"agentrepl.v1.MergeWorkspaceSessionDeleted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceSessionDeleted.
+ * Use `create(MergeWorkspaceSessionDeletedSchema)` to create a new message.
+ */
+export const MergeWorkspaceSessionDeletedSchema: GenMessage<MergeWorkspaceSessionDeleted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 9);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceAlreadyQueued
+ */
+export type MergeWorkspaceAlreadyQueued = Message<"agentrepl.v1.MergeWorkspaceAlreadyQueued"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceAlreadyQueued.
+ * Use `create(MergeWorkspaceAlreadyQueuedSchema)` to create a new message.
+ */
+export const MergeWorkspaceAlreadyQueuedSchema: GenMessage<MergeWorkspaceAlreadyQueued> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 10);
+
+/**
+ * @generated from message agentrepl.v1.MergeWorkspaceAlreadyMerging
+ */
+export type MergeWorkspaceAlreadyMerging = Message<"agentrepl.v1.MergeWorkspaceAlreadyMerging"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.MergeWorkspaceAlreadyMerging.
+ * Use `create(MergeWorkspaceAlreadyMergingSchema)` to create a new message.
+ */
+export const MergeWorkspaceAlreadyMergingSchema: GenMessage<MergeWorkspaceAlreadyMerging> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_merge_workspace, 11);
 
