@@ -754,14 +754,18 @@ describe("reconciliation at session start", () => {
     }
   });
 
-  // GetLiveWork's CALL COUNT is not observable from outside: `FakeStore` exposes
-  // `writes()` but no record of the read verbs it served, so "called once" can
-  // only be asserted with a lever the fake does not have (it is not this
-  // agent's file to add one to). The OBSERVABLE half — that every seeded item is
-  // either announced or closed — is the two tests above.
-  test.todo(
-    "GetLiveWork is called exactly once at session start — needs a read-call ledger on the fake store (test/fakes/store-server.ts, not this agent's file)",
-  );
+  test("GetLiveWork is called exactly ONCE, at session start", async () => {
+    // It answers "what did the record see START and never see END", which is
+    // timeless and cannot go stale — so asking again would be the shim
+    // treating the record as a live view of the world.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    await shim.clients.h1.startTurn(turnFor({ turn: "t1", text: "!bash-detach-live" }));
+
+    const liveWorkReads = (shim.store?.reads() ?? []).filter((read) => read.rpc === "GetLiveWork");
+    expect(liveWorkReads.length).toBe(1);
+  });
 });
 
 describe("a fan-wide cancel", () => {
