@@ -194,6 +194,134 @@ loaded after this one silently reached the real `git' / `gh' / daemon."
   (should-error (agent-repl--launchctl-call "list")
                 :type 'error))
 
+
+;;;; ---- config.el's load list ----
+
+(ert-deftest agent-repl-config-test-loads-verbs ()
+  "verbs.el is in the load list: without it every workspace verb is unbound."
+  (should (string-match-p "(agent-repl--load-module \"verbs\")"
+                          (with-temp-buffer
+                            (insert-file-contents
+                             (expand-file-name "config.el"
+                                               agent-repl-config-test--module-root))
+                            (buffer-string)))))
+
+(ert-deftest agent-repl-config-test-loads-no-deleted-module ()
+  "config.el names no module this branch deleted.
+A `load!' of a missing file is a load ERROR, which fails the whole
+module, so this is the cheapest place to catch a stale load line."
+  (let ((text (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "config.el" agent-repl-config-test--module-root))
+                (buffer-string))))
+    (dolist (name '("merge-handlers" "workspace-create-client"))
+      (should-not (string-match-p (format "(agent-repl--load-module \"%s\")" name)
+                                  text)))))
+
+;;;; ---- The doctor's daemon probe ----
+;;
+;; THREE OUTCOMES, and the distinction between the last two is the point: a
+;; daemon that is not there cannot be unhealthy, and conflating the two sends
+;; the reader hunting for faults in a process that does not exist.
+
+(defvar agent-repl-config-test--doctor-loaded nil
+  "Non-nil once doctor.el has been loaded for these tests.")
+
+(defvar agent-repl-config-test--module-root
+  (expand-file-name ".." (file-name-directory (or load-file-name buffer-file-name)))
+  "The module root, captured at LOAD time.
+`load-file-name' is bound only while a file is loading, so a test body
+that reads it at run time gets nil.")
+
+(defun agent-repl-config-test--load-doctor ()
+  "Load doctor.el once, with its top-level aggregation neutralized.
+doctor.el is a SCRIPT, not a library: `doom doctor' loads it for the side
+effect of running every check and reporting through `warn!'.  Loading it
+to reach one function therefore means stubbing the reporters and giving
+the probe a no-daemon answer, so the load itself finds nothing and says
+nothing."
+  (unless agent-repl-config-test--doctor-loaded
+    (cl-letf (((symbol-function 'warn!) (lambda (&rest _) nil))
+              ((symbol-function 'error!) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil)))
+      (load (expand-file-name "doctor.el" agent-repl-config-test--module-root) nil t))
+    (setq agent-repl-config-test--doctor-loaded t)))
+
+(defmacro agent-repl-config-test--with-doctor (&rest body)
+  "Run BODY with doctor.el loaded and its probe dependencies stubbed."
+  (declare (indent 0))
+  `(progn
+     (agent-repl-config-test--load-doctor)
+     (cl-letf (((symbol-function 'agent-repl-connect-open) (lambda (_a) 'conn))
+               ((symbol-function 'agent-repl-connect-close) (lambda (_c) nil)))
+       ,@body)))
+
+(ert-deftest agent-repl-config-test-doctor-reports-no-daemon-addr ()
+  "An absent daemon.addr means no daemon has been started."
+  (agent-repl-config-test--with-doctor
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil))
+              ((symbol-function 'agent-repl-rpc-daemon-health-sync) (lambda (&rest _) nil)))
+      (let ((issues (agent-repl--doctor-daemon-issues)))
+        (should (equal (length issues) 1))
+        (should (string-match-p "no daemon.addr" (cdr (car issues))))))))
+
+(ert-deftest agent-repl-config-test-doctor-reports-a-stale-addr ()
+  "A transport failure is evidence about the FILE, never about health."
+  (agent-repl-config-test--with-doctor
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
+               (lambda () "127.0.0.1:1234"))
+              ((symbol-function 'agent-repl-rpc-daemon-health-sync)
+               (lambda (&rest _) (error "connection refused"))))
+      (let ((issues (agent-repl--doctor-daemon-issues)))
+        (should (equal (length issues) 1))
+        (should (string-match-p "no daemon answering" (cdr (car issues))))
+        (should (string-match-p "stale daemon.addr" (cdr (car issues))))))))
+
+(ert-deftest agent-repl-config-test-doctor-stale-addr-is-not-unhealthy ()
+  "A daemon that is not there is never REPORTED as an unhealthy one."
+  (agent-repl-config-test--with-doctor
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
+               (lambda () "127.0.0.1:1234"))
+              ((symbol-function 'agent-repl-rpc-daemon-health-sync)
+               (lambda (&rest _) (error "connection refused"))))
+      (should-not (string-match-p "UNHEALTHY"
+                                  (cdr (car (agent-repl--doctor-daemon-issues))))))))
+
+(ert-deftest agent-repl-config-test-doctor-healthy-daemon-is-no-finding ()
+  "The doctor reports findings, and a healthy daemon is not one."
+  (agent-repl-config-test--with-doctor
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
+               (lambda () "127.0.0.1:1234"))
+              ((symbol-function 'agent-repl-rpc-daemon-health-sync)
+               (lambda (&rest _) '(:arm :success :value (:arm :healthy :value nil)))))
+      (should-not (agent-repl--doctor-daemon-issues)))))
+
+(ert-deftest agent-repl-config-test-doctor-unhealthy-prints-each-fault ()
+  "UNHEALTHY IS AN ANSWER: one issue for the verdict, one per fault."
+  (agent-repl-config-test--with-doctor
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
+               (lambda () "127.0.0.1:1234"))
+              ((symbol-function 'agent-repl-rpc-daemon-health-sync)
+               (lambda (&rest _)
+                 '(:arm :success
+                   :value (:arm :unhealthy
+                           :value (:faults ((:detail "shim adoption stalled"))))))))
+      (let ((issues (agent-repl--doctor-daemon-issues)))
+        (should (equal (length issues) 2))
+        (should (string-match-p "UNHEALTHY (1 fault" (cdr (nth 0 issues))))
+        (should (string-match-p "shim adoption stalled" (cdr (nth 1 issues))))))))
+
+(ert-deftest agent-repl-config-test-doctor-refused-question-still-proves-a-daemon ()
+  "A daemon that REFUSES the health question is still a daemon that answered."
+  (agent-repl-config-test--with-doctor
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
+               (lambda () "127.0.0.1:1234"))
+              ((symbol-function 'agent-repl-rpc-daemon-health-sync)
+               (lambda (&rest _) '(:arm :error :value nil))))
+      (let ((issues (agent-repl--doctor-daemon-issues)))
+        (should (equal (length issues) 1))
+        (should (string-match-p "refused the health question" (cdr (car issues))))))))
+
 (provide 'test-config)
 
 ;;; test-config.el ends here
