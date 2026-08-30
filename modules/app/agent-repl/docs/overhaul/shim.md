@@ -516,3 +516,9 @@ purpose).
 - store.v1 WatchBashRun serves the sidecar-written bash rows; WatchBash serves a run from it when the shim did not write the run itself.
 - The detached-work announcement is a page line keyed `detached:<work id>`; the run's rows live in the lifecycle table only.
 - Producer string `claude-shim:<original vendor session id>`.
+
+## Landing 4 relay (2026-08-29, project lead)
+
+- SessionUpdate.rate_limit_status maps the SDK's `rate_limit_event` (seconds→ms, fraction→percent, presence never sentinels).
+- SessionUpdate tag 24 retired; the budget warning is the sidecar's AgentUpdate page line.
+- SessionStarted.live_work always announces `created`-origin; DetachedWorkId.value == the unit's AgentActivityId.
