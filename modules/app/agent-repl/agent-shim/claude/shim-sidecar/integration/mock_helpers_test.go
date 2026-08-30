@@ -33,6 +33,7 @@ package integration
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -43,6 +44,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -775,4 +777,333 @@ func mockLogTail(path string) string {
 		lines = lines[len(lines)-12:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// The invariants every generated scenario must satisfy.
+// ---------------------------------------------------------------------------
+
+// allowedVendorSpecificPrefixes and allowedVendorSpecificKinds are the residue
+// classes the sidecar's AGENTS.md documents ("Withholding classes"). A kind
+// outside them is a MODELLING GAP the mock exposed, not a licence to widen the
+// list: widening it needs the evidence stated in the report.
+var (
+	allowedVendorSpecificPrefixes = []string{
+		"attachment/",    // context-cut exclusions and the other attachment machinery
+		"content_block/", // unmodeled content blocks
+		"system/",        // the informational / turn_duration / away_summary … system lines
+		"file-history-",  // the file-history pair
+		"workflow/",      // workflow journals and spools — KICKED this wave
+	}
+	allowedVendorSpecificKinds = map[string]bool{
+		"mode":                   true,
+		"permission-mode":        true,
+		"queue-operation":        true,
+		"last-prompt":            true,
+		"ai-title":               true,
+		"pr-link":                true,
+		"frame-link":             true,
+		"attribution-snapshot":   true,
+		"no_response_requested":  true,
+		"orphan_tool_result":     true,
+		vendorSpecificUserPrompt: true, // R15: a file-plane user prompt is never a page line
+	}
+)
+
+func vendorSpecificKindAllowed(kind string) bool {
+	if allowedVendorSpecificKinds[kind] {
+		return true
+	}
+	for _, prefix := range allowedVendorSpecificPrefixes {
+		if strings.HasPrefix(kind, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// requireNoUnparsedResidue: NOTHING the mocked vendor writes may fail to parse.
+// `unparsed` is the reader's last resort for bytes that are not JSON at all, and
+// the mock writes JSON lines exclusively.
+func requireNoUnparsedResidue(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, u := range unparsedOf(entries) {
+		t.Errorf("%s: the sidecar could not PARSE a line the mocked vendor wrote: source=%q offset=%d error=%q",
+			scenario, u.GetSource(), u.GetOffset(), u.GetParseError())
+	}
+}
+
+// requireNoUnknownResidue: every discriminator the mock writes is one the
+// converter models or deliberately withholds. An `unknown` is the converter
+// saying it parsed a record and does not know what it is — for a scenario built
+// from the corpus that is a producer defect by definition.
+func requireNoUnknownResidue(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, u := range unknownsOf(entries) {
+		t.Errorf("%s: the sidecar parsed a record it does not model: field=%q discriminator=%q",
+			scenario, u.GetDiscriminatorField(), u.GetDiscriminator())
+	}
+}
+
+// requireDocumentedVendorSpecificKinds: withholding is deliberate and its
+// classes are enumerated. A kind outside the documented set means the converter
+// withheld something nobody decided to withhold.
+func requireDocumentedVendorSpecificKinds(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, kind := range vendorSpecificKinds(entries) {
+		if !vendorSpecificKindAllowed(kind) {
+			t.Errorf("%s: vendor_specific kind %q is outside the documented withholding classes", scenario, kind)
+		}
+	}
+}
+
+// requireBooksAreKnownAgents: every page line names a book that EXISTS as a
+// file-plane identity — the transcript FILE's session uuid for a main agent
+// (R9), the spawning call's tool_use_id from `agent-<id>.meta.json` for a
+// subagent. A line in a book nobody can address is a line nobody can read.
+func requireBooksAreKnownAgents(t *testing.T, scenario string, tree *mockTree, entries []*storev1.StoreEntry) {
+	t.Helper()
+	known := map[string]string{}
+	for _, id := range tree.MainAgentIDs() {
+		known[id] = "the transcript file's session uuid"
+	}
+	for _, id := range mockSubagentBookIDs(t, tree) {
+		known[id] = "a subagent's meta.json toolUseId"
+	}
+	for _, line := range pageLinesOf(entries) {
+		book := line.GetPageAgentId().GetValue()
+		if _, ok := known[book]; !ok {
+			t.Errorf("%s: a page line names the book %q, which is neither a transcript file's session uuid %v "+
+				"nor a subagent's meta.json toolUseId %v", scenario, book, tree.MainAgentIDs(), mockSubagentBookIDs(t, tree))
+		}
+	}
+}
+
+// mockSubagentBookIDs reads each generated `agent-<id>.meta.json` and answers
+// its `toolUseId` — the identity a subagent's own book is keyed by.
+func mockSubagentBookIDs(t *testing.T, tree *mockTree) []string {
+	t.Helper()
+	var out []string
+	for _, transcript := range tree.Subagents {
+		meta := strings.TrimSuffix(transcript, ".jsonl") + ".meta.json"
+		raw, err := os.ReadFile(meta)
+		if err != nil {
+			t.Fatalf("a subagent transcript has no metadata sidecar beside it (%s): %v", meta, err)
+		}
+		var fields struct {
+			AgentType   string `json:"agentType"`
+			Description string `json:"description"`
+			ToolUseID   string `json:"toolUseId"`
+			SpawnDepth  int    `json:"spawnDepth"`
+		}
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatalf("decoding %s: %v", meta, err)
+		}
+		if fields.ToolUseID == "" {
+			t.Fatalf("%s carries no toolUseId, which is the only key a subagent's book has", meta)
+		}
+		out = append(out, fields.ToolUseID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// blockUnit is one text-or-thinking unit addressed as `<message.id>:<ordinal>`.
+type blockUnit struct {
+	messageID string
+	ordinal   int
+	hasUsage  bool
+}
+
+// mockBlockUnits reads every `activity:<message.id>:<ordinal>` unit off the wire.
+// Tool-call units are addressed by their `tool_use_id` instead and are not here;
+// they still CONSUME an ordinal, which is why the ordinals of the block units
+// alone are asserted as a subset rather than as a dense run.
+func mockBlockUnits(t *testing.T, entries []*storev1.StoreEntry) []blockUnit {
+	t.Helper()
+	var out []blockUnit
+	for _, e := range entries {
+		key := e.GetUpsertKey()
+		if !strings.HasPrefix(key, "activity:") {
+			continue
+		}
+		id := strings.TrimPrefix(key, "activity:")
+		cut := strings.LastIndex(id, ":")
+		if cut < 0 {
+			continue // a tool call, addressed by its tool_use_id
+		}
+		ordinal, err := strconv.Atoi(id[cut+1:])
+		if err != nil {
+			continue // likewise: a tool_use_id that happens to contain a colon
+		}
+		activity := e.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity()
+		out = append(out, blockUnit{messageID: id[:cut], ordinal: ordinal, hasUsage: activity.GetUsage() != nil})
+	}
+	return out
+}
+
+// requireBlockUnitsAreAddressedByBlock: an assistant message becomes SEVERAL
+// units, one per content block, each addressed `<message.id>:<block ordinal>`
+// with the ordinals running ACROSS the LINES that share the message id — the
+// mock writes one line per block, so a converter that restarted the count per
+// line would collide two units onto one identity.
+//
+// The ordinals are asserted DISTINCT rather than dense: a `tool_use` block is
+// addressed by its own `tool_use_id` and an exempt block produces no unit at
+// all, so a response legitimately yields a sparse set here. Distinctness is the
+// property that matters — it is what makes the identity a per-block address.
+func requireBlockUnitsAreAddressedByBlock(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	seen := map[string]map[int]bool{}
+	for _, unit := range mockBlockUnits(t, entries) {
+		if unit.ordinal < 0 {
+			t.Errorf("%s: block unit %s:%d has a negative ordinal", scenario, unit.messageID, unit.ordinal)
+			continue
+		}
+		if seen[unit.messageID] == nil {
+			seen[unit.messageID] = map[int]bool{}
+		}
+		if seen[unit.messageID][unit.ordinal] {
+			t.Errorf("%s: two units share the identity %s:%d, so one of them is unaddressable",
+				scenario, unit.messageID, unit.ordinal)
+		}
+		seen[unit.messageID][unit.ordinal] = true
+	}
+}
+
+// requireUsageOnTheFirstBlockOnly: EXACTLY ONE unit per API response carries
+// `usage`, the unit for block 0. A consumer that sums units would otherwise
+// over-count the bill by the number of blocks.
+func requireUsageOnTheFirstBlockOnly(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, unit := range mockBlockUnits(t, entries) {
+		if unit.ordinal != 0 && unit.hasUsage {
+			t.Errorf("%s: unit %s:%d carries usage, but only block 0 of a response may",
+				scenario, unit.messageID, unit.ordinal)
+		}
+	}
+}
+
+// requireContextCutPageLine: the compaction and clear scenarios each land ONE
+// context_cut page line of the main agent's book.
+func requireContextCutPageLine(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	n := 0
+	for _, line := range pageLinesOf(entries) {
+		if contextCutOf(line) != nil {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%s: expected exactly one AgentUpdate.context_cut page line, got %d", scenario, n)
+	}
+}
+
+// requireAPIErrorPageLine: a `system/api_error` record is MID-TURN EVIDENCE and
+// lands as its own page line, never as the turn's terminal.
+func requireAPIErrorPageLine(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, line := range pageLinesOf(entries) {
+		if apiErrorOf(line) != nil {
+			return
+		}
+	}
+	t.Errorf("%s: no AgentUpdate.api_error page line was produced", scenario)
+}
+
+// requireContextBudgetWarning: the vendor's budget warning is a FILE-PLANE fact
+// with no stream producer, so the sidecar is its only producer and it must
+// arrive as a page line carrying the vendor's own sentence.
+func requireContextBudgetWarning(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, line := range pageLinesOf(entries) {
+		warning := frameOf(line).GetUpdate().GetContextBudgetWarning()
+		if warning == nil {
+			continue
+		}
+		if warning.GetText() == "" {
+			t.Errorf("%s: the context-budget warning landed with no text; the sentence IS the record", scenario)
+		}
+		return
+	}
+	t.Errorf("%s: no AgentUpdate.context_budget_warning page line was produced", scenario)
+}
+
+// requireKeepAliveNeverReachesAPage: a keep-alive turn's records land on
+// `unserved_item.keepalive`, which is structurally unable to appear in a page.
+func requireKeepAliveNeverReachesAPage(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	if len(keepalivesOf(entries)) == 0 {
+		t.Errorf("%s: the keep-alive marker produced no unserved_item.keepalive entries at all", scenario)
+	}
+	for _, line := range pageLinesOf(entries) {
+		if frameOf(line).GetUpdate().GetActivity() != nil {
+			t.Errorf("%s: a keep-alive turn produced a page line (unit %s); keep-alive work is never served",
+				scenario, activityOf(line).GetActivityId().GetValue())
+		}
+	}
+}
+
+// requireSubagentBook: a subagent's constituents form ITS OWN book, keyed by the
+// spawning call's tool_use_id, and the spawn unit is a line in the PARENT's.
+func requireSubagentBook(t *testing.T, scenario string, tree *mockTree, entries []*storev1.StoreEntry) {
+	t.Helper()
+	books := mockSubagentBookIDs(t, tree)
+	if len(books) == 0 {
+		t.Fatalf("%s: the scenario is declared to spawn a subagent, but the mock wrote no agent-<id>.meta.json", scenario)
+	}
+	for _, book := range books {
+		if len(linesForBook(entries, book)) == 0 {
+			t.Errorf("%s: the subagent book %q (its meta.json toolUseId) holds no page lines", scenario, book)
+		}
+	}
+}
+
+// requireBashRunReadableThroughTheStore: a detached shell's rows are read back
+// through the REAL store's WatchBashRun — start, contiguous deltas, terminal —
+// which is the only surface a consumer has for them.
+func requireBashRunReadableThroughTheStore(t *testing.T, scenario string, in *mockIngest) {
+	t.Helper()
+	runs := mockDetachedRuns(in.Entries())
+	if len(runs) == 0 {
+		t.Fatalf("%s: the scenario is declared to launch a detached shell, but no bash rows were written", scenario)
+	}
+	ctx, cancel := testContext(t)
+	defer cancel()
+	for _, run := range runs {
+		rows := awaitBashRunTerminal(ctx, t, in.Store.Client, run)
+		requireBashReplayOrder(t, run, rows)
+		requireContiguousDeltas(t, run, rows)
+	}
+}
+
+// mockDetachedRuns answers every detached run id the sidecar wrote bash rows for.
+func mockDetachedRuns(entries []*storev1.StoreEntry) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, b := range bashFramesOf(entries) {
+		run := b.GetRun().GetValue()
+		if run != "" && !seen[run] {
+			seen[run] = true
+			out = append(out, run)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// requireExitCodeInTheTerminal: the spool's `EXIT=<code>` marker is the run's
+// termination and rides the terminal row, never a delta.
+func requireExitCodeInTheTerminal(t *testing.T, scenario string, in *mockIngest) {
+	t.Helper()
+	ctx, cancel := testContext(t)
+	defer cancel()
+	for _, run := range mockDetachedRuns(in.Entries()) {
+		rows := awaitBashRunTerminal(ctx, t, in.Store.Client, run)
+		terminal := rows[len(rows)-1]
+		if terminal.GetSuccess().GetCompleted().GetTermination().GetExited() == nil {
+			t.Errorf("%s: run %s terminated without an `exited` termination: %v",
+				scenario, run, describeBashRows(rows[len(rows)-1:]))
+		}
+	}
 }
