@@ -22,20 +22,6 @@ const (
 	opSelfCheck  = "daemon.health.self_check"
 )
 
-// The fault kinds the reporter raises itself. They are its own liveness
-// evidence, distinct from the shim's SessionFault vocabulary.
-const (
-	// FaultKindStateUnreadable is the daemon-scope fault the liveness
-	// self-check raises when its own state client will not answer.
-	FaultKindStateUnreadable = "daemon_state_unreadable"
-	// FaultKindSessionAbsent is the session-scope fault raised when a
-	// workspace has no live session at all.
-	FaultKindSessionAbsent = "session_absent"
-	// FaultKindLinkSevered is the session-scope fault raised when the
-	// daemon-to-shim link is not serving.
-	FaultKindLinkSevered = "session_link_severed"
-)
-
 // reporter is the Reporter. It holds no state of its own: every fault lives in
 // WSM, and liveness is answered by the injected fleet probe.
 type reporter struct {
@@ -62,9 +48,7 @@ func (r *reporter) Daemon(ctx context.Context) (*agentreplv1.DaemonHealthRespons
 			"scope": "daemon",
 			"cause": err.Error(),
 		})
-		faults = append(faults, &agentreplv1.DaemonFault{
-			Detail: fmt.Sprintf("%s: %v", FaultKindStateUnreadable, err),
-		})
+		faults = append(faults, selfCheckFault(err))
 		return unhealthyDaemon(faults), nil
 	}
 	log.Debug(opSelfCheck, "state client answered the open-fault read", dlog.Context{
@@ -77,7 +61,7 @@ func (r *reporter) Daemon(ctx context.Context) (*agentreplv1.DaemonHealthRespons
 		if f.Workspace != nil {
 			continue
 		}
-		faults = append(faults, &agentreplv1.DaemonFault{Detail: faultDetail(f)})
+		faults = append(faults, daemonFault(f))
 	}
 	if len(faults) > 0 {
 		log.Warn(opDaemon, "daemon is unhealthy", dlog.Context{"faults": len(faults)})
@@ -120,17 +104,17 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 	exists, connected := r.live(ws)
 	switch {
 	case !exists:
-		wsLog.Warn(opSession, "no live session", dlog.Context{"kind": FaultKindSessionAbsent})
-		faults = append(faults, &agentreplv1.SessionFault{
-			Detail: FaultKindSessionAbsent + ": the workspace has no live session",
-		})
+		wsLog.Warn(opSession, "no live session", dlog.Context{"kind": KindSessionAbsent})
+		faults = append(faults, sessionFault(wsm.Fault{
+			Kind: KindSessionAbsent, Detail: "the workspace has no live session",
+		}))
 	case !connected:
 		wsLog.Warn(opSession, "the daemon-to-shim link is not serving", dlog.Context{
-			"kind": FaultKindLinkSevered,
+			"kind": KindLinkSevered,
 		})
-		faults = append(faults, &agentreplv1.SessionFault{
-			Detail: FaultKindLinkSevered + ": the daemon-to-shim link is not serving",
-		})
+		faults = append(faults, sessionFault(wsm.Fault{
+			Kind: KindLinkSevered, Detail: "the daemon-to-shim link is not serving",
+		}))
 	default:
 		wsLog.Debug(opSession, "the session is live and the link is serving", nil)
 	}
@@ -138,13 +122,13 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 	open, err := r.db.OpenFaults(ctx, wsm.FaultScope{Workspace: &ws})
 	if err != nil {
 		wsLog.Error(opSession, "state client refused the open-fault read", dlog.Context{"cause": err.Error()})
-		faults = append(faults, &agentreplv1.SessionFault{
-			Detail: fmt.Sprintf("%s: %v", FaultKindStateUnreadable, err),
-		})
+		faults = append(faults, sessionFault(wsm.Fault{
+			Kind: KindStateUnreadable, Detail: err.Error(),
+		}))
 		return unhealthySession(faults), nil
 	}
 	for _, f := range open {
-		faults = append(faults, &agentreplv1.SessionFault{Detail: faultDetail(f)})
+		faults = append(faults, sessionFault(f))
 	}
 
 	if len(faults) > 0 {
@@ -212,15 +196,6 @@ func (r *reporter) OpenFaults(ctx context.Context, scope wsm.FaultScope) ([]wsm.
 	}
 	log.Debug(opOpenFaults, "read the open faults", dlog.Context{"count": len(out)})
 	return out, nil
-}
-
-// faultDetail renders one fault record as the wire's single detail line. The
-// kind leads so a reader can tell two faults apart without a second field.
-func faultDetail(f wsm.Fault) string {
-	if f.Detail == "" {
-		return f.Kind
-	}
-	return f.Kind + ": " + f.Detail
 }
 
 func unhealthyDaemon(faults []*agentreplv1.DaemonFault) *agentreplv1.DaemonHealthResponse {
