@@ -113,7 +113,16 @@ export class SessionPushes {
   constructor(private readonly nowMs: () => number = () => Date.now()) {}
 
   /** The arms a joining subscriber is caught up on, in the order it gets them. */
-  private static readonly REPLAYED = ["contextUsage", "modelChanged", "permissionModeChanged"];
+  //
+  // `fastMode` is replayed for the same reason the model is: it is a LEVEL the
+  // session is in, not an event, and a consumer that attached after the vendor
+  // last stated it would otherwise draw the toggle from nothing.
+  private static readonly REPLAYED = [
+    "contextUsage",
+    "modelChanged",
+    "permissionModeChanged",
+    "fastMode",
+  ];
 
   /**
    * Open one standing stream.

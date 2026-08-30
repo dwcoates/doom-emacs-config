@@ -1261,3 +1261,109 @@ describe("the model the vendor answers on", () => {
     expect(names.filter((name) => name === "claude-haiku-4-5").length).toBe(1);
   });
 });
+
+describe("fast mode", () => {
+  /** A turn terminal restating the session's fast-mode state. */
+  const resultWithFastMode = (state: string, reason?: string): never =>
+    ({
+      ...(resultMessage("u-fast") as unknown as Record<string, unknown>),
+      fast_mode_state: state,
+      ...(reason === undefined ? {} : { fast_mode_disabled_reason: reason }),
+    }) as never;
+
+  /** Every fast-mode arm the engine pushed, in order. */
+  async function pushedFastMode(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const arms: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "fastMode") arms.push(update.value.state.case ?? "");
+      }
+    })();
+    await act();
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+    return arms;
+  }
+
+  it("pushes the state a result reports", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+    });
+
+    expect(arms).toContain("on");
+  });
+
+  it("carries the vendor's own reason on the off arm", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const reasons: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "fastMode" && update.value.state.case === "off") {
+          reasons.push(update.value.state.value.reason);
+        }
+      }
+    })();
+
+    await h.engine.onSdkMessage(resultWithFastMode("off", "preference"));
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(reasons).toContain("preference");
+  });
+
+  it("distinguishes a cooldown from off", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("cooldown"));
+    });
+
+    expect(arms).toContain("cooldown");
+  });
+
+  it("pushes an unchanged state only once", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+    });
+
+    expect(arms.filter((arm) => arm === "on").length).toBe(1);
+  });
+
+  it("pushes nothing for a result that states no fast-mode state", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultMessage("u-silent"));
+    });
+
+    expect(arms).toEqual([]);
+  });
+
+  it("replays the current state to a consumer that joins late", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(resultWithFastMode("on"));
+
+    const arms = await pushedFastMode(h, async () => undefined);
+
+    expect(arms).toEqual(["on"]);
+  });
+});

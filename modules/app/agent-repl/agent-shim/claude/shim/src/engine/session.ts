@@ -67,6 +67,7 @@ import {
 import type { Engine } from "./engine.js";
 import type { EngineFold, FoldContext } from "./fold-context.js";
 import { SYNTHETIC_MODEL } from "../model.js";
+import { fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -359,6 +360,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     );
     effectiveModel = name;
     pushModel();
+  }
+
+  /**
+   * FAST MODE, from the two places the vendor states it.
+   *
+   * `init` states it at the session's start (and again after every rotation),
+   * and EVERY `result` restates it — which is what makes a mid-session change
+   * observable at all, since the vendor announces nothing when it flips. ONE
+   * PRODUCER: the fold's own `fast_mode` row still lands in the record, but the
+   * push is the engine's, so no consumer ever sees the same flip twice.
+   *
+   * Unchanged values are dropped by the fan-out itself, and a joining consumer
+   * is replayed the current one.
+   */
+  function noteFastMode(state: unknown, reason: unknown): void {
+    if (typeof state !== "string" || state === "") return;
+    LOGGER.logVerbose({ fast_mode_state: state }, "the vendor stated its fast-mode state");
+    pushes.push(fastModeUpdate(state, typeof reason === "string" ? reason : undefined));
   }
 
   function pushPermissionMode(): void {
@@ -798,11 +817,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         effectiveModel = message.model;
       }
       permissionMode = fromVendorPermissionMode(message.permissionMode);
+      noteFastMode(
+        (message as { fast_mode_state?: unknown }).fast_mode_state,
+        (message as { fast_mode_disabled_reason?: unknown }).fast_mode_disabled_reason,
+      );
       if (identity !== undefined && message.session_id !== identity.vendorSessionId) {
         void rotate(message.session_id);
       }
       initResolve?.(message);
       initResolve = undefined;
+      return;
+    }
+    if (message.type === "result") {
+      // EVERY RESULT RESTATES IT, which is the only way a flip mid-session is
+      // ever seen: the vendor announces the change nowhere else.
+      noteFastMode(
+        (message as { fast_mode_state?: unknown }).fast_mode_state,
+        (message as { fast_mode_disabled_reason?: unknown }).fast_mode_disabled_reason,
+      );
       return;
     }
     if (message.type === "assistant") {
