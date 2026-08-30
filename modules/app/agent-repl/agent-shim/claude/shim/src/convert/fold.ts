@@ -162,6 +162,10 @@ export function createFold(): Fold {
           { level: "error", sdk_message_type: (message as { type?: string }).type, detail },
           "converter defect: the message produced no frame and lands as residue",
         );
+        // THE CONTROL PLANE IS TOLD TOO. Residue keeps the record honest; the
+        // fault channel keeps the shim's own diagnostics honest, which is the
+        // only place a consumer can see that the converter is degraded.
+        context.reportFault?.("converter_defect", detail);
         return {
           entries: [
             residueEntry(
