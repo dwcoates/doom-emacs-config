@@ -59,6 +59,31 @@ func (s *sink) assertLogged(t *testing.T, level, substring string) {
 	t.Fatalf("no %s record mentioning %q; log was:\n%s", level, substring, s.file.String())
 }
 
+// assertTracedRefusal is the assertion for a REFUSED REQUEST: this layer traces
+// it at verbose with its statement and table, and writes NO normal-level record
+// for it, because the single normal-level record belongs to the server — the
+// only layer that knows the rpc, the request id and the producer the refusal
+// belongs to. Two normal-level records on one refusal is what "logged exactly
+// once" exists to prevent.
+func (s *sink) assertTracedRefusal(t *testing.T, substring string) {
+	t.Helper()
+	traced := false
+	for _, record := range s.records(t) {
+		message, _ := record["message"].(string)
+		if !strings.Contains(message, substring) {
+			continue
+		}
+		if record["verbosity"] == "verbose" {
+			traced = true
+			continue
+		}
+		t.Fatalf("a refused request wrote a normal-level record; the server owns that record: %v\nlog was:\n%s", record, s.file.String())
+	}
+	if !traced {
+		t.Fatalf("no verbose trace mentioning %q; log was:\n%s", substring, s.file.String())
+	}
+}
+
 // assertContext fails unless some record carries key=value in its context.
 func (s *sink) assertContext(t *testing.T, key string, value any) {
 	t.Helper()
