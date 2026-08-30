@@ -47,7 +47,12 @@ message UpdateShutdownScheduleResponse {
 }
 // The action is armed (schedule), cleared (cancel), or under way (now).
 message UpdateShutdownScheduleSuccess {}
-// EMPTY ON PURPOSE: arms DERIVED at the wave (nothing scheduled to cancel,
-// a newer schedule already stands), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message UpdateShutdownScheduleError {
+  oneof cause {
+    // Nothing is scheduled to cancel.
+    UpdateShutdownScheduleNothingScheduled nothing_scheduled = 1;
+  }
 }
+message UpdateShutdownScheduleNothingScheduled {}
