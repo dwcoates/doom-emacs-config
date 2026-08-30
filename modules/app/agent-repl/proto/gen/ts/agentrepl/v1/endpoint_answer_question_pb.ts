@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_answer_question.proto.
  */
 export const file_agentrepl_v1_endpoint_answer_question: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX3F1ZXN0aW9uLnByb3RvEgxhZ2VudHJlcGwudjEiogEKFUFuc3dlclF1ZXN0aW9uUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiUKCHF1ZXN0aW9uGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjMKB2Fuc3dlcnMYAyADKAsyIi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25BbnN3ZXIijAEKFEFuc3dlclF1ZXN0aW9uQW5zd2VyEhUKDXF1ZXN0aW9uX3RleHQYASABKAkSDgoGY2hvc2VuGAIgAygJEj4KCm90aGVyX3RleHQYAyABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25PdGhlclRleHRIAIgBAUINCgtfb3RoZXJfdGV4dCInChdBbnN3ZXJRdWVzdGlvbk90aGVyVGV4dBIMCgR0ZXh0GAEgASgJIo4BChZBbnN3ZXJRdWVzdGlvblJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25TdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25FcnJvckgAQggKBnJlc3VsdCIXChVBbnN3ZXJRdWVzdGlvblN1Y2Nlc3MiFQoTQW5zd2VyUXVlc3Rpb25FcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfYW5zd2VyX3F1ZXN0aW9uLnByb3RvEgxhZ2VudHJlcGwudjEiogEKFUFuc3dlclF1ZXN0aW9uUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiUKCHF1ZXN0aW9uGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkEjMKB2Fuc3dlcnMYAyADKAsyIi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25BbnN3ZXIijAEKFEFuc3dlclF1ZXN0aW9uQW5zd2VyEhUKDXF1ZXN0aW9uX3RleHQYASABKAkSDgoGY2hvc2VuGAIgAygJEj4KCm90aGVyX3RleHQYAyABKAsyJS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25PdGhlclRleHRIAIgBAUINCgtfb3RoZXJfdGV4dCInChdBbnN3ZXJRdWVzdGlvbk90aGVyVGV4dBIMCgR0ZXh0GAEgASgJIo4BChZBbnN3ZXJRdWVzdGlvblJlc3BvbnNlEjYKB3N1Y2Nlc3MYASABKAsyIy5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25TdWNjZXNzSAASMgoFZXJyb3IYAiABKAsyIS5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25FcnJvckgAQggKBnJlc3VsdCIXChVBbnN3ZXJRdWVzdGlvblN1Y2Nlc3Mi9AQKE0Fuc3dlclF1ZXN0aW9uRXJyb3ISSQoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25Vbmtub3duV29ya3NwYWNlSAASUgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIwLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbldvcmtzcGFjZVJlZk1pc21hdGNoSAASSQoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLC5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25UcmFuc2ZlcnJpbmdBd2F5SAASRAoPbm90X3lldF9hZG9wdGVkGAQgASgLMikuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uTm90WWV0QWRvcHRlZEgAEkYKEGFza19ub3Rfc3RhbmRpbmcYBSABKAsyKi5hZ2VudHJlcGwudjEuQW5zd2VyUXVlc3Rpb25Bc2tOb3RTdGFuZGluZ0gAEkMKDnVuc2VydmVkX3ZhbHVlGAYgASgLMikuYWdlbnRyZXBsLnYxLkFuc3dlclF1ZXN0aW9uVW5zZXJ2ZWRWYWx1ZUgAEloKG211bHRpX3BpY2tfb25fc2luZ2xlX3NlbGVjdBgHIAEoCzIzLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbk11bHRpUGlja09uU2luZ2xlU2VsZWN0SAASOwoKbm9fc2Vzc2lvbhgIIAEoCzIlLmFnZW50cmVwbC52MS5BbnN3ZXJRdWVzdGlvbk5vU2Vzc2lvbkgAQgcKBWNhdXNlIiAKHkFuc3dlclF1ZXN0aW9uVW5rbm93bldvcmtzcGFjZSI6CiJBbnN3ZXJRdWVzdGlvbldvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIxCh5BbnN3ZXJRdWVzdGlvblRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIdChtBbnN3ZXJRdWVzdGlvbk5vdFlldEFkb3B0ZWQiHgocQW5zd2VyUXVlc3Rpb25Bc2tOb3RTdGFuZGluZyIrChtBbnN3ZXJRdWVzdGlvblVuc2VydmVkVmFsdWUSDAoEdGV4dBgBIAEoCSInCiVBbnN3ZXJRdWVzdGlvbk11bHRpUGlja09uU2luZ2xlU2VsZWN0IhkKF0Fuc3dlclF1ZXN0aW9uTm9TZXNzaW9uQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.AnswerQuestionRequest
@@ -161,13 +161,80 @@ export const AnswerQuestionSuccessSchema: GenMessage<AnswerQuestionSuccess> = /*
   messageDesc(file_agentrepl_v1_endpoint_answer_question, 4);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown card, already
- * answered or expired, an echoed question or label the batch never served,
- * a multi-pick on a single-select).
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.AnswerQuestionError
  */
 export type AnswerQuestionError = Message<"agentrepl.v1.AnswerQuestionError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.AnswerQuestionError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionUnknownWorkspace unknown_workspace = 1;
+     */
+    value: AnswerQuestionUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: AnswerQuestionWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionTransferringAway transferring_away = 3;
+     */
+    value: AnswerQuestionTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionNotYetAdopted not_yet_adopted = 4;
+     */
+    value: AnswerQuestionNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The question card is no longer standing.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionAskNotStanding ask_not_standing = 5;
+     */
+    value: AnswerQuestionAskNotStanding;
+    case: "askNotStanding";
+  } | {
+    /**
+     * A question text or option label the batch never served.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionUnservedValue unserved_value = 6;
+     */
+    value: AnswerQuestionUnservedValue;
+    case: "unservedValue";
+  } | {
+    /**
+     * Several options were picked on a single-select question.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect multi_pick_on_single_select = 7;
+     */
+    value: AnswerQuestionMultiPickOnSingleSelect;
+    case: "multiPickOnSingleSelect";
+  } | {
+    /**
+     * The workspace has no session to answer to.
+     *
+     * @generated from field: agentrepl.v1.AnswerQuestionNoSession no_session = 8;
+     */
+    value: AnswerQuestionNoSession;
+    case: "noSession";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -176,4 +243,126 @@ export type AnswerQuestionError = Message<"agentrepl.v1.AnswerQuestionError"> & 
  */
 export const AnswerQuestionErrorSchema: GenMessage<AnswerQuestionError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_answer_question, 5);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionUnknownWorkspace
+ */
+export type AnswerQuestionUnknownWorkspace = Message<"agentrepl.v1.AnswerQuestionUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionUnknownWorkspace.
+ * Use `create(AnswerQuestionUnknownWorkspaceSchema)` to create a new message.
+ */
+export const AnswerQuestionUnknownWorkspaceSchema: GenMessage<AnswerQuestionUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 6);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionWorkspaceRefMismatch
+ */
+export type AnswerQuestionWorkspaceRefMismatch = Message<"agentrepl.v1.AnswerQuestionWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionWorkspaceRefMismatch.
+ * Use `create(AnswerQuestionWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const AnswerQuestionWorkspaceRefMismatchSchema: GenMessage<AnswerQuestionWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 7);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionTransferringAway
+ */
+export type AnswerQuestionTransferringAway = Message<"agentrepl.v1.AnswerQuestionTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionTransferringAway.
+ * Use `create(AnswerQuestionTransferringAwaySchema)` to create a new message.
+ */
+export const AnswerQuestionTransferringAwaySchema: GenMessage<AnswerQuestionTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 8);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionNotYetAdopted
+ */
+export type AnswerQuestionNotYetAdopted = Message<"agentrepl.v1.AnswerQuestionNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionNotYetAdopted.
+ * Use `create(AnswerQuestionNotYetAdoptedSchema)` to create a new message.
+ */
+export const AnswerQuestionNotYetAdoptedSchema: GenMessage<AnswerQuestionNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 9);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionAskNotStanding
+ */
+export type AnswerQuestionAskNotStanding = Message<"agentrepl.v1.AnswerQuestionAskNotStanding"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionAskNotStanding.
+ * Use `create(AnswerQuestionAskNotStandingSchema)` to create a new message.
+ */
+export const AnswerQuestionAskNotStandingSchema: GenMessage<AnswerQuestionAskNotStanding> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 10);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionUnservedValue
+ */
+export type AnswerQuestionUnservedValue = Message<"agentrepl.v1.AnswerQuestionUnservedValue"> & {
+  /**
+   * The unserved text, as echoed.
+   *
+   * @generated from field: string text = 1;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionUnservedValue.
+ * Use `create(AnswerQuestionUnservedValueSchema)` to create a new message.
+ */
+export const AnswerQuestionUnservedValueSchema: GenMessage<AnswerQuestionUnservedValue> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 11);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
+ */
+export type AnswerQuestionMultiPickOnSingleSelect = Message<"agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect.
+ * Use `create(AnswerQuestionMultiPickOnSingleSelectSchema)` to create a new message.
+ */
+export const AnswerQuestionMultiPickOnSingleSelectSchema: GenMessage<AnswerQuestionMultiPickOnSingleSelect> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 12);
+
+/**
+ * @generated from message agentrepl.v1.AnswerQuestionNoSession
+ */
+export type AnswerQuestionNoSession = Message<"agentrepl.v1.AnswerQuestionNoSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AnswerQuestionNoSession.
+ * Use `create(AnswerQuestionNoSessionSchema)` to create a new message.
+ */
+export const AnswerQuestionNoSessionSchema: GenMessage<AnswerQuestionNoSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_answer_question, 13);
 

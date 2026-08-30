@@ -194,10 +194,18 @@ func (*NukeWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unregistered
-// workspace, a worktree the daemon does not own, a git failure mid-delete).
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type NukeWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*NukeWorkspaceError_UnknownWorkspace
+	//	*NukeWorkspaceError_WorkspaceRefMismatch
+	//	*NukeWorkspaceError_TransferringAway
+	//	*NukeWorkspaceError_NotYetAdopted
+	//	*NukeWorkspaceError_GitFailed
+	Cause         isNukeWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -232,6 +240,304 @@ func (*NukeWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *NukeWorkspaceError) GetCause() isNukeWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *NukeWorkspaceError) GetUnknownWorkspace() *NukeWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *NukeWorkspaceError) GetWorkspaceRefMismatch() *NukeWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *NukeWorkspaceError) GetTransferringAway() *NukeWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *NukeWorkspaceError) GetNotYetAdopted() *NukeWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *NukeWorkspaceError) GetGitFailed() *NukeWorkspaceGitFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*NukeWorkspaceError_GitFailed); ok {
+			return x.GitFailed
+		}
+	}
+	return nil
+}
+
+type isNukeWorkspaceError_Cause interface {
+	isNukeWorkspaceError_Cause()
+}
+
+type NukeWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *NukeWorkspaceUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type NukeWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *NukeWorkspaceWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type NukeWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *NukeWorkspaceTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type NukeWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *NukeWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type NukeWorkspaceError_GitFailed struct {
+	// A git operation failed mid-delete.
+	GitFailed *NukeWorkspaceGitFailed `protobuf:"bytes,5,opt,name=git_failed,json=gitFailed,proto3,oneof"`
+}
+
+func (*NukeWorkspaceError_UnknownWorkspace) isNukeWorkspaceError_Cause() {}
+
+func (*NukeWorkspaceError_WorkspaceRefMismatch) isNukeWorkspaceError_Cause() {}
+
+func (*NukeWorkspaceError_TransferringAway) isNukeWorkspaceError_Cause() {}
+
+func (*NukeWorkspaceError_NotYetAdopted) isNukeWorkspaceError_Cause() {}
+
+func (*NukeWorkspaceError_GitFailed) isNukeWorkspaceError_Cause() {}
+
+type NukeWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NukeWorkspaceUnknownWorkspace) Reset() {
+	*x = NukeWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NukeWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NukeWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *NukeWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NukeWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*NukeWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+type NukeWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NukeWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = NukeWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NukeWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NukeWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *NukeWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NukeWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*NukeWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *NukeWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type NukeWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NukeWorkspaceTransferringAway) Reset() {
+	*x = NukeWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NukeWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NukeWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *NukeWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NukeWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*NukeWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *NukeWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type NukeWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NukeWorkspaceNotYetAdopted) Reset() {
+	*x = NukeWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NukeWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NukeWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *NukeWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NukeWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*NukeWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+type NukeWorkspaceGitFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Git's own account of the failure.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NukeWorkspaceGitFailed) Reset() {
+	*x = NukeWorkspaceGitFailed{}
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NukeWorkspaceGitFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NukeWorkspaceGitFailed) ProtoMessage() {}
+
+func (x *NukeWorkspaceGitFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NukeWorkspaceGitFailed.ProtoReflect.Descriptor instead.
+func (*NukeWorkspaceGitFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *NukeWorkspaceGitFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_nuke_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc = "" +
@@ -243,8 +549,23 @@ const file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.NukeWorkspaceSuccessH\x00R\asuccess\x128\n" +
 	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.NukeWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x16\n" +
-	"\x14NukeWorkspaceSuccess\"\x14\n" +
-	"\x12NukeWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x14NukeWorkspaceSuccess\"\xd9\x03\n" +
+	"\x12NukeWorkspaceError\x12Z\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.NukeWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.NukeWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2+.agentrepl.v1.NukeWorkspaceTransferringAwayH\x00R\x10transferringAway\x12R\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.NukeWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12E\n" +
+	"\n" +
+	"git_failed\x18\x05 \x01(\v2$.agentrepl.v1.NukeWorkspaceGitFailedH\x00R\tgitFailedB\a\n" +
+	"\x05cause\"\x1f\n" +
+	"\x1dNukeWorkspaceUnknownWorkspace\"F\n" +
+	"!NukeWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
+	"\x1dNukeWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
+	"\x1aNukeWorkspaceNotYetAdopted\"0\n" +
+	"\x16NukeWorkspaceGitFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescOnce sync.Once
@@ -258,23 +579,33 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_nuke_workspace_proto_goTypes = []any{
-	(*NukeWorkspaceRequest)(nil),  // 0: agentrepl.v1.NukeWorkspaceRequest
-	(*NukeWorkspaceResponse)(nil), // 1: agentrepl.v1.NukeWorkspaceResponse
-	(*NukeWorkspaceSuccess)(nil),  // 2: agentrepl.v1.NukeWorkspaceSuccess
-	(*NukeWorkspaceError)(nil),    // 3: agentrepl.v1.NukeWorkspaceError
-	(*v1.WorkspaceRef)(nil),       // 4: workspace.v1.WorkspaceRef
+	(*NukeWorkspaceRequest)(nil),              // 0: agentrepl.v1.NukeWorkspaceRequest
+	(*NukeWorkspaceResponse)(nil),             // 1: agentrepl.v1.NukeWorkspaceResponse
+	(*NukeWorkspaceSuccess)(nil),              // 2: agentrepl.v1.NukeWorkspaceSuccess
+	(*NukeWorkspaceError)(nil),                // 3: agentrepl.v1.NukeWorkspaceError
+	(*NukeWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.NukeWorkspaceUnknownWorkspace
+	(*NukeWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
+	(*NukeWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.NukeWorkspaceTransferringAway
+	(*NukeWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.NukeWorkspaceNotYetAdopted
+	(*NukeWorkspaceGitFailed)(nil),            // 8: agentrepl.v1.NukeWorkspaceGitFailed
+	(*v1.WorkspaceRef)(nil),                   // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_nuke_workspace_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.NukeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 0: agentrepl.v1.NukeWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.NukeWorkspaceResponse.success:type_name -> agentrepl.v1.NukeWorkspaceSuccess
 	3, // 2: agentrepl.v1.NukeWorkspaceResponse.error:type_name -> agentrepl.v1.NukeWorkspaceError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: agentrepl.v1.NukeWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.NukeWorkspaceUnknownWorkspace
+	5, // 4: agentrepl.v1.NukeWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.NukeWorkspaceWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.NukeWorkspaceError.transferring_away:type_name -> agentrepl.v1.NukeWorkspaceTransferringAway
+	7, // 6: agentrepl.v1.NukeWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.NukeWorkspaceNotYetAdopted
+	8, // 7: agentrepl.v1.NukeWorkspaceError.git_failed:type_name -> agentrepl.v1.NukeWorkspaceGitFailed
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_nuke_workspace_proto_init() }
@@ -286,13 +617,20 @@ func file_agentrepl_v1_endpoint_nuke_workspace_proto_init() {
 		(*NukeWorkspaceResponse_Success)(nil),
 		(*NukeWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_nuke_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*NukeWorkspaceError_UnknownWorkspace)(nil),
+		(*NukeWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*NukeWorkspaceError_TransferringAway)(nil),
+		(*NukeWorkspaceError_NotYetAdopted)(nil),
+		(*NukeWorkspaceError_GitFailed)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_nuke_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
