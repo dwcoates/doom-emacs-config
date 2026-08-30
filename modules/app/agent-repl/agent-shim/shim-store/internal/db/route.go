@@ -74,7 +74,10 @@ func entryField(index int, path string) string {
 // detached_work rows) dispatch on the same arms a second time — deliberately,
 // so classification stays a pure, separately testable function.
 type routed struct {
-	entry     *storev1.StoreEntry
+	entry *storev1.StoreEntry
+	// index is this entry's place in the producer's batch, kept so a refusal
+	// raised after classification can still name `entries[i]`.
+	index     int
 	writeID   string
 	upsertKey string
 	plane     int64
@@ -116,7 +119,7 @@ func classify(entry *storev1.StoreEntry, index int) (routed, error) {
 	if entry == nil {
 		return routed{}, invalidFieldf(entryField(index, ""), "entries[%d] is nil", index)
 	}
-	r := routed{entry: entry, writeID: entry.GetWriteId(), upsertKey: entry.GetUpsertKey()}
+	r := routed{entry: entry, index: index, writeID: entry.GetWriteId(), upsertKey: entry.GetUpsertKey()}
 
 	plane, err := validatePlane(entry.GetPlane(), index)
 	if err != nil {
@@ -248,6 +251,9 @@ func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (r
 		if err := validateAgentPrompt(arm.AgentPrompt, index); err != nil {
 			return routed{}, err
 		}
+		if err := requireBookMatchesFrame(book, arm.AgentPrompt.GetAgent().GetValue(), "agent_prompt.agent", index); err != nil {
+			return routed{}, err
+		}
 		r.kind = kindPageLine
 		r.book = sql.NullString{String: book, Valid: true}
 		r.pageLine = line
@@ -257,6 +263,25 @@ func classifyServeableFrame(r routed, line *storev1.StorePageLine, index int) (r
 	default:
 		return routed{}, invalidFieldf(entryField(index, "agent_update.serveable_frame.agent_item"), "entries[%d].agent_update.serveable_frame.agent_item sets no `item` arm", index)
 	}
+}
+
+// requireBookMatchesFrame refuses a page line whose ENVELOPE names a different
+// agent than the FRAME inside it.
+//
+// THE PRODUCER DECIDES PAGEABILITY, NOT ATTRIBUTION. `page_agent_id` says which
+// book the producer chose to file this line in; the frame says whose fact it is.
+// They are two statements about one line, and when they disagree the store has
+// no way to pick a winner — accepting either would file an agent's own words
+// under another agent's name, producing a book that reads as a conversation
+// that never happened. The write is refused whole instead.
+func requireBookMatchesFrame(book, frameAgent, what string, index int) error {
+	if book == frameAgent {
+		return nil
+	}
+	return invalidSitef(SitePageBookMismatch,
+		entryField(index, "agent_update.serveable_frame.page_agent_id"),
+		"entries[%d].agent_update.serveable_frame.page_agent_id is %q but %s is %q — the envelope and the frame disagree about whose line this is",
+		index, book, what, frameAgent)
 }
 
 // validateAgentPrompt is the base function for conversation.v1.AgentPrompt at
@@ -287,6 +312,9 @@ func classifyAgentFrame(r routed, line *storev1.StorePageLine, frame *conversati
 		return routed{}, invalidFieldf(entryField(index, "agent_frame.agent_id"), "entries[%d].agent_frame.agent_id is unset or empty — a frame's attribution is its whole placement", index)
 	}
 	book := line.GetPageAgentId().GetValue()
+	if err := requireBookMatchesFrame(book, frame.GetAgentId().GetValue(), "agent_frame.agent_id", index); err != nil {
+		return routed{}, err
+	}
 
 	switch arm := frame.GetResult().(type) {
 	case *conversationv1.AgentFrame_Update:
@@ -373,10 +401,30 @@ func classifyUnservedItem(item *storev1.StoreUnservedItem, index int) (string, e
 		}
 		return kindKeepalive, nil
 	case *storev1.StoreUnservedItem_VendorSpecific:
+		// THE VERBATIM RECORD IS THE ONLY THING RESIDUE IS FOR. These arms exist
+		// so nothing unconvertible is dropped — a row saying only "there was
+		// something here" IS the drop, dressed up as durability, and the
+		// follow-up work (a converter, a model, a parser fix) is impossible
+		// without the bytes.
+		if arm.VendorSpecific.GetRaw() == nil {
+			return "", invalidSitef(SiteResidueRawUnset,
+				entryField(index, "agent_update.unserved_item.vendor_specific.raw"),
+				"entries[%d].agent_update.unserved_item.vendor_specific.raw is unset — residue exists to carry the record entire, and without it the row records only that something was lost", index)
+		}
 		return kindVendorSpecific, nil
 	case *storev1.StoreUnservedItem_Unknown:
+		if arm.Unknown.GetRaw() == nil {
+			return "", invalidSitef(SiteResidueRawUnset,
+				entryField(index, "agent_update.unserved_item.unknown.raw"),
+				"entries[%d].agent_update.unserved_item.unknown.raw is unset — a record we do not model is worth keeping only verbatim", index)
+		}
 		return kindUnknown, nil
 	case *storev1.StoreUnservedItem_Unparsed:
+		if arm.Unparsed.GetRaw() == "" {
+			return "", invalidSitef(SiteResidueRawUnset,
+				entryField(index, "agent_update.unserved_item.unparsed.raw"),
+				"entries[%d].agent_update.unserved_item.unparsed.raw is empty — an unreadable record is investigable only through its bytes", index)
+		}
 		return kindUnparsed, nil
 	default:
 		return "", invalidFieldf(entryField(index, "agent_update.unserved_item"), "entries[%d].agent_update.unserved_item sets no arm — the residue must say WHY it cannot be served", index)
