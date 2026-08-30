@@ -493,3 +493,8 @@ every UX or contract gap you surfaced instead of improvising.
   sidecar's arm only. (3) landing 5 adds a `not_observed` arm to
   `AgentBashInterrupted.output`; until it lands the current shape stays,
   then lost/reconciled runs state `not_observed`.
+- BUDGET-WARNING KEY (project lead, cross-plane): the shim's
+  AgentUpdate.context_budget_warning page line is keyed
+  `session:context_budget_warning:<record uuid>` (the transcript line's
+  uuid, identical to the sidecar's), never `budget:<uuid>`; a test pins the
+  spelling. Assigned to remediation #1 as item (g).
