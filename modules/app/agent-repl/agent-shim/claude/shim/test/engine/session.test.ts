@@ -17,6 +17,7 @@ import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../
 import { cwdSlug } from "../../src/engine/cold.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { textSaid } from "../../src/engine/turn.js";
+import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
@@ -68,7 +69,9 @@ function assistantLine(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
-function harness(options: { nowMs?: number; lockThrows?: boolean } = {}): Harness {
+function harness(
+  options: { nowMs?: number; lockThrows?: boolean; keepaliveIntervalMs?: number } = {},
+): Harness {
   const stateDir = scratch();
   const configDir = scratch();
   const cwd = "/ws";
@@ -90,6 +93,9 @@ function harness(options: { nowMs?: number; lockThrows?: boolean } = {}): Harnes
     env: { stateDir, configDir, cwd },
     nowMs: () => options.nowMs ?? 1_000_100,
     scheduler,
+    ...(options.keepaliveIntervalMs === undefined
+      ? {}
+      : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
     acquireLock: (sessionId) => {
       if (options.lockThrows === true) throw new Error("locked by another shim");
       locks.push(sessionId);
@@ -1402,5 +1408,23 @@ describe("fast mode", () => {
     const arms = await pushedFastMode(h, async () => undefined);
 
     expect(arms).toEqual(["on"]);
+  });
+});
+
+describe("the keep-alive interval", () => {
+  it("beats on the module constant when nothing overrode it", async () => {
+    const h = harness();
+
+    await started(h);
+
+    expect(h.scheduler.intervals[0]).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("beats on the interval the caller supplied", async () => {
+    const h = harness({ keepaliveIntervalMs: 200 });
+
+    await started(h);
+
+    expect(h.scheduler.intervals[0]).toBe(200);
   });
 });
