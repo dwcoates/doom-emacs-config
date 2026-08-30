@@ -189,9 +189,13 @@ message SessionUpdate {
     // failure, active goal, prompt suggestions, file uploads, incomplete
     // interrupts, MCP policy, background tasks, model fallback, relocation
     // and worktree state, tool-set churn, settings faults) are deferred.
-    // The vendor's own context-budget warning, injected into the prompt as
-    // the window fills. Session-scoped; the footer's activity line draws it.
-    SessionContextBudgetWarning context_budget_warning = 24;
+    // Tag 24 (context_budget_warning) is RETIRED: the warning is a transcript
+    // attachment with no live-stream producer, so it lives on the agent plane
+    // as AgentUpdate.context_budget_warning (ruled 2026-08-29).
+    // The vendor's RATE-LIMIT STATUS, a STREAM-ONLY event (never written to
+    // the transcript, so the shim is its only producer). Session-scoped;
+    // the footer's allowance cell draws it.
+    SessionRateLimitStatus rate_limit_status = 28;
     // The shim's own health report, PUSHED at the shim's cadence and on
     // change — the pulled GetSessionDiagnostics verb is superseded by
     // this arm; the daemon's sessionwatcher routes it (topbar warnings).
@@ -215,10 +219,68 @@ message SessionCompacting {
 
 // The vendor's context-budget warning: its own signal that the context
 // window is filling, injected into the prompt as an attachment record.
-message SessionContextBudgetWarning {
-  // The vendor's warning text, verbatim — the producer composes it and no
-  // structured figure rides the record.
-  string text = 1;
+// The vendor's rate-limit status as its stream event carries it (SDK
+// `rate_limit_event`). Every optional field is ABSENT when the vendor omitted
+// it — presence, never a sentinel.
+message SessionRateLimitStatus {
+  // The vocabulary is in evidence (three values); the arm is the status.
+  oneof status {
+    SessionRateLimitAllowed allowed = 1;
+    SessionRateLimitAllowedWarning allowed_warning = 2;
+    SessionRateLimitRejected rejected = 3;
+  }
+  // When the window resets, unix millis (the vendor's seconds, converted).
+  optional int64 resets_at_ms = 4;
+  // Which window the status is about; declared six-value vocabulary.
+  optional SessionRateLimitType rate_limit_type = 5;
+  // How much of the window is used, 0–100 (the vendor's fraction, converted).
+  optional double utilization_percent = 6;
+  // The overage side of the account, when the vendor reported it.
+  optional SessionRateLimitOverage overage = 7;
+  optional bool is_using_overage = 8;
+  optional bool overage_in_use = 9;
+  // The threshold just crossed, 0–100 (the vendor's fraction, converted).
+  optional double surpassed_threshold_percent = 10;
+  // The vendor's error code, verbatim (e.g. "credits_required").
+  optional string error_code = 11;
+  optional bool can_user_purchase_credits = 12;
+  optional bool has_chargeable_saved_payment_method = 13;
+}
+message SessionRateLimitAllowed {}
+message SessionRateLimitAllowedWarning {}
+message SessionRateLimitRejected {}
+
+// The window a rate-limit status refers to. THE ARM IS THE WINDOW.
+message SessionRateLimitType {
+  oneof window {
+    SessionRateLimitWindowFiveHour five_hour = 1;
+    SessionRateLimitWindowSevenDay seven_day = 2;
+    SessionRateLimitWindowSevenDayOpus seven_day_opus = 3;
+    SessionRateLimitWindowSevenDaySonnet seven_day_sonnet = 4;
+    SessionRateLimitWindowSevenDayOverageIncluded seven_day_overage_included = 5;
+    SessionRateLimitWindowOverage overage = 6;
+  }
+}
+message SessionRateLimitWindowFiveHour {}
+message SessionRateLimitWindowSevenDay {}
+message SessionRateLimitWindowSevenDayOpus {}
+message SessionRateLimitWindowSevenDaySonnet {}
+message SessionRateLimitWindowSevenDayOverageIncluded {}
+message SessionRateLimitWindowOverage {}
+
+// The overage side of a rate-limit status.
+message SessionRateLimitOverage {
+  // Same three-value vocabulary as the main status.
+  oneof status {
+    SessionRateLimitAllowed allowed = 1;
+    SessionRateLimitAllowedWarning allowed_warning = 2;
+    SessionRateLimitRejected rejected = 3;
+  }
+  // When the overage window resets, unix millis.
+  optional int64 resets_at_ms = 4;
+  // Why overage is disabled, verbatim: the vendor declares thirteen values
+  // but none is observed, so no typed arms yet.
+  optional string disabled_reason = 5;
 }
 
 // The vendor rotated the session's identity. The store scopes by this id, so
