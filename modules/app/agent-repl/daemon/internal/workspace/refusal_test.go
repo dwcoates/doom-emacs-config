@@ -1,0 +1,95 @@
+package workspace
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+
+	"claude-repld/internal/dlog"
+)
+
+func TestRefusalRendersTheLedgerMessage(t *testing.T) {
+	// Arrange.
+	refusal := &Refusal{Rpc: "CloseWorkspace", Arm: "blocked", Reason: "a turn is running"}
+
+	// Act.
+	got := refusal.Error()
+
+	// Assert.
+	want := "intended arm: CloseWorkspaceError.blocked: a turn is running"
+	if got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestRefusalWithoutAnRpcRendersThePlaceholder(t *testing.T) {
+	// Arrange: a refusal raised by a shared helper leaves the rpc to the
+	// handler that surfaces it.
+	refusal := &Refusal{Arm: ArmWorkspaceRefMismatch, Reason: "dir disagrees"}
+
+	// Act.
+	got := refusal.Error()
+
+	// Assert.
+	want := "intended arm: <Rpc>Error.workspace_ref_mismatch: dir disagrees"
+	if got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestWithRpcDoesNotMutateTheOriginal(t *testing.T) {
+	// Arrange: two handlers naming one shared refusal must not overwrite each
+	// other.
+	shared := &Refusal{Arm: ArmUnknownWorkspace, Reason: "gone"}
+
+	// Act.
+	named := shared.WithRpc("OpenWorkspace")
+
+	// Assert.
+	if shared.Rpc != "" {
+		t.Fatalf("the shared refusal's rpc = %q, want it left empty", shared.Rpc)
+	}
+	if named.Rpc != "OpenWorkspace" {
+		t.Fatalf("the named refusal's rpc = %q, want OpenWorkspace", named.Rpc)
+	}
+}
+
+func TestAsRefusalFindsAWrappedRefusal(t *testing.T) {
+	// Arrange.
+	wrapped := fmt.Errorf("create: %w", &Refusal{Arm: ArmNoSlug, Reason: "no words"})
+
+	// Act.
+	refusal, ok := AsRefusal(wrapped)
+
+	// Assert.
+	if !ok || refusal.Arm != ArmNoSlug {
+		t.Fatalf("AsRefusal(%v) = (%v, %v), want the no_slug refusal", wrapped, refusal, ok)
+	}
+}
+
+func TestAsRefusalRejectsAnOrdinaryError(t *testing.T) {
+	// Arrange. Act.
+	_, ok := AsRefusal(errors.New("disk on fire"))
+
+	// Assert.
+	if ok {
+		t.Fatal("AsRefusal(ordinary error) reported a refusal")
+	}
+}
+
+func TestRefuseLogsTheIntendedArmAtWarning(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	refuse(log, "Interrupt", ArmNoSession, "no live session", false)
+
+	// Assert.
+	records := log.Records()
+	if len(records) != 1 {
+		t.Fatalf("records = %v, want exactly one", records)
+	}
+	if records[0].Level != "warn" || records[0].Operation != opRefusal {
+		t.Fatalf("record = %+v, want a warning under %s", records[0], opRefusal)
+	}
+}

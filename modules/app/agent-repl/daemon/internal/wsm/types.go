@@ -9,6 +9,8 @@ package wsm
 import (
 	"time"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 )
@@ -86,6 +88,13 @@ type RegisterFacts struct {
 	ParentBranch string
 	// RepoDir is the repository's canonicalized common dir.
 	RepoDir string
+	// DefaultBranch is the repository's default branch, as the announcing
+	// caller read it off git. It is recorded on FIRST SIGHT of the repository
+	// and refreshed on every later announcement, so a repository whose default
+	// branch is renamed does not keep answering with the old one. Empty leaves
+	// whatever is recorded alone, because "not looked up" is not "no default
+	// branch".
+	DefaultBranch string
 }
 
 // Priority is the roster's ordering priority, mirroring
@@ -116,6 +125,11 @@ type CreationJob struct {
 	Materialized bool
 	// OneShot marks a one-shot workspace (created, prompted, merged, closed).
 	OneShot bool
+	// Finish is the one-shot's FINISH ACTION, recorded before materialization
+	// so the turn that concludes with the success marker can act on it even
+	// after a daemon restart. It is CLEARED once the action has been taken,
+	// which is what makes the finish happen exactly once.
+	Finish string
 	// InitialPrompt is the prompt the workspace was created with, empty when
 	// created without one.
 	InitialPrompt string
@@ -233,59 +247,88 @@ type OutputAddress struct {
 }
 
 // HeldPrompt is one parked submission. WSM is the ONE durable hold store.
+//
+// Two ORTHOGONAL facts describe a hold and each has its own column. The
+// CLASSIFICATION is the judge's verdict on the prompt (five arms, one column);
+// the HOLD KIND is a daemon-side condition unrelated to any verdict (three
+// arms, a separate nullable column). Neither is derivable from the other, so
+// neither is stored as a projection of the other.
 type HeldPrompt struct {
 	Workspace WorkspaceID
 	// Turn is the minted turn the prompt will run as when released.
 	Turn TurnID
-	// Text is the submission's full text (the metaprompt sentinel spans are
-	// stripped only for display, never on the record).
-	Text string
+	// Said is the WHOLE submission as the user composed it — text and any
+	// attached images — kept as the serialized proto blob. A text-only record
+	// would silently drop a pasted image, so there is no text column.
+	Said *conversationv1.UserSaid
 	// Origin is the prompt's origin, as conversation.v1.PromptOrigin names it.
 	Origin string
 	// Target, when set, is the bubble composer's addressed row.
 	Target *feedid.Ref
-	// Hold is why it is held, nil once it is deliverable.
+	// Hold is the daemon-side condition holding the prompt, nil when no
+	// condition does.
 	Hold *HoldKind
+	// ScheduleID is the drain schedule a HoldShutdown is waiting on, empty for
+	// every other hold kind.
+	ScheduleID string
 	// Classification is the classifier's verdict, nil until judged.
 	Classification *Classification
+	// Accepted records that the user accepted the tray's offer to let the
+	// prompt wait for the turn's end (UpdateHeldPrompt.accept), which is legal
+	// only on a hold_for_turn_end verdict.
+	Accepted bool
 	// Tombstone is why it was retired, nil while it stands.
 	Tombstone *Tombstone
 	// QueuedAt is when it was submitted.
 	QueuedAt time.Time
 }
 
-// HoldKind is why a prompt is held, mirroring frontend.v1's held-prompt arms.
+// HoldKind is a DAEMON-SIDE condition holding a prompt, independent of any
+// classification verdict. Keep-alive is not an arm: the keep-alive window is
+// the shim's, and the daemon never holds a prompt for it.
 type HoldKind int
 
 // The hold kinds.
 const (
-	// HoldClassifying is awaiting the classifier's verdict.
-	HoldClassifying HoldKind = iota
-	// HoldForTurnEnd waits for the running turn to end.
-	HoldForTurnEnd
-	// HoldUninterruptibleTurn waits because the running turn refuses interrupts.
-	HoldUninterruptibleTurn
-	// HoldClassificationError holds after the classifier failed.
-	HoldClassificationError
 	// HoldShutdown holds for the shutdown drain's lease.
-	HoldShutdown
-	// HoldKeepAlive holds inside a keep-alive window.
-	HoldKeepAlive
+	HoldShutdown HoldKind = iota
 	// HoldSessionStarting holds while the session is still coming up.
 	HoldSessionStarting
 	// HoldBuildRefresh holds across a build-staleness bounce.
 	HoldBuildRefresh
 )
 
+// ClassificationArm is the classifier's verdict on a held prompt: ONE column
+// with five arms, mirroring frontend.v1's held-prompt verdict oneof. Interject
+// and failure are arms of this one fact, never separate booleans that could
+// disagree with it.
+type ClassificationArm int
+
+// The classification arms.
+const (
+	// ArmClassifying is awaiting the classifier's verdict.
+	ArmClassifying ClassificationArm = iota
+	// ArmInterject interrupts the running turn.
+	ArmInterject
+	// ArmHoldForTurnEnd waits for the running turn to end.
+	ArmHoldForTurnEnd
+	// ArmUninterruptibleTurn waits because the running turn refuses interrupts;
+	// Command names the session command that made it uninterruptible.
+	ArmUninterruptibleTurn
+	// ArmClassificationError is the verdict after the classifier failed.
+	ArmClassificationError
+)
+
 // Classification is the classifier's verdict on a held prompt.
 type Classification struct {
-	// Interject reports whether the prompt interrupts the running turn.
-	Interject bool
+	// Arm is the verdict.
+	Arm ClassificationArm
 	// Reason is the judge's stated reason, kept as evidence.
 	Reason string
-	// Failed reports that judging errored; the prompt holds with
-	// HoldClassificationError.
-	Failed bool
+	// Command is the recognized session command that made the running turn
+	// uninterruptible. It is set only on ArmUninterruptibleTurn and is
+	// UNSPECIFIED otherwise.
+	Command conversationv1.SessionCommand
 	// At is when the verdict landed.
 	At time.Time
 }
@@ -404,10 +447,17 @@ type Fault struct {
 	ID FaultID
 	// Workspace is the faulting workspace, nil for a daemon-scoped fault.
 	Workspace *WorkspaceID
-	// Kind names the fault, from the frontend.v1 failure vocabulary.
+	// Kind names the fault. It is the arm name of the typed DaemonFault /
+	// SessionFault kind oneof the health reporter answers with, so the record
+	// and the wire cannot disagree about which fault this is.
 	Kind string
-	// Detail is the evidence.
+	// Detail is the human-readable evidence.
 	Detail string
+	// Evidence carries the typed kind's OWN fields — a shim exit code, a
+	// stderr tail, a resume cause — keyed by the proto field name. It exists
+	// so the reporter fills the typed arm from a record rather than parsing
+	// them back out of Detail, which is prose and is allowed to change.
+	Evidence map[string]string
 	// OpenedAt is when it was raised.
 	OpenedAt time.Time
 	// ResolvedAt is when it was closed, nil while open.
@@ -423,4 +473,37 @@ type DrainSchedule struct {
 	Deadline time.Time
 	// SetAt is when the schedule was put in force.
 	SetAt time.Time
+}
+
+// RepoKey identifies one repository's merge queue: the TARGET repository's
+// canonical common dir. It is a path rather than a RepoID because the queue is
+// keyed by what a merge lands in, which the orchestrator knows before it knows
+// any workspace's registered repository.
+type RepoKey string
+
+// MergeQueueState is where one queue entry stands.
+type MergeQueueState int
+
+// The merge queue states.
+const (
+	// MergeQueued is waiting for its repository's turn.
+	MergeQueued MergeQueueState = iota
+	// MergeAdmitted is the entry the orchestrator is running now.
+	MergeAdmitted
+)
+
+// MergeQueueEntry is one workspace's place in its repository's merge queue. The
+// queue is DURABLE so a restart re-enqueues exactly what was waiting, in the
+// order it was waiting in.
+type MergeQueueEntry struct {
+	// Repo is the queue's repository key.
+	Repo RepoKey
+	// Workspace is the workspace whose merge is queued.
+	Workspace WorkspaceID
+	// Position is the entry's one-based place in the queue's order.
+	Position int
+	// State is where the entry stands.
+	State MergeQueueState
+	// EnqueuedAt is when it joined the queue.
+	EnqueuedAt time.Time
 }

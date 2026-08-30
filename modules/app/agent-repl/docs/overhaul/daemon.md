@@ -1281,3 +1281,28 @@ its own file only when >1 endpoint needs it.
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Landing 3 relay (2026-08-29, project lead)
+
+- StartTurnSuccess.page is the opening page; page_size/known_through on the request are live.
+- UpdateAgent prompt to a subagent refuses `not_deliverable` (SDK limit); DetachForeground refuses `unsupported` when the SDK cannot initiate a detachment. Both surface honestly in the feed; whether the controls are hidden this wave is the user's call (put to the user).
+- AgentId minting rule (proto comment on AgentId): main = original vendor session id; subagent = spawning call's tool_use_id. The daemon never derives a spawn unit's identity from an AgentId even though the bytes coincide.
+- FILE-PLANE-ONLY facts: AgentContextInjected, the write/edit `diagnostics` consequence arm and SessionUpdate.context_budget_warning arrive only through the store tail (WatchAgent replay/follow), never on the shim's live WatchSession; the daemon must not wait for them on the session stream.
+- Left unset by the stream plane (never invented): subagent spawn_depth/working_dir/transcript_suppressed/structured_result, worktree provenance/cleanup, AgentActivity.effort, ApiRateLimited.retry_after_ms from a result, AgentHookStart.gated_call, a foreground bash's termination, an image bash result's media_type.
+- Your error-arm batch is landing 4.
+
+## Landing 4 relay (2026-08-29, project lead)
+
+- Every `<Rpc>Error` carries its typed arms; refusal sites switch off the seam constants; ERROR-ARMS.md rows are retired as each lands. Arms prescribed for unlanded packages are landed too; report any that end up unused and I retire them.
+- FooterAllowance is sourced from SessionUpdate.rate_limit_status (typed status); the verbatim string is gone.
+- context_budget_warning arrives on the agent plane (AgentUpdate); the WatchSession routing goes.
+- Re-adopted live work is always `created`-origin (shim ruling); DetachedWorkId == the unit's AgentActivityId, so `created`-origin monitors are retired by their own terminal.
+
+## Implementation overrides recorded by the daemon lead (2026-08-29)
+
+- MERGE RECOVERY: an in-flight merge found at boot (lease row present) is
+  re-queued at the FRONT of its repository's queue and re-run from the
+  queue tab rather than re-entered at its last recorded tab; the tab
+  history already published stays as feed content, the new run appends
+  its rounds. Rationale: the git state after a crash is only trustworthy
+  from a clean re-run; re-entering mid-tab would guess at partial state.
