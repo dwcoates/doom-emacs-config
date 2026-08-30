@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_interrupt.proto.
  */
 export const file_agentrepl_v1_endpoint_interrupt: GenFile = /*@__PURE__*/
-  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfaW50ZXJydXB0LnByb3RvEgxhZ2VudHJlcGwudjEi8QEKEEludGVycnVwdFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIrCgR0dXJuGAIgASgLMhsuYWdlbnRyZXBsLnYxLkludGVycnVwdFR1cm5IABInCghkZXRhY2hlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAEjYKCmFsbF9hZ2VudHMYBCABKAsyIC5hZ2VudHJlcGwudjEuSW50ZXJydXB0QWxsQWdlbnRzSAASFgoOY29uZmlybV9hZ2VudHMYBSABKAhCCAoGdGFyZ2V0Ig8KDUludGVycnVwdFR1cm4iFAoSSW50ZXJydXB0QWxsQWdlbnRzIn8KEUludGVycnVwdFJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuSW50ZXJydXB0U3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkludGVycnVwdEVycm9ySABCCAoGcmVzdWx0It0BChBJbnRlcnJ1cHRTdWNjZXNzEjkKEGludGVycnVwdGVkX3R1cm4YASABKAsyHS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWRUdXJuSAASQQoUaW50ZXJydXB0ZWRfZGV0YWNoZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWREZXRhY2hlZEgAEkAKD25vdGhpbmdfcnVubmluZxgDIAEoCzIlLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3RoaW5nUnVubmluZ0gAQgkKB291dGNvbWUiEQoPSW50ZXJydXB0ZWRUdXJuIiQKE0ludGVycnVwdGVkRGV0YWNoZWQSDQoFY291bnQYASABKAMiGQoXSW50ZXJydXB0Tm90aGluZ1J1bm5pbmciXAoOSW50ZXJydXB0RXJyb3ISQgoQY29uZmlybV9yZXF1aXJlZBgBIAEoCzImLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRDb25maXJtUmVxdWlyZWRIAEIGCgRraW5kIjQKGEludGVycnVwdENvbmZpcm1SZXF1aXJlZBIYChBsaXZlX2FnZW50X2NvdW50GAEgASgDQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CiVhZ2VudHJlcGwvdjEvZW5kcG9pbnRfaW50ZXJydXB0LnByb3RvEgxhZ2VudHJlcGwudjEi8QEKEEludGVycnVwdFJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIrCgR0dXJuGAIgASgLMhsuYWdlbnRyZXBsLnYxLkludGVycnVwdFR1cm5IABInCghkZXRhY2hlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAEjYKCmFsbF9hZ2VudHMYBCABKAsyIC5hZ2VudHJlcGwudjEuSW50ZXJydXB0QWxsQWdlbnRzSAASFgoOY29uZmlybV9hZ2VudHMYBSABKAhCCAoGdGFyZ2V0Ig8KDUludGVycnVwdFR1cm4iFAoSSW50ZXJydXB0QWxsQWdlbnRzIn8KEUludGVycnVwdFJlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuSW50ZXJydXB0U3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkludGVycnVwdEVycm9ySABCCAoGcmVzdWx0It0BChBJbnRlcnJ1cHRTdWNjZXNzEjkKEGludGVycnVwdGVkX3R1cm4YASABKAsyHS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWRUdXJuSAASQQoUaW50ZXJydXB0ZWRfZGV0YWNoZWQYAiABKAsyIS5hZ2VudHJlcGwudjEuSW50ZXJydXB0ZWREZXRhY2hlZEgAEkAKD25vdGhpbmdfcnVubmluZxgDIAEoCzIlLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3RoaW5nUnVubmluZ0gAQgkKB291dGNvbWUiEQoPSW50ZXJydXB0ZWRUdXJuIiQKE0ludGVycnVwdGVkRGV0YWNoZWQSDQoFY291bnQYASABKAMiGQoXSW50ZXJydXB0Tm90aGluZ1J1bm5pbmcisQQKDkludGVycnVwdEVycm9yEkIKEGNvbmZpcm1fcmVxdWlyZWQYASABKAsyJi5hZ2VudHJlcGwudjEuSW50ZXJydXB0Q29uZmlybVJlcXVpcmVkSAASRAoRdW5rbm93bl93b3Jrc3BhY2UYAiABKAsyJy5hZ2VudHJlcGwudjEuSW50ZXJydXB0VW5rbm93bldvcmtzcGFjZUgAEk0KFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyKy5hZ2VudHJlcGwudjEuSW50ZXJydXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJEChF0cmFuc2ZlcnJpbmdfYXdheRgEIAEoCzInLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRUcmFuc2ZlcnJpbmdBd2F5SAASPwoPbm90X3lldF9hZG9wdGVkGAUgASgLMiQuYWdlbnRyZXBsLnYxLkludGVycnVwdE5vdFlldEFkb3B0ZWRIABJDChFub3RfZGV0YWNoZWRfd29yaxgGIAEoCzImLmFnZW50cmVwbC52MS5JbnRlcnJ1cHROb3REZXRhY2hlZFdvcmtIABI2Cgpub19zZXNzaW9uGAcgASgLMiAuYWdlbnRyZXBsLnYxLkludGVycnVwdE5vU2Vzc2lvbkgAEjoKDHNoaW1fcmVmdXNlZBgIIAEoCzIiLmFnZW50cmVwbC52MS5JbnRlcnJ1cHRTaGltUmVmdXNlZEgAQgYKBGtpbmQiNAoYSW50ZXJydXB0Q29uZmlybVJlcXVpcmVkEhgKEGxpdmVfYWdlbnRfY291bnQYASABKAMiGwoZSW50ZXJydXB0VW5rbm93bldvcmtzcGFjZSI1Ch1JbnRlcnJ1cHRXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLAoZSW50ZXJydXB0VHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhgKFkludGVycnVwdE5vdFlldEFkb3B0ZWQiGgoYSW50ZXJydXB0Tm90RGV0YWNoZWRXb3JrIhQKEkludGVycnVwdE5vU2Vzc2lvbiImChRJbnRlcnJ1cHRTaGltUmVmdXNlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.InterruptRequest
@@ -229,10 +229,8 @@ export const InterruptNothingRunningSchema: GenMessage<InterruptNothingRunning> 
   messageDesc(file_agentrepl_v1_endpoint_interrupt, 7);
 
 /**
- * Refusal arms: confirm_required is landed (the UX depends on it); the
- * rest are DERIVED at the wave (e.g. the shim cannot be asked — today's
- * shim.v1 DetachedCancelUnsupported — is a real failure and lands here),
- * spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.InterruptError
  */
@@ -250,6 +248,62 @@ export type InterruptError = Message<"agentrepl.v1.InterruptError"> & {
      */
     value: InterruptConfirmRequired;
     case: "confirmRequired";
+  } | {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.InterruptUnknownWorkspace unknown_workspace = 2;
+     */
+    value: InterruptUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.InterruptWorkspaceRefMismatch workspace_ref_mismatch = 3;
+     */
+    value: InterruptWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.InterruptTransferringAway transferring_away = 4;
+     */
+    value: InterruptTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.InterruptNotYetAdopted not_yet_adopted = 5;
+     */
+    value: InterruptNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The FeedId names no detached item.
+     *
+     * @generated from field: agentrepl.v1.InterruptNotDetachedWork not_detached_work = 6;
+     */
+    value: InterruptNotDetachedWork;
+    case: "notDetachedWork";
+  } | {
+    /**
+     * The workspace has no session to interrupt.
+     *
+     * @generated from field: agentrepl.v1.InterruptNoSession no_session = 7;
+     */
+    value: InterruptNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * A typed shim refusal relayed (e.g. UpdateAgent nothing_running).
+     *
+     * @generated from field: agentrepl.v1.InterruptShimRefused shim_refused = 8;
+     */
+    value: InterruptShimRefused;
+    case: "shimRefused";
   } | { case: undefined; value?: undefined };
 };
 
@@ -280,4 +334,113 @@ export type InterruptConfirmRequired = Message<"agentrepl.v1.InterruptConfirmReq
  */
 export const InterruptConfirmRequiredSchema: GenMessage<InterruptConfirmRequired> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_interrupt, 9);
+
+/**
+ * @generated from message agentrepl.v1.InterruptUnknownWorkspace
+ */
+export type InterruptUnknownWorkspace = Message<"agentrepl.v1.InterruptUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptUnknownWorkspace.
+ * Use `create(InterruptUnknownWorkspaceSchema)` to create a new message.
+ */
+export const InterruptUnknownWorkspaceSchema: GenMessage<InterruptUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 10);
+
+/**
+ * @generated from message agentrepl.v1.InterruptWorkspaceRefMismatch
+ */
+export type InterruptWorkspaceRefMismatch = Message<"agentrepl.v1.InterruptWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptWorkspaceRefMismatch.
+ * Use `create(InterruptWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const InterruptWorkspaceRefMismatchSchema: GenMessage<InterruptWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 11);
+
+/**
+ * @generated from message agentrepl.v1.InterruptTransferringAway
+ */
+export type InterruptTransferringAway = Message<"agentrepl.v1.InterruptTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptTransferringAway.
+ * Use `create(InterruptTransferringAwaySchema)` to create a new message.
+ */
+export const InterruptTransferringAwaySchema: GenMessage<InterruptTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 12);
+
+/**
+ * @generated from message agentrepl.v1.InterruptNotYetAdopted
+ */
+export type InterruptNotYetAdopted = Message<"agentrepl.v1.InterruptNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptNotYetAdopted.
+ * Use `create(InterruptNotYetAdoptedSchema)` to create a new message.
+ */
+export const InterruptNotYetAdoptedSchema: GenMessage<InterruptNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 13);
+
+/**
+ * @generated from message agentrepl.v1.InterruptNotDetachedWork
+ */
+export type InterruptNotDetachedWork = Message<"agentrepl.v1.InterruptNotDetachedWork"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptNotDetachedWork.
+ * Use `create(InterruptNotDetachedWorkSchema)` to create a new message.
+ */
+export const InterruptNotDetachedWorkSchema: GenMessage<InterruptNotDetachedWork> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 14);
+
+/**
+ * @generated from message agentrepl.v1.InterruptNoSession
+ */
+export type InterruptNoSession = Message<"agentrepl.v1.InterruptNoSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptNoSession.
+ * Use `create(InterruptNoSessionSchema)` to create a new message.
+ */
+export const InterruptNoSessionSchema: GenMessage<InterruptNoSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 15);
+
+/**
+ * @generated from message agentrepl.v1.InterruptShimRefused
+ */
+export type InterruptShimRefused = Message<"agentrepl.v1.InterruptShimRefused"> & {
+  /**
+   * The shim's own account of the refusal.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.InterruptShimRefused.
+ * Use `create(InterruptShimRefusedSchema)` to create a new message.
+ */
+export const InterruptShimRefusedSchema: GenMessage<InterruptShimRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_interrupt, 16);
 
