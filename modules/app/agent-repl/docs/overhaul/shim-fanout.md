@@ -441,3 +441,12 @@ every UX or contract gap you surfaced instead of improvising.
   (c) fast_mode has no producer — the engine drops the fold's fast_mode
   update as an owned arm and pushes none; produce it from init/result
   fast_mode_state.
+- LEDGER (after outage 2): landing 4 merged at d83fdb250 (rate_limit_status
+  28; tag 24 retired → AgentUpdate.context_budget_warning 7; DetachedWorkId
+  == AgentActivityId in the proto comment). All three implementers resumed
+  by message with the relay: record plane (from 2f3dcb22e; rate_limit_event
+  mapping + budget-warning retarget added to its list), integration author
+  (from 7e60e77f8; rate_limit_status assertion, budget-warning test
+  retired), mock additions (from e017fe398; five_hour fix pending). Next:
+  merge each, run `npm run test:integration`, opus-low remediation for the
+  three engine gaps + suite failures, fable audit loop.
