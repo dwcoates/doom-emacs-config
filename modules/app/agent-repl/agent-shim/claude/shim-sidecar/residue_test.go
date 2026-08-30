@@ -16,7 +16,7 @@ func residueHandlerFor(t *testing.T) *residueHandler {
 
 func TestResidueEntryIsUnservedUnparsed(t *testing.T) {
 	// Arrange, Act.
-	entry := residueEntry("/private/tmp/b1.output", 128, "why", []byte("bytes"))
+	entry := residueEntry("16777232:501", "/private/tmp/b1.output", 128, "why", []byte("bytes"))
 
 	// Assert: it can never reach a page, and it is investigable.
 	unparsed := entry.GetAgentUpdate().GetUnservedItem().GetUnparsed()
@@ -30,7 +30,7 @@ func TestResidueEntryIsUnservedUnparsed(t *testing.T) {
 
 func TestResidueEntryNamesTheFilePlane(t *testing.T) {
 	// Arrange, Act.
-	entry := residueEntry("/private/tmp/b1.output", 0, "why", nil)
+	entry := residueEntry("16777232:501", "/private/tmp/b1.output", 0, "why", nil)
 
 	// Assert.
 	if entry.GetPlane().GetFile() == nil {
@@ -40,8 +40,8 @@ func TestResidueEntryNamesTheFilePlane(t *testing.T) {
 
 func TestResidueWriteIDIsDeterministic(t *testing.T) {
 	// Arrange, Act: the same bytes re-read after a restart.
-	first := residueEntry("/private/tmp/b1.output", 128, "why", []byte("bytes"))
-	second := residueEntry("/private/tmp/b1.output", 128, "why", []byte("bytes"))
+	first := residueEntry("16777232:501", "/private/tmp/b1.output", 128, "why", []byte("bytes"))
+	second := residueEntry("16777232:501", "/private/tmp/b1.output", 128, "why", []byte("bytes"))
 
 	// Assert: replay absorption rests on this.
 	if first.GetWriteId() != second.GetWriteId() {
@@ -51,8 +51,8 @@ func TestResidueWriteIDIsDeterministic(t *testing.T) {
 
 func TestResidueWriteIDVariesByOffset(t *testing.T) {
 	// Arrange, Act.
-	first := residueEntry("/private/tmp/b1.output", 0, "why", []byte("bytes"))
-	second := residueEntry("/private/tmp/b1.output", 128, "why", []byte("bytes"))
+	first := residueEntry("16777232:501", "/private/tmp/b1.output", 0, "why", []byte("bytes"))
+	second := residueEntry("16777232:501", "/private/tmp/b1.output", 128, "why", []byte("bytes"))
 
 	// Assert.
 	if first.GetWriteId() == second.GetWriteId() {
@@ -60,9 +60,44 @@ func TestResidueWriteIDVariesByOffset(t *testing.T) {
 	}
 }
 
+func TestResidueWriteIDIsUnchangedByARenameOfTheSpool(t *testing.T) {
+	// Arrange, Act. R-S1: the cursor is keyed by "dev:inode" and survives a
+	// rename, so the write identity minted from the same byte range must too —
+	// otherwise the replay after the rename is stored a second time instead of
+	// being absorbed.
+	first := residueEntry("16777232:501", "/private/tmp/b1.output", 128, "why", []byte("bytes"))
+	second := residueEntry("16777232:501", "/private/tmp/b2.output", 128, "why", []byte("bytes"))
+
+	// Assert.
+	if first.GetWriteId() != second.GetWriteId() {
+		t.Fatalf("a rename changed the residue write id (%q -> %q)", first.GetWriteId(), second.GetWriteId())
+	}
+}
+
+func TestResidueWriteIDVariesByFileID(t *testing.T) {
+	// Arrange, Act: the same offset in two DIFFERENT files.
+	first := residueEntry("16777232:501", "/private/tmp/b1.output", 0, "why", []byte("bytes"))
+	second := residueEntry("16777232:502", "/private/tmp/b1.output", 0, "why", []byte("bytes"))
+
+	// Assert: two files must never share an identity space keyed only by offset.
+	if first.GetWriteId() == second.GetWriteId() {
+		t.Fatal("two distinct files minted the same residue write id for one offset")
+	}
+}
+
+func TestResidueEntryWithoutAFileIDIsRaisedAsAReaderDefect(t *testing.T) {
+	// Arrange, Act + Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("residue minted without a file id must be raised, never digested as an empty string")
+		}
+	}()
+	_ = residueEntry("", "/private/tmp/b1.output", 0, "why", nil)
+}
+
 func TestResidueUpsertKeyIsItsSourceCoordinate(t *testing.T) {
 	// Arrange, Act.
-	entry := residueEntry("/private/tmp/b1.output", 128, "why", nil)
+	entry := residueEntry("16777232:501", "/private/tmp/b1.output", 128, "why", nil)
 
 	// Assert: a re-read supersedes the row whole rather than growing a second.
 	// A spool's bytes carry no vendor uuid — there is no record, only a byte
@@ -82,7 +117,7 @@ func TestResidueHandlerConvertsEveryFrame(t *testing.T) {
 	}
 
 	// Act.
-	got := h.Handle(frames, &tail.Context{Path: "/private/tmp/q1.output"})
+	got := h.Handle(frames, &tail.Context{Path: "/private/tmp/q1.output", FileID: "16777232:777"})
 
 	// Assert: nothing on disk is dropped.
 	if len(got) != 2 {
@@ -95,7 +130,7 @@ func TestResidueHandlerCarriesTheReason(t *testing.T) {
 	h := residueHandlerFor(t)
 
 	// Act.
-	got := h.Handle([]tail.Frame{{Raw: []byte("x")}}, &tail.Context{Path: "/private/tmp/q1.output"})
+	got := h.Handle([]tail.Frame{{Raw: []byte("x")}}, &tail.Context{Path: "/private/tmp/q1.output", FileID: "16777232:777"})
 
 	// Assert: the stored record says what a human needs without reading a log.
 	if reason := got[0].GetAgentUpdate().GetUnservedItem().GetUnparsed().GetParseError(); reason != "no conversion could be selected" {
@@ -108,7 +143,7 @@ func TestResidueHandlerOnAnEmptyBatch(t *testing.T) {
 	h := residueHandlerFor(t)
 
 	// Act.
-	got := h.Handle(nil, &tail.Context{Path: "/private/tmp/q1.output"})
+	got := h.Handle(nil, &tail.Context{Path: "/private/tmp/q1.output", FileID: "16777232:777"})
 
 	// Assert.
 	if len(got) != 0 {

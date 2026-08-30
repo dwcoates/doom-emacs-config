@@ -117,13 +117,29 @@ func (at Attribution) ctxError(operation string) logging.Context {
 
 // writeID mints the STABLE write identity for one record.
 //
-// DETERMINISTIC ON PURPOSE, and the exact ruled recipe: hex sha256 of
-// "shim-claude-sidecar|" + path + "|" + offset + "|" + discriminator. The
+// DETERMINISTIC ON PURPOSE, and the exact ruled recipe (R-S1): hex sha256 of
+// "shim-claude-sidecar|" + FILE_ID + "|" + offset + "|" + discriminator. The
 // discriminator separates the several entries one record can mint (a block
 // index, "terminal", "diag"). Randomness is forbidden — replay idempotence at
 // the store rests entirely on the same bytes minting the same id.
+//
+// IT DIGESTS THE FILE ID, NEVER THE PATH, and the two are not
+// interchangeable. The cursor is keyed by "dev:inode", so a RENAMED file keeps
+// its cursor and is resumed from it — but a path-derived write identity would
+// mint a brand new id for every record replayed after that rename, and the
+// store's absorption (a replayed batch whose write_ids all landed before is the
+// SUCCESS arm) would silently store the whole re-read turn a second time. The
+// cursor's identity and the write's identity have to be the same identity, or
+// rename-proof resumption and replay absorption contradict each other.
+//
+// A FILE WITH NO ID IS A READER DEFECT, and it is stated as one rather than
+// quietly digesting an empty string, which would collapse every file's records
+// onto one identity space keyed only by offset.
 func writeID(at Attribution, discriminator string) string {
-	sum := sha256.Sum256([]byte(Producer + "|" + at.Path + "|" + strconv.FormatInt(at.Offset, 10) + "|" + discriminator))
+	if at.FileID == "" {
+		panic("convert: write_id requires the file's dev:inode identity; the reader supplied none")
+	}
+	sum := sha256.Sum256([]byte(Producer + "|" + at.FileID + "|" + strconv.FormatInt(at.Offset, 10) + "|" + discriminator))
 	return hex.EncodeToString(sum[:])
 }
 

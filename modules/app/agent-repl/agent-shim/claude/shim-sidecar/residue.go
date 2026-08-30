@@ -42,7 +42,7 @@ func newResidueHandler(reason string, log *logging.Bound) *residueHandler {
 func (h *residueHandler) Handle(frames []tail.Frame, ctx *tail.Context) []*storev1.StoreEntry {
 	out := make([]*storev1.StoreEntry, 0, len(frames))
 	for _, frame := range frames {
-		out = append(out, residueEntry(ctx.Path, frame.Offset, h.reason, frame.Raw))
+		out = append(out, residueEntry(ctx.FileID, ctx.Path, frame.Offset, h.reason, frame.Raw))
 		h.log.With(logging.Context{
 			Operation: "residue", Path: ctx.Path, TaskID: ctx.TaskID, Offset: logging.Off(frame.Offset),
 		}).LogVerbose("ingested %d byte(s) as residue: %s", len(frame.Raw), h.reason)
@@ -57,8 +57,17 @@ func (h *residueHandler) Handle(frames []tail.Frame, ctx *tail.Context) []*store
 // absorbs the replay as success instead of storing the residue twice. The
 // upsert key is the same coordinates, so a re-read supersedes the row whole
 // rather than growing a second one beside it.
-func residueEntry(path string, offset int64, reason string, raw []byte) *storev1.StoreEntry {
-	coordinates := fmt.Sprintf("%s|%s|%d|residue", storeclient.Producer, path, offset)
+// R-S1: the digest is over the FILE ID, never the path, so a renamed file
+// re-read from its (inode-keyed) cursor mints the identical write ids and the
+// store absorbs the replay instead of storing the residue a second time. The
+// upsert key still names the PATH, because that is the human-facing coordinate
+// a residue row is investigated by and it is the same key convert.ResidueKey
+// uses for a uuid-less record.
+func residueEntry(fileID, path string, offset int64, reason string, raw []byte) *storev1.StoreEntry {
+	if fileID == "" {
+		panic("sidecar: residue write_id requires the file's dev:inode identity; the reader supplied none")
+	}
+	coordinates := fmt.Sprintf("%s|%s|%d|residue", storeclient.Producer, fileID, offset)
 	digest := sha256.Sum256([]byte(coordinates))
 	return &storev1.StoreEntry{
 		Plane:   &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}},

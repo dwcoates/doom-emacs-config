@@ -9,18 +9,18 @@ import (
 )
 
 func TestWriteIdIsTheRuledDigestOfItsSourceCoordinates(t *testing.T) {
-	// Arrange. THE RECIPE IS THE RULING: sha256 of
-	// "producer|path|offset|discriminator", hex. Asserting the recipe rather than
-	// a recorded digest is what keeps the shim able to reproduce it.
-	at := Attribution{Path: "/p/s.jsonl", Offset: 128}
+	// Arrange. THE RECIPE IS THE RULING (R-S1): sha256 of
+	// "producer|file_id|offset|discriminator", hex. Asserting the recipe rather
+	// than a recorded digest is what keeps the shim able to reproduce it.
+	at := Attribution{Path: "/p/s.jsonl", FileID: "16777232:9910", Offset: 128}
 
 	// Act.
 	got := WriteID(at, "block:0")
 
 	// Assert: recomputing the documented input must reproduce it exactly.
-	want := sha256Hex(Producer + "|/p/s.jsonl|128|block:0")
+	want := sha256Hex(Producer + "|16777232:9910|128|block:0")
 	if got != want {
-		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|/p/s.jsonl|128|block:0")
+		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|16777232:9910|128|block:0")
 	}
 }
 
@@ -28,7 +28,7 @@ func TestWriteIdIsStableAcrossTwoRunsOfTheSameBytes(t *testing.T) {
 	// Arrange. Replay idempotence at the store rests entirely on this: the same
 	// bytes re-read after a restart must mint the same id, so randomness is
 	// forbidden.
-	at := Attribution{Path: "/p/s.jsonl", Offset: 7}
+	at := Attribution{Path: "/p/s.jsonl", FileID: "16777232:9910", Offset: 7}
 
 	// Act.
 	first := WriteID(at, "settle:toolu_a")
@@ -40,18 +40,39 @@ func TestWriteIdIsStableAcrossTwoRunsOfTheSameBytes(t *testing.T) {
 	}
 }
 
+func TestWriteIdIsUnchangedByARenameOfTheFile(t *testing.T) {
+	// Arrange. THE RULING'S WHOLE POINT (R-S1). The store's cursor is keyed by
+	// "dev:inode", so a renamed file keeps its cursor and is RESUMED from it. If
+	// the write identity digested the path instead, every record replayed after
+	// that rename would mint a fresh id and the store — whose absorption is
+	// write_id equality — would store the entire re-read turn a second time.
+	before := Attribution{Path: "/p/projects/proj/s.jsonl", FileID: "16777232:9910", Offset: 512}
+	after := Attribution{Path: "/p/projects/proj/renamed.jsonl", FileID: "16777232:9910", Offset: 512}
+
+	// Act.
+	first := WriteID(before, "block:0")
+	second := WriteID(after, "block:0")
+
+	// Assert.
+	if first != second {
+		t.Fatalf("a rename changed the write identity (%q -> %q); the cursor survived it, so the write id must too", first, second)
+	}
+}
+
 func TestWriteIdVariesWithEveryCoordinate(t *testing.T) {
 	// Arrange. Each coordinate must change the identity, or two distinct records
-	// collide and the store absorbs one as a replay of the other, losing it.
-	base := Attribution{Path: "/p/s.jsonl", Offset: 10}
+	// collide and the store absorbs one as a replay of the other, losing it. The
+	// PATH is deliberately absent from this table: it is not a coordinate of the
+	// identity any more (R-S1), and the rename subject above pins that.
+	base := Attribution{Path: "/p/s.jsonl", FileID: "16777232:9910", Offset: 10}
 	cases := []struct {
 		name string
 		at   Attribution
 		disc string
 	}{
 		{name: "baseline", at: base, disc: "d"},
-		{name: "a different path", at: Attribution{Path: "/p/other.jsonl", Offset: 10}, disc: "d"},
-		{name: "a different offset", at: Attribution{Path: "/p/s.jsonl", Offset: 11}, disc: "d"},
+		{name: "a different file id", at: Attribution{Path: "/p/s.jsonl", FileID: "16777232:9911", Offset: 10}, disc: "d"},
+		{name: "a different offset", at: Attribution{Path: "/p/s.jsonl", FileID: "16777232:9910", Offset: 11}, disc: "d"},
 		{name: "a different discriminator", at: base, disc: "e"},
 	}
 
@@ -69,6 +90,23 @@ func TestWriteIdVariesWithEveryCoordinate(t *testing.T) {
 	if len(seen) != len(cases) {
 		t.Fatalf("distinct ids = %d, want %d", len(seen), len(cases))
 	}
+}
+
+func TestAWriteIdWithoutAFileIdIsRaisedAsAReaderDefect(t *testing.T) {
+	// Arrange. Digesting an empty file id would collapse EVERY file's records
+	// onto one identity space keyed only by offset, so two unrelated files'
+	// first records would absorb each other at the store. The reader always
+	// supplies the id, so its absence is a defect and is stated as one rather
+	// than defaulted away.
+	at := Attribution{Path: "/p/s.jsonl", Offset: 0}
+
+	// Act + Assert.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a write id minted without a file id must be raised, never digested as an empty string")
+		}
+	}()
+	_ = WriteID(at, "block:0")
 }
 
 func TestEveryEntryNamesTheFilePlane(t *testing.T) {
@@ -136,7 +174,7 @@ func TestUnparsedResidueIsBoundedButKeepsItsEvidence(t *testing.T) {
 func TestTopLevelIsUnsetWhenGenuinelyUnresolvable(t *testing.T) {
 	// Arrange. UNSET ONLY WHEN GENUINELY UNRESOLVABLE — residue that names no
 	// agent at all. A sentinel here would be indistinguishable from a real book.
-	at := Attribution{Path: "/p/s.jsonl", Offset: 0}
+	at := Attribution{Path: "/p/s.jsonl", FileID: "16777232:9910", Offset: 0}
 
 	// Act.
 	entry := UnknownEntry(at, "x", "type", map[string]any{})
