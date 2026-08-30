@@ -376,3 +376,68 @@ every UX or contract gap you surfaced instead of improvising.
   (5) ACCOUNT USAGE with every window populated plus one scenario per
   unavailable reason (`!usage-full`, `!usage-service-unavailable`,
   `!usage-window-unavailable`, `!usage-utilization-unavailable`).
+- SESSIONWATCHER RULINGS (project lead, binding; landing 4 carries the
+  proto comments): (1) `SessionStarted.live_work` re-adoption announces
+  EVERY live item with the `created` origin — `work_created` states the kind
+  and description — never `detached{...}`; the description is sourced from
+  the shim's own record (the `detached:<work id>` page line when it was
+  created-origin, else the unit's start: its `activity:<id>` page line in
+  the announcing agent's book, the bash run's start row via WatchBashRun, or
+  the subagent's own book opening); an unreadable case is REPORTED, never
+  restated as `detached{requested}`. (2) `DetachedWorkId.value ==
+  AgentActivityId.value` — the spawning call's tool_use_id (for a subagent
+  also its AgentId); the vendor task_id is an internal lookup (task_started
+  maps it) used only for stopTask/level signals, never on the wire.
+  (3) `SessionUpdate.context_budget_warning` (24) is retired in landing 4;
+  the warning becomes `AgentUpdate.context_budget_warning = 7 {text}`, a
+  page line the SIDECAR produces from the transcript attachment; the shim's
+  converter maps to that arm and never emits it live.
+- DISPATCH TIERS (user ruling): every NEW implementation dispatch is
+  `opus-low` (Opus at LOW effort); agents already running or being resumed
+  keep their tier. Implementers MAY offload mechanical, fully-specified
+  writes (boilerplate, tests from a settled table, rote conversions, doc
+  sections) to `sonnet-medium` at their judgment; the offloading agent stays
+  accountable — it reviews the output, runs the suites, and reports the
+  offload. Both statements ride every brief. If the types are not offered,
+  `subagent_type: "claude"` with `model: "opus"` / `"sonnet"` and the effort
+  stated in the brief.
+- COMPACTION RULE (user ruling): the moment the lead's context is compacted
+  it drops to LOW effort (`/effort low` if available; else explicitly — no
+  re-derivation, no exploration; act on the summary + these docs + the
+  ledger below) and says "compacted" to the project lead.
+
+## LIVE LEDGER (shim lead; updated at every dispatch/merge)
+
+- Branch `overhaul/shim`, worktree `~/.config/doom-overhaul/shim`. Merged and
+  retired: scaffold, capture harness, engine, mock (first roster).
+- RUNNING (opus-medium, keep tier): RECORD PLANE agent `a699887424d695c83`
+  in `~/.config/doom-overhaul/shim-agents/record` (branch
+  `overhaul/shim-record`; steps 1–10: StoreLineAt pointers, WatchBashRun,
+  lost arms, producer re-key, engine extras page/not_deliverable/unsupported,
+  owed unit files, created-origin live_work, DetachedWorkId == activity id,
+  budget-warning mapping); INTEGRATION AUTHOR `a4e55fa0df5a8d8c9` in
+  `shim-agents/itests` (branch `overhaul/shim-itests`; seven suites; never
+  runs them); MOCK ADDITIONS `a4c3a36d86587908d` in `shim-agents/mock2`
+  (branch `overhaul/shim-mock2`; fast/usage/context-drift/fault/fallback).
+- NEXT: merge each landing (verify typecheck/test/build/smoke); run
+  `npm run test:integration` (pretest builds); remediation dispatches at
+  `opus-low` in hand-made worktrees `overhaul/shim-<slug>`; fresh fable
+  auditor (`subagent_type: "claude"`, `model: "fable"`) over docs/overhaul/
+  {shim,daemon,store,sidecar}.md vs test/integration; loop; landing 4 merge
+  (retired context_budget_warning arm; daemon error arms); final report per
+  COMMON.md (must include the R9 rule + evidence, the mock file layout, the
+  prompt→scenario table location = agent-shim/claude/shim/AGENTS.md).
+- ESCALATIONS OUTSTANDING: none (all seven answered in landing 3).
+- Project lead address for SendMessage: `main`.
+- LEDGER: mock additions landed on overhaul/shim-mock2 (2babe459c..e017fe398,
+  awaiting one fix: `!usage-window-unavailable` must null five_hour). ENGINE
+  GAPS queued for an opus-low remediation agent after the record plane lands
+  (they touch engine/pushes.ts, session.ts, the fold seam): (a) a fold
+  converter defect (StoreUnparsed with parse_error "converter defect: …")
+  must raise SessionFault.converter_defect + a degraded window and recover
+  (a FoldContext.reportFault channel or the Persistence fault source);
+  (b) model_changed must also be derived from the next assistant message's
+  message.model (unsolicited vendor fallback), not only init/SetSessionModel;
+  (c) fast_mode has no producer — the engine drops the fold's fast_mode
+  update as an owned arm and pushes none; produce it from init/result
+  fast_mode_state.

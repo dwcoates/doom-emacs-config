@@ -190,9 +190,17 @@ func (*CloseLoginSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type CloseLoginError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*CloseLoginError_UnknownWorkspace
+	//	*CloseLoginError_WorkspaceRefMismatch
+	//	*CloseLoginError_TransferringAway
+	//	*CloseLoginError_NotYetAdopted
+	Cause         isCloseLoginError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,6 +235,243 @@ func (*CloseLoginError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *CloseLoginError) GetCause() isCloseLoginError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *CloseLoginError) GetUnknownWorkspace() *CloseLoginUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseLoginError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *CloseLoginError) GetWorkspaceRefMismatch() *CloseLoginWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseLoginError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *CloseLoginError) GetTransferringAway() *CloseLoginTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseLoginError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *CloseLoginError) GetNotYetAdopted() *CloseLoginNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*CloseLoginError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+type isCloseLoginError_Cause interface {
+	isCloseLoginError_Cause()
+}
+
+type CloseLoginError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *CloseLoginUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type CloseLoginError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *CloseLoginWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type CloseLoginError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *CloseLoginTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type CloseLoginError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *CloseLoginNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+func (*CloseLoginError_UnknownWorkspace) isCloseLoginError_Cause() {}
+
+func (*CloseLoginError_WorkspaceRefMismatch) isCloseLoginError_Cause() {}
+
+func (*CloseLoginError_TransferringAway) isCloseLoginError_Cause() {}
+
+func (*CloseLoginError_NotYetAdopted) isCloseLoginError_Cause() {}
+
+type CloseLoginUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseLoginUnknownWorkspace) Reset() {
+	*x = CloseLoginUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseLoginUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseLoginUnknownWorkspace) ProtoMessage() {}
+
+func (x *CloseLoginUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseLoginUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*CloseLoginUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP(), []int{4}
+}
+
+type CloseLoginWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseLoginWorkspaceRefMismatch) Reset() {
+	*x = CloseLoginWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseLoginWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseLoginWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *CloseLoginWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseLoginWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*CloseLoginWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CloseLoginWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type CloseLoginTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseLoginTransferringAway) Reset() {
+	*x = CloseLoginTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseLoginTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseLoginTransferringAway) ProtoMessage() {}
+
+func (x *CloseLoginTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseLoginTransferringAway.ProtoReflect.Descriptor instead.
+func (*CloseLoginTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CloseLoginTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type CloseLoginNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseLoginNotYetAdopted) Reset() {
+	*x = CloseLoginNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseLoginNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseLoginNotYetAdopted) ProtoMessage() {}
+
+func (x *CloseLoginNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_close_login_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseLoginNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*CloseLoginNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP(), []int{7}
+}
+
 var File_agentrepl_v1_endpoint_close_login_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_close_login_proto_rawDesc = "" +
@@ -238,8 +483,19 @@ const file_agentrepl_v1_endpoint_close_login_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\x1f.agentrepl.v1.CloseLoginSuccessH\x00R\asuccess\x125\n" +
 	"\x05error\x18\x02 \x01(\v2\x1d.agentrepl.v1.CloseLoginErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x13\n" +
-	"\x11CloseLoginSuccess\"\x11\n" +
-	"\x0fCloseLoginErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x11CloseLoginSuccess\"\x83\x03\n" +
+	"\x0fCloseLoginError\x12W\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2(.agentrepl.v1.CloseLoginUnknownWorkspaceH\x00R\x10unknownWorkspace\x12d\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2,.agentrepl.v1.CloseLoginWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12W\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2(.agentrepl.v1.CloseLoginTransferringAwayH\x00R\x10transferringAway\x12O\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2%.agentrepl.v1.CloseLoginNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x05cause\"\x1c\n" +
+	"\x1aCloseLoginUnknownWorkspace\"C\n" +
+	"\x1eCloseLoginWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"6\n" +
+	"\x1aCloseLoginTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x19\n" +
+	"\x17CloseLoginNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_close_login_proto_rawDescOnce sync.Once
@@ -253,23 +509,31 @@ func file_agentrepl_v1_endpoint_close_login_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_close_login_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_close_login_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_close_login_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_close_login_proto_goTypes = []any{
-	(*CloseLoginRequest)(nil),  // 0: agentrepl.v1.CloseLoginRequest
-	(*CloseLoginResponse)(nil), // 1: agentrepl.v1.CloseLoginResponse
-	(*CloseLoginSuccess)(nil),  // 2: agentrepl.v1.CloseLoginSuccess
-	(*CloseLoginError)(nil),    // 3: agentrepl.v1.CloseLoginError
-	(*v1.WorkspaceRef)(nil),    // 4: workspace.v1.WorkspaceRef
+	(*CloseLoginRequest)(nil),              // 0: agentrepl.v1.CloseLoginRequest
+	(*CloseLoginResponse)(nil),             // 1: agentrepl.v1.CloseLoginResponse
+	(*CloseLoginSuccess)(nil),              // 2: agentrepl.v1.CloseLoginSuccess
+	(*CloseLoginError)(nil),                // 3: agentrepl.v1.CloseLoginError
+	(*CloseLoginUnknownWorkspace)(nil),     // 4: agentrepl.v1.CloseLoginUnknownWorkspace
+	(*CloseLoginWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.CloseLoginWorkspaceRefMismatch
+	(*CloseLoginTransferringAway)(nil),     // 6: agentrepl.v1.CloseLoginTransferringAway
+	(*CloseLoginNotYetAdopted)(nil),        // 7: agentrepl.v1.CloseLoginNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                // 8: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_close_login_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.CloseLoginRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	8, // 0: agentrepl.v1.CloseLoginRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.CloseLoginResponse.success:type_name -> agentrepl.v1.CloseLoginSuccess
 	3, // 2: agentrepl.v1.CloseLoginResponse.error:type_name -> agentrepl.v1.CloseLoginError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: agentrepl.v1.CloseLoginError.unknown_workspace:type_name -> agentrepl.v1.CloseLoginUnknownWorkspace
+	5, // 4: agentrepl.v1.CloseLoginError.workspace_ref_mismatch:type_name -> agentrepl.v1.CloseLoginWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.CloseLoginError.transferring_away:type_name -> agentrepl.v1.CloseLoginTransferringAway
+	7, // 6: agentrepl.v1.CloseLoginError.not_yet_adopted:type_name -> agentrepl.v1.CloseLoginNotYetAdopted
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_close_login_proto_init() }
@@ -281,13 +545,19 @@ func file_agentrepl_v1_endpoint_close_login_proto_init() {
 		(*CloseLoginResponse_Success)(nil),
 		(*CloseLoginResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_close_login_proto_msgTypes[3].OneofWrappers = []any{
+		(*CloseLoginError_UnknownWorkspace)(nil),
+		(*CloseLoginError_WorkspaceRefMismatch)(nil),
+		(*CloseLoginError_TransferringAway)(nil),
+		(*CloseLoginError_NotYetAdopted)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_close_login_proto_rawDesc), len(file_agentrepl_v1_endpoint_close_login_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
