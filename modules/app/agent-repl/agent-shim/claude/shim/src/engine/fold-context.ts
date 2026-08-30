@@ -71,6 +71,19 @@ export interface FoldContext {
   mcpServerNames?(): readonly string[];
 
   /**
+   * REPORT A CONVERTER DEFECT the fold could not convert around.
+   *
+   * The fold's answer to a record it refuses is residue plus a log; that is the
+   * RECORD plane's half. This is the CONTROL plane's half: the shim's own
+   * diagnostics must say the converter is unhealthy while it is, and say so on
+   * WatchSession rather than only in a log nobody is reading. It is deliberately
+   * NOT the store writer's `store_unreachable` path — nothing about the store
+   * failed — and deliberately optional, so a fold driven without an engine
+   * (every unit test) needs no channel at all.
+   */
+  reportFault?(kind: "converter_defect", detail: string): void;
+
+  /**
    * The last write or edit unit seen.
    *
    * The vendor's IDE-diagnostics record carries no tool id, so the join is by

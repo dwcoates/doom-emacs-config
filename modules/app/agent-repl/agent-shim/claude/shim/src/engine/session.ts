@@ -244,12 +244,58 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
+      reportFault: (_kind, detail) => {
+        noteConverterDefect(detail);
+      },
       liveTask: (taskId) => {
         const entry = live.get(taskId);
         if (entry === undefined) return undefined;
         return entry.toolUseId === undefined ? { toolUseId: "" } : { toolUseId: entry.toolUseId };
       },
     };
+  }
+
+  // -- the converter's own health -------------------------------------------
+
+  /** Which component a converter defect is reported against, on both sides. */
+  const CONVERTER_COMPONENT = "converter";
+
+  /** Open while the converter is refusing messages; counts what it refused. */
+  let converterDegraded: { droppedCount: number } | undefined;
+  /** Set by the fault channel during ONE fold call, cleared before the next. */
+  let converterDefectThisMessage = false;
+
+  /**
+   * The fold refused a vendor message.
+   *
+   * The fault is standing (the session is unhealthy) and the window is OPEN
+   * until a message converts cleanly. Every refusal counts toward the window's
+   * `dropped_count`, which is the only place the number of lost records is
+   * ever stated.
+   */
+  function noteConverterDefect(detail: string): void {
+    converterDefectThisMessage = true;
+    if (converterDegraded === undefined) {
+      converterDegraded = { droppedCount: 0 };
+      pushes.openDegradedWindow(
+        CONVERTER_COMPONENT,
+        "the fold refused a vendor message it should have modelled",
+      );
+    }
+    converterDegraded.droppedCount += 1;
+    LOGGER.log(
+      { level: "error", component: CONVERTER_COMPONENT, detail, dropped_count: converterDegraded.droppedCount },
+      "the converter refused a vendor message; the session is degraded until one converts",
+    );
+    pushes.fault(sessionFault({ kind: "converterDefect" }, CONVERTER_COMPONENT, detail));
+  }
+
+  /** A message converted cleanly (or the turn ended): the converter is well. */
+  function noteConverterHealthy(): void {
+    if (converterDegraded === undefined) return;
+    const droppedCount = converterDegraded.droppedCount;
+    converterDegraded = undefined;
+    pushes.resolveComponent(CONVERTER_COMPONENT, droppedCount);
   }
 
   // -- session-level pushes the shim itself produces ------------------------
@@ -679,7 +725,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function onSdkMessage(message: SdkMessage): Promise<void> {
     noteIdentityFacts(message);
     noteDetachedWork(message);
+    converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext());
+    if (converterDefectThisMessage) {
+      LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
+    } else {
+      noteConverterHealthy();
+    }
     const entries = [...output.entries];
     if (entries.length > 0) deps.persistence.write(entries);
     for (const entry of entries) {
@@ -690,7 +742,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const uuid = (message as { uuid?: string }).uuid;
     if (typeof uuid === "string" && uuid !== "") rewind.noteRecord(uuid, open?.keepalive === true);
-    if (output.turnEnded !== undefined) await closeTurn();
+    if (output.turnEnded !== undefined) {
+      // THE TURN'S END IS ALSO A RECOVERY POINT: a defect on the turn's last
+      // convertible message would otherwise leave the window open until some
+      // later turn happened to arrive.
+      noteConverterHealthy();
+      await closeTurn();
+    }
   }
 
   function noteIdentityFacts(message: SdkMessage): void {

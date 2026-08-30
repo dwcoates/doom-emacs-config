@@ -1087,3 +1087,101 @@ describe("GetLiveWork reconciliation", () => {
     expect((await started(h)).result.case).toBe("success");
   });
 });
+
+describe("the converter's own health", () => {
+  /** The diagnostics the engine would state right now. */
+  function diagnostics(h: Harness): conversationv1.SessionDiagnostics {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("the engine stated no diagnostics");
+    return update.value;
+  }
+
+  const prose = (uuid: string): never =>
+    ({
+      type: "assistant",
+      uuid,
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "claude-opus-5", content: [] },
+    }) as never;
+
+  it("reports a refused message as a converter_defect fault", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "the hook firing id is empty" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    const health = diagnostics(h).health;
+    expect(health.case === "unhealthy" ? health.value.faults[0]?.kind.case : "").toBe("converterDefect");
+  });
+
+  it("names the converter as the faulting component", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    const health = diagnostics(h).health;
+    expect(health.case === "unhealthy" ? health.value.faults[0]?.component : "").toBe("converter");
+  });
+
+  it("opens a degraded window for the converter", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("open");
+  });
+
+  it("returns to healthy once a message converts", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid === "u-defect" ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    await h.engine.onSdkMessage(prose("u-good"));
+
+    expect(diagnostics(h).health.case).toBe("healthy");
+  });
+
+  it("closes the window with the number of messages it refused", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid?.startsWith("u-defect") === true ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect-1"));
+    await h.engine.onSdkMessage(prose("u-defect-2"));
+
+    await h.engine.onSdkMessage(prose("u-good"));
+
+    const window = diagnostics(h).degradedWindows[0];
+    expect(window?.extent.case === "closed" ? window.extent.value.droppedCount : -1n).toBe(2n);
+  });
+
+  it("opens ONE window across consecutive refusals", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = () => "boom";
+
+    await h.engine.onSdkMessage(prose("u-defect-1"));
+    await h.engine.onSdkMessage(prose("u-defect-2"));
+
+    expect(diagnostics(h).degradedWindows.length).toBe(1);
+  });
+
+  it("closes the window at the turn's end", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    await h.engine.onSdkMessage(resultMessage("u-result"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("closed");
+  });
+});
