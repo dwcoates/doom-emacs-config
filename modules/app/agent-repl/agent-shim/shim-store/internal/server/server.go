@@ -64,8 +64,8 @@ func New(store Store, log *logging.Logger, watchBuffer int) *Server {
 		panic("shim-store server: nil logger")
 	}
 	s := &Server{
-		store:  store,
-		log:    log,
+		store:   store,
+		log:     log,
 		tokens:  newTokenRegistry(),
 		fan:     newFanout(watchBuffer, lineKey),
 		bashFan: newFanout(watchBuffer, bashRowKey),
@@ -122,6 +122,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 // one request produces.
 func (s *Server) rpcLogger(procedure string, header http.Header) *logging.Logger {
 	return s.log.With(logging.Fields{RPC: procedure, RequestID: header.Get(RequestIDHeader)})
+}
+
+// correlated carries the caller's request id down to the storage layer.
+//
+// THE STORAGE LAYER'S RECORDS NEED IT TOO. Its logger is built once at boot and
+// belongs to the process, so without this a db record could never say which call
+// it belonged to — and "no statement ran for this request" would be
+// unassertable, which is exactly the hole that made the suite's
+// no-database-touch check vacuous.
+func correlated(ctx context.Context, header http.Header) context.Context {
+	return logging.ContextWithRequestID(ctx, header.Get(RequestIDHeader))
 }
 
 // logRefusal records a refusal exactly once, at its owning layer, with the site
@@ -220,7 +231,7 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 		return writeBatchFailure(ref), nil
 	}
 
-	result, err := s.store.WriteBatch(ctx, msg.GetProducer(), msg.GetBatch())
+	result, err := s.store.WriteBatch(correlated(ctx, req.Header()), msg.GetProducer(), msg.GetBatch())
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.write-batch", err, logging.Fields{Producer: msg.GetProducer()})
 		return writeBatchFailure(ref), nil
@@ -287,7 +298,7 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 		return openFailure(ref), nil
 	}
 
-	opened, err := s.store.OpenPage(ctx, agentID, msg.GetPageSize(), msg.GetKnownThrough())
+	opened, err := s.store.OpenPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetKnownThrough())
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.open-agent-session", err, logging.Fields{AgentID: agentID})
 		return openFailure(ref), nil
@@ -362,7 +373,7 @@ func (s *Server) WatchAgentSession(ctx context.Context, req *connect.Request[sto
 	sub := s.fan.subscribe(entry.agentID, hash)
 	defer s.fan.unsubscribe(sub)
 
-	replay, err := s.store.LinesSince(ctx, entry.agentID, entry.pinSeq)
+	replay, err := s.store.LinesSince(correlated(ctx, req.Header()), entry.agentID, entry.pinSeq)
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.watch-agent-session", err, logging.Fields{WriteSeq: entry.pinSeq})
 		return connect.NewError(connect.CodeInternal, ref)
@@ -451,7 +462,7 @@ func (s *Server) ReadAgentPage(ctx context.Context, req *connect.Request[storev1
 		return readPageFailure(ref), nil
 	}
 
-	page, err := s.store.ReadPage(ctx, agentID, msg.GetPageSize(), msg.GetAfter())
+	page, err := s.store.ReadPage(correlated(ctx, req.Header()), agentID, msg.GetPageSize(), msg.GetAfter())
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.read-agent-page", err, logging.Fields{AgentID: agentID, Position: msg.GetAfter().GetValue()})
 		return readPageFailure(ref), nil
@@ -511,7 +522,7 @@ func (s *Server) GetLiveWork(ctx context.Context, req *connect.Request[storev1.G
 	log := s.rpcLogger(storev1connect.ShimStoreGetLiveWorkProcedure, req.Header())
 	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-live-work"}, "reading the open obligations")
 
-	live, err := s.store.LiveWork(ctx)
+	live, err := s.store.LiveWork(correlated(ctx, req.Header()))
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.get-live-work", err, logging.Fields{})
 		return liveWorkFailure(ref), nil
@@ -553,7 +564,7 @@ func (s *Server) GetSidecarCursors(ctx context.Context, req *connect.Request[sto
 		return cursorsFailure(ref), nil
 	}
 
-	cursors, err := s.store.Cursors(ctx, msg.FileId)
+	cursors, err := s.store.Cursors(correlated(ctx, req.Header()), msg.FileId)
 	if err != nil {
 		ref := s.storeFailure(log, "store.rpc.get-sidecar-cursors", err, logging.Fields{FileID: msg.GetFileId()})
 		return cursorsFailure(ref), nil

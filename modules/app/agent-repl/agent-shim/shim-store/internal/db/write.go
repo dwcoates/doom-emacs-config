@@ -84,7 +84,10 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 
 	started := time.Now()
-	defer func() { d.observeQuery(StatementWriteBatch, "entry", base, started, int64(len(entries))) }()
+	defer func() {
+		d.observeQuery(StatementWriteBatch, "entry", base, started, int64(len(entries)))
+		d.traceStatement(ctx, StatementWriteBatch, "entry", base, int64(len(entries)))
+	}()
 
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
