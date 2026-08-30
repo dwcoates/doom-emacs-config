@@ -212,10 +212,19 @@ func (x *RequestCommandSupportSuccess) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace, a
-// command the daemon never refused, creation failed, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type RequestCommandSupportError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*RequestCommandSupportError_UnknownWorkspace
+	//	*RequestCommandSupportError_WorkspaceRefMismatch
+	//	*RequestCommandSupportError_TransferringAway
+	//	*RequestCommandSupportError_NotYetAdopted
+	//	*RequestCommandSupportError_BlankCommand
+	//	*RequestCommandSupportError_BriefMissing
+	Cause         isRequestCommandSupportError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -250,6 +259,356 @@ func (*RequestCommandSupportError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *RequestCommandSupportError) GetCause() isRequestCommandSupportError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *RequestCommandSupportError) GetUnknownWorkspace() *RequestCommandSupportUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*RequestCommandSupportError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *RequestCommandSupportError) GetWorkspaceRefMismatch() *RequestCommandSupportWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*RequestCommandSupportError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *RequestCommandSupportError) GetTransferringAway() *RequestCommandSupportTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*RequestCommandSupportError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *RequestCommandSupportError) GetNotYetAdopted() *RequestCommandSupportNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*RequestCommandSupportError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *RequestCommandSupportError) GetBlankCommand() *RequestCommandSupportBlankCommand {
+	if x != nil {
+		if x, ok := x.Cause.(*RequestCommandSupportError_BlankCommand); ok {
+			return x.BlankCommand
+		}
+	}
+	return nil
+}
+
+func (x *RequestCommandSupportError) GetBriefMissing() *RequestCommandSupportBriefMissing {
+	if x != nil {
+		if x, ok := x.Cause.(*RequestCommandSupportError_BriefMissing); ok {
+			return x.BriefMissing
+		}
+	}
+	return nil
+}
+
+type isRequestCommandSupportError_Cause interface {
+	isRequestCommandSupportError_Cause()
+}
+
+type RequestCommandSupportError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *RequestCommandSupportUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type RequestCommandSupportError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *RequestCommandSupportWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type RequestCommandSupportError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *RequestCommandSupportTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type RequestCommandSupportError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *RequestCommandSupportNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type RequestCommandSupportError_BlankCommand struct {
+	// The command is blank once trimmed.
+	BlankCommand *RequestCommandSupportBlankCommand `protobuf:"bytes,5,opt,name=blank_command,json=blankCommand,proto3,oneof"`
+}
+
+type RequestCommandSupportError_BriefMissing struct {
+	// The named brief file is absent.
+	BriefMissing *RequestCommandSupportBriefMissing `protobuf:"bytes,6,opt,name=brief_missing,json=briefMissing,proto3,oneof"`
+}
+
+func (*RequestCommandSupportError_UnknownWorkspace) isRequestCommandSupportError_Cause() {}
+
+func (*RequestCommandSupportError_WorkspaceRefMismatch) isRequestCommandSupportError_Cause() {}
+
+func (*RequestCommandSupportError_TransferringAway) isRequestCommandSupportError_Cause() {}
+
+func (*RequestCommandSupportError_NotYetAdopted) isRequestCommandSupportError_Cause() {}
+
+func (*RequestCommandSupportError_BlankCommand) isRequestCommandSupportError_Cause() {}
+
+func (*RequestCommandSupportError_BriefMissing) isRequestCommandSupportError_Cause() {}
+
+type RequestCommandSupportUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCommandSupportUnknownWorkspace) Reset() {
+	*x = RequestCommandSupportUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCommandSupportUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCommandSupportUnknownWorkspace) ProtoMessage() {}
+
+func (x *RequestCommandSupportUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCommandSupportUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*RequestCommandSupportUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{4}
+}
+
+type RequestCommandSupportWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCommandSupportWorkspaceRefMismatch) Reset() {
+	*x = RequestCommandSupportWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCommandSupportWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCommandSupportWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *RequestCommandSupportWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCommandSupportWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*RequestCommandSupportWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RequestCommandSupportWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type RequestCommandSupportTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCommandSupportTransferringAway) Reset() {
+	*x = RequestCommandSupportTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCommandSupportTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCommandSupportTransferringAway) ProtoMessage() {}
+
+func (x *RequestCommandSupportTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCommandSupportTransferringAway.ProtoReflect.Descriptor instead.
+func (*RequestCommandSupportTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RequestCommandSupportTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type RequestCommandSupportNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCommandSupportNotYetAdopted) Reset() {
+	*x = RequestCommandSupportNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCommandSupportNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCommandSupportNotYetAdopted) ProtoMessage() {}
+
+func (x *RequestCommandSupportNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCommandSupportNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*RequestCommandSupportNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{7}
+}
+
+type RequestCommandSupportBlankCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCommandSupportBlankCommand) Reset() {
+	*x = RequestCommandSupportBlankCommand{}
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCommandSupportBlankCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCommandSupportBlankCommand) ProtoMessage() {}
+
+func (x *RequestCommandSupportBlankCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCommandSupportBlankCommand.ProtoReflect.Descriptor instead.
+func (*RequestCommandSupportBlankCommand) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{8}
+}
+
+type RequestCommandSupportBriefMissing struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The brief's name, as asked for.
+	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequestCommandSupportBriefMissing) Reset() {
+	*x = RequestCommandSupportBriefMissing{}
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequestCommandSupportBriefMissing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequestCommandSupportBriefMissing) ProtoMessage() {}
+
+func (x *RequestCommandSupportBriefMissing) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequestCommandSupportBriefMissing.ProtoReflect.Descriptor instead.
+func (*RequestCommandSupportBriefMissing) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RequestCommandSupportBriefMissing) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_request_command_support_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_request_command_support_proto_rawDesc = "" +
@@ -263,8 +622,24 @@ const file_agentrepl_v1_endpoint_request_command_support_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2(.agentrepl.v1.RequestCommandSupportErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"X\n" +
 	"\x1cRequestCommandSupportSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x1c\n" +
-	"\x1aRequestCommandSupportErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xea\x04\n" +
+	"\x1aRequestCommandSupportError\x12b\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v23.agentrepl.v1.RequestCommandSupportUnknownWorkspaceH\x00R\x10unknownWorkspace\x12o\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v27.agentrepl.v1.RequestCommandSupportWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12b\n" +
+	"\x11transferring_away\x18\x03 \x01(\v23.agentrepl.v1.RequestCommandSupportTransferringAwayH\x00R\x10transferringAway\x12Z\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v20.agentrepl.v1.RequestCommandSupportNotYetAdoptedH\x00R\rnotYetAdopted\x12V\n" +
+	"\rblank_command\x18\x05 \x01(\v2/.agentrepl.v1.RequestCommandSupportBlankCommandH\x00R\fblankCommand\x12V\n" +
+	"\rbrief_missing\x18\x06 \x01(\v2/.agentrepl.v1.RequestCommandSupportBriefMissingH\x00R\fbriefMissingB\a\n" +
+	"\x05cause\"'\n" +
+	"%RequestCommandSupportUnknownWorkspace\"N\n" +
+	")RequestCommandSupportWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"A\n" +
+	"%RequestCommandSupportTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"$\n" +
+	"\"RequestCommandSupportNotYetAdopted\"#\n" +
+	"!RequestCommandSupportBlankCommand\"7\n" +
+	"!RequestCommandSupportBriefMissing\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04nameB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_request_command_support_proto_rawDescOnce sync.Once
@@ -278,24 +653,36 @@ func file_agentrepl_v1_endpoint_request_command_support_proto_rawDescGZIP() []by
 	return file_agentrepl_v1_endpoint_request_command_support_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_request_command_support_proto_goTypes = []any{
-	(*RequestCommandSupportRequest)(nil),  // 0: agentrepl.v1.RequestCommandSupportRequest
-	(*RequestCommandSupportResponse)(nil), // 1: agentrepl.v1.RequestCommandSupportResponse
-	(*RequestCommandSupportSuccess)(nil),  // 2: agentrepl.v1.RequestCommandSupportSuccess
-	(*RequestCommandSupportError)(nil),    // 3: agentrepl.v1.RequestCommandSupportError
-	(*v1.WorkspaceRef)(nil),               // 4: workspace.v1.WorkspaceRef
+	(*RequestCommandSupportRequest)(nil),              // 0: agentrepl.v1.RequestCommandSupportRequest
+	(*RequestCommandSupportResponse)(nil),             // 1: agentrepl.v1.RequestCommandSupportResponse
+	(*RequestCommandSupportSuccess)(nil),              // 2: agentrepl.v1.RequestCommandSupportSuccess
+	(*RequestCommandSupportError)(nil),                // 3: agentrepl.v1.RequestCommandSupportError
+	(*RequestCommandSupportUnknownWorkspace)(nil),     // 4: agentrepl.v1.RequestCommandSupportUnknownWorkspace
+	(*RequestCommandSupportWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.RequestCommandSupportWorkspaceRefMismatch
+	(*RequestCommandSupportTransferringAway)(nil),     // 6: agentrepl.v1.RequestCommandSupportTransferringAway
+	(*RequestCommandSupportNotYetAdopted)(nil),        // 7: agentrepl.v1.RequestCommandSupportNotYetAdopted
+	(*RequestCommandSupportBlankCommand)(nil),         // 8: agentrepl.v1.RequestCommandSupportBlankCommand
+	(*RequestCommandSupportBriefMissing)(nil),         // 9: agentrepl.v1.RequestCommandSupportBriefMissing
+	(*v1.WorkspaceRef)(nil),                           // 10: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_request_command_support_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.RequestCommandSupportRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.RequestCommandSupportResponse.success:type_name -> agentrepl.v1.RequestCommandSupportSuccess
-	3, // 2: agentrepl.v1.RequestCommandSupportResponse.error:type_name -> agentrepl.v1.RequestCommandSupportError
-	4, // 3: agentrepl.v1.RequestCommandSupportSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	10, // 0: agentrepl.v1.RequestCommandSupportRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.RequestCommandSupportResponse.success:type_name -> agentrepl.v1.RequestCommandSupportSuccess
+	3,  // 2: agentrepl.v1.RequestCommandSupportResponse.error:type_name -> agentrepl.v1.RequestCommandSupportError
+	10, // 3: agentrepl.v1.RequestCommandSupportSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	4,  // 4: agentrepl.v1.RequestCommandSupportError.unknown_workspace:type_name -> agentrepl.v1.RequestCommandSupportUnknownWorkspace
+	5,  // 5: agentrepl.v1.RequestCommandSupportError.workspace_ref_mismatch:type_name -> agentrepl.v1.RequestCommandSupportWorkspaceRefMismatch
+	6,  // 6: agentrepl.v1.RequestCommandSupportError.transferring_away:type_name -> agentrepl.v1.RequestCommandSupportTransferringAway
+	7,  // 7: agentrepl.v1.RequestCommandSupportError.not_yet_adopted:type_name -> agentrepl.v1.RequestCommandSupportNotYetAdopted
+	8,  // 8: agentrepl.v1.RequestCommandSupportError.blank_command:type_name -> agentrepl.v1.RequestCommandSupportBlankCommand
+	9,  // 9: agentrepl.v1.RequestCommandSupportError.brief_missing:type_name -> agentrepl.v1.RequestCommandSupportBriefMissing
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_request_command_support_proto_init() }
@@ -307,13 +694,21 @@ func file_agentrepl_v1_endpoint_request_command_support_proto_init() {
 		(*RequestCommandSupportResponse_Success)(nil),
 		(*RequestCommandSupportResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_request_command_support_proto_msgTypes[3].OneofWrappers = []any{
+		(*RequestCommandSupportError_UnknownWorkspace)(nil),
+		(*RequestCommandSupportError_WorkspaceRefMismatch)(nil),
+		(*RequestCommandSupportError_TransferringAway)(nil),
+		(*RequestCommandSupportError_NotYetAdopted)(nil),
+		(*RequestCommandSupportError_BlankCommand)(nil),
+		(*RequestCommandSupportError_BriefMissing)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_request_command_support_proto_rawDesc), len(file_agentrepl_v1_endpoint_request_command_support_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

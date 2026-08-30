@@ -225,11 +225,19 @@ func (x *OpenFeedSuccess) GetWatch() *FeedWatchToken {
 	return nil
 }
 
-// EMPTY ON PURPOSE: the refusal arms are DERIVED from the daemon's real
-// refusal sites at the wave (an unregistered workspace; a feed id that does
-// not decode or names a bubble this workspace does not own), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type OpenFeedError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*OpenFeedError_UnknownWorkspace
+	//	*OpenFeedError_WorkspaceRefMismatch
+	//	*OpenFeedError_TransferringAway
+	//	*OpenFeedError_NotYetAdopted
+	//	*OpenFeedError_FeedUndecodable
+	//	*OpenFeedError_FeedNotInWorkspace
+	Cause         isOpenFeedError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -264,6 +272,347 @@ func (*OpenFeedError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *OpenFeedError) GetCause() isOpenFeedError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *OpenFeedError) GetUnknownWorkspace() *OpenFeedUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenFeedError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *OpenFeedError) GetWorkspaceRefMismatch() *OpenFeedWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenFeedError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *OpenFeedError) GetTransferringAway() *OpenFeedTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenFeedError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *OpenFeedError) GetNotYetAdopted() *OpenFeedNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenFeedError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *OpenFeedError) GetFeedUndecodable() *OpenFeedFeedUndecodable {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenFeedError_FeedUndecodable); ok {
+			return x.FeedUndecodable
+		}
+	}
+	return nil
+}
+
+func (x *OpenFeedError) GetFeedNotInWorkspace() *OpenFeedFeedNotInWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenFeedError_FeedNotInWorkspace); ok {
+			return x.FeedNotInWorkspace
+		}
+	}
+	return nil
+}
+
+type isOpenFeedError_Cause interface {
+	isOpenFeedError_Cause()
+}
+
+type OpenFeedError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *OpenFeedUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type OpenFeedError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *OpenFeedWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type OpenFeedError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *OpenFeedTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type OpenFeedError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *OpenFeedNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type OpenFeedError_FeedUndecodable struct {
+	// The FeedId does not decode.
+	FeedUndecodable *OpenFeedFeedUndecodable `protobuf:"bytes,5,opt,name=feed_undecodable,json=feedUndecodable,proto3,oneof"`
+}
+
+type OpenFeedError_FeedNotInWorkspace struct {
+	// The FeedId decodes to another workspace.
+	FeedNotInWorkspace *OpenFeedFeedNotInWorkspace `protobuf:"bytes,6,opt,name=feed_not_in_workspace,json=feedNotInWorkspace,proto3,oneof"`
+}
+
+func (*OpenFeedError_UnknownWorkspace) isOpenFeedError_Cause() {}
+
+func (*OpenFeedError_WorkspaceRefMismatch) isOpenFeedError_Cause() {}
+
+func (*OpenFeedError_TransferringAway) isOpenFeedError_Cause() {}
+
+func (*OpenFeedError_NotYetAdopted) isOpenFeedError_Cause() {}
+
+func (*OpenFeedError_FeedUndecodable) isOpenFeedError_Cause() {}
+
+func (*OpenFeedError_FeedNotInWorkspace) isOpenFeedError_Cause() {}
+
+type OpenFeedUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedUnknownWorkspace) Reset() {
+	*x = OpenFeedUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedUnknownWorkspace) ProtoMessage() {}
+
+func (x *OpenFeedUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenFeedUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{4}
+}
+
+type OpenFeedWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedWorkspaceRefMismatch) Reset() {
+	*x = OpenFeedWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *OpenFeedWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*OpenFeedWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenFeedWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type OpenFeedTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedTransferringAway) Reset() {
+	*x = OpenFeedTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedTransferringAway) ProtoMessage() {}
+
+func (x *OpenFeedTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedTransferringAway.ProtoReflect.Descriptor instead.
+func (*OpenFeedTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *OpenFeedTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type OpenFeedNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedNotYetAdopted) Reset() {
+	*x = OpenFeedNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedNotYetAdopted) ProtoMessage() {}
+
+func (x *OpenFeedNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*OpenFeedNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{7}
+}
+
+type OpenFeedFeedUndecodable struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedFeedUndecodable) Reset() {
+	*x = OpenFeedFeedUndecodable{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedFeedUndecodable) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedFeedUndecodable) ProtoMessage() {}
+
+func (x *OpenFeedFeedUndecodable) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedFeedUndecodable.ProtoReflect.Descriptor instead.
+func (*OpenFeedFeedUndecodable) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{8}
+}
+
+type OpenFeedFeedNotInWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenFeedFeedNotInWorkspace) Reset() {
+	*x = OpenFeedFeedNotInWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenFeedFeedNotInWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenFeedFeedNotInWorkspace) ProtoMessage() {}
+
+func (x *OpenFeedFeedNotInWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenFeedFeedNotInWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenFeedFeedNotInWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP(), []int{9}
+}
+
 var File_agentrepl_v1_endpoint_open_feed_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_feed_proto_rawDesc = "" +
@@ -279,8 +628,23 @@ const file_agentrepl_v1_endpoint_open_feed_proto_rawDesc = "" +
 	"\x06result\"p\n" +
 	"\x0fOpenFeedSuccess\x12)\n" +
 	"\x04page\x18\x01 \x01(\v2\x15.frontend.v1.FeedPageR\x04page\x122\n" +
-	"\x05watch\x18\x02 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\x0f\n" +
-	"\rOpenFeedErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x05watch\x18\x02 \x01(\v2\x1c.agentrepl.v1.FeedWatchTokenR\x05watch\"\xac\x04\n" +
+	"\rOpenFeedError\x12U\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2&.agentrepl.v1.OpenFeedUnknownWorkspaceH\x00R\x10unknownWorkspace\x12b\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2*.agentrepl.v1.OpenFeedWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12U\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2&.agentrepl.v1.OpenFeedTransferringAwayH\x00R\x10transferringAway\x12M\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2#.agentrepl.v1.OpenFeedNotYetAdoptedH\x00R\rnotYetAdopted\x12R\n" +
+	"\x10feed_undecodable\x18\x05 \x01(\v2%.agentrepl.v1.OpenFeedFeedUndecodableH\x00R\x0ffeedUndecodable\x12]\n" +
+	"\x15feed_not_in_workspace\x18\x06 \x01(\v2(.agentrepl.v1.OpenFeedFeedNotInWorkspaceH\x00R\x12feedNotInWorkspaceB\a\n" +
+	"\x05cause\"\x1a\n" +
+	"\x18OpenFeedUnknownWorkspace\"A\n" +
+	"\x1cOpenFeedWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"4\n" +
+	"\x18OpenFeedTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x17\n" +
+	"\x15OpenFeedNotYetAdopted\"\x19\n" +
+	"\x17OpenFeedFeedUndecodable\"\x1c\n" +
+	"\x1aOpenFeedFeedNotInWorkspaceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_open_feed_proto_rawDescOnce sync.Once
@@ -294,29 +658,41 @@ func file_agentrepl_v1_endpoint_open_feed_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_feed_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_open_feed_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_open_feed_proto_goTypes = []any{
-	(*OpenFeedRequest)(nil),  // 0: agentrepl.v1.OpenFeedRequest
-	(*OpenFeedResponse)(nil), // 1: agentrepl.v1.OpenFeedResponse
-	(*OpenFeedSuccess)(nil),  // 2: agentrepl.v1.OpenFeedSuccess
-	(*OpenFeedError)(nil),    // 3: agentrepl.v1.OpenFeedError
-	(*v1.WorkspaceRef)(nil),  // 4: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),       // 5: frontend.v1.FeedId
-	(*v11.FeedPage)(nil),     // 6: frontend.v1.FeedPage
-	(*FeedWatchToken)(nil),   // 7: agentrepl.v1.FeedWatchToken
+	(*OpenFeedRequest)(nil),              // 0: agentrepl.v1.OpenFeedRequest
+	(*OpenFeedResponse)(nil),             // 1: agentrepl.v1.OpenFeedResponse
+	(*OpenFeedSuccess)(nil),              // 2: agentrepl.v1.OpenFeedSuccess
+	(*OpenFeedError)(nil),                // 3: agentrepl.v1.OpenFeedError
+	(*OpenFeedUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenFeedUnknownWorkspace
+	(*OpenFeedWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenFeedWorkspaceRefMismatch
+	(*OpenFeedTransferringAway)(nil),     // 6: agentrepl.v1.OpenFeedTransferringAway
+	(*OpenFeedNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenFeedNotYetAdopted
+	(*OpenFeedFeedUndecodable)(nil),      // 8: agentrepl.v1.OpenFeedFeedUndecodable
+	(*OpenFeedFeedNotInWorkspace)(nil),   // 9: agentrepl.v1.OpenFeedFeedNotInWorkspace
+	(*v1.WorkspaceRef)(nil),              // 10: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                   // 11: frontend.v1.FeedId
+	(*v11.FeedPage)(nil),                 // 12: frontend.v1.FeedPage
+	(*FeedWatchToken)(nil),               // 13: agentrepl.v1.FeedWatchToken
 }
 var file_agentrepl_v1_endpoint_open_feed_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.OpenFeedRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	5, // 1: agentrepl.v1.OpenFeedRequest.feed:type_name -> frontend.v1.FeedId
-	2, // 2: agentrepl.v1.OpenFeedResponse.success:type_name -> agentrepl.v1.OpenFeedSuccess
-	3, // 3: agentrepl.v1.OpenFeedResponse.error:type_name -> agentrepl.v1.OpenFeedError
-	6, // 4: agentrepl.v1.OpenFeedSuccess.page:type_name -> frontend.v1.FeedPage
-	7, // 5: agentrepl.v1.OpenFeedSuccess.watch:type_name -> agentrepl.v1.FeedWatchToken
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	10, // 0: agentrepl.v1.OpenFeedRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	11, // 1: agentrepl.v1.OpenFeedRequest.feed:type_name -> frontend.v1.FeedId
+	2,  // 2: agentrepl.v1.OpenFeedResponse.success:type_name -> agentrepl.v1.OpenFeedSuccess
+	3,  // 3: agentrepl.v1.OpenFeedResponse.error:type_name -> agentrepl.v1.OpenFeedError
+	12, // 4: agentrepl.v1.OpenFeedSuccess.page:type_name -> frontend.v1.FeedPage
+	13, // 5: agentrepl.v1.OpenFeedSuccess.watch:type_name -> agentrepl.v1.FeedWatchToken
+	4,  // 6: agentrepl.v1.OpenFeedError.unknown_workspace:type_name -> agentrepl.v1.OpenFeedUnknownWorkspace
+	5,  // 7: agentrepl.v1.OpenFeedError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenFeedWorkspaceRefMismatch
+	6,  // 8: agentrepl.v1.OpenFeedError.transferring_away:type_name -> agentrepl.v1.OpenFeedTransferringAway
+	7,  // 9: agentrepl.v1.OpenFeedError.not_yet_adopted:type_name -> agentrepl.v1.OpenFeedNotYetAdopted
+	8,  // 10: agentrepl.v1.OpenFeedError.feed_undecodable:type_name -> agentrepl.v1.OpenFeedFeedUndecodable
+	9,  // 11: agentrepl.v1.OpenFeedError.feed_not_in_workspace:type_name -> agentrepl.v1.OpenFeedFeedNotInWorkspace
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_feed_proto_init() }
@@ -330,13 +706,21 @@ func file_agentrepl_v1_endpoint_open_feed_proto_init() {
 		(*OpenFeedResponse_Success)(nil),
 		(*OpenFeedResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_feed_proto_msgTypes[3].OneofWrappers = []any{
+		(*OpenFeedError_UnknownWorkspace)(nil),
+		(*OpenFeedError_WorkspaceRefMismatch)(nil),
+		(*OpenFeedError_TransferringAway)(nil),
+		(*OpenFeedError_NotYetAdopted)(nil),
+		(*OpenFeedError_FeedUndecodable)(nil),
+		(*OpenFeedError_FeedNotInWorkspace)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_feed_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_feed_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
