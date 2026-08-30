@@ -32,41 +32,44 @@ func (r *resolver) notificationLine(s *wsState) *frontendv1.FooterStatusActivity
 	return &frontendv1.FooterStatusActivityNotification{Text: s.notification.text}
 }
 
-// rateLine is the standing rate-limit report, or nil. A report is drawn only
-// once BOTH windows have been reported and at least one allowance is
-// newsworthy: the line states both figures so a reader can tell which
-// allowance the newsworthy percentage belongs to, synthesizing an unreported
-// window would state a figure nobody reported, and an unremarkable allowance
-// is not news and would crowd out the lines that are.
+// rateLine is the standing rate-limit report, or nil. The line draws as soon
+// as a USAGE SAMPLE exists — figures come from account_usage and are complete
+// from the first sample — and at least one allowance is newsworthy: an
+// unremarkable allowance is not news and would crowd out the lines that are.
+// The verdict arm joins each allowance later, when a rate-limit event for
+// that window arrives.
+//
+// WHEN THE SAMPLE CARRIES NO SEVEN-DAY WINDOW (an account with no weekly
+// allowance, or a vendor that reported none) the weekly allowance is drawn
+// ABSENT rather than synthesized: FooterStatusActivityRateLimited.weekly is a
+// message field, so an unset weekly is representable, and stating a figure
+// nobody reported would be worse than stating none.
 func (r *resolver) rateLine(s *wsState) *frontendv1.FooterStatusActivityRateLimited {
-	if s.rate.session == nil || s.rate.weekly == nil {
+	session := r.allowance(&s.rate.session)
+	weekly := r.allowance(&s.rate.weekly)
+	if session == nil && weekly == nil {
 		return nil
 	}
-	session := r.allowance(s.rate.session)
-	weekly := r.allowance(s.rate.weekly)
 	if !session.GetNewsworthy() && !weekly.GetNewsworthy() {
 		return nil
 	}
 	return &frontendv1.FooterStatusActivityRateLimited{Session: session, Weekly: weekly}
 }
 
-// allowance projects one window's rate-limit status onto the drawn allowance.
-// The vendor reports utilization as a percentage and a reset in millis; the
-// contract carries a 0..1 fraction and epoch SECONDS, so the conversion is the
-// daemon's and never the client's. The vocabulary is the vendor's own three
-// values and the drawn allowance carries the same three, so nothing is
-// invented and nothing is flattened to a word.
-func (r *resolver) allowance(status *conversationv1.SessionRateLimitStatus) *frontendv1.FooterAllowance {
-	utilization := status.GetUtilizationPercent() / 100
-	allowance := &frontendv1.FooterAllowance{
-		Newsworthy:  utilization >= r.opts.rateNewsworth,
-		ResetsAtS:   status.GetResetsAtMs() / 1000,
-		Utilization: utilization,
+// allowance projects one window's evidence onto the drawn allowance, or nil
+// when no figure has been observed for it. The status arm is COPIED, arm for
+// arm, from the window's last rate-limit event; no event yet, or an event the
+// vendor left statusless, draws NO arm — nothing is defaulted to "allowed".
+func (r *resolver) allowance(w *allowanceWindow) *frontendv1.FooterAllowance {
+	if !w.figured {
+		return nil
 	}
-	// The status arm is COPIED, arm for arm. A status the vendor left unset
-	// draws no arm: the field is a oneof and an absent status is
-	// representable, so nothing is defaulted to "allowed".
-	switch status.GetStatus().(type) {
+	allowance := &frontendv1.FooterAllowance{
+		Newsworthy:  w.utilization >= r.opts.rateNewsworth,
+		ResetsAtS:   w.resetsAtS,
+		Utilization: w.utilization,
+	}
+	switch w.verdict.GetStatus().(type) {
 	case *conversationv1.SessionRateLimitStatus_Allowed:
 		allowance.Status = &frontendv1.FooterAllowance_Allowed{Allowed: &frontendv1.FooterAllowanceAllowed{}}
 	case *conversationv1.SessionRateLimitStatus_AllowedWarning:

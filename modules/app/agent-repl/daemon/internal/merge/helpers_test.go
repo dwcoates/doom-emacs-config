@@ -315,6 +315,13 @@ type fakeGit struct {
 	outcomes []gitclient.MergeOutcome
 	// conflicted are the ConflictedFiles answers, consumed in order.
 	conflicted [][]string
+	// commits are the Commit shas, consumed in order; an exhausted script
+	// answers a standing sha.
+	commits []string
+	// commitErr fails every Commit when set.
+	commitErr error
+	// commitMessages records what each Commit was asked to record.
+	commitMessages []string
 	landed     []gitclient.Commit
 	changed    []string
 	changedErr error
@@ -414,6 +421,22 @@ func (g *fakeGit) ConflictedFiles(context.Context, string) ([]string, error) {
 	}
 	g.mu.Unlock()
 	return files, nil
+}
+
+func (g *fakeGit) Commit(_ context.Context, _, message string) (string, error) {
+	g.record("commit")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.commitMessages = append(g.commitMessages, message)
+	if g.commitErr != nil {
+		return "", g.commitErr
+	}
+	if len(g.commits) == 0 {
+		return "concluded000000", nil
+	}
+	sha := g.commits[0]
+	g.commits = g.commits[1:]
+	return sha, nil
 }
 
 func (g *fakeGit) AbortMerge(context.Context, string) error {
@@ -776,10 +799,6 @@ type harness struct {
 	briefValues []map[string]string
 	// turnCloses answers AwaitTurnEnd, consumed in order.
 	turnCloses []wsm.TurnClose
-	// commits answers CommitMerge, consumed in order.
-	commits []gitclient.Commit
-	// commitErr fails every CommitMerge when set.
-	commitErr error
 	// startedSessions records the revivals a configured prompt caused.
 	startedSessions []ids.WorkspaceID
 	// occupancyReleases counts the occupancy guards dropped.
@@ -908,19 +927,6 @@ func (h *harness) deps() Deps {
 				return "", false, nil
 			}
 			return *h.displaced, true, nil
-		},
-		CommitMerge: func(_ context.Context, _, _ string) (gitclient.Commit, error) {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			if h.commitErr != nil {
-				return gitclient.Commit{}, h.commitErr
-			}
-			if len(h.commits) == 0 {
-				return gitclient.Commit{SHA: "concluded000000"}, nil
-			}
-			c := h.commits[0]
-			h.commits = h.commits[1:]
-			return c, nil
 		},
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
 			h.mu.Lock()
