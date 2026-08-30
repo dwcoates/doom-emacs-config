@@ -1,0 +1,274 @@
+/**
+ * The bash converter. The one that must never be got wrong is the BACKGROUNDED
+ * receipt: the vendor returns the same shape for a command that finished and
+ * one it launched, and settling on the latter would say work ended when it
+ * moved. Both corpus results drive that pair directly.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { create } from "@bufbuild/protobuf";
+import { describe, expect, it } from "vitest";
+import { conversationv1 } from "../../../src/proto.js";
+import { bashConverter } from "../../../src/convert/tools/bash.js";
+import { toolProgress } from "../../../src/convert/entries.js";
+import type { PendingCall, ToolOutcome } from "../../../src/convert/tool-calls.js";
+
+const AGENT = create(conversationv1.AgentIdSchema, { value: "session-1" });
+
+function corpusResult(name: string): Record<string, unknown> {
+  const path = fileURLToPath(
+    new URL(`../../../../../../testdata/corpus/tool-results/${name}.jsonl`, import.meta.url),
+  );
+  const line = readFileSync(path, "utf8").split("\n").find((entry) => entry.trim() !== "");
+  return (JSON.parse(line as string) as { toolUseResult: Record<string, unknown> }).toolUseResult;
+}
+
+function call(input: Record<string, unknown>): PendingCall {
+  return {
+    toolUseId: "toolu_bash",
+    toolName: "Bash",
+    input,
+    startedAtMs: 1_700_000_000_000,
+    agentId: AGENT,
+  };
+}
+
+function outcome(structured: unknown, isError = false): ToolOutcome {
+  return { content: undefined, isError, structured, settledAtMs: 1_700_000_001_000 };
+}
+
+function successOf(item: ReturnType<typeof bashConverter.settle>): conversationv1.AgentBashSuccess {
+  return (item?.value as conversationv1.AgentBash).result.value as conversationv1.AgentBashSuccess;
+}
+
+function textOf(success: conversationv1.AgentBashSuccess): conversationv1.AgentBashOutputText {
+  const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+  return completed.output?.form.value as conversationv1.AgentBashOutputText;
+}
+
+describe("bashConverter.start", () => {
+  it("announces the command line verbatim, from the corpus call", () => {
+    // Arrange.
+    const pending = call({ command: "pwd; ls | head" });
+
+    // Act.
+    const item = bashConverter.start(pending);
+
+    // Assert.
+    const start = (item.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashStart;
+    expect(start.command?.line).toBe("pwd; ls | head");
+    expect(start.startedAt?.atMs).toBe(1_700_000_000_000n);
+  });
+
+  it("leaves the description UNSET when the agent wrote none", () => {
+    // Arrange, Act.
+    const item = bashConverter.start(call({ command: "ls" }));
+
+    // Assert.
+    const start = (item.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashStart;
+    expect(start.command?.description).toBeUndefined();
+  });
+
+  it("says SANDBOXED for an ordinary command", () => {
+    // Arrange, Act.
+    const item = bashConverter.start(call({ command: "ls" }));
+
+    // Assert.
+    const start = (item.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashStart;
+    expect(start.command?.sandbox.case).toBe("sandboxed");
+  });
+
+  it("says SANDBOX DISABLED when the caller deliberately turned it off", () => {
+    // Arrange, Act.
+    const item = bashConverter.start(call({ command: "ls", dangerouslyDisableSandbox: true }));
+
+    // Assert.
+    const start = (item.value as conversationv1.AgentBash).result
+      .value as conversationv1.AgentBashStart;
+    expect(start.command?.sandbox.case).toBe("sandboxDisabled");
+  });
+
+  it("produces NO message when the call carried no command line", () => {
+    // Arrange, Act.
+    const item = bashConverter.start(call({ description: "does nothing" }));
+
+    // Assert.
+    expect(item.case).toBeUndefined();
+  });
+});
+
+describe("bashConverter.settle", () => {
+  it("settles the corpus foreground command as COMPLETED, with its stdout whole", () => {
+    // Arrange.
+    const result = corpusResult("bash");
+    const pending = call({ command: "rg scroll" });
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    expect(success.outcome.case).toBe("completed");
+    expect(textOf(success).stdout).toBe(result["stdout"]);
+    expect(textOf(success).extent.case).toBe("whole");
+  });
+
+  it("states NO termination for a foreground command, because no producer states one", () => {
+    // Arrange.
+    const pending = call({ command: "ls" });
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(pending, outcome({ stdout: "a", stderr: "", interrupted: false })),
+    );
+
+    // Assert.
+    expect((success.outcome.value as conversationv1.AgentBashCompleted).termination).toBeUndefined();
+  });
+
+  it("does NOT settle the corpus backgrounded launch: the command moved, it did not end", () => {
+    // Arrange.
+    const pending = call({ command: "npm test", run_in_background: true });
+
+    // Act.
+    const item = bashConverter.settle(pending, outcome(corpusResult("bash-background")));
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("keeps stderr apart from stdout rather than interleaving them", () => {
+    // Arrange.
+    const pending = call({ command: "ls /nope" });
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(pending, outcome({ stdout: "out", stderr: "err", interrupted: false })),
+    );
+
+    // Assert.
+    expect(textOf(success).stdout).toBe("out");
+    expect(textOf(success).stderr).toBe("err");
+  });
+
+  it("SUBTRACTS the omitted bytes and names the spill when the output was too large", () => {
+    // Arrange.
+    const pending = call({ command: "cat big" });
+    const result = {
+      stdout: "abcde",
+      stderr: "",
+      interrupted: false,
+      persistedOutputPath: "/tmp/out.txt",
+      persistedOutputSize: 1_005,
+    };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    expect(textOf(success).extent.value).toEqual(
+      create(conversationv1.AgentBashOutputPartialSchema, {
+        bytesOmitted: 1_000n,
+        spilled: create(conversationv1.AgentBashSpilledOutputSchema, {
+          path: "/tmp/out.txt",
+          sizeBytes: 1_005n,
+        }),
+      }),
+    );
+  });
+
+  it("leaves the spill UNSET when the producer kept nothing: the omitted bytes are gone", () => {
+    // Arrange.
+    const pending = call({ command: "cat big" });
+    const result = { stdout: "abcde", stderr: "", interrupted: false, persistedOutputSize: 1_005 };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    const partial = textOf(success).extent.value as conversationv1.AgentBashOutputPartial;
+    expect(partial.spilled).toBeUndefined();
+  });
+
+  it("says INTERRUPTED BY USER when a person stopped it", () => {
+    // Arrange.
+    const pending = call({ command: "sleep 999" });
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(pending, outcome({ stdout: "", stderr: "", interrupted: true })),
+    );
+
+    // Assert.
+    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
+    expect(success.outcome.case).toBe("interrupted");
+    expect(interrupted.cause.case).toBe("byUser");
+  });
+
+  it("says TIMED OUT with the CONFIGURED limit when the command outlived its timeout", () => {
+    // Arrange.
+    const pending = call({ command: "sleep 999", timeout: 5_000 });
+    const result = { stdout: "", stderr: "", interrupted: true, timedOutAfterMs: 5_000 };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result)));
+
+    // Assert.
+    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
+    expect(interrupted.cause.value).toEqual(
+      create(conversationv1.AgentBashInterruptedByTimeoutSchema, { timeoutMs: 5_000n }),
+    );
+  });
+
+  it("produces NO frame for IMAGE output, which the vendor gives no media type for", () => {
+    // Arrange.
+    const pending = call({ command: "screencapture -" });
+
+    // Act.
+    const item = bashConverter.settle(
+      pending,
+      outcome({ stdout: "iVBORw0KG", stderr: "", interrupted: false, isImage: true }),
+    );
+
+    // Assert.
+    expect(item).toBeUndefined();
+  });
+
+  it("a NONZERO EXIT is still the success arm: the command ran and answered", () => {
+    // Arrange.
+    const pending = call({ command: "false" });
+
+    // Act.
+    const item = bashConverter.settle(
+      pending,
+      outcome({ stdout: "", stderr: "boom", interrupted: false }),
+    );
+
+    // Assert.
+    expect((item?.value as conversationv1.AgentBash).result.case).toBe("success");
+  });
+
+  it("carries the failure arm when the CALL could not be performed at all", () => {
+    // Arrange, Act.
+    const item = bashConverter.settle(call({ command: "rm -rf /" }), outcome("denied", true));
+
+    // Assert.
+    const bash = item?.value as conversationv1.AgentBash;
+    expect(bash.result.case).toBe("failure");
+    expect((bash.result.value as conversationv1.AgentBashFailure).error?.settledAt?.atMs).toBe(
+      1_700_000_001_000n,
+    );
+  });
+});
+
+describe("bashConverter.progress", () => {
+  it("relays the vendor's beat on the command's own progress arm", () => {
+    // Arrange, Act.
+    const item = bashConverter.progress?.(toolProgress(1_700_000_000_500));
+
+    // Assert.
+    expect((item?.value as conversationv1.AgentBash).result.case).toBe("progress");
+  });
+});

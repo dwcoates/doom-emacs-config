@@ -14,6 +14,10 @@ export default defineConfig({
     // The vendor guard keeps every test offline. The log setup installs a
     // deterministic inherited sink for canonical JSON logging assertions.
     setupFiles: ["./test/setup.ts", "./test/log-setup.ts"],
+    // The integration suite runs under vitest.integration.config.ts
+    // (`npm run test:integration`): it spawns the BUILT bundle, so including it
+    // here would make a fresh checkout's `npm test` fail for want of dist/.
+    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**"],
     coverage: {
       provider: "v8",
       all: true,
