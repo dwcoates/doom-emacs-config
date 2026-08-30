@@ -18,15 +18,23 @@ func scanSession(row interface{ Scan(...any) error }) (Session, error) {
 		s          Session
 		started    int64
 		engagement int64
+		pid        sql.NullInt64
 		kind       sql.NullString
 		detail     sql.NullString
 		at         sql.NullInt64
 	)
-	if err := row.Scan(&s.Workspace, &s.VendorSessionID, &s.ConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &kind, &detail, &at); err != nil {
+	if err := row.Scan(&s.Workspace, &s.VendorSessionID, &s.ConfigDir, &s.Model, &s.PermissionMode, &started, &engagement, &pid, &kind, &detail, &at); err != nil {
 		return Session{}, err
 	}
 	s.StartedAt = fromNanos(started)
 	s.LastEngagementAt = fromNanos(engagement)
+	if pid.Valid {
+		if pid.Int64 <= 0 {
+			return Session{}, &DecodeError{Table: "sessions", Row: string(s.Workspace), Field: "shim_pid", Err: errors.New("a recorded shim pid is positive")}
+		}
+		recorded := int(pid.Int64)
+		s.ShimPID = &recorded
+	}
 	switch {
 	case !kind.Valid && !at.Valid && !detail.Valid:
 	case kind.Valid && at.Valid && detail.Valid:
@@ -58,20 +66,28 @@ func (s *store) PutSession(ctx context.Context, sess Session) error {
 		var (
 			tKind, tDetail any
 			tAt            any
+			pid            any
 		)
 		if sess.Terminal != nil {
 			tKind, tDetail, tAt = sess.Terminal.Kind, sess.Terminal.Detail, nanos(sess.Terminal.At)
 		}
+		if sess.ShimPID != nil {
+			if *sess.ShimPID <= 0 {
+				return fmt.Errorf("wsm: workspace %s: a recorded shim pid is positive, got %d", sess.Workspace, *sess.ShimPID)
+			}
+			pid = int64(*sess.ShimPID)
+		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO sessions (workspace_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, terminal_kind, terminal_detail, terminal_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO sessions (workspace_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(workspace_id) DO UPDATE SET
 			   vendor_session_id = excluded.vendor_session_id, config_dir = excluded.config_dir, model = excluded.model,
 			   permission_mode = excluded.permission_mode, started_at = excluded.started_at,
-			   last_engagement_at = excluded.last_engagement_at, terminal_kind = excluded.terminal_kind,
+			   last_engagement_at = excluded.last_engagement_at, shim_pid = excluded.shim_pid,
+			   terminal_kind = excluded.terminal_kind,
 			   terminal_detail = excluded.terminal_detail, terminal_at = excluded.terminal_at`,
 			sess.Workspace, sess.VendorSessionID, sess.ConfigDir, sess.Model, sess.PermissionMode,
-			nanos(sess.StartedAt), nanos(sess.LastEngagementAt), tKind, tDetail, tAt)
+			nanos(sess.StartedAt), nanos(sess.LastEngagementAt), pid, tKind, tDetail, tAt)
 		return err
 	})
 }
@@ -84,7 +100,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 	)
 	err := s.read(ctx, "daemon.wsm.session", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		sess, err := scanSession(s.db.QueryRowContext(ctx,
-			`SELECT workspace_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, terminal_kind, terminal_detail, terminal_at
+			`SELECT workspace_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at
 			 FROM sessions WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			out, found = Session{}, false
@@ -132,6 +148,33 @@ func (s *store) SetSessionTerminal(ctx context.Context, id WorkspaceID, t Sessio
 func (s *store) TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error {
 	return s.write(ctx, "daemon.wsm.touch_engagement", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `UPDATE sessions SET last_engagement_at = ? WHERE workspace_id = ?`, nanos(at), id)
+		if err != nil {
+			return err
+		}
+		return requireOneRow(res, fmt.Sprintf("wsm: session for workspace %s", id))
+	})
+}
+
+// SetShimPID records (or clears, with nil) the pid of the shim process serving
+// a workspace's session. The stand-down INTENT MANIFEST names it per session
+// and the incoming daemon reconciles it against the shim-held kernel lock, so
+// a stale pid would make a dead session read as preserved: the pid is cleared
+// at every stand-down rather than left behind.
+func (s *store) SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error {
+	const op = "daemon.wsm.set_shim_pid"
+	fields := dlog.Context{"workspace": string(id)}
+	var stored any
+	if pid != nil {
+		if *pid <= 0 {
+			err := fmt.Errorf("wsm: workspace %s: a recorded shim pid is positive, got %d", id, *pid)
+			s.log.Error(op, "refused a non-positive shim pid", withError(fields, err))
+			return err
+		}
+		fields["shim_pid"] = *pid
+		stored = int64(*pid)
+	}
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE sessions SET shim_pid = ? WHERE workspace_id = ?`, stored, id)
 		if err != nil {
 			return err
 		}
