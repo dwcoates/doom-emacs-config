@@ -355,7 +355,7 @@ only records the fact and drops the dead stream."
     (pcase arm
       (:host (agent-repl-host--apply-state ws value))
       (:notification (agent-repl-host--notify ws value))
-      (:transferred (agent-repl-host--transferred ws))
+      (:transferred (agent-repl-host--transferred ws value))
       (:reload-webapp (agent-repl-host--reload-webapp ws))
       (:open-in-editor (agent-repl-host--open-in-editor ws value))
       (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S push=%S"
@@ -418,15 +418,26 @@ never asks whether Emacs is focused — that knowledge is only here."
 ;;;; ---- The handover, per workspace ----
 
 (defun agent-repl-host--adopt-onto (ws new)
-  "Adopt WS onto the NEW daemon, then cancel the old stream and re-subscribe.
+  "Adopt WS onto the NEW daemon, move its webview there, and re-subscribe.
 THE ONE WALK, shared by the `transferred' push and by a per-workspace
 rpc's `transferring_away' refusal — both say the same thing, and a second
-copy of this order would be a second contract.  The order is the
-contract's: AdoptHostWorkspace on the NEW connection FIRST, then cancel,
-then subscribe there.  The old stream is kept standing on every failure
-path, because a workspace whose old stream was dropped and whose adopt
-did not land would be served by nobody."
-  (let ((ref (agent-repl-host-ref ws)))
+copy of this order would be a second contract.
+
+THE ORDER IS THE CONTRACT.  AdoptHostWorkspace on the NEW connection
+FIRST; then `:conn' is moved to NEW; then the webview is reloaded; then
+the old stream is cancelled; then the subscription is opened on NEW.
+`:conn' MUST move before the reload because frontend.el derives the page
+URL from `agent-repl-host-conn' — reloading first would navigate the
+webview straight back at the daemon that just released the workspace.
+The reloaded page adopts itself (AdoptWebWorkspace at boot); the webapp
+only draws a moved notice and stops its streams, so the HOST owns this
+redial and nothing on the web side retries it.
+
+The old stream is kept standing on every failure path, because a
+workspace whose old stream was dropped and whose adopt did not land would
+be served by nobody."
+  (let ((ref (agent-repl-host-ref ws))
+        (address (agent-repl-connect-connection-address new)))
     (if (null ref)
         (agent-repl--error ws "elisp.host.adopt-without-ref ws=%s" ws)
       (agent-repl-rpc-adopt-host-workspace
@@ -435,7 +446,11 @@ did not land would be served by nobody."
        (lambda (response)
          (pcase (plist-get response :arm)
            (:success
-            (agent-repl--info ws "elisp.host.adopted ws=%s" ws)
+            (agent-repl--info ws "elisp.host.adopted ws=%s address=%S" ws address)
+            (agent-repl-host--put ws :conn new)
+            (agent-repl-frontend-reload-webview ws)
+            (agent-repl--info ws "elisp.host.webview-redialed ws=%s address=%S"
+                              ws address)
             (agent-repl-host-unsubscribe ws)
             (agent-repl-host-subscribe new ws ref))
            (:error
@@ -447,15 +462,37 @@ did not land would be served by nobody."
        (lambda (detail)
          (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S" ws detail))))))
 
-(defun agent-repl-host--transferred (ws)
+(defun agent-repl-host--successor-for (ws address)
+  "Return the adoptable successor connection for WS at ADDRESS, or nil.
+A DECODED ADDRESS TAKES PRECEDENCE: it names the daemon that now owns WS,
+so it is dialed (reusing the link's successor when the address matches).
+A nil ADDRESS falls back to the link's standing successor, which is the
+shape the `transferred' push has while `HostWorkspaceTransferred' carries
+no address of its own.  Nil while a dial has not been ACCEPTED."
+  (if address
+      (agent-repl-host--redial-successor ws address)
+    (agent-repl-link-successor)))
+
+(defun agent-repl-host--transferred (ws &optional value)
   "Adopt WS onto the successor daemon after the old one released it.
-`transferred' is a PUSH, never a terminal frame, so the old stream stays
-standing until the adopt lands and this cancels it."
-  (let ((new (agent-repl-link-successor)))
-    (if (null new)
-        (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws)
-      (agent-repl--info ws "elisp.host.transferred ws=%s adopting=t" ws)
-      (agent-repl-host--adopt-onto ws new))))
+VALUE is the decoded `HostWorkspaceTransferred'; when it carries an
+`:address' that address names the successor, otherwise the link's
+standing successor is it.  `transferred' is a PUSH, never a terminal
+frame, so the old stream stays standing until the adopt lands and the
+shared walk cancels it."
+  (let* ((address (plist-get value :address))
+         (new (agent-repl-host--successor-for ws address)))
+    (cond
+     (new
+      (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
+                        ws address)
+      (agent-repl-host--adopt-onto ws new))
+     (address
+      ;; The dial stands but is not accepted; the gate forbids adopting.
+      (agent-repl--info ws "elisp.host.awaiting-successor ws=%s address=%S" ws address)
+      (agent-repl-host--adopt-on-acceptance ws))
+     (t
+      (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws)))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 
@@ -511,7 +548,7 @@ through here, so a repeated refusal cannot recurse into a loop."
          (if (null address)
              (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s" ws)
            (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
-           (let ((new (agent-repl-host--redial-successor ws address)))
+           (let ((new (agent-repl-host--successor-for ws address)))
              (if new
                  (agent-repl-host--adopt-onto ws new)
                ;; The dial stands but is not accepted yet; adopting onto an

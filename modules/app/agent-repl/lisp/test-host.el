@@ -108,6 +108,9 @@
 (defvar agent-repl-test-host--successor nil
   "What the stubbed `agent-repl-link-successor' answers.")
 
+(defvar agent-repl-test-host--walk nil
+  "Steps of the adoption walk, newest first: :adopt :reload :cancel :subscribe.")
+
 (defvar agent-repl-test-host--dialled nil
   "Addresses handed to the stubbed dial, newest first.")
 
@@ -146,6 +149,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-test-host--focused nil)
          (agent-repl-test-host--current-ws nil)
          (agent-repl-test-host--successor nil)
+         (agent-repl-test-host--walk nil)
          (agent-repl-test-host--dialled nil)
          (agent-repl-test-host--dial-accepts t)
          (agent-repl-link-handover-functions nil)
@@ -171,18 +175,22 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
                 (lambda (conn request &rest keys)
                   (push (list "AdoptHostWorkspace" conn request) agent-repl-test-host--calls)
+                  (push :adopt agent-repl-test-host--walk)
                   (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-watch-host-workspace)
                 (lambda (conn ref on-push on-close &optional on-open)
+                  (push :subscribe agent-repl-test-host--walk)
                   (let ((record (list :conn conn :ref ref
                                       :on-push on-push :on-close on-close
                                       :on-open on-open)))
                     (push record agent-repl-test-host--streams)
                     record)))
                ((symbol-function 'agent-repl-connect-stream-cancel)
-                (lambda (stream) (push stream agent-repl-test-host--cancelled)))
+                (lambda (stream)
+                  (push stream agent-repl-test-host--cancelled)
+                  (push :cancel agent-repl-test-host--walk)))
                ((symbol-function 'agent-repl-link-successor)
                 (lambda () agent-repl-test-host--successor))
                ((symbol-function 'agent-repl-link-primary) (lambda () nil))
@@ -204,7 +212,14 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-status-blink-tab)
                 (lambda (ws) (push (cons :blink ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-frontend-reload-webview)
-                (lambda (ws) (push (cons :reload ws) agent-repl-test-host--effects)))
+                (lambda (ws)
+                  ;; The conn is captured AS THE RELOAD SEES IT: frontend.el
+                  ;; derives the page URL from it, so the order is the fact
+                  ;; under test, not an incidental detail.
+                  (push (cons :reload-conn (agent-repl-host-conn ws))
+                        agent-repl-test-host--effects)
+                  (push (cons :reload ws) agent-repl-test-host--effects)
+                  (push :reload agent-repl-test-host--walk)))
                ((symbol-function 'agent-repl-popup-open)
                 (lambda (path &optional line)
                   (push (list :popup path line) agent-repl-test-host--effects)))
@@ -1195,6 +1210,127 @@ unary rpc can produce, which the contract never collapses into one."
     (agent-repl-host-handle-refusal "ws-1" '(:arm :budget-exceeded :value nil))
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.unknown-refusal-arm"))))
+
+;;;; ---- The handover's webview redial ----
+
+(ert-deftest agent-repl-test-host-adoption-walks-adopt-conn-reload-cancel-subscribe ()
+  "THE ORDER IS THE CONTRACT, and the whole of it is asserted here."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--walk nil)
+    ;; Act
+    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+    ;; Assert
+    (should (equal (reverse agent-repl-test-host--walk)
+                   '(:adopt :reload :cancel :subscribe)))))
+
+(ert-deftest agent-repl-test-host-adoption-moves-the-conn-before-the-reload ()
+  "frontend.el reads the URL off `agent-repl-host-conn': reloading first
+would navigate the page straight back at the daemon that released it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+      ;; Assert
+      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects))
+                  successor)))))
+
+(ert-deftest agent-repl-test-host-adoption-reloads-the-webview-once ()
+  "One adoption is one navigation, never two."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+    ;; Assert
+    (should (= 1 (length (seq-filter (lambda (e) (eq (car-safe e) :reload))
+                                     agent-repl-test-host--effects))))))
+
+(ert-deftest agent-repl-test-host-adoption-logs-the-webview-redial ()
+  "The page's move is on the record with the address it moved to."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :info "elisp.host.webview-redialed ws=ws-1 address=\"127.0.0.1:9100\""))))
+
+(ert-deftest agent-repl-test-host-refused-adopt-does-not-reload-the-webview ()
+  "An adopt that was REFUSED moved nothing, so the page must not move."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :response (list :arm :error :value (list :message "no"))))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+    ;; Assert
+    (should (null (assq :reload agent-repl-test-host--effects)))))
+
+(ert-deftest agent-repl-test-host-refused-adopt-leaves-the-conn-on-the-old-daemon ()
+  "Moving `:conn' on a refusal would point the page at a daemon that said no."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((old (agent-repl-connect-open "127.0.0.1:9001")))
+      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+            agent-repl-test-host--adopt-answer
+            (list :response (list :arm :error :value (list :message "no"))))
+      (agent-repl-test-host--subscribe "ws-1" old)
+      ;; Act
+      (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+      ;; Assert
+      (should (eq (agent-repl-host-conn "ws-1") old)))))
+
+(ert-deftest agent-repl-test-host-transferring-away-reloads-the-webview ()
+  "The refusal path is the same walk, so the page moves there too."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal
+     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (= 1 (length (seq-filter (lambda (e) (eq (car-safe e) :reload))
+                                     agent-repl-test-host--effects))))))
+
+(ert-deftest agent-repl-test-host-transferring-away-moves-the-conn-before-the-reload ()
+  "Same order on the refusal path, for the same reason."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-host-handle-refusal
+       "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
+      ;; Assert
+      (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects))
+                  successor)))))
+
+(ert-deftest agent-repl-test-host-transferred-address-takes-precedence ()
+  "A `transferred' push that names an address dials THAT daemon.
+HostWorkspaceTransferred is empty in this tree, so the field is absent
+today; the walk is written so a decoded address wins the moment it lands."
+  (agent-repl-test-host--with-harness
+    ;; Arrange — the link's successor is somewhere else entirely
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9999"))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" '(:arm :transferred :value (:address "127.0.0.1:9100")))
+    ;; Assert
+    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9100")))))
 
 ;;;; ---- Subscription acceptance ----
 
