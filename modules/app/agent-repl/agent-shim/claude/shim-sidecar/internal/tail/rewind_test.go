@@ -151,6 +151,15 @@ func TestIsUserPromptRecordClassifies(t *testing.T) {
 		{name: "empty string content", line: `{"type":"user","message":{"content":""}}`, want: false},
 		{name: "no message", line: `{"type":"user"}`, want: false},
 		{name: "system record", line: `{"type":"system","subtype":"compact_boundary"}`, want: false},
+		// R-S3: a compaction summary is a `user` record carrying prose in
+		// exactly a prompt's shape, but it is the machine writing the
+		// conversation down rather than a person asking for something. Rewinding
+		// to it re-warms none of the joins the rewind exists for.
+		{name: "compaction summary as a string", line: `{"type":"user","isCompactSummary":true,"message":{"content":"a summary of the work so far"}}`, want: false},
+		{name: "compaction summary as a text block", line: `{"type":"user","isCompactSummary":true,"message":{"content":[{"type":"text","text":"a summary"}]}}`, want: false},
+		// A keep-alive prompt IS a turn start: the marker changes how the turn's
+		// records are stored, not whether a turn began.
+		{name: "keep-alive prompt", line: `{"type":"user","message":{"content":[{"type":"text","text":"<!--agent-repl:keepalive-->go on"}]}}`, want: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

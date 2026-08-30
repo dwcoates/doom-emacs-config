@@ -179,8 +179,19 @@ func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 }
 
 // turnStartOffsetAtOrBefore answers the byte offset of the last turn-opening
-// record at or before limit — a user record carrying PROSE rather than a
-// tool_result, which is the boundary the production rewind scans back to.
+// record at or before limit — the boundary the production rewind scans back to.
+//
+// A TURN START IS A REAL USER PROMPT (ruling R-S3): a `user` record carrying
+// PROSE that is neither the harness's own bookkeeping (`isMeta`), nor a
+// tool_result carrier, nor a COMPACTION SUMMARY (`isCompactSummary`). The
+// summary is the one that is easy to miss: it is a `user` record whose content
+// is prose in exactly a prompt's shape, so a helper that did not exclude it
+// answered "the summary line" for any fixture that had been compacted — and the
+// subject then asserted the sidecar rewound somewhere it must not.
+//
+// A KEEP-ALIVE PROMPT DOES COUNT: the marker changes how a turn's records are
+// stored, not whether a turn began.
+//
 // Computed here from the fixture's own bytes so the subject never imports the
 // production predicate it is checking.
 func turnStartOffsetAtOrBefore(t *testing.T, lines []string, limit int64) int64 {
@@ -194,16 +205,17 @@ func turnStartOffsetAtOrBefore(t *testing.T, lines []string, limit int64) int64 
 			break
 		}
 		var rec struct {
-			Type    string `json:"type"`
-			IsMeta  bool   `json:"isMeta"`
-			Message struct {
+			Type             string `json:"type"`
+			IsMeta           bool   `json:"isMeta"`
+			IsCompactSummary bool   `json:"isCompactSummary"`
+			Message          struct {
 				Content any `json:"content"`
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			t.Fatalf("fixture line is not JSON: %v", err)
 		}
-		if rec.Type != "user" || rec.IsMeta {
+		if rec.Type != "user" || rec.IsMeta || rec.IsCompactSummary {
 			continue
 		}
 		switch content := rec.Message.Content.(type) {
