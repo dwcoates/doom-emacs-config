@@ -238,8 +238,6 @@ func sessionUpdateArm(update *conversationv1.SessionUpdate) string {
 		return "account_usage"
 	case *conversationv1.SessionUpdate_PermissionModeChanged:
 		return "permission_mode_changed"
-	case *conversationv1.SessionUpdate_ContextBudgetWarning:
-		return "context_budget_warning"
 	case *conversationv1.SessionUpdate_Diagnostics:
 		return "diagnostics"
 	case *conversationv1.SessionUpdate_ContextUsage:
