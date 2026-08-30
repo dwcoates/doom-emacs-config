@@ -345,7 +345,9 @@ func driveSidechain(t *testing.T, path string) []*storev1.StoreEntry {
 	h := NewAgentTranscriptHandler(testLogger(t))
 	ctx := &Context{
 		Path: path, SessionID: "owning-session", MainAgentID: "owning-session",
-		AgentID: "aef975b7bc3422d4b", Kind: tail.KindAgentTranscript, FileID: "dev:3",
+		// The book is the SPAWNING CALL, which the corpus's own meta file states
+		// as toolUseId; `agent-aef975b7bc3422d4b` is that file's locator.
+		AgentID: "toolu_019w534yMVsDAc3KqJYLGhP8", Kind: tail.KindAgentTranscript, FileID: "dev:3",
 	}
 	return h.Handle(framesFrom(t, readFixture(t, path)), ctx)
 }

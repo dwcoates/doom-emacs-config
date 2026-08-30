@@ -103,7 +103,15 @@ func (s *sidecar) resolveTarget(target discover.Target, now time.Time) (discover
 	}
 	if obs, ok := s.owners.resolve(target); ok {
 		s.held.release(target.Path)
-		target.AgentID = obs.agentID
+		// AN a* SPOOL IS AN AGENT'S OWN TRANSCRIPT, so its book is that agent —
+		// which IS the spawning call under the cross-plane minting rule. Every
+		// other spool carries a RUN rather than an agent, and its frames are
+		// attributed to the book the spawn happened in.
+		if target.Kind == tail.KindAgentTranscript {
+			target.AgentID = obs.activityID
+		} else {
+			target.AgentID = obs.agentID
+		}
 		return target, true
 	}
 	if !s.held.hold(target.Path, now) {

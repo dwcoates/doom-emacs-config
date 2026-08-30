@@ -20,14 +20,15 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	if result == nil {
 		return
 	}
-	taskID, agent, output := "", "", ""
+	taskID, output := "", ""
 	switch {
 	case has(result, "isAsync"):
 		// A backgrounded subagent. Its transcript is the a* spool, and its
 		// prose reaches no stream at all — the path is the only place the work
-		// exists.
+		// exists. The vendor's `agentId` is that FILE's locator, never the
+		// created agent's identity: the identity is this call (the cross-plane
+		// minting rule) and the reader derives it from the call id below.
 		taskID = str(pick(result, "agentId", "agent_id"))
-		agent = taskID
 		output = str(pick(result, "outputFile", "output_file"))
 	case str(pick(result, "backgroundTaskId", "background_task_id")) != "":
 		// A detached shell run. Its spool is the b* file.
@@ -49,10 +50,14 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 			Log("detached launch carries no task identity; its spool cannot be attributed to this call")
 		return
 	}
-	c.log.With(at.ctxFor("launch")).With(logging.Context{TaskID: taskID, ActivityID: call.activityID, BookAgentID: agent}).
+	c.log.With(at.ctxFor("launch")).With(logging.Context{TaskID: taskID, ActivityID: call.activityID, BookAgentID: call.agentID}).
 		Log("detached launch observed with output path %q", output)
 	// Remembered for THIS file's own conversions: a TaskStop result names only
 	// the task, and the run it cancels is the call recorded here.
 	c.spawnedRuns[taskID] = call.activityID
-	c.observer.TaskSpawned(taskID, call.activityID, agent, output)
+	// THE THIRD FACT IS THE SPAWNER, NOT THE SPAWNED. A created agent's id is
+	// the spawning call's id and needs no separate report; what the reader
+	// genuinely cannot derive is WHOSE book the spawn happened in, which is what
+	// a detached run's frames are attributed to.
+	c.observer.TaskSpawned(taskID, call.activityID, call.agentID, output)
 }

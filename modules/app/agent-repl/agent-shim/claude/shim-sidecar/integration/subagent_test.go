@@ -16,7 +16,15 @@ import (
 
 // corpusSubagentID is the agent id of the checked-in sidechain fixture; its
 // file name and its records' `agentId` field agree on it.
+// corpusSubagentID is the `agent-<id>` of the checked-in sidechain fixture — a
+// LOCATOR that names the file on disk, and deliberately NOT the agent's identity.
 const corpusSubagentID = "aef975b7bc3422d4b"
+
+// corpusSubagentAgentID is that agent's IDENTITY: the tool_use_id of the call
+// that spawned it, as the fixture's own meta.json states it in `toolUseId`. The
+// cross-plane minting rule binds both planes to this one id, so the book, the
+// frames' agent_id and the spawn's created_agent_id all carry it.
+const corpusSubagentAgentID = "toolu_019w534yMVsDAc3KqJYLGhP8"
 
 // writeSubagentTranscript copies the sidechain fixture into a session's
 // subagents/ directory, growing it one fsynced line at a time.
@@ -96,7 +104,8 @@ func TestASidechainIsIngestedOnceItsMetaAppears(t *testing.T) {
 }
 
 // TestASubagentsFramesFormItsOwnBook asserts the sidechain's page lines are
-// keyed by the vendor agentId, not by the owning session.
+// keyed by the agent's OWN identity — the spawning call's tool_use_id from its
+// meta.json — and not by the owning session or by the file's name.
 func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -111,13 +120,43 @@ func TestASubagentsFramesFormItsOwnBook(t *testing.T) {
 	startSidecar(t, defaultSidecarOptions(t, store.Socket, tree))
 	writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
 	writeSubagentMeta(t, tree, slug, session, corpusSubagentID)
-	lines := awaitBookLines(ctx, t, store.Client, corpusSubagentID, 1)
+	lines := awaitBookLines(ctx, t, store.Client, corpusSubagentAgentID, 1)
 
 	// Assert.
 	for _, at := range lines {
-		if got := at.GetLine().GetPageAgentId().GetValue(); got != corpusSubagentID {
-			t.Errorf("a subagent's line names book %q, wanted the vendor agentId %q", got, corpusSubagentID)
+		if got := at.GetLine().GetPageAgentId().GetValue(); got != corpusSubagentAgentID {
+			t.Errorf("a subagent's line names book %q, wanted its spawning call %q", got, corpusSubagentAgentID)
 		}
+	}
+}
+
+// TestASubagentsBookIsNotItsFileName asserts the other half of the minting rule:
+// the `agent-<id>` locator must reach no book at all, or one agent would have two
+// — one per plane — that no consumer could reconcile.
+func TestASubagentsBookIsNotItsFileName(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	fake := startFakeStore(t)
+	tree := newVendorTree(t)
+	cwd := "/Users/dodgecoates/subagent-locator-probe"
+	slug := cwdSlug(cwd)
+	session := "5b5b5b5b-5b5b-45b5-85b5-5b5b5b5b5b5b"
+
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	g := writeSubagentTranscript(t, tree, slug, session, corpusSubagentID)
+	writeSubagentMeta(t, tree, slug, session, corpusSubagentID)
+	awaitCursorInBatches(ctx, t, fake, g.Path(), g.Offset())
+
+	// Assert.
+	for _, line := range pageLinesOf(fake.Entries()) {
+		if got := line.GetPageAgentId().GetValue(); got == corpusSubagentID {
+			t.Errorf("a page line names book %q, which is the file's locator rather than the agent's identity", got)
+		}
+	}
+	if len(linesForBook(fake.Entries(), corpusSubagentAgentID)) == 0 {
+		t.Fatalf("no line reached the subagent's own book %q", corpusSubagentAgentID)
 	}
 }
 
@@ -144,7 +183,7 @@ func TestASubagentsFramesNameTheSessionsMainAgentAsTopLevel(t *testing.T) {
 	var checked int
 	for _, e := range fake.Entries() {
 		up := e.GetAgentUpdate()
-		if up.GetServeableFrame().GetPageAgentId().GetValue() != corpusSubagentID {
+		if up.GetServeableFrame().GetPageAgentId().GetValue() != corpusSubagentAgentID {
 			continue
 		}
 		checked++

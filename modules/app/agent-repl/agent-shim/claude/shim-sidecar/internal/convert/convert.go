@@ -41,9 +41,13 @@ import (
 // boundary neither of them owns.
 type Observer interface {
 	// TaskSpawned reports a launch read off a tool result: the vendor task id,
-	// the call that spawned it, the agent it created (empty for a shell run) and
+	// the call that spawned it, the agent whose book the spawn happened in, and
 	// the spool path the vendor named (empty when it named none).
-	TaskSpawned(taskID, toolUseID, agentID, outputPath string)
+	//
+	// THE CREATED AGENT'S ID IS NOT A PARAMETER because it is not a separate
+	// fact: a subagent's AgentId IS the spawning call's tool_use_id, so a reader
+	// holding toolUseID already holds it.
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string)
 
 	// TaskStopped reports a TaskStop result: a person stopped this task.
 	//
@@ -59,7 +63,7 @@ type Observer interface {
 type noopObserver struct{}
 
 func (noopObserver) TaskSpawned(string, string, string, string) {}
-func (noopObserver) TaskStopped(string)                          {}
+func (noopObserver) TaskStopped(string)                         {}
 
 // openCall is what a tool RETURN needs to settle its unit, remembered from the
 // call. One entry per OPEN call, deleted the moment the call settles — the map
@@ -227,8 +231,6 @@ func withheldLineKind(kind string) (string, bool) {
 // reduced to the fields attribution and the joins actually need.
 type envelope struct {
 	uuid        string
-	isSidechain bool
-	agentID     string
 	isMeta      bool
 	isSummary   bool
 	sourceTool  string
@@ -238,8 +240,6 @@ type envelope struct {
 func readEnvelope(obj map[string]any) envelope {
 	return envelope{
 		uuid:        str(obj["uuid"]),
-		isSidechain: boolean(obj["isSidechain"]),
-		agentID:     str(obj["agentId"]),
 		isMeta:      boolean(obj["isMeta"]),
 		isSummary:   boolean(obj["isCompactSummary"]),
 		sourceTool:  str(obj["sourceToolUseID"]),
@@ -249,14 +249,18 @@ func readEnvelope(obj map[string]any) envelope {
 
 // frameAgent resolves WHOSE frame a record produces.
 //
-// A sidechain record names its own agent; everything else belongs to the book
-// the file itself names. The per-record `sessionId` is deliberately never
-// consulted: it diverges from the runtime's answer in ~22% of records and that
-// divergence must not ride the wire.
+// THE READER'S IDENTITY WINS, ALWAYS. A record's own `agentId` is the vendor's
+// LOCATOR for a sidechain file, not an AgentId: under the cross-plane minting
+// rule a subagent's identity is the tool_use_id of the call that spawned it,
+// which the reader read out of the agent's meta.json and put on the context.
+// Reading the record field as an identity would file this agent's frames under
+// a second, file-plane-only name that the stream plane never uses and no
+// consumer could join to.
+//
+// The per-record `sessionId` is deliberately never consulted either: it diverges
+// from the runtime's answer in ~22% of records and that divergence must not ride
+// the wire.
 func (c *Converter) frameAgent(at Attribution, env envelope) string {
-	if env.isSidechain && env.agentID != "" {
-		return env.agentID
-	}
 	if at.AgentID != "" {
 		return at.AgentID
 	}

@@ -45,6 +45,17 @@ func (h *AgentTranscriptHandler) SetObserver(o convert.Observer) { h.conv.SetObs
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
+	if ctx.AgentID == "" {
+		// A SIDECHAIN'S BOOK IS ITS AGENT, and its agent is the spawning call
+		// named in the meta file. A transcript whose meta has not been read is
+		// HELD by the reader, so arriving here without an identity means the hold
+		// was skipped — and converting anyway would put this agent's whole book
+		// under the empty id, or under its filename, which the other plane would
+		// never agree with. Refused, loudly, rather than mis-filed.
+		h.log.With(handleErr("agent-handle", ctx)).Log(
+			"subagent transcript reached the handler with no agent identity; its meta file names the spawning call and must be read before it is tailed, so nothing is converted for it")
+		return nil
+	}
 	out := convertFrames(h.conv, h.log, frames, ctx)
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))

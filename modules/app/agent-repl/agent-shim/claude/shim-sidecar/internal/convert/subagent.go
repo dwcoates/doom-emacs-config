@@ -26,7 +26,15 @@ import (
 // onto this one lifecycle. A consumer that had to know which the producer used
 // would be learning a calling convention in order to draw a bubble.
 func (c *Converter) subagentSettled(call openCall, result map[string]any, failed bool, failure *conversationv1.AgentToolFailure, ts int64, at Attribution) *conversationv1.AgentActivity {
-	created := str(pick(result, "agentId", "agent_id"))
+	// THE CREATED AGENT'S IDENTITY IS THIS CALL. The cross-plane minting rule
+	// (conversation/v1 AgentId) binds every producer to one id for one agent: a
+	// subagent's AgentId is the tool_use_id of the call that spawned it. The
+	// vendor's own `agentId` is a LOCATOR — it names the sidechain records and
+	// the a* spool on disk — and is kept for owner resolution, never used as an
+	// identity. The two spaces stay distinct even though the bytes coincide with
+	// this call's activity id.
+	created := call.activityID
+	vendorAgentID := str(pick(result, "agentId", "agent_id"))
 	prompt := subagentPrompt(call, result)
 
 	if failed {
@@ -47,8 +55,14 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 	if boolean(result["isAsync"]) {
 		if created == "" {
 			c.log.With(at.ctxError("subagent")).With(logging.Context{ActivityID: call.activityID}).
-				Log("async subagent launch names no agent id; the spawn has no join key and cannot be announced")
+				Log("async subagent launch carries no spawning-call id; the spawn has no identity and cannot be announced")
 			return nil
+		}
+		if vendorAgentID == "" {
+			// The identity is safe (it is this call), but nothing will attribute
+			// the agent's own a* spool without the vendor's locator.
+			c.log.With(at.ctxWarn("subagent")).With(logging.Context{ActivityID: call.activityID}).
+				Log("async subagent launch names no vendor agent id; its transcript spool cannot be attributed to this spawn")
 		}
 		c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
 			Log("async subagent launch announced; its own stream carries it from here")
@@ -64,10 +78,6 @@ func (c *Converter) subagentSettled(call openCall, result map[string]any, failed
 		}})
 	}
 
-	if created == "" {
-		c.log.With(at.ctxWarn("subagent")).With(logging.Context{ActivityID: call.activityID}).
-			Log("subagent result names no agent id; the settled spawn carries no join key")
-	}
 	c.log.With(at.ctxFor("subagent")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID), BookAgentID: created}).
 		LogVerbose("subagent spawn settled")
 
