@@ -385,13 +385,9 @@ func (r *run) runConfiguredPrompt(ctx context.Context, name string, origin conve
 			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the configured prompt %q: %w", name, err)
 		}
 	}
-	brief, err := r.o.deps.Briefs(name)
+	text, err := r.o.deps.Briefs(name, map[string]string{})
 	if err != nil {
 		return wsm.CloseFailed, fmt.Errorf("merge: reading the configured prompt %q: %w", name, err)
-	}
-	text, err := brief.Splice(map[string]string{})
-	if err != nil {
-		text = brief.Body
 	}
 	return r.submit(ctx, text, origin)
 }

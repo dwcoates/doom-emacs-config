@@ -82,11 +82,7 @@ func (r *run) conflicts(ctx context.Context, files []string, message string) (st
 	r.conflictBriefed[tip] = true
 	r.mu.Unlock()
 	if !briefed {
-		brief, err := r.o.deps.Briefs(BriefConflictResolve)
-		if err != nil {
-			return "", false, fmt.Errorf("merge: reading the conflict brief: %w", err)
-		}
-		text, err := brief.Splice(map[string]string{
+		text, err := r.o.deps.Briefs(BriefConflictResolve, map[string]string{
 			"conflict_commit": short(tip),
 			"source_branch":   r.job.Layout.SourceBranch,
 			"target_dir":      r.job.Layout.TargetDir,
@@ -220,11 +216,7 @@ func (r *run) fixes(ctx context.Context, failing GateResult) (bool, bool, error)
 	r.address(TabFixes, round)
 	r.upsert(TabFixes, round, fixesTabRow(&frontendv1.FeedMergeTabLive{}, "", 0, ""))
 
-	brief, err := r.o.deps.Briefs(BriefTestFailureResolve)
-	if err != nil {
-		return false, false, fmt.Errorf("merge: reading the test-failure brief: %w", err)
-	}
-	text, err := brief.Splice(map[string]string{
+	text, err := r.o.deps.Briefs(BriefTestFailureResolve, map[string]string{
 		"source_branch":     r.job.Layout.SourceBranch,
 		"target_dir":        r.job.Layout.TargetDir,
 		"failure_tail":      failing.Tail,
@@ -287,6 +279,9 @@ func (r *run) park(ctx context.Context, line string) (*conversationv1.UserSaid, 
 	}
 	r.o.deps.Queue.OnLeaseChanged(r.ws)
 	r.facts(StateParked, line)
+	if r.o.onPark != nil {
+		r.o.onPark(r.ws)
+	}
 	select {
 	case said := <-r.guidance:
 		return said, true

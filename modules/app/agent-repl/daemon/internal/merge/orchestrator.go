@@ -84,6 +84,11 @@ type orchestrator struct {
 	pumping map[wsm.RepoKey]bool
 	// async reports whether Enqueue starts the admission pump itself.
 	async bool
+	// onPark, when set, is signalled the moment a run parks. It exists so a
+	// test synchronizes on the park itself rather than on elapsed time: a
+	// parked merge is a state, and waiting for a state by sleeping is how a
+	// suite becomes flaky.
+	onPark func(ids.WorkspaceID)
 }
 
 // New builds the orchestrator. Its admission pump runs on its own goroutine:

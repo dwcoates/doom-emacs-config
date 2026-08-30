@@ -222,13 +222,14 @@ func (o *orchestrator) republishQueue(ctx context.Context, repo wsm.RepoKey) err
 		frontTab = tabLabel(front.activeTab(), front.roundOf(front.activeTab()))
 	}
 	for _, entry := range entries {
-		lease, ok := o.leaseOf(entry.Workspace)
-		if !ok {
-			continue
+		// A merge that has not been admitted holds no lease, so it has no
+		// bubble to draw a queue tab on yet. Its FACTS still travel: the roster
+		// and the footer are how a waiting user learns their place.
+		if lease, ok := o.leaseOf(entry.Workspace); ok {
+			snapshot := queueSnapshot(entries, entry.Workspace, names, dirs, frontTab)
+			o.deps.Feed.UpsertSynthesized(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
+				queueTab(snapshot, entry.Position == 1, o.nowMS())))
 		}
-		snapshot := queueSnapshot(entries, entry.Workspace, names, dirs, frontTab)
-		o.deps.Feed.UpsertSynthesized(entry.Workspace, mergeFeed(lease), tabRow(entry.Workspace, lease, TabQueue, 1,
-			queueTab(snapshot, entry.Position == 1, o.nowMS())))
 		facts, _ := o.Facts(entry.Workspace)
 		facts.QueuePosition = entry.Position
 		facts.QueueDepth = len(entries)
