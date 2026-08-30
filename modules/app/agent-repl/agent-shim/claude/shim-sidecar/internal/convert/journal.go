@@ -21,6 +21,7 @@ import (
 // {result, key, agentId, result} — and nothing run-scoped: NOTHING IN A JOURNAL
 // EVER SAYS THE RUN FINISHED, which is why no terminal is minted from one.
 func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID string) []*storev1.StoreEntry {
+	at.RecordUUID = str(record["uuid"])
 	kind := str(record["type"])
 	switch kind {
 	case "started", "result":

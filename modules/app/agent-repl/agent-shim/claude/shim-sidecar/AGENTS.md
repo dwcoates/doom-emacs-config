@@ -338,6 +338,14 @@ record MEANS.
   owning session's main agent UNLESS the spawn was backgrounded, in which case
   the subagent itself. UNSET only when genuinely unresolvable — residue that
   names no agent.
+- RESIDUE keys (ruled): `residue:<vendor record uuid>` where the record has a
+  uuid — THE STREAM PLANE KEYS THE SAME RECORD IDENTICALLY, so both planes'
+  writes collapse onto one row instead of standing beside each other as two
+  copies of one unconvertible line — and `residue:file:<normalized path>:<byte
+  offset>` where it has none (an unparsed line, a spool's raw bytes), which is a
+  deliberately separate space so no path can collide with a uuid. A KEEP-ALIVE
+  is not residue: it is a well-formed fact with no book and keeps the key of the
+  unit it would have been.
 - `write_id` is DETERMINISTIC: hex sha256 of
   `"shim-claude-sidecar|" + path + "|" + offset + "|" + discriminator`, where
   the discriminator distinguishes multiple entries minted from one record.

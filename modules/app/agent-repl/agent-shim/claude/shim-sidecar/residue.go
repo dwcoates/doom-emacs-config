@@ -61,9 +61,13 @@ func residueEntry(path string, offset int64, reason string, raw []byte) *storev1
 	coordinates := fmt.Sprintf("%s|%s|%d|residue", storeclient.Producer, path, offset)
 	digest := sha256.Sum256([]byte(coordinates))
 	return &storev1.StoreEntry{
-		Plane:     &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}},
-		WriteId:   hex.EncodeToString(digest[:]),
-		UpsertKey: fmt.Sprintf("residue:%s:%d", path, offset),
+		Plane:   &storev1.Plane{Plane: &storev1.Plane_File{File: &storev1.PlaneFile{}}},
+		WriteId: hex.EncodeToString(digest[:]),
+		// A spool's bytes carry no vendor uuid — there is no record, only a byte
+		// range — so they key on where they live. `residue:file:` is the same
+		// space convert.ResidueKey uses for a uuid-less record, kept visibly
+		// apart from the uuid space so no path can collide with a uuid.
+		UpsertKey: fmt.Sprintf("residue:file:%s:%d", path, offset),
 		Entry: &storev1.StoreEntry_AgentUpdate{AgentUpdate: &storev1.StoreAgentUpdate{
 			// top_level is genuinely unresolvable here: residue names no agent,
 			// which is the one case the field is documented to be unset for.

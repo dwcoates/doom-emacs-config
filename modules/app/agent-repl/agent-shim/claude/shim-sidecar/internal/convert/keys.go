@@ -51,6 +51,27 @@ func BashDeltaKey(run string, fromOffset int64) string {
 // BashTerminalKey names a run's single terminal row.
 func BashTerminalKey(run string) string { return "bash:" + run + ":terminal" }
 
+// ResidueKey names one unconvertible record: BY THE VENDOR'S OWN UUID where the
+// record has one, and by its file coordinates where it does not.
+//
+// THE UUID IS WHAT MAKES THE TWO PLANES COLLAPSE. The shim and the sidecar see
+// the same vendor record and either may store it as residue; keyed by the
+// vendor's uuid both writes land on ONE row, and the second supersedes the first
+// instead of standing beside it as a duplicate nobody can reconcile. A digest of
+// the file coordinates could never do that — the stream plane has no file
+// position to digest.
+//
+// A record with NO uuid (an unparsed line, a spool's raw bytes) has nothing the
+// other plane could agree on, so it is keyed by where it lives: `residue:file:`
+// keeps that space visibly separate from the uuid space, so no path can ever
+// collide with a uuid.
+func ResidueKey(at Attribution) string {
+	if at.RecordUUID != "" {
+		return "residue:" + at.RecordUUID
+	}
+	return "residue:file:" + at.Path + ":" + itoa(int(at.Offset))
+}
+
 // SessionKey names a session-scoped fact by its arm and the record that carried
 // it — a context cut, a mid-turn api error.
 func SessionKey(arm, recordUUID string) string { return "session:" + arm + ":" + recordUUID }
