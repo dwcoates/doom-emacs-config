@@ -1115,13 +1115,22 @@ one conversation identifier worth correlating a log line by."
                    ws field value)))))))
   record)
 
-(defun agent-repl--log-record (ws level verbosity fmt args &optional pseudo-ws)
+(defun agent-repl--log-record (ws level verbosity fmt args &optional pseudo-ws operation-fmt)
   "Serialize WS / LEVEL / VERBOSITY / FMT / ARGS as one JSONL record.
 PSEUDO-WS, when non-nil, is the persp-mode pseudo-perspective the caller
 attributed this record to (see `agent-repl--pseudo-workspace-name-p').  Such a
 name owns no durable sink, so WS is nil and the record lands globally; the name
 is preserved on the record as `pseudo_workspace' so the line still says which
-perspective it is about."
+perspective it is about.
+
+OPERATION-FMT, when non-nil, is the format string the stable `operation'
+name is derived from, INSTEAD of FMT.  The severity rungs
+(`agent-repl--warn', `agent-repl--error') prepend a display tag to FMT so
+the recorded message reads \"WARNING: ...\"; deriving `operation' from that
+tagged string would fold the severity into the operation name and give the
+same logical operation two names depending on which rung logged it.
+logging-contract.md reserves `level' for severity and requires `operation'
+to be stable, so the BARE format string travels here separately."
   (let* ((message (if (stringp fmt)
                       (apply #'format fmt args)
                     (agent-repl--log-format-capture-bug fmt)
@@ -1136,7 +1145,8 @@ perspective it is about."
                   (cons "pid" (emacs-pid))
                   (cons "level" level)
                   (cons "verbosity" verbosity)
-                  (cons "operation" (agent-repl--log-operation fmt))
+                  (cons "operation" (agent-repl--log-operation
+                                     (or operation-fmt fmt)))
                   (cons "message" message)
                   (cons "context" context))))
     (agent-repl--log-add-workspace-identity record ws)
@@ -1418,8 +1428,10 @@ the debug lines a reader actually wants."
   "Whether a LEVEL / VERBOSITY record clears `agent-repl-log-buffer-level'."
   (agent-repl--log-record-clears-p level verbosity agent-repl-log-buffer-level))
 
-(defun agent-repl--persist-log-record (ws level verbosity fmt args)
-  "Persist one JSONL record for WS without changing caller-facing signatures."
+(defun agent-repl--persist-log-record (ws level verbosity fmt args &optional operation-fmt)
+  "Persist one JSONL record for WS without changing caller-facing signatures.
+OPERATION-FMT, when non-nil, is the untagged format string the record's
+stable `operation' name is derived from; see `agent-repl--log-record'."
   ;; Record construction resolves the durable sink identity for WS.  Skip that
   ;; work when both persistence sinks are disabled, as in the generic batch
   ;; harness.  Echo-area formatting and emission remain the caller's concern.
@@ -1443,7 +1455,7 @@ the debug lines a reader actually wants."
                              (agent-repl--pseudo-workspace-name-p ws)
                              ws))
              (record (agent-repl--log-record sink-ws level verbosity fmt args
-                                             pseudo-ws)))
+                                             pseudo-ws operation-fmt)))
         (when to-file
           (agent-repl--do-log-to-file record sink-ws))
         (when to-buffer
@@ -1500,10 +1512,14 @@ agent-repl's quiet sink from its loud one."
   (let ((inhibit-message (not echo)))
     (message "%s" text)))
 
-(defun agent-repl--do-log-level (ws fmt args level &optional error-p)
-  "Persist and emit WS / FMT / ARGS at LEVEL without changing public APIs."
+(defun agent-repl--do-log-level (ws fmt args level &optional error-p operation-fmt)
+  "Persist and emit WS / FMT / ARGS at LEVEL without changing public APIs.
+OPERATION-FMT, when non-nil, is the untagged format string the persisted
+record's stable `operation' name is derived from, while FMT — which may
+carry a severity display tag — still supplies the recorded and displayed
+message."
   (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--persist-log-record ws level "normal" fmt args)
+    (agent-repl--persist-log-record ws level "normal" fmt args operation-fmt)
     (if error-p
         (error "%s" text)
       (agent-repl--emit-message text nil))))
@@ -1586,7 +1602,7 @@ the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
 use it for failed writes, dropped state, broken invariants, and degraded
 functionality that are worth flagging in the log but are not fatal."
   (if (stringp fmt)
-      (agent-repl--do-log-level ws (concat "WARNING: " fmt) args "warn")
+      (agent-repl--do-log-level ws (concat "WARNING: " fmt) args "warn" nil fmt)
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather
     ;; than `concat'-ing it (which would raise a wrong-type-argument here and
     ;; bury the real culprit): `agent-repl--build-log-text' already captures a
@@ -2058,7 +2074,7 @@ records at this same level and then signals; a refusal that already has
 its own `error' / `user-error' keeps it and calls this to put the reason
 on the record first."
   (if (stringp fmt)
-      (agent-repl--do-log-level ws (concat "ERROR: " fmt) args "error")
+      (agent-repl--do-log-level ws (concat "ERROR: " fmt) args "error" nil fmt)
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather
     ;; than `concat'-ing it (which would raise a wrong-type-argument here and
     ;; bury the real culprit): `agent-repl--build-log-text' already captures a
