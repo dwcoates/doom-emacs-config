@@ -291,6 +291,7 @@ export interface ScenarioContext {
 /** Which shape `usage_EXPERIMENTAL…` answers with. */
 export type AccountUsageArm =
   | "available"
+  | "opus_absent"
   | "service_unavailable"
   | "window_unavailable"
   | "utilization_unavailable"
