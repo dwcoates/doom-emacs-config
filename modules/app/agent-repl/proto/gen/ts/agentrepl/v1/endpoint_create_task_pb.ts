@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_create_task.proto.
  */
 export const file_agentrepl_v1_endpoint_create_task: GenFile = /*@__PURE__*/
-  fileDesc("CidhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY3JlYXRlX3Rhc2sucHJvdG8SDGFnZW50cmVwbC52MSIiChFDcmVhdGVUYXNrUmVxdWVzdBINCgV0aXRsZRgBIAEoCSKCAQoSQ3JlYXRlVGFza1Jlc3BvbnNlEjIKB3N1Y2Nlc3MYASABKAsyHy5hZ2VudHJlcGwudjEuQ3JlYXRlVGFza1N1Y2Nlc3NIABIuCgVlcnJvchgCIAEoCzIdLmFnZW50cmVwbC52MS5DcmVhdGVUYXNrRXJyb3JIAEIICgZyZXN1bHQiOAoRQ3JlYXRlVGFza1N1Y2Nlc3MSIwoEdGFzaxgBIAEoCzIVLmFnZW50cmVwbC52MS5UYXNrUmVmIhEKD0NyZWF0ZVRhc2tFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_agentrepl_v1_task]);
+  fileDesc("CidhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY3JlYXRlX3Rhc2sucHJvdG8SDGFnZW50cmVwbC52MSIiChFDcmVhdGVUYXNrUmVxdWVzdBINCgV0aXRsZRgBIAEoCSKCAQoSQ3JlYXRlVGFza1Jlc3BvbnNlEjIKB3N1Y2Nlc3MYASABKAsyHy5hZ2VudHJlcGwudjEuQ3JlYXRlVGFza1N1Y2Nlc3NIABIuCgVlcnJvchgCIAEoCzIdLmFnZW50cmVwbC52MS5DcmVhdGVUYXNrRXJyb3JIAEIICgZyZXN1bHQiOAoRQ3JlYXRlVGFza1N1Y2Nlc3MSIwoEdGFzaxgBIAEoCzIVLmFnZW50cmVwbC52MS5UYXNrUmVmIlUKD0NyZWF0ZVRhc2tFcnJvchI5CgtibGFua190aXRsZRgBIAEoCzIiLmFnZW50cmVwbC52MS5DcmVhdGVUYXNrQmxhbmtUaXRsZUgAQgcKBWNhdXNlIhYKFENyZWF0ZVRhc2tCbGFua1RpdGxlQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_task]);
 
 /**
  * @generated from message agentrepl.v1.CreateTaskRequest
@@ -88,12 +88,24 @@ export const CreateTaskSuccessSchema: GenMessage<CreateTaskSuccess> = /*@__PURE_
   messageDesc(file_agentrepl_v1_endpoint_create_task, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (blank title, …),
- * spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.CreateTaskError
  */
 export type CreateTaskError = Message<"agentrepl.v1.CreateTaskError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.CreateTaskError.cause
+   */
+  cause: {
+    /**
+     * The title is blank once trimmed.
+     *
+     * @generated from field: agentrepl.v1.CreateTaskBlankTitle blank_title = 1;
+     */
+    value: CreateTaskBlankTitle;
+    case: "blankTitle";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -102,4 +114,17 @@ export type CreateTaskError = Message<"agentrepl.v1.CreateTaskError"> & {
  */
 export const CreateTaskErrorSchema: GenMessage<CreateTaskError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_create_task, 3);
+
+/**
+ * @generated from message agentrepl.v1.CreateTaskBlankTitle
+ */
+export type CreateTaskBlankTitle = Message<"agentrepl.v1.CreateTaskBlankTitle"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.CreateTaskBlankTitle.
+ * Use `create(CreateTaskBlankTitleSchema)` to create a new message.
+ */
+export const CreateTaskBlankTitleSchema: GenMessage<CreateTaskBlankTitle> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_create_task, 4);
 

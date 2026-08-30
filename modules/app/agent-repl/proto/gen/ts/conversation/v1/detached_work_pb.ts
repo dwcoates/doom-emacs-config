@@ -387,6 +387,13 @@ export const DetachableWorkSchema: GenMessage<DetachableWork> = /*@__PURE__*/
  * The identity of one unit of detached work, and the handle a stop is aimed at.
  * Opaque; equality is the only question asked of it.
  *
+ * MINTING RULE (binding on every producer, ruled 2026-08-29): the value is the
+ * SAME BYTES as the unit's AgentActivityId — the spawning call's tool_use_id —
+ * so the unit's later frames (a bash terminal, a monitor's `ended`, a
+ * subagent's end) retire the handle by equality without any join table. For a
+ * subagent those bytes are also its AgentId. Consumers still compare only;
+ * they never derive one id from the other.
+ *
  * @generated from message conversation.v1.DetachedWorkId
  */
 export type DetachedWorkId = Message<"conversation.v1.DetachedWorkId"> & {

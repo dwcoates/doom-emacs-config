@@ -142,8 +142,48 @@ message CreateWorkspaceSuccess {
   workspace.v1.WorkspaceRef workspace = 1;
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown repository,
-// base ref does not resolve, worktree creation failed, unknown parent,
-// ungated mode without consent, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message CreateWorkspaceError {
+  oneof cause {
+    // An ungated permission mode was asked for without the explicit consent.
+    CreateWorkspaceUngatedWithoutConsent ungated_without_consent = 1;
+    // No slug could be derived for the workspace's branch and dir.
+    CreateWorkspaceNoSlug no_slug = 2;
+    // A one-shot form arrived with no finish action chosen.
+    CreateWorkspaceFinishRequired finish_required = 3;
+    // A finish action arrived on a form that is not one-shot.
+    CreateWorkspaceFinishNotOneShot finish_not_one_shot = 4;
+    // A fork was asked for from a parent that has no conversation to fork.
+    CreateWorkspaceForkParentHasNoConversation fork_parent_has_no_conversation = 5;
+    // The named brief file is absent.
+    CreateWorkspaceBriefMissing brief_missing = 6;
+    // The repository the form names is not one the daemon knows.
+    CreateWorkspaceUnknownRepository unknown_repository = 7;
+    // The parent workspace is not in the daemon's registry.
+    CreateWorkspaceUnknownParent unknown_parent = 8;
+    // The base ref does not resolve in the repository.
+    CreateWorkspaceBaseRefUnresolved base_ref_unresolved = 9;
+    // Creating the worktree failed.
+    CreateWorkspaceWorktreeCreationFailed worktree_creation_failed = 10;
+  }
+}
+message CreateWorkspaceUngatedWithoutConsent {}
+message CreateWorkspaceNoSlug {}
+message CreateWorkspaceFinishRequired {}
+message CreateWorkspaceFinishNotOneShot {}
+message CreateWorkspaceForkParentHasNoConversation {}
+message CreateWorkspaceBriefMissing {
+  // The brief's name, as asked for.
+  string name = 1;
+}
+message CreateWorkspaceUnknownRepository {}
+message CreateWorkspaceUnknownParent {}
+message CreateWorkspaceBaseRefUnresolved {
+  // The ref that did not resolve.
+  string ref = 1;
+}
+message CreateWorkspaceWorktreeCreationFailed {
+  // Git's own account of the failure.
+  string detail = 1;
 }

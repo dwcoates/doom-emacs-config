@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_close_login.proto.
  */
 export const file_agentrepl_v1_endpoint_close_login: GenFile = /*@__PURE__*/
-  fileDesc("CidhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2VfbG9naW4ucHJvdG8SDGFnZW50cmVwbC52MSJCChFDbG9zZUxvZ2luUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIoIBChJDbG9zZUxvZ2luUmVzcG9uc2USMgoHc3VjY2VzcxgBIAEoCzIfLmFnZW50cmVwbC52MS5DbG9zZUxvZ2luU3VjY2Vzc0gAEi4KBWVycm9yGAIgASgLMh0uYWdlbnRyZXBsLnYxLkNsb3NlTG9naW5FcnJvckgAQggKBnJlc3VsdCITChFDbG9zZUxvZ2luU3VjY2VzcyIRCg9DbG9zZUxvZ2luRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CidhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2VfbG9naW4ucHJvdG8SDGFnZW50cmVwbC52MSJCChFDbG9zZUxvZ2luUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIoIBChJDbG9zZUxvZ2luUmVzcG9uc2USMgoHc3VjY2VzcxgBIAEoCzIfLmFnZW50cmVwbC52MS5DbG9zZUxvZ2luU3VjY2Vzc0gAEi4KBWVycm9yGAIgASgLMh0uYWdlbnRyZXBsLnYxLkNsb3NlTG9naW5FcnJvckgAQggKBnJlc3VsdCITChFDbG9zZUxvZ2luU3VjY2VzcyK6AgoPQ2xvc2VMb2dpbkVycm9yEkUKEXVua25vd25fd29ya3NwYWNlGAEgASgLMiguYWdlbnRyZXBsLnYxLkNsb3NlTG9naW5Vbmtub3duV29ya3NwYWNlSAASTgoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIsLmFnZW50cmVwbC52MS5DbG9zZUxvZ2luV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJFChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIoLmFnZW50cmVwbC52MS5DbG9zZUxvZ2luVHJhbnNmZXJyaW5nQXdheUgAEkAKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIlLmFnZW50cmVwbC52MS5DbG9zZUxvZ2luTm90WWV0QWRvcHRlZEgAQgcKBWNhdXNlIhwKGkNsb3NlTG9naW5Vbmtub3duV29ya3NwYWNlIjYKHkNsb3NlTG9naW5Xb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLQoaQ2xvc2VMb2dpblRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIZChdDbG9zZUxvZ2luTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.CloseLoginRequest
@@ -82,11 +82,48 @@ export const CloseLoginSuccessSchema: GenMessage<CloseLoginSuccess> = /*@__PURE_
   messageDesc(file_agentrepl_v1_endpoint_close_login, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.CloseLoginError
  */
 export type CloseLoginError = Message<"agentrepl.v1.CloseLoginError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.CloseLoginError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.CloseLoginUnknownWorkspace unknown_workspace = 1;
+     */
+    value: CloseLoginUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.CloseLoginWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: CloseLoginWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.CloseLoginTransferringAway transferring_away = 3;
+     */
+    value: CloseLoginTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.CloseLoginNotYetAdopted not_yet_adopted = 4;
+     */
+    value: CloseLoginNotYetAdopted;
+    case: "notYetAdopted";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -95,4 +132,68 @@ export type CloseLoginError = Message<"agentrepl.v1.CloseLoginError"> & {
  */
 export const CloseLoginErrorSchema: GenMessage<CloseLoginError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_close_login, 3);
+
+/**
+ * @generated from message agentrepl.v1.CloseLoginUnknownWorkspace
+ */
+export type CloseLoginUnknownWorkspace = Message<"agentrepl.v1.CloseLoginUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseLoginUnknownWorkspace.
+ * Use `create(CloseLoginUnknownWorkspaceSchema)` to create a new message.
+ */
+export const CloseLoginUnknownWorkspaceSchema: GenMessage<CloseLoginUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_login, 4);
+
+/**
+ * @generated from message agentrepl.v1.CloseLoginWorkspaceRefMismatch
+ */
+export type CloseLoginWorkspaceRefMismatch = Message<"agentrepl.v1.CloseLoginWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseLoginWorkspaceRefMismatch.
+ * Use `create(CloseLoginWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const CloseLoginWorkspaceRefMismatchSchema: GenMessage<CloseLoginWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_login, 5);
+
+/**
+ * @generated from message agentrepl.v1.CloseLoginTransferringAway
+ */
+export type CloseLoginTransferringAway = Message<"agentrepl.v1.CloseLoginTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseLoginTransferringAway.
+ * Use `create(CloseLoginTransferringAwaySchema)` to create a new message.
+ */
+export const CloseLoginTransferringAwaySchema: GenMessage<CloseLoginTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_login, 6);
+
+/**
+ * @generated from message agentrepl.v1.CloseLoginNotYetAdopted
+ */
+export type CloseLoginNotYetAdopted = Message<"agentrepl.v1.CloseLoginNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.CloseLoginNotYetAdopted.
+ * Use `create(CloseLoginNotYetAdoptedSchema)` to create a new message.
+ */
+export const CloseLoginNotYetAdoptedSchema: GenMessage<CloseLoginNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_close_login, 7);
 

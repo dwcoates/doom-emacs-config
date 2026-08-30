@@ -429,3 +429,24 @@ every UX or contract gap you surfaced instead of improvising.
   prompt→scenario table location = agent-shim/claude/shim/AGENTS.md).
 - ESCALATIONS OUTSTANDING: none (all seven answered in landing 3).
 - Project lead address for SendMessage: `main`.
+- LEDGER: mock additions landed on overhaul/shim-mock2 (2babe459c..e017fe398,
+  awaiting one fix: `!usage-window-unavailable` must null five_hour). ENGINE
+  GAPS queued for an opus-low remediation agent after the record plane lands
+  (they touch engine/pushes.ts, session.ts, the fold seam): (a) a fold
+  converter defect (StoreUnparsed with parse_error "converter defect: …")
+  must raise SessionFault.converter_defect + a degraded window and recover
+  (a FoldContext.reportFault channel or the Persistence fault source);
+  (b) model_changed must also be derived from the next assistant message's
+  message.model (unsolicited vendor fallback), not only init/SetSessionModel;
+  (c) fast_mode has no producer — the engine drops the fold's fast_mode
+  update as an owned arm and pushes none; produce it from init/result
+  fast_mode_state.
+- LEDGER (after outage 2): landing 4 merged at d83fdb250 (rate_limit_status
+  28; tag 24 retired → AgentUpdate.context_budget_warning 7; DetachedWorkId
+  == AgentActivityId in the proto comment). All three implementers resumed
+  by message with the relay: record plane (from 2f3dcb22e; rate_limit_event
+  mapping + budget-warning retarget added to its list), integration author
+  (from 7e60e77f8; rate_limit_status assertion, budget-warning test
+  retired), mock additions (from e017fe398; five_hour fix pending). Next:
+  merge each, run `npm run test:integration`, opus-low remediation for the
+  three engine gaps + suite failures, fable audit loop.
