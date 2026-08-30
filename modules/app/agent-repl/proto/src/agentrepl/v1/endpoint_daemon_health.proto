@@ -7,6 +7,8 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "workspace/v1/workspace.proto";
+
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // Nothing to ask beyond "you?".
@@ -41,13 +43,45 @@ message DaemonUnhealthy {
 message DaemonFault {
   // The dynamic account, verbatim — supplements the kind, never replaces it.
   string detail = 1;
-  // THE KIND ONEOF IS ADDED WITH ITS FIRST DERIVED ARMS at the wave (an
-  // empty oneof is not legal proto): derived from the daemon's real fault
-  // sites, never invented. The pending file's RuntimeFault (string
-  // component/fault_type/impact/cause) is this message's ancestor and is
-  // judged INTO these arms at the host stream's turn.
+  // Kinds derived from the daemon's real fault sites (landing 4, 2026-08-29).
+  oneof kind {
+    // A workspace's adoption window closed before the joining daemon
+    // adopted it.
+    DaemonFaultAdoptionWindowExpired adoption_window_expired = 2;
+    // A log sink can no longer be written.
+    DaemonFaultLogSinkPoisoned log_sink_poisoned = 3;
+    // The deploy script failed.
+    DaemonFaultDeployScriptFailed deploy_script_failed = 4;
+    // Spawning the successor daemon failed.
+    DaemonFaultSuccessorSpawnFailed successor_spawn_failed = 5;
+    // The prompts directory is not on disk.
+    DaemonFaultPromptsDirMissing prompts_dir_missing = 6;
+    // The workspace-state store is read-only.
+    DaemonFaultWsmReadOnly wsm_read_only = 7;
+  }
 }
+message DaemonFaultAdoptionWindowExpired {
+  // The workspace whose window expired.
+  workspace.v1.WorkspaceRef workspace = 1;
+}
+message DaemonFaultLogSinkPoisoned {
+  // Which sink.
+  string sink = 1;
+}
+message DaemonFaultDeployScriptFailed {
+  // The script's own account of the failure.
+  string detail = 1;
+}
+message DaemonFaultSuccessorSpawnFailed {
+  // The spawn's own account of the failure.
+  string detail = 1;
+}
+message DaemonFaultPromptsDirMissing {
+  // The path that is not there.
+  string path = 1;
+}
+message DaemonFaultWsmReadOnly {}
 
-// EMPTY ON PURPOSE: arms DERIVED at the wave, spelled per 3b.
+// No arms: DaemonHealth has no refusal site (landing 4).
 message DaemonHealthError {
 }
