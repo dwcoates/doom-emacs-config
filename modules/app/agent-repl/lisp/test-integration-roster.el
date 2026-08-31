@@ -346,7 +346,11 @@ notification would be a spurious re-alert."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
-      (let ((blinked nil))
+      ;; The fixture blanks the update hook; this scenario's subject IS the
+      ;; production consumer's reaction, so it puts that one consumer back.
+      (let ((blinked nil)
+            (agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
         (agent-repl--ws-put "itest-attn2" :project-dir "/tmp/itest-attn2")
         (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
                    (lambda (ws) (push ws blinked))))
@@ -373,6 +377,10 @@ that never clears would flag a workspace with nothing left unread."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
+      ;; The fixture blanks the update hook; the marker's lifecycle IS that
+      ;; consumer's work, so it is put back for this scenario.
+      (let ((agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
       (agent-repl--ws-put "itest-attn3" :project-dir "/tmp/itest-attn3")
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
@@ -390,7 +398,7 @@ that never clears would flag a workspace with nothing left unread."
       (agent-repl-itest--wait-until
        (lambda () (not (agent-repl-status-attention-visible-p "itest-attn3")))
        nil "the marker to clear")
-      (should-not (agent-repl-status-attention-visible-p "itest-attn3")))))
+      (should-not (agent-repl-status-attention-visible-p "itest-attn3"))))))
 
 ;;;; ---- Scenario 10: tab reconciliation ----
 

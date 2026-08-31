@@ -444,9 +444,9 @@ so the host probe happens at most once per session."
 (defun agent-repl-notify-make-fake-backend (sink)
   "Return a notification backend that records into SINK instead of posting.
 SINK is a symbol whose value is a list; each call conses
-`(WS TITLE MESSAGE ACTIVATE)' onto its front.  THE TEST SEAM for the notification
-policy: bound over `agent-repl--notification-backend', it proves what
-Emacs decided to post without any host tool existing at all."
+`(WS TITLE MESSAGE ACTIVATE)' onto its front.  THE TEST SEAM for the
+notification policy: bound over `agent-repl--notification-backend', it
+proves what Emacs decided to post without any host tool existing at all."
   (lambda (ws title message &optional activate)
     (set sink (cons (list ws title message activate) (symbol-value sink)))
     (agent-repl--log ws "elisp.notifications.fake-backend title=%s message=%s"
