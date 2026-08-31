@@ -69,6 +69,12 @@ const (
 	// it is a test failure, never a retry.
 	waitBudget = 60 * time.Second
 
+	// snapshotBudget bounds watchBashRun's read of an UNFINISHED run. The
+	// endpoint follows until the terminal, so a snapshot of a live run has no
+	// other way to end; it is a bound on a stream that is deliberately still
+	// open, never a sleep standing in for a signal.
+	snapshotBudget = 2 * time.Second
+
 	// pollTick is the re-read cadence of the bounded store-polling helpers. It
 	// is a POLL of a durable surface, never a sleep standing in for a signal.
 	pollTick = 20 * time.Millisecond
@@ -1000,6 +1006,17 @@ type fakeStore struct {
 	cursorsFailure string
 	writeFailures  int
 	writeDetail    string
+	// writeInvalidField, when set alongside a scripted failure, answers the
+	// invalid_request arm naming this field — the refusal a retry CANNOT help
+	// with. Empty scripts the storage_failure arm, the recoverable one.
+	writeInvalidField string
+	// writeKindless scripts a failure carrying NEITHER arm, which the contract
+	// forbids. It exists so the sidecar's handling of a store that violates the
+	// contract has a subject.
+	writeKindless bool
+	// rejections holds every batch the fake refused on its OWN validation, so a
+	// subject can state what the store objected to.
+	rejections []string
 
 	batchC chan *storev1.WriteBatchRequest
 	callC  chan string
@@ -1071,6 +1088,107 @@ func (f *fakeStore) FailWrites(n int, detail string) {
 	defer f.mu.Unlock()
 	f.writeFailures = n
 	f.writeDetail = detail
+	f.writeInvalidField = ""
+	f.writeKindless = false
+}
+
+// FailWritesInvalid makes the next n WriteBatch calls answer the
+// invalid_request arm naming field — the refusal a retry CANNOT help with, and
+// therefore the one the sidecar must treat as a producer defect rather than as
+// an outage (ruling R-S2).
+func (f *fakeStore) FailWritesInvalid(n int, field, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writeFailures = n
+	f.writeDetail = detail
+	f.writeInvalidField = field
+	f.writeKindless = false
+}
+
+// FailWritesWithoutAKind makes the next n WriteBatch calls answer a failure
+// carrying NEITHER arm — a shape this contract forbids, scripted so the
+// sidecar's handling of a store that violates it has a subject.
+func (f *fakeStore) FailWritesWithoutAKind(n int, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writeFailures = n
+	f.writeDetail = detail
+	f.writeInvalidField = ""
+	f.writeKindless = true
+}
+
+// scriptedFailure builds the failure arm the test asked for. THE KIND IS NOT
+// OPTIONAL on this contract: a fake that always omitted it was answering a
+// shape the real store never sends, and no subject could then tell the
+// recoverable refusal from the one a retry can never fix. Caller must not hold
+// mu.
+func (f *fakeStore) scriptedFailure(detail string) *storev1.WriteBatchFailure {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := &storev1.WriteBatchFailure{Detail: detail}
+	switch {
+	case f.writeKindless:
+		// Deliberately illegal, and deliberately left unset.
+	case f.writeInvalidField != "":
+		out.Kind = &storev1.WriteBatchFailure_InvalidRequest{
+			InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: f.writeInvalidField},
+		}
+	default:
+		out.Kind = &storev1.WriteBatchFailure_StorageFailure{
+			StorageFailure: &storev1.WriteBatchStorageFailure{},
+		}
+	}
+	return out
+}
+
+// Rejections lists every batch the fake refused on its OWN validation.
+func (f *fakeStore) Rejections() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.rejections...)
+}
+
+// validateWriteBatchEnvelope restates shim-store's validateWriteBatchRequest.
+// It answers the offending field and the store's account, or "" when the
+// request is well formed.
+//
+// IT IS THE ENVELOPE ONLY, exactly like the real store's: the frame inside a
+// StoreEntry is opaque to this layer and is routed by arm further down.
+func validateWriteBatchEnvelope(req *storev1.WriteBatchRequest) (string, string) {
+	if req.GetProducer() == "" {
+		return "producer", "producer: the write names no producer, so nothing can be attributed"
+	}
+	batch := req.GetBatch()
+	if batch == nil {
+		return "batch", "batch: the request carries no EntryBatch"
+	}
+	if len(batch.GetEntries()) == 0 && batch.GetCursorAdvance() == nil {
+		return "batch", "batch: the EntryBatch carries neither entries nor a cursor advance"
+	}
+	for i, e := range batch.GetEntries() {
+		what := fmt.Sprintf("batch.entries[%d]", i)
+		if e == nil {
+			return what, what + ": no entry"
+		}
+		if e.GetPlane() == nil || e.GetPlane().GetPlane() == nil {
+			return what + ".plane", what + ": plane names neither stream nor file"
+		}
+		if e.GetWriteId() == "" {
+			return what + ".write_id", what + ": write_id is empty, so the write cannot be deduped on replay"
+		}
+		if e.GetUpsertKey() == "" {
+			return what + ".upsert_key", what + ": upsert_key is empty, so the write identifies no row"
+		}
+		if e.GetEntry() == nil {
+			return what + ".entry", what + ": the entry oneof names neither agent_update nor session_update"
+		}
+	}
+	// A CURSOR-ONLY BATCH IS LEGAL: a reader that consumed bytes yielding no
+	// entries must still make its position durable.
+	if cs := batch.GetCursorAdvance(); cs != nil && cs.GetFileId() == "" {
+		return "batch.cursor_advance.file_id", "cursor_advance: a CursorState with no file_id keys no row"
+	}
+	return "", ""
 }
 
 // SeedCursors scripts the GetSidecarCursors answer.
@@ -1137,11 +1255,31 @@ func (f *fakeStore) WriteBatch(_ context.Context, req *connect.Request[storev1.W
 	default:
 	}
 
-	if fail {
+	// THE FAKE VALIDATES WHAT THE REAL STORE VALIDATES (ruling R-S5). A fake
+	// that accepts anything makes every subject running against it prove only
+	// that the sidecar sent SOMETHING — a batch with an empty write_id, an
+	// unset plane or a cursor naming no file would sail through here and fail
+	// only in production. The rules are shim-store's own
+	// validateWriteBatchRequest, restated in the vocabulary of what it refuses.
+	if field, detail := validateWriteBatchEnvelope(req.Msg); field != "" {
+		f.mu.Lock()
+		f.rejections = append(f.rejections, detail)
+		f.mu.Unlock()
 		return connect.NewResponse(&storev1.WriteBatchResponse{
 			Result: &storev1.WriteBatchResponse_Failure{
-				Failure: &storev1.WriteBatchFailure{Detail: detail},
+				Failure: &storev1.WriteBatchFailure{
+					Detail: detail,
+					Kind: &storev1.WriteBatchFailure_InvalidRequest{
+						InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: field},
+					},
+				},
 			},
+		}), nil
+	}
+
+	if fail {
+		return connect.NewResponse(&storev1.WriteBatchResponse{
+			Result: &storev1.WriteBatchResponse_Failure{Failure: f.scriptedFailure(detail)},
 		}), nil
 	}
 	f.mu.Lock()
@@ -1358,13 +1496,30 @@ func (f *fakeStore) awaitEntry(ctx context.Context, t *testing.T, what string, m
 // the assertion; the raw envelopes are only how a failure is explained.
 // ---------------------------------------------------------------------------
 
-// watchBashRun replays one run's rows through the store and returns them in the
-// order the store sent them, ending after the terminal row (or when the context
-// is done). A run the store holds no row for is a refused open, reported as
-// ok=false rather than as a failure.
+// watchBashRun takes a SNAPSHOT of one run: the rows the store holds for it
+// right now, in the order the store replays them.
+//
+// IT IS BOUNDED, AND THAT IS THE POINT. WatchBashRun replays the stored rows
+// and then FOLLOWS, ending only after the terminal — so a run that has not
+// finished leaves the stream open indefinitely, which is correct behavior and
+// exactly what a snapshot must not wait for. The snapshot therefore ends on the
+// terminal row OR on its own short deadline, whichever comes first. A subject
+// that wants the terminal uses awaitBashRunTerminal, which follows ONE stream
+// to the end.
+//
+// A run the store holds no row for is a REFUSED OPEN — the endpoint's own
+// convention — reported as ok=false rather than as an empty stream that would
+// read as "the run produced nothing".
+//
+// A GENUINE STREAM FAILURE IS FATAL, never quietly reported as a snapshot: a
+// read path that dies partway through a replay is precisely what these subjects
+// exist to catch, and returning the rows it managed to send first would let it
+// pass every assertion that only looked at those.
 func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) ([]*conversationv1.AgentBash, bool) {
 	t.Helper()
-	stream, err := c.WatchBashRun(ctx, connect.NewRequest(&storev1.WatchBashRunRequest{
+	snapshot, cancel := context.WithTimeout(ctx, snapshotBudget)
+	defer cancel()
+	stream, err := c.WatchBashRun(snapshot, connect.NewRequest(&storev1.WatchBashRunRequest{
 		Run: &conversationv1.AgentActivityId{Value: run},
 	}))
 	if err != nil {
@@ -1378,30 +1533,114 @@ func watchBashRun(ctx context.Context, t *testing.T, c storev1connect.ShimStoreC
 			t.Fatalf("WatchBashRun(%s) sent a row for run %q", run, got)
 		}
 		out = append(out, row.GetFrame())
+		if isTerminalFrame(row.GetFrame()) {
+			return out, true
+		}
 	}
-	if err := stream.Err(); err != nil && len(out) == 0 {
+	if err := stream.Err(); err != nil {
+		// A REFUSED OPEN ARRIVES HERE, not from the call above: Connect reports a
+		// server-side stream error lazily, on the first Receive. NotFound is the
+		// endpoint's own convention for a run it holds no row for, and it is an
+		// answer rather than a fault.
+		if connect.CodeOf(err) == connect.CodeNotFound {
+			return nil, false
+		}
+		// The snapshot window closing on an unfinished run is the ordinary end
+		// of a snapshot, not a failure: the run has simply not said anything
+		// more yet. Anything else — and any expiry of the CALLER's own deadline,
+		// which means the subject itself ran out of time — is a real failure.
+		if snapshot.Err() != nil && ctx.Err() == nil {
+			if len(out) == 0 {
+				return nil, false
+			}
+			return out, true
+		}
+		t.Fatalf("WatchBashRun(%s) delivered %d row(s) and then failed: %v", run, len(out), err)
+	}
+	if len(out) == 0 {
 		return nil, false
 	}
 	return out, true
 }
 
-// awaitBashRunTerminal follows a run until its terminal row arrives and returns
-// every row of it, in write order. The stream's own delivery is the signal.
+// awaitBashRunTerminal follows ONE stream of a run until its terminal row
+// arrives, and returns every row of it in write order.
+//
+// IT OPENS THE STREAM ONCE. Re-opening per tick replayed the stored rows from
+// the start each time and returned as soon as a snapshot happened to end on a
+// terminal — so the endpoint's FOLLOW phase (rows delivered live to an already
+// open stream) was never driven at all, and its ordering guarantee across the
+// replay/follow boundary was never tested. The stream's own delivery is the
+// synchronization primitive; the deadline is the context's.
+//
+// A run the store holds no row for yet is a refused open, so the ONE retry loop
+// that remains is the wait for the run to EXIST — never a re-read of one that
+// does.
 func awaitBashRunTerminal(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) []*conversationv1.AgentBash {
+	t.Helper()
+	stream, first := awaitBashRunStream(ctx, t, c, run)
+	defer stream.Close()
+
+	// The first row was consumed to PROVE the run exists (a refusal is reported
+	// lazily, on the first Receive), so it is folded in here rather than lost.
+	var out []*conversationv1.AgentBash
+	if got := first.GetRun().GetValue(); got != run {
+		t.Fatalf("WatchBashRun(%s) sent a row for run %q", run, got)
+	}
+	out = append(out, first.GetFrame())
+	if isTerminalFrame(first.GetFrame()) {
+		return out
+	}
+	for stream.Receive() {
+		row := stream.Msg().GetRow()
+		if got := row.GetRun().GetValue(); got != run {
+			t.Fatalf("WatchBashRun(%s) sent a row for run %q", run, got)
+		}
+		out = append(out, row.GetFrame())
+		if isTerminalFrame(row.GetFrame()) {
+			return out
+		}
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("run %s: the stream failed after %d row(s) without a terminal: %v; its rows were %v",
+			run, len(out), err, describeBashRows(out))
+	}
+	t.Fatalf("run %s: the stream ended after %d row(s) without a terminal; its rows were %v",
+		run, len(out), describeBashRows(out))
+	return nil
+}
+
+// awaitBashRunStream opens ONE WatchBashRun stream, waiting only for the run to
+// come into existence — an unknown run is a refused open, which is the
+// endpoint's own convention.
+func awaitBashRunStream(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, run string) (*connect.ServerStreamForClient[storev1.WatchBashRunResponse], *storev1.StoreAgentBash) {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		rows, ok := watchBashRun(ctx, t, c, run)
-		if ok && len(rows) > 0 && isTerminalFrame(rows[len(rows)-1]) {
-			return rows
+		stream, err := c.WatchBashRun(ctx, connect.NewRequest(&storev1.WatchBashRunRequest{
+			Run: &conversationv1.AgentActivityId{Value: run},
+		}))
+		if err == nil {
+			// A REFUSAL IS REPORTED LAZILY on the first Receive, so a stream
+			// that opened cleanly may still be a NotFound for a run the store
+			// holds nothing for. The first row is what proves the run exists,
+			// and it is handed back with the stream so the follow phase is
+			// driven by ONE stream from that row onward.
+			if stream.Receive() {
+				return stream, stream.Msg().GetRow()
+			}
+			receiveErr := stream.Err()
+			stream.Close()
+			if connect.CodeOf(receiveErr) != connect.CodeNotFound && receiveErr != nil {
+				t.Fatalf("run %s: opening its stream failed: %v", run, receiveErr)
+			}
+			err = receiveErr
 		}
 		select {
 		case <-ctx.Done():
-			rows, _ := watchBashRun(context.Background(), t, c, run)
-			t.Fatalf("run %s never reached a terminal row within the deadline; its rows were %v",
-				run, describeBashRows(rows))
-			return nil
+			t.Fatalf("run %s was never openable within the deadline: %v", run, err)
+			return nil, nil
 		case <-tick.C:
 		}
 	}
@@ -1913,6 +2152,25 @@ func backgroundLaunchText(taskID, spoolPath string) string {
 
 // compactSummaryLine spells the summary record the vendor writes immediately
 // after a compact_boundary — the line the boundary must be coalesced with.
+//
+// *** SYNTHETIC. THIS SHAPE IS NOT CAPTURED ANYWHERE. ***
+//
+// Every other fixture in this suite is a real vendor record re-pointed at the
+// test's session; this one is INVENTED, because no capture in
+// testdata/corpus/ or under projects/ contains an `isCompactSummary` record at
+// all (grep the trees: there is not one). The production converter's
+// compactSummaryText reads `type == "user"` and `isCompactSummary == true` and
+// takes the summary out of `message.content`, so that much is pinned by the
+// code — but the SURROUNDING envelope here (parentUuid, userType, entrypoint,
+// version, and whether `content` is a bare string or a block array in the real
+// article) is a plausible reconstruction, not evidence.
+//
+// WHAT THAT COSTS: every subject built on this fixture proves the sidecar
+// handles the shape WE BELIEVE the vendor writes. If the real record differs —
+// say its content is a block array — the compaction coalescing would fail in
+// production while this suite stayed green. It is carried as a CONCERN for the
+// teamlead rather than dressed up as a capture; the fix is a real capture of a
+// compacted session, and nothing here should be read as one.
 func compactSummaryLine(t *testing.T, session, cwd, uuid, parent, summary string) string {
 	t.Helper()
 	return encodeRecord(t, map[string]any{
@@ -1994,15 +2252,21 @@ func samePathAny(v any, path string) bool {
 	return samePath(s, path)
 }
 
-// awaitAnyCursorFor waits until the sidecar has offered ANY cursor advance for
-// a path — the signal that the file is discovered and being read, used where
-// the interesting state is a PARTIAL read rather than a byte count.
+// awaitAnyCursorFor waits until the sidecar has DURABLY advanced a path's
+// cursor at all — the signal that the file is discovered and its first bytes
+// are committed, used where the interesting state is a PARTIAL read rather than
+// a byte count.
+//
+// IT COUNTS ONLY ACKED BATCHES, like awaitCursorInBatches and for the same
+// reason: a refused WriteBatch committed NOTHING, so a cursor inside one is an
+// offer the store rejected. Waiting on offers made every "and then it wrote"
+// assertion satisfiable by a write that FAILED.
 func awaitAnyCursorFor(ctx context.Context, t *testing.T, f *fakeStore, path string) {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		if latestCursorFor(f.Batches(), path) != nil {
+		if latestCursorFor(f.AckedBatches(), path) != nil {
 			return
 		}
 		select {
@@ -2013,19 +2277,22 @@ func awaitAnyCursorFor(ctx context.Context, t *testing.T, f *fakeStore, path str
 	}
 }
 
-// awaitCursorPast waits until the sidecar's cursor for a path moves strictly
-// past an offset — the signal that a held frame was released.
+// awaitCursorPast waits until the sidecar's DURABLE cursor for a path moves
+// strictly past an offset — the signal that a held frame was released.
+//
+// IT COUNTS ONLY ACKED BATCHES: a released hold is a released hold only once
+// the store took the batch that carried it past the held byte.
 func awaitCursorPast(ctx context.Context, t *testing.T, f *fakeStore, path string, offset int64) *storev1.CursorState {
 	t.Helper()
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		if cs := latestCursorFor(f.Batches(), path); cs != nil && cs.GetOffset() > offset {
+		if cs := latestCursorFor(f.AckedBatches(), path); cs != nil && cs.GetOffset() > offset {
 			return cs
 		}
 		select {
 		case <-ctx.Done():
-			cs := latestCursorFor(f.Batches(), path)
+			cs := latestCursorFor(f.AckedBatches(), path)
 			t.Fatalf("the cursor for %s never moved past %d (last: %v) within the deadline", path, offset, cs)
 			return nil
 		case <-tick.C:
