@@ -92,14 +92,11 @@ func TestUnknownBookReadsEmptyAtFloor(t *testing.T) {
 	assertPageFloor(t, empty.GetPage())
 
 	// And a pointer from ANOTHER book is stale here, never silently accepted.
-	detail := readPageExpectingFailure(ctx, t, cli, &storev1.ReadAgentPageRequest{
+	assertReadStalePointer(t, readPageExpectingFailure(ctx, t, cli, &storev1.ReadAgentPageRequest{
 		Book:     agentID("unwritten"),
 		PageSize: 5,
 		After:    pointerInMain,
-	})
-	if detail == "" {
-		t.Errorf("the stale-pointer refusal carried no detail")
-	}
+	}))
 }
 
 // TestContinuationLinesCarryTheSamePointersTheOpeningPageWouldHave: a

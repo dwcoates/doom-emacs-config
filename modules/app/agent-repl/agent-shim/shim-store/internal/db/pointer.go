@@ -31,22 +31,22 @@ func encodePointer(position int64) *storev1.StoreItemPointer {
 // re-open when what it must do is stop sending garbage.
 func decodePointer(p *storev1.StoreItemPointer, field string) (int64, error) {
 	if p == nil {
-		return 0, invalidf("%s is unset", field)
+		return 0, invalidFieldf(field, "%s is unset", field)
 	}
 	value := p.GetValue()
 	if value == "" {
-		return 0, invalidf("%s.value is empty", field)
+		return 0, invalidFieldf(field, "%s.value is empty", field)
 	}
 	rest, ok := strings.CutPrefix(value, pointerPrefix)
 	if !ok {
-		return 0, invalidf("%s.value %q is not a store-minted item pointer", field, value)
+		return 0, invalidFieldf(field, "%s.value %q is not a store-minted item pointer", field, value)
 	}
 	position, err := strconv.ParseInt(rest, 36, 64)
 	if err != nil {
-		return 0, invalidf("%s.value %q is not a store-minted item pointer", field, value)
+		return 0, invalidFieldf(field, "%s.value %q is not a store-minted item pointer", field, value)
 	}
 	if position <= 0 {
-		return 0, invalidf("%s.value %q names position %d, which this store never assigns", field, value, position)
+		return 0, invalidFieldf(field, "%s.value %q names position %d, which this store never assigns", field, value, position)
 	}
 	return position, nil
 }
