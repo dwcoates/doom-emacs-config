@@ -86,11 +86,8 @@ func (h *ShellOutputHandler) CancelTerminal(taskID, run, ownerAgentID string, se
 			Log("no terminal minted for a stopped run: no spawning-call activity id was supplied, so the frame would name no unit")
 		return nil
 	}
-	at, ok := h.terminalAttribution(taskID, ownerAgentID, "cancel-terminal", "stopped")
-	if !ok {
-		return nil
-	}
-	return []*storev1.StoreEntry{h.conv.BashCancelled(at, run, string(h.seen), h.omitted, settledAtMs)}
+	at := h.terminalAttribution(taskID, ownerAgentID, run)
+	return []*storev1.StoreEntry{h.conv.BashCancelled(at, run, string(h.seen), h.omitted, settledAtMs, h.read)}
 }
 
 // SetTerminalObserver adopts the reader's terminal-read sink.
@@ -129,31 +126,46 @@ func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, r
 			Log("no terminal minted for a LOST run: no spawning-call activity id was supplied, so the frame would name no unit (reason=%s)", reason)
 		return nil
 	}
-	at, ok := h.terminalAttribution(taskID, ownerAgentID, "lost-terminal", "LOST")
-	if !ok {
-		return nil
-	}
-	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason))}
+	at := h.terminalAttribution(taskID, ownerAgentID, run)
+	return []*storev1.StoreEntry{h.conv.BashLost(at, run, string(h.seen), h.omitted, convert.LostReason(reason), h.read)}
 }
 
 // terminalAttribution states WHERE a reader-concluded terminal is written from.
 //
-// THE FILE COORDINATES ARE NOT DECORATION: the write identity is the digest of
-// "producer|file_id|offset|discriminator" (R-S1), so a terminal built without
-// them digests the SAME id for every run in the process and the store absorbs
-// the second one as a replay of the first, losing a run's only terminal. The
-// coordinates are the ones this handler last read at, which are the same ones
-// the cursor is stated in.
+// THE WRITE IDENTITY MUST BE UNIQUE PER RUN, and that is the whole job here.
+// The identity is the digest of "producer|file_id|offset|discriminator" (R-S1),
+// so a terminal built with neither would digest the SAME id for every run in
+// the process and the store — whose absorption IS write_id equality — would
+// swallow the second one as a replay of the first, leaving a run with no
+// terminal at all and open in every reader downstream.
 //
-// A HANDLER THAT HAS READ NOTHING HAS NO POSITION TO STATE, and it refuses
-// loudly rather than minting a terminal at a coordinate it invented.
-func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, operation, what string) (convert.Attribution, bool) {
+// THERE ARE TWO HONEST CASES, and each gets a real identity:
+//
+//   - THE SPOOL WAS READ. Its coordinates are the ones this handler last read
+//     at, which are the same ones the cursor is stated in.
+//   - THE SPOOL WAS NEVER READ — a run swept up at boot, or one whose file was
+//     never readable. There is no file position, and inventing offset 0 would
+//     claim a byte we never saw; the identity is scoped to the RUN instead,
+//     which is unique by construction and is already what the terminal's upsert
+//     key names. The terminal itself then states `not_observed` for its output,
+//     because we do not know what the command printed.
+//
+// It NEVER refuses. A refused terminal is a run left open forever in every
+// reader, which is strictly worse than a terminal that honestly says it saw
+// nothing — and refusing was what made the swept-up conclusion unstatable.
+func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, run string) convert.Attribution {
 	if h.coords.FileID == "" {
 		h.log.With(logging.Context{
-			Operation: operation, Level: "error", TaskID: taskID,
-			AgentID: ownerAgentID, Path: h.coords.Path,
-		}).Log("no terminal minted for a %s run: this handler has read no batch of its spool, so it has no file position to state the terminal at and every such terminal would share one write identity", what)
-		return convert.Attribution{}, false
+			Operation: "terminal-attribution", TaskID: taskID,
+			AgentID: ownerAgentID, ActivityID: run, Path: h.coords.Path,
+		}).LogVerbose("this handler read no batch of the run's spool, so its terminal is identified by the run and states not_observed for its output")
+		return convert.Attribution{
+			VendorSessionID: ownerAgentID,
+			MainAgentID:     ownerAgentID,
+			AgentID:         ownerAgentID,
+			TaskID:          taskID,
+			WriteScope:      convert.RunScope(run),
+		}
 	}
 	return convert.Attribution{
 		VendorSessionID: ownerAgentID,
@@ -163,5 +175,5 @@ func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, operation
 		Path:            h.coords.Path,
 		FileID:          h.coords.FileID,
 		Offset:          h.coords.Offset,
-	}, true
+	}
 }

@@ -590,8 +590,16 @@ the suite rather than quietly shrinking what the feed can show.
   DETERMINISTIC: randomness is forbidden, because replay idempotence at the
   store rests entirely on the same bytes minting the same id. The discriminator
   separates the several entries one record mints (a block index, `settle:<id>`,
-  `terminal`, `diag`). A frame whose attribution carries no file id is a READER
-  defect and is raised as one; digesting an empty string would collapse every
+  `terminal`, `diag`). A RECORD WITH NO FILE POSITION gets a RUN-SCOPED
+  identity instead: `sha256("shim-claude-sidecar|run:<run>|" + discriminator)`,
+  carrying no offset at all. Exactly one record is like that — a terminal
+  concluded from the ABSENCE of a file (a run swept up at boot, a spool that was
+  never readable) — and inventing offset 0 for it would claim a byte nobody saw.
+  Without it every inferred terminal in a process digests ONE id and the store,
+  whose absorption is write_id equality, swallows the second run's terminal as a
+  replay of the first, leaving that run open in every reader downstream. It is
+  set through `Attribution.WriteScope`, and a file id ALWAYS wins over it. A
+  frame carrying NEITHER is a READER defect and is raised as one; digesting an empty string would collapse every
   file onto one identity space keyed only by offset. The residue `write_id`
   minted in `residue.go` follows the same recipe with the `residue`
   discriminator, while its `upsert_key` still names the path.
@@ -789,6 +797,28 @@ verdict is absorbed rather than appended beside an observed exit.
 
 A non-zero shell exit is COMPLETED, not a failure arm; empty search results are
 SUCCESS with an empty answer.
+
+#### A terminal states what it OBSERVED, and `not_observed` when it observed nothing
+
+`AgentBashOutput` has three arms, and they are three different facts:
+
+- `text{stdout: "", whole{}}` — the COMMAND printed nothing. A positive claim
+  about the command.
+- `text{..., partial{bytes_omitted: n}}` — the CARRIER cut it.
+- `not_observed` — THE PRODUCER DOES NOT KNOW. Nothing on disk said what the
+  run printed.
+
+A terminal minted for a run whose spool this handler NEVER READ — swept up at
+boot, or a file that was never readable — states `not_observed`. It may not say
+`text{stdout: ""}`, which would put words in the command's mouth, nor
+`partial{bytes_omitted: 0}`, which claims nothing was cut. The converse matters
+as much: a run we DID read that printed nothing states empty `text{whole}`,
+because that is something we know and downgrading it would throw it away.
+
+Such a terminal is MINTED, never refused. A refused terminal is a run left open
+forever in every reader downstream, which is strictly worse than one that
+honestly says it saw nothing — and refusing was what made the `swept_up`
+conclusion, whose whole premise is a spool nobody read, unstatable.
 
 ### Logging
 
