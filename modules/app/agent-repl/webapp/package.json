@@ -14,11 +14,14 @@
     "precoverage": "npm run ensure-deps",
     "coverage": "vitest run --coverage",
     "pretypecheck": "npm run ensure-deps",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest:integration": "npm run ensure-deps",
+    "test:integration": "vitest run -c vitest.integration.config.ts"
   },
   "devDependencies": {
     "@connectrpc/connect-node": "^2.1.2",
     "@types/markdown-it": "^14.1.2",
+    "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^29.1.1",
     "typescript": "^5.6.0",
