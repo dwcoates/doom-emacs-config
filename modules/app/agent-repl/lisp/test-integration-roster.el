@@ -30,6 +30,8 @@
 (declare-function agent-repl-roster-subscribe "roster")
 (declare-function agent-repl-roster-reconcile "roster")
 (declare-function agent-repl-status-tab-state "status")
+(declare-function agent-repl-status-sync-attention "status")
+(declare-function agent-repl-status-blink-tab "status")
 (declare-function agent-repl-connect-open "connect")
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl--ws-by-ref-id "workspace")
@@ -238,7 +240,12 @@ sidebar and the Emacs tab-bar both implement exactly it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
-      (let ((blinked nil))
+      ;; The fixture blanks the update hook so scenarios do not see each
+      ;; other's reactions; THIS scenario's subject IS that reaction, so it
+      ;; puts the production consumer back and nothing else.
+      (let ((blinked nil)
+            (agent-repl-roster-update-functions
+             (list #'agent-repl-status-sync-attention)))
         (agent-repl--ws-put "itest-attn" :project-dir "/tmp/itest-attn")
         (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
                    (lambda (ws) (push ws blinked))))
