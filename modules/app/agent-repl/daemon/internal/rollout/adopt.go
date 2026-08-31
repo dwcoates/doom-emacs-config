@@ -159,6 +159,12 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 				withCause(fields, probeErr))
 		case state == sessionlock.StateFree:
 			c.log.Warn(opAdopt, "no shim holds this workspace's lock; there is nothing running to adopt", fields)
+		case state == sessionlock.StateUnknown:
+			// "Could not tell" is NEVER read as free, and it is never read as
+			// held either: it is said out loud.
+			c.log.Warn(opAdopt, "the workspace lock probe could not tell; adopting on the WSM facts alone", fields)
+		default:
+			c.log.Debug(opAdopt, "a shim still holds the workspace's lock, as a handover expects", fields)
 		}
 	}
 

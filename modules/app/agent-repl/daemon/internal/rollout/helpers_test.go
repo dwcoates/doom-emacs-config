@@ -709,10 +709,13 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	}
 	h.freeness.SetFree(ws.ID, true)
 	h.fleet.live[ws.ID] = newFakeShim(pid, h.order)
+	// The registry NORMALIZES the dir (macOS resolves /var to /private/var), and
+	// the lock probe is called with the registry's spelling: keying the fake
+	// probe by anything else would silently answer "could not tell".
 	h.mu.Lock()
-	h.lockStates[dir] = sessionlock.StateHeld
+	h.lockStates[ws.Dir] = sessionlock.StateHeld
 	h.mu.Unlock()
-	return ws.ID, dir
+	return ws.ID, ws.Dir
 }
 
 // records returns every captured record whose operation matches.
