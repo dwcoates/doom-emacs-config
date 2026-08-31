@@ -76,6 +76,7 @@
 (declare-function agent-repl-rpc-session-health "agent-repl-rpc" (conn request &rest keys))
 
 ;; Defined by roster.el.  Declared, never defined here.
+(declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
 (defvar agent-repl-roster-view)
 
 
@@ -508,8 +509,9 @@ schedule and now: every client's drain banner names it."
 
 (defun agent-repl-verb-merge-queue (action)
   "Send ACTION to UpdateMergeQueue.
-ACTION is spelled FLAT: `(:arm :pause)', `(:arm :resume)' or `(:arm
-:evict :workspace REF)'."
+ACTION is spelled FLAT: `(:arm :pause :repository REF)', `(:arm :resume
+:repository REF)' or `(:arm :evict :workspace REF)'.  A nil `repository'
+is the daemon-wide switch and is omitted from the encoding."
   (agent-repl-verbs--send
    #'agent-repl-rpc-update-merge-queue (agent-repl-verbs--conn)
    (list :action (agent-repl-verbs--arm action))
@@ -846,15 +848,38 @@ every client's standing banner names it."
   (agent-repl-verb-shutdown-schedule
    (list :arm :now :reason (agent-repl-verbs--read-drain-reason))))
 
-(defun agent-repl-merge-queue-pause ()
-  "Stop admitting merges to the front of the daemon's queue."
-  (interactive)
-  (agent-repl-verb-merge-queue (list :arm :pause)))
+(defun agent-repl-verbs--merge-queue-repository (&optional ws)
+  "Return the repository ref scoping a queue change for WS, or refuse.
+THE QUEUE IS PER REPOSITORY, so a caller that means one names it: the ref
+is the roster section's own key for the workspace's section, which is the
+only place Emacs holds one.  Errors when the roster has no section for WS
+— sending the daemon-wide switch instead would pause every repository on
+a caller who asked about one."
+  (let* ((ws (or ws (agent-repl--ws-current-name)))
+         (ref (agent-repl-verbs--ref ws))
+         (repository (agent-repl-roster-repository-of (plist-get ref :id))))
+    (or repository
+        (progn
+          (agent-repl--warn ws "elisp.verbs.no-repository ws=%s" ws)
+          (user-error "agent-repl: no roster repository for workspace %s" ws)))))
 
-(defun agent-repl-merge-queue-resume ()
-  "Resume admitting merges."
-  (interactive)
-  (agent-repl-verb-merge-queue (list :arm :resume)))
+(defun agent-repl-merge-queue-pause (&optional daemon-wide)
+  "Stop admitting merges to the front of THIS workspace's repository queue.
+With a prefix argument DAEMON-WIDE the repository is omitted, which is the
+contract's spelling of every repository that has a queue."
+  (interactive "P")
+  (agent-repl-verb-merge-queue
+   (list :arm :pause
+         :repository (unless daemon-wide (agent-repl-verbs--merge-queue-repository)))))
+
+(defun agent-repl-merge-queue-resume (&optional daemon-wide)
+  "Resume admitting merges on THIS workspace's repository queue.
+With a prefix argument DAEMON-WIDE the repository is omitted, resuming
+every repository that has a queue."
+  (interactive "P")
+  (agent-repl-verb-merge-queue
+   (list :arm :resume
+         :repository (unless daemon-wide (agent-repl-verbs--merge-queue-repository)))))
 
 (defun agent-repl-merge-queue-evict (&optional ws)
   "Take the current workspace's merge off the queue."
