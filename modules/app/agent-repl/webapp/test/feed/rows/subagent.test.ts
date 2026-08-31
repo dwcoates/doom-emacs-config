@@ -6,6 +6,7 @@ import {
   FeedSubagentSettledSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { InterruptResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
+import { INTERRUPT_ERROR_ARMS } from "../../../src/interrupt-error.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   SUBAGENT_SETTLED_ARMS,
@@ -268,7 +269,36 @@ describe("drawFeedSubagent: the stop control", () => {
     expect(el.querySelector(".refusal")?.textContent).toContain("3");
   });
 
-  it("offers a confirm step that resends the stop", async () => {
+  it.each(INTERRUPT_ERROR_ARMS)("draws the %s refusal by its own arm", async (arm) => {
+    const h = harness({
+      interrupt: () =>
+        create(InterruptResponseSchema, {
+          result: { case: "error", value: { kind: { case: arm as never, value: {} as never } } },
+        }),
+    });
+    const { el } = drawRow(subagentRow("b1", { detached: true }), h);
+    el.querySelector<HTMLElement>("[data-interrupt]")?.click();
+    await settle();
+    expect(el.querySelector(".refusal")?.getAttribute("data-arm")).toBe(arm);
+  });
+
+  it("names the registry's directory when the workspace ref disagrees with it", async () => {
+    const h = harness({
+      interrupt: () =>
+        create(InterruptResponseSchema, {
+          result: {
+            case: "error",
+            value: { kind: { case: "workspaceRefMismatch", value: { registryDir: "/w/other" } } },
+          },
+        }),
+    });
+    const { el } = drawRow(subagentRow("b1", { detached: true }), h);
+    el.querySelector<HTMLElement>("[data-interrupt]")?.click();
+    await settle();
+    expect(el.querySelector(".refusal")?.textContent).toContain("/w/other");
+  });
+
+  it("offers no confirm step, the challenge not applying to a detached target", async () => {
     const h = harness({
       interrupt: () =>
         create(InterruptResponseSchema, {
@@ -281,9 +311,23 @@ describe("drawFeedSubagent: the stop control", () => {
     const { el } = drawRow(subagentRow("b1", { detached: true }), h);
     el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
-    el.querySelector<HTMLElement>("[data-interrupt-confirm]")?.click();
+    expect(el.querySelector("[data-interrupt-confirm]")).toBeNull();
+  });
+
+  it("does not resend the stop after the challenge", async () => {
+    const h = harness({
+      interrupt: () =>
+        create(InterruptResponseSchema, {
+          result: {
+            case: "error",
+            value: { kind: { case: "confirmRequired", value: { liveAgentCount: 1n } } },
+          },
+        }),
+    });
+    const { el } = drawRow(subagentRow("b1", { detached: true }), h);
+    el.querySelector<HTMLElement>("[data-interrupt]")?.click();
     await settle();
-    expect(h.calls.interrupt).toHaveLength(2);
+    expect(h.calls.interrupt).toHaveLength(1);
   });
 
   it("tells the reader when the click never reached the daemon", async () => {

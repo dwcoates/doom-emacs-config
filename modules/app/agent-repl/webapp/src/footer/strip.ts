@@ -88,7 +88,7 @@ import type { AppContext } from "../rpc/context.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { protoArmName } from "../vocab.js";
 import type { FooterPanel } from "./expanded.js";
-import { activityDatumClass, statusArmClass } from "./tones.js";
+import { activityDatumClass, allowanceStatusClass, statusArmClass } from "./tones.js";
 import { drawTurnStopControl } from "./stop.js";
 
 /** The label the clock cell shows between turns. The baseline strip's own. */
@@ -544,9 +544,20 @@ export function drawFooterStatusActivityRateLimited(
  *
  * `utilization` is 0..1 on the wire and a PERCENTAGE on screen — display
  * formatting of one shipped figure, not a derivation of a second one — and
- * `resets_at_s` is the vendor's own SECONDS, converted once here. The vendor's
- * status word rides as a title rather than as prose, because its vocabulary is
- * not in evidence and this cell has no room to spend on it.
+ * `resets_at_s` is the vendor's own SECONDS, converted once here.
+ *
+ * THE VENDOR'S STATUS IS AN ARM NOW, not the free string it used to be, so the
+ * cell PAINTS it (`tones.ts`) instead of parking a word in a title nobody
+ * reads: green while there is headroom, yellow on the vendor's own warning, red
+ * once a call would be rejected. The arm rides as `data-arm` and its sentence
+ * as the title.
+ *
+ * AN UNSET STATUS IS LEGAL AND MEANS "NO VERDICT YET". The figures are sampled
+ * from the account's usage and are true the moment they are pushed; the vendor's
+ * verdict arrives later, on its own rate-limit event. So an allowance with no
+ * arm draws its percentage and its reset countdown UNPAINTED and untitled —
+ * absence of a verdict, not a verdict of its own — and gains the colour, the
+ * title and the `data-arm` on the push that carries one.
  */
 export function drawFooterAllowance(
   u: FooterAllowance,
@@ -554,12 +565,23 @@ export function drawFooterAllowance(
   deps: StripDeps,
   path: string,
 ): HTMLElement {
+  const status = u.status.case === undefined ? null : u.status;
   const span = document.createElement("span");
-  span.className = "footer-allowance";
+  span.className =
+    status === null
+      ? "footer-allowance"
+      : `footer-allowance arm-${status.case} ${allowanceStatusClass(status.case)}`;
   span.setAttribute("data-allowance", label);
+  if (status !== null) {
+    span.setAttribute("data-arm", status.case);
+    span.title = allowanceStatusTitle(status, `${path}.status`);
+  }
   if (u.newsworthy) span.setAttribute("data-newsworthy", "true");
   if (u.newsworthy) span.classList.add("footer-allowance-newsworthy");
-  span.title = u.status;
+  log("debug", `drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`, {
+    operation: "footer.strip.allowance",
+    context: { allowance: label, status: status?.case, newsworthy: u.newsworthy },
+  });
 
   span.appendChild(document.createTextNode(`${label} `));
   const percent = document.createElement("span");
@@ -576,6 +598,31 @@ export function drawFooterAllowance(
   });
   span.appendChild(resets);
   return span;
+}
+
+/**
+ * What each allowance arm SAYS, as the cell's hover.
+ *
+ * Exhaustive over the oneof: the arms are the vendor's own vocabulary, now in
+ * evidence, and an arm a newer daemon set is refused here rather than drawn as
+ * an untitled cell wearing whatever colour the table happened to have.
+ */
+function allowanceStatusTitle(
+  status: NonNullable<FooterAllowance["status"]> & { case: string },
+  path: string,
+): string {
+  switch (status.case) {
+    case "allowed":
+      return "within the allowance";
+    case "allowedWarning":
+      return "close to the allowance — the vendor is warning";
+    case "rejected":
+      return "the allowance is spent — calls are being rejected";
+    default: {
+      const other: { case: string } = status;
+      return unreachableArm(path, other.case);
+    }
+  }
 }
 
 /**

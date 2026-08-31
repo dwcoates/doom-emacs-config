@@ -8,7 +8,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
-  TURN_ERROR_ARMS,
+  TURN_ERROR_WAIT_ARMS,
   drawFeedTurnEnded,
 } from "../../../src/feed/rows/turn-ended.js";
 import { feedId, harness, rowContext, userPromptRow } from "../harness.js";
@@ -104,8 +104,17 @@ describe("drawFeedTurnEnded: every error arm", () => {
     .filter((oneof) => oneof.name === "error")
     .flatMap((oneof) => oneof.fields.map((field) => field.localName));
 
-  it("words every arm the schema declares, and no others", () => {
-    expect([...TURN_ERROR_ARMS].sort()).toEqual([...schemaArms].sort());
+  /** The arms whose message CARRIES a wait, read off the schema itself. */
+  const schemaWaitArms = FeedTurnEndedErroredSchema.oneofs
+    .filter((oneof) => oneof.name === "error")
+    .flatMap((oneof) => oneof.fields)
+    .filter((field) =>
+      (field.message?.fields ?? []).some((inner) => inner.name === "retry_after_ms"),
+    )
+    .map((field) => field.localName);
+
+  it("counts down on exactly the arms the schema gives a wait", () => {
+    expect([...TURN_ERROR_WAIT_ARMS].sort()).toEqual([...schemaWaitArms].sort());
   });
 
   it.each(schemaArms)("draws %s distinctly, by its own arm", (arm) => {
@@ -113,6 +122,7 @@ describe("drawFeedTurnEnded: every error arm", () => {
       ended({
         case: "errored",
         value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "the turn died" },
           error: { case: arm as never, value: { type: "x" } as never },
         }),
       }),
@@ -121,24 +131,57 @@ describe("drawFeedTurnEnded: every error arm", () => {
     expect(el.getAttribute("data-turn-error")).toBe(arm);
   });
 
-  it("names the vendor's own type on the unmodeled arm", () => {
+  it.each(schemaArms)("draws %s's headline and no wording of its own", (arm) => {
     const el = drawFeedTurnEnded(
       ended({
         case: "errored",
         value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: `the daemon's words for ${arm}` },
+          error: { case: arm as never, value: { type: "x" } as never },
+        }),
+      }),
+      contextWithRow(null),
+    );
+    expect(el.querySelector(".turn-ended-cause")?.textContent).toBe(
+      `the daemon's words for ${arm}`,
+    );
+  });
+
+  it("draws the daemon's headline verbatim, wording nothing itself", () => {
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "an API error this build does not model: teapot_error" },
           error: { case: "vendorUnmodeled", value: { type: "teapot_error" } },
         }),
       }),
       contextWithRow(null),
     );
-    expect(el.textContent).toContain("teapot_error");
+    expect(el.querySelector(".turn-ended-cause")?.textContent).toBe(
+      "an API error this build does not model: teapot_error",
+    );
+  });
+
+  it("refuses an errored row with no headline to draw", () => {
+    expect(() =>
+      drawFeedTurnEnded(
+        ended({
+          case: "errored",
+          value: create(FeedTurnEndedErroredSchema, {
+            error: { case: "internal", value: {} },
+          }),
+        }),
+        contextWithRow(null),
+      ),
+    ).toThrow(MalformedView);
   });
 
   it("draws the vendor's sentence when the record carried one", () => {
     const el = drawFeedTurnEnded(
       ended({
         case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
+        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
           message: { text: "overloaded_error" },
           error: { case: "internal", value: {} },
         }),
@@ -152,7 +195,7 @@ describe("drawFeedTurnEnded: every error arm", () => {
     const el = drawFeedTurnEnded(
       ended({
         case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
+        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
           error: { case: "queryDied", value: {} },
         }),
       }),
@@ -161,30 +204,34 @@ describe("drawFeedTurnEnded: every error arm", () => {
     expect(el.querySelector(".turn-ended-vendor")).toBeNull();
   });
 
-  it("distinguishes the cut response from the refused request", () => {
+  it("distinguishes the cut response from the refused request by headline", () => {
     const cut = drawFeedTurnEnded(
       ended({
         case: "errored",
-        value: create(FeedTurnEndedErroredSchema, { error: { case: "maxTokens", value: {} } }),
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "cut short at the output ceiling" },
+          error: { case: "maxTokens", value: {} },
+        }),
       }),
       contextWithRow(null),
-    ).textContent;
+    ).querySelector(".turn-ended-cause")?.textContent;
     const refused = drawFeedTurnEnded(
       ended({
         case: "errored",
         value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "refused: asked for more output than the model produces" },
           error: { case: "maxOutputTokens", value: {} },
         }),
       }),
       contextWithRow(null),
-    ).textContent;
+    ).querySelector(".turn-ended-cause")?.textContent;
     expect(cut).not.toBe(refused);
   });
 
   it("refuses an errored row whose cause arm is unset", () => {
     expect(() =>
       drawFeedTurnEnded(
-        ended({ case: "errored", value: create(FeedTurnEndedErroredSchema, {}) }),
+        ended({ case: "errored", value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },}) }),
         contextWithRow(null),
       ),
     ).toThrow(MalformedView);
@@ -197,7 +244,7 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
       ended(
         {
           case: "errored",
-          value: create(FeedTurnEndedErroredSchema, {
+          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
             error: { case: "rateLimited", value: { retryAfterMs: 30_000n } },
           }),
         },
@@ -213,7 +260,7 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
       ended(
         {
           case: "errored",
-          value: create(FeedTurnEndedErroredSchema, {
+          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
             error: { case: "overloaded", value: { retryAfterMs: 30_000n } },
           }),
         },
@@ -231,7 +278,7 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
       ended(
         {
           case: "errored",
-          value: create(FeedTurnEndedErroredSchema, {
+          value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
             error: { case: "rateLimited", value: { retryAfterMs: 1_000n } },
           }),
         },
@@ -247,7 +294,7 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
     const el = drawFeedTurnEnded(
       ended({
         case: "errored",
-        value: create(FeedTurnEndedErroredSchema, {
+        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" },
           error: { case: "rateLimited", value: {} },
         }),
       }),
@@ -260,7 +307,7 @@ describe("drawFeedTurnEnded: the retry countdown", () => {
     const el = drawFeedTurnEnded(
       ended({
         case: "errored",
-        value: create(FeedTurnEndedErroredSchema, { error: { case: "notFound", value: {} } }),
+        value: create(FeedTurnEndedErroredSchema, { headline: { text: "the turn died" }, error: { case: "notFound", value: {} } }),
       }),
       contextWithRow(null),
     );
