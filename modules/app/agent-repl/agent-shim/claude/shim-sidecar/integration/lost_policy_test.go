@@ -27,14 +27,21 @@ import (
 // real signal — a store read, a cursor advance, a line in the log — never a
 // sleep. There is no time.Sleep in this file.
 //
-// TWO SURFACES CARRY THE CONCLUSION, and each subject asserts exactly one:
+// TWO SURFACES CARRY THE CONCLUSION, and they carry the SAME conclusion:
 //
-//   - THE LOG owns the REASON. store.v1 and conversation.v1 have no DetachedLost
-//     message this wave, so how we stopped seeing the run survives only in the
-//     record the reader writes (operation "lost-terminal").
-//   - THE WIRE owns the TERMINAL: AgentBash.success.interrupted carrying the
-//     output so far and NO cause arm, because neither a person nor a timeout cut
-//     this run — we merely stopped seeing it.
+//   - THE WIRE owns it. AgentBash.success.interrupted carries the output so far
+//     and cause = `lost`, whose DetachedLost arm names HOW we concluded it:
+//     file_vanished, went_silent, swept_up (agent_activity.proto). It is NOT a
+//     cause-less interrupted: an earlier reading of this contract held that
+//     conversation.v1 had no DetachedLost message this wave, and that reading
+//     was simply wrong — the message and all three of its arms are on the wire,
+//     reached through AgentBashInterrupted.cause.lost, so a consumer can draw
+//     "we stopped seeing it, this way" instead of an unexplained cut.
+//   - THE LOG joins it back to the sweep, through the `reason` key on the
+//     "lost-terminal" record — the same word the wire's arm carries.
+//
+// `by_user` and `timed_out` remain the two things a LOST terminal must never
+// say: both name a decision, and the reader knows of neither.
 
 // staleWindows are the windows every subject here runs with, spelled once. The
 // window under test is short; the others are long enough that no OTHER arm can
@@ -124,17 +131,45 @@ func awaitInterruptedTerminal(ctx context.Context, t *testing.T, f *fakeStore, r
 	}
 }
 
-// requireNoCause states the one thing the interrupted arm must NOT say. A cause
-// names a decision — a person stopped it, its own timeout cut it — and the
-// reader knows neither: it stopped seeing the file, which is not a claim about
-// why the run ended.
-func requireNoCause(t *testing.T, cut *conversationv1.AgentBashInterrupted) {
+// requireLostCause states what a LOST terminal's cause MUST and MUST NOT say.
+//
+// IT MUST SAY `lost`, NAMING THE ARM. A cause-less interrupted is an
+// unexplained cut, and the wire has the vocabulary to do better: DetachedLost's
+// three arms are exactly the reader's own conclusions. A terminal that leaves
+// the cause unset throws away the only account of what was observed.
+//
+// IT MUST NOT SAY `by_user` OR `timed_out`. Both name a DECISION — a person
+// stopped it, its own timeout cut it — and the reader knows of neither; it
+// stopped seeing the file, which is not a claim about why the run ended.
+func requireLostCause(t *testing.T, cut *conversationv1.AgentBashInterrupted, want string) {
 	t.Helper()
 	if cut.GetByUser() != nil {
 		t.Errorf("the LOST terminal blames a person; we only stopped seeing the run")
 	}
 	if cut.GetTimedOut() != nil {
 		t.Errorf("the LOST terminal blames a timeout; we only stopped seeing the run")
+	}
+	lost := cut.GetLost()
+	if lost == nil {
+		t.Fatalf("the LOST terminal states no cause at all; it must carry cause=lost naming HOW we concluded it (cause was %v)", cut.GetCause())
+	}
+	if got := lostArmName(lost); got != want {
+		t.Errorf("the LOST terminal names the arm %q, wanted %q", got, want)
+	}
+}
+
+// lostArmName spells a DetachedLost's arm in the reader's own vocabulary, which
+// is the same word the log's `reason` key carries.
+func lostArmName(lost *conversationv1.DetachedLost) string {
+	switch {
+	case lost.GetFileVanished() != nil:
+		return "file_vanished"
+	case lost.GetWentSilent() != nil:
+		return "went_silent"
+	case lost.GetSweptUp() != nil:
+		return "swept_up"
+	default:
+		return "unset"
 	}
 }
 
@@ -191,7 +226,7 @@ func TestAVanishedSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 
 	// Assert.
 	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
-	requireNoCause(t, cut)
+	requireLostCause(t, cut, "file_vanished")
 	if got := cut.GetOutput().GetText().GetStdout(); !strings.Contains(got, "all it managed to say") {
 		t.Errorf("the LOST terminal carries stdout %q, wanted the output the run had produced", got)
 	}
@@ -248,7 +283,7 @@ func TestASilentSpoolSettlesItsRunAsInterrupted(t *testing.T) {
 
 	// Assert.
 	cut := awaitInterruptedTerminal(ctx, t, fake, fx.CallID)
-	requireNoCause(t, cut)
+	requireLostCause(t, cut, "went_silent")
 	if got := cut.GetOutput().GetText().GetStdout(); !strings.Contains(got, "started, then stopped") {
 		t.Errorf("the LOST terminal carries stdout %q, wanted the output the run had produced", got)
 	}

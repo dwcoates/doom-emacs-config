@@ -106,15 +106,16 @@ func (h *ShellOutputHandler) SetTerminalObserver(fn func(path, run string)) {
 // LostTerminal spells the reader's LOST conclusion as the detached run's terminal.
 //
 // LOST IS ITS OWN WORD — "we stopped seeing it", not "known failed" — and the
-// wire carries no DetachedLost message this wave, so the run resolves as
-// AgentBash.success.interrupted with NO cause arm set. Setting `by_user` or
-// `timed_out` would be an accusation with no evidence, so HOW we concluded it
-// survives in the log record this writes and nowhere else. That is a contract
-// gap, stated rather than papered over.
+// wire says exactly that: the run resolves as AgentBash.success.interrupted
+// with cause = `lost`, whose DetachedLost arm names HOW we concluded it
+// (file_vanished | went_silent | swept_up). Setting `by_user` or `timed_out`
+// would be an accusation with no evidence; `lost` is the arm that is honest,
+// and it is on the wire rather than only in this process's log, so a reader can
+// draw the distinction.
 //
-// The reason is the reader's own vocabulary (file_vanished | went_silent |
-// swept_up); an unrecognized one is carried through rather than remapped, because
-// silently normalizing it would lose the only account of what was observed.
+// The reason is the reader's own vocabulary, and convert.DetachedLostArm
+// RAISES on one it does not know rather than leaving the oneof unset: a lost
+// run with no arm states nothing, which is worse than the conclusion itself.
 func (h *ShellOutputHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry {
 	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE. Falling back to the vendor
 	// task id would key the terminal on a row no reader of the conversation can
