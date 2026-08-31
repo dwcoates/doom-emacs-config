@@ -824,15 +824,40 @@ wire."
 
 ;;;; ---- UpdateMergeQueue ------------------------------------------------
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-pause-names-its-repository ()
+  "A pause that means ONE repository names it: the queue is per repository."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action
+                           (list :arm :pause
+                                 :value (list :repository
+                                              agent-repl-test-wire-verbs--repo)))))
+                   (concat "{\"pause\":{\"repository\":"
+                           "{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}}")))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-resume-names-its-repository ()
+  "A resume scoped to one repository carries the same optional ref."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (json-serialize
+                    (agent-repl-wire-encode-update-merge-queue-request
+                     (list :action
+                           (list :arm :resume
+                                 :value (list :repository
+                                              agent-repl-test-wire-verbs--repo)))))
+                   (concat "{\"resume\":{\"repository\":"
+                           "{\"id\":\"repo-1\",\"dir\":\"/r/one\"}}}")))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-pause ()
-  "Pause is the whole action, so its arm is the empty message."
+  "Pause with no repository is the DAEMON-WIDE switch: the field is omitted,
+never sent as an empty ref, because unset is what means every queue."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
                                     '(:action (:arm :pause :value nil))))
                    "{\"pause\":{}}"))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-resume ()
-  "Resume is the whole action, so its arm is the empty message."
+  "Resume with no repository is the daemon-wide switch, field omitted."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (json-serialize (agent-repl-wire-encode-update-merge-queue-request
                                     '(:action (:arm :resume :value nil))))
