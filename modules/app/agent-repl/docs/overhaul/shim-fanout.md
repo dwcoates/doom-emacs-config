@@ -521,3 +521,13 @@ every UX or contract gap you surfaced instead of improvising.
   DetachForeground `unsupported` on the `!ctrl-b` unit (the mock must make
   the vendor detachment BEFORE the call, or the test must wait for it), and
   the timeouts. Run #2 on the merged tree is the authoritative inventory.
+- LEDGER: landing 5 merged at 05046cd34. Remediation #1 resumed (items
+  d/e/f committed; i mid-flight; new k not_observed, l context_tip
+  disclaimer, m agent-spool EXIT bug). INTEGRATION RUN #2 (tree 731aa5f00+):
+  99 failed / 90 passed / 4 todo, 76 of 99 are 60 s timeouts — systemic;
+  an Explore agent is bucketing the log by root cause for the remediation
+  #2 brief. Known already: SHIM_BUILD_SHA must be read from the SPAWN ENV
+  at runtime (build-identity bakes a define; harness spawns with =itest and
+  the shim reports ''), six handler exceptions escape as Code.Internal,
+  the fake store lacks the typed refusal arms, !ctrl-b vs DetachForeground
+  confirmation mismatch, a cold-seed ENOENT path mismatch.
