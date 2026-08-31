@@ -243,6 +243,20 @@ describe("closingBashTerminal", () => {
     expect(lost.how.case).toBe("sweptUp");
   });
 
+  it("states not_observed for output the reconciliation never saw", async () => {
+    // LANDING 5: the producer says it does not know, rather than claiming an
+    // omission of zero bytes — which read as "we saw all none of it".
+    const { reconciler: plane } = await reconciler("close-bash-output");
+    const start = findBashStart([recordedBashStart("sleep 100")], RUN);
+
+    const entry = plane.closingBashTerminal(BOOK, RUN, start as conversationv1.AgentBashStart);
+
+    const frame = entry.item.kind === "bash_run" ? entry.item.frame : undefined;
+    const success = frame?.result.value as conversationv1.AgentBashSuccess;
+    const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
+    expect(interrupted.output?.form.case).toBe("notObserved");
+  });
+
   it("refuses to invent a command when the record holds no start", async () => {
     const { reconciler: plane } = await reconciler("close-bash-no-start");
 
