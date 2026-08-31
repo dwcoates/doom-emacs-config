@@ -96,7 +96,8 @@ than a silently ignored instruction.
 | `POST /_fake/script` | `{method, response}` | Canned answer for one unary method. `response` is protojson, validated by unmarshalling into the generated response type. Unknown method → 400; a response the schema rejects → 400. |
 | `POST /_fake/push` | `{stream, workspace_id?, message, snapshot?}` | Deliver `message` (protojson of the stream's response type) to every matching open subscriber. `snapshot: true` also stores it, so later subscribers receive it on subscribe. |
 | `POST /_fake/end` | `{stream, workspace_id?, error?: {code, message}, abort?}` | End matching streams. With `error`, the end frame carries that Connect error. With `abort`, the TCP connection is dropped and **no end frame is written at all**. |
-| `GET /_fake/calls` | — | The recorded requests in order: `[{method, body}]`, `body` being the request's protojson. `[]` when nothing has been called. |
+| `POST /_fake/gate` | `{method, release?}` | Withhold one unary method's ANSWER until released. The request is still recorded and validated; only the response waits. `release: true` lets every held call answer and disarms the gate. Unknown method → 400; releasing a gate nobody armed → 400. |
+| `GET /_fake/calls` | — | The recorded requests in order: `[{method, body, raw?}]`. `body` is the request's protojson re-marshalled from the decoded message; `raw` is the request EXACTLY as the client wrote it. `[]` when nothing has been called. |
 | `GET /_fake/subscribers` | — | Open streams: `[{id, stream, workspace_id?}]`. |
 | `POST /_fake/exit` | — | Answer, then exit orderly (removing `daemon.addr`). |
 
@@ -108,6 +109,36 @@ refused exactly like one on an old arm. Nothing here needs a per-arm allowlist.
 `stream` is one of `host`, `daemon`, `roster`. `workspace_id` is **required**
 for `host` (that stream is keyed by workspace) and **refused** for the other
 two (they are the workspace-independent channels by ruling).
+
+### `raw`: what the client actually wrote
+
+`body` is a re-marshal of the DECODED message, and protojson drops every
+zero-valued scalar on the way out. An explicit `"force":false` and an omitted
+`force` are therefore identical in `body` — and that distinction is exactly
+what several contract sentences turn on (`force` is "always encoded
+explicitly, false included"; `self_certified` and `add_to_merge_queue`
+default false and must still ride the wire). `raw` carries the request bytes
+verbatim, captured by a mux middleware before the codec sees them, so an
+assertion about explicit encoding reads the wire rather than a lossy echo. A
+body over 1 MiB is passed through untouched and recorded with no `raw`, and
+the skip is logged.
+
+### `POST /_fake/gate`: pinning ORDER
+
+Some obligations are about sequence, not content — "call `AdoptHostWorkspace`
+… **then** cancel the old stream and re-subscribe" is only pinned by observing
+the client while the adopt is still in flight. Arming a gate holds that
+method's answer open (after recording and validation, so the call is visible),
+the scenario asserts the intermediate state, then releases:
+
+```
+POST /_fake/gate {"method":"AdoptHostWorkspace"}
+… assert the primary still lists the host subscriber and the successor lists none …
+POST /_fake/gate {"method":"AdoptHostWorkspace","release":true}
+```
+
+A held call still ends if the client cancels: the handler selects on the
+request context too, and answers `canceled`.
 
 `error.code` is a Connect code in snake_case (`unavailable`,
 `invalid_argument`, `failed_precondition`, …). `abort` cannot carry an

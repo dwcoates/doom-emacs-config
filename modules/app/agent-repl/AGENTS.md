@@ -31,6 +31,24 @@ emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exi
 emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
 ```
 
+### Integration suites restore a REGISTERED boundary, by name and per scenario
+
+The batch harness replaces every entry of
+`agent-repl--external-boundary-functions` with a guard that errors, and that
+stays true for `test-integration-*.el` too — with one sanctioned exception.
+An integration scenario exists precisely to drive one external boundary
+against a real, harmless, test-owned target: the transport's
+`agent-repl-connect--spawn-curl` against a fake daemon on loopback, and cold
+start's `agent-repl--frontend-run-build-script` /
+`agent-repl--frontend-spawn-daemon` / `agent-repl--frontend-artifact-exists-p`
+against stub scripts in the scenario's own temp dir. Those are restored
+through the harness's own restore path
+(`agent-repl-itest--real-boundary`, which signals unless the symbol is in
+`agent-repl--external-boundary-functions`), BY NAME and PER SCENARIO, while
+every other guard stays armed. This is the sanctioned way to write an
+integration scenario, not a bypass of the guard: an unregistered boundary
+cannot be restored at all, and a scenario that reaches for one fails loudly.
+
 ## Runtime investigations go through one skill
 
 For any current or historical agent-repl behavior, use the complete controller
