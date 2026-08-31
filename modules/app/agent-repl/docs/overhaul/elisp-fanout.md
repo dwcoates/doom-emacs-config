@@ -100,7 +100,14 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   `optional repository` (unset = every repository); the encoder field and
   verbs.el's pause/resume argument are R-NOTIFY's added scope (own
   commits); R-SUITE-1 extends finding #79 to both scopes.
-- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-NOTIFY (`opus-low`, remed4);
+- R-SUITE-1 MERGED (336ace8cd): all 92 findings pinned; composer fixture
+  fixed (empty arm `[]`→`{}`); fake gains raw-body recording + /_fake/gate;
+  verbs suite repaired to landed signatures. Known-red pins awaiting
+  remediations: #11 (daemon-link drain cause text ignores DrainReason) and
+  #52 (banner must read "Agent ready: <name>") — BOTH ADDED to R-HANDOVER's
+  brief; #79-scoped awaits R-NOTIFY's encoder; host 20/22/25/33/36 await
+  remediation-1.
+- RUNNING: R-NOTIFY (`opus-low`, remed4);
   remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
   remediation-1 merges (cut its worktree off that tip).
 - VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
