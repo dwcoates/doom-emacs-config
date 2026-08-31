@@ -27,7 +27,9 @@ merge queue), sessionlock (probes), gitclient (incl. Commit; fake-git tests
 only), shimclient (spawn/adopt/redial/verbs/streams), sessionwatcher (fleet,
 connectivity, routing incl. landing-4 adaptations), resolve/feed,
 resolve/footer, resolve/topbar (allowance sourcing per ruling),
-resolve/sidebar, resolve/holds, prompthandler? NO — see queued. workspace
+resolve/sidebar, resolve/holds, drain (schedule/sweep/refusal
+rate-limiting), rollout (trigger/handover/adopt rendezvous/relaunch/
+manifest; Join/CheckStaleness/Reconcile), prompthandler? NO — see queued. workspace
 (verbs/health/commandfile, typed arms), merge (orchestrator, durable queue,
 both methods, briefs, test gate). Skeletons only (api.go + stubs): vocab,
 paint, prompts, feedid (Encode/Decode still stubs — footer chip jump
@@ -38,13 +40,6 @@ flags and exits 2 ("not wired yet").
 
 ## Worktrees left in place (NOT merged; unreported at the wind-down)
 
-- ~/.config/doom-overhaul/daemon-agents/drainrollout — branch
-  overhaul/daemon-drainrollout at 371b3e8db, 10 ahead, clean. drain +
-  rollout implementation; last commit is the bounce-accountability matrix
-  tests; completeness unverified (the agent never delivered a final
-  report). Resume: verify green in the worktree, review against the brief
-  (ARCHITECTURE "rollout" seam + daemon.md entries 9/10 + "Handover: the
-  web side never redials"), then merge.
 - ~/.config/doom-overhaul/daemon-agents/hostside — branch
   overhaul/daemon-hostside at 87e3ca5f1, 6 ahead, clean. account/login/
   externalbrowser; login landed (one pty per account root, scrollback);
@@ -131,6 +126,39 @@ step; no real git and no vendor calls in tests)
    ./integration/...`, remediates warnings to zero, then the adversarial
    suite audits (fresh fable agents against docs/overhaul/daemon.md +
    webapp.md + elisp.md) until clean.
+
+## Post-stop merge: drain/rollout landed (2026-08-31, after the first stop commit)
+
+The drain/rollout agent finished naturally and is merged (155 tests). For
+the wave-3 server/boot brief, its Deps hooks to wire: drain.Deps{Stand,
+Freeness, Announcer, Exit, Clock, SweepEvery, RefusalWindow} + the queue
+calls Controller.NoteRefusal per drain-refused submission; helpers
+drain.EncodeReason/DecodeReason (UpdateShutdownSchedule handler encodes
+before PutDrainSchedule), drain.ScheduleID (the tray's schedule id),
+drain.ErrNothingScheduled. rollout.Deps{Deploy, Spawner
+(NewProcessSpawner), Announcer, Pusher, Participants (one web slot),
+Quiesce, DrainIntake, Freeness, Shims (Prelaunch/Adopt/Resume with a cold
+ANSWER), LockProbe, PublishViews, WriteDaemonAddr (only when the last
+manifest workspace is owned), DeployStamp, SessionBuildSHA, ColdGate,
+Exit, DB, SelfRepoDir, SelfAddress, Instance, StateDir, Clock, windows};
+cmd under --joining calls rollout.ReportJoiningAddr at bind and boot calls
+Controller.Join; the expected-participant snapshot rides the intent
+manifest; Reconcile persists all four dispositions as faults (PRESERVED/
+ROLLED closed immediately, DIED/UNKNOWN open). Its refusal errors map onto
+the landed Adopt* arms; ErrNoTransferAnnounced on AdoptWeb logs INFO.
+
+Recorded concerns from that agent: (a) CheckStaleness compares the daemon
+deploy stamp; the shim's own stamp is agent-shim/claude/shim/dist/
+.built-sha — DeployStamp is an opaque func, point it wherever the project
+lead prefers; wsm has no ShimBuildSHA column (SessionBuildSHA is a
+process fact hook) — flag if a column is wanted. (b) KNOWN FLAKE in
+internal/workspace: TestStartSurfacesANonColdStartFailure intermittently
+fails t.TempDir cleanup ("unlinkat …: bad file descriptor" — a log-sink
+descriptor double-close), ~1 in 8 full-suite runs; queue a remediation.
+(c) The drain schedule id is derived (drain.ScheduleID from SetAt), not a
+column. (d) bin/deploy-all.sh step 5 still names the dead elisp function
+(wave-3 item). (e) store/sidecar stay unhandled by design; one WARN names
+them at classification.
 
 ## Open items awaiting others
 
