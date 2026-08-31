@@ -1,0 +1,404 @@
+package drain
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"claude-repld/internal/wsm"
+)
+
+func TestSchedulePersistsTheScheduleInForce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deadline := instant.Add(time.Hour)
+
+	// Act
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: deadline, SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+	got, err := h.c.Current(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if got == nil || !got.Deadline.Equal(deadline) {
+		t.Fatalf("current = %+v, want the schedule just armed", got)
+	}
+}
+
+func TestSchedulePublishesDrainScheduledToEveryWatchDaemonSubscriber(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Assert
+	pushed := h.announcer.Scheduled()
+	if len(pushed) != 1 {
+		t.Fatalf("drain_scheduled pushes = %d, want 1", len(pushed))
+	}
+	if pushed[0].GetReason().GetDeploy() == nil {
+		t.Fatalf("push reason = %v, want the deploy arm the schedule named", pushed[0].GetReason())
+	}
+}
+
+func TestANewerScheduleReplacesTheStandingOne(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+	replacement := instant.Add(2 * time.Hour)
+
+	// Act
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: replacement, SetAt: instant.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+	got, err := h.c.Current(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if got == nil || !got.Deadline.Equal(replacement) {
+		t.Fatalf("current deadline = %v, want the replacement %v", got, replacement)
+	}
+}
+
+func TestScheduleRefusesAReasonThatWillNotDecode(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: "not a drain reason", Deadline: instant.Add(time.Hour), SetAt: instant,
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("Schedule accepted a reason that will not decode")
+	}
+}
+
+func TestCancelClearsTheScheduleAndPublishesTheCancellation(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	if err := h.c.Schedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("Schedule: %v", err)
+	}
+
+	// Act
+	if err := h.c.Cancel(context.Background()); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	got, err := h.c.Current(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Current: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("current = %+v after a cancel, want nil", got)
+	}
+	if h.announcer.Cancelled() != 1 {
+		t.Fatalf("drain_cancelled pushes = %d, want 1", h.announcer.Cancelled())
+	}
+}
+
+func TestCancelRefusesWhenNothingIsScheduled(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.c.Cancel(context.Background())
+
+	// Assert
+	if !errors.Is(err, ErrNothingScheduled) {
+		t.Fatalf("Cancel error = %v, want ErrNothingScheduled", err)
+	}
+}
+
+func TestShutdownNowAnnouncesTheImmediateCauseAndExits(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	reason := &agentreplv1.DrainReason{
+		Kind: &agentreplv1.DrainReason_Operator{
+			Operator: &agentreplv1.DrainReasonOperator{Note: "the operator said so"},
+		},
+	}
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), reason); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	pushed := h.announcer.Shutdowns()
+	if len(pushed) != 1 {
+		t.Fatalf("shutdown announcements = %d, want 1", len(pushed))
+	}
+	if pushed[0].GetCause().GetImmediate().GetReason().GetOperator().GetNote() != "the operator said so" {
+		t.Fatalf("cause = %v, want the immediate arm carrying the operator's note", pushed[0].GetCause())
+	}
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started")
+	}
+}
+
+func TestShutdownNowCarriesNoSuccessorAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if err := h.c.ShutdownNow(context.Background(), &agentreplv1.DrainReason{
+		Kind: &agentreplv1.DrainReason_Maintenance{Maintenance: &agentreplv1.DrainReasonMaintenance{}},
+	}); err != nil {
+		t.Fatalf("ShutdownNow: %v", err)
+	}
+
+	// Assert
+	if h.announcer.Shutdowns()[0].Address != nil {
+		t.Fatalf("address = %v on an immediate shutdown, want unset (a plain bounce)", *h.announcer.Shutdowns()[0].Address)
+	}
+}
+
+func TestShutdownNowRefusesAnArmlessReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.c.ShutdownNow(context.Background(), &agentreplv1.DrainReason{})
+
+	// Assert
+	if err == nil {
+		t.Fatalf("ShutdownNow accepted a reason with no arm")
+	}
+}
+
+func TestFireHoldsEveryWorkspaceUnderTheDrainLease(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	first := h.workspace(t, instant)
+	second := h.workspace(t, instant)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+	// Neither is free, so the hold phase is followed by a wait this test can
+	// synchronize on: fire takes EVERY hold before it waits on any workspace.
+	h.freeness.SetFree(first, false)
+	h.freeness.SetFree(second, false)
+	gate := h.freeness.Gate(first)
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.c.fire(context.Background(), schedule) }()
+	<-h.freeness.calls
+	leases := map[wsm.WorkspaceID]wsm.Lease{}
+	for _, ws := range []wsm.WorkspaceID{first, second} {
+		lease, held, err := h.db.Lease(context.Background(), ws)
+		if err != nil || !held {
+			t.Fatalf("workspace %s lease held = %v (err %v), want held before the first wait", ws, held, err)
+		}
+		leases[ws] = lease
+	}
+	close(gate)
+	h.freeness.Gate(second)
+	<-h.freeness.calls
+
+	// Assert
+	for ws, lease := range leases {
+		if lease.Holder != wsm.HolderDrain || lease.Policy != wsm.PolicyHold {
+			t.Fatalf("workspace %s lease = holder %v policy %v, want HolderDrain/PolicyHold", ws, lease.Holder, lease.Policy)
+		}
+	}
+}
+
+func TestFireWaitsForFreenessBeforeAnnouncing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, false)
+	gate := h.freeness.Gate(ws)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.c.fire(context.Background(), schedule) }()
+	<-h.freeness.calls
+	announcedEarly := len(h.announcer.Shutdowns())
+	close(gate)
+	if err := <-done; err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	if announcedEarly != 0 {
+		t.Fatalf("shutdown announcements before freeness = %d, want 0", announcedEarly)
+	}
+	if len(h.announcer.Shutdowns()) != 1 {
+		t.Fatalf("shutdown announcements = %d, want 1 once the workspace fell free", len(h.announcer.Shutdowns()))
+	}
+}
+
+func TestFireNeverInterruptsTheVendor(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	h.freeness.SetFree(ws, false)
+	gate := h.freeness.Gate(ws)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.c.fire(context.Background(), schedule) }()
+	<-h.freeness.calls
+	close(gate)
+	if err := <-done; err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("stand-down calls during a drain = %+v, want none: teardown never interrupts", killed)
+	}
+}
+
+func TestFireAnnouncesTheScheduledDrainCauseWithNoAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t, instant)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+
+	// Act
+	if err := h.c.fire(context.Background(), schedule); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	pushed := h.announcer.Shutdowns()[0]
+	if pushed.GetCause().GetScheduledDrain() == nil {
+		t.Fatalf("cause = %v, want the scheduled_drain arm", pushed.GetCause())
+	}
+	if pushed.Address != nil {
+		t.Fatalf("address = %q on a scheduled drain, want unset", *pushed.Address)
+	}
+}
+
+func TestFireExitsOnceEveryWorkspaceIsQuiet(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t, instant)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+
+	// Act
+	if err := h.c.fire(context.Background(), schedule); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+
+	// Assert
+	select {
+	case <-h.exits:
+	default:
+		t.Fatalf("the orderly exit was never started")
+	}
+}
+
+func TestFireReleasesTheDrainHoldsBeforeExiting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	schedule := wsm.DrainSchedule{Reason: deployReason(t), Deadline: instant, SetAt: instant}
+
+	// Act
+	if err := h.c.fire(context.Background(), schedule); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	_, held, err := h.db.Lease(context.Background(), ws)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Lease: %v", err)
+	}
+	if held {
+		t.Fatalf("the drain hold is still held after the exit was started")
+	}
+}
+
+func TestResolveIdleCutoffLetsTheEnvironmentBeatTheFlag(t *testing.T) {
+	// Arrange
+	t.Setenv(IdleCutoffEnv, "250")
+
+	// Act
+	got, err := ResolveIdleCutoff(time.Hour)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveIdleCutoff: %v", err)
+	}
+	if got != 250*time.Millisecond {
+		t.Fatalf("cutoff = %v, want the environment's 250ms", got)
+	}
+}
+
+func TestResolveIdleCutoffRefusesAMalformedEnvironmentValue(t *testing.T) {
+	// Arrange
+	t.Setenv(IdleCutoffEnv, "soon")
+
+	// Act
+	_, err := ResolveIdleCutoff(time.Hour)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("ResolveIdleCutoff accepted a value that is not a whole number of milliseconds")
+	}
+}
+
+func TestResolveIdleCutoffFallsBackToTheFlag(t *testing.T) {
+	// Arrange
+	t.Setenv(IdleCutoffEnv, "")
+
+	// Act
+	got, err := ResolveIdleCutoff(90 * time.Minute)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveIdleCutoff: %v", err)
+	}
+	if got != 90*time.Minute {
+		t.Fatalf("cutoff = %v, want the flag's 90m", got)
+	}
+}
+
+func TestResolveIdleCutoffFallsBackToTheDefault(t *testing.T) {
+	// Arrange
+	t.Setenv(IdleCutoffEnv, "")
+
+	// Act
+	got, err := ResolveIdleCutoff(0)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ResolveIdleCutoff: %v", err)
+	}
+	if got != DefaultIdleCutoff {
+		t.Fatalf("cutoff = %v, want the default %v", got, DefaultIdleCutoff)
+	}
+}

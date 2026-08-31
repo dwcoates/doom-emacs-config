@@ -197,3 +197,101 @@ func TestSessionFailsWholeOnAHalfWrittenTerminal(t *testing.T) {
 		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
 	}
 }
+
+func TestSetShimPIDRoundTripsTheManifestPid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	pid := 4242
+
+	// Act
+	if err := s.SetShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetShimPID: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.ShimPID == nil || *got.ShimPID != pid {
+		t.Fatalf("shim pid = %v, want %d", got.ShimPID, pid)
+	}
+}
+
+func TestSetShimPIDClearsThePidAtStandDown(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	pid := 4242
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+		ShimPID: &pid,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+
+	// Act
+	if err := s.SetShimPID(context.Background(), ws.ID, nil); err != nil {
+		t.Fatalf("SetShimPID: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.ShimPID != nil {
+		t.Fatalf("shim pid = %d, want nil after a stand-down", *got.ShimPID)
+	}
+}
+
+func TestSetShimPIDRefusesANonPositivePid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	zero := 0
+
+	// Act
+	err := s.SetShimPID(context.Background(), ws.ID, &zero)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("SetShimPID accepted a non-positive pid")
+	}
+}
+
+func TestSessionRefusesACorruptShimPid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	corrupt(t, s, `UPDATE sessions SET shim_pid = -1 WHERE workspace_id = ?`, ws.ID)
+
+	// Act
+	_, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) {
+		t.Fatalf("Session error = %v, want a DecodeError for a corrupt shim pid", err)
+	}
+}
