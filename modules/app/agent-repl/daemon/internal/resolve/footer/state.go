@@ -19,16 +19,57 @@ type standing struct {
 	at time.Time
 }
 
-// rateState is the vendor's last rate-limit status PER WINDOW. The event
-// reports one window at a time and the drawn line states both allowances, so
-// each window's latest status stands until a newer one for that window
-// replaces it. A nil window is one the vendor has not reported yet.
+// allowanceWindow is ONE drawn allowance's evidence, assembled from two
+// different vendor facts per the project lead's sourcing ruling:
+//
+//   - the FIGURES (utilization, reset) come from SessionUpdate.account_usage,
+//     the sampled account usage, which is complete from its first sample;
+//   - the VERDICT (the typed status arm) comes from
+//     SessionUpdate.rate_limit_status, the vendor's rate-limit event, and
+//     stays UNSET until an event for this window has been seen. An unset
+//     status oneof is legal and means "no vendor verdict observed yet" — it
+//     is never defaulted to "allowed".
+//
+// A rate-limit event that carries a utilization NEWER than the figures on
+// hand also wins for the figure; an older one does not.
+type allowanceWindow struct {
+	// figured reports whether any figure has been observed for this window.
+	figured bool
+	// utilization is the drawn fraction, 0..1.
+	utilization float64
+	// resetsAtS is the drawn reset, epoch SECONDS.
+	resetsAtS int64
+	// figuresAtMs is when the figures on hand were observed, unix millis.
+	figuresAtMs int64
+	// verdict is the last rate-limit event for this window, nil until one has
+	// been seen. Only its status arm is read.
+	verdict *conversationv1.SessionRateLimitStatus
+}
+
+// observeFigures files a figure sighting, keeping the NEWER of the two. The
+// vendor reports utilization as a percentage and resets in millis; the
+// contract carries a 0..1 fraction and epoch seconds, so the conversion is
+// the daemon's and never the client's.
+func (w *allowanceWindow) observeFigures(utilizationPercent float64, resetsAtMs, atMs int64) bool {
+	if w.figured && atMs <= w.figuresAtMs {
+		return false
+	}
+	w.figured = true
+	w.utilization = utilizationPercent / 100
+	w.resetsAtS = resetsAtMs / 1000
+	w.figuresAtMs = atMs
+	return true
+}
+
+// rateState is the two drawn allowances. The five-hour window is the session
+// allowance and the seven-day window (with its per-model and overage-included
+// aliases) is the weekly one.
 type rateState struct {
-	// session is the rolling five-hour allowance's last status.
-	session *conversationv1.SessionRateLimitStatus
-	// weekly is the seven-day allowance's last status.
-	weekly *conversationv1.SessionRateLimitStatus
-	// at is when the newest of the two was observed.
+	// session is the rolling five-hour allowance.
+	session allowanceWindow
+	// weekly is the seven-day allowance.
+	weekly allowanceWindow
+	// at is when the newest evidence for either window was observed.
 	at time.Time
 }
 
