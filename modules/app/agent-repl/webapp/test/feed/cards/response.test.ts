@@ -230,6 +230,142 @@ describe("the usage stamp", () => {
   });
 });
 
+describe("the notice register", () => {
+  /** Every state arm: the notice is a FIELD, so it rides all of them. */
+  const STATES = (
+    FeedResponseSchema.oneofs.find((oneof) => oneof.name === "result")?.fields ?? []
+  ).map((field) => field.localName);
+
+  it("covers every state arm the schema declares", () => {
+    expect([...STATES].sort()).toEqual(["error", "success", "update"].sort());
+  });
+
+  it.each(STATES)("marks the bubble as a notice in the %s state", (arm) => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "the turn was interrupted" },
+        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
+      }),
+      rowContext(),
+    );
+    expect(el.hasAttribute("data-notice")).toBe(true);
+  });
+
+  it.each(STATES)("draws the daemon's heading verbatim in the %s state", (arm) => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "the turn was interrupted" },
+        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".response-notice-heading")?.textContent).toBe(
+      "the turn was interrupted",
+    );
+  });
+
+  it.each(STATES)("draws the heading ABOVE the prose in the %s state", (arm) => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "a system remark" },
+        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
+      }),
+      rowContext(),
+    );
+    const children = [...el.children];
+    const heading = children.findIndex((c) => c.classList.contains("response-notice-heading"));
+    const body = children.findIndex((c) => c.classList.contains("bubble-body"));
+    expect(heading).toBeLessThan(body);
+  });
+
+  it.each(STATES)("keeps the heading outside the body the prose rewrites (%s)", (arm) => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "a system remark" },
+        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".bubble-body .response-notice-heading")).toBeNull();
+  });
+
+  it.each(STATES)("keeps the notice register's own class in the %s state", (arm) => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "a system remark" },
+        result: { case: arm as never, value: { prose: { markdown: "hi" } } as never },
+      }),
+      rowContext(),
+    );
+    expect(el.classList.contains("response-notice")).toBe(true);
+  });
+
+  // The arriving state is excluded here on purpose: its prose is PACED, so at
+  // draw time the body holds only the arriving indicator (the state's own suite
+  // covers the type-out). The next test asserts the notice leaves that pacing
+  // alone.
+  it.each(["success", "error"])("draws the prose itself in the %s state, notice or not", (arm) => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "a system remark" },
+        result: { case: arm as never, value: { prose: { markdown: "the words" } } as never },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".bubble-body")?.textContent).toContain("the words");
+  });
+
+  it("leaves the arriving state's pacing alone under a notice", () => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "a system remark" },
+        result: { case: "update", value: { prose: { markdown: "the words" } } },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".bubble-body .response-arriving")).not.toBeNull();
+  });
+
+  it.each(STATES)("marks no notice on an ordinary %s response", (arm) => {
+    const el = drawFeedResponse(
+      response({ result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
+      rowContext(),
+    );
+    expect(el.hasAttribute("data-notice")).toBe(false);
+  });
+
+  it.each(STATES)("draws no heading on an ordinary %s response", (arm) => {
+    const el = drawFeedResponse(
+      response({ result: { case: arm as never, value: { prose: { markdown: "hi" } } as never } }),
+      rowContext(),
+    );
+    expect(el.querySelector(".response-notice-heading")).toBeNull();
+  });
+
+  it("keeps the state's own marker beside the notice", () => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "cut short by a stop" },
+        result: { case: "error", value: { prose: { markdown: "hi" } } },
+      }),
+      rowContext(),
+    );
+    expect(el.classList.contains("response-cut-short")).toBe(true);
+  });
+
+  it("draws the usage stamp beside a notice heading", () => {
+    const el = drawFeedResponse(
+      response({
+        notice: { heading: "a system remark" },
+        usage: { text: "2.1k" },
+        result: { case: "success", value: { prose: { markdown: "hi" } } },
+      }),
+      rowContext(),
+    );
+    expect(el.querySelector(".turn-meta .usage-stamp")?.textContent).toBe("2.1k");
+  });
+});
+
 describe("revealedSoFar", () => {
   it("starts from nothing on a row's first draw", () => {
     expect(revealedSoFar(undefined, 10)).toBe(0);
