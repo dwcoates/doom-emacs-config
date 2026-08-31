@@ -46,6 +46,7 @@ import {
   permissionRow,
   planUnit,
   questionRow,
+  repositoryRef,
   roster,
   rosterRow,
   topbarView,
@@ -727,4 +728,96 @@ describe("AdoptWebWorkspace's refusals", () => {
     // Assert
     expect(harness.failureArms()).toContain("controlPlaneFailed");
   });
+});
+
+// ---------------------------------------------------------------------------
+// UpdateMergeQueue's repository scope (landing 5)
+//
+// Pause and resume now take an OPTIONAL repository: set = that repository's
+// queue, unset = daemon-wide. The footer's control scopes to the workspace the
+// page is on, so the echo is what these assert — an unscoped pause from a
+// per-workspace control would silently pause every repository.
+// ---------------------------------------------------------------------------
+
+describe("UpdateMergeQueue's repository scope", () => {
+  const withQueueControl = async (): Promise<Harness> => {
+    const h = await startHarness({
+      arrange: (fake) => {
+        fake.setFooter(WORKSPACE_ID, footerView({ status: "merging", substatus: "queued" }));
+        fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] }));
+      },
+    });
+    return h;
+  };
+
+  it("scopes a pause to the current workspace's repository", async () => {
+    // Arrange
+    harness = await withQueueControl();
+    // Act
+    await harness.click('[data-merge-queue="pause"]');
+    // Assert
+    const [request] = harness.fake.calls<{
+      action: { case?: string; value?: { repository?: { id: string } } };
+    }>("updateMergeQueue");
+    expect(request.action.value?.repository?.id).toBe(repositoryRef().id);
+  });
+
+  it("sends the pause arm", async () => {
+    // Arrange
+    harness = await withQueueControl();
+    // Act
+    await harness.click('[data-merge-queue="pause"]');
+    // Assert
+    const [request] = harness.fake.calls<{ action: { case?: string } }>("updateMergeQueue");
+    expect(request.action.case).toBe("pause");
+  });
+
+  it("scopes a resume to the same repository", async () => {
+    // Arrange
+    harness = await withQueueControl();
+    // Act
+    await harness.click('[data-merge-queue="resume"]');
+    // Assert
+    const [request] = harness.fake.calls<{
+      action: { case?: string; value?: { repository?: { id: string } } };
+    }>("updateMergeQueue");
+    expect(request.action.value?.repository?.id).toBe(repositoryRef().id);
+  });
+
+  it("echoes the repository's dir, not just its id", async () => {
+    // Arrange
+    harness = await withQueueControl();
+    // Act
+    await harness.click('[data-merge-queue="pause"]');
+    // Assert: the ref is echoed whole; a half-built ref is a defect.
+    const [request] = harness.fake.calls<{
+      action: { value?: { repository?: { dir: string } } };
+    }>("updateMergeQueue");
+    expect(request.action.value?.repository?.dir).toBe(repositoryRef().dir);
+  });
+
+  it("accepts an unscoped pause, which stays daemon-wide", async () => {
+    // Arrange: the fake must not require the field — unset is legal, and a
+    // future operator surface may legitimately pause every repository.
+    harness = await startHarness();
+    // Act
+    const response = await harness.ctx.client.updateMergeQueue({
+      action: { case: "pause", value: {} },
+    });
+    // Assert
+    expect(response.result.case).toBe("success");
+  });
+
+  it.each(["alreadyPaused", "notPaused", "noSuchQueuedMerge"])(
+    "draws the %s refusal at the queue control",
+    async (arm) => {
+      // Arrange
+      harness = await withQueueControl();
+      harness.fake.refuse("updateMergeQueue", arm);
+      // Act
+      await harness.click('[data-merge-queue="pause"]');
+      // Assert
+      expect(harness.$(`.refusal[data-arm="${arm}"]`)).not.toBeNull();
+    },
+  );
 });

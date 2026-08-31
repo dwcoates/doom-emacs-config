@@ -79,6 +79,8 @@ import {
   permissionRow,
   planUnit,
   questionRow,
+  RESPONSE_NOTICE_HEADING,
+  responseNoticeUnit,
   responseUnit,
   separationRow,
   skillUnit,
@@ -289,6 +291,52 @@ describe.each(RESPONSE_STATES)("a %s response", (state) => {
 // ---------------------------------------------------------------------------
 // Tool calls
 // ---------------------------------------------------------------------------
+
+describe("a response in the notice register", () => {
+  it("marks the bubble as a notice", async () => {
+    // Arrange / Act: vendor-synthesized prose, not the agent's own words.
+    const row = await drawRow(activityRow(responseNoticeUnit()));
+    // Assert
+    expect(row.querySelector("[data-notice]")).not.toBeNull();
+  });
+
+  it("draws the daemon-composed heading verbatim", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(responseNoticeUnit()));
+    // Assert: the client holds no notice vocabulary of its own.
+    expect(row.textContent).toContain(RESPONSE_NOTICE_HEADING);
+  });
+
+  it("still draws the prose beneath the heading", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(responseNoticeUnit()));
+    // Assert
+    expect(row.textContent).toContain("the vendor's remark");
+  });
+
+  it("draws whatever heading the daemon serves", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(responseNoticeUnit("success", "a system remark")));
+    // Assert
+    expect(row.textContent).toContain("a system remark");
+  });
+
+  it.each(RESPONSE_STATES)("carries the notice register on a %s response too", async (state) => {
+    // Arrange / Act: the notice rides every result arm.
+    const row = await drawRow(activityRow(responseNoticeUnit(state)));
+    // Assert
+    expect(row.querySelector("[data-notice]")).not.toBeNull();
+  });
+});
+
+describe("an ordinary response", () => {
+  it("carries no notice register", async () => {
+    // Arrange / Act: `notice` is optional — absent means draw nothing.
+    const row = await drawRow(activityRow(responseUnit("success")));
+    // Assert
+    expect(row.querySelector("[data-notice]")).toBeNull();
+  });
+});
 
 describe("a running tool call", () => {
   it("carries the running outcome", async () => {
@@ -1194,5 +1242,97 @@ describe("a refused command card", () => {
     const row = await drawRow(commandRefusedRow({ addSupport: false }));
     // Assert
     expect(row.querySelector("[data-add-support]")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TOKEN FORMATTING, ACROSS THE THREE SURFACES
+//
+// Three places show a token figure, and only ONE of them formats: a feed row's
+// usage stamp and the topbar's context chip arrive daemon-composed and are
+// drawn verbatim, while the cold gate is the contract's deliberate exception
+// and formats from a raw `bigint` client-side.
+//
+// So the risk is a SCALE MISMATCH: the daemon saying "1.2M" while the client
+// says "1234.6k" for the same quantity, on the same screen. These cases feed
+// figures that straddle every scale boundary and assert the client's own
+// output follows the convention the daemon's strings use.
+//
+// They assert STRUCTURE, not one blessed string: the exact spelling ("1.0k"
+// vs "1k") is not written down anywhere in the contract, and picking one here
+// would be this suite inventing a convention rather than checking one. The
+// WIRING AGENT owns that unification — see the report.
+// ---------------------------------------------------------------------------
+
+/** Figures chosen to straddle every scale boundary a formatter can get wrong. */
+const TOKEN_SCALES = [999n, 1_000n, 12_345n, 1_234_567n] as const;
+
+describe("token formatting across surfaces", () => {
+  /** The cold gate's own drawn figure for a raw token count. */
+  const coldGateFigure = async (tokens: bigint): Promise<string> => {
+    const row = await drawRow(coldGateStandingRow({ contextTokens: tokens }));
+    const drawn = row.querySelector("[data-context-tokens]")?.textContent?.trim();
+    if (drawn === undefined) throw new Error("the cold gate drew no context-token figure");
+    return drawn;
+  };
+
+  it.each(TOKEN_SCALES)("draws a figure for %s at all", async (tokens) => {
+    // Arrange / Act
+    const drawn = await coldGateFigure(tokens);
+    // Assert
+    expect(drawn).not.toBe("");
+  });
+
+  it("leaves a sub-thousand figure unscaled", async () => {
+    // Arrange / Act
+    const drawn = await coldGateFigure(999n);
+    // Assert: nothing to abbreviate below the first boundary.
+    expect(drawn).not.toMatch(/[kM]/);
+  });
+
+  it("scales a figure at the thousand boundary", async () => {
+    // Arrange / Act
+    const drawn = await coldGateFigure(1_000n);
+    // Assert
+    expect(drawn).toMatch(/k/);
+  });
+
+  it("distinguishes the two sides of the thousand boundary", async () => {
+    // Arrange
+    const below = await coldGateFigure(999n);
+    await harness.stop();
+    // Act
+    const at = await coldGateFigure(1_000n);
+    // Assert
+    expect(at).not.toBe(below);
+  });
+
+  it("scales a million-order figure past k rather than reading in thousands", async () => {
+    // Arrange / Act
+    const drawn = await coldGateFigure(1_234_567n);
+    // Assert: "1234.6k" beside a daemon-composed "1.2M" is the mismatch these
+    // cases exist to catch.
+    expect(drawn).toMatch(/M/);
+  });
+
+  it("keeps a mid-scale figure to one fractional digit", async () => {
+    // Arrange / Act
+    const drawn = await coldGateFigure(12_345n);
+    // Assert
+    expect(drawn).toMatch(/^\d+\.\dk$/);
+  });
+
+  it("draws the daemon's own usage stamp verbatim, whatever its scale", async () => {
+    // Arrange / Act: the feed never reformats what the daemon composed.
+    const row = await drawRow(activityRow(responseUnit("success", "prose", "1.2M in / 3.4k out")));
+    // Assert
+    expect(row.textContent).toContain("1.2M in / 3.4k out");
+  });
+
+  it("does not rescale a daemon usage stamp into its own convention", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(responseUnit("success", "prose", "1234.6k in")));
+    // Assert: verbatim means verbatim, even when the daemon's scale differs.
+    expect(row.textContent).toContain("1234.6k in");
   });
 });
