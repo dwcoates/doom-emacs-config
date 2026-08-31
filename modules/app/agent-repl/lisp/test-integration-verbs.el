@@ -43,6 +43,8 @@
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl-link-primary "daemon-link")
 (declare-function agent-repl--ws-known-p "workspace")
+(declare-function agent-repl--ws-live-p "workspace")
+(defvar agent-repl--workspaces)
 (declare-function agent-repl--ws-put "workspace")
 
 ;;;; ---- Fixtures ----
@@ -65,6 +67,11 @@ through `agent-repl-host-ref', so the workspace must be registered first."
   `(let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon))))
      (unwind-protect
          (let ((,ref nil))
+           ;; `agent-repl--workspaces' outlives a scenario, and a teardown
+           ;; TOMBSTONES rather than removes, so a fixture that reused the
+           ;; name would start already-dead.  The record is dropped outright
+           ;; here, which no production path may do.
+           (remhash agent-repl-itest-verbs--ws agent-repl--workspaces)
            (agent-repl--ws-put agent-repl-itest-verbs--ws
                                :project-dir agent-repl-itest-verbs--dir)
            (agent-repl-host-register conn agent-repl-itest-verbs--dir
@@ -109,11 +116,14 @@ Teardown is idempotent against the roster push that follows."
       ;; Act.
       (agent-repl-verb-close agent-repl-itest-verbs--ws)
       (agent-repl-itest--await-call daemon "CloseWorkspace")
-      ;; Assert.
+      ;; Assert: LIVENESS is what a torn-down tab loses.  `--ws-del'
+      ;; TOMBSTONES the entry by design — the identity record survives so
+      ;; reverse-lookups and the revival picker still resolve it — so
+      ;; `--ws-known-p' stays true and says nothing about the tab.
       (agent-repl-itest--wait-until
-       (lambda () (not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))
+       (lambda () (not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))
        nil "the closed workspace's tab to go away")
-      (should-not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+      (should-not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
 
 (ert-deftest agent-repl-itest-verbs-close-blocked-keeps-the-tab ()
   "A `blocked' close keeps the tab and raises NO dialog.
@@ -132,7 +142,7 @@ undelivered user intent may never be silently discarded."
       ;; Assert: the workspace survives, and the fact is logged rather than
       ;; put in front of the user as an Emacs dialog.
       (agent-repl-itest--await-log daemon "elisp.verbs.close-blocked" "info")
-      (should (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+      (should (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
 
 (ert-deftest agent-repl-itest-verbs-kill-echoes-the-ref ()
   "KillWorkspace sends the ref; it never blocks and never warns.
@@ -196,7 +206,7 @@ the roster/footer; Emacs's durable merged memory was REMOVED."
                       (agent-repl-itest-verbs--body daemon "MergeWorkspace")
                       'workspace 'id)
                      (plist-get ref :id)))
-      (should (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+      (should (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
 
 (ert-deftest agent-repl-itest-verbs-restart-sends-force-false-explicitly ()
   "A graceful restart sends `force' false, not an absent field.
@@ -249,7 +259,10 @@ field exists — the account is DETERMINED by the repo-under-root rule."
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
         (should (equal (agent-repl-itest--body-field body 'repository 'id) "repo-itest"))
-        (should (agent-repl-itest--body-field body 'standard))))))
+        ;; `standard' with nothing set is `{}', which parses back to nil, so
+        ;; PRESENCE is the assertion — the same shape the fork and priority
+        ;; cases assert.
+        (should (assq 'standard body))))))
 
 (ert-deftest agent-repl-itest-verbs-create-standard-carries-the-initial-prompt ()
   "An initial prompt rides the standard form as UserSaid.
@@ -285,7 +298,9 @@ and the DAEMON owns naming, worktree, decoration and postprocessing."
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
-        (should (agent-repl-itest--body-field body 'oneShot 'selfMerge))))))
+        ;; `self_merge' is an EMPTY message: present and `{}', which parses
+        ;; back to nil, so presence is the whole assertion.
+        (should (assq 'selfMerge (agent-repl-itest--body-field body 'oneShot)))))))
 
 (ert-deftest agent-repl-itest-verbs-create-one-shot-open-pr-sends-its-flags ()
   "The `open_pr' finish arm carries both of its bools explicitly.
@@ -494,7 +509,9 @@ Never a transport error: a success arm carrying typed fault lists with
 dynamic detail strings."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (let* ((fault '((detail . "merge worker wedged")))
+    ;; THE KIND IS A TYPED ARM: `detail' supplements it, so a fault without
+    ;; one is a contract breach the codec refuses before rendering.
+    (let* ((fault '((logSinkPoisoned . ()) (detail . "merge worker wedged")))
            (response `((success . ((unhealthy . ((faults . [,fault]))))))))
       (agent-repl-itest--script daemon "DaemonHealth" response))
     (agent-repl-itest-verbs--with-workspace daemon ref
@@ -530,7 +547,10 @@ The two are different facts: the daemon answered and refused, versus the
 daemon could not be reached."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--script daemon "MergeWorkspace" '((error . ())))
+    ;; THE ARM IS THE REFUSAL, so the scripted error names one; an unset
+    ;; cause would be a contract breach rather than a refusal to report.
+    (agent-repl-itest--script daemon "MergeWorkspace"
+                              '((error . ((alreadyQueued . ())))))
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.

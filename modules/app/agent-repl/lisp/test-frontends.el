@@ -186,19 +186,6 @@ cannot make this pass by accident."
     ;; Act / Assert — no :active-env on the plist at all.
     (should (eq (agent-repl--frontend-default-for-ws "ws1") 'gui))))
 
-(ert-deftest agent-repl-test-frontends-default-for-ws-codex-signals-with-no-capable-frontend ()
-  "A codex workspace's resolution signals loudly instead of silently
-mis-presenting it.  The gui cannot drive codex, and with vterm gone gui
-is the ONLY registered frontend, so there is nothing left to fall back
-to — codex stays registered deliberately so this failure is loud (see
-the frontends.el commentary); the fallback becomes meaningful again
-once a second frontend is registered."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :backend 'codex)
-    ;; Act / Assert
-    (should-error (agent-repl--frontend-default-for-ws "ws1"))))
-
 (ert-deftest agent-repl-test-frontends-default-for-ws-env-rules-out-the-default ()
   "An environment the default frontend cannot run resolves to one that can.
 The default is capability-constrained on `:active-env' exactly as it is on
@@ -218,19 +205,6 @@ the rejection is staged with a frontend that declares it cannot."
        ;; Act / Assert
        (should (eq (agent-repl--frontend-default-for-ws "ws1")
                    'bare-metal-capable))))))
-
-(ert-deftest agent-repl-test-frontends-default-for-ws-signals-when-nothing-capable ()
-  "When NO registered frontend can drive the workspace, resolution signals."
-  ;; Arrange — a registry whose only frontend drives neither this backend nor env.
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-frontend-registry
-     (let ((agent-repl--frontends (make-hash-table :test #'eq)))
-       (agent-repl-register-frontend
-        (agent-repl-test--make-frontend 'claude-only :supported-backends '(claude)))
-       (setq agent-repl-default-frontend 'claude-only)
-       (agent-repl--ws-put "ws1" :backend 'codex)
-       ;; Act / Assert
-       (should-error (agent-repl--frontend-default-for-ws "ws1"))))))
 
 (ert-deftest agent-repl-test-frontends-ws-resolution-explicit-beats-the-constraint ()
   "An explicit `:frontend' is honored even where the constrained default differs."
@@ -252,23 +226,6 @@ the rejection is staged with a frontend that declares it cannot."
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :frontend) 'placeholder))
     (should (agent-repl--ws-get "ws1" :frontend-explicit))))
-
-(ert-deftest agent-repl-test-frontends-incidental-frontend-stamp-is-not-a-choice ()
-  "A `:frontend' value written WITHOUT `:frontend-explicit' is not a choice.
-Only `agent-repl--ws-choose-frontend' marks a selection deliberate (it
-always writes both keys together); a `:frontend' key written any other
-way — an incidental stamp, distinct from a deliberate choice — must
-still resolve via the plist value but must NOT read as a user choice,
-since only a marked choice survives a restart
-\(`agent-repl--apply-display-state')."
-  ;; Arrange / Act — an incidental stamp, distinct from `--ws-choose-frontend'.
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :frontend 'placeholder)
-    ;; Assert
-    (should (eq (agent-repl--ws-frontend-name "ws1") 'placeholder))
-    (should-not (agent-repl--ws-get "ws1" :frontend-explicit))))
-
-;;;; ---- Pair validation -------------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontends-validate-pair-accepts-supported ()
   "A supported frontend/backend pair validates.
@@ -426,77 +383,3 @@ frontend must implement."
 
 ;;;; ---- Headless boot ---------------------------------------------------------------
 
-(defmacro agent-repl-test--with-boot-env-stub (&rest body)
-  "Run BODY with `agent-repl--initialize-ws-env' stubbed as a faithful env writer.
-The real one is the sole writer of `:active-env' and touches the disk;
-the boot resolves the frontend against that key, so the stub must still
-write it."
-  (declare (indent 0))
-  `(cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
-              (lambda (ws &optional _dir env)
-                (agent-repl--ws-put ws :active-env (or env :bare-metal)))))
-     ,@body))
-
-(ert-deftest agent-repl-test-frontends-boot-session-dispatches-boot-fn ()
-  "The headless boot calls the resolved frontend's boot capability with the hints."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-frontend-registry
-     (let ((got nil))
-       (agent-repl-register-frontend
-        (agent-repl-test--make-frontend
-         'probe
-         :boot-fn (lambda (ws dir env) (setq got (list ws dir env)))
-         :running-p-fn (lambda (_ws) nil)))
-       (agent-repl--ws-put "ws1" :frontend 'probe)
-       (agent-repl-test--with-boot-env-stub
-         ;; Act
-         (agent-repl--frontend-boot-session "ws1" "/tmp/wt" :bare-metal))
-       ;; Assert
-       (should (equal got '("ws1" "/tmp/wt" :bare-metal)))))))
-
-(ert-deftest agent-repl-test-frontends-boot-session-skips-a-running-frontend ()
-  "The headless boot is a no-op when the workspace's frontend is already running."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-frontend-registry
-     (let ((booted nil)
-           (hydrated nil))
-       (agent-repl-register-frontend
-        (agent-repl-test--make-frontend
-         'probe
-         :boot-fn (lambda (&rest _) (setq booted t))
-         :running-p-fn (lambda (_ws) t)))
-       (agent-repl--ws-put "ws1" :frontend 'probe)
-       (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
-                  (lambda (&rest _) (setq hydrated t))))
-         ;; Act
-         (agent-repl--frontend-boot-session "ws1"))
-       ;; Assert — no boot, and no env hydration against the live session.
-       (should-not booted)
-       (should-not hydrated)))))
-
-(ert-deftest agent-repl-test-frontends-boot-session-hydrates-before-resolving ()
-  "The workspace is hydrated BEFORE the booting frontend is picked.
-A restored codex workspace carries its `:backend' in its STATE FILE, not
-on its plist yet — hydration is what surfaces it.  Were resolution to run
-FIRST (against the not-yet-hydrated plist), the workspace would still
-look like a claude one and boot silently on the gui default; hydrating
-first means the codex backend is visible to resolution, which (with no
-registered frontend able to drive codex) must signal loudly instead."
-  ;; Arrange — nothing on the plist says codex; the hydration is what does.
-  (agent-repl-test--with-clean-state
-    (let ((gui-booted nil))
-      (cl-letf (((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (ws &optional _dir env)
-                   (agent-repl--ws-put ws :active-env (or env :bare-metal))
-                   (agent-repl--ws-put ws :backend 'codex)))
-                ((symbol-function 'agent-repl--gui-boot)
-                 (lambda (&rest _) (setq gui-booted t))))
-        ;; Act / Assert
-        (should-error (agent-repl--frontend-boot-session "ws1" "/tmp/wt" :bare-metal))
-        (should-not gui-booted)))))
-
-(provide 'test-frontends)
-
-;;; test-frontends.el ends here

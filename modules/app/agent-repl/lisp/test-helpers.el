@@ -345,7 +345,7 @@ work in the batch process.  Ignores every argument by design."
 ;; interactive reload.  Individual tests that assert specific state-dir
 ;; paths rebind `process-environment' locally and are unaffected.
 ;; Batch-gated: in a live session this redirect would send every state
-;; write (workspace snapshot, logs, status export) to the temp dir, and
+;; write (logs and per-workspace state) to the temp dir, and
 ;; the module reload below would re-bake load-time path constants from
 ;; it — both halves of the observed live-session poisoning.
 (when noninteractive
@@ -677,9 +677,6 @@ in what they pretend a webview is."
 
 (defmacro agent-repl-test--with-clean-state (&rest body)
   "Execute BODY with fresh agent-repl global state.
-Also redirects `agent-repl-workspace-snapshot-file' to a throwaway
-temp path so the state-save snapshot piggyback can't clobber the
-user's real snapshot during ERT runs.
 
 `agent-repl-default-frontend' is scratch-bound here, at the choke point
 every test already passes through, because the selection commands ADOPT
@@ -706,22 +703,18 @@ re-routes their frontend resolution instead."
          (agent-repl--tabbar-diagnostic-until nil)
          (agent-repl--tabbar-frame-parameter-audit-active nil)
          (agent-repl--tabline-last-truncation nil)
-         (agent-repl--snapshot-load-state nil)
          (agent-repl--sync-timer nil)
          (agent-repl-debug nil)
          (agent-repl-default-frontend agent-repl-default-frontend)
-         (agent-repl-workspace-snapshot-file
-          (expand-file-name (format "agent-snap-%s" (random)) temporary-file-directory))
-         (agent-repl--snapshot-archived-this-run nil)
-         ;; Roster-durability state (commands.el).  Both are per-Emacs-boot
-         ;; globals: `--snapshot-loaded-p' gates whether a save may write at
-         ;; all, and `--snapshot-materialized-pending' is the debt list a
-         ;; boot-resume materialization parks there.  A test that sets
-         ;; either would otherwise decide whether a LATER test's save is
-         ;; permitted, which is suite order.
-         (agent-repl--snapshot-loaded-p nil)
-         (agent-repl--snapshot-materialized-pending nil)
-         (agent-repl--restored-workspaces nil)
+         ;; NO SNAPSHOT STATE.  The durable Emacs workspace-roster snapshot
+         ;; is gone -- the daemon is the source of which workspaces exist,
+         ;; and Emacs opens tabs from the roster stream -- so there is no
+         ;; snapshot file to redirect and no load/save gate to reset.
+         ;; `agent-repl--opened-recent-cycle' replaces the old restored-set
+         ;; global: it is the walk state of the most-recent-workspace cycle,
+         ;; and a test that advances the cycle would otherwise decide where
+         ;; a LATER test's cycle starts.
+         (agent-repl--opened-recent-cycle nil)
          ;; Reset workspace-state update timer state so each test starts
          ;; from a clean slate: counter at 0, no chain in flight, async
          ;; spread disabled (tests want synchronous iteration so they
@@ -744,11 +737,7 @@ re-routes their frontend resolution instead."
                   (when-let ((buf (plist-get entry :buffer)))
                     (when (buffer-live-p buf) (kill-buffer buf))))
                 agent-repl--open-progress)
-       (when (file-exists-p agent-repl-workspace-snapshot-file)
-         (delete-file agent-repl-workspace-snapshot-file))
-       (let ((archive-dir (agent-repl--workspace-snapshot-archive-dir)))
-         (when (file-directory-p archive-dir)
-           (delete-directory archive-dir t))))))
+       nil)))
 
 (defmacro agent-repl-test--with-mocked-git-probes (&rest body)
   "Execute BODY with the git-probe external-boundary wrappers stubbed.

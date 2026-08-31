@@ -1148,9 +1148,12 @@ If the agent isn't running, start it (same as `agent-repl')."
      ((eq (current-buffer) (agent-repl--ws-get ws :input-buffer))
       (agent-repl--log ws "focus-input branch=jump-back")
       (evil-window-left 1))
-     ;; Not running — start fresh
-     ((not (agent-repl--agent-running-p))
-      (agent-repl--log ws "focus-input branch=initialize-agent")
+     ;; No composer buffer yet — bring the workspace's panels up.  The
+     ;; question here is editor-local ("are this workspace's panels
+     ;; mounted?"), not "is a session running": session liveness is the
+     ;; daemon's and reaches Emacs as host state, never as a local probe.
+     ((not (agent-repl--ws-get ws :input-buffer))
+      (agent-repl--log ws "focus-input branch=mount-panels")
       (agent-repl))
      ;; Running but panels hidden — show them
      (t
