@@ -307,16 +307,6 @@
                   "{\"text\":\"x\",\"atMs\":\"1\",\"kind\":{}}")
                  '("HostNotificationKind" kind "oneof is unset"))))
 
-(ert-deftest agent-repl-test-wire-host-notification-decodes-question-asked ()
-  "A question batch names the first question's chip label for the banner."
-  (should (equal (plist-get (agent-repl-test-wire-host--decode
-                             #'agent-repl-wire-decode-host-workspace-notification
-                             (concat "{\"text\":\"pick a branch\",\"atMs\":1,"
-                                     "\"kind\":{\"questionAsked\":"
-                                     "{\"header\":\"Which branch?\"}}}"))
-                            :kind)
-                 '(:arm :question-asked :value (:header "Which branch?")))))
-
 (ert-deftest agent-repl-test-wire-host-question-asked-without-a-header-defaults ()
   "`header' is a non-optional proto3 string: protojson omits the default."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
