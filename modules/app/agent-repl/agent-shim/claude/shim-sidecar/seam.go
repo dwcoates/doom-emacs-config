@@ -171,9 +171,16 @@ func (s *sidecar) plumbObserver(kind tail.Kind, built tail.Handler, log *logging
 func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 	var out []*storev1.StoreEntry
 	for _, lost := range conclusions {
+		// THE REASON RIDES THE BOUND CONTEXT, so EVERY branch below carries it.
+		// It used to be interpolated into each branch's prose instead, which
+		// left three of the four outcomes — a file no longer watched, a residue
+		// spool naming no run, a converter with no LostTerminal — findable only
+		// by substring, and a reader filtering on `reason` saw a conclusion
+		// reached for a residue spool as no conclusion at all.
 		bound := s.log.With(logging.Context{
 			Operation: "lost-terminal", Path: lost.Path, TaskID: lost.TaskID,
 			AgentID: lost.OwnerAgentID, ActivityID: lost.RunActivityID,
+			Reason: string(lost.Reason),
 		})
 		// A run concluded LOST because its FILE IS GONE is never read again, so
 		// its tailer goes as soon as its terminal has been stated (or refused).
@@ -214,8 +221,7 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 		// THE REASON RIDES A DEDICATED KEY. It is the arm now set on the wire,
 		// and a record that only interpolated it into a sentence could not be
 		// filtered or joined against the terminal it explains.
-		bound.With(logging.Context{Reason: string(lost.Reason)}).
-			Log("LOST terminal minted reason=%s entries=%d", lost.Reason, len(entries))
+		bound.Log("LOST terminal minted reason=%s entries=%d", lost.Reason, len(entries))
 		out = append(out, entries...)
 	}
 	return out
