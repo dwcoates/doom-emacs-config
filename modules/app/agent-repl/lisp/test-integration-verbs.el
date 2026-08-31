@@ -549,7 +549,15 @@ Operator control; the visible state rides the merge bubble's queue tab."
       (agent-repl-verb-merge-queue (list :arm :pause :value nil))
       (agent-repl-itest--await-call daemon "UpdateMergeQueue")
       ;; Assert.
-      (should (assq 'pause (agent-repl-itest-verbs--body daemon "UpdateMergeQueue"))))))
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        (should (assq 'pause body))
+        ;; endpoint_update_merge_queue.proto, UpdateMergeQueuePause: "WHICH
+        ;; repository's queue.  UNSET = every repository that has a queue
+        ;; (the daemon-wide switch)."  The absence IS the daemon-wide
+        ;; meaning, so an encoder that started emitting an empty
+        ;; `repository' object would change what the request ASKS FOR.
+        (should-not (assq 'repository
+                          (agent-repl-itest--body-field body 'pause)))))))
 
 (ert-deftest agent-repl-itest-verbs-merge-queue-evict-carries-the-ref ()
   "Evicting from the merge queue names the workspace by ref."
@@ -989,7 +997,58 @@ too or the resume command would silently do nothing."
       (agent-repl-verb-merge-queue (list :arm :resume :value nil))
       (agent-repl-itest--await-call daemon "UpdateMergeQueue")
       ;; Assert.
-      (should (assq 'resume (agent-repl-itest-verbs--body daemon "UpdateMergeQueue"))))))
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        (should (assq 'resume body))
+        ;; endpoint_update_merge_queue.proto, UpdateMergeQueueResume: "UNSET
+        ;; = every repository that has a queue (the daemon-wide switch)."
+        (should-not (assq 'repository
+                          (agent-repl-itest--body-field body 'resume)))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-queue-pause-scoped-names-the-repository ()
+  "A pause that means ONE repository names it, rather than pausing everything.
+Pins UpdateMergeQueuePause's `repository' (endpoint_update_merge_queue.proto,
+added by landing 5): \"The queue is per repository, so a caller that means
+one names it.\"  Without this the scoped pause silently becomes the
+daemon-wide switch, which stops every other repository's queue too — the
+kind of blast-radius defect no unscoped assertion can catch."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-merge-queue
+       (list :arm :pause :value (list :repository agent-repl-itest-verbs--repo)))
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        ;; The RepositoryRef's own two fields, both of which ride: `id' is
+        ;; "the sole supported repository identifier", `dir' is "NOT an
+        ;; identifier" but travels with it (workspace.proto).
+        (should (equal (agent-repl-itest--body-field body 'pause 'repository 'id)
+                       "repo-itest"))
+        (should (equal (agent-repl-itest--body-field body 'pause 'repository 'dir)
+                       "/tmp/itest-verbs-repo"))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-scoped-names-the-repository ()
+  "A resume that means ONE repository names it, rather than resuming everything.
+Pins UpdateMergeQueueResume's `repository' (endpoint_update_merge_queue.proto,
+added by landing 5): \"The queue is per repository, so a caller that means
+one names it.\"  Resume carries the field independently of pause, so a
+one-sided encoder would resume every repository after a scoped pause."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-merge-queue
+       (list :arm :resume :value (list :repository agent-repl-itest-verbs--repo)))
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        (should (equal (agent-repl-itest--body-field body 'resume 'repository 'id)
+                       "repo-itest"))
+        (should (equal (agent-repl-itest--body-field body 'resume 'repository 'dir)
+                       "/tmp/itest-verbs-repo"))))))
 
 ;;;; ---- Health rendering (audit finding 80) ----
 
