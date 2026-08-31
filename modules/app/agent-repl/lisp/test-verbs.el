@@ -205,7 +205,7 @@ answers a bare success, which is what almost every verb's success is."
 (ert-deftest agent-repl-verbs-set-priority-carries-the-level ()
   "SetWorkspacePriority carries the level arm when one is given."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-set-priority "ws-one" (list :arm :p1 :value nil))
+    (agent-repl-verb-set-priority "ws-one" :p1)
     (should (equal (plist-get (agent-repl-test-verbs--request :set-priority) :priority)
                    (list :arm :p1 :value nil)))))
 
@@ -375,8 +375,7 @@ daemon starts sending it, with no table to update here."
   (agent-repl-test-verbs--with
       '((:create . (:response (:arm :error
                                :value (:cause (:arm :unknown-repository :value nil))))))
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref)
-                            (list :arm :standard :value nil))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
     (should (agent-repl-test-verbs--messaged-p "create refused: unknown-repository"))))
 
 (ert-deftest agent-repl-verbs-missing-ref-refuses-before-sending ()
@@ -458,8 +457,7 @@ daemon starts sending it, with no table to update here."
 (ert-deftest agent-repl-verbs-create-standard-sends-the-repository-and-form ()
   "A standard create names its repository and sets the standard form arm."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref)
-                            (list :arm :standard :value (list :name "n")))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :name "n")
     (let ((request (agent-repl-test-verbs--request :create)))
       (should (equal (plist-get request :repository) (agent-repl-test-verbs--repo-ref)))
       (should (eq (plist-get (plist-get request :form) :arm) :standard)))))
@@ -467,8 +465,7 @@ daemon starts sending it, with no table to update here."
 (ert-deftest agent-repl-verbs-create-omits-absent-facts ()
   "Absent creation facts are OMITTED: absence is what the proto reads."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref)
-                            (list :arm :standard :value nil))
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
     (let ((request (agent-repl-test-verbs--request :create)))
       (should-not (plist-get request :parent))
       (should-not (plist-get request :model))
@@ -620,8 +617,7 @@ this test needs the genuinely sectionless roster."
   "A scheduled drain carries its deadline instant and its typed reason."
   (agent-repl-test-verbs--with nil
     (agent-repl-verb-shutdown-schedule
-     (list :arm :schedule :value (list :at-ms 1700000000000
-                                       :reason (list :arm :deploy :value nil))))
+     (list :arm :schedule :at-ms 1700000000000 :reason (list :arm :deploy)))
     (let ((action (plist-get (agent-repl-test-verbs--request :shutdown-schedule) :action)))
       (should (eq (plist-get action :arm) :schedule))
       (should (equal (plist-get (plist-get action :value) :at-ms) 1700000000000))
@@ -630,7 +626,7 @@ this test needs the genuinely sectionless roster."
 (ert-deftest agent-repl-verbs-shutdown-cancel-carries-an-empty-arm ()
   "Cancel is the whole assertion: the arm carries no payload."
   (agent-repl-test-verbs--with nil
-    (agent-repl-verb-shutdown-schedule (list :arm :cancel :value nil))
+    (agent-repl-verb-shutdown-schedule (list :arm :cancel))
     (should (equal (plist-get (agent-repl-test-verbs--request :shutdown-schedule) :action)
                    (list :arm :cancel :value nil)))))
 
@@ -751,7 +747,122 @@ this test needs the genuinely sectionless roster."
 (ert-deftest agent-repl-verbs-read-priority-label-answers-its-arm ()
   "A level label answers that level's arm."
   (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "P0.5")))
-    (should (equal (agent-repl-verbs--read-priority) (list :arm :p05 :value nil)))))
+    (should (equal (agent-repl-verbs--read-priority) :p05))))
+
+;;;; ---- Flat arms to codec oneofs ----
+
+(ert-deftest agent-repl-verbs-arm-wraps-a-flat-arms-fields ()
+  "A flat arm's own fields become the oneof's VALUE plist."
+  (should (equal (agent-repl-verbs--arm (list :arm :evict :workspace "ref"))
+                 (list :arm :evict :value (list :workspace "ref")))))
+
+(ert-deftest agent-repl-verbs-arm-gives-an-empty-arm-a-nil-value ()
+  "An arm carrying nothing gets a nil VALUE: being set is its whole assertion."
+  (should (equal (agent-repl-verbs--arm (list :arm :pause))
+                 (list :arm :pause :value nil))))
+
+(ert-deftest agent-repl-verbs-arm-of-nothing-is-nothing ()
+  "No arm at all translates to nil rather than an unset-arm oneof."
+  (should-not (agent-repl-verbs--arm nil)))
+
+(ert-deftest agent-repl-verbs-level-arm-builds-the-priority-oneof ()
+  "A bare level keyword becomes the level arm; the levels carry nothing."
+  (should (equal (agent-repl-verbs--level-arm :p2) (list :arm :p2 :value nil))))
+
+(ert-deftest agent-repl-verbs-level-arm-of-nil-clears ()
+  "No level is the ABSENCE of the field, never a sentinel arm."
+  (should-not (agent-repl-verbs--level-arm nil)))
+
+(ert-deftest agent-repl-verbs-shutdown-action-translates-the-nested-reason ()
+  "The `DrainReason' nested in a flat action is translated on the way past."
+  (should (equal (agent-repl-verbs--shutdown-action
+                  (list :arm :now :reason (list :arm :operator :note "n")))
+                 (list :arm :now
+                       :value (list :reason (list :arm :operator
+                                                  :value (list :note "n")))))))
+
+;;;; ---- Creation forms built at the verb boundary ----
+
+(ert-deftest agent-repl-verbs-create-standard-wraps-the-prompt-as-user-said ()
+  "A standard form's initial prompt rides as `UserSaid', not as bare text."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :initial-prompt "fix the flake")
+    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
+           (blocks (plist-get (plist-get (plist-get (plist-get form :value)
+                                                    :initial-prompt)
+                                         :content)
+                              :blocks)))
+      (should (equal (plist-get (plist-get (car blocks) :value) :text) "fix the flake")))))
+
+(ert-deftest agent-repl-verbs-create-one-shot-self-merge-is-an-empty-arm ()
+  "The `self_merge' finish arm carries nothing: the arm is the whole fact."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
+                            :prompt "land it" :finish :self-merge)
+    (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
+      (should (equal (plist-get (plist-get form :value) :finish)
+                     (list :arm :self-merge :value nil))))))
+
+(ert-deftest agent-repl-verbs-create-one-shot-open-pr-states-false-explicitly ()
+  "`open_pr's two bools are plain bools: false is a VALUE, never an absence."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
+                            :prompt "land it" :finish :open-pr
+                            :self-certified nil :add-to-merge-queue nil)
+    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
+           (finish (plist-get (plist-get form :value) :finish)))
+      (should (equal (plist-get finish :value)
+                     (list :self-certified nil :add-to-merge-queue nil))))))
+
+(ert-deftest agent-repl-verbs-create-fork-rides-inside-the-parent ()
+  "FORK lives INSIDE the parent: a fork without a parent is unrepresentable."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :parent (agent-repl-test-verbs--ref) :fork t)
+    (should (equal (plist-get (agent-repl-test-verbs--request :create) :parent)
+                   (list :workspace (agent-repl-test-verbs--ref) :fork t)))))
+
+(ert-deftest agent-repl-verbs-create-unknown-form-refuses ()
+  "A form arm the verb does not know is refused before anything is sent."
+  (agent-repl-test-verbs--with nil
+    (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :bogus)
+                  :type 'user-error)))
+
+(ert-deftest agent-repl-verbs-create-unknown-finish-refuses ()
+  "A finish arm the verb does not know is refused before anything is sent."
+  (agent-repl-test-verbs--with nil
+    (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :one-shot
+                                          :prompt "p" :finish :bogus)
+                  :type 'user-error)))
+
+;;;; ---- Resolution and logging ----
+
+(ert-deftest agent-repl-verbs-conn-stands-the-link-when-none-is-up ()
+  "A daemon-admin verb with no standing link STANDS one rather than refusing."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () nil))
+              ((symbol-function 'agent-repl-link-connect) (lambda () 'stood-conn)))
+      (should (eq (agent-repl-verbs--conn) 'stood-conn)))))
+
+(ert-deftest agent-repl-verbs-conn-refuses-when-the-link-cannot-be-stood ()
+  "No daemon anywhere is a refusal, not a request sent into nothing."
+  (agent-repl-test-verbs--with nil
+    (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () nil))
+              ((symbol-function 'agent-repl-link-connect) (lambda () nil)))
+      (should-error (agent-repl-verbs--conn) :type 'user-error))))
+
+(ert-deftest agent-repl-verbs-refusal-slug-names-the-verb ()
+  "A refusal's operation slug is `elisp.verbs.<op>-refused'."
+  (let ((formats nil))
+    (agent-repl-test-verbs--with
+        '((:merge . (:response (:arm :error
+                                :value (:cause (:arm :already-queued :value nil))))))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest _args) (push fmt formats))))
+        (agent-repl-verb-merge "ws-one")))
+    (should (cl-find-if (lambda (fmt) (string-prefix-p "elisp.verbs.merge-refused" fmt))
+                        formats))))
 
 (provide 'test-verbs)
 

@@ -60,6 +60,7 @@
 (declare-function agent-repl-host-faults "agent-repl-host" (ws))
 (declare-function agent-repl-host-handle-refusal "agent-repl-host" (ws arm))
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
+(declare-function agent-repl-link-connect "agent-repl-daemon-link" ())
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl-rpc-close-workspace "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-kill-workspace "agent-repl-rpc" (conn request &rest keys))
@@ -76,6 +77,20 @@
 
 ;; Defined by roster.el.  Declared, never defined here.
 (defvar agent-repl-roster-view)
+
+
+;;;; ---- Logging ----------------------------------------------------------
+;;
+;; A VERB LINE THAT IS ABOUT A WORKSPACE IS OWNED BY IT, and so is passed WS
+;; as the record's owner: logging-contract.md routes an owned record into
+;; that workspace's own `emacs.log', and failing to resolve a workspace for
+;; an owned record is a routing invariant violation rather than permission
+;; to write it globally.  The global sink is for the lines that genuinely
+;; have no workspace -- the daemon-admin verbs and the health pull.
+;;
+;; THE SLUG NAMES THE VERB (`elisp.verbs.<op>-refused'), because the reader
+;; of a refusal wants every refusal of ONE verb rather than a full-text
+;; search over the context of a slug all of them share.
 
 ;;;; ---- Resolution -------------------------------------------------------
 
@@ -96,9 +111,39 @@ handover the two daemons own different workspaces, and a per-workspace
 call must reach the daemon that owns THAT workspace."
   (or (and ws (agent-repl-host-conn ws))
       (agent-repl-link-primary)
+      ;; A daemon-admin verb can be the FIRST thing that needs the link --
+      ;; nothing about `SPC' on a fresh frame guarantees one is already
+      ;; standing -- so the link is stood here rather than refused.
+      (agent-repl-link-connect)
       (progn
         (agent-repl--warn ws "elisp.verbs.no-conn ws=%s" ws)
         (user-error "agent-repl: no daemon connection"))))
+
+
+;;;; ---- Oneof plists ------------------------------------------------------
+;;
+;; THE CALLER SPELLS AN ARM FLAT, the codec takes it NESTED.  A verb's
+;; arguments are written by a human at a keybinding -- `(:arm :evict
+;; :workspace REF)' -- while the encoders take the representation the whole
+;; codec shares, `(:arm KEYWORD :value FIELDS)' with a nil VALUE for an empty
+;; arm.  The translation belongs HERE, at the verb boundary, so neither side
+;; has to hold the other's convention.
+
+(defun agent-repl-verbs--arm (flat)
+  "Return the codec oneof plist for FLAT, or nil when FLAT is nil.
+FLAT is `(:arm KEYWORD . FIELDS)'; the answer is `(:arm KEYWORD :value
+FIELDS)', whose VALUE is nil exactly when the arm carries nothing."
+  (when flat
+    (let ((fields nil))
+      (cl-loop for (key value) on flat by #'cddr
+               unless (eq key :arm)
+               do (setq fields (append fields (list key value))))
+      (list :arm (plist-get flat :arm) :value fields))))
+
+(defun agent-repl-verbs--level-arm (level)
+  "Return the `WorkspacePriority' oneof for the bare LEVEL keyword, or nil.
+The levels carry nothing at all, so the keyword IS the whole priority."
+  (when level (list :arm level :value nil)))
 
 ;;;; ---- Refusals --------------------------------------------------------
 ;;
@@ -144,12 +189,15 @@ the user as the verb, the word refused, the arm keyword, and the fields."
          (keyword (plist-get arm :arm)))
     (cond
      ((memq keyword agent-repl-verbs--handover-arms)
-      (agent-repl--info ws "elisp.verbs.handover-refusal op=%s ws=%s arm=%S fields=%S"
-                        op ws keyword (plist-get arm :value))
+      (agent-repl--info ws (format "elisp.verbs.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
+                        ws keyword (plist-get arm :value))
       (agent-repl-host-handle-refusal ws arm))
      (t
-      (agent-repl--warn ws "elisp.verbs.refused op=%s ws=%s arm=%S fields=%S"
-                        op ws keyword (plist-get arm :value))
+      ;; THE SLUG NAMES THE VERB: `elisp.verbs.<op>-refused'.  A refusal
+      ;; reader wants every refusal of ONE verb, and a slug shared by all of
+      ;; them would make that a full-text search over the context instead.
+      (agent-repl--warn ws (format "elisp.verbs.%s-refused ws=%%s arm=%%S fields=%%S" op)
+                        ws keyword (plist-get arm :value))
       (message "%s refused: %s%s" op
                (if keyword (substring (symbol-name keyword) 1) "unstated")
                (agent-repl-verbs--refusal-fields arm))))))
@@ -348,57 +396,123 @@ is the user's next prompt."
 
 (defun agent-repl-verb-set-priority (ws priority)
   "Set WS's PRIORITY, or CLEAR it when PRIORITY is nil.
-Clearing is the ABSENCE of the field, never a sentinel level -- so a nil
-priority omits it from the request entirely."
+PRIORITY is the BARE level keyword -- `:p05', `:p1', `:p2' or `:p3' -- and
+the level arm is built here.  Clearing is the ABSENCE of the field, never a
+sentinel level, so a nil priority omits it from the request entirely."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-verbs--send
      #'agent-repl-rpc-set-workspace-priority (agent-repl-verbs--conn ws)
-     (list :workspace ref :priority priority)
+     (list :workspace ref :priority (agent-repl-verbs--level-arm priority))
      :ws ws :op "set-priority"
      :on-success
      (lambda (_)
-       (message "agent-repl: priority %s"
-                (if priority (plist-get priority :arm) "cleared"))))))
+       (message "agent-repl: priority %s" (or priority "cleared"))))))
 
-(cl-defun agent-repl-verb-create (repository form &key parent model priority allow-ungated)
+(cl-defun agent-repl-verb-create (repository form
+                                             &key initial-prompt base-ref name
+                                             prompt finish self-certified add-to-merge-queue
+                                             parent fork model priority allow-ungated)
   "Create a workspace in REPOSITORY under FORM.
-FORM is the creation-form oneof: `(:arm :standard :value ...)' or
-`(:arm :one-shot :value ...)'.  PARENT, MODEL, PRIORITY and ALLOW-UNGATED
-are the shared creation facts and are omitted when nil, which is exactly
-what their absence means on the wire: a top-level workspace, the daemon's
-default model, no priority, no ungated consent.
+FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
+`:one-shot' -- and that arm\'s own fields ride as keyword arguments beside
+it, because a caller at a keybinding writes facts, not nested oneofs.
+
+  `:standard\' takes INITIAL-PROMPT (plain text, wrapped as `UserSaid\'),
+    BASE-REF and NAME; every one of them is optional, and each absence is
+    the statement the proto asks for -- an empty workspace, the repo\'s
+    default branch resolution, a daemon-minted name.
+  `:one-shot\' takes PROMPT (required -- a one-shot IS its prompt) and
+    FINISH, itself a bare arm keyword: `:self-merge\', or `:open-pr\' with
+    SELF-CERTIFIED and ADD-TO-MERGE-QUEUE, two plain bools whose false is a
+    VALUE the daemon must receive.
+
+PARENT is the parent\'s `WorkspaceRef\' and FORK the presence-only fork
+fact, which lives INSIDE the parent by construction -- a fork without a
+parent is unrepresentable.  MODEL, PRIORITY (a bare level keyword) and
+ALLOW-UNGATED are the remaining creation facts and are omitted when nil.
 
 Nothing happens on success: THE DAEMON names and creates everything, and
-the new workspace's tab arrives through the roster push."
+the new workspace\'s tab arrives through the roster push."
   (agent-repl-verbs--send
    #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
-   (list :repository repository :form form :parent parent
-         :model model :priority priority :allow-ungated allow-ungated)
+   (list :repository repository
+         :form (agent-repl-verbs--create-form
+                form :initial-prompt initial-prompt :base-ref base-ref :name name
+                :prompt prompt :finish finish
+                :self-certified self-certified :add-to-merge-queue add-to-merge-queue)
+         :parent (when parent
+                   (append (list :workspace parent) (when fork (list :fork fork))))
+         :model model
+         :priority (agent-repl-verbs--level-arm priority)
+         :allow-ungated allow-ungated)
    :op "create"
    :on-success (lambda (_) (message "agent-repl: workspace requested"))))
 
+(cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
+                                              prompt finish
+                                              self-certified add-to-merge-queue)
+  "Return the creation-form oneof for the bare arm keyword FORM.
+The two forms take disjoint facts, so each arm reads only its own."
+  (pcase form
+    (:standard
+     (list :arm :standard
+           :value (list :initial-prompt (and initial-prompt
+                                             (agent-repl-verbs--said initial-prompt))
+                        :base-ref base-ref
+                        :name name)))
+    (:one-shot
+     (list :arm :one-shot
+           :value (list :prompt (and prompt (agent-repl-verbs--said prompt))
+                        :finish (agent-repl-verbs--finish-arm
+                                 finish self-certified add-to-merge-queue))))
+    (_ (user-error "agent-repl: unknown creation form %S" form))))
+
+(defun agent-repl-verbs--finish-arm (finish self-certified add-to-merge-queue)
+  "Return the one-shot finish oneof for the bare arm keyword FINISH.
+`open_pr\'s two bools are stated explicitly, false included: they change
+what happens to the branch, so neither may ride as an absence."
+  (pcase finish
+    ('nil nil)
+    (:self-merge (list :arm :self-merge :value nil))
+    (:open-pr (list :arm :open-pr
+                    :value (list :self-certified (and self-certified t)
+                                 :add-to-merge-queue (and add-to-merge-queue t))))
+    (_ (user-error "agent-repl: unknown one-shot finish %S" finish))))
+
 ;;;; ---- The daemon-admin verbs -------------------------------------------
+
+(defun agent-repl-verbs--shutdown-action (action)
+  "Return the codec action oneof for the FLAT shutdown ACTION.
+The `DrainReason' nested inside `schedule' and `now' is spelled flat too,
+so it is translated on the way past rather than left half-converted."
+  (let* ((oneof (agent-repl-verbs--arm action))
+         (fields (plist-get oneof :value)))
+    (if (plist-get fields :reason)
+        (list :arm (plist-get oneof :arm)
+              :value (plist-put (copy-sequence fields) :reason
+                                (agent-repl-verbs--arm (plist-get fields :reason))))
+      oneof)))
 
 (defun agent-repl-verb-shutdown-schedule (action)
   "Send ACTION to UpdateShutdownSchedule.
-ACTION is the request's action oneof: `(:arm :schedule :value (:at-ms N
-:reason R))', `(:arm :cancel :value nil)' or `(:arm :now :value (:reason
-R))'.  The reason is REQUIRED on both schedule and now: every client's
-drain banner names it."
+ACTION is the request's action spelled FLAT: `(:arm :schedule :at-ms N
+:reason REASON)', `(:arm :cancel)' or `(:arm :now :reason REASON)', where
+REASON is itself a flat `DrainReason' arm.  The reason is REQUIRED on both
+schedule and now: every client's drain banner names it."
   (agent-repl-verbs--send
    #'agent-repl-rpc-update-shutdown-schedule (agent-repl-verbs--conn)
-   (list :action action)
+   (list :action (agent-repl-verbs--shutdown-action action))
    :op "shutdown-schedule"
    :on-success
    (lambda (_) (message "agent-repl: shutdown %s" (plist-get action :arm)))))
 
 (defun agent-repl-verb-merge-queue (action)
   "Send ACTION to UpdateMergeQueue.
-ACTION is `(:arm :pause :value nil)', `(:arm :resume :value nil)' or
-`(:arm :evict :value (:workspace REF))'."
+ACTION is spelled FLAT: `(:arm :pause)', `(:arm :resume)' or `(:arm
+:evict :workspace REF)'."
   (agent-repl-verbs--send
    #'agent-repl-rpc-update-merge-queue (agent-repl-verbs--conn)
-   (list :action action)
+   (list :action (agent-repl-verbs--arm action))
    :op "merge-queue"
    :on-success
    (lambda (_) (message "agent-repl: merge queue %s" (plist-get action :arm)))))
@@ -531,12 +645,12 @@ background task are interrupted, and the agent is not resumed."
 Clearing is the absence of the field, which no level label can spell.")
 
 (defun agent-repl-verbs--read-priority ()
-  "Read a `WorkspacePriority', or nil to clear."
+  "Read a `WorkspacePriority' LEVEL keyword, or nil to clear."
   (let* ((labels (append (mapcar #'car agent-repl-verbs-priority-levels)
                          (list agent-repl-verbs-priority-clear-label)))
          (choice (completing-read "Priority: " labels nil t)))
     (unless (equal choice agent-repl-verbs-priority-clear-label)
-      (list :arm (cdr (assoc choice agent-repl-verbs-priority-levels)) :value nil))))
+      (cdr (assoc choice agent-repl-verbs-priority-levels)))))
 
 (defun agent-repl-set-priority (&optional ws)
   "Set or clear the current workspace's priority."
@@ -598,16 +712,14 @@ default branch resolution."
          (name (agent-repl-verbs--optional-string "Name (blank = daemon mints one): "))
          (base-ref (agent-repl-verbs--optional-string "Base ref (blank = default branch): "))
          (parent (when child
-                   (list :workspace (agent-repl-verbs--ref (agent-repl--ws-current-name))))))
+                   (agent-repl-verbs--ref (agent-repl--ws-current-name)))))
     (agent-repl--info nil "elisp.verbs.create-standard child=%s named=%s based=%s"
                       (and child t) (and name t) (and base-ref t))
     (agent-repl-verb-create
-     repository
-     (list :arm :standard
-           :value (list :initial-prompt (unless (string-empty-p (string-trim prompt))
-                                          (agent-repl-verbs--said prompt))
-                        :base-ref base-ref
-                        :name name))
+     repository :standard
+     :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
+     :base-ref base-ref
+     :name name
      :parent parent)))
 
 (defun agent-repl-fork-workspace ()
@@ -617,15 +729,12 @@ this is its own command rather than a flag on the plain create."
   (interactive)
   (let* ((repository (agent-repl-verbs--read-repository))
          (prompt (agent-repl-verbs--read-prompt "Initial prompt: "))
-         (parent (list :workspace (agent-repl-verbs--ref (agent-repl--ws-current-name))
-                       :fork t)))
+         (parent (agent-repl-verbs--ref (agent-repl--ws-current-name))))
     (agent-repl--info nil "elisp.verbs.create-fork")
     (agent-repl-verb-create
-     repository
-     (list :arm :standard
-           :value (list :initial-prompt (unless (string-empty-p (string-trim prompt))
-                                          (agent-repl-verbs--said prompt))))
-     :parent parent)))
+     repository :standard
+     :initial-prompt (unless (string-empty-p (string-trim prompt)) prompt)
+     :parent parent :fork t)))
 
 ;;;; ---- One-shots --------------------------------------------------------
 ;;
@@ -656,18 +765,18 @@ the vendor's, not ours."
                  agent-repl-oneshot-model-candidates nil nil))))
     (unless (string-empty-p value) value)))
 
-(cl-defun agent-repl-verbs--create-oneshot (finish &key model)
+(cl-defun agent-repl-verbs--create-oneshot (finish &key model
+                                                   self-certified add-to-merge-queue)
   "Create a one-shot whose FINISH arm says what happens when the work ends."
   (let ((repository (agent-repl-verbs--read-repository))
         (prompt (agent-repl-verbs--read-prompt "One-shot commission: ")))
     (when (string-empty-p (string-trim prompt))
       (user-error "agent-repl: a one-shot IS its prompt"))
-    (agent-repl--info nil "elisp.verbs.create-one-shot finish=%S model=%S"
-                      (plist-get finish :arm) model)
+    (agent-repl--info nil "elisp.verbs.create-one-shot finish=%S model=%S" finish model)
     (agent-repl-verb-create
-     repository
-     (list :arm :one-shot
-           :value (list :prompt (agent-repl-verbs--said prompt) :finish finish))
+     repository :one-shot
+     :prompt prompt :finish finish
+     :self-certified self-certified :add-to-merge-queue add-to-merge-queue
      :model model)))
 
 (defun agent-repl-create-oneshot-self-merge (&optional pick-model)
@@ -675,7 +784,7 @@ the vendor's, not ours."
 A prefix argument asks for the model."
   (interactive "P")
   (agent-repl-verbs--create-oneshot
-   (list :arm :self-merge :value nil)
+   :self-merge
    :model (and pick-model (agent-repl-verbs--read-model))))
 
 (defun agent-repl-create-oneshot-open-pr (&optional pick-model)
@@ -684,7 +793,7 @@ A prefix argument asks for the model.  Both PR flags are stated
 explicitly, false included: they change what happens to the branch."
   (interactive "P")
   (agent-repl-verbs--create-oneshot
-   (list :arm :open-pr :value (list :self-certified t :add-to-merge-queue t))
+   :open-pr :self-certified t :add-to-merge-queue t
    :model (and pick-model (agent-repl-verbs--read-model))))
 
 (defun agent-repl-create-oneshot-open-pr-reviewed (&optional pick-model)
@@ -692,7 +801,7 @@ explicitly, false included: they change what happens to the branch."
 Neither self-certified nor queued: the PR waits for a human."
   (interactive "P")
   (agent-repl-verbs--create-oneshot
-   (list :arm :open-pr :value (list :self-certified nil :add-to-merge-queue nil))
+   :open-pr :self-certified nil :add-to-merge-queue nil
    :model (and pick-model (agent-repl-verbs--read-model))))
 
 ;;;; ---- Shutdown and merge-queue commands --------------------------------
@@ -704,7 +813,7 @@ THE ARM IS THE REASON -- never a bare string; the note lives inside the one
 arm that owns it.")
 
 (defun agent-repl-verbs--read-drain-reason ()
-  "Read a `DrainReason'.  The operator arm's note is REQUIRED non-blank."
+  "Read a FLAT `DrainReason'.  The operator arm's note is REQUIRED non-blank."
   (let* ((choice (completing-read "Reason: "
                                   (mapcar #'car agent-repl-verbs-drain-reason-kinds)
                                   nil t))
@@ -713,8 +822,8 @@ arm that owns it.")
         (let ((note (string-trim (read-string "Operator note: "))))
           (when (string-empty-p note)
             (user-error "agent-repl: an operator reason requires a note"))
-          (list :arm :operator :value (list :note note)))
-      (list :arm arm :value nil))))
+          (list :arm :operator :note note))
+      (list :arm arm))))
 
 (defun agent-repl-daemon-shutdown-schedule (minutes)
   "Schedule the daemon to drain and exit MINUTES from now.
@@ -724,35 +833,35 @@ every client's standing banner names it."
   (let ((at-ms (+ (truncate (* 1000 (float-time))) (* minutes 60 1000)))
         (reason (agent-repl-verbs--read-drain-reason)))
     (agent-repl-verb-shutdown-schedule
-     (list :arm :schedule :value (list :at-ms at-ms :reason reason)))))
+     (list :arm :schedule :at-ms at-ms :reason reason))))
 
 (defun agent-repl-daemon-shutdown-cancel ()
   "Drop the daemon's standing shutdown schedule and resume normal intake."
   (interactive)
-  (agent-repl-verb-shutdown-schedule (list :arm :cancel :value nil)))
+  (agent-repl-verb-shutdown-schedule (list :arm :cancel)))
 
 (defun agent-repl-daemon-shutdown-now ()
   "Stop the daemon now.  The reason rides the shutdown announcement."
   (interactive)
   (agent-repl-verb-shutdown-schedule
-   (list :arm :now :value (list :reason (agent-repl-verbs--read-drain-reason)))))
+   (list :arm :now :reason (agent-repl-verbs--read-drain-reason))))
 
 (defun agent-repl-merge-queue-pause ()
   "Stop admitting merges to the front of the daemon's queue."
   (interactive)
-  (agent-repl-verb-merge-queue (list :arm :pause :value nil)))
+  (agent-repl-verb-merge-queue (list :arm :pause)))
 
 (defun agent-repl-merge-queue-resume ()
   "Resume admitting merges."
   (interactive)
-  (agent-repl-verb-merge-queue (list :arm :resume :value nil)))
+  (agent-repl-verb-merge-queue (list :arm :resume)))
 
 (defun agent-repl-merge-queue-evict (&optional ws)
   "Take the current workspace's merge off the queue."
   (interactive)
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl-verb-merge-queue
-     (list :arm :evict :value (list :workspace (agent-repl-verbs--ref ws))))))
+     (list :arm :evict :workspace (agent-repl-verbs--ref ws)))))
 
 (provide 'verbs)
 

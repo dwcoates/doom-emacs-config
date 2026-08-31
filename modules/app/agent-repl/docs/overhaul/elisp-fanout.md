@@ -84,14 +84,41 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   on a signal. AGENTS.md owes a line on restoring a boundary in
   integration tests (R-SUITE-1 carries it). R-PUSHINVALID may be moot
   after the reader fix — re-run host/roster before dispatching it.
-- RUNNING: R-ARMS + R-LOGOP (`opus-low`) in elisp-agents/remed3.
+- R-ARMS + R-LOGOP MERGED (b00b2e58b): every `<Rpc>Error` arm set,
+  HostFault/SessionFault/DaemonFault kinds decoded and pinned; core.el
+  derives `operation` from the bare format string. Treatments still owed
+  (R-HANDOVER: transferring_away/not_yet_adopted in host.el).
+- R-VERBS MERGED (1f433f54d): integration-verbs 30/30 (oneof shapes built
+  at the verb boundary; verbs fall back to `agent-repl-link-connect`).
+  REVERSED deviation in flight (same agent, remed5): verb records must
+  stay WORKSPACE-owned per logging-contract.md; the harness reader now
+  searches the workspace sinks too; link teardown added to the fixture.
+- R-VERBS follow-up MERGED (33b3d2e81): workspace-owned verb records
+  restored; harness reader searches global + workspace sinks; fixture
+  tears the link down. integration-verbs 30/30, daemon 12/12.
+- LANDING 5 merged (d597d9970): UpdateMergeQueuePause/Resume gain
+  `optional repository` (unset = every repository); the encoder field and
+  verbs.el's pause/resume argument are R-NOTIFY's added scope (own
+  commits); R-SUITE-1 extends finding #79 to both scopes.
+- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-NOTIFY (`opus-low`, remed4);
+  remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
+  remediation-1 merges (cut its worktree off that tip).
 - VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
   footer_allowance verbatim (f1132d3a7); merged, resolved to theirs; the
   files are identical on both branches. HostWorkspaceTransferred stays
   EMPTY by design — the successor address is always WatchDaemon's
   announcement; the webview reload uses that address.
 - RE-RUN after the reader fix: host 24/32, roster 19/20, link 14/18,
-  connect 12/16, daemon 12/12. R-PUSHINVALID is RETIRED (the reader was
+  connect 12/16, daemon 12/12.
+- FIRST RUN composer 2/21 (17 on the suite's malformed host-push literal —
+  R-SUITE-1 fixes the fixture), verbs 10/30. R-VERBS (queued, worktree
+  elisp-agents/remed5): verbs.el hands the codec BARE keywords where §2
+  requires oneof plists — e.g. priority `:p05` must be `(:arm :p05 :value
+  nil)`; the same applies to create's form/finish/priority arms,
+  shutdown's action/reason arms, merge-queue's action arm. Fix verbs.el
+  (and the suite where it passes bare keywords), keep the codec as is;
+  also the close-success tab teardown and the transport-failure /
+  merge-refused log assertions. R-PUSHINVALID is RETIRED (the reader was
   the cause); its residue, if any, folds into R-NOTIFY.
 - QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
   new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
