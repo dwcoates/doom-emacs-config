@@ -33,7 +33,7 @@ import { bindLog } from "../log.js";
 import { storev1 } from "../proto.js";
 import type { PersistEntry } from "../store/persistence.js";
 import type { FoldContext } from "./fold-context.js";
-import { residueUpsertKey } from "../store/keys.js";
+import { residueUpsertKey, streamResidueUpsertKey } from "../store/keys.js";
 
 const LOGGER = bindLog({ component: "shim-convert-residue", operation: "shim.convert.residue" });
 
@@ -156,6 +156,20 @@ export function residueKind(record: { type?: string; subtype?: string }): string
 }
 
 /**
+ * The per-process sequence behind a uuid-less record's residue key.
+ *
+ * MONOTONIC AND PROCESS-LOCAL: it names an occurrence, because a record with no
+ * identity has nothing else to be named by, and a shared counter would make two
+ * different unidentified records upsert over each other.
+ */
+let streamResidueSequence = 0;
+
+function nextStreamResidue(): number {
+  streamResidueSequence += 1;
+  return streamResidueSequence;
+}
+
+/**
  * Wrap one residue as a row.
  *
  * Residue has NO BOOK — that is what makes it unserved — so `agentId` here is
@@ -168,11 +182,22 @@ export function residueEntry(
   discriminator: string,
 ): PersistEntry {
   const record = message as { uuid?: string; type?: string; subtype?: string };
-  const vendorUuid = record.uuid ?? `residue:${residueKind(record)}`;
+  // THE KEY IS THE RECORD'S OWN UUID (ruling, landing 5): both planes convert
+  // the same transcript line, and write_id dedup collapses them into one row
+  // only when the key bytes match.
+  const vendorUuid = record.uuid ?? "";
+  const upsertKey =
+    vendorUuid === "" ? streamResidueUpsertKey(nextStreamResidue()) : residueUpsertKey(vendorUuid);
+  if (vendorUuid === "") {
+    LOGGER.log(
+      { level: "warn", kind: residueKind(record), upsert_key: upsertKey },
+      "the vendor stated no uuid for this record; its residue is keyed by this process's own stream sequence",
+    );
+  }
   return {
     agentId: context.mainAgentId,
-    upsertKey: residueUpsertKey(residueKind(record), vendorUuid),
-    source: { vendorUuid, discriminator },
+    upsertKey,
+    source: { vendorUuid: vendorUuid === "" ? upsertKey : vendorUuid, discriminator },
     // RESIDUE IS ALREADY UNSERVED. Marking it keep-alive as well would put it
     // under the keepalive arm and lose which of the four reasons it is unserved
     // for, which is the whole information the arm carries.
