@@ -56,15 +56,77 @@ Rotates on restart within one session; fault windows scope to it."
            :config-dir (agent-repl-wire--decode-string
                         "HostVendorClaude" 'configDir object)))))
 
-(defun agent-repl-wire-decode-host-fault (value)
-  "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms)'."
+(defun agent-repl-wire-decode-host-fault-shim-start-failed (value)
+  "Decode HostFault's `shim_start_failed' kind arm from VALUE as a
+`SessionFaultShimStartFailed'."
+  (agent-repl-wire-decode-session-fault-shim-start-failed value))
+
+(defun agent-repl-wire-decode-host-fault-shim-died (value)
+  "Decode HostFault's `shim_died' kind arm from VALUE as a
+`SessionFaultShimDied'."
+  (agent-repl-wire-decode-session-fault-shim-died value))
+
+(defun agent-repl-wire-decode-host-fault-link-severed (value)
+  "Decode HostFault's `link_severed' kind arm from VALUE as a
+`SessionFaultLinkSevered'."
+  (agent-repl-wire-decode-session-fault-link-severed value))
+
+(defun agent-repl-wire-decode-host-fault-resume-failed (value)
+  "Decode HostFault's `resume_failed' kind arm from VALUE as a
+`SessionFaultResumeFailed'."
+  (agent-repl-wire-decode-session-fault-resume-failed value))
+
+(defun agent-repl-wire-decode-host-fault-bounce-died (value)
+  "Decode HostFault's `bounce_died' kind arm from VALUE as a
+`SessionFaultBounceDied'."
+  (agent-repl-wire-decode-session-fault-bounce-died value))
+
+(defun agent-repl-wire-decode-host-fault-bounce-unknown (value)
+  "Decode HostFault's `bounce_unknown' kind arm from VALUE as a
+`SessionFaultBounceUnknown'."
+  (agent-repl-wire-decode-session-fault-bounce-unknown value))
+
+(defun agent-repl-wire-decode-host-fault-classifier-failed (value)
+  "Decode HostFault's `classifier_failed' kind arm from VALUE as a
+`SessionFaultClassifierFailed'."
+  (agent-repl-wire-decode-session-fault-classifier-failed value))
+
+(defun agent-repl-wire-decode-host-fault-shim-reported (value)
+  "Decode HostFault's `shim_reported' kind arm from VALUE as a
+`SessionFaultShimReported'."
+  (agent-repl-wire-decode-session-fault-shim-reported value))
+
+(defun agent-repl-wire-decode-host-fault-kind (value)
+  "Decode HostFault's `kind' oneof from the object VALUE.
+THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
+it, so a fault with no kind is a contract breach rather than a prose-only
+fault the consumer would have to parse."
   (let ((object (agent-repl-wire--object "HostFault" value)))
-    (agent-repl-wire--check-keys "HostFault" object '(detail openedAtMs))
+    (agent-repl-wire--decode-oneof
+     "HostFault" 'kind object
+     '((shimStartFailed :shim-start-failed agent-repl-wire-decode-host-fault-shim-start-failed)
+       (shimDied :shim-died agent-repl-wire-decode-host-fault-shim-died)
+       (linkSevered :link-severed agent-repl-wire-decode-host-fault-link-severed)
+       (resumeFailed :resume-failed agent-repl-wire-decode-host-fault-resume-failed)
+       (bounceDied :bounce-died agent-repl-wire-decode-host-fault-bounce-died)
+       (bounceUnknown :bounce-unknown agent-repl-wire-decode-host-fault-bounce-unknown)
+       (classifierFailed :classifier-failed agent-repl-wire-decode-host-fault-classifier-failed)
+       (shimReported :shim-reported agent-repl-wire-decode-host-fault-shim-reported)))))
+
+(defun agent-repl-wire-decode-host-fault (value)
+  "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms :kind)'.
+The eight kinds are the session controller's own fault vocabulary, shared
+verbatim with SessionHealth's `SessionFault' — the stream reporting a
+fault never changes its class."
+  (let ((object (agent-repl-wire--object "HostFault" value)))
+    (agent-repl-wire--check-keys
+     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported))
     (agent-repl-wire--decoded
      "HostFault"
      (list :detail (agent-repl-wire--decode-string "HostFault" 'detail object)
            :opened-at-ms (agent-repl-wire--decode-int64
-                          "HostFault" 'openedAtMs object)))))
+                          "HostFault" 'openedAtMs object)
+           :kind (agent-repl-wire-decode-host-fault-kind object)))))
 
 (defun agent-repl-wire-decode-host-workspace-naming (value)
   "Decode VALUE as `HostWorkspaceNaming', a plist `(:slug :title)'.
@@ -433,9 +495,30 @@ A PATH, not an identity: the daemon normalizes it and mints the identity."
                        "RegisterWorkspaceSuccess" 'workspace object
                        #'agent-repl-wire-decode-register-workspace-success-workspace)))))
 
+(defun agent-repl-wire-decode-register-workspace-not-a-worktree (value)
+  "Decode VALUE as the empty message `RegisterWorkspaceNotAWorktree'.
+The dir exists but is not a git worktree the daemon can adopt."
+  (agent-repl-wire--decode-empty "RegisterWorkspaceNotAWorktree" value))
+
+(defun agent-repl-wire-decode-register-workspace-error-not-a-worktree (value)
+  "Decode RegisterWorkspaceError's `not_a_worktree' cause arm from VALUE."
+  (agent-repl-wire-decode-register-workspace-not-a-worktree value))
+
+(defun agent-repl-wire-decode-register-workspace-error-cause (value)
+  "Decode RegisterWorkspaceError's `cause' oneof from the object VALUE.
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((object (agent-repl-wire--object "RegisterWorkspaceError" value)))
+    (agent-repl-wire--check-keys "RegisterWorkspaceError" object '(notAWorktree))
+    (agent-repl-wire--decode-oneof
+     "RegisterWorkspaceError" 'cause object
+     '((notAWorktree :not-a-worktree agent-repl-wire-decode-register-workspace-error-not-a-worktree)))))
+
 (defun agent-repl-wire-decode-register-workspace-error (value)
-  "Decode VALUE as `RegisterWorkspaceError' — empty until arms are derived."
-  (agent-repl-wire--decode-empty "RegisterWorkspaceError" value))
+  "Decode VALUE as `RegisterWorkspaceError', a plist (:cause ONEOF)."
+  (agent-repl-wire--decoded
+   "RegisterWorkspaceError"
+   (list :cause (agent-repl-wire-decode-register-workspace-error-cause value))))
 
 (defun agent-repl-wire-decode-register-workspace-response-result (value)
   "Decode `RegisterWorkspaceResponse''s `result' oneof from the object VALUE."
@@ -473,9 +556,71 @@ A PATH, not an identity: the daemon normalizes it and mints the identity."
   "Decode VALUE as the empty message `SelectWorkspaceSuccess'."
   (agent-repl-wire--decode-empty "SelectWorkspaceSuccess" value))
 
+(defun agent-repl-wire-decode-select-workspace-unknown-workspace (value)
+  "Decode VALUE as the empty message `SelectWorkspaceUnknownWorkspace'.
+The workspace id is not in the daemon's registry."
+  (agent-repl-wire--decode-empty "SelectWorkspaceUnknownWorkspace" value))
+
+(defun agent-repl-wire-decode-select-workspace-workspace-ref-mismatch (value)
+  "Decode VALUE as `SelectWorkspaceWorkspaceRefMismatch', a plist (`:registry-
+dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((object (agent-repl-wire--object "SelectWorkspaceWorkspaceRefMismatch" value)))
+    (agent-repl-wire--check-keys "SelectWorkspaceWorkspaceRefMismatch" object '(registryDir))
+    (agent-repl-wire--decoded
+     "SelectWorkspaceWorkspaceRefMismatch"
+     (list :registry-dir (agent-repl-wire--decode-string
+                    "SelectWorkspaceWorkspaceRefMismatch" 'registryDir object)))))
+
+(defun agent-repl-wire-decode-select-workspace-transferring-away (value)
+  "Decode VALUE as `SelectWorkspaceTransferringAway', a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((object (agent-repl-wire--object "SelectWorkspaceTransferringAway" value)))
+    (agent-repl-wire--check-keys "SelectWorkspaceTransferringAway" object '(address))
+    (agent-repl-wire--decoded
+     "SelectWorkspaceTransferringAway"
+     (list :address (agent-repl-wire--decode-string
+                    "SelectWorkspaceTransferringAway" 'address object)))))
+
+(defun agent-repl-wire-decode-select-workspace-not-yet-adopted (value)
+  "Decode VALUE as the empty message `SelectWorkspaceNotYetAdopted'.
+A joining daemon has not finished adopting this workspace yet."
+  (agent-repl-wire--decode-empty "SelectWorkspaceNotYetAdopted" value))
+
+(defun agent-repl-wire-decode-select-workspace-error-unknown-workspace (value)
+  "Decode SelectWorkspaceError's `unknown_workspace' cause arm from VALUE."
+  (agent-repl-wire-decode-select-workspace-unknown-workspace value))
+
+(defun agent-repl-wire-decode-select-workspace-error-workspace-ref-mismatch (value)
+  "Decode SelectWorkspaceError's `workspace_ref_mismatch' cause arm from VALUE."
+  (agent-repl-wire-decode-select-workspace-workspace-ref-mismatch value))
+
+(defun agent-repl-wire-decode-select-workspace-error-transferring-away (value)
+  "Decode SelectWorkspaceError's `transferring_away' cause arm from VALUE."
+  (agent-repl-wire-decode-select-workspace-transferring-away value))
+
+(defun agent-repl-wire-decode-select-workspace-error-not-yet-adopted (value)
+  "Decode SelectWorkspaceError's `not_yet_adopted' cause arm from VALUE."
+  (agent-repl-wire-decode-select-workspace-not-yet-adopted value))
+
+(defun agent-repl-wire-decode-select-workspace-error-cause (value)
+  "Decode SelectWorkspaceError's `cause' oneof from the object VALUE.
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((object (agent-repl-wire--object "SelectWorkspaceError" value)))
+    (agent-repl-wire--check-keys "SelectWorkspaceError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (agent-repl-wire--decode-oneof
+     "SelectWorkspaceError" 'cause object
+     '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-select-workspace-error-unknown-workspace)
+       (workspaceRefMismatch :workspace-ref-mismatch agent-repl-wire-decode-select-workspace-error-workspace-ref-mismatch)
+       (transferringAway :transferring-away agent-repl-wire-decode-select-workspace-error-transferring-away)
+       (notYetAdopted :not-yet-adopted agent-repl-wire-decode-select-workspace-error-not-yet-adopted)))))
+
 (defun agent-repl-wire-decode-select-workspace-error (value)
-  "Decode VALUE as `SelectWorkspaceError' — empty until arms are derived."
-  (agent-repl-wire--decode-empty "SelectWorkspaceError" value))
+  "Decode VALUE as `SelectWorkspaceError', a plist (:cause ONEOF)."
+  (agent-repl-wire--decoded
+   "SelectWorkspaceError"
+   (list :cause (agent-repl-wire-decode-select-workspace-error-cause value))))
 
 (defun agent-repl-wire-decode-select-workspace-response-result (value)
   "Decode `SelectWorkspaceResponse''s `result' oneof from the object VALUE."
@@ -516,9 +661,94 @@ adopt verbs — so nothing in the request self-declares the caller's kind."
 Adoption is COMPLETE: re-subscribe the workspace's streams here now."
   (agent-repl-wire--decode-empty "AdoptHostWorkspaceSuccess" value))
 
+(defun agent-repl-wire-decode-adopt-host-workspace-unknown-workspace (value)
+  "Decode VALUE as the empty message `AdoptHostWorkspaceUnknownWorkspace'.
+The workspace id is not in the daemon's registry."
+  (agent-repl-wire--decode-empty "AdoptHostWorkspaceUnknownWorkspace" value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-workspace-ref-mismatch (value)
+  "Decode VALUE as `AdoptHostWorkspaceWorkspaceRefMismatch', a plist
+(`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((object (agent-repl-wire--object "AdoptHostWorkspaceWorkspaceRefMismatch" value)))
+    (agent-repl-wire--check-keys "AdoptHostWorkspaceWorkspaceRefMismatch" object '(registryDir))
+    (agent-repl-wire--decoded
+     "AdoptHostWorkspaceWorkspaceRefMismatch"
+     (list :registry-dir (agent-repl-wire--decode-string
+                    "AdoptHostWorkspaceWorkspaceRefMismatch" 'registryDir object)))))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-transferring-away (value)
+  "Decode VALUE as `AdoptHostWorkspaceTransferringAway', a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((object (agent-repl-wire--object "AdoptHostWorkspaceTransferringAway" value)))
+    (agent-repl-wire--check-keys "AdoptHostWorkspaceTransferringAway" object '(address))
+    (agent-repl-wire--decoded
+     "AdoptHostWorkspaceTransferringAway"
+     (list :address (agent-repl-wire--decode-string
+                    "AdoptHostWorkspaceTransferringAway" 'address object)))))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-not-yet-adopted (value)
+  "Decode VALUE as the empty message `AdoptHostWorkspaceNotYetAdopted'.
+A joining daemon has not finished adopting this workspace yet."
+  (agent-repl-wire--decode-empty "AdoptHostWorkspaceNotYetAdopted" value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-no-transfer-announced (value)
+  "Decode VALUE as the empty message `AdoptHostWorkspaceNoTransferAnnounced'.
+No transfer was announced for this workspace."
+  (agent-repl-wire--decode-empty "AdoptHostWorkspaceNoTransferAnnounced" value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-participant-not-expected (value)
+  "Decode VALUE as the empty message `AdoptHostWorkspaceParticipantNotExpected'.
+The caller's stream was not open at announcement."
+  (agent-repl-wire--decode-empty "AdoptHostWorkspaceParticipantNotExpected" value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-unknown-workspace (value)
+  "Decode AdoptHostWorkspaceError's `unknown_workspace' cause arm from VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-unknown-workspace value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-workspace-ref-mismatch (value)
+  "Decode AdoptHostWorkspaceError's `workspace_ref_mismatch' cause arm from
+VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-workspace-ref-mismatch value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-transferring-away (value)
+  "Decode AdoptHostWorkspaceError's `transferring_away' cause arm from VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-transferring-away value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-not-yet-adopted (value)
+  "Decode AdoptHostWorkspaceError's `not_yet_adopted' cause arm from VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-not-yet-adopted value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-no-transfer-announced (value)
+  "Decode AdoptHostWorkspaceError's `no_transfer_announced' cause arm from
+VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-no-transfer-announced value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-participant-not-expected (value)
+  "Decode AdoptHostWorkspaceError's `participant_not_expected' cause arm from
+VALUE."
+  (agent-repl-wire-decode-adopt-host-workspace-participant-not-expected value))
+
+(defun agent-repl-wire-decode-adopt-host-workspace-error-cause (value)
+  "Decode AdoptHostWorkspaceError's `cause' oneof from the object VALUE.
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((object (agent-repl-wire--object "AdoptHostWorkspaceError" value)))
+    (agent-repl-wire--check-keys "AdoptHostWorkspaceError" object '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noTransferAnnounced participantNotExpected))
+    (agent-repl-wire--decode-oneof
+     "AdoptHostWorkspaceError" 'cause object
+     '((unknownWorkspace :unknown-workspace agent-repl-wire-decode-adopt-host-workspace-error-unknown-workspace)
+       (workspaceRefMismatch :workspace-ref-mismatch agent-repl-wire-decode-adopt-host-workspace-error-workspace-ref-mismatch)
+       (transferringAway :transferring-away agent-repl-wire-decode-adopt-host-workspace-error-transferring-away)
+       (notYetAdopted :not-yet-adopted agent-repl-wire-decode-adopt-host-workspace-error-not-yet-adopted)
+       (noTransferAnnounced :no-transfer-announced agent-repl-wire-decode-adopt-host-workspace-error-no-transfer-announced)
+       (participantNotExpected :participant-not-expected agent-repl-wire-decode-adopt-host-workspace-error-participant-not-expected)))))
+
 (defun agent-repl-wire-decode-adopt-host-workspace-error (value)
-  "Decode VALUE as `AdoptHostWorkspaceError' — empty until arms are derived."
-  (agent-repl-wire--decode-empty "AdoptHostWorkspaceError" value))
+  "Decode VALUE as `AdoptHostWorkspaceError', a plist (:cause ONEOF)."
+  (agent-repl-wire--decoded
+   "AdoptHostWorkspaceError"
+   (list :cause (agent-repl-wire-decode-adopt-host-workspace-error-cause value))))
 
 (defun agent-repl-wire-decode-adopt-host-workspace-response-result (value)
   "Decode `AdoptHostWorkspaceResponse''s `result' oneof from the object VALUE."
@@ -538,7 +768,8 @@ Adoption is COMPLETE: re-subscribe the workspace's streams here now."
 ;;;; ---- WatchDaemon ----
 
 (defun agent-repl-wire-encode-watch-daemon-request (value)
-  "Encode the WatchDaemonRequest from VALUE — empty: the stream is daemon-scoped."
+  "Encode the WatchDaemonRequest from VALUE — empty: the stream is daemon-
+scoped."
   (agent-repl-wire--encoded
    "WatchDaemonRequest" (agent-repl-wire--encode-empty "WatchDaemonRequest" value)))
 
