@@ -4,9 +4,14 @@
 
 - Branch `overhaul/shim`, worktree `~/.config/doom-overhaul/shim`. Last code
   commit: `ba1281377` (merge of remediation #1); this file's commit is the tip.
-- No shim agent worktrees or branches remain; no agents are running. One
-  uncommitted scratch file (`test/integration/zz-fm.test.ts`, remediation #1's
-  fast-mode probe) was discarded with its worktree.
+- No shim agent worktrees or branches remain; no agents are running.
+  INCIDENT, recorded for the resumption: remediation #1 was still ALIVE at
+  the first "no agents running" report — the lead had judged it dead after
+  two silent days and force-removed its worktree mid-run (it re-anchored the
+  identical branch and later stopped cleanly on order). Lesson: verify a
+  silent agent with a message round-trip before reaping its worktree. One
+  uncommitted scratch file (`test/integration/zz-fm.test.ts`) was discarded
+  with the first removal.
 - Verified AT THE TIP: `npm run typecheck` clean; `npm test` 89 files /
   2270 tests green; `npm run build` green; `npm run smoke` green (real --fake
   StartSession). Every test environment exports
@@ -76,6 +81,16 @@
       TEST-VS-DESIGN CONTRADICTION — "a fresh session's opening page is
       EMPTY" vs R15 (the prompt row is durable before the page is read, so
       the page contains it): needs a lead ruling at resumption.
+
+## Post-merge individual integration verdicts (remediation #1, at its tip)
+
+- PASS individually: `!fault-converter` + recovery (bucket 3a fix), `!model-fallback`
+  (3b), all three fast_mode arms (3c), and the keep-alive
+  "no keep-alive prompt appears in any page" test.
+- GetLiveWork-called-once FAILED on the 60 s harness spawn-wait flake only
+  (the test has no stream waits; bucket 1) — no code signal.
+- Never run (stopped by the wind-down): the second keep-alive test (the
+  rewind/yield assertion) and `!context-tip`.
 
 ## Remediation #2 — full queued scope (NOT dispatched; opus-low when resumed)
 
