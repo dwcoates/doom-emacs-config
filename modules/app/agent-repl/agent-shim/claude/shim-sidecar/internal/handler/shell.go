@@ -168,7 +168,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 // staleness policy in the root package, never inferred here.
 func (h *ShellOutputHandler) Lost(ctx *Context, reason convert.LostReason) *storev1.StoreEntry {
 	at := attribute(ctx, ctx.BytesObserved)
-	return h.conv.BashLost(at, ctx.RunActivityID, string(h.seen), h.omitted, reason)
+	return h.conv.BashLost(at, ctx.RunActivityID, string(h.seen), h.omitted, reason, h.read)
 }
 
 // rememberCoords records where this handler has read to, so a terminal the

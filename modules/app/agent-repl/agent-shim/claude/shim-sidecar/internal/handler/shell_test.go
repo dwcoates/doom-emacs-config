@@ -325,3 +325,73 @@ func TestAMarkerOpeningAMidLineBatchIsNotTrusted(t *testing.T) {
 		}
 	}
 }
+
+// ---- a terminal for a spool this handler never read ----
+
+func TestATerminalForANeverReadSpoolIsStillMinted(t *testing.T) {
+	// Arrange. A REFUSED TERMINAL IS A RUN LEFT OPEN FOREVER in every reader
+	// downstream, which is strictly worse than a terminal that honestly says it
+	// saw nothing — and refusing is what made the swept_up conclusion, whose
+	// whole premise is a spool nobody ever read, unstatable.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostSweptUp))
+
+	// Assert.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1: a run concluded LOST owes a terminal even when its spool was never read", len(entries))
+	}
+}
+
+func TestATerminalForANeverReadSpoolStatesNotObserved(t *testing.T) {
+	// Arrange. The handler holds no bytes, so it may not claim the command
+	// printed nothing.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostSweptUp))
+
+	// Assert.
+	output := entries[0].GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
+	if output.GetNotObserved() == nil {
+		t.Fatalf("output = %v, want not_observed for a spool this handler never read", output)
+	}
+}
+
+func TestTwoNeverReadSpoolsMintDistinctTerminalWriteIds(t *testing.T) {
+	// Arrange. Both handlers have read nothing, so neither has a file position;
+	// their terminals are identified by their RUNS, or the store absorbs the
+	// second as a replay of the first and one run loses its terminal entirely.
+	first := NewShellOutputHandler(testLogger(t))
+	second := NewShellOutputHandler(testLogger(t))
+
+	// Act.
+	a := first.LostTerminal("b1", "toolu_run_one", "owner-agent", string(convert.LostSweptUp))
+	b := second.LostTerminal("b2", "toolu_run_two", "owner-agent", string(convert.LostSweptUp))
+
+	// Assert.
+	if a[0].GetWriteId() == b[0].GetWriteId() {
+		t.Fatalf("two never-read runs minted the same terminal write id %q", a[0].GetWriteId())
+	}
+}
+
+func TestATerminalForAReadSpoolIsIdentifiedByTheFileItWasReadFrom(t *testing.T) {
+	// Arrange. A handler that DID read states the terminal at those coordinates,
+	// which are the same ones the cursor is stated in — so a re-read after a
+	// restart mints the identical id and the store absorbs the replay.
+	h := NewShellOutputHandler(testLogger(t))
+	ctx := spoolContext("/private/tmp/b1.output", "b1", "toolu_run")
+	h.Handle(spoolFrames("some output\n", 0), ctx)
+
+	// Act.
+	entries := h.LostTerminal("b1", "toolu_run", "owner-agent", string(convert.LostWentSilent))
+
+	// Assert.
+	want := convert.WriteID(convert.Attribution{
+		FileID: ctx.FileID, Offset: ctx.BytesObserved,
+	}, "bash_terminal")
+	if got := entries[0].GetWriteId(); got != want {
+		t.Fatalf("write id = %q, want the digest of the coordinates it was read at (%q)", got, want)
+	}
+}

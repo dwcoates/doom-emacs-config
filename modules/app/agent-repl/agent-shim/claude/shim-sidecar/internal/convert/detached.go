@@ -92,10 +92,11 @@ func (c *Converter) BashExited(at Attribution, run, output string, omitted uint6
 // this reader's log. It is deliberately NOT `by_user` or `timed_out`: those name
 // decisions, and no decision was observed — which is exactly why `lost` draws as
 // its own word downstream and never as a cancel or a failure.
-func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason) *storev1.StoreEntry {
-	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
-		Log("the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm", reason)
-	return BashLostEntry(at, run, output, omitted, reason)
+func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64, reason LostReason, observed bool) *storev1.StoreEntry {
+	c.log.With(at.ctxWarn("bash-lost")).With(logging.Context{
+		ActivityID: run, UpsertKey: BashTerminalKey(run), Reason: string(reason),
+	}).Log("the detached run is LOST (%s); it resolves interrupted with cause=lost naming that arm, output_observed=%t", reason, observed)
+	return BashLostEntry(at, run, output, omitted, reason, observed)
 }
 
 // BashLostEntry is BashLost without a converter, for the staleness policy in the
@@ -104,12 +105,15 @@ func (c *Converter) BashLost(at Attribution, run, output string, omitted uint64,
 // THE WRITE IDENTITY IS STABLE FOR THE VERDICT: a run is lost once however many
 // sweeps observe it, so a re-emission is absorbed at the store rather than
 // appending a second terminal.
-func BashLostEntry(at Attribution, run, output string, omitted uint64, reason LostReason) *storev1.StoreEntry {
+func BashLostEntry(at Attribution, run, output string, omitted uint64, reason LostReason, observed bool) *storev1.StoreEntry {
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command: &conversationv1.AgentBashCommand{Line: at.TaskID},
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
-				Output: spoolOutput(output, omitted),
+				// A run concluded from the ABSENCE of a file states
+				// not_observed: we do not know what it printed, and "it printed
+				// nothing" would put words in its mouth.
+				Output: terminalOutput(output, omitted, observed),
 				Cause:  &conversationv1.AgentBashInterrupted_Lost{Lost: DetachedLostArm(reason)},
 			}},
 		}},
@@ -123,15 +127,18 @@ func BashLostEntry(at Attribution, run, output string, omitted uint64, reason Lo
 // evidence — a TaskStop result is a person's act, recorded by the vendor. It is
 // deliberately not `lost`: we did not stop seeing this run, we were told it was
 // stopped.
-func (c *Converter) BashCancelled(at Attribution, run, output string, omitted uint64, settledAtMs int64) *storev1.StoreEntry {
+func (c *Converter) BashCancelled(at Attribution, run, output string, omitted uint64, settledAtMs int64, observed bool) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("bash-cancelled")).With(logging.Context{ActivityID: run, UpsertKey: BashTerminalKey(run)}).
-		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user carrying the %d byte(s) it had produced", len(output))
+		Log("the detached run was stopped by a person; it resolves interrupted with cause=by_user, output_observed=%t carrying %d byte(s)", observed, len(output))
 	return BashRun(at, "bash_terminal", BashTerminalKey(run), run, &conversationv1.AgentBash{
 		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
 			Command:   &conversationv1.AgentBashCommand{Line: at.TaskID},
 			SettledAt: settledAt(settledAtMs),
 			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
-				Output: spoolOutput(output, omitted),
+				// A stop for a run whose spool was never readable states
+				// not_observed: the stop is evidence about the PERSON's
+				// decision, never about what the command printed.
+				Output: terminalOutput(output, omitted, observed),
 				Cause:  &conversationv1.AgentBashInterrupted_ByUser{ByUser: &conversationv1.AgentBashInterruptedByUser{}},
 			}},
 		}},
@@ -239,4 +246,30 @@ func spoolOutput(output string, omitted uint64) *conversationv1.AgentBashOutput 
 	return &conversationv1.AgentBashOutput{
 		Form: &conversationv1.AgentBashOutput_Text{Text: text},
 	}
+}
+
+// unobservedOutput states that the producer HOLDS NO BYTES for this run.
+//
+// IT IS A THIRD THING, not a spelling of empty. `text{stdout: "", whole{}}`
+// asserts that the command printed nothing — a claim about the COMMAND — and
+// `partial{bytes_omitted: 0}` asserts that nothing was cut, which is a claim
+// about the CARRIER. A run swept up at boot, or one whose spool was never
+// readable, supports neither: we do not know what it printed, and saying "it
+// printed nothing" would put words in its mouth. `not_observed` is the arm that
+// says exactly that, and the producer owes the reader the distinction.
+func unobservedOutput() *conversationv1.AgentBashOutput {
+	return &conversationv1.AgentBashOutput{
+		Form: &conversationv1.AgentBashOutput_NotObserved{
+			NotObserved: &conversationv1.AgentBashOutputNotObserved{},
+		},
+	}
+}
+
+// terminalOutput picks the arm a terminal owes: what the run said when the
+// producer READ it, and `not_observed` when it never did.
+func terminalOutput(output string, omitted uint64, observed bool) *conversationv1.AgentBashOutput {
+	if !observed {
+		return unobservedOutput()
+	}
+	return spoolOutput(output, omitted)
 }

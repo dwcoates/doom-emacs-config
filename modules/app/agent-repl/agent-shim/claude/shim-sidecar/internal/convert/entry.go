@@ -79,6 +79,21 @@ type Attribution struct {
 	// transcript. It never crosses the contract; it is logging and owner
 	// resolution only.
 	TaskID string
+
+	// WriteScope is an alternative identity for the write, used when the record
+	// has NO FILE POSITION at all.
+	//
+	// A TERMINAL THE READER INFERRED IS THE ONLY SUCH RECORD. A run swept up at
+	// boot, or one whose spool was never readable, is concluded from the
+	// ABSENCE of a file rather than from a byte in one — so there is no file id
+	// and no offset to digest, and every such terminal would otherwise share
+	// one write identity and absorb its siblings at the store. Its identity is
+	// therefore scoped to the RUN, which is unique by construction and is
+	// already what its upsert key names.
+	//
+	// It is deliberately NOT a fallback for a record that was read off a file:
+	// FileID wins whenever it is set, and a record with neither is a defect.
+	WriteScope string
 }
 
 // ctxFor is the CORRELATION BASE every log record in this package starts from.
@@ -136,12 +151,23 @@ func (at Attribution) ctxError(operation string) logging.Context {
 // quietly digesting an empty string, which would collapse every file's records
 // onto one identity space keyed only by offset.
 func writeID(at Attribution, discriminator string) string {
-	if at.FileID == "" {
-		panic("convert: write_id requires the file's dev:inode identity; the reader supplied none")
+	if at.FileID != "" {
+		sum := sha256.Sum256([]byte(Producer + "|" + at.FileID + "|" + strconv.FormatInt(at.Offset, 10) + "|" + discriminator))
+		return hex.EncodeToString(sum[:])
 	}
-	sum := sha256.Sum256([]byte(Producer + "|" + at.FileID + "|" + strconv.FormatInt(at.Offset, 10) + "|" + discriminator))
-	return hex.EncodeToString(sum[:])
+	if at.WriteScope != "" {
+		// A record with no file position — an inferred terminal — is identified
+		// by its run instead. The offset is deliberately absent rather than
+		// zero: there is no position, and digesting one would claim there was.
+		sum := sha256.Sum256([]byte(Producer + "|" + at.WriteScope + "|" + discriminator))
+		return hex.EncodeToString(sum[:])
+	}
+	panic("convert: write_id requires either the file's dev:inode identity or a run-scoped WriteScope; the reader supplied neither")
 }
+
+// RunScope spells the WriteScope of a record inferred ABOUT a run rather than
+// read out of a file, so the spelling lives in one place.
+func RunScope(run string) string { return "run:" + run }
 
 // WriteID exposes the write-identity recipe so tests can assert determinism
 // against the rule rather than against a recorded digest.
