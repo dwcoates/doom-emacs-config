@@ -2324,6 +2324,78 @@ on SelectWorkspace and re-pushes the roster."
         (should (equal (length cancelled)
                        (length agent-repl-status-blink-schedule)))))))
 
+
+;;;; ---- Following the roster's attention marker -------------------------
+
+(defmacro agent-repl-test-status--syncing-attention (attention &rest body)
+  "Run BODY with a one-row roster walk whose row's attention is ATTENTION."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-roster-walk)
+              (lambda (_roster) (list (list :row (list :attention ,attention)))))
+             ((symbol-function 'agent-repl-roster-row-id) (lambda (_row) "id-alpha"))
+             ((symbol-function 'agent-repl--ws-by-ref-id) (lambda (_id) "alpha"))
+             ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
+             ((symbol-function 'agent-repl--cancel-timer-key) #'ignore))
+     ,@body))
+
+(ert-deftest agent-repl-test-status-an-arriving-marker-blinks ()
+  "A marker that ARRIVES runs the canonical cadence — the cadence IS
+blink-then-steady, stated on frontend.v1 RosterRowAttention at the marker."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--marker-on (make-hash-table :test 'equal))
+          (blinked nil))
+      (agent-repl-test-status--syncing-attention t
+        (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
+                   (lambda (ws) (push ws blinked))))
+          ;; Act
+          (agent-repl-status-sync-attention 'roster)))
+      ;; Assert
+      (should (equal blinked '("alpha"))))))
+
+(ert-deftest agent-repl-test-status-a-persisting-marker-does-not-re-blink ()
+  "A marker still standing across a re-push is left alone: re-blinking
+would blink at the daemon's push rate rather than the notification's."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--marker-on (make-hash-table :test 'equal))
+          (blinked nil))
+      (puthash "alpha" t agent-repl-status--marker-on)
+      (agent-repl-test-status--syncing-attention t
+        (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
+                   (lambda (ws) (push ws blinked))))
+          ;; Act
+          (agent-repl-status-sync-attention 'roster)))
+      ;; Assert
+      (should-not blinked))))
+
+(ert-deftest agent-repl-test-status-an-arriving-marker-is-visible-before-its-first-step ()
+  "The marker is recorded BEFORE the cadence is armed, so a push landing
+between the arming and the 0 ms step cannot restart the blink."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--marker-on (make-hash-table :test 'equal)))
+      (agent-repl-test-status--syncing-attention t
+        (cl-letf (((symbol-function 'agent-repl-status-blink-tab) #'ignore))
+          ;; Act
+          (agent-repl-status-sync-attention 'roster)))
+      ;; Assert
+      (should (agent-repl-status-attention-visible-p "alpha")))))
+
+(ert-deftest agent-repl-test-status-a-departed-marker-is-cleared ()
+  "A row that arrives WITHOUT the marker retracts it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-status--marker-on (make-hash-table :test 'equal)))
+      (puthash "alpha" t agent-repl-status--marker-on)
+      (agent-repl-test-status--syncing-attention nil
+        (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
+                   (lambda (&rest _) (error "a departed marker must not blink"))))
+          ;; Act
+          (agent-repl-status-sync-attention 'roster)))
+      ;; Assert
+      (should-not (agent-repl-status-attention-visible-p "alpha")))))
+
 ;;;; ---- The paint -------------------------------------------------------
 
 (ert-deftest agent-repl-test-status-display-state-is-the-arm-with-panels-open ()

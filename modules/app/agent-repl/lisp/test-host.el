@@ -94,7 +94,7 @@
   "W2-B surface calls, newest first: `(NAME . ARGS)'.")
 
 (defvar agent-repl-test-host--notifications nil
-  "Desktop notifications posted, newest first: `(WS TITLE MESSAGE)'.")
+  "Desktop notifications posted, newest first: `(WS TITLE MESSAGE ACTIVATE)'.")
 
 (defvar agent-repl-test-host--focused nil
   "What the stubbed `agent-repl--emacs-focused-p' answers.")
@@ -180,8 +180,9 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl--emacs-focused-p)
                 (lambda (&optional _ws) agent-repl-test-host--focused))
                ((symbol-function 'agent-repl--notify)
-                (lambda (ws title message)
-                  (push (list ws title message) agent-repl-test-host--notifications)))
+                (lambda (ws title message &optional activate)
+                  (push (list ws title message activate)
+                        agent-repl-test-host--notifications)))
                ((symbol-function 'agent-repl-status-blink-tab)
                 (lambda (ws) (push (cons :blink ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-frontend-reload-webview)
@@ -592,7 +593,7 @@ unary rpc can produce, which the contract never collapses into one."
     (agent-repl-test-host--push
      "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
     ;; Assert
-    (should (equal (car agent-repl-test-host--notifications)
+    (should (equal (seq-take (car agent-repl-test-host--notifications) 3)
                    (list "ws-1" "ws-1" "the agent has a question")))))
 
 (ert-deftest agent-repl-test-host-notification-unfocused-does-not-blink ()
@@ -689,6 +690,50 @@ unary rpc can produce, which the contract never collapses into one."
                                       :value (list :tool-name "Bash")))))
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "tool=\"Bash\""))))
+
+(ert-deftest agent-repl-test-host-notification-carries-a-click-activation ()
+  "R-CLICK: the unfocused banner carries an activation, not a bare line."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
+    ;; Assert
+    (should (functionp (nth 3 (car agent-repl-test-host--notifications))))))
+
+(ert-deftest agent-repl-test-host-notification-activation-selects-this-workspace ()
+  "Running the activation selects the workspace the banner came from."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification :value (agent-repl-test-host--notification)))
+    (let ((activated nil))
+      (cl-letf (((symbol-function 'agent-repl--notification-activate)
+                 (lambda (ws) (setq activated ws))))
+        ;; Act
+        (funcall (nth 3 (car agent-repl-test-host--notifications)))
+        ;; Assert
+        (should (equal activated "ws-1"))))))
+
+(ert-deftest agent-repl-test-host-question-ask-logs-its-header ()
+  "`question_asked' carries the question batch's own summary line into the
+log context, exactly as a permission ask carries its tool name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--focused nil)
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :notification
+                  :value (agent-repl-test-host--notification
+                          :kind (list :arm :question-asked
+                                      :value (list :header "Which approach?")))))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "header=\"Which approach?\""))))
 
 ;;;; ---- The handover ----
 
