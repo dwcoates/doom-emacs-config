@@ -4,9 +4,30 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"claude-repld/internal/gitclient"
 )
+
+// runTriggerThroughHandover starts Trigger, waits for every workspace's
+// adoption window and expires it, so a handover-shaped trigger reaches its
+// exit without anything being waited out.
+func runTriggerThroughHandover(t *testing.T, h *harness, workspaces int) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- h.c.Trigger(context.Background(), landed()) }()
+	for range workspaces {
+		h.clock.awaitArmed(t, adoptionWindow)
+	}
+	h.clock.Fire(adoptionWindow)
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Trigger never returned")
+		return nil
+	}
+}
 
 // landed is the two-commit range every trigger test classifies.
 func landed() []gitclient.Commit {
@@ -57,7 +78,7 @@ func TestADaemonChangeHandsOver(t *testing.T) {
 	h.git.paths = []string{ModuleRoot + "daemon/internal/server/api.go"}
 
 	// Act
-	if err := h.c.Trigger(context.Background(), landed()); err != nil {
+	if err := runTriggerThroughHandover(t, h, 1); err != nil {
 		t.Fatalf("Trigger: %v", err)
 	}
 
@@ -78,7 +99,7 @@ func TestACombinedDaemonAndWebappChangeHandsOverAndPushesNoReload(t *testing.T) 
 	}
 
 	// Act
-	if err := h.c.Trigger(context.Background(), landed()); err != nil {
+	if err := runTriggerThroughHandover(t, h, 1); err != nil {
 		t.Fatalf("Trigger: %v", err)
 	}
 
