@@ -43,6 +43,10 @@ type Git interface {
 	// The outcome is an ANSWER: Landed with the merge commit, or Conflicted
 	// with the conflicted files.
 	MergeNoFF(ctx context.Context, targetDir, sourceBranch, message string) (MergeOutcome, error)
+	// Commit records the staged index as a commit and answers its full sha.
+	// It is how a RESOLVED conflict is completed: the resolution flow leaves
+	// the merge's index staged, and this is the one call that closes it.
+	Commit(ctx context.Context, dir, message string) (string, error)
 	// ConflictedFiles lists the paths currently in conflict.
 	ConflictedFiles(ctx context.Context, dir string) ([]string, error)
 	// AbortMerge aborts an in-progress merge.

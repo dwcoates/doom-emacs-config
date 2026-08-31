@@ -335,6 +335,28 @@ func (c *client) MergeNoFF(ctx context.Context, targetDir, sourceBranch, message
 	return MergeOutcome{Conflicted: conflicted}, nil
 }
 
+// Commit records whatever is staged as a commit and answers its full sha.
+// `--no-edit` keeps git from opening an editor on a merge's prepared message,
+// and `-m` supplies the message the caller composed; the sha is read back with
+// a separate `rev-parse HEAD` rather than parsed out of commit's own chatter,
+// whose shape is porcelain and not a contract.
+func (c *client) Commit(ctx context.Context, dir, message string) (string, error) {
+	const operation = "daemon.gitclient.commit"
+
+	if _, err := c.run(ctx, operation, dir, "commit", "--no-edit", "-m", message); err != nil {
+		return "", err
+	}
+	sha, err := c.run(ctx, operation, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	c.log.Global().Debug(operation, "the staged index was recorded as a commit", dlog.Context{
+		"dir": dir,
+		"sha": sha,
+	})
+	return sha, nil
+}
+
 // ConflictedFiles lists the paths currently in conflict. `-z` is not a detail:
 // without it git quotes and escapes paths with unusual bytes, and the caller
 // would hand a quoted path to a resolution agent as though it were a filename.

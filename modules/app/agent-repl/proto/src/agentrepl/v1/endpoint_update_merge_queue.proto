@@ -23,8 +23,18 @@ message UpdateMergeQueueRequest {
     UpdateMergeQueueEvict evict = 3;
   }
 }
-message UpdateMergeQueuePause {}
-message UpdateMergeQueueResume {}
+message UpdateMergeQueuePause {
+  // WHICH repository's queue. UNSET = every repository that has a queue
+  // (the daemon-wide switch). The queue is per repository, so a caller that
+  // means one names it (added 2026-08-29; the request carried no scope).
+  optional workspace.v1.RepositoryRef repository = 1;
+}
+message UpdateMergeQueueResume {
+  // WHICH repository's queue. UNSET = every repository that has a queue
+  // (the daemon-wide switch). The queue is per repository, so a caller that
+  // means one names it (added 2026-08-29; the request carried no scope).
+  optional workspace.v1.RepositoryRef repository = 1;
+}
 message UpdateMergeQueueEvict {
   // Whose merge to evict.
   workspace.v1.WorkspaceRef workspace = 1;
