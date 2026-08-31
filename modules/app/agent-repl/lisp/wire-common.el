@@ -158,6 +158,14 @@ both are honored here."
   (let ((raw (agent-repl-wire--raw object field)))
     (if (null raw) 0 (agent-repl-wire--parse-integer message-name field raw))))
 
+(defun agent-repl-wire--decode-int32 (message-name field object)
+  "Decode OBJECT's non-optional int32 FIELD of MESSAGE-NAME.
+protojson spells int32 as a number, but the same decimal-string spelling
+int64 uses is accepted rather than refused; an absent field is the proto3
+default 0, which protojson omits."
+  (let ((raw (agent-repl-wire--raw object field)))
+    (if (null raw) 0 (agent-repl-wire--parse-integer message-name field raw))))
+
 (defun agent-repl-wire--decode-optional-uint32 (message-name field object)
   "Decode OBJECT's optional uint32 FIELD of MESSAGE-NAME, nil when absent."
   (let ((raw (agent-repl-wire--raw object field)))
@@ -558,6 +566,78 @@ rather than sent for the daemon to reject."
   "Encode the WorkspacePriority oneof plist VALUE `(:arm :value)'."
   (agent-repl-wire--encoded
    "WorkspacePriority" (agent-repl-wire-encode-workspace-priority-level value)))
+
+;;;; ---- agentrepl.v1 SessionFault arm messages (shared leaf) ----
+;;
+;; The eight fault classes the session controller mints.  They are declared
+;; once in the proto and carried by TWO parents — `SessionFault' on the
+;; SessionHealth response (wire-verbs.el) and `HostFault' on the host stream
+;; (wire-host.el) — because a session's fault classes do not change with the
+;; stream that reports them.  Validation lives ONCE per message, so the base
+;; decoders live here, in the leaf both files already lean on; each parent
+;; keeps its own use-site wrappers and its own `kind' oneof decoder.
+
+(defun agent-repl-wire-decode-session-fault-shim-start-failed (value)
+  "Decode VALUE as `SessionFaultShimStartFailed', a plist (`:exit-code'
+`:stderr-tail')."
+  (let ((object (agent-repl-wire--object "SessionFaultShimStartFailed" value)))
+    (agent-repl-wire--check-keys "SessionFaultShimStartFailed" object '(exitCode stderrTail))
+    (agent-repl-wire--decoded
+     "SessionFaultShimStartFailed"
+     (list :exit-code (agent-repl-wire--decode-int32
+                    "SessionFaultShimStartFailed" 'exitCode object)
+           :stderr-tail (agent-repl-wire--decode-string
+                    "SessionFaultShimStartFailed" 'stderrTail object)))))
+
+(defun agent-repl-wire-decode-session-fault-shim-died (value)
+  "Decode VALUE as `SessionFaultShimDied', a plist (`:exit-code')."
+  (let ((object (agent-repl-wire--object "SessionFaultShimDied" value)))
+    (agent-repl-wire--check-keys "SessionFaultShimDied" object '(exitCode))
+    (agent-repl-wire--decoded
+     "SessionFaultShimDied"
+     (list :exit-code (agent-repl-wire--decode-int32
+                    "SessionFaultShimDied" 'exitCode object)))))
+
+(defun agent-repl-wire-decode-session-fault-link-severed (value)
+  "Decode VALUE as the empty message `SessionFaultLinkSevered'."
+  (agent-repl-wire--decode-empty "SessionFaultLinkSevered" value))
+
+(defun agent-repl-wire-decode-session-fault-resume-failed (value)
+  "Decode VALUE as `SessionFaultResumeFailed', a plist (`:cause')."
+  (let ((object (agent-repl-wire--object "SessionFaultResumeFailed" value)))
+    (agent-repl-wire--check-keys "SessionFaultResumeFailed" object '(cause))
+    (agent-repl-wire--decoded
+     "SessionFaultResumeFailed"
+     (list :cause (agent-repl-wire--decode-string
+                    "SessionFaultResumeFailed" 'cause object)))))
+
+(defun agent-repl-wire-decode-session-fault-bounce-died (value)
+  "Decode VALUE as the empty message `SessionFaultBounceDied'."
+  (agent-repl-wire--decode-empty "SessionFaultBounceDied" value))
+
+(defun agent-repl-wire-decode-session-fault-bounce-unknown (value)
+  "Decode VALUE as the empty message `SessionFaultBounceUnknown'."
+  (agent-repl-wire--decode-empty "SessionFaultBounceUnknown" value))
+
+(defun agent-repl-wire-decode-session-fault-classifier-failed (value)
+  "Decode VALUE as `SessionFaultClassifierFailed', a plist (`:detail')."
+  (let ((object (agent-repl-wire--object "SessionFaultClassifierFailed" value)))
+    (agent-repl-wire--check-keys "SessionFaultClassifierFailed" object '(detail))
+    (agent-repl-wire--decoded
+     "SessionFaultClassifierFailed"
+     (list :detail (agent-repl-wire--decode-string
+                    "SessionFaultClassifierFailed" 'detail object)))))
+
+(defun agent-repl-wire-decode-session-fault-shim-reported (value)
+  "Decode VALUE as `SessionFaultShimReported', a plist (`:component' `:kind')."
+  (let ((object (agent-repl-wire--object "SessionFaultShimReported" value)))
+    (agent-repl-wire--check-keys "SessionFaultShimReported" object '(component kind))
+    (agent-repl-wire--decoded
+     "SessionFaultShimReported"
+     (list :component (agent-repl-wire--decode-string
+                    "SessionFaultShimReported" 'component object)
+           :kind (agent-repl-wire--decode-string
+                    "SessionFaultShimReported" 'kind object)))))
 
 (provide 'wire-common)
 

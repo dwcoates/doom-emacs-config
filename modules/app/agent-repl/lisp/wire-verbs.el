@@ -65,6 +65,14 @@
 (declare-function agent-repl-wire-encode-drain-reason "agent-repl-wire-common" (reason))
 (declare-function agent-repl-wire-encode-workspace-priority "agent-repl-wire-common" (priority))
 (declare-function agent-repl-wire-decode-turn-id "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-shim-start-failed "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-shim-died "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-link-severed "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-resume-failed "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-bounce-died "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-bounce-unknown "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-classifier-failed "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-shim-reported "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
@@ -159,6 +167,20 @@ An absent field is the empty list, protojson's spelling of `no elements'."
     (cond
      ((null cell) nil)
      ((listp (cdr cell)) (mapcar decoder (cdr cell)))
+     (t (agent-repl-wire-verbs--fail message (symbol-name field) "not an array")))))
+
+(defun agent-repl-wire-verbs--decode-repeated-string (message field json)
+  "Decode the repeated string FIELD of MESSAGE out of JSON as a list.
+An absent field is the empty list, protojson's spelling of `no elements';
+a non-string element is a contract breach."
+  (let ((cell (assq field json)))
+    (cond
+     ((null cell) nil)
+     ((listp (cdr cell))
+      (dolist (element (cdr cell))
+        (unless (stringp element)
+          (agent-repl-wire-verbs--fail message (symbol-name field) "not a string")))
+      (append (cdr cell) nil))
      (t (agent-repl-wire-verbs--fail message (symbol-name field) "not an array")))))
 
 (defun agent-repl-wire-verbs--require (message field value)
@@ -260,7 +282,8 @@ oneof is a breach."
   (agent-repl-wire-encode-user-said said))
 
 (defun agent-repl-wire-encode-create-workspace-merge-actions-postprocessing-prompt (said)
-  "Encode CreateWorkspaceMergeActions's `postprocessing_prompt' use site from SAID."
+  "Encode CreateWorkspaceMergeActions's `postprocessing_prompt' use site from
+SAID."
   (agent-repl-wire-encode-user-said said))
 
 (defun agent-repl-wire-encode-create-workspace-merge-actions (value)
@@ -416,9 +439,127 @@ contract breach, not an empty success."
           (agent-repl-wire-decode-create-workspace-success-workspace
            (agent-repl-wire-verbs--require message "workspace" (cdr (assq 'workspace json)))))))
 
+(defun agent-repl-wire-decode-create-workspace-ungated-without-consent (json)
+  "Decode CreateWorkspaceUngatedWithoutConsent from JSON.  Empty: An ungated
+permission mode was asked for without the explicit consent."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUngatedWithoutConsent" json))
+
+(defun agent-repl-wire-decode-create-workspace-no-slug (json)
+  "Decode CreateWorkspaceNoSlug from JSON.  Empty: No slug could be derived for
+the workspace's branch and dir."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceNoSlug" json))
+
+(defun agent-repl-wire-decode-create-workspace-finish-required (json)
+  "Decode CreateWorkspaceFinishRequired from JSON.  Empty: A one-shot form
+arrived with no finish action chosen."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceFinishRequired" json))
+
+(defun agent-repl-wire-decode-create-workspace-finish-not-one-shot (json)
+  "Decode CreateWorkspaceFinishNotOneShot from JSON.  Empty: A finish action
+arrived on a form that is not one-shot."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceFinishNotOneShot" json))
+
+(defun agent-repl-wire-decode-create-workspace-fork-parent-has-no-conversation (json)
+  "Decode CreateWorkspaceForkParentHasNoConversation from JSON.  Empty: A fork
+was asked for from a parent that has no conversation to fork."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceForkParentHasNoConversation" json))
+
+(defun agent-repl-wire-decode-create-workspace-brief-missing (json)
+  "Decode CreateWorkspaceBriefMissing from JSON into a plist (`:name').
+The named brief file is absent."
+  (let ((message "CreateWorkspaceBriefMissing"))
+    (agent-repl-wire-verbs--check-keys message json '(name))
+    (list :name (agent-repl-wire-verbs--decode-string
+                       message 'name json))))
+
+(defun agent-repl-wire-decode-create-workspace-unknown-repository (json)
+  "Decode CreateWorkspaceUnknownRepository from JSON.  Empty: The repository
+the form names is not one the daemon knows."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUnknownRepository" json))
+
+(defun agent-repl-wire-decode-create-workspace-unknown-parent (json)
+  "Decode CreateWorkspaceUnknownParent from JSON.  Empty: The parent workspace
+is not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceUnknownParent" json))
+
+(defun agent-repl-wire-decode-create-workspace-base-ref-unresolved (json)
+  "Decode CreateWorkspaceBaseRefUnresolved from JSON into a plist (`:ref').
+The base ref does not resolve in the repository."
+  (let ((message "CreateWorkspaceBaseRefUnresolved"))
+    (agent-repl-wire-verbs--check-keys message json '(ref))
+    (list :ref (agent-repl-wire-verbs--decode-string
+                       message 'ref json))))
+
+(defun agent-repl-wire-decode-create-workspace-worktree-creation-failed (json)
+  "Decode CreateWorkspaceWorktreeCreationFailed from JSON into a plist
+(`:detail').
+Creating the worktree failed."
+  (let ((message "CreateWorkspaceWorktreeCreationFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string
+                       message 'detail json))))
+
+(defun agent-repl-wire-decode-create-workspace-error-ungated-without-consent (json)
+  "Decode CreateWorkspaceError's `ungated_without_consent' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-ungated-without-consent json))
+
+(defun agent-repl-wire-decode-create-workspace-error-no-slug (json)
+  "Decode CreateWorkspaceError's `no_slug' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-no-slug json))
+
+(defun agent-repl-wire-decode-create-workspace-error-finish-required (json)
+  "Decode CreateWorkspaceError's `finish_required' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-finish-required json))
+
+(defun agent-repl-wire-decode-create-workspace-error-finish-not-one-shot (json)
+  "Decode CreateWorkspaceError's `finish_not_one_shot' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-finish-not-one-shot json))
+
+(defun agent-repl-wire-decode-create-workspace-error-fork-parent-has-no-conversation (json)
+  "Decode CreateWorkspaceError's `fork_parent_has_no_conversation' cause arm
+from JSON."
+  (agent-repl-wire-decode-create-workspace-fork-parent-has-no-conversation json))
+
+(defun agent-repl-wire-decode-create-workspace-error-brief-missing (json)
+  "Decode CreateWorkspaceError's `brief_missing' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-brief-missing json))
+
+(defun agent-repl-wire-decode-create-workspace-error-unknown-repository (json)
+  "Decode CreateWorkspaceError's `unknown_repository' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-unknown-repository json))
+
+(defun agent-repl-wire-decode-create-workspace-error-unknown-parent (json)
+  "Decode CreateWorkspaceError's `unknown_parent' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-unknown-parent json))
+
+(defun agent-repl-wire-decode-create-workspace-error-base-ref-unresolved (json)
+  "Decode CreateWorkspaceError's `base_ref_unresolved' cause arm from JSON."
+  (agent-repl-wire-decode-create-workspace-base-ref-unresolved json))
+
+(defun agent-repl-wire-decode-create-workspace-error-worktree-creation-failed (json)
+  "Decode CreateWorkspaceError's `worktree_creation_failed' cause arm from
+JSON."
+  (agent-repl-wire-decode-create-workspace-worktree-creation-failed json))
+
 (defun agent-repl-wire-decode-create-workspace-error (json)
-  "Decode CreateWorkspaceError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "CreateWorkspaceError" json))
+  "Decode CreateWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "CreateWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(ungatedWithoutConsent noSlug finishRequired finishNotOneShot forkParentHasNoConversation briefMissing unknownRepository unknownParent baseRefUnresolved worktreeCreationFailed))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'ungatedWithoutConsent :ungated-without-consent #'agent-repl-wire-decode-create-workspace-error-ungated-without-consent)
+         (list 'noSlug :no-slug #'agent-repl-wire-decode-create-workspace-error-no-slug)
+         (list 'finishRequired :finish-required #'agent-repl-wire-decode-create-workspace-error-finish-required)
+         (list 'finishNotOneShot :finish-not-one-shot #'agent-repl-wire-decode-create-workspace-error-finish-not-one-shot)
+         (list 'forkParentHasNoConversation :fork-parent-has-no-conversation #'agent-repl-wire-decode-create-workspace-error-fork-parent-has-no-conversation)
+         (list 'briefMissing :brief-missing #'agent-repl-wire-decode-create-workspace-error-brief-missing)
+         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-create-workspace-error-unknown-repository)
+         (list 'unknownParent :unknown-parent #'agent-repl-wire-decode-create-workspace-error-unknown-parent)
+         (list 'baseRefUnresolved :base-ref-unresolved #'agent-repl-wire-decode-create-workspace-error-base-ref-unresolved)
+         (list 'worktreeCreationFailed :worktree-creation-failed #'agent-repl-wire-decode-create-workspace-error-worktree-creation-failed))))))
 
 (defun agent-repl-wire-decode-create-workspace-response-success (json)
   "Decode CreateWorkspaceResponse's `success' arm from JSON."
@@ -454,9 +595,101 @@ contract breach, not an empty success."
   "Decode OpenWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
   (agent-repl-wire-verbs--decode-empty "OpenWorkspaceSuccess" json))
 
+(defun agent-repl-wire-decode-open-workspace-unknown-workspace (json)
+  "Decode OpenWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-open-workspace-workspace-ref-mismatch (json)
+  "Decode OpenWorkspaceWorkspaceRefMismatch from JSON into a plist (`:registry-
+dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "OpenWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-open-workspace-transferring-away (json)
+  "Decode OpenWorkspaceTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "OpenWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-open-workspace-not-yet-adopted (json)
+  "Decode OpenWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-open-workspace-session-deleted (json)
+  "Decode OpenWorkspaceSessionDeleted from JSON.  Empty: The workspace's
+session has been deleted and cannot be reopened."
+  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceSessionDeleted" json))
+
+(defun agent-repl-wire-decode-open-workspace-transcript-missing (json)
+  "Decode OpenWorkspaceTranscriptMissing from JSON into a plist (`:vendor-
+session-id' `:searched-paths').
+The vendor transcript to resume from is nowhere on disk."
+  (let ((message "OpenWorkspaceTranscriptMissing"))
+    (agent-repl-wire-verbs--check-keys message json '(vendorSessionId searchedPaths))
+    (list :vendor-session-id (agent-repl-wire-verbs--decode-string
+                       message 'vendorSessionId json)
+          :searched-paths (agent-repl-wire-verbs--decode-repeated-string
+                       message 'searchedPaths json))))
+
+(defun agent-repl-wire-decode-open-workspace-spawn-failed (json)
+  "Decode OpenWorkspaceSpawnFailed from JSON into a plist (`:detail').
+Spawning the session's shim failed."
+  (let ((message "OpenWorkspaceSpawnFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string
+                       message 'detail json))))
+
+(defun agent-repl-wire-decode-open-workspace-error-unknown-workspace (json)
+  "Decode OpenWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-open-workspace-error-workspace-ref-mismatch (json)
+  "Decode OpenWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-open-workspace-error-transferring-away (json)
+  "Decode OpenWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-open-workspace-error-not-yet-adopted (json)
+  "Decode OpenWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-open-workspace-error-session-deleted (json)
+  "Decode OpenWorkspaceError's `session_deleted' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-session-deleted json))
+
+(defun agent-repl-wire-decode-open-workspace-error-transcript-missing (json)
+  "Decode OpenWorkspaceError's `transcript_missing' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-transcript-missing json))
+
+(defun agent-repl-wire-decode-open-workspace-error-spawn-failed (json)
+  "Decode OpenWorkspaceError's `spawn_failed' cause arm from JSON."
+  (agent-repl-wire-decode-open-workspace-spawn-failed json))
+
 (defun agent-repl-wire-decode-open-workspace-error (json)
-  "Decode OpenWorkspaceError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "OpenWorkspaceError" json))
+  "Decode OpenWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "OpenWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted sessionDeleted transcriptMissing spawnFailed))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-open-workspace-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-open-workspace-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-open-workspace-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-open-workspace-error-not-yet-adopted)
+         (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-open-workspace-error-session-deleted)
+         (list 'transcriptMissing :transcript-missing #'agent-repl-wire-decode-open-workspace-error-transcript-missing)
+         (list 'spawnFailed :spawn-failed #'agent-repl-wire-decode-open-workspace-error-spawn-failed))))))
 
 (defun agent-repl-wire-decode-open-workspace-response-success (json)
   "Decode OpenWorkspaceResponse's `success' arm from JSON."
@@ -489,29 +722,76 @@ contract breach, not an empty success."
                                                 (plist-get request :workspace))))))
 
 (defun agent-repl-wire-decode-close-workspace-success (json)
-  "Decode CloseWorkspaceSuccess from JSON.  Empty: quiet, so the close happened."
+  "Decode CloseWorkspaceSuccess from JSON.  Empty: quiet, so the close
+happened."
   (agent-repl-wire-verbs--decode-empty "CloseWorkspaceSuccess" json))
 
 (defun agent-repl-wire-decode-close-workspace-blocked (json)
-  "Decode CloseWorkspaceBlocked from JSON.
-Empty on purpose: the reasons are pushed on the footer stream, so this
-refusal never restates them."
+  "Decode CloseWorkspaceBlocked from JSON.  Empty: Work is in flight; the
+footer's close-blocked state carries the reasons."
   (agent-repl-wire-verbs--decode-empty "CloseWorkspaceBlocked" json))
+
+(defun agent-repl-wire-decode-close-workspace-unknown-workspace (json)
+  "Decode CloseWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-close-workspace-workspace-ref-mismatch (json)
+  "Decode CloseWorkspaceWorkspaceRefMismatch from JSON into a plist
+(`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "CloseWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-close-workspace-transferring-away (json)
+  "Decode CloseWorkspaceTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "CloseWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-close-workspace-not-yet-adopted (json)
+  "Decode CloseWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceNotYetAdopted" json))
 
 (defun agent-repl-wire-decode-close-workspace-error-blocked (json)
   "Decode CloseWorkspaceError's `blocked' cause arm from JSON."
   (agent-repl-wire-decode-close-workspace-blocked json))
 
+(defun agent-repl-wire-decode-close-workspace-error-unknown-workspace (json)
+  "Decode CloseWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-close-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-close-workspace-error-workspace-ref-mismatch (json)
+  "Decode CloseWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-close-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-close-workspace-error-transferring-away (json)
+  "Decode CloseWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-close-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-close-workspace-error-not-yet-adopted (json)
+  "Decode CloseWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-close-workspace-not-yet-adopted json))
+
 (defun agent-repl-wire-decode-close-workspace-error (json)
   "Decode CloseWorkspaceError from JSON into (:cause (:arm ARM :value V)).
-The cause oneof is the refusal, so an unset cause is a contract breach."
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
   (let ((message "CloseWorkspaceError"))
-    (agent-repl-wire-verbs--check-keys message json '(blocked))
+    (agent-repl-wire-verbs--check-keys message json '(blocked unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
-           (list (list 'blocked :blocked
-                       #'agent-repl-wire-decode-close-workspace-error-blocked))))))
+           (list (list 'blocked :blocked #'agent-repl-wire-decode-close-workspace-error-blocked)
+         (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-close-workspace-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-close-workspace-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-close-workspace-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-close-workspace-error-not-yet-adopted))))))
 
 (defun agent-repl-wire-decode-close-workspace-response-success (json)
   "Decode CloseWorkspaceResponse's `success' arm from JSON."
@@ -547,9 +827,62 @@ The cause oneof is the refusal, so an unset cause is a contract breach."
   "Decode KillWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
   (agent-repl-wire-verbs--decode-empty "KillWorkspaceSuccess" json))
 
+(defun agent-repl-wire-decode-kill-workspace-unknown-workspace (json)
+  "Decode KillWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "KillWorkspaceUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-kill-workspace-workspace-ref-mismatch (json)
+  "Decode KillWorkspaceWorkspaceRefMismatch from JSON into a plist (`:registry-
+dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "KillWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-kill-workspace-transferring-away (json)
+  "Decode KillWorkspaceTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "KillWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-kill-workspace-not-yet-adopted (json)
+  "Decode KillWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "KillWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-kill-workspace-error-unknown-workspace (json)
+  "Decode KillWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-kill-workspace-error-workspace-ref-mismatch (json)
+  "Decode KillWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-kill-workspace-error-transferring-away (json)
+  "Decode KillWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-kill-workspace-error-not-yet-adopted (json)
+  "Decode KillWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-kill-workspace-not-yet-adopted json))
+
 (defun agent-repl-wire-decode-kill-workspace-error (json)
-  "Decode KillWorkspaceError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "KillWorkspaceError" json))
+  "Decode KillWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "KillWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-kill-workspace-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-kill-workspace-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-kill-workspace-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-kill-workspace-error-not-yet-adopted))))))
 
 (defun agent-repl-wire-decode-kill-workspace-response-success (json)
   "Decode KillWorkspaceResponse's `success' arm from JSON."
@@ -585,9 +918,75 @@ The cause oneof is the refusal, so an unset cause is a contract breach."
   "Decode NukeWorkspaceSuccess from JSON.  Empty: the effects ride the streams."
   (agent-repl-wire-verbs--decode-empty "NukeWorkspaceSuccess" json))
 
+(defun agent-repl-wire-decode-nuke-workspace-unknown-workspace (json)
+  "Decode NukeWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "NukeWorkspaceUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-nuke-workspace-workspace-ref-mismatch (json)
+  "Decode NukeWorkspaceWorkspaceRefMismatch from JSON into a plist (`:registry-
+dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "NukeWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-nuke-workspace-transferring-away (json)
+  "Decode NukeWorkspaceTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "NukeWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-nuke-workspace-not-yet-adopted (json)
+  "Decode NukeWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "NukeWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-nuke-workspace-git-failed (json)
+  "Decode NukeWorkspaceGitFailed from JSON into a plist (`:detail').
+A git operation failed mid-delete."
+  (let ((message "NukeWorkspaceGitFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string
+                       message 'detail json))))
+
+(defun agent-repl-wire-decode-nuke-workspace-error-unknown-workspace (json)
+  "Decode NukeWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-nuke-workspace-error-workspace-ref-mismatch (json)
+  "Decode NukeWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-nuke-workspace-error-transferring-away (json)
+  "Decode NukeWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-nuke-workspace-error-not-yet-adopted (json)
+  "Decode NukeWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-nuke-workspace-error-git-failed (json)
+  "Decode NukeWorkspaceError's `git_failed' cause arm from JSON."
+  (agent-repl-wire-decode-nuke-workspace-git-failed json))
+
 (defun agent-repl-wire-decode-nuke-workspace-error (json)
-  "Decode NukeWorkspaceError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "NukeWorkspaceError" json))
+  "Decode NukeWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "NukeWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted gitFailed))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-nuke-workspace-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-nuke-workspace-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-nuke-workspace-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-nuke-workspace-error-not-yet-adopted)
+         (list 'gitFailed :git-failed #'agent-repl-wire-decode-nuke-workspace-error-git-failed))))))
 
 (defun agent-repl-wire-decode-nuke-workspace-response-success (json)
   "Decode NukeWorkspaceResponse's `success' arm from JSON."
@@ -623,9 +1022,102 @@ The cause oneof is the refusal, so an unset cause is a contract breach."
   "Decode MergeWorkspaceSuccess from JSON.  Empty: success means ENQUEUED."
   (agent-repl-wire-verbs--decode-empty "MergeWorkspaceSuccess" json))
 
+(defun agent-repl-wire-decode-merge-workspace-unknown-workspace (json)
+  "Decode MergeWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-merge-workspace-workspace-ref-mismatch (json)
+  "Decode MergeWorkspaceWorkspaceRefMismatch from JSON into a plist
+(`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "MergeWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-merge-workspace-transferring-away (json)
+  "Decode MergeWorkspaceTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "MergeWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-merge-workspace-not-yet-adopted (json)
+  "Decode MergeWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-merge-workspace-no-layout-facts (json)
+  "Decode MergeWorkspaceNoLayoutFacts from JSON.  Empty: The daemon holds no
+layout facts for this workspace to merge with."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceNoLayoutFacts" json))
+
+(defun agent-repl-wire-decode-merge-workspace-session-deleted (json)
+  "Decode MergeWorkspaceSessionDeleted from JSON.  Empty: The workspace's
+session has been deleted."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceSessionDeleted" json))
+
+(defun agent-repl-wire-decode-merge-workspace-already-queued (json)
+  "Decode MergeWorkspaceAlreadyQueued from JSON.  Empty: This workspace's merge
+is already in the queue."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceAlreadyQueued" json))
+
+(defun agent-repl-wire-decode-merge-workspace-already-merging (json)
+  "Decode MergeWorkspaceAlreadyMerging from JSON.  Empty: This workspace's
+merge is already in flight."
+  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceAlreadyMerging" json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-unknown-workspace (json)
+  "Decode MergeWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-workspace-ref-mismatch (json)
+  "Decode MergeWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-transferring-away (json)
+  "Decode MergeWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-not-yet-adopted (json)
+  "Decode MergeWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-no-layout-facts (json)
+  "Decode MergeWorkspaceError's `no_layout_facts' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-no-layout-facts json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-session-deleted (json)
+  "Decode MergeWorkspaceError's `session_deleted' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-session-deleted json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-already-queued (json)
+  "Decode MergeWorkspaceError's `already_queued' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-already-queued json))
+
+(defun agent-repl-wire-decode-merge-workspace-error-already-merging (json)
+  "Decode MergeWorkspaceError's `already_merging' cause arm from JSON."
+  (agent-repl-wire-decode-merge-workspace-already-merging json))
+
 (defun agent-repl-wire-decode-merge-workspace-error (json)
-  "Decode MergeWorkspaceError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "MergeWorkspaceError" json))
+  "Decode MergeWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "MergeWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noLayoutFacts sessionDeleted alreadyQueued alreadyMerging))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-merge-workspace-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-merge-workspace-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-merge-workspace-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-merge-workspace-error-not-yet-adopted)
+         (list 'noLayoutFacts :no-layout-facts #'agent-repl-wire-decode-merge-workspace-error-no-layout-facts)
+         (list 'sessionDeleted :session-deleted #'agent-repl-wire-decode-merge-workspace-error-session-deleted)
+         (list 'alreadyQueued :already-queued #'agent-repl-wire-decode-merge-workspace-error-already-queued)
+         (list 'alreadyMerging :already-merging #'agent-repl-wire-decode-merge-workspace-error-already-merging))))))
 
 (defun agent-repl-wire-decode-merge-workspace-response-success (json)
   "Decode MergeWorkspaceResponse's `success' arm from JSON."
@@ -650,7 +1142,8 @@ The cause oneof is the refusal, so an unset cause is a contract breach."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defun agent-repl-wire-encode-restart-workspace-request (request)
-  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF :force BOOL).
+  "Encode RestartWorkspaceRequest from plist REQUEST (:workspace REF :force
+BOOL).
 `force' is spelled EXPLICITLY on the wire even when false: a forced
 restart interrupts live work, so the request states the mode rather than
 leaning on an omitted default."
@@ -666,9 +1159,72 @@ leaning on an omitted default."
   "Decode RestartWorkspaceSuccess from JSON.  Empty: the restart is accepted."
   (agent-repl-wire-verbs--decode-empty "RestartWorkspaceSuccess" json))
 
+(defun agent-repl-wire-decode-restart-workspace-unknown-workspace (json)
+  "Decode RestartWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id
+is not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-restart-workspace-workspace-ref-mismatch (json)
+  "Decode RestartWorkspaceWorkspaceRefMismatch from JSON into a plist
+(`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "RestartWorkspaceWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-restart-workspace-transferring-away (json)
+  "Decode RestartWorkspaceTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "RestartWorkspaceTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-restart-workspace-not-yet-adopted (json)
+  "Decode RestartWorkspaceNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-restart-workspace-no-session (json)
+  "Decode RestartWorkspaceNoSession from JSON.  Empty: The workspace has no
+session to restart."
+  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceNoSession" json))
+
+(defun agent-repl-wire-decode-restart-workspace-error-unknown-workspace (json)
+  "Decode RestartWorkspaceError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-unknown-workspace json))
+
+(defun agent-repl-wire-decode-restart-workspace-error-workspace-ref-mismatch (json)
+  "Decode RestartWorkspaceError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-restart-workspace-error-transferring-away (json)
+  "Decode RestartWorkspaceError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-transferring-away json))
+
+(defun agent-repl-wire-decode-restart-workspace-error-not-yet-adopted (json)
+  "Decode RestartWorkspaceError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-restart-workspace-error-no-session (json)
+  "Decode RestartWorkspaceError's `no_session' cause arm from JSON."
+  (agent-repl-wire-decode-restart-workspace-no-session json))
+
 (defun agent-repl-wire-decode-restart-workspace-error (json)
-  "Decode RestartWorkspaceError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "RestartWorkspaceError" json))
+  "Decode RestartWorkspaceError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "RestartWorkspaceError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted noSession))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-restart-workspace-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-restart-workspace-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-restart-workspace-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-restart-workspace-error-not-yet-adopted)
+         (list 'noSession :no-session #'agent-repl-wire-decode-restart-workspace-error-no-session))))))
 
 (defun agent-repl-wire-decode-restart-workspace-response-success (json)
   "Decode RestartWorkspaceResponse's `success' arm from JSON."
@@ -719,9 +1275,64 @@ the field entirely."
 Empty: the roster push carries the new state."
   (agent-repl-wire-verbs--decode-empty "SetWorkspacePrioritySuccess" json))
 
+(defun agent-repl-wire-decode-set-workspace-priority-unknown-workspace (json)
+  "Decode SetWorkspacePriorityUnknownWorkspace from JSON.  Empty: The workspace
+id is not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "SetWorkspacePriorityUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-workspace-ref-mismatch (json)
+  "Decode SetWorkspacePriorityWorkspaceRefMismatch from JSON into a plist
+(`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "SetWorkspacePriorityWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-set-workspace-priority-transferring-away (json)
+  "Decode SetWorkspacePriorityTransferringAway from JSON into a plist
+(`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "SetWorkspacePriorityTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-set-workspace-priority-not-yet-adopted (json)
+  "Decode SetWorkspacePriorityNotYetAdopted from JSON.  Empty: A joining daemon
+has not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "SetWorkspacePriorityNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-error-unknown-workspace (json)
+  "Decode SetWorkspacePriorityError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-set-workspace-priority-unknown-workspace json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-error-workspace-ref-mismatch (json)
+  "Decode SetWorkspacePriorityError's `workspace_ref_mismatch' cause arm from
+JSON."
+  (agent-repl-wire-decode-set-workspace-priority-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-error-transferring-away (json)
+  "Decode SetWorkspacePriorityError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-set-workspace-priority-transferring-away json))
+
+(defun agent-repl-wire-decode-set-workspace-priority-error-not-yet-adopted (json)
+  "Decode SetWorkspacePriorityError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-set-workspace-priority-not-yet-adopted json))
+
 (defun agent-repl-wire-decode-set-workspace-priority-error (json)
-  "Decode SetWorkspacePriorityError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "SetWorkspacePriorityError" json))
+  "Decode SetWorkspacePriorityError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "SetWorkspacePriorityError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-set-workspace-priority-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-set-workspace-priority-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-set-workspace-priority-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-set-workspace-priority-error-not-yet-adopted))))))
 
 (defun agent-repl-wire-decode-set-workspace-priority-response-success (json)
   "Decode SetWorkspacePriorityResponse's `success' arm from JSON."
@@ -853,24 +1464,111 @@ anything to await."
                  #'agent-repl-wire-decode-submit-prompt-success-command-refused)))))
 
 (defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
-  "Decode SubmitPromptRefusedMerging from JSON.
-Empty: the set arm IS the whole assertion — the footer and the merge
-bubble already show which merge."
+  "Decode SubmitPromptRefusedMerging from JSON.  Empty: a merge is in flight
+and the prompt arrived after it began."
   (agent-repl-wire-verbs--decode-empty "SubmitPromptRefusedMerging" json))
+
+(defun agent-repl-wire-decode-submit-prompt-unknown-workspace (json)
+  "Decode SubmitPromptUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-submit-prompt-workspace-ref-mismatch (json)
+  "Decode SubmitPromptWorkspaceRefMismatch from JSON into a plist (`:registry-
+dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "SubmitPromptWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-submit-prompt-transferring-away (json)
+  "Decode SubmitPromptTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "SubmitPromptTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-submit-prompt-not-yet-adopted (json)
+  "Decode SubmitPromptNotYetAdopted from JSON.  Empty: A joining daemon has not
+finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-submit-prompt-feed-not-in-workspace (json)
+  "Decode SubmitPromptFeedNotInWorkspace from JSON.  Empty: The FeedId decodes
+to another workspace."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptFeedNotInWorkspace" json))
+
+(defun agent-repl-wire-decode-submit-prompt-feed-undecodable (json)
+  "Decode SubmitPromptFeedUndecodable from JSON.  Empty: The FeedId does not
+decode."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptFeedUndecodable" json))
+
+(defun agent-repl-wire-decode-submit-prompt-turn-already-open (json)
+  "Decode SubmitPromptTurnAlreadyOpen from JSON.  Empty: A bubble-addressed
+submit while that agent's turn runs."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptTurnAlreadyOpen" json))
+
+(defun agent-repl-wire-decode-submit-prompt-no-session (json)
+  "Decode SubmitPromptNoSession from JSON.  Empty: The workspace has no session
+to submit to."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptNoSession" json))
 
 (defun agent-repl-wire-decode-submit-prompt-error-merging (json)
   "Decode SubmitPromptError's `merging' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-refused-merging json))
 
+(defun agent-repl-wire-decode-submit-prompt-error-unknown-workspace (json)
+  "Decode SubmitPromptError's `unknown_workspace' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-unknown-workspace json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-workspace-ref-mismatch (json)
+  "Decode SubmitPromptError's `workspace_ref_mismatch' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-transferring-away (json)
+  "Decode SubmitPromptError's `transferring_away' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-transferring-away json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-not-yet-adopted (json)
+  "Decode SubmitPromptError's `not_yet_adopted' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-feed-not-in-workspace (json)
+  "Decode SubmitPromptError's `feed_not_in_workspace' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-feed-not-in-workspace json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-feed-undecodable (json)
+  "Decode SubmitPromptError's `feed_undecodable' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-feed-undecodable json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-turn-already-open (json)
+  "Decode SubmitPromptError's `turn_already_open' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-turn-already-open json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-no-session (json)
+  "Decode SubmitPromptError's `no_session' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-no-session json))
+
 (defun agent-repl-wire-decode-submit-prompt-error (json)
-  "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V))."
+  "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
+arm this codec does not know is refused as an unknown field."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable turnAlreadyOpen noSession))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
-           (list (list 'merging :merging
-                       #'agent-repl-wire-decode-submit-prompt-error-merging))))))
+           (list (list 'merging :merging #'agent-repl-wire-decode-submit-prompt-error-merging)
+         (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-submit-prompt-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-submit-prompt-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-submit-prompt-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-submit-prompt-error-not-yet-adopted)
+         (list 'feedNotInWorkspace :feed-not-in-workspace #'agent-repl-wire-decode-submit-prompt-error-feed-not-in-workspace)
+         (list 'feedUndecodable :feed-undecodable #'agent-repl-wire-decode-submit-prompt-error-feed-undecodable)
+         (list 'turnAlreadyOpen :turn-already-open #'agent-repl-wire-decode-submit-prompt-error-turn-already-open)
+         (list 'noSession :no-session #'agent-repl-wire-decode-submit-prompt-error-no-session))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
@@ -951,9 +1649,27 @@ cause."
   "Decode UpdateShutdownScheduleSuccess from JSON.  Empty: the action is armed."
   (agent-repl-wire-verbs--decode-empty "UpdateShutdownScheduleSuccess" json))
 
+(defun agent-repl-wire-decode-update-shutdown-schedule-nothing-scheduled (json)
+  "Decode UpdateShutdownScheduleNothingScheduled from JSON.  Empty: Nothing is
+scheduled to cancel."
+  (agent-repl-wire-verbs--decode-empty "UpdateShutdownScheduleNothingScheduled" json))
+
+(defun agent-repl-wire-decode-update-shutdown-schedule-error-nothing-scheduled (json)
+  "Decode UpdateShutdownScheduleError's `nothing_scheduled' cause arm from
+JSON."
+  (agent-repl-wire-decode-update-shutdown-schedule-nothing-scheduled json))
+
 (defun agent-repl-wire-decode-update-shutdown-schedule-error (json)
-  "Decode UpdateShutdownScheduleError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "UpdateShutdownScheduleError" json))
+  "Decode UpdateShutdownScheduleError from JSON into (:cause (:arm ARM :value
+V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "UpdateShutdownScheduleError"))
+    (agent-repl-wire-verbs--check-keys message json '(nothingScheduled))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'nothingScheduled :nothing-scheduled #'agent-repl-wire-decode-update-shutdown-schedule-error-nothing-scheduled))))))
 
 (defun agent-repl-wire-decode-update-shutdown-schedule-response-success (json)
   "Decode UpdateShutdownScheduleResponse's `success' arm from JSON."
@@ -1016,9 +1732,91 @@ cause."
   "Decode UpdateMergeQueueSuccess from JSON.  Empty: the bubbles reflect it."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueSuccess" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-unknown-workspace (json)
+  "Decode UpdateMergeQueueUnknownWorkspace from JSON.  Empty: The workspace id
+is not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-workspace-ref-mismatch (json)
+  "Decode UpdateMergeQueueWorkspaceRefMismatch from JSON into a plist
+(`:registry-dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "UpdateMergeQueueWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-update-merge-queue-transferring-away (json)
+  "Decode UpdateMergeQueueTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "UpdateMergeQueueTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-update-merge-queue-not-yet-adopted (json)
+  "Decode UpdateMergeQueueNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-already-paused (json)
+  "Decode UpdateMergeQueueAlreadyPaused from JSON.  Empty: The queue is already
+paused."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueAlreadyPaused" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-not-paused (json)
+  "Decode UpdateMergeQueueNotPaused from JSON.  Empty: The queue is not paused."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNotPaused" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-no-such-queued-merge (json)
+  "Decode UpdateMergeQueueNoSuchQueuedMerge from JSON.  Empty: No queued merge
+for that workspace."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoSuchQueuedMerge" json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
+  "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-workspace-ref-mismatch (json)
+  "Decode UpdateMergeQueueError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-transferring-away (json)
+  "Decode UpdateMergeQueueError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-transferring-away json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-not-yet-adopted (json)
+  "Decode UpdateMergeQueueError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-not-yet-adopted json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-already-paused (json)
+  "Decode UpdateMergeQueueError's `already_paused' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-already-paused json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-not-paused (json)
+  "Decode UpdateMergeQueueError's `not_paused' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-not-paused json))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge (json)
+  "Decode UpdateMergeQueueError's `no_such_queued_merge' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-no-such-queued-merge json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
-  "Decode UpdateMergeQueueError from JSON.  Empty until its arms are derived."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueError" json))
+  "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "UpdateMergeQueueError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-update-merge-queue-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-update-merge-queue-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-update-merge-queue-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-update-merge-queue-error-not-yet-adopted)
+         (list 'alreadyPaused :already-paused #'agent-repl-wire-decode-update-merge-queue-error-already-paused)
+         (list 'notPaused :not-paused #'agent-repl-wire-decode-update-merge-queue-error-not-paused)
+         (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."
@@ -1043,16 +1841,104 @@ cause."
   (agent-repl--log nil "elisp.wire.verbs-encode-daemon-health-request")
   nil)
 
-(defun agent-repl-wire-decode-daemon-fault (json)
-  "Decode DaemonFault from JSON into (:detail STRING).
-The kind oneof is not declared yet — it lands with its first derived arms
-— so `detail' is the whole message today."
-  (let ((message "DaemonFault"))
+(defun agent-repl-wire-decode-daemon-fault-adoption-window-expired-workspace (json)
+  "Decode DaemonFaultAdoptionWindowExpired's `workspace' use site from JSON."
+  (agent-repl-wire-decode-workspace-ref json))
+
+(defun agent-repl-wire-decode-daemon-fault-adoption-window-expired (json)
+  "Decode DaemonFaultAdoptionWindowExpired from JSON into (:workspace REF).
+The workspace whose adoption window expired."
+  (let ((message "DaemonFaultAdoptionWindowExpired"))
+    (agent-repl-wire-verbs--check-keys message json '(workspace))
+    (list :workspace (agent-repl-wire-decode-daemon-fault-adoption-window-expired-workspace
+                      (agent-repl-wire-verbs--require
+                       message "workspace" (alist-get 'workspace json))))))
+
+(defun agent-repl-wire-decode-daemon-fault-log-sink-poisoned (json)
+  "Decode DaemonFaultLogSinkPoisoned from JSON into (:sink).
+Which sink."
+  (let ((message "DaemonFaultLogSinkPoisoned"))
+    (agent-repl-wire-verbs--check-keys message json '(sink))
+    (list :sink (agent-repl-wire-verbs--decode-string message 'sink json))))
+
+(defun agent-repl-wire-decode-daemon-fault-deploy-script-failed (json)
+  "Decode DaemonFaultDeployScriptFailed from JSON into (:detail).
+The script's own account of the failure."
+  (let ((message "DaemonFaultDeployScriptFailed"))
     (agent-repl-wire-verbs--check-keys message json '(detail))
     (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
 
+(defun agent-repl-wire-decode-daemon-fault-successor-spawn-failed (json)
+  "Decode DaemonFaultSuccessorSpawnFailed from JSON into (:detail).
+The spawn's own account of the failure."
+  (let ((message "DaemonFaultSuccessorSpawnFailed"))
+    (agent-repl-wire-verbs--check-keys message json '(detail))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+
+(defun agent-repl-wire-decode-daemon-fault-prompts-dir-missing (json)
+  "Decode DaemonFaultPromptsDirMissing from JSON into (:path).
+The path that is not there."
+  (let ((message "DaemonFaultPromptsDirMissing"))
+    (agent-repl-wire-verbs--check-keys message json '(path))
+    (list :path (agent-repl-wire-verbs--decode-string message 'path json))))
+
+(defun agent-repl-wire-decode-daemon-fault-wsm-read-only (json)
+  "Decode DaemonFaultWsmReadOnly from JSON.  Empty: the arm is the whole fact."
+  (agent-repl-wire-verbs--decode-empty "DaemonFaultWsmReadOnly" json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired (json)
+  "Decode DaemonFault's `adoption_window_expired' kind arm from JSON as a
+`DaemonFaultAdoptionWindowExpired'."
+  (agent-repl-wire-decode-daemon-fault-adoption-window-expired json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind-log-sink-poisoned (json)
+  "Decode DaemonFault's `log_sink_poisoned' kind arm from JSON as a
+`DaemonFaultLogSinkPoisoned'."
+  (agent-repl-wire-decode-daemon-fault-log-sink-poisoned json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed (json)
+  "Decode DaemonFault's `deploy_script_failed' kind arm from JSON as a
+`DaemonFaultDeployScriptFailed'."
+  (agent-repl-wire-decode-daemon-fault-deploy-script-failed json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed (json)
+  "Decode DaemonFault's `successor_spawn_failed' kind arm from JSON as a
+`DaemonFaultSuccessorSpawnFailed'."
+  (agent-repl-wire-decode-daemon-fault-successor-spawn-failed json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing (json)
+  "Decode DaemonFault's `prompts_dir_missing' kind arm from JSON as a
+`DaemonFaultPromptsDirMissing'."
+  (agent-repl-wire-decode-daemon-fault-prompts-dir-missing json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind-wsm-read-only (json)
+  "Decode DaemonFault's `wsm_read_only' kind arm from JSON as a
+`DaemonFaultWsmReadOnly'."
+  (agent-repl-wire-decode-daemon-fault-wsm-read-only json))
+
+(defun agent-repl-wire-decode-daemon-fault-kind (json)
+  "Decode DaemonFault's `kind' oneof from JSON into (:arm ARM :value V).
+THE KIND IS A TYPED ARM: `detail' carries only what prose must, so a
+fault with no kind is a contract breach."
+  (agent-repl-wire-verbs--decode-oneof
+   "DaemonFault" "kind" json
+   (list (list 'adoptionWindowExpired :adoption-window-expired #'agent-repl-wire-decode-daemon-fault-kind-adoption-window-expired)
+                 (list 'logSinkPoisoned :log-sink-poisoned #'agent-repl-wire-decode-daemon-fault-kind-log-sink-poisoned)
+                 (list 'deployScriptFailed :deploy-script-failed #'agent-repl-wire-decode-daemon-fault-kind-deploy-script-failed)
+                 (list 'successorSpawnFailed :successor-spawn-failed #'agent-repl-wire-decode-daemon-fault-kind-successor-spawn-failed)
+                 (list 'promptsDirMissing :prompts-dir-missing #'agent-repl-wire-decode-daemon-fault-kind-prompts-dir-missing)
+                 (list 'wsmReadOnly :wsm-read-only #'agent-repl-wire-decode-daemon-fault-kind-wsm-read-only))))
+
+(defun agent-repl-wire-decode-daemon-fault (json)
+  "Decode DaemonFault from JSON into (:detail STRING :kind ONEOF)."
+  (let ((message "DaemonFault"))
+    (agent-repl-wire-verbs--check-keys message json '(detail adoptionWindowExpired logSinkPoisoned deployScriptFailed successorSpawnFailed promptsDirMissing wsmReadOnly))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
+          :kind (agent-repl-wire-decode-daemon-fault-kind json))))
+
 (defun agent-repl-wire-decode-daemon-unhealthy-faults (json)
-  "Decode one element of DaemonUnhealthy's repeated `faults' use site from JSON."
+  "Decode one element of DaemonUnhealthy's repeated `faults' use site from
+JSON."
   (agent-repl-wire-decode-daemon-fault json))
 
 (defun agent-repl-wire-decode-daemon-unhealthy (json)
@@ -1122,16 +2008,74 @@ ANSWERED at all."
                (agent-repl-wire-verbs--require "SessionHealthRequest" "workspace"
                                                 (plist-get request :workspace))))))
 
+(defun agent-repl-wire-decode-session-fault-kind-shim-start-failed (json)
+  "Decode SessionFault's `shim_start_failed' kind arm from JSON as a
+`SessionFaultShimStartFailed'."
+  (agent-repl-wire-decode-session-fault-shim-start-failed json))
+
+(defun agent-repl-wire-decode-session-fault-kind-shim-died (json)
+  "Decode SessionFault's `shim_died' kind arm from JSON as a
+`SessionFaultShimDied'."
+  (agent-repl-wire-decode-session-fault-shim-died json))
+
+(defun agent-repl-wire-decode-session-fault-kind-link-severed (json)
+  "Decode SessionFault's `link_severed' kind arm from JSON as a
+`SessionFaultLinkSevered'."
+  (agent-repl-wire-decode-session-fault-link-severed json))
+
+(defun agent-repl-wire-decode-session-fault-kind-resume-failed (json)
+  "Decode SessionFault's `resume_failed' kind arm from JSON as a
+`SessionFaultResumeFailed'."
+  (agent-repl-wire-decode-session-fault-resume-failed json))
+
+(defun agent-repl-wire-decode-session-fault-kind-bounce-died (json)
+  "Decode SessionFault's `bounce_died' kind arm from JSON as a
+`SessionFaultBounceDied'."
+  (agent-repl-wire-decode-session-fault-bounce-died json))
+
+(defun agent-repl-wire-decode-session-fault-kind-bounce-unknown (json)
+  "Decode SessionFault's `bounce_unknown' kind arm from JSON as a
+`SessionFaultBounceUnknown'."
+  (agent-repl-wire-decode-session-fault-bounce-unknown json))
+
+(defun agent-repl-wire-decode-session-fault-kind-classifier-failed (json)
+  "Decode SessionFault's `classifier_failed' kind arm from JSON as a
+`SessionFaultClassifierFailed'."
+  (agent-repl-wire-decode-session-fault-classifier-failed json))
+
+(defun agent-repl-wire-decode-session-fault-kind-shim-reported (json)
+  "Decode SessionFault's `shim_reported' kind arm from JSON as a
+`SessionFaultShimReported'."
+  (agent-repl-wire-decode-session-fault-shim-reported json))
+
+(defun agent-repl-wire-decode-session-fault-kind (json)
+  "Decode SessionFault's `kind' oneof from JSON into (:arm ARM :value V).
+THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
+it, so a fault with no kind is a contract breach."
+  (agent-repl-wire-verbs--decode-oneof
+   "SessionFault" "kind" json
+   (list (list 'shimStartFailed :shim-start-failed #'agent-repl-wire-decode-session-fault-kind-shim-start-failed)
+                 (list 'shimDied :shim-died #'agent-repl-wire-decode-session-fault-kind-shim-died)
+                 (list 'linkSevered :link-severed #'agent-repl-wire-decode-session-fault-kind-link-severed)
+                 (list 'resumeFailed :resume-failed #'agent-repl-wire-decode-session-fault-kind-resume-failed)
+                 (list 'bounceDied :bounce-died #'agent-repl-wire-decode-session-fault-kind-bounce-died)
+                 (list 'bounceUnknown :bounce-unknown #'agent-repl-wire-decode-session-fault-kind-bounce-unknown)
+                 (list 'classifierFailed :classifier-failed #'agent-repl-wire-decode-session-fault-kind-classifier-failed)
+                 (list 'shimReported :shim-reported #'agent-repl-wire-decode-session-fault-kind-shim-reported))))
+
 (defun agent-repl-wire-decode-session-fault (json)
-  "Decode SessionFault from JSON into (:detail STRING).
+  "Decode SessionFault from JSON into (:detail STRING :kind ONEOF).
 Deliberately NOT DaemonFault: a session's fault classes are the session
-controller's own vocabulary."
+controller's own vocabulary — the same eight the host stream's HostFault
+carries, decoded through the same shared arm messages."
   (let ((message "SessionFault"))
-    (agent-repl-wire-verbs--check-keys message json '(detail))
-    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json))))
+    (agent-repl-wire-verbs--check-keys message json '(detail shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
+          :kind (agent-repl-wire-decode-session-fault-kind json))))
 
 (defun agent-repl-wire-decode-session-unhealthy-faults (json)
-  "Decode one element of SessionUnhealthy's repeated `faults' use site from JSON."
+  "Decode one element of SessionUnhealthy's repeated `faults' use site from
+JSON."
   (agent-repl-wire-decode-session-fault json))
 
 (defun agent-repl-wire-decode-session-unhealthy (json)
@@ -1165,11 +2109,62 @@ UNHEALTHY IS AN ANSWER: it arrives inside success, never as an error."
            (list 'unhealthy :unhealthy
                  #'agent-repl-wire-decode-session-health-success-unhealthy)))))
 
+(defun agent-repl-wire-decode-session-health-unknown-workspace (json)
+  "Decode SessionHealthUnknownWorkspace from JSON.  Empty: The workspace id is
+not in the daemon's registry."
+  (agent-repl-wire-verbs--decode-empty "SessionHealthUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-session-health-workspace-ref-mismatch (json)
+  "Decode SessionHealthWorkspaceRefMismatch from JSON into a plist (`:registry-
+dir').
+The echoed dir disagrees with the registry's dir for this id."
+  (let ((message "SessionHealthWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string
+                       message 'registryDir json))))
+
+(defun agent-repl-wire-decode-session-health-transferring-away (json)
+  "Decode SessionHealthTransferringAway from JSON into a plist (`:address').
+This daemon released the workspace to a successor; dial `address'."
+  (let ((message "SessionHealthTransferringAway"))
+    (agent-repl-wire-verbs--check-keys message json '(address))
+    (list :address (agent-repl-wire-verbs--decode-string
+                       message 'address json))))
+
+(defun agent-repl-wire-decode-session-health-not-yet-adopted (json)
+  "Decode SessionHealthNotYetAdopted from JSON.  Empty: A joining daemon has
+not finished adopting this workspace yet."
+  (agent-repl-wire-verbs--decode-empty "SessionHealthNotYetAdopted" json))
+
+(defun agent-repl-wire-decode-session-health-error-unknown-workspace (json)
+  "Decode SessionHealthError's `unknown_workspace' cause arm from JSON."
+  (agent-repl-wire-decode-session-health-unknown-workspace json))
+
+(defun agent-repl-wire-decode-session-health-error-workspace-ref-mismatch (json)
+  "Decode SessionHealthError's `workspace_ref_mismatch' cause arm from JSON."
+  (agent-repl-wire-decode-session-health-workspace-ref-mismatch json))
+
+(defun agent-repl-wire-decode-session-health-error-transferring-away (json)
+  "Decode SessionHealthError's `transferring_away' cause arm from JSON."
+  (agent-repl-wire-decode-session-health-transferring-away json))
+
+(defun agent-repl-wire-decode-session-health-error-not-yet-adopted (json)
+  "Decode SessionHealthError's `not_yet_adopted' cause arm from JSON."
+  (agent-repl-wire-decode-session-health-not-yet-adopted json))
+
 (defun agent-repl-wire-decode-session-health-error (json)
-  "Decode SessionHealthError from JSON.
-Empty until its arms are derived; error means the question could not be
-ANSWERED (an unknown workspace), never that the session is unhealthy."
-  (agent-repl-wire-verbs--decode-empty "SessionHealthError" json))
+  "Decode SessionHealthError from JSON into (:cause (:arm ARM :value V)).
+THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
+arm this codec does not know is refused as an unknown field."
+  (let ((message "SessionHealthError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted))
+    (list :cause
+          (agent-repl-wire-verbs--decode-oneof
+           message "cause" json
+           (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-session-health-error-unknown-workspace)
+         (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-session-health-error-workspace-ref-mismatch)
+         (list 'transferringAway :transferring-away #'agent-repl-wire-decode-session-health-error-transferring-away)
+         (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-session-health-error-not-yet-adopted))))))
 
 (defun agent-repl-wire-decode-session-health-response-success (json)
   "Decode SessionHealthResponse's `success' arm from JSON."

@@ -360,16 +360,39 @@ every scenario that pushes after subscribing must pass through here."
 ;; the JSONL sink into the private state dir and hands the suite a reader.
 
 (defun agent-repl-itest--log-file (daemon)
-  "Return the production JSONL log path for DAEMON's state dir."
+  "Return the production GLOBAL JSONL log path for DAEMON's state dir."
   (expand-file-name "emacs.jsonl" (agent-repl-itest-daemon-state-dir daemon)))
 
-(defun agent-repl-itest--log-records (daemon)
-  "Return the production log records written during DAEMON's run.
-Each record is the parsed JSONL object; a malformed line is skipped
-rather than aborting the read, because a truncated final line is a normal
-consequence of reading a sink that is still being appended to."
-  (let ((path (agent-repl-itest--log-file daemon))
-        (records nil))
+(defvar agent-repl--workspaces)
+
+(defun agent-repl-itest--workspace-log-files ()
+  "Return the workspace `emacs.log' sinks of every registered workspace.
+THE SINK FOLLOWS THE RECORD'S OWNER.  logging-contract.md routes a record
+that owns a workspace into that workspace\='s own
+`<workspace>/.claude/emacs/emacs.log\=' -- writing it globally would be
+the routing invariant violation the contract forbids -- so a reader that
+looked only at the global sink could not see a workspace-owned line at
+all.  The canonical path is a SYMLINK to the runtime-owned target;
+`insert-file-contents\=' follows it, which is the whole of what reading it
+takes."
+  (let (paths)
+    (when (boundp 'agent-repl--workspaces)
+      (maphash
+       (lambda (_ws plist)
+         (let ((dir (plist-get plist :project-dir)))
+           (when (stringp dir)
+             (let ((path (expand-file-name ".claude/emacs/emacs.log" dir)))
+               (when (and (file-exists-p path) (not (member path paths)))
+                 (push path paths))))))
+       agent-repl--workspaces))
+    (nreverse paths)))
+
+(defun agent-repl-itest--log-records-in (path)
+  "Return the JSONL records in PATH, oldest first.
+A malformed line is skipped rather than aborting the read, because a
+truncated final line is a normal consequence of reading a sink that is
+still being appended to."
+  (let ((records nil))
     (when (file-exists-p path)
       (with-temp-buffer
         (insert-file-contents path)
@@ -386,6 +409,17 @@ consequence of reading a sink that is still being appended to."
           (forward-line 1))))
     (nreverse records)))
 
+(defun agent-repl-itest--log-records (daemon)
+  "Return the production log records written during DAEMON's run.
+BOTH SINKS ARE READ: the global one for records that genuinely have no
+workspace, and every registered workspace\='s own `emacs.log\=' for the
+records that own one.  A scenario asserting on a workspace-owned line
+must find it where the contract puts it."
+  (apply #'append
+         (agent-repl-itest--log-records-in (agent-repl-itest--log-file daemon))
+         (mapcar #'agent-repl-itest--log-records-in
+                 (agent-repl-itest--workspace-log-files))))
+
 (defun agent-repl-itest--operation-slug (name)
   "Return the slug core.el derives from the log NAME's format string.
 `agent-repl--log-operation' normalizes the FORMAT STRING into
@@ -397,30 +431,15 @@ format's trailing `key=%S' fragments extend it)."
    (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase name))))
 
 (defun agent-repl-itest--operation-prefix (name)
-  "Return the `operation' prefix core.el derives for the log NAME.
-Kept for callers that want the plain `agent-repl.<slug>' form; the
-matcher below is what tolerates core.el's SEVERITY prefix."
+  "Return the `operation' prefix core.el derives for the log NAME."
   (concat "agent-repl." (agent-repl-itest--operation-slug name)))
-
-(defconst agent-repl-itest--operation-severity-slugs '("" "warning-" "error-")
-  "Slug fragments core.el's severity tags contribute to `operation'.
-`agent-repl--warn' and `agent-repl--error' prepend \"WARNING: \" and
-\"ERROR: \" to the FORMAT STRING itself, and `agent-repl--log-operation'
-normalizes that whole string — so the recorded operation for a warned
-`elisp.daemon.stale-addr' is `agent-repl.warning-elisp-daemon-stale-addr...'.
-The LEVEL field already carries the severity, so a reader asking for a
-logical operation name must accept it with or without the tag rather than
-making every caller spell the tag it cannot see from the call site.")
 
 (defun agent-repl-itest--operation-matches-p (operation name)
   "Return non-nil when the recorded OPERATION names the logical NAME.
-Matches `agent-repl.<slug>...' with or without a severity tag between the
-namespace and the slug (see
-`agent-repl-itest--operation-severity-slugs')."
-  (let ((slug (agent-repl-itest--operation-slug name)))
-    (seq-some (lambda (severity)
-                (string-prefix-p (concat "agent-repl." severity slug) operation))
-              agent-repl-itest--operation-severity-slugs)))
+core.el derives `operation' from the BARE format string on every rung —
+the severity rungs\' display tags never reach it, and `level' carries the
+severity instead — so a plain prefix match is the whole rule."
+  (string-prefix-p (agent-repl-itest--operation-prefix name) operation))
 
 (defun agent-repl-itest--log-entries (daemon operation &optional level)
   "Return DAEMON's log records for OPERATION, optionally at LEVEL.
@@ -447,6 +466,17 @@ suite asserting on a log line waits for it rather than racing it."
    agent-repl-itest-default-timeout
    (format "the production log to carry %s%s" operation
            (if level (format " at %s" level) ""))))
+
+;;;; ---- Link teardown ----
+
+(defun agent-repl-itest--teardown-link ()
+  "Close any standing daemon link and cancel its reconnect timer.
+`agent-repl-link-teardown\=' closes the connections and forgets the link
+state; the reconnect timer is armed separately by the close handler, so
+it is cancelled here too -- a timer that survives the scenario reconnects
+into the NEXT one\='s daemon."
+  (ignore-errors (agent-repl-link-teardown))
+  (ignore-errors (agent-repl-link--cancel-reconnect)))
 
 ;;;; ---- Boundary mocks the suite installs ----
 
@@ -530,6 +560,12 @@ signals."
                       (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls))
                      (agent-repl--notification-backend (agent-repl-itest--fake-notifier)))
              ,@body))
+       ;; A verb may STAND THE LINK on its own (a daemon-admin verb can be
+       ;; the first thing that needs one), and a link outliving its daemon
+       ;; leaves an armed reconnect timer that fires into the next
+       ;; scenario.  Tearing it down is the only thing that actually ends
+       ;; it -- the same reason the cold-start reset exists.
+       (agent-repl-itest--teardown-link)
        (agent-repl-itest--stop-daemon ,var))))
 
 (defmacro agent-repl-itest--with-second-daemon (primary var &rest body)
@@ -579,6 +615,7 @@ into the scenario's own temp dir, and `file-exists-p' on those paths.")
 (defvar agent-repl--frontend-daemon-process)
 (declare-function agent-repl-daemon--cancel-boot-wait "daemon")
 (declare-function agent-repl-link-teardown "daemon-link")
+(declare-function agent-repl-link--cancel-reconnect "daemon-link")
 
 (defun agent-repl-itest--reset-cold-start ()
   "Take down everything a cold-start scenario can leave running.
