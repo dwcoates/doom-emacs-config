@@ -107,6 +107,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   #52 (banner must read "Agent ready: <name>") — BOTH ADDED to R-HANDOVER's
   brief; #79-scoped awaits R-NOTIFY's encoder; host 20/22/25/33/36 await
   remediation-1.
+- WIND-DOWN (user directive): nothing new dispatches; R-HANDOVER and
+  audit 2 stay queued; running implementers finish naturally and merge.
+- VERBS-SUITE REGRESSION diagnosed (post-R-SUITE-1 merge, 29/61): the
+  suite's repaired calls pass ready-made oneof plists to verbs that take
+  BARE keywords and wrap internally (create refuses "unknown creation
+  form (:arm :standard ...)"; set-priority double-wraps). Fix on resume:
+  re-repair the suite's verb calls to the landed signatures (bare form
+  arm + keyword facts; bare level keyword; flat actions), then triage the
+  21 timeout-class failures. Composer 37/42 (5 = input.el production
+  gaps: image blocks, posthooks, defer path, #66 key reuse); daemon 14/15
+  (#90 default command/no-argv).
 - RUNNING: R-NOTIFY (`opus-low`, remed4);
   remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
   remediation-1 merges (cut its worktree off that tip).
