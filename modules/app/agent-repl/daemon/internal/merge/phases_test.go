@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -258,6 +259,54 @@ func TestResolvedConflictConcludesTheCommit(t *testing.T) {
 	}
 	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateMerged {
 		t.Fatalf("the merge is %q, want it to have landed", facts.State)
+	}
+}
+
+// TestResolvedConflictCommitsThroughTheGitLeaf pins the seam: the conclusion
+// goes through gitclient.Git.Commit, not a local shell-out of the merge
+// package's own.
+func TestResolvedConflictCommitsThroughTheGitLeaf(t *testing.T) {
+	// Arrange: a conflict the agent resolves.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{}}
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	h.git.mu.Lock()
+	defer h.git.mu.Unlock()
+	if len(h.git.commitMessages) != 1 {
+		t.Fatalf("the git leaf saw %d commits, want the resolution's one", len(h.git.commitMessages))
+	}
+}
+
+// TestAFailedConclusionSurfacesTheGitFailure covers the other half of the
+// seam: the leaf's failure is the merge's failure, never swallowed.
+func TestAFailedConclusionSurfacesTheGitFailure(t *testing.T) {
+	// Arrange: a resolved conflict the git leaf refuses to commit.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{}}
+	h.git.commitErr = errors.New("nothing to commit")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	err := h.admit(context.Background())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("a refused conclusion landed the merge anyway")
 	}
 }
 

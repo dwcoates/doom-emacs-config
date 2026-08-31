@@ -67,13 +67,64 @@ func sevenDayWindow() *conversationv1.SessionRateLimitType {
 	}}
 }
 
+// sevenDayOpusWindow, sevenDaySonnetWindow, sevenDayOverageIncludedWindow and
+// overageWindow are the remaining declared windows an event can name.
+func sevenDayOpusWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDayOpus{
+		SevenDayOpus: &conversationv1.SessionRateLimitWindowSevenDayOpus{},
+	}}
+}
+
+func sevenDaySonnetWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDaySonnet{
+		SevenDaySonnet: &conversationv1.SessionRateLimitWindowSevenDaySonnet{},
+	}}
+}
+
+func sevenDayOverageIncludedWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_SevenDayOverageIncluded{
+		SevenDayOverageIncluded: &conversationv1.SessionRateLimitWindowSevenDayOverageIncluded{},
+	}}
+}
+
+func overageWindow() *conversationv1.SessionRateLimitType {
+	return &conversationv1.SessionRateLimitType{Window: &conversationv1.SessionRateLimitType_Overage{
+		Overage: &conversationv1.SessionRateLimitWindowOverage{},
+	}}
+}
+
 // ptr is the address of a value, which is how an optional scalar is set.
 func ptr[T any](v T) *T { return &v }
 
-// bothAllowances reports both windows, which is what makes the line drawable.
+// usageSample is one sampled account usage, the FIGURES' source. A negative
+// seven-day utilization stands for "the vendor reported no weekly window".
+func usageSample(fiveHour, sevenDay float64, observedAtMs int64) *conversationv1.SessionUpdate {
+	available := &conversationv1.SessionAccountUsageAvailable{
+		FiveHour: &conversationv1.SessionUsageWindow{
+			UtilizationPercent: fiveHour,
+			ResetsAtMs:         instant.Add(5 * time.Hour).UnixMilli(),
+		},
+	}
+	if sevenDay >= 0 {
+		available.SevenDay = &conversationv1.SessionUsageWindow{
+			UtilizationPercent: sevenDay,
+			ResetsAtMs:         instant.Add(7 * 24 * time.Hour).UnixMilli(),
+		}
+	}
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_AccountUsage{
+			AccountUsage: &conversationv1.SessionAccountUsage{
+				ObservedAtMs: observedAtMs,
+				Outcome:      &conversationv1.SessionAccountUsage_Available{Available: available},
+			},
+		},
+	}
+}
+
+// bothAllowances files a usage sample carrying both windows' figures, which is
+// what makes the line drawable.
 func bothAllowances(h *harness, fiveHour, sevenDay float64) {
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), fiveHour, 5*time.Hour))
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(sevenDayWindow(), sevenDay, 7*24*time.Hour))
+	h.r.OnSessionUpdate(testWS, usageSample(fiveHour, sevenDay, instant.UnixMilli()))
 }
 
 // budgetWarning is the vendor's own context-budget warning, an AGENT-PLANE
@@ -217,8 +268,10 @@ func TestAnAllowanceCopiesTheVendorsStatusArm(t *testing.T) {
 	h := newHarness(t)
 	connected(h)
 
-	// Act
 	bothAllowances(h, 95, 95)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 95, 5*time.Hour))
 
 	// Assert
 	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
@@ -285,17 +338,182 @@ func TestAStatusTheVendorLeftUnsetDrawsNoArm(t *testing.T) {
 	}
 }
 
-func TestOnlyTheFiveHourWindowIsNotDrawn(t *testing.T) {
+func TestTheFiguresComeFromTheUsageSample(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
 	// Act
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetSession().GetUtilization() != 0.95 || line.GetWeekly().GetUtilization() != 0.9 {
+		t.Fatalf("allowances = %+v, want both figures from the sample", line)
+	}
+}
+
+func TestTheResetComesFromTheUsageSampleInSeconds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetResetsAtS() != instant.Add(5*time.Hour).Unix() {
+		t.Fatalf("resets_at_s = %d, want the sample's reset in seconds", got.GetResetsAtS())
+	}
+}
+
+func TestTheVerdictIsUnsetBeforeAnyRateLimitEvent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetStatus() != nil {
+		t.Fatalf("status = %+v, want no verdict until a rate-limit event is seen", got.GetStatus())
+	}
+}
+
+func TestTheVerdictJoinsWhenTheRateLimitEventArrives(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Act
+	update := rateLimitStatus(fiveHourWindow(), 95, 5*time.Hour)
+	update.GetRateLimitStatus().Status = &conversationv1.SessionRateLimitStatus_Rejected{
+		Rejected: &conversationv1.SessionRateLimitRejected{},
+	}
+	h.r.OnSessionUpdate(testWS, update)
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetRejected() == nil {
+		t.Fatalf("status = %+v, want the verdict to have joined the drawn allowance", got.GetStatus())
+	}
+}
+
+func TestEveryRateLimitWindowMatchesItsAllowance(t *testing.T) {
+	// Arrange
+	tests := []struct {
+		name   string
+		window *conversationv1.SessionRateLimitType
+		// weekly reports which allowance the verdict must land on.
+		weekly bool
+	}{
+		{name: "five hour is the session allowance", window: fiveHourWindow()},
+		{name: "seven day is the weekly allowance", window: sevenDayWindow(), weekly: true},
+		{name: "seven day opus is the weekly allowance", window: sevenDayOpusWindow(), weekly: true},
+		{name: "seven day sonnet is the weekly allowance", window: sevenDaySonnetWindow(), weekly: true},
+		{name: "seven day overage included is the weekly allowance", window: sevenDayOverageIncludedWindow(), weekly: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			connected(h)
+			h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+			// Act
+			h.r.OnSessionUpdate(testWS, rateLimitStatus(tc.window, 95, 5*time.Hour))
+
+			// Assert
+			line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+			landed, other := line.GetSession(), line.GetWeekly()
+			if tc.weekly {
+				landed, other = other, landed
+			}
+			if landed.GetAllowed() == nil || other.GetStatus() != nil {
+				t.Fatalf("session = %+v weekly = %+v, want the verdict on one allowance only", line.GetSession(), line.GetWeekly())
+			}
+		})
+	}
+}
+
+func TestTheOverageWindowIsLoggedAndDrawnNowhere(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
+
+	// Act: the contract carries no overage cell.
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(overageWindow(), 95, 5*time.Hour))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetSession().GetStatus() != nil || line.GetWeekly().GetStatus() != nil {
+		t.Fatalf("session = %+v weekly = %+v, want the overage verdict drawn nowhere", line.GetSession(), line.GetWeekly())
+	}
+}
+
+func TestANewerEventUtilizationWinsOverTheSample(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.Add(-time.Minute).UnixMilli()))
+
+	// Act: the resolver's clock reads `instant`, so the event is the newer fact.
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 99, 5*time.Hour))
 
 	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetUtilization() != 0.99 {
+		t.Fatalf("utilization = %v, want the newer event's figure", got.GetUtilization())
+	}
+}
+
+func TestAnOlderEventUtilizationDoesNotWin(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.Add(time.Minute).UnixMilli()))
+
+	// Act: the sample was observed after the clock the event is stamped with.
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(fiveHourWindow(), 10, 5*time.Hour))
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if got.GetUtilization() != 0.95 {
+		t.Fatalf("utilization = %v, want the newer sample's figure kept", got.GetUtilization())
+	}
+}
+
+func TestASampleWithoutASevenDayWindowDrawsNoWeeklyAllowance(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act: the vendor reported no weekly window at all.
+	h.r.OnSessionUpdate(testWS, usageSample(95, -1, instant.UnixMilli()))
+
+	// Assert
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetSession() == nil || line.GetWeekly() != nil {
+		t.Fatalf("line = %+v, want the session allowance drawn and the weekly one absent", line)
+	}
+}
+
+func TestARateLimitEventAloneDrawsNoLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act: the verdict's source carries no figures of its own to draw from
+	// until a usage sample exists — but an event's utilization does seed one.
+	h.r.OnSessionUpdate(testWS, rateLimitStatus(sevenDayWindow(), 10, 7*24*time.Hour))
+
+	// Assert
 	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
-		t.Fatalf("a one-window report was drawn; the line states BOTH allowances or neither")
+		t.Fatalf("an unremarkable allowance was drawn; only a newsworthy one is news")
 	}
 }
 
@@ -303,30 +521,33 @@ func TestAStatusNamingNoWindowIsDropped(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
-	h.r.OnSessionUpdate(testWS, rateLimitStatus(sevenDayWindow(), 99, 7*24*time.Hour))
+	h.r.OnSessionUpdate(testWS, usageSample(95, 90, instant.UnixMilli()))
 
 	// Act: a status the vendor gave no window is not filable.
 	h.r.OnSessionUpdate(testWS, rateLimitStatus(nil, 99, 5*time.Hour))
 
 	// Assert
-	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
-		t.Fatalf("a windowless status was filed as an allowance")
+	line := h.view(t).GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited()
+	if line.GetSession().GetStatus() != nil || line.GetWeekly().GetStatus() != nil {
+		t.Fatalf("session = %+v weekly = %+v, want a windowless status filed nowhere", line.GetSession(), line.GetWeekly())
 	}
 }
 
-func TestTheAccountUsageArmDrawsNothing(t *testing.T) {
+func TestAnUnavailableUsageSampleDrawsNothing(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	connected(h)
 
-	// Act: the account's usage is no longer the allowance line's source.
+	// Act: a sample that could read no figure leaves the line undrawn.
 	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_AccountUsage{
 			AccountUsage: &conversationv1.SessionAccountUsage{
-				Outcome: &conversationv1.SessionAccountUsage_Available{
-					Available: &conversationv1.SessionAccountUsageAvailable{
-						FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 99},
-						SevenDay: &conversationv1.SessionUsageWindow{UtilizationPercent: 99},
+				ObservedAtMs: instant.UnixMilli(),
+				Outcome: &conversationv1.SessionAccountUsage_Unavailable{
+					Unavailable: &conversationv1.SessionAccountUsageUnavailable{
+						Reason: &conversationv1.SessionAccountUsageUnavailable_ServiceUnavailable{
+							ServiceUnavailable: &conversationv1.SessionUsageServiceUnavailable{},
+						},
 					},
 				},
 			},
@@ -335,7 +556,7 @@ func TestTheAccountUsageArmDrawsNothing(t *testing.T) {
 
 	// Assert
 	if h.view(t).GetStrip().GetStatus().GetIdle().GetActivity() != nil {
-		t.Fatalf("account usage drew an allowance; rate_limit_status is its only source")
+		t.Fatalf("an unavailable sample drew an allowance")
 	}
 }
 

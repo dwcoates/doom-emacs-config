@@ -269,14 +269,14 @@ func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.Se
 	if update == nil {
 		return
 	}
-	arm, apply := r.sessionArm(update)
+	arm, apply := r.sessionArm(ws, update)
 	r.mutate(ws, "daemon.footer.on_session_update", "the footer took a session update",
 		dlog.Context{"arm": arm}, apply)
 }
 
 // sessionArm names the update's arm and returns what it changes. Every arm has
 // a branch, including the ones the footer deliberately draws nothing from.
-func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, func(*wsState)) {
+func (r *resolver) sessionArm(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) (string, func(*wsState)) {
 	switch u := update.GetUpdate().(type) {
 	case *conversationv1.SessionUpdate_QueryDied:
 		return "query_died", func(s *wsState) {
@@ -289,14 +289,12 @@ func (r *resolver) sessionArm(update *conversationv1.SessionUpdate) (string, fun
 			s.tok.settled = true
 		}
 	case *conversationv1.SessionUpdate_AccountUsage:
-		// NOTHING IN THE FOOTER DRAWS THE ACCOUNT'S USAGE any more: the two
-		// allowance figures the rate-limited line states are sourced from
-		// SessionUpdate.rate_limit_status, the vendor's own rate-limit event,
-		// which is the only thing that carries the typed status the drawn
-		// allowance copies. The branch stands because every arm has one.
-		return "account_usage", func(*wsState) {}
+		// THE FIGURES' SOURCE. The sampled account usage carries both
+		// windows' utilization and reset, complete from the first sample;
+		// the rate-limit event carries the verdict.
+		return "account_usage", func(s *wsState) { r.observeAccountUsage(s, u.AccountUsage) }
 	case *conversationv1.SessionUpdate_RateLimitStatus:
-		return "rate_limit_status", func(s *wsState) { r.observeRateLimitStatus(s, u.RateLimitStatus) }
+		return "rate_limit_status", func(s *wsState) { r.observeRateLimitStatus(ws, s, u.RateLimitStatus) }
 	case *conversationv1.SessionUpdate_Compacting:
 		return "compacting", func(s *wsState) { s.compacting = true }
 	case *conversationv1.SessionUpdate_Diagnostics:
@@ -329,22 +327,61 @@ func anyWindowOpen(d *conversationv1.SessionDiagnostics) bool {
 	return false
 }
 
+// observeAccountUsage takes one usage sample and files BOTH windows' figures:
+// five_hour is the session allowance, seven_day the weekly one. A sample that
+// could read no figure (the unavailable arm) leaves the figures on hand
+// standing, and a sample whose seven_day window the vendor omitted leaves the
+// weekly allowance unfigured, which draws it absent rather than invented.
+func (r *resolver) observeAccountUsage(s *wsState, usage *conversationv1.SessionAccountUsage) {
+	available, ok := usage.GetOutcome().(*conversationv1.SessionAccountUsage_Available)
+	if !ok {
+		return
+	}
+	at := usage.GetObservedAtMs()
+	moved := false
+	if five := available.Available.GetFiveHour(); five != nil {
+		moved = s.rate.session.observeFigures(five.GetUtilizationPercent(), five.GetResetsAtMs(), at) || moved
+	}
+	if seven := available.Available.GetSevenDay(); seven != nil {
+		moved = s.rate.weekly.observeFigures(seven.GetUtilizationPercent(), seven.GetResetsAtMs(), at) || moved
+	}
+	if moved {
+		s.rate.at = r.opts.clock.Now()
+	}
+}
+
 // observeRateLimitStatus takes one rate-limit event and files it under the
-// window it is about. The event reports ONE window at a time, and the drawn
-// line states both allowances, so each window's latest status is kept until a
-// newer one for the same window replaces it. A status naming no window, or a
-// window the drawn line has no cell for, is not drawable and is dropped.
-func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.SessionRateLimitStatus) {
+// window it is about: five_hour is the session allowance; seven_day and its
+// per-model and overage-included aliases are all the weekly one. The event is
+// the VERDICT's only source, so filing it is what lets an allowance's status
+// arm join. An event whose utilization is NEWER than the figures on hand also
+// wins for the figure. The overage window has no cell in the contract, so it
+// is logged and dropped rather than drawn against a window it is not about;
+// a status naming no window is not filable at all.
+func (r *resolver) observeRateLimitStatus(ws ids.WorkspaceID, s *wsState, status *conversationv1.SessionRateLimitStatus) {
 	if status == nil {
 		return
 	}
+	var window *allowanceWindow
 	switch status.GetRateLimitType().GetWindow().(type) {
 	case *conversationv1.SessionRateLimitType_FiveHour:
-		s.rate.session = status
-	case *conversationv1.SessionRateLimitType_SevenDay:
-		s.rate.weekly = status
+		window = &s.rate.session
+	case *conversationv1.SessionRateLimitType_SevenDay,
+		*conversationv1.SessionRateLimitType_SevenDayOpus,
+		*conversationv1.SessionRateLimitType_SevenDaySonnet,
+		*conversationv1.SessionRateLimitType_SevenDayOverageIncluded:
+		window = &s.rate.weekly
+	case *conversationv1.SessionRateLimitType_Overage:
+		r.logOf(ws, s).Warn("daemon.footer.rate_limit_overage",
+			"the vendor reported the overage window, which the footer contract has no allowance cell for",
+			dlog.Context{})
+		return
 	default:
 		return
+	}
+	window.verdict = status
+	if status.UtilizationPercent != nil {
+		window.observeFigures(status.GetUtilizationPercent(), status.GetResetsAtMs(), r.opts.clock.Now().UnixMilli())
 	}
 	s.rate.at = r.opts.clock.Now()
 }
