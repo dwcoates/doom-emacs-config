@@ -165,24 +165,43 @@ export function sessionUpsertKey(arm: string, vendorRecordUuid: string): string 
  * is not an activity, so `activity:` would be a lie, and a key naming only the
  * warning would have each new one overwrite the last — leaving a conversation
  * with exactly one visible warning however often the window filled.
+ *
+ * IT IS A `session:<arm>:<uuid>` KEY, NOT A `budget:` ONE (ruling, landing 5).
+ * BOTH PLANES produce this fact from ONE transcript line — the sidecar reads
+ * the file, the shim reads the stream — and write_id dedup collapses them into
+ * one row only if the key BYTES match. The sidecar mints `session:<arm>:<uuid>`
+ * for every arm it serves, so this plane spells it the same way.
  */
 export function contextBudgetWarningUpsertKey(vendorRecordUuid: string): string {
-  return `budget:${requireValue(vendorRecordUuid, "the vendor record uuid")}`;
+  return sessionUpsertKey("context_budget_warning", vendorRecordUuid);
 }
 
 /**
- * A residue row, keyed by WHAT KIND of record it was and which record it was.
+ * A residue row, keyed by THE RECORD IT WAS and nothing else.
  *
  * Residue has no identity of its own — that is what makes it residue — so the
  * key is its provenance. Keyed by the vendor record's own uuid so a redelivered
  * record settles as one row rather than accumulating copies of the same
  * unconverted line.
+ *
+ * NO KIND SEGMENT (ruling, landing 5). The kind lives INSIDE the row, and both
+ * planes' conversions of one record must collapse to one row — which they
+ * cannot if one plane's key carries a segment the other's does not.
  */
-export function residueUpsertKey(kind: string, vendorRecordUuid: string): string {
-  return `residue:${requireValue(kind, "the residue kind")}:${requireValue(
-    vendorRecordUuid,
-    "the vendor record uuid",
-  )}`;
+export function residueUpsertKey(vendorRecordUuid: string): string {
+  return `residue:${requireValue(vendorRecordUuid, "the vendor record uuid")}`;
+}
+
+/**
+ * The residue key for a stream record the vendor gave NO uuid.
+ *
+ * A PER-PROCESS MONOTONIC SEQUENCE, so it can never collide with the sidecar's
+ * own `residue:file:<path>:<offset>`: the two planes name their unidentified
+ * residue in disjoint spaces, because there is nothing about a record with no
+ * identity for the two to agree on.
+ */
+export function streamResidueUpsertKey(sequence: number): string {
+  return `residue:stream:${String(sequence)}`;
 }
 
 // ---------------------------------------------------------------------------
