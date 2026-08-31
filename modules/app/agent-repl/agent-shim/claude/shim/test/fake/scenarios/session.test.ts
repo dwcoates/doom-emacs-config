@@ -127,16 +127,28 @@ describe("rate-limit events", () => {
   });
 });
 
-describe("the context-budget warning", () => {
+describe("the generic context tip", () => {
   it("is an attachment, never a stream message", async () => {
     // Arrange + Act
-    const driven = await driveScenario(["!context-budget"]);
+    const driven = await driveScenario(["!context-tip"]);
     const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
       type: string;
     };
 
     // Assert
     expect(attachment.type).toBe("context_tip");
+  });
+
+  it("is a GENERIC tip and not the context-budget warning", async () => {
+    // RULING (landing 5): the one real capture of this record is a `/goal`
+    // tip, so a mock that dressed it as the budget warning would have every
+    // suite agree with a mapping the vendor never made.
+    const driven = await driveScenario(["!context-tip"]);
+    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
+      tip?: { featureId?: string };
+    };
+
+    expect(attachment.tip?.featureId).toBe("goal");
   });
 });
 

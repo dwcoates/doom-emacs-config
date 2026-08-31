@@ -364,7 +364,12 @@ export function convertAttachment(
     // last change was an edit or a write from the same remembered value.
     return convertDiagnostics(record, context, unit, true);
   }
-  if (type === "context_tip" || type === "context_budget_warning") {
+  // `context_tip` IS NOT THE BUDGET WARNING (ruling, landing 5). The one real
+  // `context_tip` capture is a generic `/goal` tip, so mapping it to the
+  // warning would draw an unrelated tip as "your context is filling"; which
+  // attachment really carries the warning is on the capture run's checklist.
+  // Until a capture says, the tip lands as itself: residue.
+  if (type === "context_budget_warning") {
     return convertContextBudgetWarning(record, context);
   }
   if (type === "nested_memory" || type === "invoked_skills" || type === "dynamic_skill") {
