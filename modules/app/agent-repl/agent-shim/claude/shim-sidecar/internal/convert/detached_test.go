@@ -109,8 +109,8 @@ func TestLostVerdictIsStableSoAReEmissionIsANoOp(t *testing.T) {
 	at.TaskID = "b1"
 
 	// Act.
-	first := c.BashLost(at, "toolu_run", "", 0, LostWentSilent)
-	second := c.BashLost(at, "toolu_run", "", 0, LostWentSilent)
+	first := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true)
+	second := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true)
 
 	// Assert.
 	if first.GetWriteId() != second.GetWriteId() {
@@ -128,7 +128,7 @@ func TestLostAndExitedShareTheTerminalDiscriminator(t *testing.T) {
 
 	// Act.
 	exited := c.BashExited(at, "toolu_run", "out", 0, 0)
-	lost := c.BashLost(at, "toolu_run", "out", 0, LostSweptUp)
+	lost := c.BashLost(at, "toolu_run", "out", 0, LostSweptUp, true)
 
 	// Assert.
 	if exited.GetWriteId() != lost.GetWriteId() {
@@ -265,7 +265,7 @@ func TestALostRunStatesTheArmItConcludedOn(t *testing.T) {
 			at := testAttribution(0)
 
 			// Act.
-			entry := c.BashLost(at, "toolu_run", "so far", 0, test.reason)
+			entry := c.BashLost(at, "toolu_run", "so far", 0, test.reason, true)
 
 			// Assert.
 			cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
@@ -286,7 +286,7 @@ func TestALostRunIsNeverBlamedOnAPersonOrATimeout(t *testing.T) {
 	at := testAttribution(0)
 
 	// Act.
-	entry := c.BashLost(at, "toolu_run", "so far", 0, LostWentSilent)
+	entry := c.BashLost(at, "toolu_run", "so far", 0, LostWentSilent, true)
 
 	// Assert.
 	cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
@@ -320,7 +320,7 @@ func TestACancelledRunCarriesTheOutputItHadProducedAndBlamesThePerson(t *testing
 	at.TaskID = "b1"
 
 	// Act.
-	entry := c.BashCancelled(at, "toolu_run", "partial work\n", 0, 1700000000000)
+	entry := c.BashCancelled(at, "toolu_run", "partial work\n", 0, 1700000000000, true)
 
 	// Assert.
 	cut := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted()
@@ -332,5 +332,94 @@ func TestACancelledRunCarriesTheOutputItHadProducedAndBlamesThePerson(t *testing
 	}
 	if got := entry.GetUpsertKey(); got != BashTerminalKey("toolu_run") {
 		t.Fatalf("cancelled terminal keyed %q, want the run's terminal key", got)
+	}
+}
+
+// ---- landing 5: a terminal whose producer holds NO BYTES says not_observed ----
+
+func TestALostTerminalWithNoBytesObservedStatesNotObserved(t *testing.T) {
+	// Arrange. THREE DIFFERENT FACTS, and only one of them is true here:
+	// text{stdout:"", whole{}} claims the COMMAND printed nothing;
+	// partial{bytes_omitted:0} claims nothing was CUT; not_observed claims the
+	// producer does not know. A run swept up at boot supports only the third.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false)
+
+	// Assert.
+	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
+	if output.GetNotObserved() == nil {
+		t.Fatalf("output = %v, want the not_observed arm", output)
+	}
+}
+
+func TestALostTerminalWithNoBytesNeverClaimsTheCommandPrintedNothing(t *testing.T) {
+	// Arrange. The distinction is the whole point: an empty text arm is a
+	// positive claim about the command, and the producer is not entitled to it.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashLost(at, "toolu_run", "", 0, LostSweptUp, false)
+
+	// Assert.
+	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
+	if output.GetText() != nil {
+		t.Fatalf("output states text %v; a producer holding no bytes must not claim the command printed nothing", output.GetText())
+	}
+}
+
+func TestALostTerminalThatDidObserveOutputStillCarriesIt(t *testing.T) {
+	// Arrange. not_observed is for the case the spool was never read; a run we
+	// DID read still owes its bytes.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashLost(at, "toolu_run", "what it managed to say", 0, LostWentSilent, true)
+
+	// Assert.
+	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
+	if got := output.GetText().GetStdout(); got != "what it managed to say" {
+		t.Fatalf("stdout = %q, want the bytes the reader observed", got)
+	}
+}
+
+func TestACancelledTerminalWithNoBytesObservedStatesNotObserved(t *testing.T) {
+	// Arrange. A stop is evidence about a PERSON's decision, never about what
+	// the command printed — so a stop for a run whose spool was never readable
+	// says not_observed rather than inventing an empty output for it.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashCancelled(at, "toolu_run", "", 0, 1700000000000, false)
+
+	// Assert.
+	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
+	if output.GetNotObserved() == nil {
+		t.Fatalf("output = %v, want the not_observed arm", output)
+	}
+}
+
+func TestAnObservedButGenuinelySilentRunStatesEmptyTextNotNotObserved(t *testing.T) {
+	// Arrange. THE CONVERSE, and it matters as much: a command we READ that
+	// printed nothing is a real fact about the command, and downgrading it to
+	// not_observed would throw away something we do know.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+
+	// Act.
+	entry := c.BashLost(at, "toolu_run", "", 0, LostWentSilent, true)
+
+	// Assert.
+	output := entry.GetAgentUpdate().GetBash().GetFrame().GetSuccess().GetInterrupted().GetOutput()
+	if output.GetNotObserved() != nil {
+		t.Fatal("a run we DID read that printed nothing must state empty text, not not_observed")
+	}
+	if output.GetText().GetWhole() == nil {
+		t.Fatalf("output = %v, want text with the whole extent", output)
 	}
 }

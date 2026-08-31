@@ -321,3 +321,62 @@ func TestAKeepAliveKeepsTheKeyOfTheItemItWouldHaveBeen(t *testing.T) {
 
 // errTestParse stands in for a decoder failure.
 var errTestParse = errors.New("invalid character 'n'")
+
+// ---- a record with no FILE POSITION: the run-scoped write identity ----
+
+func TestARecordWithNoFilePositionIsIdentifiedByItsRun(t *testing.T) {
+	// Arrange. A terminal concluded from the ABSENCE of a file — a run swept up
+	// at boot — has no file id and no offset to digest. Inventing offset 0 would
+	// claim a byte we never saw, so the identity is scoped to the run, which is
+	// unique by construction and is already what the terminal's upsert key
+	// names.
+	at := Attribution{WriteScope: RunScope("toolu_run_0001")}
+
+	// Act.
+	got := WriteID(at, "bash_terminal")
+
+	// Assert: the recipe deliberately carries NO offset.
+	want := sha256Hex(Producer + "|run:toolu_run_0001|bash_terminal")
+	if got != want {
+		t.Fatalf("write_id = %q, want the digest of %q", got, Producer+"|run:toolu_run_0001|bash_terminal")
+	}
+}
+
+func TestTwoRunsWithNoFilePositionNeverShareAWriteIdentity(t *testing.T) {
+	// Arrange. THIS IS THE DEFECT THE SCOPE EXISTS FOR: with neither a file id
+	// nor a run scope, every inferred terminal in a process digests one id, and
+	// the store — whose absorption IS write_id equality — swallows the second
+	// run's terminal as a replay of the first. That run then has no terminal at
+	// all and stays open in every reader downstream.
+	first := Attribution{WriteScope: RunScope("toolu_run_0001")}
+	second := Attribution{WriteScope: RunScope("toolu_run_0002")}
+
+	// Act, Assert.
+	if WriteID(first, "bash_terminal") == WriteID(second, "bash_terminal") {
+		t.Fatal("two runs concluded without a file position share one write identity")
+	}
+}
+
+func TestAFilePositionBeatsARunScope(t *testing.T) {
+	// Arrange. The run scope is for records with NO position, never a fallback
+	// for one that has one: a record read off a file must stay identified by
+	// where it was read, so a re-read after a restart mints the same id.
+	scoped := Attribution{FileID: "16777232:9910", Offset: 512, WriteScope: RunScope("toolu_run_0001")}
+	plain := Attribution{FileID: "16777232:9910", Offset: 512}
+
+	// Act, Assert.
+	if WriteID(scoped, "block:0") != WriteID(plain, "block:0") {
+		t.Fatal("a run scope changed the identity of a record that HAS a file position")
+	}
+}
+
+func TestAWriteIdWithNeitherAFileIdNorARunScopeIsRaised(t *testing.T) {
+	// Arrange, Act + Assert. Neither coordinate means no identity at all, and
+	// digesting the empty string would silently collide every such record.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("a write id with no file id and no run scope must be raised, never digested")
+		}
+	}()
+	_ = WriteID(Attribution{Path: "/p/s.jsonl"}, "bash_terminal")
+}
