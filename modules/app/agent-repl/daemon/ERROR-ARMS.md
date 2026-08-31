@@ -50,3 +50,18 @@ not yet expressible.
    CLAUDE_CONFIG_DIR project entry.
 4. The metaprompt sentinels (exact strings) the daemon wraps around a held or
    merged prompt.
+
+## Drain and rollout refusal arms (this wave, all LANDED)
+
+The drain controller and the rollout controller make four refusals, and every
+one of them already has a typed arm in the landing-4 contract. They are recorded
+here as the mapping the server handlers switch on, not as arms still owed:
+
+| rpc | arm | daemon-side refusal | package |
+| --- | --- | --- | --- |
+| UpdateShutdownSchedule | `nothing_scheduled` | `drain.ErrNothingScheduled` — Cancel with nothing in force | drain |
+| AdoptHostWorkspace / AdoptWebWorkspace | `no_transfer_announced` | `rollout.ErrNoTransferAnnounced`. On the WEB side this is the ORDINARY page boot (the web side never redials, so every non-handover boot makes the call) and is recorded at INFO, never WARN and never a fault | rollout |
+| AdoptHostWorkspace / AdoptWebWorkspace | `not_yet_adopted` | `rollout.ErrNotYetAdopted` — an expected participant has not called yet; the caller retries with backoff | rollout |
+| AdoptHostWorkspace / AdoptWebWorkspace | `participant_not_expected` | `rollout.ErrParticipantNotExpected` — the caller's stream was not open at announcement | rollout |
+
+NOTHING NEW IS OWED by drain or rollout: no refusal either makes lacks an arm.
