@@ -285,15 +285,23 @@ type fakeShim struct {
 	// killAnswer is what KillSession answers; the zero value is success.
 	killAnswer *shimv1.KillSessionResponse
 	killErr    error
-	// exited is closed (with an ExitInfo sent) when the test reaps it.
+	// exited carries the one ExitInfo the test reaps it with.
 	exited chan shimclient.ExitInfo
+	// forced announces every force-kill, so a test synchronizes on one having
+	// happened rather than spinning on a counter.
+	forced chan shimclient.KillAttribution
 	// order records the engine's steps against this shim, so a test asserts the
 	// SEQUENCE and not merely that each happened.
 	order *steps
 }
 
 func newFakeShim(pid int, order *steps) *fakeShim {
-	return &fakeShim{pid: pid, exited: make(chan shimclient.ExitInfo, 1), order: order}
+	return &fakeShim{
+		pid:    pid,
+		exited: make(chan shimclient.ExitInfo, 1),
+		forced: make(chan shimclient.KillAttribution, 4),
+		order:  order,
+	}
 }
 
 func (s *fakeShim) PID() int { return s.pid }
@@ -339,6 +347,7 @@ func (s *fakeShim) Kill(attr shimclient.KillAttribution) error {
 	s.killed = append(s.killed, attr)
 	s.mu.Unlock()
 	s.order.record("force_kill")
+	s.forced <- attr
 	return nil
 }
 
@@ -754,4 +763,15 @@ func indexOf(taken []string, step string) int {
 // writeFile replaces a file's whole content, for the tests that corrupt one.
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// waitForForceKill blocks until the engine has force-killed a shim, which is
+// how a test knows the stand-down window's expiry was acted on.
+func waitForForceKill(t *testing.T, shim *fakeShim) {
+	t.Helper()
+	select {
+	case <-shim.forced:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the shim was never force-killed")
+	}
 }
