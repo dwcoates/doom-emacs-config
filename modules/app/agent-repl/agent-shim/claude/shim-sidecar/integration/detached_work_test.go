@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,6 +34,17 @@ type detachedFixture struct {
 // seedDetachedShell writes the captured transcript's background-launch pair —
 // the assistant's `run_in_background` Bash call and the tool_result naming the
 // spool — into a fresh session, re-pointed at this test's spool path.
+//
+// THE PAIR IS GENUINE, and requireCapturedBackgroundLaunchPair below pins that:
+// captured line 8 is a real `Bash` tool_use whose input carries
+// `run_in_background: true`, and captured line 10 is its real background
+// tool_result — the one naming a `backgroundTaskId` and carrying the vendor's
+// launch prose. Its `stdout`/`stderr`/`interrupted` fields are present and
+// empty because that is what the VENDOR writes for a backgrounded launch (the
+// corpus's own tool-results/bash-background.jsonl carries the identical shape),
+// not because a foreground result was mutated into one. Only the task id and
+// the spool PATH are re-pointed, because those are this test's, and nothing
+// else about the record is touched.
 func seedDetachedShell(t *testing.T, tree *vendorTree, cwd, session string) detachedFixture {
 	t.Helper()
 	captured := loadCapturedSession(t)
@@ -39,6 +52,7 @@ func seedDetachedShell(t *testing.T, tree *vendorTree, cwd, session string) deta
 	taskID := capturedSpoolTask1
 	spool := tree.spoolPath(slug, session, taskID)
 
+	requireCapturedBackgroundLaunchPair(t, captured)
 	call := retargetSession(t, decodeRecord(t, captured.Lines[8]), session, cwd)
 	result := retargetSession(t, decodeRecord(t, captured.Lines[10]), session, cwd)
 	result = setToolResultText(t, result, backgroundLaunchText(taskID, spool))
@@ -51,6 +65,60 @@ func seedDetachedShell(t *testing.T, tree *vendorTree, cwd, session string) deta
 		Tree: tree, Slug: slug, Session: session,
 		CallID: capturedBashCall1, TaskID: taskID, SpoolPath: spool, Parent: g,
 	}
+}
+
+// requireCapturedBackgroundLaunchPair guards the provenance every detached
+// subject rests on. A re-capture that moved or changed those two lines must
+// fail HERE, saying exactly what it lost, rather than as a mystifying "no bash
+// row was ever written" in eight separate subjects.
+func requireCapturedBackgroundLaunchPair(t *testing.T, captured capturedSession) {
+	t.Helper()
+	call := decodeRecord(t, captured.Lines[8])
+	if kind, _ := call["type"].(string); kind != "assistant" {
+		t.Fatalf("captured line 8 is a %q record, wanted the assistant's background Bash call", kind)
+	}
+	block := soleToolUseBlock(t, call)
+	if name, _ := block["name"].(string); name != "Bash" {
+		t.Fatalf("captured line 8 calls %q, wanted Bash", name)
+	}
+	input, ok := block["input"].(map[string]any)
+	if !ok {
+		t.Fatalf("captured line 8's Bash call carries no input object: %v", block)
+	}
+	if background, _ := input["run_in_background"].(bool); !background {
+		t.Fatalf("captured line 8's Bash call is not backgrounded (run_in_background=%v); the detached subjects need a real LAUNCH, not a foreground call dressed as one", input["run_in_background"])
+	}
+
+	result := decodeRecord(t, captured.Lines[10])
+	if id := toolUseIDOfResult(t, result); id != capturedBashCall1 {
+		t.Fatalf("captured line 10 answers call %q, wanted line 8's %q", id, capturedBashCall1)
+	}
+	inner, ok := result["toolUseResult"].(map[string]any)
+	if !ok {
+		t.Fatalf("captured line 10 carries no toolUseResult: %v", result)
+	}
+	if got, _ := inner["backgroundTaskId"].(string); got != capturedSpoolTask1 {
+		t.Fatalf("captured line 10 names background task %q, wanted %q; a result with no backgroundTaskId is a FOREGROUND result and announces no spool",
+			got, capturedSpoolTask1)
+	}
+}
+
+// soleToolUseBlock answers the one tool_use block of an assistant record.
+func soleToolUseBlock(t *testing.T, obj map[string]any) map[string]any {
+	t.Helper()
+	msg, ok := obj["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("record carries no message object: %v", obj)
+	}
+	blocks, _ := msg["content"].([]any)
+	for _, raw := range blocks {
+		b, ok := raw.(map[string]any)
+		if ok && b["type"] == "tool_use" {
+			return b
+		}
+	}
+	t.Fatalf("record carries no tool_use block: %v", msg)
+	return nil
 }
 
 // TestSpoolBytesBecomeBashUpdatesUnderTheSpawningCallsIdentity asserts the run
@@ -317,8 +385,7 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 
 	stop := decodeRecord(t, corpusLine(t, "tool-results/task_stop.jsonl", 0))
 	stop = retargetSession(t, stop, fx.Session, "/Users/dodgecoates/detached-stop-probe")
-	stop = setNested(t, stop, "toolUseResult", "task_id", fx.TaskID)
-	stop = setNested(t, stop, "toolUseResult", "task_type", "local_bash")
+	stop = retargetTaskStop(t, stop, fx.TaskID, "local_bash")
 	// THE CALL COMES FIRST, as the vendor writes it. An exempt tool's call is
 	// DROPPED but still remembered, because this one result has to find the call
 	// it belongs to; a fixture that supplies only the result is a transcript no
@@ -387,6 +454,39 @@ func TestTaskStopCallItselfIsDropped(t *testing.T) {
 			t.Errorf("an exempt-set call produced entry %q; exempt calls are dropped entirely", e.GetUpsertKey())
 		}
 	}
+}
+
+// retargetTaskStop re-points a TaskStop result at this test's task, in BOTH
+// places the vendor states it.
+//
+// THE VENDOR WRITES THE FACT TWICE: once as the structured `toolUseResult`
+// object, and once as the tool_result BLOCK's content, which is that same
+// object serialized to a JSON string. Re-pointing only `toolUseResult` left the
+// block's embedded JSON still naming the corpus's task (`abaa339795d28ab75`,
+// type `local_agent`) — an incoherent record no vendor ever wrote, and one that
+// would let a converter reading the block instead of the object pass this
+// subject while failing in production on every real stop.
+func retargetTaskStop(t *testing.T, obj map[string]any, taskID, taskType string) map[string]any {
+	t.Helper()
+	inner, ok := obj["toolUseResult"].(map[string]any)
+	if !ok {
+		t.Fatalf("record carries no toolUseResult: %v", obj)
+	}
+	retargeted := make(map[string]any, len(inner))
+	for k, v := range inner {
+		retargeted[k] = v
+	}
+	retargeted["task_id"] = taskID
+	retargeted["task_type"] = taskType
+	command, _ := retargeted["command"].(string)
+	retargeted["message"] = fmt.Sprintf("Successfully stopped task: %s (%s)", taskID, command)
+
+	encoded, err := json.Marshal(retargeted)
+	if err != nil {
+		t.Fatalf("encode the retargeted stop result: %v", err)
+	}
+	out := withFields(t, obj, map[string]any{"toolUseResult": retargeted})
+	return setToolResultText(t, out, string(encoded))
 }
 
 // exitCodeOf reads the code from a spool's terminal EXIT marker.
