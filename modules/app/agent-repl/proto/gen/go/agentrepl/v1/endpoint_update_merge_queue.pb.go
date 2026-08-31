@@ -132,7 +132,11 @@ func (*UpdateMergeQueueRequest_Resume) isUpdateMergeQueueRequest_Action() {}
 func (*UpdateMergeQueueRequest_Evict) isUpdateMergeQueueRequest_Action() {}
 
 type UpdateMergeQueuePause struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHICH repository's queue. UNSET = every repository that has a queue
+	// (the daemon-wide switch). The queue is per repository, so a caller that
+	// means one names it (added 2026-08-29; the request carried no scope).
+	Repository    *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3,oneof" json:"repository,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -167,8 +171,19 @@ func (*UpdateMergeQueuePause) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{1}
 }
 
+func (x *UpdateMergeQueuePause) GetRepository() *v1.RepositoryRef {
+	if x != nil {
+		return x.Repository
+	}
+	return nil
+}
+
 type UpdateMergeQueueResume struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// WHICH repository's queue. UNSET = every repository that has a queue
+	// (the daemon-wide switch). The queue is per repository, so a caller that
+	// means one names it (added 2026-08-29; the request carried no scope).
+	Repository    *v1.RepositoryRef `protobuf:"bytes,1,opt,name=repository,proto3,oneof" json:"repository,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,6 +216,13 @@ func (x *UpdateMergeQueueResume) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UpdateMergeQueueResume.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueResume) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *UpdateMergeQueueResume) GetRepository() *v1.RepositoryRef {
+	if x != nil {
+		return x.Repository
+	}
+	return nil
 }
 
 type UpdateMergeQueueEvict struct {
@@ -818,9 +840,17 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\x05pause\x18\x01 \x01(\v2#.agentrepl.v1.UpdateMergeQueuePauseH\x00R\x05pause\x12>\n" +
 	"\x06resume\x18\x02 \x01(\v2$.agentrepl.v1.UpdateMergeQueueResumeH\x00R\x06resume\x12;\n" +
 	"\x05evict\x18\x03 \x01(\v2#.agentrepl.v1.UpdateMergeQueueEvictH\x00R\x05evictB\b\n" +
-	"\x06action\"\x17\n" +
-	"\x15UpdateMergeQueuePause\"\x18\n" +
-	"\x16UpdateMergeQueueResume\"Q\n" +
+	"\x06action\"h\n" +
+	"\x15UpdateMergeQueuePause\x12@\n" +
+	"\n" +
+	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
+	"repository\x88\x01\x01B\r\n" +
+	"\v_repository\"i\n" +
+	"\x16UpdateMergeQueueResume\x12@\n" +
+	"\n" +
+	"repository\x18\x01 \x01(\v2\x1b.workspace.v1.RepositoryRefH\x00R\n" +
+	"repository\x88\x01\x01B\r\n" +
+	"\v_repository\"Q\n" +
 	"\x15UpdateMergeQueueEvict\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xa4\x01\n" +
 	"\x18UpdateMergeQueueResponse\x12A\n" +
@@ -876,27 +906,30 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_goTypes = []any{
 	(*UpdateMergeQueueAlreadyPaused)(nil),        // 11: agentrepl.v1.UpdateMergeQueueAlreadyPaused
 	(*UpdateMergeQueueNotPaused)(nil),            // 12: agentrepl.v1.UpdateMergeQueueNotPaused
 	(*UpdateMergeQueueNoSuchQueuedMerge)(nil),    // 13: agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	(*v1.WorkspaceRef)(nil),                      // 14: workspace.v1.WorkspaceRef
+	(*v1.RepositoryRef)(nil),                     // 14: workspace.v1.RepositoryRef
+	(*v1.WorkspaceRef)(nil),                      // 15: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.UpdateMergeQueueRequest.pause:type_name -> agentrepl.v1.UpdateMergeQueuePause
 	2,  // 1: agentrepl.v1.UpdateMergeQueueRequest.resume:type_name -> agentrepl.v1.UpdateMergeQueueResume
 	3,  // 2: agentrepl.v1.UpdateMergeQueueRequest.evict:type_name -> agentrepl.v1.UpdateMergeQueueEvict
-	14, // 3: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
-	5,  // 4: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
-	6,  // 5: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
-	7,  // 6: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
-	8,  // 7: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
-	9,  // 8: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
-	10, // 9: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
-	11, // 10: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
-	12, // 11: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
-	13, // 12: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	14, // 3: agentrepl.v1.UpdateMergeQueuePause.repository:type_name -> workspace.v1.RepositoryRef
+	14, // 4: agentrepl.v1.UpdateMergeQueueResume.repository:type_name -> workspace.v1.RepositoryRef
+	15, // 5: agentrepl.v1.UpdateMergeQueueEvict.workspace:type_name -> workspace.v1.WorkspaceRef
+	5,  // 6: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
+	6,  // 7: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
+	7,  // 8: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+	8,  // 9: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+	9,  // 10: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
+	10, // 11: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
+	11, // 12: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
+	12, // 13: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
+	13, // 14: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_merge_queue_proto_init() }
@@ -909,6 +942,8 @@ func file_agentrepl_v1_endpoint_update_merge_queue_proto_init() {
 		(*UpdateMergeQueueRequest_Resume)(nil),
 		(*UpdateMergeQueueRequest_Evict)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[1].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[2].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_update_merge_queue_proto_msgTypes[4].OneofWrappers = []any{
 		(*UpdateMergeQueueResponse_Success)(nil),
 		(*UpdateMergeQueueResponse_Error)(nil),
