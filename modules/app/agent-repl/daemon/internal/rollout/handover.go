@@ -74,9 +74,11 @@ func (c *controller) Handover(ctx context.Context) error {
 		}
 	}
 
-	// The adoption windows are TIMED, not waited on for progress: expiry is the
-	// workspace's own fault record and nothing else. Letting them settle before
-	// the exit is what makes the record get written at all.
+	// THE OUTGOING DAEMON TIMES THE WINDOW, so it must still be alive when the
+	// window closes: letting the windows settle before the exit is what makes
+	// the accountability record get written at all. The exit is therefore
+	// delayed by at most one AdoptionWindow past the last transfer — a bounded
+	// stand-down, paid while the successor is already serving every workspace.
 	windows.Wait()
 
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
@@ -134,20 +136,18 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 // fault when it expires. There is deliberately no abort and no retry
 // machinery: expiry is remediated as it comes up.
 func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
+	// An adoption that already landed needs no window: the headless case claims
+	// serving inside Join, before the push it is answering was even read.
+	if c.adopted(ctx, ws, fields) {
+		return
+	}
 	select {
 	case <-ctx.Done():
 		c.log.Debug(opAdoption, "the adoption window ended with its context", fields)
 		return
 	case <-c.deps.Clock.After(c.deps.AdoptionWindow):
 	}
-	owner, err := c.deps.DB.Serving(ctx, ws)
-	if err != nil {
-		c.log.Error(opAdoption, "could not read serving ownership at the window's expiry", withCause(fields, err))
-		return
-	}
-	if owner != nil && *owner != c.deps.Instance {
-		c.log.Debug(opAdoption, "the successor claimed the workspace inside its window",
-			merge(fields, dlog.Context{"owner": string(*owner)}))
+	if c.adopted(ctx, ws, fields) {
 		return
 	}
 	workspace := ws
@@ -164,6 +164,24 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, field
 	}
 	c.log.Warn(opAdoption, "the adoption window expired; recorded the workspace's own fault",
 		merge(fields, dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}))
+}
+
+// adopted reports whether some OTHER daemon instance now serves the workspace,
+// which is the only evidence of a completed adoption the outgoing daemon has:
+// there is no daemon-to-daemon channel, so serving ownership in WSM is the
+// whole of the signal.
+func (c *controller) adopted(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) bool {
+	owner, err := c.deps.DB.Serving(ctx, ws)
+	if err != nil {
+		c.log.Error(opAdoption, "could not read serving ownership", withCause(fields, err))
+		return false
+	}
+	if owner == nil || *owner == c.deps.Instance {
+		return false
+	}
+	c.log.Debug(opAdoption, "the successor owns the workspace",
+		merge(fields, dlog.Context{"owner": string(*owner)}))
+	return true
 }
 
 // awaitFreeForever waits for a workspace to fall free, FOREVER, naming the
