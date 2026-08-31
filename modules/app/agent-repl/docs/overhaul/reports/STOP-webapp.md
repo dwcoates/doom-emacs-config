@@ -20,19 +20,28 @@ reds explicitly assigned below.
 - landings 1–5 of the proto remediation and the corrected vocabulary files
   (render-colors.json incl. footer_allowance; paint-classes.json)
 
-## Running at wind-down (merge each on its report, then remove its worktree)
+## Final merges before the stop (all in; tip verified green)
 
-- cards B + asks (worktree webapp-agents/feed-cards-b): skill/artifact/plan/findings/shell
-  cards, permission/question/cold-gate asks, typed Answer*/Interrupt refusal arms, cold-gate
-  compact scope trace.
-- landing-3/4 remediation (worktree webapp-agents/landing-3): tool-card input form +
-  none output, turn-ended headline (deletes the client sentence table), detached confirm
-  removal, FooterAllowance oneof (UNSET legal) via vocab footer_allowance, Interrupt arms
-  at the three stop controls, FeedResponse.notice register. OWNS the two known reds:
-  src/footer/strip.ts type error + test, tool-card output-form arm guard.
-- integration suite (worktree webapp-agents/integration-suite): fake daemon (flush-on-accept),
-  fixtures, harness, 11 suites; landing-4/5 arm tables; the ruled token-format table pinned;
-  test/integration excluded from the main tsconfig until wiring flips it.
+The three implementers running at wind-down delivered and are MERGED:
+- cards B + asks (4c5959d29): skill/artifact/plan/findings/shell cards; permission/
+  question/cold-gate asks; typed Answer*/Interrupt refusal arms at the controls;
+  cold-gate compact scope trace; COLD_GATE_COPY shipped for review.
+- landing-3/4/5 remediation (bea4726cb): tool-card input form {command|path|query} +
+  none output; turn-ended headline verbatim (client sentence table deleted); detached
+  confirm removal; FooterAllowance oneof with UNSET legal, colored via vocab
+  footer_allowance; Interrupt arms at the three stop controls; FeedResponse.notice
+  register. Cleared the two known reds.
+- integration suite (92becf33a): fake daemon (flush-on-accept), fixtures, harness,
+  11 suites + streams additions; landing-4/5 arm tables; the ruled token-format table
+  pinned (the cold-gate scale case deliberately red under test:integration until the
+  wiring agent unifies the formatter); test/integration stays excluded from the main
+  tsconfig until wiring flips it.
+
+Tip verification: `npm run typecheck` 0 errors; `npm test` 75 files / 2657 tests green;
+`npm run build` green; fake-daemon self-test 50/50 green. The integration SUITE PROPER
+(`npm run test:integration`) is expected red until briefs 1, 2 and 4 land — three component
+module families (src/topbar, src/login, src/lifecycle, src/feed/merge) do not exist yet and
+main.ts wiring is unassembled; that is the designed order, not a defect.
 
 ## Queued briefs, in dispatch order (all opus-low; brief text in webapp-briefs/)
 
@@ -70,12 +79,11 @@ working rulings on interrupt placement, prompt markdown fidelity, empty-tray tre
 panel auto-close, and the cards-B accepted rulings). The proposed cold-gate copy ships in
 src/feed/asks/cold-gate.ts as COLD_GATE_COPY (one object, one place to reword).
 
-## Worktrees left in place at wind-down
+## Worktrees left in place
 
-webapp-agents/{topbar-login, merge-bubble} (queued, untouched at base) and whichever of
-{feed-cards-b, landing-3, integration-suite} had not yet merged when the final report was
-sent (each holds committed work on its overhaul/webapp-* branch; resume by SendMessage to
-the agent id in the session ledger, or re-dispatch fresh from the brief if the session is gone).
+webapp-agents/topbar-login and webapp-agents/merge-bubble only — both queued briefs,
+untouched at an older base (merge overhaul/webapp first on dispatch). Every other agent
+worktree and branch is merged and deleted.
 
 ## Standing constraints that survive the pause
 
