@@ -477,3 +477,47 @@ every UX or contract gap you surfaced instead of improvising.
   fast_mode producer, the keep-alive override, the fake-store read ledger,
   the auditor's critiques, and the first integration run's failures. The
   producer re-key (record plane step 4) is confirmed to the lead on landing.
+- LEDGER: record plane merged at 731aa5f00 (worktree/branch retired; 2205
+  unit tests, smoke 10/10). Producer re-key confirmed to the lead.
+  Remediation #1 worktree `shim-agents/remed1` (branch
+  `overhaul/shim-remed1`) cut for the opus-low agent: (a) converter_defect
+  fault + degraded window + recovery, (b) unsolicited model_changed from
+  message.model, (c) fast_mode producer, (d) `AGENT_REPL_FAKE_KEEPALIVE_INTERVAL_MS`
+  under --fake, (e) fake-store read ledger, then integration failures and
+  auditor #1 critiques as they arrive.
+- RECONCILIATION RULINGS (project lead): (1) a live unit the record cannot
+  DESCRIBE is never left open — its KIND is known from where GetLiveWork
+  found it (bash rows → bash, agent book → subagent, workflow table →
+  workflow); reconciliation CLOSES it with `lost.swept_up` and logs at WARN
+  naming the id; no kind-free terminal exists. (2) `file_vanished` is the
+  sidecar's arm only. (3) landing 5 adds a `not_observed` arm to
+  `AgentBashInterrupted.output`; until it lands the current shape stays,
+  then lost/reconciled runs state `not_observed`.
+- BUDGET-WARNING KEY (project lead, cross-plane): the shim's
+  AgentUpdate.context_budget_warning page line is keyed
+  `session:context_budget_warning:<record uuid>` (the transcript line's
+  uuid, identical to the sidecar's), never `budget:<uuid>`; a test pins the
+  spelling. Assigned to remediation #1 as item (g).
+- BASH ROW KEYS (project lead amendment, binding): the start row is
+  `bash:<run id>`, each output delta `bash:<run id>:<from_offset>`, the
+  terminal `bash:<run id>:terminal`; WatchBashRun replays in write order;
+  one row never supersedes another. Assigned to remediation #1 as item (h).
+- RESIDUE KEY (project lead ruling): `residue:<vendor record uuid>` on both
+  planes when the record has a uuid; without one the shim mints
+  `residue:stream:<sequence>` and the sidecar `residue:file:<path>:<offset>`
+  (they must not collide). Assigned to remediation #1 as item (i); item (j)
+  adds `!rate-limit-five-hour` / `!rate-limit-seven-day` to the mock for the
+  e2e footer-join case.
+- STORE FAILURE ARMS now typed (invalid_request | stale_pointer |
+  storage_failure on Open/ReadAgentPage; storage_failure on GetLiveWork;
+  invalid_request | storage_failure on WriteBatch): the shim's reader must
+  switch on them, never on detail prose (remediation #2).
+- INTEGRATION RUN #1 (tree 04703c1c3, pre-record-plane; stale): 98 failed /
+  91 passed / 4 todo in 1623 s (many 60 s timeouts). Persisting signals to
+  carry into remediation #2: six `[internal] internal error` Connect
+  responses (a shim exception escaping as internal — every handler must map
+  known refusals to arms and unknown exceptions to a logged
+  Code.Internal WITH detail), socket hang-ups on kill/stand-down paths,
+  DetachForeground `unsupported` on the `!ctrl-b` unit (the mock must make
+  the vendor detachment BEFORE the call, or the test must wait for it), and
+  the timeouts. Run #2 on the merged tree is the authoritative inventory.
