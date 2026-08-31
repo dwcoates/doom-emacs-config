@@ -143,6 +143,50 @@ whose calls are the observation."
       ;; Assert
       (should (equal ids '("b" "a"))))))
 
+(ert-deftest agent-repl-test-roster-repository-of-answers-the-section-key ()
+  "A workspace's repository is ITS SECTION'S OWN key, the imported join token."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section
+                                  "alpha" (list (agent-repl-test-roster--row
+                                                 "a" "a-row" :ready)))
+                                 (agent-repl-test-roster--section
+                                  "beta" (list (agent-repl-test-roster--row
+                                                "b" "b-row" :ready)))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-repository-of "b" roster)
+                   '(:id "repo-beta" :dir "/r/beta")))))
+
+(ert-deftest agent-repl-test-roster-repository-of-finds-a-child-row ()
+  "A nested row belongs to its section too - the walk is depth-first."
+  ;; Arrange
+  (let* ((child (agent-repl-test-roster--row "kid" "kid" :ready))
+         (parent (agent-repl-test-roster--row "par" "par" :ready :children (list child)))
+         (roster (agent-repl-test-roster--roster
+                  :sections (list (agent-repl-test-roster--section
+                                   "alpha" (list parent))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-roster-repository-of "kid" roster)
+                   '(:id "repo-alpha" :dir "/r/alpha")))))
+
+(ert-deftest agent-repl-test-roster-repository-of-is-nil-for-an-unknown-id ()
+  "No section holds the id: nil, so the caller refuses rather than guessing."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :sections (list (agent-repl-test-roster--section
+                                  "alpha" (list (agent-repl-test-roster--row
+                                                 "a" "a-row" :ready)))))))
+    ;; Act / Assert
+    (should-not (agent-repl-roster-repository-of "nope" roster))))
+
+(ert-deftest agent-repl-test-roster-repository-of-ignores-the-merged-section ()
+  "The recently-merged section carries no repository key, so it answers nothing."
+  ;; Arrange
+  (let ((roster (agent-repl-test-roster--roster
+                 :merged (list (agent-repl-test-roster--row "m" "m-row" :ready)))))
+    ;; Act / Assert
+    (should-not (agent-repl-roster-repository-of "m" roster))))
+
 (ert-deftest agent-repl-test-roster-walk-visits-children-depth-first ()
   "A row precedes its children, which is the contract's render order."
   ;; Arrange
