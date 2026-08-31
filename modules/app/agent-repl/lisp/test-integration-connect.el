@@ -55,6 +55,27 @@ the contract forbids."
                       (agent-repl-itest--addr-file
                        (agent-repl-itest-daemon-state-dir daemon))))))))
 
+(ert-deftest agent-repl-itest-connect-malformed-addr-signals-connect-error ()
+  "Malformed `daemon.addr' content signals `agent-repl-connect-error'.
+fanout §3: \"malformed content signals `agent-repl-connect-error'\" — a
+regression here would let a garbled address file be treated as no daemon
+at all, or crash with an unclassified error instead of the documented
+`:malformed-addr' kind."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (write-region "garbage" nil
+                  (agent-repl-itest--addr-file
+                   (agent-repl-itest-daemon-state-dir daemon))
+                  nil 'silent)
+    ;; Act / Assert.
+    (let ((detail
+           (condition-case err
+               (progn (agent-repl-connect-read-daemon-addr) nil)
+             (agent-repl-connect-error (cadr err)))))
+      (should detail)
+      ;; fanout §3: "malformed content signals `agent-repl-connect-error'".
+      (should (eq (plist-get detail :kind) :malformed-addr)))))
+
 (ert-deftest agent-repl-itest-connect-daemon-addr-absent-reads-nil ()
   "An absent addr file is the legal no-daemon state, not an error.
 Cold start depends on telling `no daemon' from `a broken daemon'."
@@ -161,7 +182,12 @@ unmarshalled into the GENERATED type, so a misspelling cannot pass."
             (should detail)
             ;; The daemon answered non-200 with a Connect error body.
             (should (eq (plist-get detail :kind) :http))
-            (should (equal (plist-get detail :status) 400)))
+            (should (equal (plist-get detail :status) 400))
+            ;; fanout §3: "parse the Connect error body {code,message}" —
+            ;; an unparsed body would still pass the two assertions above.
+            (should (equal (plist-get detail :code) "invalid_argument"))
+            (should (and (stringp (plist-get detail :message))
+                        (not (string-empty-p (plist-get detail :message))))))
         (agent-repl-connect-close conn)))))
 
 (ert-deftest agent-repl-itest-connect-missing-required-field-is-refused ()
@@ -181,7 +207,13 @@ unknown-field strictness cannot see."
                             nil)
                    (agent-repl-connect-error (cadr err)))))
             (should detail)
-            (should (eq (plist-get detail :kind) :http)))
+            (should (eq (plist-get detail :kind) :http))
+            ;; fanout §3: "parse the Connect error body {code,message}" —
+            ;; this test previously asserted neither the code nor the
+            ;; message, so an unparsed body would also pass.
+            (should (equal (plist-get detail :code) "invalid_argument"))
+            (should (and (stringp (plist-get detail :message))
+                        (not (string-empty-p (plist-get detail :message))))))
         (agent-repl-connect-close conn)))))
 
 (ert-deftest agent-repl-itest-connect-logs-the-address-read ()
@@ -194,6 +226,96 @@ discovery step must leave one."
     ;; Assert.
     (agent-repl-itest--await-log daemon "elisp.connect.daemon-addr-read" "debug")
     (should (agent-repl-itest--logged-p daemon "elisp.connect.daemon-addr-read" "debug"))))
+
+(ert-deftest agent-repl-itest-connect-unary-sync-times-out ()
+  "A unary call whose answer never arrives fails as `:timeout'.
+fanout §3: \"Default timeout `agent-repl-connect-unary-timeout-seconds'
+(10)\" — this fails if a withheld answer hangs the sync call forever, or
+if the failure it eventually reports is misclassified as some other
+kind (`:transport', `:http', ...)."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--gate daemon "RegisterWorkspace")
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          ;; Act / Assert.
+          (let ((detail
+                 (condition-case err
+                     (progn (agent-repl-connect-unary-sync
+                             conn "RegisterWorkspace"
+                             (json-serialize '((dir . "/tmp/itest-ws"))) 0.2)
+                            nil)
+                   (agent-repl-connect-error (cadr err)))))
+            (should detail)
+            ;; fanout §3: the `:timeout' failure kind.
+            (should (eq (plist-get detail :kind) :timeout)))
+        (agent-repl-connect-close conn)
+        (agent-repl-itest--release-gate daemon "RegisterWorkspace")))))
+
+(ert-deftest agent-repl-itest-connect-on-push-exception-is-caught-and-logged ()
+  "An ON-PUSH handler that signals is caught at the filter boundary.
+fanout §3: \"ON-PUSH exceptions are caught at the filter boundary: log
+ERROR with the payload in context; the stream stays open\" — this fails
+if a misbehaving callback ever kills the transport, or if the exception
+is swallowed without a trace in the production log."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((pushes nil)
+          (first-call t)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            (agent-repl-connect-stream
+             conn "WatchDaemon" (json-serialize '())
+             (lambda (msg)
+               (if first-call
+                   (progn (setq first-call nil) (error "on-push boom"))
+                 (push msg pushes)))
+             (lambda (_outcome) nil))
+            (agent-repl-itest--await-subscriber daemon "daemon")
+            ;; Act: two pushes, the first of which the handler chokes on.
+            (agent-repl-itest--push daemon "daemon" '((drainCancelled . ())))
+            (agent-repl-itest--push daemon "daemon" '((drainCancelled . ())))
+            (agent-repl-itest--wait-until (lambda () pushes) nil
+                                          "the second push to still arrive")
+            ;; Assert: the stream stayed open past the first exception.
+            (should pushes)
+            ;; fanout §3: "log ERROR with the payload in context".
+            (should (agent-repl-itest--logged-p
+                     daemon "elisp.connect.push-handler-error" "error")))
+        (agent-repl-connect-close conn)))))
+
+(ert-deftest agent-repl-itest-connect-close-cancels-every-standing-stream ()
+  "`agent-repl-connect-close' cancels every standing stream as `(:cancelled)'.
+fanout §3 LANDED SHAPES: \"(agent-repl-connect-close CONN) marks the
+connection dead and cancels every standing stream as `(:cancelled)'\" —
+this fails if closing a connection with two open streams leaves one
+of them open, reports a different outcome for it, or if the fake still
+lists either subscription afterward."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((outcomes-a nil) (outcomes-b nil)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (agent-repl-connect-stream
+       conn "WatchDaemon" (json-serialize '())
+       (lambda (_push) nil)
+       (lambda (outcome) (push outcome outcomes-a)))
+      (agent-repl-connect-stream
+       conn "WatchWorkspaceRoster" (json-serialize '())
+       (lambda (_push) nil)
+       (lambda (outcome) (push outcome outcomes-b)))
+      (agent-repl-itest--await-subscriber daemon "daemon")
+      (agent-repl-itest--await-subscriber daemon "roster")
+      ;; Act.
+      (agent-repl-connect-close conn)
+      (agent-repl-itest--wait-until (lambda () (and outcomes-a outcomes-b)) nil
+                                    "both streams to close")
+      ;; Assert.
+      (should (equal (car outcomes-a) '(:cancelled)))
+      (should (equal (car outcomes-b) '(:cancelled)))
+      (agent-repl-itest--wait-until
+       (lambda () (null (agent-repl-itest--subscribers daemon)))
+       nil "the fake's subscriber list to empty"))))
 
 ;;;; ---- Scenario 16: the two stream endings ----
 
@@ -223,7 +345,11 @@ transport failure; only a CLIENT cancel is a normal close."
                                           "the stream's close outcome")
             ;; Assert.
             (should (eq (car (car outcomes)) :error))
-            (should (eq (plist-get (cadr (car outcomes)) :kind) :no-end-frame)))
+            (should (eq (plist-get (cadr (car outcomes)) :kind) :no-end-frame))
+            ;; fanout §3: "process death without an end frame — logged
+            ;; ERROR here".
+            (should (agent-repl-itest--logged-p
+                     daemon "elisp.connect.stream-error" "error")))
         (agent-repl-connect-close conn)))))
 
 (ert-deftest agent-repl-itest-connect-end-frame-with-an-error-fails ()
@@ -245,7 +371,12 @@ said why."
                                           "the stream's close outcome")
             ;; Assert.
             (should (eq (car (car outcomes)) :error))
-            (should (equal (plist-get (cadr (car outcomes)) :code) "unavailable")))
+            (should (equal (plist-get (cadr (car outcomes)) :code) "unavailable"))
+            ;; fanout §3: "(:error DETAIL) ... logged ERROR here" — the
+            ;; end-frame-with-error case, distinct from the no-end-frame
+            ;; case above but logged through the same site.
+            (should (agent-repl-itest--logged-p
+                     daemon "elisp.connect.stream-error" "error")))
         (agent-repl-connect-close conn)))))
 
 (ert-deftest agent-repl-itest-connect-clean-end-frame-reports-ended ()
@@ -315,6 +446,46 @@ but the order within one stream."
             ;; Assert: newest-first accumulation, so the cancel is at the head.
             (should (assq 'drainCancelled (car pushes)))
             (should (assq 'drainScheduled (cadr pushes))))
+        (agent-repl-connect-close conn)))))
+
+(ert-deftest agent-repl-itest-connect-watch-host-workspace-unset-ref-never-opens ()
+  "A stream request that fails validation is never accepted as a subscriber.
+fanout §3 STANDING-STREAM ACCEPTANCE: \"a non-200 ... never calls
+[ON-OPEN]\" — this fails if the fake ever lists a subscriber for a
+request that never passed validation, or if the resulting close outcome
+loses its `:error' kind or Connect error code.
+
+NOTE on `:status': the Connect streaming protocol reports an in-handler
+refusal (validation runs before `accept', per fakedaemon's accept.go)
+through the terminal EndStreamResponse frame at HTTP 200, never through a
+non-200 status line — confirmed empirically against the pinned connect-go
+(a raw socket capture of this exact request shows `HTTP/1.1 200 OK' with
+`{\"error\":{\"code\":\"invalid_argument\",...}}' framed as the end
+frame).  `agent-repl-connect--end-frame-reason' therefore never populates
+`:status' for this path; the audit's \"with status 400\" describes the
+unary non-200 case (§3's `Any non-200 →' sentence), not this streaming
+one, so `:code' is asserted here instead."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((outcomes nil)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act: WatchHostWorkspaceRequest with its non-optional
+            ;; `workspace' field unset.
+            (agent-repl-connect-stream
+             conn "WatchHostWorkspace" (json-serialize '())
+             (lambda (_push) nil)
+             (lambda (outcome) (push outcome outcomes)))
+            (agent-repl-itest--wait-until (lambda () outcomes) nil
+                                          "the stream's close outcome")
+            ;; Assert.
+            ;; fanout §3 STANDING-STREAM ACCEPTANCE: never accepted as a
+            ;; subscriber.
+            (should (null (agent-repl-itest--subscribers daemon "host")))
+            (should (eq (car (car outcomes)) :error))
+            (should (equal (plist-get (cadr (car outcomes)) :code)
+                           "invalid_argument")))
         (agent-repl-connect-close conn)))))
 
 (provide 'test-integration-connect)

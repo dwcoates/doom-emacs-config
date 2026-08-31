@@ -28,7 +28,7 @@ func (s *fakeServer) OpenFeed(ctx context.Context, req *connect.Request[v1.OpenF
 }
 
 func (s *fakeServer) WatchFeed(ctx context.Context, req *connect.Request[v1.WatchFeedRequest], stream *connect.ServerStream[v1.WatchFeedResponse]) error {
-	s.record("WatchFeed", req.Msg)
+	s.record(ctx, "WatchFeed", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
 		map[string]any{"method": "WatchFeed"})
 	return connect.NewError(connect.CodeUnimplemented,
@@ -56,7 +56,7 @@ func (s *fakeServer) AnswerColdGate(ctx context.Context, req *connect.Request[v1
 }
 
 func (s *fakeServer) WatchWorkspaceRoster(ctx context.Context, req *connect.Request[v1.WatchWorkspaceRosterRequest], stream *connect.ServerStream[v1.WatchWorkspaceRosterResponse]) error {
-	s.record("WatchWorkspaceRoster", req.Msg)
+	s.record(ctx, "WatchWorkspaceRoster", req.Msg)
 	return serveStream[v1.WatchWorkspaceRosterResponse](ctx, s, streamRoster, "", stream)
 }
 
@@ -105,7 +105,7 @@ func (s *fakeServer) AssignWorkspaceTask(ctx context.Context, req *connect.Reque
 }
 
 func (s *fakeServer) WatchTopbar(ctx context.Context, req *connect.Request[v1.WatchTopbarRequest], stream *connect.ServerStream[v1.WatchTopbarResponse]) error {
-	s.record("WatchTopbar", req.Msg)
+	s.record(ctx, "WatchTopbar", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
 		map[string]any{"method": "WatchTopbar"})
 	return connect.NewError(connect.CodeUnimplemented,
@@ -121,7 +121,7 @@ func (s *fakeServer) SetPermissionMode(ctx context.Context, req *connect.Request
 }
 
 func (s *fakeServer) WatchFooter(ctx context.Context, req *connect.Request[v1.WatchFooterRequest], stream *connect.ServerStream[v1.WatchFooterResponse]) error {
-	s.record("WatchFooter", req.Msg)
+	s.record(ctx, "WatchFooter", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
 		map[string]any{"method": "WatchFooter"})
 	return connect.NewError(connect.CodeUnimplemented,
@@ -129,7 +129,7 @@ func (s *fakeServer) WatchFooter(ctx context.Context, req *connect.Request[v1.Wa
 }
 
 func (s *fakeServer) WatchDaemonHolds(ctx context.Context, req *connect.Request[v1.WatchDaemonHoldsRequest], stream *connect.ServerStream[v1.WatchDaemonHoldsResponse]) error {
-	s.record("WatchDaemonHolds", req.Msg)
+	s.record(ctx, "WatchDaemonHolds", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
 		map[string]any{"method": "WatchDaemonHolds"})
 	return connect.NewError(connect.CodeUnimplemented,
@@ -173,7 +173,7 @@ func (s *fakeServer) SelectWorkspace(ctx context.Context, req *connect.Request[v
 }
 
 func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest], stream *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
-	s.record("WatchHostWorkspace", req.Msg)
+	s.record(ctx, "WatchHostWorkspace", req.Msg)
 	if err := validateRequest(req.Msg); err != nil {
 		// An unset non-optional field is illegal, immediately — the stream is
 		// refused rather than standing on a request nobody filled in.
@@ -186,7 +186,7 @@ func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Reques
 }
 
 func (s *fakeServer) WatchDaemon(ctx context.Context, req *connect.Request[v1.WatchDaemonRequest], stream *connect.ServerStream[v1.WatchDaemonResponse]) error {
-	s.record("WatchDaemon", req.Msg)
+	s.record(ctx, "WatchDaemon", req.Msg)
 	return serveStream[v1.WatchDaemonResponse](ctx, s, streamDaemon, "", stream)
 }
 
@@ -195,7 +195,7 @@ func (s *fakeServer) AdoptHostWorkspace(ctx context.Context, req *connect.Reques
 }
 
 func (s *fakeServer) WatchWebWorkspace(ctx context.Context, req *connect.Request[v1.WatchWebWorkspaceRequest], stream *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {
-	s.record("WatchWebWorkspace", req.Msg)
+	s.record(ctx, "WatchWebWorkspace", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
 		map[string]any{"method": "WatchWebWorkspace"})
 	return connect.NewError(connect.CodeUnimplemented,
@@ -207,7 +207,7 @@ func (s *fakeServer) OpenLogin(ctx context.Context, req *connect.Request[v1.Open
 }
 
 func (s *fakeServer) WatchLoginTerminal(ctx context.Context, req *connect.Request[v1.WatchLoginTerminalRequest], stream *connect.ServerStream[v1.LoginTerminalOutput]) error {
-	s.record("WatchLoginTerminal", req.Msg)
+	s.record(ctx, "WatchLoginTerminal", req.Msg)
 	logWarn("fakedaemon.stream.not-mocked", "a stream this fake does not mock was called",
 		map[string]any{"method": "WatchLoginTerminal"})
 	return connect.NewError(connect.CodeUnimplemented,

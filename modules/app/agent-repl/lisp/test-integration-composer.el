@@ -36,11 +36,24 @@
 (declare-function agent-repl-host-unsubscribe "host")
 (declare-function agent-repl-host-composer-gate "host")
 (declare-function agent-repl-host-ref "host")
+(declare-function agent-repl-host-forget "host")
 (declare-function agent-repl-connect-open "connect")
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl-input-mode "input")
+(declare-function agent-repl-input-attachments "input")
+(declare-function agent-repl-send-with-postfix "input")
+(declare-function agent-repl-send-with-prefix "input")
+(declare-function agent-repl-prompt-queue-pending "prompt-queue")
+(declare-function agent-repl-prompt-queue-drain "prompt-queue")
+(declare-function agent-repl--prompt-queue-on-link-up "prompt-queue")
+(declare-function agent-repl-link-up-p "daemon-link")
 (defvar agent-repl-send-posthooks)
 (defvar agent-repl-host-update-functions)
+(defvar agent-repl-send-postfix)
+(defvar agent-repl-send-prefix)
+;; Buffer-local var of the same name as the accessor function above.
+(defvar agent-repl-input-attachments)
 
 ;;;; ---- Fixtures ----
 
@@ -58,19 +71,35 @@
                           (claude . ((sessionId . "vendor-1")
                                      (configDir . "/home/itest/.claude")))
                           (backfill . ((done . ())))
-                          (,composer . [])))))
+                          (,composer . ())))))
     (naming . ())))
+
+(defconst agent-repl-itest-composer--gate-keywords
+  '((open . :open) (merging . :merging) (draining . :draining)
+    (restarting . :restarting) (mergeParked . :merge-parked))
+  "Map a composer arm's protojson key symbol to its gate keyword.
+The wire spellings a scenario passes to
+`agent-repl-itest-composer--with-composer' are the same protojson keys
+`agent-repl-itest-composer--live' embeds.")
 
 (defmacro agent-repl-itest-composer--with-composer (daemon gate ref &rest body)
   "Register, subscribe and gate the composer's workspace on DAEMON, run BODY.
 GATE is the composer arm's protojson key symbol; REF is bound to the
 minted WorkspaceRef.  The host push is what sets the gate — the RESOLVED
-ARM IS THE GATE, so a test never sets one directly."
+ARM IS THE GATE, so a test never sets one directly.
+
+The fixture workspace name is a single constant shared by every test in
+this suite, and `agent-repl-host--by-name' is a global table this macro
+does not own, so it forgets any prior entry first and then waits for the
+SPECIFIC gate this push asked for (not merely \"no longer :unknown\") --
+otherwise a stale non-:unknown gate left by an earlier test could satisfy
+the wait before this scenario's own push has actually been delivered."
   (declare (indent 3) (debug (form form symbolp body)))
   `(let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon)))
          (agent-repl-send-posthooks nil))
      (unwind-protect
          (let ((,ref nil))
+           (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
            (agent-repl--ws-put agent-repl-itest-composer--ws
                                :project-dir agent-repl-itest-composer--dir)
            (agent-repl-host-register
@@ -85,9 +114,8 @@ ARM IS THE GATE, so a test never sets one directly."
             `((host . ,(agent-repl-itest-composer--live ,gate)))
             (plist-get ,ref :id))
            (agent-repl-itest--wait-until
-            (lambda () (not (eq (agent-repl-host-composer-gate
-                                 agent-repl-itest-composer--ws)
-                                :unknown)))
+            (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                           (cdr (assq ,gate agent-repl-itest-composer--gate-keywords))))
             nil (format "the %s composer gate" ,gate))
            ,@body)
        (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-composer--ws))
@@ -110,6 +138,109 @@ ARM IS THE GATE, so a test never sets one directly."
     (delq nil (mapcar (lambda (block)
                         (agent-repl-itest--body-field block 'image 'path 'path))
                       blocks))))
+
+(defun agent-repl-itest-composer--make-buffer (ws text)
+  "Create a live `agent-repl-input-mode' buffer for WS containing TEXT.
+Registers it as WS's `:input-buffer' and returns it; the caller kills it
+and clears the registration on the way out."
+  (let ((buf (generate-new-buffer (format " *agent-repl-itest-composer-%s*" ws))))
+    (with-current-buffer buf
+      (agent-repl-input-mode)
+      (insert text))
+    (agent-repl--ws-put ws :input-buffer buf)
+    buf))
+
+(defun agent-repl-itest-composer--kill-buffer (ws buf)
+  "Unregister WS's `:input-buffer' and kill BUF."
+  (agent-repl--ws-put ws :input-buffer nil)
+  (when (buffer-live-p buf) (kill-buffer buf)))
+
+(defun agent-repl-itest-composer--restart-on-same-dir (daemon)
+  "Stop DAEMON, keeping its state dir, and start a fresh instance there.
+Mirrors a real daemon restart: the same `AGENT_REPL_STATE_DIR' gets a new
+`daemon.addr', which is what a link's own reconnect follows in production."
+  (let ((dir (agent-repl-itest-daemon-state-dir daemon)))
+    (agent-repl-itest--stop-daemon daemon t)
+    (agent-repl-itest--start-daemon dir)))
+
+(defun agent-repl-itest-composer--reattach (successor)
+  "Re-register and re-subscribe the fixture workspace on SUCCESSOR.
+Returns (CONN . REF).  RegisterWorkspace is idempotent by dir, so REF's id
+is the one the original daemon minted -- the real reconnect path host.el
+drives on link-up.  Pushes no host state; the caller decides the gate."
+  (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address successor)))
+        (ref nil))
+    (agent-repl-host-register conn agent-repl-itest-composer--dir
+                              (lambda (minted) (setq ref minted)))
+    (agent-repl-itest--wait-until (lambda () ref) nil
+                                  "RegisterWorkspace on the successor to answer")
+    (agent-repl-host-subscribe conn agent-repl-itest-composer--ws ref)
+    (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
+    (cons conn ref)))
+
+;;;; ---- Reading the fixture workspace's OWN log ----
+;;
+;; Once the fixture workspace has a registered `:project-dir', input.el and
+;; host.el's WS-scoped records route to that workspace's OWN sink
+;; (`agent-repl--workspace-emacs-log-target', a target file symlinked at
+;; `<project-dir>/.claude/emacs/emacs.log') rather than to the daemon's
+;; global JSONL `agent-repl-itest--log-records' reads.  A log assertion
+;; about one of THIS suite's send sites must therefore read both.
+
+(defun agent-repl-itest-composer--workspace-log-path ()
+  "Absolute path of the fixture workspace's own log symlink."
+  (expand-file-name ".claude/emacs/emacs.log" agent-repl-itest-composer--dir))
+
+(defun agent-repl-itest-composer--workspace-log-records ()
+  "Return the parsed JSONL records from the fixture workspace's own log.
+A malformed final line is skipped, exactly like
+`agent-repl-itest--log-records'."
+  (let ((path (agent-repl-itest-composer--workspace-log-path))
+        (records nil))
+    (when (file-exists-p path)
+      (with-temp-buffer
+        (insert-file-contents path)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let ((line (string-trim (buffer-substring (line-beginning-position)
+                                                      (line-end-position)))))
+            (unless (string-empty-p line)
+              (condition-case nil
+                  (push (json-parse-string line :object-type 'alist :array-type 'list
+                                           :null-object :null :false-object :false)
+                        records)
+                (error nil))))
+          (forward-line 1))))
+    (nreverse records)))
+
+(defun agent-repl-itest-composer--log-entries (daemon operation &optional level)
+  "Return every OPERATION (at LEVEL) record for the fixture ws, either sink."
+  (append (agent-repl-itest--log-entries daemon operation level)
+          (seq-filter
+           (lambda (record)
+             (and (agent-repl-itest--operation-matches-p
+                   (or (alist-get 'operation record) "") operation)
+                  (or (null level) (equal (alist-get 'level record) level))))
+           (agent-repl-itest-composer--workspace-log-records))))
+
+(defun agent-repl-itest-composer--logged-p (daemon operation &optional level)
+  "Return non-nil when OPERATION (at LEVEL) was logged, either sink."
+  (consp (agent-repl-itest-composer--log-entries daemon operation level)))
+
+(defun agent-repl-itest-composer--await-log (daemon operation &optional level)
+  "Block until OPERATION (at LEVEL) is logged, in either sink the fixture ws uses."
+  (agent-repl-itest--wait-until
+   (lambda () (agent-repl-itest-composer--logged-p daemon operation level))
+   nil (format "the production log to carry %s%s" operation
+               (if level (format " at %s" level) ""))))
+
+(defun agent-repl-itest-composer--log-names-arm-p (daemon operation arm-string)
+  "Return non-nil when DAEMON's OPERATION log entry's context names ARM-STRING."
+  (seq-some
+   (lambda (entry)
+     (seq-some (lambda (arg) (string-match-p (regexp-quote arm-string) arg))
+               (agent-repl-itest--body-field entry 'context 'arguments)))
+   (agent-repl-itest-composer--log-entries daemon operation "info")))
 
 ;;;; ---- The three REQUIRED request facts ----
 
@@ -145,9 +276,15 @@ webapp (R7), so a host submit must carry no feed at all."
       (let ((body (agent-repl-itest-composer--submit-body daemon)))
         (should (null (assq 'feed body)))))))
 
+(defconst agent-repl-itest-composer--uuid-v4-regexp
+  "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-4[0-9a-f]\\{3\\}-[89ab][0-9a-f]\\{3\\}-[0-9a-f]\\{12\\}\\'"
+  "Exact shape of an RFC 4122 v4 UUID as `agent-repl--uuid' mints it.")
+
 (ert-deftest agent-repl-itest-composer-submit-carries-a-fresh-idempotency-key ()
-  "Each submit mints its own idempotency key.
-Two submits sharing a key would let the daemon collapse them into one."
+  "Each submit mints its own idempotency key, shaped as an RFC 4122 v4 UUID.
+Two submits sharing a key would let the daemon collapse them into one; a
+key of the wrong SHAPE (finding 65) would mean `agent-repl--uuid' stopped
+setting the version/variant nibbles it documents."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
@@ -163,7 +300,11 @@ Two submits sharing a key would let the daemon collapse them into one."
             (second (agent-repl-itest--body-field
                      (agent-repl-itest-composer--submit-body daemon 1) 'idempotencyKey)))
         (should first)
-        (should-not (equal first second))))))
+        (should-not (equal first second))
+        ;; "`(agent-repl--uuid)' (RFC 4122 v4 from `random')" -- shape, not
+        ;; just inequality.
+        (should (string-match-p agent-repl-itest-composer--uuid-v4-regexp first))
+        (should (string-match-p agent-repl-itest-composer--uuid-v4-regexp second))))))
 
 (ert-deftest agent-repl-itest-composer-submit-carries-its-send-sites-origin ()
   "Each send site sends its OWN PromptOrigin, and never UNSPECIFIED.
@@ -215,6 +356,77 @@ and delivered now, and the daemon is told so."
                      (agent-repl-itest-composer--submit-body daemon) 'origin)))
         (should (equal origin "PROMPT_ORIGIN_DEFERRED_PROMPT"))))))
 
+;;;; ---- Finding 56: every remaining send site's own origin ----
+;;
+;; §10 "Sites: user-sent, user-sent-and-hide, user-sent-with-metaprompt,
+;; user-sent-with-postfix, user-sent-with-prefix, metaprompt-read,
+;; command-diff-analysis, command-explain-context, command-explain-prompt,
+;; command-update-pr, command-rebase, command-create-or-update-pr,
+;; deferred-prompt."  user-sent, user-sent-with-metaprompt and
+;; deferred-prompt are pinned above; every other site is table-driven here,
+;; one deftest per site (the suite does not already thread a dolist through
+;; a single deftest, so each row stays its own test).
+
+(defmacro agent-repl-itest-composer--deftest-origin (name origin-keyword wire-string)
+  "Define a deftest NAME asserting ORIGIN-KEYWORD encodes as WIRE-STRING."
+  (declare (indent 2))
+  `(ert-deftest ,name ()
+     ,(format "The %S send site sends %s.
+Every Emacs send site has EXACTLY ONE production origin; a site that sent
+the wrong value would silently mismark a stored turn's editor situation."
+              origin-keyword wire-string)
+     ;; Arrange.
+     (agent-repl-itest--with-fake-daemon daemon
+       (agent-repl-itest-composer--with-composer daemon 'open ref
+         (ignore ref)
+         ;; Act.
+         (agent-repl--send ,origin-keyword "run the tests" agent-repl-itest-composer--ws)
+         (agent-repl-itest--await-call daemon "SubmitPrompt")
+         ;; Assert.
+         (let ((origin (agent-repl-itest--body-field
+                        (agent-repl-itest-composer--submit-body daemon) 'origin)))
+           (should (equal origin ,wire-string)))))))
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-user-sent-and-hide-site-sends-its-own-origin
+  :user-sent-and-hide "PROMPT_ORIGIN_USER_SENT_AND_HIDE")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-user-sent-with-postfix-site-sends-its-own-origin
+  :user-sent-with-postfix "PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-user-sent-with-prefix-site-sends-its-own-origin
+  :user-sent-with-prefix "PROMPT_ORIGIN_USER_SENT_WITH_PREFIX")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-metaprompt-read-site-sends-its-own-origin
+  :metaprompt-read "PROMPT_ORIGIN_METAPROMPT_READ")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-diff-analysis-site-sends-its-own-origin
+  :command-diff-analysis "PROMPT_ORIGIN_COMMAND_DIFF_ANALYSIS")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-explain-context-site-sends-its-own-origin
+  :command-explain-context "PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-explain-prompt-site-sends-its-own-origin
+  :command-explain-prompt "PROMPT_ORIGIN_COMMAND_EXPLAIN_PROMPT")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-update-pr-site-sends-its-own-origin
+  :command-update-pr "PROMPT_ORIGIN_COMMAND_UPDATE_PR")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-rebase-site-sends-its-own-origin
+  :command-rebase "PROMPT_ORIGIN_COMMAND_REBASE")
+
+(agent-repl-itest-composer--deftest-origin
+    agent-repl-itest-composer-command-create-or-update-pr-site-sends-its-own-origin
+  :command-create-or-update-pr "PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR")
+
 ;;;; ---- Scenario 12: composition and outcomes ----
 
 (ert-deftest agent-repl-itest-composer-text-becomes-a-user-said-text-block ()
@@ -253,6 +465,63 @@ how the daemon knows which span to hide when it DRAWS the row."
         (let ((texts (agent-repl-itest-composer--text-blocks
                       (agent-repl-itest-composer--submit-body daemon))))
           (should (equal (car texts) prepared)))))))
+
+(ert-deftest agent-repl-itest-composer-postfix-site-sends-composed-text-and-origin ()
+  "`agent-repl-send-with-postfix' submits raw+postfix under its own origin.
+Scenario 12 \"prefix/postfix\": PROMPT COMPOSITION IS FREE, so what is
+submitted is the raw text with `agent-repl-send-postfix' appended -- and
+`agent-repl-send-with-postfix' is the ONE production site for
+PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl--ws-current-log-name)
+                       (lambda () agent-repl-itest-composer--ws)))
+              ;; Act.
+              (agent-repl-send-with-postfix)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (let* ((body (agent-repl-itest-composer--submit-body daemon))
+                     (texts (agent-repl-itest-composer--text-blocks body)))
+                (should (equal (car texts)
+                               (concat "run the tests" agent-repl-send-postfix)))
+                (should (equal (agent-repl-itest--body-field body 'origin)
+                               "PROMPT_ORIGIN_USER_SENT_WITH_POSTFIX"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-prefix-site-sends-composed-text-and-origin ()
+  "`agent-repl-send-with-prefix' submits prefix+raw under its own origin.
+Scenario 12 \"prefix/postfix\": the composed text is `agent-repl-send-prefix'
+prepended to the raw input, submitted verbatim, under
+PROMPT_ORIGIN_USER_SENT_WITH_PREFIX -- its ONE production site."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl--ws-current-log-name)
+                       (lambda () agent-repl-itest-composer--ws)))
+              ;; Act.
+              (agent-repl-send-with-prefix)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (let* ((body (agent-repl-itest-composer--submit-body daemon))
+                     (texts (agent-repl-itest-composer--text-blocks body)))
+                (should (equal (car texts)
+                               (concat agent-repl-send-prefix "run the tests")))
+                (should (equal (agent-repl-itest--body-field body 'origin)
+                               "PROMPT_ORIGIN_USER_SENT_WITH_PREFIX"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-attached-image-travels-as-a-path-block ()
   "A pasted image travels as `ImageBlock{path}' beside the text.
@@ -293,25 +562,124 @@ WHERE the bytes are, the media type says WHAT they are."
           (should (equal (agent-repl-itest--body-field image-block 'image 'mediaType)
                          "image/png")))))))
 
-(ert-deftest agent-repl-itest-composer-success-turn-runs-the-send-posthooks ()
-  "A `turn' outcome clears the input and runs the send posthooks.
-`turn' is the only outcome that means \"something to await\"."
+(ert-deftest agent-repl-itest-composer-attachments-clear-after-a-successful-turn-send ()
+  "Attachments clear on a successful `turn' send: the NEXT send has none.
+§10: the attachment list is \"cleared on a successful send\" -- a second
+submit that still carried the first image would resend it twice."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((ran nil))
-        (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (push t ran)))
-        ;; Act.
-        (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
-        ;; Assert.
-        (agent-repl-itest--wait-until (lambda () ran) nil "the send posthooks")
-        (should ran)))))
+      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "look at this")))
+        (unwind-protect
+            (progn
+              ;; Act: first send, with the attachment.
+              (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt" 1)
+              (should (equal (agent-repl-itest-composer--image-paths
+                              (agent-repl-itest-composer--submit-body daemon 0))
+                             (list image)))
+              ;; Act: second send, nothing newly attached.
+              (with-current-buffer buf (insert "and this"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt" 2)
+              ;; Assert: no image block travels a second time.
+              (should (null (agent-repl-itest-composer--image-paths
+                             (agent-repl-itest-composer--submit-body daemon 1)))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-attachments-survive-a-merging-refusal ()
+  "A `merging' refusal must not clear the attachment: it was never delivered.
+§10: attachments clear ONLY on a successful send; a refused submission
+that dropped the image would silently lose it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((merging . ())))))
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "look at this")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              (agent-repl-itest-composer--await-log daemon "elisp.input.refused-merging" "warn")
+              ;; Assert: the attachment SURVIVES the refusal.
+              (should (equal (with-current-buffer buf agent-repl-input-attachments)
+                             (list (list :path image :media-type "image/png")))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-two-images-travel-text-first-then-images-in-order ()
+  "Two attached images travel as the text block, then each image in order.
+§10: blocks are \"the text block(s) plus one ... image block per image\",
+in the order the person composed them -- attach order, not reverse."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let* ((first (expand-file-name "first.png" agent-repl-itest-composer--dir))
+             (second (expand-file-name "second.jpg" agent-repl-itest-composer--dir))
+             (buf (agent-repl-itest-composer--make-buffer
+                   agent-repl-itest-composer--ws "compare these")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf
+                (agent-repl-input-attach-image first "image/png")
+                (agent-repl-input-attach-image second "image/jpeg"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert: block order is text, then image, then image.
+              (let* ((body (agent-repl-itest-composer--submit-body daemon))
+                     (blocks (agent-repl-itest--body-field body 'said 'content 'blocks)))
+                (should (equal (mapcar #'caar blocks) '(text image image)))
+                (should (equal (agent-repl-itest--body-field (nth 1 blocks) 'image 'path 'path)
+                               first))
+                (should (equal (agent-repl-itest--body-field (nth 1 blocks) 'image 'mediaType)
+                               "image/png"))
+                (should (equal (agent-repl-itest--body-field (nth 2 blocks) 'image 'path 'path)
+                               second))
+                (should (equal (agent-repl-itest--body-field (nth 2 blocks) 'image 'mediaType)
+                               "image/jpeg"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-success-turn-runs-the-send-posthooks ()
+  "A `turn' outcome clears the input, pushes history, and runs the posthooks.
+§10: success `:turn' -> \"clear the input, push history, run
+`agent-repl-send-posthooks'\"; `turn' is the only outcome that means
+\"something to await\"."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((ran nil)
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (progn
+              (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (push t ran)))
+              ;; Act.
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              ;; Assert.
+              (agent-repl-itest--wait-until (lambda () ran) nil "the send posthooks")
+              (should ran)
+              ;; Assert: the input is EMPTY, not merely different.
+              (should (equal (with-current-buffer buf (buffer-string)) ""))
+              ;; Assert: history's newest entry is the sent text.
+              (should (equal (car (buffer-local-value 'agent-repl--input-history buf))
+                             "run the tests")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-command-refused-is-answered-not-awaited ()
-  "`command_refused' means \"answered, nothing to await\".
+  "`command_refused' means \"answered, nothing to await\": input clears, logged.
 Both non-turn success arms mean that; the webapp draws the refusal card,
-and Emacs clears the input and logs."
+and Emacs clears the input and logs the arm."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script
@@ -319,12 +687,25 @@ and Emacs clears the input and logs."
      '((success . ((commandRefused . ((command . "/agents")))))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      ;; Act.
-      (agent-repl--send :user-sent "/agents" agent-repl-itest-composer--ws)
-      (agent-repl-itest--await-call daemon "SubmitPrompt")
-      ;; Assert.
-      (agent-repl-itest--await-log daemon "elisp.input.command-answered" "info")
-      (should (agent-repl-itest--logged-p daemon "elisp.input.command-answered" "info")))))
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "/agents")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (agent-repl-itest-composer--await-log daemon "elisp.input.command-answered" "info")
+              (should (agent-repl-itest-composer--logged-p daemon "elisp.input.command-answered" "info"))
+              ;; Assert: the input is cleared.
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the composer to clear")
+              (should (equal (with-current-buffer buf (buffer-string)) ""))
+              ;; Assert: the log context names the answered ARM.
+              (should (agent-repl-itest-composer--log-names-arm-p
+                       daemon "elisp.input.command-answered" ":command-refused")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-command-panel-is-answered-not-awaited ()
   "`command_panel' is the other \"answered, nothing to await\" arm.
@@ -337,64 +718,106 @@ clears the input; the webapp draws panels from its own dev composer."
      '((success . ((commandPanel . ((status . ())))))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      ;; Act.
-      (agent-repl--send :user-sent "/status" agent-repl-itest-composer--ws)
-      (agent-repl-itest--await-call daemon "SubmitPrompt")
-      ;; Assert.
-      (agent-repl-itest--await-log daemon "elisp.input.command-answered" "info")
-      (should (agent-repl-itest--logged-p daemon "elisp.input.command-answered" "info")))))
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "/status")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (agent-repl-itest-composer--await-log daemon "elisp.input.command-answered" "info")
+              (should (agent-repl-itest-composer--logged-p daemon "elisp.input.command-answered" "info"))
+              ;; Assert: the input is cleared.
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the composer to clear")
+              (should (equal (with-current-buffer buf (buffer-string)) ""))
+              ;; Assert: the log context names the answered ARM.
+              (should (agent-repl-itest-composer--log-names-arm-p
+                       daemon "elisp.input.command-answered" ":command-panel")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-merging-refusal-preserves-the-text ()
   "A `merging' refusal keeps the user's text: undelivered intent survives.
 SubmitPromptError.merging is the daemon's own refusal arm; the composer
-must not discard what the user typed."
+must not discard what the user typed, and must flash the exact refusal
+message -- \"keep the text, `message' + a mode-line flash \\='refused:
+merge in flight\\='\"."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((merging . ())))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((cleared nil))
-        (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (setq cleared t)))
-        ;; Act.
-        (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        ;; Assert: the send did not complete, so no posthook ran.
-        (should (null cleared))))))
+      (let ((cleared nil)
+            (messages nil)
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (progn
+              (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (setq cleared t)))
+              (cl-letf (((symbol-function 'message)
+                         (lambda (fmt &rest args)
+                           (push (if args (apply #'format fmt args) fmt) messages)
+                           nil)))
+                ;; Act.
+                (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+                (agent-repl-itest--await-call daemon "SubmitPrompt")
+                ;; `message' is also the quiet sink's *Messages* output, so
+                ;; other lines land in MESSAGES too; wait for and find the
+                ;; refusal text specifically rather than assuming position.
+                (agent-repl-itest--wait-until
+                 (lambda ()
+                   (member "agent-repl: refused -- a merge is in flight for this workspace"
+                           messages))
+                 nil "the refusal message")
+                ;; Assert: the send did not complete, so no posthook ran.
+                (should (null cleared))
+                ;; Assert: the exact refused message.
+                (should (member "agent-repl: refused -- a merge is in flight for this workspace"
+                               messages)))
+              ;; Assert: the composer keeps the text, unchanged.
+              (should (equal (with-current-buffer buf (buffer-string)) "run the tests")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
-(ert-deftest agent-repl-itest-composer-merging-gate-sends-no-rpc ()
-  "The `merging' GATE closes the composer: no rpc is attempted at all.
-The merge lease owns the session, and the gate is host-native, so Emacs
-enforces it rather than letting the daemon refuse."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'merging ref
-      (ignore ref)
-      ;; Act.
-      (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
-      ;; Assert.
-      (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
+(defmacro agent-repl-itest-composer--deftest-refusing-gate (name gate-symbol expected-text)
+  "Define a deftest NAME pinning GATE-SYMBOL's refusal to EXPECTED-TEXT.
+Finding 59: captures the EXACT `user-error' text (never just \"no rpc\")
+and asserts the composer's buffer still holds the user's words."
+  (declare (indent 2))
+  `(ert-deftest ,name ()
+     ,(format "The `%s' gate refuses with its own fixed text and keeps the input.
+`agent-repl--input-gate-refusals' names %S's message; a refusal that lost
+the exact wording or erased the input would strand undelivered intent."
+              gate-symbol expected-text)
+     ;; Arrange.
+     (agent-repl-itest--with-fake-daemon daemon
+       (agent-repl-itest-composer--with-composer daemon ',gate-symbol ref
+         (ignore ref)
+         (let ((buf (agent-repl-itest-composer--make-buffer
+                     agent-repl-itest-composer--ws "run the tests")))
+           (unwind-protect
+               (let ((err (should-error
+                           (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+                           :type 'user-error)))
+                 ;; Assert: the EXACT fixed refusal text, not just "it refused".
+                 (should (equal (error-message-string err) ,expected-text))
+                 ;; Assert: the composer keeps every word the user wrote.
+                 (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
+                 (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))
+             (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf)))))))
 
-(ert-deftest agent-repl-itest-composer-draining-gate-sends-no-rpc ()
-  "The `draining' gate closes the composer: a scheduled shutdown is coming."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'draining ref
-      (ignore ref)
-      ;; Act.
-      (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
-      ;; Assert.
-      (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
+(agent-repl-itest-composer--deftest-refusing-gate
+    agent-repl-itest-composer-merging-gate-sends-no-rpc
+  merging "composer closed: a merge owns this session")
 
-(ert-deftest agent-repl-itest-composer-restarting-gate-sends-no-rpc ()
-  "The `restarting' gate closes the composer during a graceful restart."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-composer--with-composer daemon 'restarting ref
-      (ignore ref)
-      ;; Act.
-      (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
-      ;; Assert.
-      (should (null (agent-repl-itest--calls daemon "SubmitPrompt"))))))
+(agent-repl-itest-composer--deftest-refusing-gate
+    agent-repl-itest-composer-draining-gate-sends-no-rpc
+  draining "composer closed: daemon draining")
+
+(agent-repl-itest-composer--deftest-refusing-gate
+    agent-repl-itest-composer-restarting-gate-sends-no-rpc
+  restarting "composer closed: restarting")
 
 (ert-deftest agent-repl-itest-composer-merge-parked-gate-sends ()
   "`merge_parked' is OPEN WITH CONTEXT: the prompt is sent, not refused.
@@ -445,6 +868,76 @@ Ruled at kickoff — the daemon starts or revives the session implicitly."
         (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-composer--ws))
         (agent-repl-connect-close conn)))))
 
+(ert-deftest agent-repl-itest-composer-terminal-gate-sends ()
+  "The `:terminal' gate simply sends: SubmitPrompt has no precondition.
+§7: \"`:no-session' / `:terminal' SEND (ruled: SubmitPrompt has no
+precondition; the daemon starts or revives the session implicitly)\"."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon)))
+          (ref nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put agent-repl-itest-composer--ws
+                                :project-dir agent-repl-itest-composer--dir)
+            (agent-repl-host-register conn agent-repl-itest-composer--dir
+                                      (lambda (minted) (setq ref minted)))
+            (agent-repl-itest--wait-until (lambda () ref) nil
+                                          "RegisterWorkspace to answer")
+            (agent-repl-host-subscribe conn agent-repl-itest-composer--ws ref)
+            (agent-repl-itest--await-subscriber daemon "host" (plist-get ref :id))
+            (agent-repl-itest--push
+             daemon "host"
+             '((host . ((existing . ((id . ((value . "host-session-1")))
+                                      (terminal . ((rehydratable . t)))))
+                        (naming . ()))))
+             (plist-get ref :id))
+            (agent-repl-itest--wait-until
+             (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                            :terminal))
+             nil "the :terminal gate")
+            ;; Act.
+            (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
+            ;; Assert.
+            (agent-repl-itest--await-call daemon "SubmitPrompt")
+            (should (agent-repl-itest--calls daemon "SubmitPrompt")))
+        (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-composer--ws))
+        (agent-repl-connect-close conn)))))
+
+(ert-deftest agent-repl-itest-composer-unknown-gate-sends-and-logs-info ()
+  "The `:unknown' gate (no host push yet) sends, logging INFO.
+§7: \"`:unknown' (no host push yet) SEND as well, logging INFO -- the
+daemon is the authority and answers with its own refusal arms\"."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    ;; A clean slate: no push in THIS test must mean :unknown, regardless of
+    ;; what an earlier test in this process left in the shared host table.
+    (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon)))
+          (ref nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put agent-repl-itest-composer--ws
+                                :project-dir agent-repl-itest-composer--dir)
+            (agent-repl-host-register conn agent-repl-itest-composer--dir
+                                      (lambda (minted) (setq ref minted)))
+            (agent-repl-itest--wait-until (lambda () ref) nil
+                                          "RegisterWorkspace to answer")
+            (agent-repl-host-subscribe conn agent-repl-itest-composer--ws ref)
+            (agent-repl-itest--await-subscriber daemon "host" (plist-get ref :id))
+            ;; No push at all: the gate reads :unknown.
+            (should (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                       :unknown))
+            ;; Act.
+            (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
+            ;; Assert.
+            (agent-repl-itest--await-call daemon "SubmitPrompt")
+            (should (agent-repl-itest--calls daemon "SubmitPrompt"))
+            (agent-repl-itest-composer--await-log daemon "elisp.input.gate-unknown-sends" "info")
+            (should (agent-repl-itest-composer--logged-p daemon "elisp.input.gate-unknown-sends" "info")))
+        (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-composer--ws))
+        (agent-repl-connect-close conn)))))
+
 (ert-deftest agent-repl-itest-composer-transport-failure-defers-the-prompt ()
   "A transport failure keeps the text and hands it to the outage queue.
 Undelivered user intent may never be silently discarded; the queue drains
@@ -464,6 +957,165 @@ on link-up."
           (agent-repl-itest--wait-until (lambda () queued) nil
                                         "the prompt to reach the outage queue")
           (should queued))))))
+
+;;;; ---- Finding 91 (partial): the submit log names its origin ----
+
+(ert-deftest agent-repl-itest-composer-submit-log-carries-the-origin ()
+  "`elisp.input.submit' logs the send's own origin in its context.
+input.el: \"elisp.input.submit ws=%s origin=%S key=%s blocks=%d\" -- a
+log line that dropped the origin would make a submission untraceable to
+the editor situation that caused it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl--send :user-sent-with-prefix "run the tests"
+                        agent-repl-itest-composer--ws)
+      (agent-repl-itest--await-call daemon "SubmitPrompt")
+      ;; Assert.
+      (agent-repl-itest-composer--await-log daemon "elisp.input.submit" "info")
+      (should (agent-repl-itest-composer--log-names-arm-p
+               daemon "elisp.input.submit" ":user-sent-with-prefix")))))
+
+;;;; ---- Findings 66-68: the outage queue, end to end ----
+
+(ert-deftest agent-repl-itest-composer-outage-drain-reuses-the-failed-attempts-idempotency-key ()
+  "A prompt re-sent from the outage queue reuses the failed attempt's key.
+endpoint_submit_prompt.proto: \"a retried request is not a second turn\" --
+ruled: a re-drive is a RETRY, so it must carry the SAME idempotency key as
+the failed attempt, letting the daemon's duplicate refusal do its job."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let (failed-key successor adopted)
+        (unwind-protect
+            (progn
+              ;; The daemon goes away mid-composition.
+              (setq successor (agent-repl-itest-composer--restart-on-same-dir daemon))
+              ;; Act: the failed attempt -- `agent-repl--send' returns its key
+              ;; synchronously even though the transport fails asynchronously.
+              (setq failed-key
+                    (agent-repl--send :user-sent "run the tests"
+                                      agent-repl-itest-composer--ws))
+              (should failed-key)
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-prompt-queue-pending
+                           agent-repl-itest-composer--ws :outage))
+               nil "the prompt to reach the outage queue")
+              ;; The successor comes up and the workspace re-attaches to it,
+              ;; then the link-up edge drains the outage queue.
+              (setq adopted (agent-repl-itest-composer--reattach successor))
+              (agent-repl-itest--push
+               successor "host" `((host . ,(agent-repl-itest-composer--live 'open)))
+               (plist-get (cdr adopted) :id))
+              (agent-repl-itest--wait-until
+               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                              :open))
+               nil "the successor's composer gate to open")
+              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+                (agent-repl--prompt-queue-on-link-up))
+              (agent-repl-itest--await-call successor "SubmitPrompt")
+              ;; Assert.
+              (let ((drained-key (agent-repl-itest--body-field
+                                  (car (agent-repl-itest--call-bodies successor "SubmitPrompt"))
+                                  'idempotencyKey)))
+                (should (equal drained-key failed-key))))
+          (when adopted (agent-repl-connect-close (car adopted)))
+          (when successor (agent-repl-itest--stop-daemon successor t)))))))
+
+(ert-deftest agent-repl-itest-composer-outage-drain-reaches-the-successor-end-to-end ()
+  "A held outage prompt is really delivered on link-up, to the SUCCESSOR daemon.
+§10: \"transport failure -> keep the text and offer it to prompt-queue.el
+(drained on link-up)\" -- this exercises the real drain, not a stubbed
+queue, and pins the drained request's origin and text."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let (successor adopted)
+        (unwind-protect
+            (progn
+              ;; The daemon goes away mid-composition.
+              (setq successor (agent-repl-itest-composer--restart-on-same-dir daemon))
+              ;; Act.
+              (ignore-errors
+                (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-prompt-queue-pending
+                           agent-repl-itest-composer--ws :outage))
+               nil "the prompt to reach the outage queue")
+              (setq adopted (agent-repl-itest-composer--reattach successor))
+              (agent-repl-itest--push
+               successor "host" `((host . ,(agent-repl-itest-composer--live 'open)))
+               (plist-get (cdr adopted) :id))
+              (agent-repl-itest--wait-until
+               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                              :open))
+               nil "the successor's composer gate to open")
+              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+                (agent-repl--prompt-queue-on-link-up))
+              ;; Assert: it landed on the SUCCESSOR (the original daemon is
+              ;; dead and cannot have received anything).
+              (agent-repl-itest--await-call successor "SubmitPrompt")
+              (let* ((body (car (agent-repl-itest--call-bodies successor "SubmitPrompt")))
+                     (texts (agent-repl-itest-composer--text-blocks body)))
+                (should (equal (agent-repl-itest--body-field body 'origin)
+                               "PROMPT_ORIGIN_DEFERRED_PROMPT"))
+                (should (equal (car texts) "run the tests"))))
+          (when adopted (agent-repl-connect-close (car adopted)))
+          (when successor (agent-repl-itest--stop-daemon successor t)))))))
+
+(ert-deftest agent-repl-itest-composer-outage-drain-waits-for-the-gate-to-open ()
+  "Link-up alone does not drain into a refusing gate; the gate must open too.
+§10: \"Its liveness gate is `agent-repl-link-up-p' and the composer
+gate\" -- both facts, not just link-up, must hold before a drain sends."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let (successor adopted)
+        (unwind-protect
+            (progn
+              ;; The daemon goes away mid-composition, with the queue outage.
+              (setq successor (agent-repl-itest-composer--restart-on-same-dir daemon))
+              (ignore-errors
+                (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
+              (agent-repl-itest--wait-until
+               (lambda () (agent-repl-prompt-queue-pending
+                           agent-repl-itest-composer--ws :outage))
+               nil "the prompt to reach the outage queue")
+              ;; The successor comes up, but its composer gate is `merging'.
+              (setq adopted (agent-repl-itest-composer--reattach successor))
+              (agent-repl-itest--push
+               successor "host" `((host . ,(agent-repl-itest-composer--live 'merging)))
+               (plist-get (cdr adopted) :id))
+              (agent-repl-itest--wait-until
+               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                              :merging))
+               nil "the successor's composer gate to read :merging")
+              ;; Act: the link-up edge fires.
+              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+                (agent-repl--prompt-queue-on-link-up))
+              ;; Assert: the merging gate refused the drain -- nothing sent.
+              (should (null (agent-repl-itest--calls successor "SubmitPrompt")))
+              (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
+              ;; Act: the gate opens.
+              (agent-repl-itest--push
+               successor "host" `((host . ,(agent-repl-itest-composer--live 'open)))
+               (plist-get (cdr adopted) :id))
+              (agent-repl-itest--wait-until
+               (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws)
+                              :open))
+               nil "the successor's composer gate to open")
+              (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+                (agent-repl-prompt-queue-drain agent-repl-itest-composer--ws :outage))
+              ;; Assert: NOW the drain sends.
+              (agent-repl-itest--await-call successor "SubmitPrompt")
+              (should (agent-repl-itest--calls successor "SubmitPrompt")))
+          (when adopted (agent-repl-connect-close (car adopted)))
+          (when successor (agent-repl-itest--stop-daemon successor t)))))))
 
 (provide 'test-integration-composer)
 
