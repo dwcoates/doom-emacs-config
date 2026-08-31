@@ -5493,7 +5493,10 @@ type FooterAllowance struct {
 	Utilization float64 `protobuf:"fixed64,3,opt,name=utilization,proto3" json:"utilization,omitempty"`
 	// Tag 4 (status, verbatim string) is RETIRED: the vocabulary is now in
 	// evidence (SessionRateLimitStatus), so the arm is typed.
-	// The vendor's status, copied from SessionRateLimitStatus.status.
+	// The vendor's VERDICT, copied from SessionRateLimitStatus.status for this
+	// window. UNSET IS LEGAL: no rate-limit event has been observed for the
+	// window yet — the figures above (from the sampled account usage) draw
+	// without a verdict class, and the arm joins when the vendor speaks.
 	//
 	// Types that are valid to be assigned to Status:
 	//
