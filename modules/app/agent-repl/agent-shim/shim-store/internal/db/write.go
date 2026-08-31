@@ -53,15 +53,15 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	base := logging.Fields{Operation: "store.db.write-batch", Table: "entry", Producer: producer}
 
 	if producer == "" {
-		return result, d.refuse(base, invalidf("producer is empty — every write is attributed"))
+		return result, d.refuse(base, invalidFieldf("producer", "producer is empty — every write is attributed"))
 	}
 	if batch == nil {
-		return result, d.refuse(base, invalidf("batch is unset"))
+		return result, d.refuse(base, invalidFieldf("batch", "batch is unset"))
 	}
 	entries := batch.GetEntries()
 	cursor := batch.GetCursorAdvance()
 	if len(entries) == 0 && cursor == nil {
-		return result, d.refuse(base, invalidf("batch carries neither entries nor a cursor advance"))
+		return result, d.refuse(base, invalidFieldf("batch", "batch carries neither entries nor a cursor advance"))
 	}
 
 	// Validation first and whole, so a refusal names the offending entry
@@ -84,7 +84,10 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	}
 
 	started := time.Now()
-	defer func() { d.observeQuery(StatementWriteBatch, "entry", base, started, int64(len(entries))) }()
+	defer func() {
+		d.observeQuery(StatementWriteBatch, "entry", base, started, int64(len(entries)))
+		d.traceStatement(ctx, StatementWriteBatch, "entry", base, int64(len(entries)))
+	}()
 
 	d.log.LogVerbose(logging.Fields{
 		Operation: "store.db.write-batch", Table: "entry", Producer: producer, Transaction: "BEGIN IMMEDIATE",
@@ -118,6 +121,10 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 			result.Absorbed++
 			d.log.LogVerbose(fields, "write absorbed: this write_id already landed entries_index=%d", i)
 			continue
+		}
+
+		if err := d.requireStableIdentity(ctx, tx, r); err != nil {
+			return WriteResult{}, d.refuse(fields, err)
 		}
 
 		if r.workflowNotImplemented {
@@ -176,18 +183,39 @@ func (d *DB) WriteBatch(ctx context.Context, producer string, batch *storev1.Ent
 	return result, nil
 }
 
-// refuse records the refusal exactly once, here at its owning layer, and hands
-// the error back for the server to shape into a typed failure arm.
+// refuse records one refusal and hands the error back for the server to shape
+// into a typed failure arm.
 //
-// EVERY error return of this package goes through it, read paths included, so
-// the rule "each error is logged exactly once by its owning layer" has one
-// implementation rather than a convention.
+// WHO OWNS THE RECORD DEPENDS ON WHOSE FAULT IT IS, and that is the whole rule.
+//
+//   - A REFUSED REQUEST (ErrInvalid, ErrStalePointer) belongs to the CALL, and
+//     only the server knows the call: its rpc, its request id, its producer.
+//     This layer's record would name a statement and a table and tie the
+//     refusal to nothing, so it is a VERBOSE trace here and the server writes
+//     the single normal-level record. Emitting both put two normal-level
+//     records on one refusal and made "every error is logged exactly once" false
+//     wherever anyone counted.
+//   - A STALE POINTER IS NOT AN ERROR AT ALL. It is an ordinary race — the
+//     caller walked a book that moved — and its recovery is a repaint. Logging
+//     it at `error` meant a healthy store wrote error records during normal
+//     operation, which is exactly how an error log stops being read.
+//   - A STORAGE FAILURE is this layer's own, with statement and table context
+//     nothing above can supply, so it stays a normal-level `error` record here
+//     and the server answers with a verbose trace instead of a second one.
 func (d *DB) refuse(fields logging.Fields, err error) error {
-	fields.Level = "error"
 	fields.ErrorCause = err.Error()
 	if fields.Operation == "" {
 		fields.Operation = "store.db"
 	}
+	if errors.Is(err, ErrInvalid) || errors.Is(err, ErrStalePointer) {
+		fields.Level = "debug"
+		if site := RefusalSite(err); site != "" {
+			fields.RefusalSite = site
+		}
+		d.log.LogVerbose(fields, "refused: %v", err)
+		return err
+	}
+	fields.Level = "error"
 	d.log.Log(fields, "refused: %v", err)
 	return err
 }
@@ -237,6 +265,53 @@ func (d *DB) recordApplied(ctx context.Context, tx *sql.Tx, r routed, writeSeq u
 	return nil
 }
 
+// requireStableIdentity refuses an upsert that would move an existing row into
+// another book or turn it into another kind of thing.
+//
+// AN UPSERT SUPERSEDES A ROW'S CONTENT, NOT ITS IDENTITY. `upsert_key` names one
+// thing, and the whole page model rests on that: a pointer stays valid across
+// every write of the row it names, so a caller holding one must still be holding
+// a line of the book it read it from. Letting a write change `book_agent_id`
+// would silently teleport a served line out of one agent's page and into
+// another's — every pointer already handed out for it now naming a row in a book
+// the caller never asked about — and changing `kind` would make a served page
+// line become an unservable residue row under a pointer that still exists.
+// Neither is a supersession; both are a different thing wearing the same key.
+func (d *DB) requireStableIdentity(ctx context.Context, tx *sql.Tx, r routed) error {
+	var book sql.NullString
+	var kind string
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT book_agent_id, kind FROM entry WHERE upsert_key = ?`, r.upsertKey).Scan(&book, &kind); {
+	case errors.Is(err, sql.ErrNoRows):
+		// A first insert has no identity to change.
+		return nil
+	case err != nil:
+		return storagef(err, "reading the identity of row %q", r.upsertKey)
+	}
+	if book.Valid != r.book.Valid || book.String != r.book.String {
+		return invalidSitef(SiteUpsertChangesIdentity,
+			entryField(r.index, "agent_update.serveable_frame.page_agent_id"),
+			"entries[%d] (upsert_key=%q) would move the row from book %q to %q — an upsert supersedes a row's content, never its identity",
+			r.index, r.upsertKey, nullableBook(book), nullableBook(r.book))
+	}
+	if kind != r.kind {
+		return invalidSitef(SiteUpsertChangesIdentity,
+			entryField(r.index, "agent_update"),
+			"entries[%d] (upsert_key=%q) would change the row's kind from %q to %q — an upsert supersedes a row's content, never its identity",
+			r.index, r.upsertKey, kind, r.kind)
+	}
+	return nil
+}
+
+// nullableBook renders a book column for a human, distinguishing the never-served
+// NULL from an agent whose id happens to be empty (which cannot occur).
+func nullableBook(book sql.NullString) string {
+	if !book.Valid {
+		return "(none)"
+	}
+	return book.String
+}
+
 // upsertEntry writes the row and returns the position it occupies.
 //
 // `position` IS NEVER IN THE UPDATE CLAUSE. That omission is the whole
@@ -273,13 +348,13 @@ func (d *DB) upsertEntry(ctx context.Context, tx *sql.Tx, r routed, writeSeq uin
 // validateCursorState is the base function for store.v1.CursorState.
 func validateCursorState(c *storev1.CursorState) error {
 	if c.GetFileId() == "" {
-		return invalidf("cursor_advance.file_id is empty — the cursor's identity is what survives the vendor's renames")
+		return invalidFieldf("cursor_advance.file_id", "cursor_advance.file_id is empty — the cursor's identity is what survives the vendor's renames")
 	}
 	if c.GetPath() == "" {
-		return invalidf("cursor_advance.path is empty (file_id=%q)", c.GetFileId())
+		return invalidFieldf("cursor_advance.path", "cursor_advance.path is empty (file_id=%q)", c.GetFileId())
 	}
 	if c.GetOffset() < 0 {
-		return invalidf("cursor_advance.offset is negative (file_id=%q offset=%d)", c.GetFileId(), c.GetOffset())
+		return invalidFieldf("cursor_advance.offset", "cursor_advance.offset is negative (file_id=%q offset=%d)", c.GetFileId(), c.GetOffset())
 	}
 	return nil
 }

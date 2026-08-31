@@ -16,6 +16,14 @@
 //   The Claude Agent SDK is kept EXTERNAL: it is heavy, drives a spawned
 //   `claude` child, and is only ever dynamically imported at runtime, where it
 //   resolves from this package's node_modules.
+//
+//   @connectrpc/connect and @connectrpc/connect-node are the OPPOSITE case and
+//   are BUNDLED (they are absent from `external` on purpose): they are plain
+//   static dependencies of the transport the shim serves and dials, they are
+//   small, and the daemon spawns `dist/main.js` by path — a bundle that left
+//   them external would resolve them only while this package's node_modules
+//   sits beside the output, which is exactly the runtime-resolution problem
+//   the bundle exists to remove.
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import path from "node:path";

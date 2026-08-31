@@ -127,30 +127,101 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		"_txlock": {"immediate"},
 	}.Encode()
 
+	clock := opts.Now
+	if clock == nil {
+		clock = nowMillis
+	}
+
+	d, err := openAt(dsn, path, log, opts, clock)
+	if err == nil {
+		return finishOpen(d, log, path, opts)
+	}
+
+	// THE FILE IS IN THE WAY, SO IT GOES. A --db path this binary cannot even
+	// read as a database is the SAME situation as a schema this binary did not
+	// create, and the store answers it the same way: the store holds a cache of
+	// what the vendor and the shim already know how to produce again, so a file
+	// worth nothing costs a remove to be rid of. Refusing to boot instead would
+	// wedge the service permanently on a truncated file or a half-written copy —
+	// an outage that needs a human with a shell, in exchange for preserving
+	// bytes nobody can read.
+	//
+	// ONLY ONCE, AND ONLY FOR THAT. A second failure after a clean recreate is a
+	// real problem — an unwritable directory, a full disk — and is returned.
+	//
+	// AND ONLY FOR A REGULAR FILE. Unlinking whatever happens to sit at an
+	// operator-supplied path is how a service deletes somebody's data: a
+	// directory at --db is a misconfiguration to report, not a database to
+	// replace, and removing it would silently destroy whatever it contained.
+	// The mode is proved before anything is removed, exactly as the listener
+	// proves a socket's mode before reclaiming it.
+	if !isRegularFile(path) {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+			"the database path cannot be opened and is not a regular file, so it will not be replaced: %v", err)
+		return nil, err
+	}
+	log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn", ErrorCause: err.Error()},
+		"the database file cannot be read by this binary (%v) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", err)
+	if removeErr := removeDatabaseFiles(path); removeErr != nil {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: removeErr.Error()},
+			"removing the unreadable database failed: %v", removeErr)
+		return nil, removeErr
+	}
+	d, err = openAt(dsn, path, log, opts, clock)
+	if err != nil {
+		return nil, err
+	}
+	return finishOpen(d, log, path, opts)
+}
+
+// finishOpen records the ready state. It is the one exit both the first attempt
+// and the post-nuke attempt take.
+func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, error) {
+	log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
+		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d", SchemaVersion, opts.SlowQuery.Milliseconds())
+	return d, nil
+}
+
+// openAt opens the handle and brings it to SchemaVersion, closing the handle if
+// either step fails so the caller may remove the file underneath it.
+func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-			"opening SQLite connection failed: %v", err)
 		return nil, storagef(err, "opening %q", path)
 	}
 	if err := sqldb.Ping(); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
-		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
-			"SQLite ping failed: %v", err)
 		return nil, storagef(err, "pinging %q", path)
-	}
-	clock := opts.Now
-	if clock == nil {
-		clock = nowMillis
 	}
 	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery, now: clock}
 	if err := d.ensureSchema(context.Background(), path); err != nil {
 		sqldb.Close() //nolint:errcheck // the open already failed
 		return nil, err
 	}
-	log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
-		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d", SchemaVersion, opts.SlowQuery.Milliseconds())
 	return d, nil
+}
+
+// isRegularFile reports whether the path is an ordinary file this store may
+// replace. A directory, a device, a symlink to either — anything that is not a
+// plain file — is somebody else's, and is never removed.
+func isRegularFile(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// removeDatabaseFiles removes the database and the two WAL siblings SQLite
+// keeps beside it.
+//
+// THE SIBLINGS MUST GO TOO. A -wal or -shm left behind belongs to the file that
+// was just deleted, and SQLite opening a fresh database next to a stale WAL is
+// how a "recreated" store comes up carrying fragments of the one it replaced.
+func removeDatabaseFiles(path string) error {
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return storagef(err, "removing the unreadable database file %q", name)
+		}
+	}
+	return nil
 }
 
 // Close closes the underlying handle.

@@ -16,8 +16,8 @@ import (
 // switches on it.
 var (
 	// ErrInvalid is every VALIDATION refusal: an unset non-optional field, an
-	// unset oneof, an empty identifier, a zero page size, a pointer that is
-	// not a store-minted pointer at all.
+	// unset oneof, an empty identifier, a pointer that is not a store-minted
+	// pointer at all.
 	ErrInvalid = errors.New("invalid request")
 
 	// ErrStalePointer is a well-formed, store-minted pointer that names no row
@@ -29,14 +29,92 @@ var (
 	ErrStorage = errors.New("storage failure")
 )
 
-// invalidf builds an ErrInvalid with the detail a human reads.
+// The refusal SITES this package can produce.
+//
+// THEY LIVE HERE, NOT IN THE SERVER, because this is the layer that decides
+// them: the server opens only the write ENVELOPE, so every refusal about what
+// is INSIDE a frame is this package's to name. internal/server aliases these
+// constants rather than restating the strings, so the vocabulary has one
+// spelling and cannot drift between the layer that emits a site and the layer
+// that logs it.
+const (
+	// SiteStoreRefusedRequest is the storage layer refusing the request on its
+	// own validation, with no finer site to name.
+	SiteStoreRefusedRequest = "store_refused_request"
+	// SiteStalePointer is a well-formed pointer naming no row of its book.
+	SiteStalePointer = "stale_pointer"
+	// SiteUpsertChangesIdentity is a write that would move an existing row to
+	// another book or another kind. Identity per thing.
+	SiteUpsertChangesIdentity = "upsert_changes_identity"
+	// SitePageBookMismatch is a page line whose envelope names a different
+	// agent than the frame inside it does.
+	SitePageBookMismatch = "page_book_mismatch"
+	// SiteResidueRawUnset is residue that carries no verbatim record, which is
+	// the only thing it exists to carry.
+	SiteResidueRawUnset = "residue_raw_unset"
+)
+
+// refusal is one refusal's STRUCTURED detail: the site, the store's own name
+// for the field at fault, and the class sentinel it answers to.
+//
+// THE FIELD NAME CROSSES THE LAYER BOUNDARY because the failure arm carries it
+// on the wire. The server names the fields IT validates; this package names the
+// fields inside a frame, which the server never opens — so without carrying the
+// name up, every db-side refusal would reach the producer as an unnamed
+// "invalid request" and the producer's own logs could not say what it sent
+// wrong.
+type refusal struct {
+	site   string
+	field  string
+	detail string
+	class  error
+}
+
+func (r *refusal) Error() string { return r.class.Error() + ": " + r.detail }
+
+// Unwrap keeps errors.Is(err, ErrInvalid) and errors.Is(err, ErrStalePointer)
+// working, so no caller has to learn this type to classify a refusal.
+func (r *refusal) Unwrap() error { return r.class }
+
+// RefusalSite reports the site a refusal names, or "" for an error that is not
+// one of this package's structured refusals.
+func RefusalSite(err error) string {
+	var target *refusal
+	if errors.As(err, &target) {
+		return target.site
+	}
+	return ""
+}
+
+// RefusalField reports the store's own name for the field a refusal blames, or
+// "" when the refusal blames no single field.
+func RefusalField(err error) string {
+	var target *refusal
+	if errors.As(err, &target) {
+		return target.field
+	}
+	return ""
+}
+
+// invalidf builds an ErrInvalid that blames no single field.
 func invalidf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
+	return &refusal{site: SiteStoreRefusedRequest, detail: fmt.Sprintf(format, args...), class: ErrInvalid}
+}
+
+// invalidFieldf builds an ErrInvalid naming the field at fault.
+func invalidFieldf(field, format string, args ...any) error {
+	return &refusal{site: SiteStoreRefusedRequest, field: field, detail: fmt.Sprintf(format, args...), class: ErrInvalid}
+}
+
+// invalidSitef builds an ErrInvalid at a NAMED site — one of the specific
+// refusals this package owns, rather than the generic one.
+func invalidSitef(site, field, format string, args ...any) error {
+	return &refusal{site: site, field: field, detail: fmt.Sprintf(format, args...), class: ErrInvalid}
 }
 
 // stalePointerf builds an ErrStalePointer with the detail a human reads.
-func stalePointerf(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrStalePointer, fmt.Sprintf(format, args...))
+func stalePointerf(field, format string, args ...any) error {
+	return &refusal{site: SiteStalePointer, field: field, detail: fmt.Sprintf(format, args...), class: ErrStalePointer}
 }
 
 // storagef builds an ErrStorage that keeps `cause` reachable through

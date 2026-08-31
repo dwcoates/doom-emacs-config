@@ -3,6 +3,8 @@ package server
 import (
 	"fmt"
 
+	"agentrepl/shim-store/internal/db"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -30,8 +32,6 @@ const (
 	SiteTokenEmpty             = "token_empty"
 	SiteUnknownWatchToken      = "unknown_watch_token"
 	SiteFileIDEmpty            = "file_id_empty"
-	SiteStoreRefusedRequest    = "store_refused_request"
-	SiteStalePointer           = "stale_pointer"
 	SiteDatabaseFailure        = "database_failure"
 	SiteWorkflowNotImplemented = "workflow_not_implemented"
 	SiteStreamNotFlushable     = "stream_not_flushable"
@@ -40,18 +40,65 @@ const (
 	SiteWatchBufferOverflow    = "watch_buffer_overflow"
 )
 
-// refusal is one typed refusal: the site the server logs, and the human detail
-// the failure arm carries. `detail` is for humans and logs and is NEVER
-// switched on by a caller.
+// The sites internal/db decides, ALIASED rather than restated.
+//
+// The storage layer owns every refusal about what is INSIDE a frame, because
+// this layer opens only the envelope. Spelling the strings twice would let the
+// site a record is logged under drift from the site the layer that raised it
+// meant, so there is exactly one definition and this is a reference to it.
+const (
+	SiteStoreRefusedRequest   = db.SiteStoreRefusedRequest
+	SiteStalePointer          = db.SiteStalePointer
+	SiteUpsertChangesIdentity = db.SiteUpsertChangesIdentity
+	SitePageBookMismatch      = db.SitePageBookMismatch
+	SiteResidueRawUnset       = db.SiteResidueRawUnset
+)
+
+// refusalClass is WHICH FAILURE ARM a refusal becomes.
+//
+// It is not the same thing as the site. A site says which of the store's many
+// checks said no — the vocabulary an operator counts by — while the class says
+// which typed arm the caller receives, and several sites map to one arm. Keeping
+// them apart is what lets a new site be added without inventing a wire arm for
+// it.
+type refusalClass int
+
+const (
+	// classInvalid is a request the caller must FIX; retrying the same bytes
+	// cannot help.
+	classInvalid refusalClass = iota
+	// classStalePointer is a well-formed pointer naming no row of its book —
+	// an ordinary race the caller recovers from by re-opening.
+	classStalePointer
+	// classStorage is the database failing; a retry may succeed.
+	classStorage
+	// classNotImplemented is a verb this wave does not answer.
+	classNotImplemented
+)
+
+// refusal is one typed refusal: the site the server logs, the store's own name
+// for the field at fault, the class that selects the wire arm, and the human
+// detail. `detail` is for humans and logs and is NEVER switched on by a caller;
+// `field` is machine-readable and is what a producer's own logs quote.
 type refusal struct {
 	site   string
+	field  string
 	detail string
+	class  refusalClass
 }
 
 func (r *refusal) Error() string { return r.detail }
 
-func refuse(site, format string, args ...any) *refusal {
-	return &refusal{site: site, detail: fmt.Sprintf(format, args...)}
+// refuse builds a VALIDATION refusal. Every call names the field, because the
+// failure arm carries it and an unnamed invalid_request tells the producer
+// nothing it can act on.
+func refuse(site, field, format string, args ...any) *refusal {
+	return &refusal{site: site, field: field, detail: fmt.Sprintf(format, args...), class: classInvalid}
+}
+
+// refuseClass builds a refusal of a class other than validation.
+func refuseClass(class refusalClass, site, field, detail string) *refusal {
+	return &refusal{site: site, field: field, detail: detail, class: class}
 }
 
 // ---- base functions: one per message, its validation lives here once ----
@@ -61,7 +108,7 @@ func refuse(site, format string, args ...any) *refusal {
 // field for the human detail, because a request may carry more than one.
 func validateAgentID(id *conversationv1.AgentId, what string) *refusal {
 	if id == nil || id.GetValue() == "" {
-		return refuse(SiteAgentIDEmpty, "%s: an AgentId with no value is not an agent", what)
+		return refuse(SiteAgentIDEmpty, what, "%s: an AgentId with no value is not an agent", what)
 	}
 	return nil
 }
@@ -71,7 +118,7 @@ func validateAgentID(id *conversationv1.AgentId, what string) *refusal {
 // book is the storage layer's answer (SiteStalePointer), not this one.
 func validateStoreItemPointer(p *storev1.StoreItemPointer, what string) *refusal {
 	if p == nil || p.GetValue() == "" {
-		return refuse(SitePointerEmpty, "%s: a StoreItemPointer with no value names no position", what)
+		return refuse(SitePointerEmpty, what, "%s: a StoreItemPointer with no value names no position", what)
 	}
 	return nil
 }
@@ -81,7 +128,7 @@ func validateStoreItemPointer(p *storev1.StoreItemPointer, what string) *refusal
 // whether it has already been consumed, is the registry's answer.
 func validateAgentSessionToken(t *storev1.AgentSessionToken) *refusal {
 	if t == nil || t.GetValue() == "" {
-		return refuse(SiteTokenEmpty, "watch: an AgentSessionToken with no value addresses no session")
+		return refuse(SiteTokenEmpty, "watch", "watch: an AgentSessionToken with no value addresses no session")
 	}
 	return nil
 }
@@ -90,7 +137,7 @@ func validateAgentSessionToken(t *storev1.AgentSessionToken) *refusal {
 // server picks": it is an unset required field.
 func validatePageSize(size uint32) *refusal {
 	if size == 0 {
-		return refuse(SitePageSizeZero, "page_size: a page budget of zero asks for nothing")
+		return refuse(SitePageSizeZero, "page_size", "page_size: a page budget of zero asks for nothing")
 	}
 	return nil
 }
@@ -99,7 +146,7 @@ func validatePageSize(size uint32) *refusal {
 // be set. An unset oneof is an error — the store never guesses a producer.
 func validatePlane(p *storev1.Plane, what string) *refusal {
 	if p == nil || p.GetPlane() == nil {
-		return refuse(SiteEntryPlaneUnset, "%s: plane names neither stream nor file", what)
+		return refuse(SiteEntryPlaneUnset, what+".plane", "%s: plane names neither stream nor file", what)
 	}
 	return nil
 }
@@ -110,7 +157,7 @@ func validatePlane(p *storev1.Plane, what string) *refusal {
 // (offset zero is a legitimate start-of-file position).
 func validateCursorState(c *storev1.CursorState, what string) *refusal {
 	if c.GetFileId() == "" {
-		return refuse(SiteCursorFileIDEmpty, "%s: a CursorState with no file_id keys no row", what)
+		return refuse(SiteCursorFileIDEmpty, what+".file_id", "%s: a CursorState with no file_id keys no row", what)
 	}
 	return nil
 }
@@ -121,19 +168,19 @@ func validateCursorState(c *storev1.CursorState, what string) *refusal {
 func validateStoreEntry(e *storev1.StoreEntry, index int) *refusal {
 	what := fmt.Sprintf("entries[%d]", index)
 	if e == nil {
-		return refuse(SiteEntryArmUnset, "%s: no entry", what)
+		return refuse(SiteEntryArmUnset, what, "%s: no entry", what)
 	}
 	if ref := validatePlane(e.GetPlane(), what); ref != nil {
 		return ref
 	}
 	if e.GetWriteId() == "" {
-		return refuse(SiteEntryWriteIDEmpty, "%s: write_id is empty, so the write cannot be deduped on replay", what)
+		return refuse(SiteEntryWriteIDEmpty, what+".write_id", "%s: write_id is empty, so the write cannot be deduped on replay", what)
 	}
 	if e.GetUpsertKey() == "" {
-		return refuse(SiteEntryUpsertKeyEmpty, "%s (write_id %s): upsert_key is empty, so the write identifies no row", what, e.GetWriteId())
+		return refuse(SiteEntryUpsertKeyEmpty, what+".upsert_key", "%s (write_id %s): upsert_key is empty, so the write identifies no row", what, e.GetWriteId())
 	}
 	if e.GetEntry() == nil {
-		return refuse(SiteEntryArmUnset, "%s (write_id %s): the entry oneof names neither agent_update nor session_update", what, e.GetWriteId())
+		return refuse(SiteEntryArmUnset, what+".entry", "%s (write_id %s): the entry oneof names neither agent_update nor session_update", what, e.GetWriteId())
 	}
 	return nil
 }
@@ -150,10 +197,10 @@ func validateStoreEntry(e *storev1.StoreEntry, index int) *refusal {
 // names rather than acknowledging as durable.
 func validateEntryBatch(b *storev1.EntryBatch) *refusal {
 	if b == nil {
-		return refuse(SiteBatchMissing, "batch: the request carries no EntryBatch")
+		return refuse(SiteBatchMissing, "batch", "batch: the request carries no EntryBatch")
 	}
 	if len(b.GetEntries()) == 0 && b.GetCursorAdvance() == nil {
-		return refuse(SiteBatchEmpty, "batch: the EntryBatch carries neither entries nor a cursor advance")
+		return refuse(SiteBatchEmpty, "batch", "batch: the EntryBatch carries neither entries nor a cursor advance")
 	}
 	for i, entry := range b.GetEntries() {
 		if ref := validateStoreEntry(entry, i); ref != nil {
@@ -172,7 +219,7 @@ func validateEntryBatch(b *storev1.EntryBatch) *refusal {
 
 func validateWriteBatchRequest(req *storev1.WriteBatchRequest) *refusal {
 	if req.GetProducer() == "" {
-		return refuse(SiteProducerEmpty, "producer: the write names no producer, so nothing can be attributed")
+		return refuse(SiteProducerEmpty, "producer", "producer: the write names no producer, so nothing can be attributed")
 	}
 	return validateEntryBatch(req.GetBatch())
 }
@@ -214,7 +261,7 @@ func validateWatchAgentSessionRequest(req *storev1.WatchAgentSessionRequest) *re
 // identity is the whole address, so an empty one names no run.
 func validateWatchBashRunRequest(req *storev1.WatchBashRunRequest) *refusal {
 	if req.GetRun() == nil || req.GetRun().GetValue() == "" {
-		return refuse(SiteRunEmpty, "run: an AgentActivityId with no value addresses no run")
+		return refuse(SiteRunEmpty, "run", "run: an AgentActivityId with no value addresses no run")
 	}
 	return nil
 }
@@ -223,7 +270,7 @@ func validateGetSidecarCursorsRequest(req *storev1.GetSidecarCursorsRequest) *re
 	// file_id is OPTIONAL: absent asks for every cursor. Present but empty is
 	// again a sentinel standing in for absence.
 	if req.FileId != nil && req.GetFileId() == "" {
-		return refuse(SiteFileIDEmpty, "file_id: present but empty; omit the field to ask for every cursor")
+		return refuse(SiteFileIDEmpty, "file_id", "file_id: present but empty; omit the field to ask for every cursor")
 	}
 	return nil
 }
