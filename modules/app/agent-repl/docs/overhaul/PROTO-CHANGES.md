@@ -154,6 +154,23 @@ OWN ACCORD:
   allowed|allowed_warning|rejected (tags 5–7), the vocabulary now in
   evidence.
 
+## Landing 5 — overhaul/integration (2026-08-29; protos e6cb62dbd, 480d8f75b, 01851abf7, 5e7a4bf70)
+
+OWN ACCORD:
+- AgentBashOutput.form gains `not_observed` — a lost/reconciled run had to
+  lie with `partial{bytes_omitted: 0}`.
+- FeedResponse.notice{heading} — vendor-synthesized notices were drawn via
+  a daemon-composed heading prepended to the prose (an unmarked register).
+- Comment-only: WebWorkspaceTransferred = notice + host reload, no in-page
+  redial (the origin changes with the port); FooterAllowance.status UNSET
+  is legal ("no vendor verdict yet").
+- UpdateMergeQueuePause/Resume gain `optional workspace.v1.RepositoryRef
+  repository` (UNSET = every repository) — the queue is per repository
+  but the request carried no scope, so pause was daemon-wide.
+- Deferred to landing 6: server-derived daemon arms from wave 3;
+  retirement of any landed-but-unused arms; FeedPermissionArguments' wire
+  source.
+
 ## Explicitly NOT changed (rulings recorded instead)
 
 - WatchAgentSession / WatchFeed refusals: no failure frame — a refused open
