@@ -38,6 +38,23 @@
 ;; header block ever arrives, and no `-L' is passed so no redirect can add
 ;; another.
 ;;
+;; CLOSING, EXACTLY ONCE, IN ONE OF THREE WAYS.  A terminal envelope runs
+;; ON-CLOSE from the FILTER, the instant the producer said how the stream
+;; ended, and kills curl afterwards — a consumer is never made to wait on
+;; a process exit for a fact it has already been sent.  A client cancel
+;; kills curl and the sentinel reports `(:cancelled)'.  A death with no
+;; terminal envelope is reported by the sentinel as an error.  CLOSED-P
+;; makes the three mutually exclusive and each of them singular, and a
+;; frame arriving after the end frame is logged at WARNING, never
+;; delivered.
+;;
+;; STANDING-STREAM ACCEPTANCE.  The daemon flushes its response headers on
+;; accept, so the HTTP 200 header block IS the acceptance of a
+;; subscription — before any frame, and long before a first push that a
+;; standing stream may never send at all.  `agent-repl-connect-stream'
+;; exposes that instant as its optional ON-OPEN, and daemon-link, host and
+;; roster key "subscribed" on it rather than on a spawn or a first frame.
+;;
 ;; EVERY process spawn in this file goes through the single boundary
 ;; wrapper `agent-repl-connect--spawn-curl', registered in
 ;; `agent-repl--external-boundary-functions' (core.el) so batch tests are
@@ -533,12 +550,14 @@ it stands on.  CANCELLED-P records a client-side cancel so the exit is
 reported as `(:cancelled)' and not as a failure.  CLOSE-REASON holds the
 outcome decided by a terminal envelope, so the sentinel reports what the
 producer said rather than re-deriving it.  CLOSED-P makes ON-CLOSE run
-exactly once."
+exactly once, and OPENED-P makes ON-OPEN run exactly once."
   (process nil)
   (method nil :type string)
   (conn nil)
   (on-push nil)
   (on-close nil)
+  (on-open nil)
+  (opened-p nil)
   (cancelled-p nil)
   (close-reason nil)
   (closed-p nil))
@@ -586,6 +605,27 @@ must not tear down a standing subscription."
        (agent-repl--error nil "elisp.connect.push-unparsable method=%S error=%S payload=%S"
                           method err payload)))))
 
+(defun agent-repl-connect--dispatch-open (stream)
+  "Run STREAM's ON-OPEN once, the instant its HTTP 200 headers landed.
+ACCEPTANCE IS THE HEADER BLOCK.  The daemon flushes response headers on
+accept, so a 200 status is proof the subscription stands — before any
+frame, and long before the first push a standing stream may never send.
+A non-200 status and a death before any header block never reach here, so
+a caller that keys its subscribed record on this is never told a refused
+stream was accepted.  An ON-OPEN that itself signals is contained here, like
+every other consumer callback at this boundary: it is logged at ERROR and
+the stream stays open."
+  (unless (agent-repl-connect-stream-opened-p stream)
+    (setf (agent-repl-connect-stream-opened-p stream) t)
+    (let ((method (agent-repl-connect-stream-method stream)))
+      (agent-repl--info nil "elisp.connect.stream-accepted method=%S" method)
+      (when (agent-repl-connect-stream-on-open stream)
+        (condition-case err
+            (funcall (agent-repl-connect-stream-on-open stream))
+          (error
+           (agent-repl--error nil "elisp.connect.open-handler-error method=%S error=%S"
+                              method err)))))))
+
 (defun agent-repl-connect--close-stream (stream outcome)
   "Run STREAM's ON-CLOSE with OUTCOME once, and forget the stream.
 OUTCOME is `(:cancelled)', `(:ended)', or `(:error DETAIL)'."
@@ -608,8 +648,13 @@ OUTCOME is `(:cancelled)', `(:ended)', or `(:error DETAIL)'."
            (agent-repl--error nil "elisp.connect.close-handler-error method=%S error=%S outcome=%S"
                               method err outcome)))))))
 
-(defun agent-repl-connect-stream (conn method json-string on-push on-close)
+(defun agent-repl-connect-stream (conn method json-string on-push on-close
+                                      &optional on-open)
   "Open server-streaming METHOD on CONN with request JSON-STRING.
+ON-OPEN, when given, is called with no arguments exactly once, the moment
+the response header block parses as HTTP 200 — the instant the stream was
+ACCEPTED, before any frame.  It never runs for a non-200 status and never
+for a transport death that happened before any headers arrived.
 ON-PUSH receives each pushed message as a parsed alist.  ON-CLOSE receives
 `(:cancelled)' when the client cancelled, `(:ended)' when the producer
 sent a clean terminal envelope, or `(:error DETAIL)' when the terminal
@@ -627,7 +672,8 @@ nothing.  Returns the stream object."
          (parser (agent-repl-connect-envelope-parser-create))
          (error-body "")
          (stream (agent-repl-connect-stream-create
-                  :method method :conn conn :on-push on-push :on-close on-close)))
+                  :method method :conn conn :on-push on-push :on-close on-close
+                  :on-open on-open)))
     (agent-repl--info nil "elisp.connect.stream-open method=%S address=%S" method address)
     (setf (agent-repl-connect-stream-process stream)
           (agent-repl-connect--spawn-curl
@@ -642,14 +688,29 @@ nothing.  Returns the stream object."
                 ((/= status 200)
                  (setq error-body (concat error-body bytes)))
                 (t
+                 (agent-repl-connect--dispatch-open stream)
                  (dolist (frame (agent-repl-connect-envelope-feed parser bytes))
-                   (if (agent-repl-connect-envelope-end-frame-p (car frame))
-                       (unless (agent-repl-connect-stream-close-reason stream)
-                         (setf (agent-repl-connect-stream-close-reason stream)
-                               (agent-repl-connect--end-frame-reason method (cdr frame)))
-                         (let ((proc (agent-repl-connect-stream-process stream)))
-                           (when (process-live-p proc) (delete-process proc))))
-                     (agent-repl-connect--dispatch-push stream (cdr frame))))))))
+                   (cond
+                    ;; THE END FRAME IS THE END.  Anything after it is the
+                    ;; producer contradicting itself, never a push to deliver.
+                    ((agent-repl-connect-stream-closed-p stream)
+                     (agent-repl--warn nil "elisp.connect.frame-after-end method=%S flags=%S"
+                                       method (car frame)))
+                    ((agent-repl-connect-envelope-end-frame-p (car frame))
+                     ;; ON-CLOSE runs HERE, from the frame that ended the
+                     ;; stream, and not from the sentinel: the producer has
+                     ;; already said what happened, so a consumer must not
+                     ;; wait on a process exit to be told.  The process is
+                     ;; killed straight after; the sentinel then finds the
+                     ;; stream closed and only frees the temporaries.
+                     (let ((reason (agent-repl-connect--end-frame-reason
+                                    method (cdr frame))))
+                       (setf (agent-repl-connect-stream-close-reason stream) reason)
+                       (agent-repl-connect--close-stream stream reason)
+                       (let ((proc (agent-repl-connect-stream-process stream)))
+                         (when (process-live-p proc) (delete-process proc)))))
+                    (t
+                     (agent-repl-connect--dispatch-push stream (cdr frame)))))))))
            (lambda (proc _event)
              (unless (process-live-p proc)
                (let ((status (agent-repl-connect--reader-status reader))
