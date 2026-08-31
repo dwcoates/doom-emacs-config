@@ -30,22 +30,25 @@ var errFake = errors.New("the fake refused")
 // selfInstance is the daemon instance every test's controller runs as.
 const selfInstance = ids.InstanceID("daemon-outgoing")
 
-// fakeClock is a Clock the test drives. After hands out ONE channel per call
-// from a queue the test fills, so no window in this package is waited out.
+// fakeClock is a Clock the test drives. Every After registers a channel under
+// the duration it was asked for, so a test releases exactly the window it means
+// to — the holdout cadence or the adoption window — and never waits one out.
 type fakeClock struct {
 	mu    sync.Mutex
 	now   time.Time
 	waits []time.Duration
-	// fire is the channel EVERY After returns. A test closes or sends on it to
-	// release whatever window is outstanding.
-	fire chan time.Time
+	armed map[time.Duration][]chan time.Time
 	// asked announces every After call, so a test synchronizes on a window
 	// having been armed rather than polling for it.
 	asked chan time.Duration
 }
 
 func newFakeClock(now time.Time) *fakeClock {
-	return &fakeClock{now: now, fire: make(chan time.Time), asked: make(chan time.Duration, 64)}
+	return &fakeClock{
+		now:   now,
+		armed: make(map[time.Duration][]chan time.Time),
+		asked: make(chan time.Duration, 256),
+	}
 }
 
 func (c *fakeClock) Now() time.Time {
@@ -55,9 +58,10 @@ func (c *fakeClock) Now() time.Time {
 }
 
 func (c *fakeClock) After(d time.Duration) <-chan time.Time {
+	ch := make(chan time.Time, 1)
 	c.mu.Lock()
 	c.waits = append(c.waits, d)
-	ch := c.fire
+	c.armed[d] = append(c.armed[d], ch)
 	c.mu.Unlock()
 	select {
 	case c.asked <- d:
@@ -73,13 +77,47 @@ func (c *fakeClock) Waits() []time.Duration {
 	return append([]time.Duration(nil), c.waits...)
 }
 
-// Fire releases every outstanding window at once.
-func (c *fakeClock) Fire() {
+// Fire releases every window armed for exactly d.
+func (c *fakeClock) Fire(d time.Duration) {
 	c.mu.Lock()
-	ch := c.fire
-	c.fire = make(chan time.Time)
+	waiting := c.armed[d]
+	delete(c.armed, d)
+	now := c.now
 	c.mu.Unlock()
-	close(ch)
+	for _, ch := range waiting {
+		ch <- now
+	}
+}
+
+// FireAll releases every window armed so far, whatever its duration.
+func (c *fakeClock) FireAll() {
+	c.mu.Lock()
+	all := c.armed
+	c.armed = make(map[time.Duration][]chan time.Time)
+	now := c.now
+	c.mu.Unlock()
+	for _, waiting := range all {
+		for _, ch := range waiting {
+			ch <- now
+		}
+	}
+}
+
+// awaitArmed blocks until a window of exactly d has been armed, which is how a
+// test knows the flow reached that window without polling or sleeping.
+func (c *fakeClock) awaitArmed(t *testing.T, d time.Duration) {
+	t.Helper()
+	for {
+		select {
+		case got := <-c.asked:
+			if got == d {
+				return
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no window of %s was ever armed", d)
+			return
+		}
+	}
 }
 
 // fakeSpawner is the successor spawner.
