@@ -11,13 +11,13 @@
  * affordance would be a new arm in the schema, not a branch in here.
  *
  * THE LOOK IS TODAY'S LOOK. The shell reuses the existing card classes
- * (`.tool-card`, `.tool-head`, `.tool-name`, `.badge`, `.cmd`, `.tool-output`
- * and the capped-section classes), so an ordinary bash call renders exactly as
- * it did before the port. The one unification the contract forces is the input
- * line: the wire carries ONE composed line for every tool, so there is no
- * longer a bash treatment and a file-path treatment to choose between — every
- * card's input is the monospace accent line, capped and click-expandable, that
- * a bash command has always had.
+ * (`.tool-card`, `.tool-head`, `.tool-name`, `.badge`, `.cmd`, `.file-path`,
+ * `.tool-output` and the capped-section classes), so an ordinary bash call
+ * renders exactly as it did before the port. The input line's TREATMENT is the
+ * one thing that used to be picked per tool: the wire now NAMES the drawn form
+ * (command, path, query) and the client applies the treatment that form has
+ * always had — the shell line, the muted file path, the query line — without
+ * ever learning which tool ran. An unset form draws as plain text.
  *
  * THE CLOCKS ARE THE CLIENT'S ONLY ARITHMETIC. `running.last_progress` ships an
  * instant and the card ticks "quiet for N" off the shared ticker; the settled
@@ -34,13 +34,17 @@ import {
   type FeedToolCallDiagnostics,
   type FeedToolCallDiffOutput,
   type FeedToolCallInput,
+  type FeedToolCallInputCommand,
   type FeedToolCallInputLink,
+  type FeedToolCallInputPath,
+  type FeedToolCallInputQuery,
   type FeedToolCallLastProgress,
   type FeedToolCallLink,
   type FeedToolCallLinkUrl,
   type FeedToolCallLinesOutput,
   type FeedToolCallLinksOutput,
   type FeedToolCallName,
+  type FeedToolCallNoOutput,
   type FeedToolCallOmitted,
   type FeedToolCallReturned,
   type FeedToolCallRunning,
@@ -142,33 +146,134 @@ export function drawFeedToolCallName(u: FeedToolCallName, path: string): HTMLEle
 }
 
 /**
- * ② The ONE composed input line.
+ * What a drawn input form contributes: the element that carries the treatment,
+ * and the chrome the CLIENT owns in front of the daemon's text.
+ *
+ * The prefix exists because the shell form's "$" is stated by the schema to be
+ * the client's, not part of the composed line — so it is drawn here rather than
+ * expected on the wire, and no other form has any.
+ */
+export interface InputForm {
+  element: HTMLElement;
+  prefix: string;
+}
+
+/**
+ * ② The ONE composed input line, in the FORM the daemon states.
+ *
+ * THE FORM IS THE DAEMON'S, THE TREATMENT IS THE CLIENT'S. The wire names the
+ * shape of the line — a shell command, a file path, a search query — and this
+ * module applies the treatment the existing look has always given that shape,
+ * while still knowing nothing about which tool ran. An UNSET form is plain
+ * text: presence, never a sentinel, and never a shape guessed from the text.
  *
  * A `link` makes the line a hyperlink to the page the call fetched; without one
- * it is plain text. The `<pre>` carries the cap and the click-to-expand either
- * way, so a long command reads the same whether or not it links anywhere.
+ * it is plain text. The form's own element carries the treatment either way, so
+ * a linked path still reads as a path.
  */
 export function drawFeedToolCallInput(
   u: FeedToolCallInput,
   rc: RowContext,
   path: string,
 ): HTMLElement {
+  const form = drawInputForm(u.form, path);
+  log("debug", "drawing a tool call input line", {
+    operation: "feed.cards.tool-call.input",
+    context: {
+      path,
+      form: u.form.case ?? "unset",
+      linked: u.link !== undefined,
+    },
+  });
+  if (form.prefix !== "") form.element.appendChild(document.createTextNode(form.prefix));
+  if (u.link === undefined) {
+    form.element.appendChild(document.createTextNode(u.text));
+    return form.element;
+  }
+  form.element.appendChild(drawFeedToolCallInputLink(u.link, rc, u.text, `${path}.link`));
+  return form.element;
+}
+
+/**
+ * The input-form oneof: one arm, exhaustively — and UNSET is an arm's worth of
+ * meaning of its own, so it is handled before the switch rather than defaulted
+ * into one of the treatments.
+ */
+function drawInputForm(form: FeedToolCallInput["form"], path: string): InputForm {
+  if (form.case === undefined) return drawPlainInput(`${path}.form`);
+  switch (form.case) {
+    case "command":
+      return drawFeedToolCallInputCommand(form.value, `${path}.command`);
+    case "path":
+      return drawFeedToolCallInputPath(form.value, `${path}.path`);
+    case "query":
+      return drawFeedToolCallInputQuery(form.value, `${path}.query`);
+    default: {
+      // The narrowed value is `never` here, which is the compile-time half of
+      // the guarantee; the run-time half still needs the arm's NAME, and an arm
+      // a NEWER daemon set is exactly the case that reaches this line.
+      const other: { case: string } = form;
+      return unreachableArm(`${path}.form`, other.case);
+    }
+  }
+}
+
+/**
+ * No form stated: the line as plain monospace text.
+ *
+ * NOT the shell treatment. A line the daemon gave no form for is not a command,
+ * and drawing it with the "$" chrome and the accent colour would be this module
+ * asserting a shape nobody stated.
+ */
+function drawPlainInput(path: string): InputForm {
+  log("debug", "drawing an unformed tool call input line as plain text", {
+    operation: "feed.cards.tool-call.input-plain",
+    context: { path },
+  });
+  const line = document.createElement("pre");
+  line.className = "tool-input";
+  return { element: line, prefix: "" };
+}
+
+/** The shell-command form: the accent monospace line, with the client's "$". */
+export function drawFeedToolCallInputCommand(
+  _u: FeedToolCallInputCommand,
+  path: string,
+): InputForm {
+  log("debug", "drawing a tool call input line as a shell command", {
+    operation: "feed.cards.tool-call.input-command",
+    context: { path },
+  });
   const line = document.createElement("pre");
   line.className = "cmd bash-input";
-  if (u.link === undefined) {
-    log("debug", "drawing a plain tool call input line", {
-      operation: "feed.cards.tool-call.input",
-      context: { path, linked: false },
-    });
-    line.textContent = u.text;
-    return line;
-  }
-  log("debug", "drawing a linked tool call input line", {
-    operation: "feed.cards.tool-call.input",
-    context: { path, linked: true },
+  return { element: line, prefix: "$ " };
+}
+
+/** The path form: the existing muted file-path line. */
+export function drawFeedToolCallInputPath(_u: FeedToolCallInputPath, path: string): InputForm {
+  log("debug", "drawing a tool call input line as a file path", {
+    operation: "feed.cards.tool-call.input-path",
+    context: { path },
   });
-  line.appendChild(drawFeedToolCallInputLink(u.link, rc, u.text, `${path}.link`));
-  return line;
+  const line = document.createElement("div");
+  line.className = "file-path";
+  return { element: line, prefix: "" };
+}
+
+/**
+ * The query form: the accent monospace line WITHOUT the shell chrome.
+ *
+ * A search pattern is not a command line — it gets the same monospace accent a
+ * grep line has always had, and no "$".
+ */
+export function drawFeedToolCallInputQuery(_u: FeedToolCallInputQuery, path: string): InputForm {
+  log("debug", "drawing a tool call input line as a query", {
+    operation: "feed.cards.tool-call.input-query",
+    context: { path },
+  });
+  const line = document.createElement("pre");
+  line.className = "cmd tool-query";
+  return { element: line, prefix: "" };
 }
 
 /** The input line's hyperlink target. */
@@ -340,6 +445,8 @@ function drawForm(
       return drawFeedToolCallLinesOutput(form.value, `${path}.lines`);
     case "links":
       return drawFeedToolCallLinksOutput(form.value, rc, `${path}.links`);
+    case "none":
+      return drawFeedToolCallNoOutput(form.value, `${path}.none`);
     default: {
       // The narrowed value is `never` here, which is the compile-time half of
       // the guarantee; the run-time half still needs the arm's NAME, and an arm
@@ -348,6 +455,27 @@ function drawForm(
       return unreachableArm(`${path}.form`, other.case);
     }
   }
+}
+
+/**
+ * The no-output form: NOTHING, deliberately.
+ *
+ * The arm says the call returned nothing to draw — a write, an empty search —
+ * so the output section is OMITTED WHOLE: no dashed divider, no empty box, no
+ * "(no output)" line. An empty text arm would have been the sentinel this arm
+ * exists to replace, and drawing an empty block would put the sentinel back in
+ * the DOM instead of on the wire. The badge and the runtime still stand; the
+ * diagnostics, if the edit raised any, are their own section and unaffected.
+ */
+export function drawFeedToolCallNoOutput(
+  _u: FeedToolCallNoOutput,
+  path: string,
+): readonly HTMLElement[] {
+  log("debug", "the returned call has no output to draw", {
+    operation: "feed.cards.tool-call.no-output",
+    context: { path },
+  });
+  return [];
 }
 
 /** The ok badge. */
@@ -659,4 +787,12 @@ export function drawFeedToolCallDiagnostics(
  */
 export const TOOL_CALL_OUTCOME_ARMS: readonly string[] = ["running", "returned", "denied"];
 export const TOOL_CALL_VERDICT_ARMS: readonly string[] = ["succeeded", "failed"];
-export const TOOL_CALL_FORM_ARMS: readonly string[] = ["text", "code", "diff", "lines", "links"];
+export const TOOL_CALL_FORM_ARMS: readonly string[] = [
+  "text",
+  "code",
+  "diff",
+  "lines",
+  "links",
+  "none",
+];
+export const TOOL_CALL_INPUT_FORM_ARMS: readonly string[] = ["command", "path", "query"];

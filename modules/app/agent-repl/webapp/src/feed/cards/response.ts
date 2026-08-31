@@ -13,6 +13,15 @@
  * draw, so a reason sentence here would be the same fact worded twice, in two
  * places that could disagree.
  *
+ * THE NOTICE REGISTER RIDES EVERY STATE TOO, and it is a FIELD, not an arm:
+ * `notice` says the prose is a vendor-synthesized remark (an interruption note,
+ * a system-inserted line) rather than the agent's own words, which is orthogonal
+ * to whether it is still arriving. So it is read from presence in all three
+ * states and draws the daemon's heading above the prose in the quiet register
+ * the stylesheet already uses for system notes. Absent = the ordinary prose
+ * bubble, unchanged. The client holds NO notice vocabulary: the heading is
+ * composed by the daemon and drawn verbatim.
+ *
  * THE USAGE STAMP RIDES EVERY STATE. It is meaningful while arriving (the vendor
  * states usage when a response opens and restates it as it grows), final once
  * settled, and the last observed figure on a broken bubble — so the corner is
@@ -30,6 +39,7 @@
 import type {
   FeedResponse,
   FeedResponseError,
+  FeedResponseNotice,
   FeedResponseProse,
   FeedResponseSuccess,
   FeedResponseUpdate,
@@ -62,12 +72,25 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   const result = requireCase(u.result, `${path}.result`);
   log("debug", "drawing a response bubble", {
     operation: "feed.cards.response",
-    context: { state: result.case, usage: u.usage !== undefined },
+    context: {
+      state: result.case,
+      usage: u.usage !== undefined,
+      notice: u.notice !== undefined,
+    },
   });
 
   const bubble = document.createElement("div");
   bubble.className = "bubble assistant md";
   bubble.setAttribute("data-state", result.case);
+
+  // BEFORE the body, and outside it: the body is rewritten whole by the prose
+  // painters (and by every frame of the type-out), so a heading placed inside it
+  // would be wiped by the first repaint of an arriving response.
+  if (u.notice !== undefined) {
+    bubble.classList.add("response-notice");
+    bubble.setAttribute("data-notice", "");
+    bubble.appendChild(drawFeedResponseNotice(u.notice, `${path}.notice`));
+  }
 
   const body = document.createElement("div");
   body.className = "bubble-body";
@@ -158,6 +181,24 @@ export function drawFeedResponseProse(u: FeedResponseProse, path: string): strin
     context: { path, length: u.markdown.length },
   });
   return u.markdown;
+}
+
+/**
+ * The notice register's heading, drawn verbatim above the prose.
+ *
+ * The daemon composes it because only the daemon knows what kind of remark the
+ * prose is; this end states it and adds nothing — no glyph of its own invention,
+ * no re-wording, no per-notice branch.
+ */
+export function drawFeedResponseNotice(u: FeedResponseNotice, path: string): HTMLElement {
+  log("debug", "drawing a response notice heading", {
+    operation: "feed.cards.response.notice",
+    context: { path },
+  });
+  const heading = document.createElement("div");
+  heading.className = "response-notice-heading";
+  heading.textContent = u.heading;
+  return heading;
 }
 
 /** The cost corner's figure, drawn verbatim. */

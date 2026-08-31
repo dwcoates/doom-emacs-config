@@ -16,9 +16,11 @@
  *
  * NOTHING-RUNNING IS AN ANSWER. `nothing_running` is a SUCCESS arm — the stop
  * found the session already quiet — so it draws a calm note, never a refusal.
- * The only refusal this verb has is `confirm_required`, which is a CHALLENGE:
- * it names how many detached agents a turn stop would also end, and the answer
- * is the same request re-sent with `confirm_agents`.
+ * The refusals are `InterruptError`'s arms, worded once in `interrupt-error.ts`
+ * and drawn here as `.refusal[data-arm]`. Exactly one of them is a CHALLENGE
+ * rather than a dead end — `confirm_required`, which names how many detached
+ * agents a TURN stop would also end and is answered by the same request re-sent
+ * with `confirm_agents` — and it is a challenge only at the turn control.
  *
  * EVERY OUTCOME DRAWS AT THE CONTROL, per the call-site rule: the user clicked
  * here and is looking here, and no view is pushed to tell them what happened.
@@ -32,6 +34,7 @@ import {
   InterruptRequestSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { frameUndecodable } from "../failure/sink.js";
+import { interruptErrorSentence, logInterruptRefusal } from "../interrupt-error.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -202,15 +205,18 @@ function drawAnswer(
       return;
     case "error": {
       const kind = requireCase(result.value.kind, "InterruptError.kind");
-      switch (kind.case) {
-        case "confirmRequired":
-          drawConfirm(ctx, spec, wrapper, kind.value.liveAgentCount);
-          return;
-        default: {
-          const other: { case: string } = kind;
-          return unreachableArm("InterruptError.kind", other.case);
-        }
+      // THE CHALLENGE IS THE TURN STOP'S ALONE. `confirm_agents` is meaningless
+      // on the fan-wide target, so an arm that arrives there is a refusal like
+      // any other rather than a second button that would resend and be refused
+      // again.
+      if (kind.case === "confirmRequired" && spec.target === "turn") {
+        drawConfirm(ctx, spec, wrapper, kind.value.liveAgentCount);
+        return;
       }
+      const sentence = interruptErrorSentence(kind, "InterruptError.kind");
+      logInterruptRefusal(kind, sentence, `${spec.operation}-refused`);
+      drawRefusal(wrapper, kind.case, sentence);
+      return;
     }
     default: {
       const other: { case: string } = result;
