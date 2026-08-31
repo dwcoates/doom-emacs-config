@@ -481,6 +481,17 @@ message FeedResponse {
     // arm only says this bubble is the one it cut short.
     FeedResponseError error = 4;
   }
+  // SET when the prose is a VENDOR-SYNTHESIZED NOTICE rather than the
+  // agent's own words (an interruption note, a system-inserted remark): the
+  // client draws the bubble in the notice register with `heading` above the
+  // prose. UNSET = ordinary agent prose. Daemon-composed; the client holds
+  // no notice vocabulary.
+  optional FeedResponseNotice notice = 5;
+}
+
+// The notice register's heading, daemon-composed.
+message FeedResponseNotice {
+  string heading = 1;
 }
 
 // The arriving state's prose.
