@@ -715,3 +715,23 @@ Rulings already binding; code swaps to the generated arms when it lands:
   repository (the current daemon-wide switch is the unset case); a set ref
   scopes the pause/resume to that repo's queue; typed refusal when the ref
   is unknown.
+
+## The canonical token-figure format (daemon-wide; the webapp copies it)
+
+One formatter, `internal/figures.Tokens(n uint64) string` (extraction from
+the three per-resolver copies is owed in the feed remediation; footer and
+topbar swap imports):
+- n < 1000 → unscaled decimal digits ("0", "999").
+- otherwise scale by the RENDERED unit: k = n/1000, M = n/1,000,000 —
+  rendered with EXACTLY ONE fractional digit (strconv.FormatFloat 'f' 1,
+  round-to-nearest with binary-float ties), then a trailing ".0" trimmed.
+  One fractional digit applies at EVERY scaled magnitude ("1.2k", "12.3k",
+  "182.4k", "1.2M") — the proto's own examples ("18.2k", "142.3k") fix this;
+  there is no drop-the-fraction-from-ten rule.
+- UNIT SELECTION IS BY THE RENDERED VALUE: a count whose k-rendering would
+  reach "1000k" (n ≥ 999,950) renders "1M" instead; same rule at every
+  boundary.
+- Examples: 0→"0", 999→"999", 1000→"1k", 1200→"1.2k", 12340→"12.3k",
+  182000→"182k", 999949→"999.9k", 999950→"1M", 1200000→"1.2M".
+- Suffixes composed by the call site ("18.2k in", "12.4k tok") wrap this
+  value; the formatter emits only the figure.
