@@ -913,6 +913,108 @@ func TestAbortMergeFailurePropagates(t *testing.T) {
 	}
 }
 
+// --- Commit -------------------------------------------------------------
+
+func TestCommitRecordsTheStagedIndexWithoutAnEditor(t *testing.T) {
+	// Arrange: --no-edit keeps git from opening an editor on a merge's own
+	// prepared message, and -m supplies the caller's.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	if _, err := git.Commit(context.Background(), "/repo", "resolve the conflict"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "commit", "--no-edit", "-m", "resolve the conflict")
+}
+
+func TestCommitReadsTheShaBackWithRevParse(t *testing.T) {
+	// Arrange: commit's own chatter is porcelain, so the sha is read back.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	sha, err := git.Commit(context.Background(), "/repo", "resolve the conflict")
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(1, "rev-parse", "HEAD")
+	if sha != "aaaabbbbccccdddd" {
+		t.Fatalf("Commit sha = %q, want the rev-parse answer", sha)
+	}
+}
+
+func TestCommitSelectsTheDirectoryWithDashC(t *testing.T) {
+	// Arrange: `-C dir` is the ONLY repository selector this client uses.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	if _, err := git.Commit(context.Background(), "/repo", "resolve the conflict"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Assert.
+	if got := fake.call(0).dashCDir(); got != "/repo" {
+		t.Fatalf("-C dir = %q, want /repo", got)
+	}
+}
+
+func TestCommitScrubsTheInheritedRepositorySelectors(t *testing.T) {
+	// Arrange: a leaked GIT_DIR is a real, previously-observed source of
+	// bogus work-tree errors.
+	t.Setenv("GIT_DIR", "/elsewhere/.git")
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("aaaabbbbccccdddd", "rev-parse"), ok(""))
+
+	// Act.
+	if _, err := git.Commit(context.Background(), "/repo", "resolve the conflict"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Assert.
+	if got := envValues(fake.call(0).Env, "GIT_DIR"); len(got) != 0 {
+		t.Fatalf("GIT_DIR reached the child as %v, want it scrubbed", got)
+	}
+}
+
+func TestCommitFailureCarriesGitsEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(1, "error: Committing is not possible because you have unmerged files.\n"))
+
+	// Act.
+	_, err := git.Commit(context.Background(), "/repo", "resolve the conflict")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("Commit error = %v (%T), want a *gitclient.Error", err, err)
+	}
+	if !strings.Contains(failure.Stderr, "unmerged files") {
+		t.Fatalf("Stderr = %q, want git's own words as evidence", failure.Stderr)
+	}
+}
+
+func TestCommitFailsWhenTheShaCannotBeRead(t *testing.T) {
+	// Arrange: the commit landed but the read-back did not; the caller is told
+	// rather than handed an empty sha.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: bad revision 'HEAD'\n", "rev-parse"), ok(""))
+
+	// Act.
+	sha, err := git.Commit(context.Background(), "/repo", "resolve the conflict")
+
+	// Assert.
+	if err == nil || sha != "" {
+		t.Fatalf("Commit = %q, %v; want a failure and no sha", sha, err)
+	}
+}
+
 // --- RevertMerge --------------------------------------------------------
 
 func TestRevertMergeUsesTheFirstParentAsMainline(t *testing.T) {
