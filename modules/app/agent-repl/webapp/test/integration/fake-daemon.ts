@@ -1,0 +1,1146 @@
+/**
+ * THE FAKE DAEMON — a real Connect server the integration suite drives.
+ *
+ * It is a genuine HTTP/1.1 listener on 127.0.0.1 speaking the real Connect
+ * protocol over the real generated `AgentRepl` service descriptor, so the app
+ * under test exercises its own transport, its own codec, and its own stream
+ * plumbing end to end. Nothing here mocks a client seam.
+ *
+ * Everything it serves is SCRIPTED. The driver API below is the only way state
+ * changes: a test pushes a view, answers an rpc, or fails one, and the server
+ * hands that exact message to whoever is listening. Anything a test has not
+ * scripted answers with a DEFAULT HEALTHY message: every response carries its
+ * `success` arm and every message is COMPLETE (every non-optional field set,
+ * every oneof set), because the client refuses malformed views by contract and
+ * an accidentally-empty fake would fail tests for the wrong reason.
+ */
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  ScalarType,
+  create,
+  type DescField,
+  type DescMessage,
+  type MessageInitShape,
+} from "@bufbuild/protobuf";
+import { connectNodeAdapter } from "@connectrpc/connect-node";
+import type { ConnectRouter } from "@connectrpc/connect";
+import { Code, ConnectError } from "@connectrpc/connect";
+
+import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { FeedWatchTokenSchema } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
+import type { FeedPage, FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FooterView } from "../../../proto/gen/ts/frontend/v1/footer_pb";
+import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
+import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { DaemonHoldTray } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
+import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
+import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_pb";
+import { WatchFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
+import { WatchFooterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_footer_pb";
+import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_topbar_pb";
+import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
+import { WatchDaemonHoldsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_daemon_holds_pb";
+import { WatchWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_web_workspace_pb";
+import { OpenFeedResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_feed_pb";
+import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
+import { SubmitPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
+import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
+import { AnswerQuestionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_question_pb";
+import { AnswerColdGateResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
+import { CreateWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
+import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
+import { KillWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
+import { NukeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
+import { MergeWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+import { RestartWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
+import { SetWorkspacePriorityResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
+import { CreateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
+import { UpdateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import { AssignWorkspaceTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
+import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
+import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
+import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
+import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
+import { UpdateShutdownScheduleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_shutdown_schedule_pb";
+import { UpdateMergeQueueResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_merge_queue_pb";
+import { DaemonHealthResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_daemon_health_pb";
+import { SessionHealthResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_session_health_pb";
+import { ClientLogResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
+import { RegisterWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_register_workspace_pb";
+import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import { AdoptHostWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_host_workspace_pb";
+import { AdoptWebWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_adopt_web_workspace_pb";
+import { OpenLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_login_pb";
+import { CloseLoginResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_login_pb";
+import { OpenExternalResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import { RequestCommandSupportResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_command_support_pb";
+import { OpenInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import { SendLoginInputResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_send_login_input_pb";
+import {
+  LoginTerminalOutputSchema,
+  type LoginTerminalOutput,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_login_terminal_pb";
+import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
+import type { WatchHostWorkspaceResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_host_workspace_pb";
+import {
+  emptyFeedPage,
+  emptyFooterView,
+  emptyRoster,
+  emptyTopbarView,
+  emptyTray,
+  hostWorkspacePush,
+  shutdownAnnounced,
+} from "./fixtures";
+
+/** Every rpc the fake serves, by its generated lowerCamel method name. */
+export type RpcName = keyof typeof AgentRepl.method;
+
+/** The `$unknown` shape protobuf-es carries and re-serializes verbatim. */
+const UNKNOWN_FIELD = { no: 999, wireType: 0, data: new Uint8Array([1]) } as const;
+
+/** The workspace's own feed. Sub-feeds are addressed by their bubble's FeedId. */
+export const ROOT_FEED = "root";
+export type FeedKey = string;
+
+/** One open server stream: a queue plus the parked reader waiting on it. */
+class Channel<T> {
+  private readonly queue: T[] = [];
+  private waiting: ((r: IteratorResult<T>) => void) | undefined;
+  private done = false;
+
+  push(value: T): void {
+    if (this.done) return;
+    const waiting = this.waiting;
+    if (waiting) {
+      this.waiting = undefined;
+      waiting({ value, done: false });
+      return;
+    }
+    this.queue.push(value);
+  }
+
+  end(): void {
+    this.done = true;
+    const waiting = this.waiting;
+    if (waiting) {
+      this.waiting = undefined;
+      waiting({ value: undefined as never, done: true });
+    }
+  }
+
+  async *iterate(signal: AbortSignal): AsyncGenerator<T> {
+    for (;;) {
+      if (signal.aborted) return;
+      if (this.queue.length > 0) {
+        yield this.queue.shift() as T;
+        continue;
+      }
+      if (this.done) return;
+      const next = await new Promise<IteratorResult<T>>((resolve) => {
+        this.waiting = resolve;
+        signal.addEventListener("abort", () => resolve({ value: undefined as never, done: true }), {
+          once: true,
+        });
+      });
+      if (next.done) return;
+      yield next.value;
+    }
+  }
+}
+
+/** A live stream registration, keyed so `liveStreams`/`endStream` can find it. */
+interface Registration {
+  rpc: RpcName;
+  /** The workspace the stream was opened for; "" for the global streams. */
+  workspace: string;
+  /** The feed a WatchFeed stream tails; undefined for every other rpc. */
+  feed?: FeedKey;
+  channel: Channel<unknown>;
+}
+
+/** A recorded request, in arrival order, with the rpc that received it. */
+export interface RecordedCall<Req = unknown> {
+  rpc: RpcName;
+  request: Req;
+  atMs: number;
+}
+
+/**
+ * The driver a test holds. Every method is synchronous state manipulation
+ * except `start`/`stop` and the awaitable `nextCall`/`awaitStream`.
+ */
+export interface FakeDaemon {
+  /** Boot the listener; resolves with the base url the transport dials. */
+  start(): Promise<{ baseUrl: string }>;
+  /** Shut the listener down and end every live stream. */
+  stop(): Promise<void>;
+  /** The base url once started. Throws before `start` resolves. */
+  readonly baseUrl: string;
+
+  // --- scripted views: each setter also pushes to every live subscriber ----
+  setFooter(workspace: string, view: FooterView): void;
+  setTopbar(workspace: string, view: TopbarView): void;
+  setRoster(roster: WorkspaceRoster): void;
+  setTray(workspace: string, tray: DaemonHoldTray): void;
+  setHostWorkspace(workspace: string, push: WatchHostWorkspaceResponse): void;
+
+  // --- the feed universe --------------------------------------------------
+  /** The page OpenFeed answers with, and GetFeedPage `first` returns. */
+  setPage(workspace: string, feed: FeedKey, page: FeedPage): void;
+  /** The page GetFeedPage `next` returns; falls back to `setPage` when unset. */
+  setNextPage(workspace: string, feed: FeedKey, page: FeedPage): void;
+  /** Deliver a row on every live WatchFeed tailing that feed. */
+  pushRow(workspace: string, feed: FeedKey, row: FeedRow): void;
+  /** The tokens OpenFeed has minted, oldest first, for one feed. */
+  mintedTokens(workspace: string, feed: FeedKey): string[];
+
+  // --- web-link and daemon-lifecycle pushes --------------------------------
+  transfer(workspace: string, address: string): void;
+  announceShutdown(init: Parameters<typeof shutdownAnnounced>[0]): void;
+  scheduleDrain(atMs: bigint, reason: DrainReason): void;
+  cancelDrain(): void;
+
+  // --- the login pty -------------------------------------------------------
+  /** The buffer WatchLoginTerminal replays before any live byte. */
+  setLoginScrollback(workspace: string, chunks: Uint8Array[]): void;
+  /** Deliver live pty bytes on every attached WatchLoginTerminal. */
+  pushLoginBytes(workspace: string, data: Uint8Array): void;
+  /** Conclude the pty with the terminal `closed` frame (a legal stream end). */
+  closeLoginTerminal(workspace: string): void;
+
+  // --- scripted unary answers ---------------------------------------------
+  /** Serve `response` for every later call of `rpc` (replaces the default). */
+  answer(rpc: RpcName, response: unknown): void;
+  /**
+   * Serve a transport-level error for the NEXT call of `rpc` only. This is a
+   * TRANSPORT death, not a refusal: the rpc never answered.
+   */
+  failNext(rpc: RpcName, errorMessage: string): void;
+  /**
+   * Serve `rpc`'s typed `<Rpc>Error` carrying ARM, built complete from the
+   * schema. This is a domain REFUSAL: the rpc answered, and said no. Kept
+   * apart from `failNext` because the two land differently in the app and the
+   * refusals suite exists to tell them apart.
+   */
+  refuse(rpc: RpcName, arm: string): void;
+  /** Every arm `refuse` accepts for `rpc`, read off the descriptor. */
+  refusalArms(rpc: RpcName): string[];
+  /** Put an unknown field on the next response or push of `rpc`. */
+  injectUnknown(rpc: RpcName): void;
+
+  // --- observation ---------------------------------------------------------
+  calls<Req = unknown>(rpc: RpcName): Req[];
+  /** Resolve with the next call of `rpc` not yet handed out by `nextCall`. */
+  nextCall<Req = unknown>(rpc: RpcName): Promise<Req>;
+  /** Every recorded call across every rpc, in arrival order. */
+  log(): RecordedCall[];
+  clearCalls(): void;
+
+  // --- stream bookkeeping --------------------------------------------------
+  liveStreams(rpc: RpcName, workspace?: string, feed?: FeedKey): number;
+  /** Kill every matching stream WITHOUT a terminal frame (transport death). */
+  endStream(rpc: RpcName, workspace?: string, feed?: FeedKey): void;
+  /** Resolve once at least `count` streams of `rpc` are live. */
+  awaitStream(rpc: RpcName, count?: number): Promise<void>;
+}
+
+const key = (workspace: string, feed: FeedKey): string => `${workspace} ${feed}`;
+
+/** Attach the unknown field protobuf-es re-serializes verbatim. */
+const withUnknown = <T extends object>(message: T): T => {
+  (message as { $unknown?: unknown[] }).$unknown = [{ ...UNKNOWN_FIELD }];
+  return message;
+};
+
+/**
+ * The streaming content types a watch request arrives with. The response
+ * echoes the request's own type, which is what the adapter would have written.
+ */
+const STREAMING_CONTENT_TYPES = new Set([
+  "application/connect+proto",
+  "application/connect+json",
+  "application/grpc-web+proto",
+  "application/grpc-web+json",
+  "application/grpc+proto",
+  "application/grpc",
+]);
+
+/**
+ * FLUSH THE RESPONSE HEAD AS SOON AS A WATCH IS ACCEPTED.
+ *
+ * The daemon flushes headers on accept, so a client can observe that its watch
+ * is OPEN before any frame arrives — which matters because a standing stream
+ * may legitimately push nothing for a long time, and "accepted" and "not yet
+ * connected" must not look alike.
+ *
+ * connect-node writes the head lazily: it is emitted on the first frame, or at
+ * the end, and a watch that pushes nothing therefore leaves the client with no
+ * response head at all (measured: the head landed only when the stream ended).
+ * So the fake writes it here, echoing the request's content type — the same
+ * type the adapter would have written — and then neutralizes the adapter's own
+ * later `writeHead`, which would otherwise throw ERR_HTTP_HEADERS_SENT.
+ *
+ * Unary requests are left alone: their head carries the response and there is
+ * nothing to observe early.
+ */
+function flushHeadersOnAccept(req: IncomingMessage, res: ServerResponse): void {
+  const contentType = req.headers["content-type"];
+  if (typeof contentType !== "string" || !STREAMING_CONTENT_TYPES.has(contentType)) return;
+  const writeHead = res.writeHead.bind(res);
+  res.writeHead = ((...args: Parameters<ServerResponse["writeHead"]>) =>
+    res.headersSent ? res : writeHead(...args)) as ServerResponse["writeHead"];
+  res.writeHead(200, { "content-type": contentType });
+  res.flushHeaders();
+}
+
+// ---------------------------------------------------------------------------
+// TYPED REFUSALS, DERIVED FROM THE SCHEMAS
+// ---------------------------------------------------------------------------
+
+/**
+ * The facts the cross-cutting arms carry, fixed so a suite can assert the
+ * exact string it expects to see drawn at the call site.
+ */
+export const REFUSAL_FACTS: Readonly<Record<string, string>> = {
+  registryDir: "/registry/elsewhere",
+  address: "http://127.0.0.1:9999",
+  detail: "the daemon said why",
+  sink: "the durable log",
+  path: "/no/such/path",
+  ref: "origin/nope",
+  name: "the-brief",
+  text: "an unserved value",
+  command: "/nope",
+  url: "not-a-url",
+  mode: "no-such-mode",
+  reason: "the reason",
+  cause: "the cause",
+  summary: "the summary",
+};
+
+/** A deterministic string for a field the table above does not name. */
+const refusalString = (fieldName: string): string => REFUSAL_FACTS[fieldName] ?? `${fieldName}-value`;
+
+/**
+ * Build a COMPLETE init for DESC: every field set, the first arm of every
+ * oneof chosen, nested messages filled recursively.
+ *
+ * The client refuses a malformed view by contract, so a refusal the fake
+ * serves half-built would fail a test for the wrong reason. Deriving the shape
+ * from the descriptor rather than hand-writing ~40 error messages also means a
+ * newly landed arm is servable the moment it lands.
+ */
+function completeInit(desc: DescMessage, depth = 0): Record<string, unknown> {
+  const init: Record<string, unknown> = {};
+  if (depth > 5) return init;
+  const filledOneofs = new Set<string>();
+  for (const field of desc.fields) {
+    const oneof = field.oneof;
+    if (oneof) {
+      // The first field of a oneof is the arm the fake picks.
+      if (filledOneofs.has(oneof.localName)) continue;
+      filledOneofs.add(oneof.localName);
+      init[oneof.localName] = { case: field.localName, value: fieldValue(field, depth) };
+      continue;
+    }
+    init[field.localName] = fieldValue(field, depth);
+  }
+  return init;
+}
+
+/** A complete value for one field, by its kind. */
+function fieldValue(field: DescField, depth: number): unknown {
+  if (field.fieldKind === "list") return [];
+  if (field.fieldKind === "map") return {};
+  if (field.fieldKind === "message") return completeInit(field.message, depth + 1);
+  if (field.fieldKind === "enum") {
+    const values = field.enum.values;
+    return (values.find((v) => v.number !== 0) ?? values[0])?.number ?? 0;
+  }
+  switch (field.scalar) {
+    case ScalarType.STRING:
+      return refusalString(field.localName);
+    case ScalarType.BOOL:
+      return true;
+    case ScalarType.BYTES:
+      return new Uint8Array([1]);
+    case ScalarType.INT64:
+    case ScalarType.UINT64:
+    case ScalarType.SINT64:
+    case ScalarType.FIXED64:
+    case ScalarType.SFIXED64:
+      return 1n;
+    default:
+      return 1;
+  }
+}
+
+/** The `<Rpc>Error` descriptor and the name of its arm oneof, off the schema. */
+function errorShapeOf(rpc: RpcName): { response: DescMessage; error: DescMessage; oneof: string } {
+  const response = AgentRepl.method[rpc].output;
+  const errorField = response.fields.find((f) => f.localName === "error" && f.fieldKind === "message");
+  if (!errorField || errorField.fieldKind !== "message") {
+    throw new Error(`${rpc} has no error field on its response`);
+  }
+  const error = errorField.message;
+  // The oneof is spelled `cause` on most rpcs, `kind` on Interrupt and
+  // `reason` on SubmitPrompt, so it is READ off the descriptor rather than
+  // assumed — a wrong guess would silently build an empty error.
+  const oneof = error.oneofs[0]?.localName;
+  if (!oneof) throw new Error(`${error.typeName} declares no arm oneof`);
+  return { response, error, oneof };
+}
+
+/** Every arm name `refuse` accepts for RPC, straight off the schema. */
+export function refusalArmsOf(rpc: RpcName): string[] {
+  const { error, oneof } = errorShapeOf(rpc);
+  const declared = error.oneofs.find((o) => o.localName === oneof);
+  return declared ? declared.fields.map((f) => f.localName) : [];
+}
+
+/** Build the complete `<Rpc>Response` carrying ARM's typed refusal. */
+function buildRefusal(rpc: RpcName, arm: string): unknown {
+  const { response, error, oneof } = errorShapeOf(rpc);
+  const declared = error.oneofs.find((o) => o.localName === oneof);
+  const field = declared?.fields.find((f) => f.localName === arm);
+  if (!field || field.fieldKind !== "message") {
+    throw new Error(
+      `${error.typeName}.${oneof} has no arm ${JSON.stringify(arm)}; it has [${refusalArmsOf(rpc).join(", ")}]`,
+    );
+  }
+  return create(response, {
+    result: {
+      case: "error",
+      value: { [oneof]: { case: arm, value: completeInit(field.message) } },
+    },
+  } as MessageInitShape<DescMessage>);
+}
+
+export function createFakeDaemon(): FakeDaemon {
+  const registrations = new Set<Registration>();
+  const recorded: RecordedCall[] = [];
+  const observed = new Map<RpcName, number>();
+  const callWaiters: Array<{ rpc: RpcName; index: number; resolve: (request: unknown) => void }> = [];
+  const streamWaiters: Array<{ rpc: RpcName; count: number; resolve: () => void }> = [];
+
+  const footers = new Map<string, FooterView>();
+  const topbars = new Map<string, TopbarView>();
+  const trays = new Map<string, DaemonHoldTray>();
+  const hosts = new Map<string, WatchHostWorkspaceResponse>();
+  const pages = new Map<string, FeedPage>();
+  const nextPages = new Map<string, FeedPage>();
+  const tokens = new Map<string, string[]>();
+  /** token value -> the feed it was minted for. WatchFeed refuses anything else. */
+  const tokenFeeds = new Map<string, { workspace: string; feed: FeedKey }>();
+  /** The pty buffer WatchLoginTerminal replays to a newly attached viewer. */
+  const loginScrollback = new Map<string, Uint8Array[]>();
+  /** Which workspace each known feed belongs to, for the submission check. */
+  const feedOwners = new Map<FeedKey, string>();
+  let roster: WorkspaceRoster = emptyRoster();
+
+  const scripted = new Map<RpcName, unknown>();
+  const failures = new Map<RpcName, string[]>();
+  const unknowns = new Set<RpcName>();
+
+  let server: Server | undefined;
+  let baseUrl = "";
+  let mintCounter = 0;
+
+  const countStreams = (rpc: RpcName, workspace?: string, feed?: FeedKey): number => {
+    let n = 0;
+    for (const reg of registrations) {
+      if (reg.rpc !== rpc) continue;
+      if (workspace !== undefined && reg.workspace !== workspace) continue;
+      if (feed !== undefined && reg.feed !== feed) continue;
+      n += 1;
+    }
+    return n;
+  };
+
+  const notifyStreamWaiters = (): void => {
+    for (let i = streamWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = streamWaiters[i];
+      if (countStreams(waiter.rpc) >= waiter.count) {
+        streamWaiters.splice(i, 1);
+        waiter.resolve();
+      }
+    }
+  };
+
+  const record = (rpc: RpcName, request: unknown): void => {
+    recorded.push({ rpc, request, atMs: Date.now() });
+    const index = recorded.filter((c) => c.rpc === rpc).length - 1;
+    for (let i = callWaiters.length - 1; i >= 0; i -= 1) {
+      const waiter = callWaiters[i];
+      if (waiter.rpc === rpc && waiter.index === index) {
+        callWaiters.splice(i, 1);
+        waiter.resolve(request);
+      }
+    }
+  };
+
+  /** Throw for a scripted `failNext`, consuming one queued failure. */
+  const consumeFailure = (rpc: RpcName): void => {
+    const queue = failures.get(rpc);
+    if (!queue || queue.length === 0) return;
+    const message = queue.shift() as string;
+    throw new ConnectError(message, Code.Unavailable);
+  };
+
+  /** Build the answer for `rpc`: the scripted one, else a default healthy one. */
+  const answerFor = <Desc extends DescMessage>(
+    rpc: RpcName,
+    schema: Desc,
+    fallback: MessageInitShape<Desc>,
+  ): never => {
+    consumeFailure(rpc);
+    const supplied = scripted.get(rpc);
+    const message = supplied ?? create(schema, fallback);
+    if (unknowns.delete(rpc)) withUnknown(message as object);
+    return message as never;
+  };
+
+  /**
+   * Open a server stream: register it, hand the caller the async iterable, and
+   * deregister on the client's cancellation.
+   */
+  const openStream = (
+    rpc: RpcName,
+    workspace: string,
+    signal: AbortSignal,
+    feed?: FeedKey,
+  ): { channel: Channel<unknown>; iterate: () => AsyncGenerator<never> } => {
+    const channel = new Channel<unknown>();
+    const reg: Registration = { rpc, workspace, feed, channel };
+    registrations.add(reg);
+    notifyStreamWaiters();
+    const iterate = async function* (): AsyncGenerator<never> {
+      try {
+        yield* channel.iterate(signal) as AsyncGenerator<never>;
+      } finally {
+        registrations.delete(reg);
+      }
+    };
+    return { channel, iterate };
+  };
+
+  /**
+   * Spend a pending `injectUnknown(rpc)` on `message`.
+   *
+   * The flag is consumed only when a message actually carries it, so arming an
+   * injection before the stream is open still taints the FIRST frame that
+   * reaches a reader rather than being swallowed by a push nobody received.
+   */
+  const taint = <T extends object>(rpc: RpcName, message: T): T =>
+    unknowns.delete(rpc) ? withUnknown(message) : message;
+
+  /** Push one value to every live stream of `rpc` matching workspace/feed. */
+  const broadcast = (
+    rpc: RpcName,
+    workspace: string | undefined,
+    feed: FeedKey | undefined,
+    value: object,
+  ): void => {
+    const targets = [...registrations].filter((reg) => {
+      if (reg.rpc !== rpc) return false;
+      if (workspace !== undefined && reg.workspace !== workspace) return false;
+      if (feed !== undefined && reg.feed !== feed) return false;
+      return true;
+    });
+    if (targets.length === 0) return;
+    const message = taint(rpc, value);
+    for (const reg of targets) reg.channel.push(message);
+  };
+
+  const routes = (router: ConnectRouter): void => {
+    router.service(AgentRepl, {
+      // ---- the feed -------------------------------------------------------
+      submitPrompt(request) {
+        record("submitPrompt", request);
+        // `origin` and `workspace` are both REQUIRED by the contract, and an
+        // unset enum and an absent message are the two shapes a proto3 client
+        // can send without noticing. The real daemon rejects both, so the fake
+        // does too: a suite that forgets one fails here rather than passing
+        // against a lenient stub.
+        if (request.origin === PromptOrigin.UNSPECIFIED) {
+          throw new ConnectError(
+            "SubmitPromptRequest.origin is required and was PROMPT_ORIGIN_UNSPECIFIED",
+            Code.InvalidArgument,
+          );
+        }
+        const submitter = request.workspace?.id;
+        if (submitter === undefined || submitter === "") {
+          throw new ConnectError(
+            "SubmitPromptRequest.workspace is required and was absent",
+            Code.InvalidArgument,
+          );
+        }
+        // A `feed` addresses a bubble's composer, and a bubble belongs to
+        // exactly one workspace. Submitting into another workspace's feed is
+        // the identity-space confusion the four-id rule exists to prevent, so
+        // it is refused rather than quietly accepted.
+        const addressed = request.feed?.value;
+        if (addressed !== undefined) {
+          const owner = feedOwners.get(addressed);
+          if (owner !== undefined && owner !== submitter) {
+            throw new ConnectError(
+              `SubmitPromptRequest.feed ${JSON.stringify(addressed)} belongs to workspace ` +
+                `${JSON.stringify(owner)}, not ${JSON.stringify(submitter)}`,
+              Code.InvalidArgument,
+            );
+          }
+        }
+        return answerFor("submitPrompt", SubmitPromptResponseSchema, {
+          result: {
+            case: "success",
+            value: { outcome: { case: "turn", value: { turn: { value: "turn-1" } } } },
+          },
+        });
+      },
+      openFeed(request) {
+        record("openFeed", request);
+        consumeFailure("openFeed");
+        const workspace = request.workspace?.id ?? "";
+        const feed: FeedKey = request.feed?.value ?? ROOT_FEED;
+        mintCounter += 1;
+        const token = `watch-${mintCounter}`;
+        const minted = tokens.get(key(workspace, feed)) ?? [];
+        minted.push(token);
+        tokens.set(key(workspace, feed), minted);
+        tokenFeeds.set(token, { workspace, feed });
+        feedOwners.set(feed, workspace);
+        const message =
+          scripted.get("openFeed") ??
+          create(OpenFeedResponseSchema, {
+            result: {
+              case: "success",
+              value: {
+                page: pages.get(key(workspace, feed)) ?? emptyFeedPage(),
+                watch: create(FeedWatchTokenSchema, { value: token }),
+              },
+            },
+          });
+        if (unknowns.delete("openFeed")) withUnknown(message as object);
+        return message as never;
+      },
+      async *watchFeed(request, context) {
+        record("watchFeed", request);
+        consumeFailure("watchFeed");
+        const token = request.watch?.value ?? "";
+        const target = tokenFeeds.get(token);
+        if (!target) {
+          throw new ConnectError(`unknown feed watch token: ${JSON.stringify(token)}`, Code.NotFound);
+        }
+        const { iterate } = openStream("watchFeed", target.workspace, context.signal, target.feed);
+        yield* iterate();
+      },
+      getFeedPage(request) {
+        record("getFeedPage", request);
+        consumeFailure("getFeedPage");
+        const workspace = request.workspace?.id ?? "";
+        const feed: FeedKey = request.feed?.value ?? ROOT_FEED;
+        const wanted =
+          request.page.case === "next"
+            ? nextPages.get(key(workspace, feed)) ?? pages.get(key(workspace, feed))
+            : pages.get(key(workspace, feed));
+        const message =
+          scripted.get("getFeedPage") ??
+          create(GetFeedPageResponseSchema, {
+            result: { case: "success", value: wanted ?? emptyFeedPage() },
+          });
+        if (unknowns.delete("getFeedPage")) withUnknown(message as object);
+        return message as never;
+      },
+      interrupt(request) {
+        record("interrupt", request);
+        return answerFor("interrupt", InterruptResponseSchema, {
+          result: { case: "success", value: { outcome: { case: "interruptedTurn", value: {} } } },
+        });
+      },
+      answerPermission(request) {
+        record("answerPermission", request);
+        return answerFor("answerPermission", AnswerPermissionResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      answerQuestion(request) {
+        record("answerQuestion", request);
+        return answerFor("answerQuestion", AnswerQuestionResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      answerColdGate(request) {
+        record("answerColdGate", request);
+        return answerFor("answerColdGate", AnswerColdGateResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- the sidebar ----------------------------------------------------
+      async *watchWorkspaceRoster(request, context) {
+        record("watchWorkspaceRoster", request);
+        consumeFailure("watchWorkspaceRoster");
+        const { channel, iterate } = openStream("watchWorkspaceRoster", "", context.signal);
+        channel.push(taint("watchWorkspaceRoster", create(WatchWorkspaceRosterResponseSchema, { roster })));
+        yield* iterate();
+      },
+      createWorkspace(request) {
+        record("createWorkspace", request);
+        return answerFor("createWorkspace", CreateWorkspaceResponseSchema, {
+          result: {
+            case: "success",
+            value: { workspace: { id: "ws-created", dir: "/tmp/ws-created" } },
+          },
+        });
+      },
+      openWorkspace(request) {
+        record("openWorkspace", request);
+        return answerFor("openWorkspace", OpenWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      closeWorkspace(request) {
+        record("closeWorkspace", request);
+        return answerFor("closeWorkspace", CloseWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      killWorkspace(request) {
+        record("killWorkspace", request);
+        return answerFor("killWorkspace", KillWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      nukeWorkspace(request) {
+        record("nukeWorkspace", request);
+        return answerFor("nukeWorkspace", NukeWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      mergeWorkspace(request) {
+        record("mergeWorkspace", request);
+        return answerFor("mergeWorkspace", MergeWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      restartWorkspace(request) {
+        record("restartWorkspace", request);
+        return answerFor("restartWorkspace", RestartWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      setWorkspacePriority(request) {
+        record("setWorkspacePriority", request);
+        return answerFor("setWorkspacePriority", SetWorkspacePriorityResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      createTask(request) {
+        record("createTask", request);
+        return answerFor("createTask", CreateTaskResponseSchema, {
+          result: { case: "success", value: { task: { id: "task-created" } } },
+        });
+      },
+      updateTask(request) {
+        record("updateTask", request);
+        return answerFor("updateTask", UpdateTaskResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      assignWorkspaceTask(request) {
+        record("assignWorkspaceTask", request);
+        return answerFor("assignWorkspaceTask", AssignWorkspaceTaskResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- topbar / footer / tray -----------------------------------------
+      async *watchTopbar(request, context) {
+        record("watchTopbar", request);
+        consumeFailure("watchTopbar");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchTopbar", workspace, context.signal);
+        channel.push(
+          taint(
+            "watchTopbar",
+            create(WatchTopbarResponseSchema, { topbar: topbars.get(workspace) ?? emptyTopbarView() }),
+          ),
+        );
+        yield* iterate();
+      },
+      setModel(request) {
+        record("setModel", request);
+        return answerFor("setModel", SetModelResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      setPermissionMode(request) {
+        record("setPermissionMode", request);
+        return answerFor("setPermissionMode", SetPermissionModeResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      async *watchFooter(request, context) {
+        record("watchFooter", request);
+        consumeFailure("watchFooter");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchFooter", workspace, context.signal);
+        channel.push(
+          taint(
+            "watchFooter",
+            create(WatchFooterResponseSchema, { footer: footers.get(workspace) ?? emptyFooterView() }),
+          ),
+        );
+        yield* iterate();
+      },
+      async *watchDaemonHolds(request, context) {
+        record("watchDaemonHolds", request);
+        consumeFailure("watchDaemonHolds");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchDaemonHolds", workspace, context.signal);
+        channel.push(
+          taint(
+            "watchDaemonHolds",
+            create(WatchDaemonHoldsResponseSchema, { tray: trays.get(workspace) ?? emptyTray() }),
+          ),
+        );
+        yield* iterate();
+      },
+      updateHeldPrompt(request) {
+        record("updateHeldPrompt", request);
+        return answerFor("updateHeldPrompt", UpdateHeldPromptResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      answerHeldOffer(request) {
+        record("answerHeldOffer", request);
+        return answerFor("answerHeldOffer", AnswerHeldOfferResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- admin / diagnostics --------------------------------------------
+      updateShutdownSchedule(request) {
+        record("updateShutdownSchedule", request);
+        return answerFor("updateShutdownSchedule", UpdateShutdownScheduleResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      updateMergeQueue(request) {
+        record("updateMergeQueue", request);
+        return answerFor("updateMergeQueue", UpdateMergeQueueResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      daemonHealth(request) {
+        record("daemonHealth", request);
+        return answerFor("daemonHealth", DaemonHealthResponseSchema, {
+          result: { case: "success", value: { health: { case: "healthy", value: {} } } },
+        });
+      },
+      sessionHealth(request) {
+        record("sessionHealth", request);
+        return answerFor("sessionHealth", SessionHealthResponseSchema, {
+          result: { case: "success", value: { health: { case: "healthy", value: {} } } },
+        });
+      },
+      clientLog(request) {
+        record("clientLog", request);
+        return answerFor("clientLog", ClientLogResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- host section (Emacs's, served so the fake is complete) ----------
+      registerWorkspace(request) {
+        record("registerWorkspace", request);
+        return answerFor("registerWorkspace", RegisterWorkspaceResponseSchema, {
+          result: {
+            case: "success",
+            value: { workspace: { id: "ws-registered", dir: "/tmp/ws-registered" } },
+          },
+        });
+      },
+      selectWorkspace(request) {
+        record("selectWorkspace", request);
+        return answerFor("selectWorkspace", SelectWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      async *watchHostWorkspace(request, context) {
+        record("watchHostWorkspace", request);
+        consumeFailure("watchHostWorkspace");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchHostWorkspace", workspace, context.signal);
+        channel.push(taint("watchHostWorkspace", hosts.get(workspace) ?? hostWorkspacePush()));
+        yield* iterate();
+      },
+      async *watchDaemon(request, context) {
+        record("watchDaemon", request);
+        consumeFailure("watchDaemon");
+        const { iterate } = openStream("watchDaemon", "", context.signal);
+        yield* iterate();
+      },
+      adoptHostWorkspace(request) {
+        record("adoptHostWorkspace", request);
+        return answerFor("adoptHostWorkspace", AdoptHostWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- the web link ---------------------------------------------------
+      async *watchWebWorkspace(request, context) {
+        record("watchWebWorkspace", request);
+        consumeFailure("watchWebWorkspace");
+        const workspace = request.workspace?.id ?? "";
+        const { iterate } = openStream("watchWebWorkspace", workspace, context.signal);
+        yield* iterate();
+      },
+      adoptWebWorkspace(request) {
+        record("adoptWebWorkspace", request);
+        return answerFor("adoptWebWorkspace", AdoptWebWorkspaceResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+
+      // ---- the login pty --------------------------------------------------
+      openLogin(request) {
+        record("openLogin", request);
+        return answerFor("openLogin", OpenLoginResponseSchema, {
+          result: { case: "success", value: { configDir: "/tmp/config" } },
+        });
+      },
+      async *watchLoginTerminal(request, context) {
+        record("watchLoginTerminal", request);
+        consumeFailure("watchLoginTerminal");
+        const workspace = request.workspace?.id ?? "";
+        const { channel, iterate } = openStream("watchLoginTerminal", workspace, context.signal);
+        // The scrollback replays FIRST, exactly as the daemon replays the pty's
+        // buffer to a newly attached viewer, before any live byte arrives.
+        for (const chunk of loginScrollback.get(workspace) ?? []) {
+          channel.push(
+            taint(
+              "watchLoginTerminal",
+              create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data: chunk } } }),
+            ),
+          );
+        }
+        yield* iterate() as AsyncGenerator<LoginTerminalOutput>;
+      },
+      sendLoginInput(request) {
+        record("sendLoginInput", request);
+        return answerFor("sendLoginInput", SendLoginInputResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      requestCommandSupport(request) {
+        record("requestCommandSupport", request);
+        return answerFor("requestCommandSupport", RequestCommandSupportResponseSchema, {
+          result: {
+            case: "success",
+            value: { workspace: { id: "ws-support", dir: "/tmp/ws-support" } },
+          },
+        });
+      },
+      openInEditor(request) {
+        record("openInEditor", request);
+        return answerFor("openInEditor", OpenInEditorResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      closeLogin(request) {
+        record("closeLogin", request);
+        return answerFor("closeLogin", CloseLoginResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+      openExternal(request) {
+        record("openExternal", request);
+        return answerFor("openExternal", OpenExternalResponseSchema, {
+          result: { case: "success", value: {} },
+        });
+      },
+    });
+  };
+
+  return {
+    async start() {
+      const handler = connectNodeAdapter({ routes });
+      const listener = createServer((req, res) => {
+        flushHeadersOnAccept(req, res);
+        handler(req, res);
+      });
+      await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+      const address = listener.address() as AddressInfo;
+      server = listener;
+      baseUrl = `http://127.0.0.1:${address.port}`;
+      return { baseUrl };
+    },
+    async stop() {
+      for (const reg of registrations) reg.channel.end();
+      registrations.clear();
+      const listener = server;
+      server = undefined;
+      if (!listener) return;
+      listener.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        listener.close((error) => (error ? reject(error) : resolve())),
+      );
+    },
+    get baseUrl() {
+      if (!baseUrl) throw new Error("fake daemon: start() has not resolved");
+      return baseUrl;
+    },
+
+    setFooter(workspace, view) {
+      footers.set(workspace, view);
+      broadcast("watchFooter", workspace, undefined, create(WatchFooterResponseSchema, { footer: view }));
+    },
+    setTopbar(workspace, view) {
+      topbars.set(workspace, view);
+      broadcast("watchTopbar", workspace, undefined, create(WatchTopbarResponseSchema, { topbar: view }));
+    },
+    setRoster(next) {
+      roster = next;
+      broadcast(
+        "watchWorkspaceRoster",
+        undefined,
+        undefined,
+        create(WatchWorkspaceRosterResponseSchema, { roster: next }),
+      );
+    },
+    setTray(workspace, tray) {
+      trays.set(workspace, tray);
+      broadcast("watchDaemonHolds", workspace, undefined, create(WatchDaemonHoldsResponseSchema, { tray }));
+    },
+    setHostWorkspace(workspace, push) {
+      hosts.set(workspace, push);
+      broadcast("watchHostWorkspace", workspace, undefined, push);
+    },
+
+    setPage(workspace, feed, page) {
+      pages.set(key(workspace, feed), page);
+      feedOwners.set(feed, workspace);
+    },
+    setNextPage(workspace, feed, page) {
+      nextPages.set(key(workspace, feed), page);
+    },
+    pushRow(workspace, feed, row) {
+      broadcast("watchFeed", workspace, feed, create(WatchFeedResponseSchema, { row }));
+    },
+    mintedTokens(workspace, feed) {
+      return [...(tokens.get(key(workspace, feed)) ?? [])];
+    },
+
+    transfer(workspace, address) {
+      broadcast(
+        "watchWebWorkspace",
+        workspace,
+        undefined,
+        create(WatchWebWorkspaceResponseSchema, { push: { case: "transferred", value: { address } } }),
+      );
+    },
+    announceShutdown(init) {
+      broadcast("watchDaemon", undefined, undefined, shutdownAnnounced(init));
+    },
+    scheduleDrain(atMs, reason) {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, { push: { case: "drainScheduled", value: { atMs, reason } } }),
+      );
+    },
+    cancelDrain() {
+      broadcast(
+        "watchDaemon",
+        undefined,
+        undefined,
+        create(WatchDaemonResponseSchema, { push: { case: "drainCancelled", value: {} } }),
+      );
+    },
+
+    setLoginScrollback(workspace, chunks) {
+      loginScrollback.set(workspace, chunks);
+    },
+    pushLoginBytes(workspace, data) {
+      broadcast(
+        "watchLoginTerminal",
+        workspace,
+        undefined,
+        create(LoginTerminalOutputSchema, { output: { case: "bytes", value: { data } } }),
+      );
+    },
+    closeLoginTerminal(workspace) {
+      broadcast(
+        "watchLoginTerminal",
+        workspace,
+        undefined,
+        create(LoginTerminalOutputSchema, { output: { case: "closed", value: {} } }),
+      );
+      for (const reg of [...registrations]) {
+        if (reg.rpc !== "watchLoginTerminal" || reg.workspace !== workspace) continue;
+        registrations.delete(reg);
+        reg.channel.end();
+      }
+    },
+
+    answer(rpc, response) {
+      scripted.set(rpc, response);
+    },
+    failNext(rpc, errorMessage) {
+      const queue = failures.get(rpc) ?? [];
+      queue.push(errorMessage);
+      failures.set(rpc, queue);
+    },
+    refuse(rpc, arm) {
+      scripted.set(rpc, buildRefusal(rpc, arm));
+    },
+    refusalArms(rpc) {
+      return refusalArmsOf(rpc);
+    },
+    injectUnknown(rpc) {
+      unknowns.add(rpc);
+    },
+
+    calls<Req>(rpc: RpcName): Req[] {
+      return recorded.filter((c) => c.rpc === rpc).map((c) => c.request as Req);
+    },
+    nextCall<Req>(rpc: RpcName): Promise<Req> {
+      const index = observed.get(rpc) ?? 0;
+      observed.set(rpc, index + 1);
+      const already = recorded.filter((c) => c.rpc === rpc);
+      if (already.length > index) return Promise.resolve(already[index].request as Req);
+      return new Promise<Req>((resolve) =>
+        callWaiters.push({ rpc, index, resolve: resolve as (r: unknown) => void }),
+      );
+    },
+    log() {
+      return [...recorded];
+    },
+    clearCalls() {
+      recorded.length = 0;
+      observed.clear();
+    },
+
+    liveStreams(rpc, workspace, feed) {
+      return countStreams(rpc, workspace, feed);
+    },
+    endStream(rpc, workspace, feed) {
+      for (const reg of [...registrations]) {
+        if (reg.rpc !== rpc) continue;
+        if (workspace !== undefined && reg.workspace !== workspace) continue;
+        if (feed !== undefined && reg.feed !== feed) continue;
+        registrations.delete(reg);
+        reg.channel.end();
+      }
+    },
+    awaitStream(rpc, count = 1) {
+      if (countStreams(rpc) >= count) return Promise.resolve();
+      return new Promise<void>((resolve) => streamWaiters.push({ rpc, count, resolve }));
+    },
+  };
+}
