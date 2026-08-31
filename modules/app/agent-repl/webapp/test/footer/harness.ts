@@ -172,12 +172,20 @@ export function interruptSuccess(
   });
 }
 
-/** The one landed refusal arm: the are-you-sure challenge. */
+/** The are-you-sure challenge, the one refusal arm that is not a dead end. */
 export function confirmRequired(liveAgentCount: bigint): InterruptResponse {
+  return interruptRefused("confirmRequired", { liveAgentCount });
+}
+
+/** Any refusal arm, by its generated case name and its own init. */
+export function interruptRefused(
+  arm: string,
+  value: Record<string, unknown> = {},
+): InterruptResponse {
   return create(InterruptResponseSchema, {
     result: {
       case: "error",
-      value: { kind: { case: "confirmRequired", value: { liveAgentCount } } },
+      value: { kind: { case: arm as never, value: value as never } },
     },
   });
 }

@@ -5347,3 +5347,36 @@ body.ungated #mode-select {
   color: var(--muted);
 }
 .cold-gate-trace { color: var(--fg); }
+/* ---- tool card input forms (src/feed/cards/tool-call.ts) ---- */
+/* The daemon names the drawn form of the card's one input line and the client
+   applies the treatment that shape of line has always worn: the shell command
+   keeps `.cmd.bash-input`, a path keeps the muted `.file-path`, and an unstated
+   form is the plain `.tool-input`. Those three rules already exist and are
+   reused untouched; only the query needs a treatment of its own — the accent
+   monospace line WITHOUT the shell chrome, held back a touch so a search
+   pattern does not read as a command that ran. */
+.tool-query { opacity: 0.9; }
+
+/* ---- response notice register (src/feed/cards/response.ts) ---- */
+/* A response whose prose is a vendor-synthesized remark rather than the agent's
+   own words. Deliberately the QUIETEST change that still reads as a different
+   register: the bubble keeps its shape, its background and its width so the
+   feed's rhythm is untouched, and gains a muted left accent plus the daemon's
+   heading in the same small muted type `.system-note` has always used for a
+   system remark. No new colour is introduced — a notice is not a warning. */
+.bubble.assistant.response-notice {
+  border-left: 2px solid var(--muted);
+  padding-left: calc(0.9rem - 2px);
+  /* `.bubble` lays its children out as a flex ROW (body beside the cost
+     corner), so the heading is given the whole first line and the row wraps
+     beneath it — the alternative, nesting the heading inside `.bubble-body`,
+     cannot work: the prose painters rewrite that element whole on every frame
+     of the type-out. */
+  flex-wrap: wrap;
+}
+.response-notice-heading {
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.35em;
+}
