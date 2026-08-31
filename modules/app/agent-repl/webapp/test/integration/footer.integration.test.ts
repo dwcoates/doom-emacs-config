@@ -17,7 +17,12 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 
 import { startHarness, type Harness } from "./harness";
-import { assertVocabCoversArms, RENDER_COLORS, footerStatusColor } from "./vocab";
+import {
+  assertVocabCoversArms,
+  RENDER_COLORS,
+  footerAllowanceColor,
+  footerStatusColor,
+} from "./vocab";
 import {
   FOOTER_ACTIVITY_KINDS,
   FOOTER_ALLOWANCE_ARMS,
@@ -64,6 +69,10 @@ describe("arm coverage", () => {
 
   it("covers every allowance verdict arm", () => {
     assertCoversOneof(FooterAllowanceSchema, "status", [...FOOTER_ALLOWANCE_ARMS]);
+  });
+
+  it("gives every allowance verdict a color in the vocabulary", () => {
+    assertVocabCoversArms(RENDER_COLORS.footer_allowance, FOOTER_ALLOWANCE_ARMS, "footer_allowance");
   });
 
   it("covers every tokens-cell verdict", () => {
@@ -212,6 +221,25 @@ describe("the activity cell", () => {
     expect(harness.$(".footer-activity [data-datum='attempt']")?.textContent).toContain("3");
   });
 
+  it.each(FOOTER_ALLOWANCE_ARMS)("paints the %s verdict the vocabulary's color", async (arm) => {
+    // Arrange
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setFooter(
+          WORKSPACE_ID,
+          footerView({
+            status: "idle",
+            activity: "rateLimited",
+            activityOverride: rateLimitedActivity(arm),
+          }),
+        ),
+    });
+    // Assert
+    expect(harness.$(`.footer-activity [data-allowance][data-arm="${arm}"]`)?.className).toContain(
+      `tone-${footerAllowanceColor(arm)}`,
+    );
+  });
+
   it.each(FOOTER_ALLOWANCE_ARMS)("draws the %s allowance verdict as its own arm", async (arm) => {
     // Arrange: the free-text status string was retired for a typed oneof, so
     // the verdict is an ARM the client draws, never a word it echoes.
@@ -228,6 +256,58 @@ describe("the activity cell", () => {
     });
     // Assert
     expect(harness.$(`.footer-activity [data-allowance][data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it("draws an allowance with no verdict yet, figures and all", async () => {
+    // Arrange: UNSET is legal — no rate-limit event observed for the window
+    // yet, so the sampled figures stand with no verdict class.
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setFooter(
+          WORKSPACE_ID,
+          footerView({
+            status: "idle",
+            activity: "rateLimited",
+            activityOverride: rateLimitedActivity(undefined),
+          }),
+        ),
+    });
+    // Assert
+    expect(harness.$(".footer-activity [data-allowance]")).not.toBeNull();
+  });
+
+  it("gives an unset verdict no arm class at all", async () => {
+    // Arrange
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setFooter(
+          WORKSPACE_ID,
+          footerView({
+            status: "idle",
+            activity: "rateLimited",
+            activityOverride: rateLimitedActivity(undefined),
+          }),
+        ),
+    });
+    // Assert: unset is not a fourth verdict, and not a malformed view either.
+    expect(harness.$(".footer-activity [data-allowance]")?.dataset.arm).toBeUndefined();
+  });
+
+  it("reports no malformed frame for an unset verdict", async () => {
+    // Arrange
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setFooter(
+          WORKSPACE_ID,
+          footerView({
+            status: "idle",
+            activity: "rateLimited",
+            activityOverride: rateLimitedActivity(undefined),
+          }),
+        ),
+    });
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
   });
 
   it("draws both the session and the weekly allowance", async () => {

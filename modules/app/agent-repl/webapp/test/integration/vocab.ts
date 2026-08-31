@@ -13,8 +13,20 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const vocabFile = (name: string): unknown =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../proto/vocab/${name}`, import.meta.url)), "utf8"));
+/**
+ * Resolve a vocabulary file next to the protos.
+ *
+ * Vite serves modules outside its root under a `/@fs` prefix, and that prefix
+ * survives into `import.meta.url` when vitest loads this file — so the naive
+ * `fileURLToPath(new URL(...))` yields `/@fs/Users/...`, which does not exist.
+ * Stripping it is the whole fix; the rest of the path is already correct.
+ */
+const vocabPath = (name: string): string => {
+  const resolved = fileURLToPath(new URL(`../../../proto/vocab/${name}`, import.meta.url));
+  return resolved.startsWith("/@fs/") ? resolved.slice("/@fs".length) : resolved;
+};
+
+const vocabFile = (name: string): unknown => JSON.parse(readFileSync(vocabPath(name), "utf8"));
 
 interface RenderColors {
   colors: string[];
@@ -23,6 +35,7 @@ interface RenderColors {
   merge_glyphs: Record<string, string>;
   feed_merge_head_glyph: string;
   footer_status: Record<string, string>;
+  footer_allowance: Record<string, string>;
   topbar_connectivity: Record<string, string>;
   topbar_tones: string[];
   failure_sides: Record<string, string>;
@@ -46,6 +59,10 @@ export const rosterStatusColor = (arm: string): string => lookup(RENDER_COLORS.r
 
 /** The color the vocabulary assigns a FooterStatus arm. */
 export const footerStatusColor = (arm: string): string => lookup(RENDER_COLORS.footer_status, arm, "footer_status");
+
+/** The color the vocabulary assigns a FooterAllowance verdict arm. */
+export const footerAllowanceColor = (arm: string): string =>
+  lookup(RENDER_COLORS.footer_allowance, arm, "footer_allowance");
 
 /** The glyph name the vocabulary assigns a merge roster arm. */
 export const mergeGlyph = (arm: string): string => lookup(RENDER_COLORS.merge_glyphs, arm, "merge_glyphs");
