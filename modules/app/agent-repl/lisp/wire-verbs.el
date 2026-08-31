@@ -1689,13 +1689,32 @@ arm this codec does not know is refused as an unknown field."
 
 ;;;; ---- UpdateMergeQueue -----------------------------------------------
 
-(defun agent-repl-wire-encode-update-merge-queue-pause (_value)
-  "Encode UpdateMergeQueuePause.  Empty: the arm is the whole action."
-  nil)
+(defun agent-repl-wire-encode-update-merge-queue-pause-repository (ref)
+  "Encode UpdateMergeQueuePause's `repository' use site from REF."
+  (agent-repl-wire-encode-repository-ref ref))
 
-(defun agent-repl-wire-encode-update-merge-queue-resume (_value)
-  "Encode UpdateMergeQueueResume.  Empty: the arm is the whole action."
-  nil)
+(defun agent-repl-wire-encode-update-merge-queue-pause (value)
+  "Encode UpdateMergeQueuePause from plist VALUE (:repository REF).
+`repository' is OPTIONAL and its ABSENCE IS THE DAEMON-WIDE SWITCH: unset
+means every repository that has a queue, so an absent ref is omitted from
+the encoding rather than sent as an empty one."
+  (let ((ref (plist-get value :repository)))
+    (when ref
+      (list (cons 'repository
+                  (agent-repl-wire-encode-update-merge-queue-pause-repository ref))))))
+
+(defun agent-repl-wire-encode-update-merge-queue-resume-repository (ref)
+  "Encode UpdateMergeQueueResume's `repository' use site from REF."
+  (agent-repl-wire-encode-repository-ref ref))
+
+(defun agent-repl-wire-encode-update-merge-queue-resume (value)
+  "Encode UpdateMergeQueueResume from plist VALUE (:repository REF).
+`repository' is OPTIONAL and its absence is the daemon-wide switch, the
+same as on the pause arm."
+  (let ((ref (plist-get value :repository)))
+    (when ref
+      (list (cons 'repository
+                  (agent-repl-wire-encode-update-merge-queue-resume-repository ref))))))
 
 (defun agent-repl-wire-encode-update-merge-queue-evict-workspace (ref)
   "Encode UpdateMergeQueueEvict's `workspace' use site from REF."

@@ -30,6 +30,7 @@
 (declare-function agent-repl-host-select "host")
 (declare-function agent-repl-host-subscribe "host")
 (declare-function agent-repl-host-unsubscribe "host")
+(declare-function agent-repl-host-forget "host")
 (declare-function agent-repl-host-ref "host")
 (declare-function agent-repl-host-conn "host")
 (declare-function agent-repl-host-state "host")
@@ -118,7 +119,11 @@ always cancelled afterwards — a client cancel IS the graceful close."
            (agent-repl-itest--await-subscriber
             ,daemon "host" (plist-get ,ref :id))
            ,@body)
-       (ignore-errors (agent-repl-host-unsubscribe agent-repl-itest-host--ws))
+       ;; FORGET, not merely unsubscribe: host state is keyed by workspace
+       ;; name and outlives a subscription by design, so leaving it behind
+       ;; would let one scenario's pushed state answer the next scenario's
+       ;; accessors -- which is exactly what a `no push yet' assertion means.
+       (ignore-errors (agent-repl-host-forget agent-repl-itest-host--ws))
        (agent-repl-connect-close conn))))
 
 (defun agent-repl-itest-host--push-invalid-context-strings (daemon)
@@ -624,8 +629,11 @@ process knows whether they are."
           (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
                     ((symbol-function 'agent-repl-status-blink-tab)
                      (lambda (&rest _) (error "an unfocused Emacs must not blink a tab")))
+                    ;; `&rest' because the unfocused arm threads a
+                    ;; per-notification ACTIVATE (R-CLICK) behind the three
+                    ;; presentation arguments.
                     ((symbol-function 'agent-repl--notify)
-                     (lambda (_ws _title message) (push message notified))))
+                     (lambda (_ws _title message &rest _) (push message notified))))
             ;; Act.
             (agent-repl-itest-host--push-notification
              daemon (plist-get ref :id) (cdr case))
