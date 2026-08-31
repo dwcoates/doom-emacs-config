@@ -94,7 +94,7 @@
       (funcall (agent-repl-notify-make-fake-backend 'agent-repl-test-notifications--sink)
                "ws-a" "Title" "Message")
       (should (equal agent-repl-test-notifications--sink
-                     '(("ws-a" "Title" "Message")))))))
+                     '(("ws-a" "Title" "Message" nil)))))))
 
 (ert-deftest agent-repl-test-notify-dispatches-through-the-resolver ()
   "`agent-repl--notify' goes through the resolver, never a raw funcall."
@@ -108,7 +108,7 @@
                            'agent-repl-test-notifications--sink))))
       (agent-repl--notify "ws-a" "Title" "Message")
       (should (equal agent-repl-test-notifications--sink
-                     '(("ws-a" "Title" "Message")))))))
+                     '(("ws-a" "Title" "Message" nil)))))))
 
 ;;;; ---- Tests: terminal-notifier backend ----
 
@@ -573,7 +573,7 @@ load-bearing."
   "agent-repl--notify should funcall the selected backend with ws/title/message."
   (let (called-with)
     (cl-letf ((agent-repl--notification-backend
-               (lambda (ws title msg) (setq called-with (list ws title msg))))
+               (lambda (ws title msg &optional _activate) (setq called-with (list ws title msg))))
               (agent-repl-debug nil)
               ((symbol-function 'agent-repl--log) (lambda (_ws _fmt &rest _args) nil)))
       (agent-repl--notify "ws-a" "Test Title" "Test Message")
@@ -582,7 +582,7 @@ load-bearing."
 (ert-deftest agent-repl-test-notify-records-the-post-at-info ()
   "Posting a banner is lifecycle chatter worth having ungated on the record."
   (let (recorded)
-    (cl-letf ((agent-repl--notification-backend (lambda (_ws _t _m) nil))
+    (cl-letf ((agent-repl--notification-backend (lambda (_ws _t _m &optional _a) nil))
               ((symbol-function 'agent-repl--info)
                (lambda (_ws fmt &rest args) (setq recorded (apply #'format fmt args)))))
       (agent-repl--notify nil "Title" "Message")
@@ -592,7 +592,7 @@ load-bearing."
   "The record lands BEFORE the backend runs, so a hung tool is still evidenced."
   (let (call-order)
     (cl-letf ((agent-repl--notification-backend
-               (lambda (_ws _t _m) (push 'backend call-order)))
+               (lambda (_ws _t _m &optional _a) (push 'backend call-order)))
               ((symbol-function 'agent-repl--info)
                (lambda (&rest _) (push 'record call-order))))
       (agent-repl--notify nil "Title" "Msg")
@@ -601,7 +601,7 @@ load-bearing."
 
 (ert-deftest agent-repl-test-notify-does-not-log-when-debug-off ()
   "agent-repl--notify should not log when debug is nil."
-  (cl-letf ((agent-repl--notification-backend (lambda (_ws _t _m) nil))
+  (cl-letf ((agent-repl--notification-backend (lambda (_ws _t _m &optional _a) nil))
             (agent-repl-debug nil))
     ;; With debug nil, the real log function is a no-op, so we just
     ;; verify no error is raised.
@@ -688,6 +688,44 @@ load-bearing."
                                              agent-repl-emacsclient-executable))
                               cmd)))))
 
+(ert-deftest agent-repl-test-notify-threads-the-activation-to-the-backend ()
+  "The per-notification ACTIVATE reaches the backend, which owns the click."
+  (let (threaded)
+    (cl-letf ((agent-repl--notification-backend
+               (lambda (_ws _t _m &optional activate) (setq threaded activate)))
+              ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (agent-repl--notify "ws-a" "T" "M" #'ignore)
+      (should (eq threaded #'ignore)))))
+
+(ert-deftest agent-repl-test-notify-without-an-activation-passes-nil ()
+  "A caller with no click action leaves the backend to activate WS itself."
+  (let ((threaded 'unset))
+    (cl-letf ((agent-repl--notification-backend
+               (lambda (_ws _t _m &optional activate) (setq threaded activate)))
+              ((symbol-function 'agent-repl--info) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+      (agent-repl--notify "ws-a" "T" "M")
+      (should-not threaded))))
+
+(ert-deftest agent-repl-test-alerter-runs-the-supplied-activation-on-a-click ()
+  "A supplied activation REPLACES the backend's own default on a click."
+  (let ((on-activate nil) (ran nil))
+    (cl-letf (((symbol-function 'agent-repl--notify-spawn)
+               (lambda (&rest args) (setq on-activate (nth 5 args)) nil))
+              ((symbol-function 'agent-repl--notification-activate)
+               (lambda (&rest _) (error "the supplied activation must win"))))
+      (agent-repl--notify-backend-alerter "ws-a" "T" "M" (lambda () (setq ran t)))
+      (funcall on-activate "@CONTENTCLICKED")
+      (should ran))))
+
+(ert-deftest agent-repl-test-fake-backend-records-the-activation ()
+  "The test seam captures the activation, so a suite can drive the click."
+  (let ((agent-repl-test-notifications--sink nil))
+    (funcall (agent-repl-notify-make-fake-backend 'agent-repl-test-notifications--sink)
+             "ws-a" "T" "M" #'ignore)
+    (should (eq (nth 3 (car agent-repl-test-notifications--sink)) #'ignore))))
+
 ;;;; ---- Tests: agent-repl--notification-activate ----
 
 (ert-deftest agent-repl-test-activate-jumps-to-workspace ()
@@ -727,6 +765,20 @@ its own — the tab switch that follows issues that verb."
       (agent-repl--notification-activate nil)
       (should-not jumped)
       (should focused))))
+
+(ert-deftest agent-repl-test-activate-unknown-ws-warns ()
+  "An activation naming no workspace is a WARNING, not a silent no-op:
+the click happened and went nowhere, which is worth the record."
+  (let (warned)
+    (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (_ws fmt &rest args) (setq warned (apply #'format fmt args))))
+              ((symbol-function 'agent-repl--ws-switch)
+               (lambda (&rest _) (error "an unknown workspace must not be switched to")))
+              ((symbol-function 'selected-frame) (lambda () 'frame))
+              ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil)))
+      (agent-repl--notification-activate "")
+      (should (string-search "activate-unknown-workspace" warned)))))
 
 ;;;; ---- Tests: agent-repl--ensure-server ----
 

@@ -792,18 +792,27 @@ finished must not paint a marker the daemon has already retracted."
     (agent-repl--log-verbose ws "elisp.status.attention-cleared: ws=%s already-clear" ws)))
 
 (defun agent-repl-status-sync-attention (roster)
-  "Follow ROSTER's attention markers: steady on where set, cleared where not.
-Registered on `agent-repl-roster-update-functions'.  A row that ARRIVES
-carrying the marker is shown it steadily — the blink itself is driven by
-the notification push (host.el), which is the EVENT; the roster carries
-the standing FACT."
+  "Follow ROSTER's attention markers: blink then steady where set, cleared where not.
+Registered on `agent-repl-roster-update-functions'.
+
+A marker that ARRIVES on a row runs the canonical cadence — the cadence
+IS blink-then-steady, and `RosterRowAttention' states it at the marker
+itself, so the arrival of the marker is what starts it.  A marker that
+merely PERSISTS across a re-push is left alone: re-blinking on every
+unrelated roster push would blink at the daemon's push rate rather than
+at the notification's.  A marker that LEAVES is cleared, cancelling any
+blink still in flight."
   (dolist (entry (agent-repl-roster-walk roster))
     (let* ((row (plist-get entry :row))
            (ws (agent-repl--ws-by-ref-id (agent-repl-roster-row-id row))))
       (when ws
         (if (agent-repl-roster-row-attention-p row)
             (unless (agent-repl-status-attention-visible-p ws)
-              (agent-repl-status--set-marker ws t))
+              ;; Marked visible BEFORE the cadence is armed: the first step
+              ;; is a timer, so a second push landing before it fires would
+              ;; otherwise see no marker and restart the blink.
+              (puthash ws t agent-repl-status--marker-on)
+              (agent-repl-status-blink-tab ws))
           (agent-repl-status-clear-attention ws))))))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl-status-sync-attention)
