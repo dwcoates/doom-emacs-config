@@ -7,6 +7,7 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
+(declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--do-log "core" (ws fmt args &optional error-p))
 (declare-function agent-repl--fatal "core" (ws fmt &rest args))
 
@@ -267,10 +268,14 @@ brings Emacs forward.  A nil or empty WS still focuses Emacs rather than
 attempting a bogus jump."
   (agent-repl--log ws "elisp.notifications.activate ws=%s" ws)
   (let ((navigable (and ws (stringp ws) (not (string-empty-p ws)))))
-    (agent-repl--log ws "elisp.notifications.activate-navigable ws=%s navigable=%s"
-                     ws navigable)
-    (when navigable
-      (agent-repl--ws-switch ws))
+    (if navigable
+        (progn
+          (agent-repl--log ws "elisp.notifications.activate-navigable ws=%s navigable=t" ws)
+          (agent-repl--ws-switch ws))
+      ;; An unknown workspace is a WARNING and NO switch: a click that
+      ;; cannot name where to go still brings Emacs forward, but guessing a
+      ;; destination would move the user somewhere nobody asked for.
+      (agent-repl--warn ws "elisp.notifications.activate-unknown-workspace ws=%S" ws))
     (select-frame-set-input-focus (selected-frame))))
 
 (defun agent-repl--notification-click-command (ws)
@@ -294,7 +299,7 @@ WS survive the shell terminal-notifier spawns the command under."
     (agent-repl--log-verbose ws "notification-click-command clickable=nil ws=%S" ws)
     nil))
 
-(defun agent-repl--notify-backend-terminal-notifier (ws title message)
+(defun agent-repl--notify-backend-terminal-notifier (ws title message &optional _activate)
   "Send a desktop notification via terminal-notifier for WS.
 TITLE and MESSAGE are the notification fields.  When WS is non-nil the
 notification is made clickable via terminal-notifier's -execute action
@@ -315,7 +320,7 @@ surfaced to the log via `agent-repl--notify-spawn'."
                    "-sound" agent-repl-notification-sound)
              (when click (list "-execute" click))))))
 
-(defun agent-repl--notify-backend-osascript (ws title message)
+(defun agent-repl--notify-backend-osascript (ws title message &optional _activate)
   "Send a desktop notification via osascript for WS.
 TITLE and MESSAGE are the notification fields.  The command's exit status
 is captured and surfaced to the log via `agent-repl--notify-spawn', so an
@@ -341,7 +346,7 @@ nil and leaves Emacs undisturbed."
     (agent-repl--log ws "alerter-activation token=%s clicked=%s" token clicked)
     clicked))
 
-(defun agent-repl--notify-backend-alerter (ws title message)
+(defun agent-repl--notify-backend-alerter (ws title message &optional activate)
   "Send a clickable desktop notification via alerter for WS.
 TITLE and MESSAGE are the notification fields.  alerter posts through the
 UNUserNotificationCenter API current macOS supports, so it delivers a
@@ -380,7 +385,9 @@ mistaken for a hang."
      (+ timeout agent-repl-notify-timeout-seconds)
      (lambda (output)
        (when (agent-repl--alerter-click-p output ws)
-         (agent-repl--notification-activate ws))))))
+         (if activate
+             (funcall activate)
+           (agent-repl--notification-activate ws)))))))
 
 (defun agent-repl--select-notification-backend ()
   "Select the best available desktop notification backend.
@@ -437,11 +444,11 @@ so the host probe happens at most once per session."
 (defun agent-repl-notify-make-fake-backend (sink)
   "Return a notification backend that records into SINK instead of posting.
 SINK is a symbol whose value is a list; each call conses
-`(WS TITLE MESSAGE)' onto its front.  THE TEST SEAM for the notification
+`(WS TITLE MESSAGE ACTIVATE)' onto its front.  THE TEST SEAM for the notification
 policy: bound over `agent-repl--notification-backend', it proves what
 Emacs decided to post without any host tool existing at all."
-  (lambda (ws title message)
-    (set sink (cons (list ws title message) (symbol-value sink)))
+  (lambda (ws title message &optional activate)
+    (set sink (cons (list ws title message activate) (symbol-value sink)))
     (agent-repl--log ws "elisp.notifications.fake-backend title=%s message=%s"
                      title message)
     t))
@@ -466,9 +473,15 @@ frame can hold focus."
                                (length frames) focused)
       focused)))
 
-(defun agent-repl--notify (ws title message)
+(defun agent-repl--notify (ws title message &optional activate)
   "Send a desktop notification with TITLE and MESSAGE.
 WS is the workspace name string, or nil for workspace-free contexts.
+ACTIVATE, when non-nil, is the PER-NOTIFICATION click action: a nullary
+function run when the banner is clicked, threaded to the backend so the
+click reaches it (see `agent-repl--notify-backend-alerter').  Nil means
+the backend falls back to activating WS itself, which is what every
+workspace-shaped notification wants; a caller passes ACTIVATE when the
+click must carry more than the workspace name.
 A desktop banner is only useful when the user is looking elsewhere, so
 the notification is suppressed when Emacs is the focused desktop
 application (see `agent-repl--emacs-focused-p').  The focus check runs
@@ -479,7 +492,7 @@ between scheduling and firing still suppresses the banner."
                        ws title)
     (agent-repl--info ws "elisp.notifications.post ws=%s title=%s message=%s"
                       ws title message)
-    (funcall (agent-repl--resolve-notification-backend) ws title message)))
+    (funcall (agent-repl--resolve-notification-backend) ws title message activate)))
 
 (provide 'notifications)
 

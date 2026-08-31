@@ -65,7 +65,8 @@
 (declare-function agent-repl--live-ws-names "workspace" ())
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 
-(declare-function agent-repl--notify "notifications" (ws title message))
+(declare-function agent-repl--notify "notifications" (ws title message &optional activate))
+(declare-function agent-repl--notification-activate "notifications" (ws))
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 
 ;; W2-B's surfaces.  NAMED HERE, NEVER DEFINED HERE: status.el owns the
@@ -375,6 +376,9 @@ context rather than in any drawn line Emacs composes itself."
       (:permission-requested
        (format "kind=permission-requested tool=%S"
                (plist-get (plist-get kind :value) :tool-name)))
+      (:question-asked
+       (format "kind=question-asked header=%S"
+               (plist-get (plist-get kind :value) :header)))
       (:agent-addressed "kind=agent-addressed")
       (_ (format "kind=%S" arm)))))
 
@@ -391,7 +395,11 @@ never asks whether Emacs is focused — that knowledge is only here."
      ((not (agent-repl--emacs-focused-p ws))
       (agent-repl--info ws "elisp.host.notification-desktop ws=%s %s at-ms=%S"
                         ws context (plist-get note :at-ms))
-      (agent-repl--notify ws (agent-repl-host-display-title ws) text))
+      ;; The click is R-CLICK: the banner carries THIS workspace, and
+      ;; activating it raises the frame and selects that tab.  Decider and
+      ;; actor are one process, so the activation is plain elisp.
+      (agent-repl--notify ws (agent-repl-host-display-title ws) text
+                          (lambda () (agent-repl--notification-activate ws))))
      ((not selected)
       (agent-repl--info ws "elisp.host.notification-blink ws=%s %s at-ms=%S"
                         ws context (plist-get note :at-ms))
