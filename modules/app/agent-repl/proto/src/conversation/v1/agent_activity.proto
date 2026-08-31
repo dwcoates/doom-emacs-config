@@ -1897,8 +1897,16 @@ message AgentBashOutput {
     // The output is image data rather than characters. Draw it as an image;
     // there is no text to show.
     AgentBashOutputImage image = 2;
+    // NO OUTPUT WAS OBSERVED — the run was lost or reconciled after a restart
+    // and nothing on disk or on the stream said what it printed. Distinct from
+    // empty text (a command that printed nothing) and from `partial`
+    // omission: the producer states that it does not know.
+    AgentBashOutputNotObserved not_observed = 3;
   }
 }
+
+// No output was observed for this run. Empty: the arm is the whole fact.
+message AgentBashOutputNotObserved {}
 
 // Character output, with the two streams kept apart.
 message AgentBashOutputText {
