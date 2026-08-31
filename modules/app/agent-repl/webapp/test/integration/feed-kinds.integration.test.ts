@@ -1253,19 +1253,35 @@ describe("a refused command card", () => {
 // drawn verbatim, while the cold gate is the contract's deliberate exception
 // and formats from a raw `bigint` client-side.
 //
-// So the risk is a SCALE MISMATCH: the daemon saying "1.2M" while the client
-// says "1234.6k" for the same quantity, on the same screen. These cases feed
-// figures that straddle every scale boundary and assert the client's own
-// output follows the convention the daemon's strings use.
+// The convention is RULED (daemon lead, format.go) and the table below is it,
+// verbatim. The rules behind it: under 1000 unscaled; from 1000 up, scaled to
+// k or M with exactly one fractional digit, round-to-nearest, and a trailing
+// ".0" trimmed; the unit follows the RENDERED value, so 999,950 reads "1M" and
+// never "1000k". Suffixes ("tok", "in") belong to the call site, not here.
 //
-// They assert STRUCTURE, not one blessed string: the exact spelling ("1.0k"
-// vs "1k") is not written down anywhere in the contract, and picking one here
-// would be this suite inventing a convention rather than checking one. The
-// WIRING AGENT owns that unification — see the report.
+// EXPECT THE COLD-GATE CASES RED until the wiring agent lands the shared
+// formatter: today's client code keeps the ".0" and caps the fraction, which
+// disagrees with the ruling. They are written to the RULING, deliberately, so
+// that fixing the formatter turns them green rather than someone having to
+// remember to tighten a loosened test. See the report.
 // ---------------------------------------------------------------------------
 
-/** Figures chosen to straddle every scale boundary a formatter can get wrong. */
-const TOKEN_SCALES = [999n, 1_000n, 12_345n, 1_234_567n] as const;
+/**
+ * The ruled table. Each row straddles a boundary a formatter can get wrong:
+ * zero, the last unscaled value, the exact scale boundary, one-digit rounding,
+ * a trimmed ".0", the rounding edge that flips the unit, and the M scale.
+ */
+const RULED_TOKEN_FIGURES: ReadonlyArray<readonly [bigint, string]> = [
+  [0n, "0"],
+  [999n, "999"],
+  [1_000n, "1k"],
+  [1_200n, "1.2k"],
+  [12_340n, "12.3k"],
+  [182_000n, "182k"],
+  [999_949n, "999.9k"],
+  [999_950n, "1M"],
+  [1_200_000n, "1.2M"],
+];
 
 describe("token formatting across surfaces", () => {
   /** The cold gate's own drawn figure for a raw token count. */
@@ -1276,50 +1292,12 @@ describe("token formatting across surfaces", () => {
     return drawn;
   };
 
-  it.each(TOKEN_SCALES)("draws a figure for %s at all", async (tokens) => {
+  it.each(RULED_TOKEN_FIGURES)("formats %s as the ruled %s", async (tokens, expected) => {
     // Arrange / Act
     const drawn = await coldGateFigure(tokens);
-    // Assert
-    expect(drawn).not.toBe("");
-  });
-
-  it("leaves a sub-thousand figure unscaled", async () => {
-    // Arrange / Act
-    const drawn = await coldGateFigure(999n);
-    // Assert: nothing to abbreviate below the first boundary.
-    expect(drawn).not.toMatch(/[kM]/);
-  });
-
-  it("scales a figure at the thousand boundary", async () => {
-    // Arrange / Act
-    const drawn = await coldGateFigure(1_000n);
-    // Assert
-    expect(drawn).toMatch(/k/);
-  });
-
-  it("distinguishes the two sides of the thousand boundary", async () => {
-    // Arrange
-    const below = await coldGateFigure(999n);
-    await harness.stop();
-    // Act
-    const at = await coldGateFigure(1_000n);
-    // Assert
-    expect(at).not.toBe(below);
-  });
-
-  it("scales a million-order figure past k rather than reading in thousands", async () => {
-    // Arrange / Act
-    const drawn = await coldGateFigure(1_234_567n);
-    // Assert: "1234.6k" beside a daemon-composed "1.2M" is the mismatch these
-    // cases exist to catch.
-    expect(drawn).toMatch(/M/);
-  });
-
-  it("keeps a mid-scale figure to one fractional digit", async () => {
-    // Arrange / Act
-    const drawn = await coldGateFigure(12_345n);
-    // Assert
-    expect(drawn).toMatch(/^\d+\.\dk$/);
+    // Assert: the ruled table verbatim — the client's one formatting site must
+    // agree with the daemon's, or the same quantity reads two ways on screen.
+    expect(drawn).toBe(expected);
   });
 
   it("draws the daemon's own usage stamp verbatim, whatever its scale", async () => {
@@ -1330,9 +1308,18 @@ describe("token formatting across surfaces", () => {
   });
 
   it("does not rescale a daemon usage stamp into its own convention", async () => {
-    // Arrange / Act
+    // Arrange / Act: a stamp that disagrees with the ruling is still drawn as
+    // sent — reformatting it would be the client deriving, and the disagreement
+    // is the daemon's to fix.
     const row = await drawRow(activityRow(responseUnit("success", "prose", "1234.6k in")));
-    // Assert: verbatim means verbatim, even when the daemon's scale differs.
+    // Assert
     expect(row.textContent).toContain("1234.6k in");
+  });
+
+  it("carries the call site's own suffix, not the formatter's", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(responseUnit("success", "prose", "182k tok")));
+    // Assert
+    expect(row.textContent).toContain("182k tok");
   });
 });
