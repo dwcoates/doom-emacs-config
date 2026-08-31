@@ -3,6 +3,7 @@ package rollout
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -748,4 +749,9 @@ func indexOf(taken []string, step string) int {
 		}
 	}
 	return -1
+}
+
+// writeFile replaces a file's whole content, for the tests that corrupt one.
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0o644)
 }
