@@ -33,7 +33,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
-import { activityUpsertKey, bashUpsertKey, terminalUpsertKey } from "./keys.js";
+import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
 import { readFailure, transportFailure } from "./reader.js";
 
@@ -205,7 +205,7 @@ export function closingBashTerminal(
   });
   return {
     agentId: agent,
-    upsertKey: bashUpsertKey(run),
+    upsertKey: bashTerminalUpsertKey(run),
     source: {
       vendorUuid: reconciledCoordinate(run.value),
       discriminator: "agent_bash.success.interrupted.lost.swept_up",

@@ -1044,7 +1044,7 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
   });
 
   it("closes work the record cannot describe rather than leaving it open", async () => {
@@ -1058,7 +1058,7 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
   });
 
   it("closes an undescribable run with lost.swept_up", async () => {
@@ -1069,7 +1069,7 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01");
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
     const outcome =
       entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
         ? entry.item.frame.result.value.outcome
@@ -1089,7 +1089,7 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01");
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
     const command =
       entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
         ? entry.item.frame.result.value.command

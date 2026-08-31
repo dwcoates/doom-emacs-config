@@ -120,13 +120,49 @@ export function terminalUpsertKey(
 }
 
 /**
- * A detached shell run's lifecycle rows, keyed by the RUN's activity id.
+ * A detached shell run's START row, keyed by the RUN's activity id.
  *
  * The run is the bash tool call itself, so its lifecycle rows and its page line
  * are about the same unit — different key prefixes, one identity.
+ *
+ * ONE ROW NEVER SUPERSEDES ANOTHER (project lead amendment, binding). A shell
+ * run's rows are a SEQUENCE, not a single upserted state: the start, then one
+ * row per output delta, then the terminal. They shared one key while the
+ * output was one whole, and under that spelling every delta overwrote the last
+ * and the terminal erased the output entirely — so `WatchBashRun`, which
+ * replays a run's whole history in write order, had nothing to replay.
  */
 export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
   return `bash:${requireValue(run.value, "the bash run's activity id")}`;
+}
+
+/**
+ * ONE output delta of a detached shell run, keyed by WHERE IT STARTS.
+ *
+ * The offset is the delta's own identity: a re-read of the spool from the same
+ * offset is the same delta and upserts in place, while the next stretch of
+ * output is a new row. That is what makes a tailer restartable without either
+ * losing output or showing it twice.
+ */
+export function bashDeltaUpsertKey(
+  run: conversationv1.AgentActivityId,
+  fromOffset: bigint | number,
+): string {
+  const offset = typeof fromOffset === "bigint" ? fromOffset : BigInt(fromOffset);
+  if (offset < 0n) {
+    throw new Error("shim store keys: an output delta's from_offset cannot be negative");
+  }
+  return `${bashUpsertKey(run)}:${offset.toString()}`;
+}
+
+/**
+ * A detached shell run's TERMINAL row.
+ *
+ * Its own key, so settling the run adds the stop notice rather than replacing
+ * the output the run produced on its way there.
+ */
+export function bashTerminalUpsertKey(run: conversationv1.AgentActivityId): string {
+  return `${bashUpsertKey(run)}:terminal`;
 }
 
 /**

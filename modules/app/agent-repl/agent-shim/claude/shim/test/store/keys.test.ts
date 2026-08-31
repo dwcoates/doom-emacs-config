@@ -124,7 +124,7 @@ describe("terminalUpsertKey", () => {
 });
 
 describe("bashUpsertKey", () => {
-  it("keys a detached shell's lifecycle rows by the RUN's activity id", () => {
+  it("keys a detached shell's START row by the RUN's activity id", () => {
     // Arrange, Act.
     const key = keys.bashUpsertKey(activityId("toolu_bash1"));
 
@@ -138,6 +138,46 @@ describe("bashUpsertKey", () => {
 
     // Act, Assert.
     expect(keys.bashUpsertKey(run)).not.toBe(keys.activityUpsertKey(run));
+  });
+
+  it("keys each output delta by WHERE IT STARTS", () => {
+    // Arrange, Act, Assert. The offset is the delta's identity: a re-read from
+    // the same offset upserts in place, and the next stretch is a new row.
+    expect(keys.bashDeltaUpsertKey(activityId("toolu_bash1"), 4096n)).toBe(
+      "bash:toolu_bash1:4096",
+    );
+  });
+
+  it("keys the first delta at offset zero", () => {
+    // Arrange, Act, Assert.
+    expect(keys.bashDeltaUpsertKey(activityId("toolu_bash1"), 0)).toBe("bash:toolu_bash1:0");
+  });
+
+  it("refuses a negative from_offset rather than minting a key nothing can hold", () => {
+    // Arrange, Act, Assert.
+    expect(() => keys.bashDeltaUpsertKey(activityId("toolu_bash1"), -1n)).toThrow();
+  });
+
+  it("keys the terminal so it SUPERSEDES NOTHING the run produced", () => {
+    // Arrange, Act, Assert.
+    expect(keys.bashTerminalUpsertKey(activityId("toolu_bash1"))).toBe(
+      "bash:toolu_bash1:terminal",
+    );
+  });
+
+  it("gives the start, a delta and the terminal three distinct keys", () => {
+    // Arrange.
+    const run = activityId("toolu_bash1");
+
+    // Act.
+    const minted = new Set([
+      keys.bashUpsertKey(run),
+      keys.bashDeltaUpsertKey(run, 0),
+      keys.bashTerminalUpsertKey(run),
+    ]);
+
+    // Assert.
+    expect(minted.size).toBe(3);
   });
 });
 

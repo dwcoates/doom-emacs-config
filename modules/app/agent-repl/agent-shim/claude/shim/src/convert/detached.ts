@@ -29,7 +29,7 @@ import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import {
   activityUpsertKey,
-  bashUpsertKey,
+  bashTerminalUpsertKey,
   detachedWorkUpsertKey,
   terminalUpsertKey,
 } from "../store/keys.js";
@@ -498,7 +498,7 @@ export function lostBashEntry(
   );
   return {
     agentId,
-    upsertKey: bashUpsertKey(run),
+    upsertKey: bashTerminalUpsertKey(run),
     source: {
       vendorUuid: `lost:${run.value}`,
       discriminator: `agent_bash.success.interrupted.lost.${String(how.how.case)}`,

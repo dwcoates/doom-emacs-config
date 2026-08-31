@@ -70,10 +70,12 @@ describe("lostBashEntry", () => {
     expect(entry).toBeUndefined();
   });
 
-  it("keys the row as every other row of the run, so it upserts in place", () => {
+  it("keys the row as the run's TERMINAL, which supersedes nothing", () => {
+    // A run's rows are a SEQUENCE — start, deltas, terminal — so a terminal
+    // sharing the start's key would erase the output the run produced.
     const entry = lostBashEntry(foldContext(), MAIN_AGENT, RUN, start(), wentSilent());
 
-    expect(entry?.upsertKey).toBe("bash:run-1");
+    expect(entry?.upsertKey).toBe("bash:run-1:terminal");
   });
 });
 
