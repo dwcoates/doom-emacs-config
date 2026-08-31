@@ -230,7 +230,7 @@ missing here or there is a broken seam.")
       (dolist (row agent-repl-test-rpc--streams)
         (cl-destructuring-bind (method fn encoder decoder) row
           (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                     (lambda (_conn sent-method _json _on-push _on-close)
+                     (lambda (_conn sent-method _json _on-push _on-close &optional _on-open)
                        (push (cons method sent-method) observed)))
                     ((symbol-function encoder) (lambda (_request) nil))
                     ((symbol-function decoder) (lambda (_alist) nil)))
@@ -409,7 +409,7 @@ missing here or there is a broken seam.")
     (let ((ref '(:id "opaque-id" :dir "/some/where"))
           (encoded nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                 (lambda (_conn _method _json _on-push _on-close) nil))
+                 (lambda (_conn _method _json _on-push _on-close &optional _on-open) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-host-workspace-request)
                  (lambda (request) (setq encoded request) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-host-workspace-response)
@@ -426,7 +426,7 @@ missing here or there is a broken seam.")
   (agent-repl-test-rpc--with-logs
     (let ((requests nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                 (lambda (_conn _method _json _on-push _on-close) nil))
+                 (lambda (_conn _method _json _on-push _on-close &optional _on-open) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
                  (lambda (request) (push request requests) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-workspace-roster-request)
@@ -447,7 +447,7 @@ missing here or there is a broken seam.")
     (let ((transport-push nil)
           (seen nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                 (lambda (_conn _method _json on-push _on-close)
+                 (lambda (_conn _method _json on-push _on-close &optional _on-open)
                    (setq transport-push on-push) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request) (lambda (_r) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
@@ -465,7 +465,7 @@ missing here or there is a broken seam.")
     (let ((transport-push nil)
           (seen nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                 (lambda (_conn _method _json on-push _on-close)
+                 (lambda (_conn _method _json on-push _on-close &optional _on-open)
                    (setq transport-push on-push) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request) (lambda (_r) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
@@ -487,7 +487,7 @@ missing here or there is a broken seam.")
   (agent-repl-test-rpc--with-logs
     (let ((transport-push nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                 (lambda (_conn _method _json on-push _on-close)
+                 (lambda (_conn _method _json on-push _on-close &optional _on-open)
                    (setq transport-push on-push) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request) (lambda (_r) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
@@ -506,7 +506,7 @@ missing here or there is a broken seam.")
     (let ((transport-close nil)
           (seen nil))
       (cl-letf (((symbol-function 'agent-repl-connect-stream)
-                 (lambda (_conn _method _json _on-push on-close)
+                 (lambda (_conn _method _json _on-push on-close &optional _on-open)
                    (setq transport-close on-close) nil))
                 ((symbol-function 'agent-repl-wire-encode-watch-daemon-request) (lambda (_r) nil))
                 ((symbol-function 'agent-repl-wire-decode-watch-daemon-response) (lambda (_a) nil)))
@@ -517,6 +517,70 @@ missing here or there is a broken seam.")
       ;; Assert
       (should (equal (nreverse seen)
                      '((:cancelled) (:ended) (:error (:kind :transport))))))))
+
+
+;;;; ---- Tests: stream acceptance pass-through ----
+
+(ert-deftest agent-repl-test-rpc-every-stream-passes-on-open-to-the-transport ()
+  "ON-OPEN carries no message, so every watcher hands it straight through."
+  ;; Arrange
+  (let ((accepted nil))
+    (agent-repl-test-rpc--with-logs
+      (dolist (row agent-repl-test-rpc--streams)
+        (cl-destructuring-bind (method fn encoder decoder) row
+          (let ((transport-open nil))
+            (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                       (lambda (_conn _method _json _on-push _on-close &optional on-open)
+                         (setq transport-open on-open)))
+                      ((symbol-function encoder) (lambda (_request) nil))
+                      ((symbol-function decoder) (lambda (_alist) nil)))
+              (if (eq fn 'agent-repl-rpc-watch-host-workspace)
+                  (funcall fn nil '(:id "w1" :dir "/w") #'ignore #'ignore
+                           (lambda () (push method accepted)))
+                (funcall fn nil #'ignore #'ignore
+                         (lambda () (push method accepted))))
+              ;; Act
+              (should transport-open)
+              (funcall transport-open))))))
+    ;; Assert
+    (should (equal (sort accepted #'string<)
+                   (sort (mapcar #'car agent-repl-test-rpc--streams) #'string<)))))
+
+(ert-deftest agent-repl-test-rpc-omitted-on-open-reaches-the-transport-as-nil ()
+  "A caller that wants no acceptance callback must not get a wrapper for one."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((transport-open :unset))
+      (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                 (lambda (_conn _method _json _on-push _on-close &optional on-open)
+                   (setq transport-open on-open)))
+                ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
+                 (lambda (_r) nil))
+                ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
+                 (lambda (_a) nil)))
+        ;; Act
+        (agent-repl-rpc-watch-daemon nil #'ignore #'ignore))
+      ;; Assert
+      (should (null transport-open)))))
+
+(ert-deftest agent-repl-test-rpc-logs-the-acceptance ()
+  "An accepted subscription is on the record before its consumer reacts."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((transport-open nil))
+      (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                 (lambda (_conn _method _json _on-push _on-close &optional on-open)
+                   (setq transport-open on-open)))
+                ((symbol-function 'agent-repl-wire-encode-watch-daemon-request)
+                 (lambda (_r) nil))
+                ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
+                 (lambda (_a) nil)))
+        (agent-repl-rpc-watch-daemon nil #'ignore #'ignore #'ignore)
+        ;; Act
+        (funcall transport-open))
+      ;; Assert
+      (should (agent-repl-test-rpc--logs-matching
+               'info "elisp\\.rpc\\.stream-accepted method=\"WatchDaemon\"")))))
 
 (provide 'test-rpc)
 
