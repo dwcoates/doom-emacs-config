@@ -107,8 +107,11 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   #52 (banner must read "Agent ready: <name>") — BOTH ADDED to R-HANDOVER's
   brief; #79-scoped awaits R-NOTIFY's encoder; host 20/22/25/33/36 await
   remediation-1.
-- WIND-DOWN (user directive): nothing new dispatches; R-HANDOVER and
-  audit 2 stay queued; running implementers finish naturally and merge.
+- WIND-DOWN (user directive): nothing new dispatches or is queued for
+  launch. R-HANDOVER, the second adversarial audit, and the verbs-suite
+  triage are CANCELLED FOR THE PAUSE — written entries only, re-decided at
+  resume. Running implementers (remediation-1, R-NOTIFY) finish naturally
+  and merge; their two worktrees are the only ones left.
 - VERBS-SUITE REGRESSION diagnosed (post-R-SUITE-1 merge, 29/61): the
   suite's repaired calls pass ready-made oneof plists to verbs that take
   BARE keywords and wrap internally (create refuses "unknown creation
