@@ -266,6 +266,24 @@
                             :kind)
                  '(:arm :permission-requested :value (:tool-name "Bash")))))
 
+(ert-deftest agent-repl-test-wire-host-notification-decodes-question-asked ()
+  "A question ask carries the first question's chip label as its header."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-notification
+                             (concat "{\"text\":\"which approach?\",\"atMs\":1,"
+                                     "\"kind\":{\"questionAsked\":"
+                                     "{\"header\":\"Which approach?\"}}}"))
+                            :kind)
+                 '(:arm :question-asked :value (:header "Which approach?")))))
+
+(ert-deftest agent-repl-test-wire-host-notification-question-asked-omitted-header-is-empty ()
+  "An omitted `header' is protojson's proto3 default, exactly as `tool_name' is."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-host-workspace-notification
+                             "{\"text\":\"x\",\"atMs\":1,\"kind\":{\"questionAsked\":{}}}")
+                            :kind)
+                 '(:arm :question-asked :value (:header "")))))
+
 (ert-deftest agent-repl-test-wire-host-notification-accepts-a-numeric-instant ()
   "protojson accepts a number for int64, and an instant is an int64."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
