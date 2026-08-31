@@ -33,7 +33,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
-import { activityUpsertKey, bashUpsertKey, terminalUpsertKey } from "./keys.js";
+import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
 import { PersistenceError, type PersistEntry } from "./persistence.js";
 import { readFailure, transportFailure } from "./reader.js";
 
@@ -184,26 +184,16 @@ export function closingBashTerminal(
         outcome: {
           case: "interrupted",
           value: create(conversationv1.AgentBashInterruptedSchema, {
-            // NOT OURS TO STATE: the reconciliation observed no output at
-            // all, so the extent is `partial` with nothing omitted that we
-            // can count and no spill we can point at. The contract has no
-            // "not observed" arm; recorded as a gap in the record-plane
-            // report rather than answered with a `whole` that would claim
-            // the command said nothing.
+            // NOT OURS TO STATE, AND NOW SAYABLE (landing 5): the
+            // reconciliation observed no output at all, so the form is
+            // `not_observed` — the producer stating that it does not know,
+            // rather than a `partial` omission of zero bytes claiming we saw
+            // all none of what it printed.
             output: create(conversationv1.AgentBashOutputSchema, {
               form: {
-                case: "text",
-                value: create(conversationv1.AgentBashOutputTextSchema, {
-                  stdout: "",
-                  stderr: "",
-                  extent: {
-                    case: "partial",
-                    value: create(conversationv1.AgentBashOutputPartialSchema, {
-                      bytesOmitted: 0n,
-                    }),
-}
-                }),
-}
+                case: "notObserved",
+                value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
+              },
             }),
             // THE CAUSE IS NOW STATEABLE (landing 3): we stopped being
             // able to see the run, which is what `lost.swept_up` says.
@@ -215,7 +205,7 @@ export function closingBashTerminal(
   });
   return {
     agentId: agent,
-    upsertKey: bashUpsertKey(run),
+    upsertKey: bashTerminalUpsertKey(run),
     source: {
       vendorUuid: reconciledCoordinate(run.value),
       discriminator: "agent_bash.success.interrupted.lost.swept_up",

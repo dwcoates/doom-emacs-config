@@ -29,7 +29,7 @@ import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import {
   activityUpsertKey,
-  bashUpsertKey,
+  bashTerminalUpsertKey,
   detachedWorkUpsertKey,
   terminalUpsertKey,
 } from "../store/keys.js";
@@ -498,7 +498,7 @@ export function lostBashEntry(
   );
   return {
     agentId,
-    upsertKey: bashUpsertKey(run),
+    upsertKey: bashTerminalUpsertKey(run),
     source: {
       vendorUuid: `lost:${run.value}`,
       discriminator: `agent_bash.success.interrupted.lost.${String(how.how.case)}`,
@@ -515,24 +515,15 @@ export function lostBashEntry(
             outcome: {
               case: "interrupted",
               value: create(conversationv1.AgentBashInterruptedSchema, {
-                // NOT OURS TO STATE: nothing observed what the command said
-                // after we lost sight of it, so the extent is `partial` with no
-                // countable omission and no spill to point at. The contract has
-                // no "not observed" arm; a `whole` here would claim the command
-                // said exactly this much and stopped.
+                // NOT OURS TO STATE, AND NOW SAYABLE (landing 5): nothing
+                // observed what the command said after we lost sight of it, so
+                // the form is `not_observed` — distinct from empty text (a
+                // command that printed nothing) and from a `partial` omission
+                // of zero bytes, which claimed we had seen all none of it.
                 output: create(conversationv1.AgentBashOutputSchema, {
                   form: {
-                    case: "text",
-                    value: create(conversationv1.AgentBashOutputTextSchema, {
-                      stdout: "",
-                      stderr: "",
-                      extent: {
-                        case: "partial",
-                        value: create(conversationv1.AgentBashOutputPartialSchema, {
-                          bytesOmitted: 0n,
-                        }),
-                      },
-                    }),
+                    case: "notObserved",
+                    value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
                   },
                 }),
                 cause: { case: "lost", value: how },

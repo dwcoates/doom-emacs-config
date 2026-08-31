@@ -230,6 +230,38 @@ describe("the fan-wide cancel setup", () => {
     expect(driven.transcript().filter((l) => l.subtype === "agents_killed")).toHaveLength(1);
   });
 
+  it("terminates the stopped SHELL's spool with EXIT=143", async () => {
+    // A shell spool is incremental bytes, and the tailer's only way to learn
+    // the run ended is the EXIT line; 143 is SIGTERM's code.
+    const driven = await driveScenario(["!cancel-all"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+        for (const started of messages.filter((m) => m.subtype === "task_started")) {
+          await query.stopTask(String(started.task_id));
+        }
+      },
+    });
+    const shells = driven.spoolIds().filter((id) => id.startsWith("b"));
+
+    expect(shells.map((id) => (driven.spool(id) ?? "").includes("EXIT=143"))).toEqual([true]);
+  });
+
+  it("writes NO EXIT line into a stopped AGENT's spool", async () => {
+    // An agent spool is the agent's own JSONL and carries no terminator ever,
+    // so an `EXIT=` line there is a shape no real tree contains.
+    const driven = await driveScenario(["!cancel-all"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+        for (const started of messages.filter((m) => m.subtype === "task_started")) {
+          await query.stopTask(String(started.task_id));
+        }
+      },
+    });
+    const agents = driven.spoolIds().filter((id) => id.startsWith("a"));
+
+    expect(agents.map((id) => (driven.spool(id) ?? "").includes("EXIT="))).toEqual([false, false]);
+  });
+
   it("stops every live item, leaving the announced set empty", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!cancel-all"], {
