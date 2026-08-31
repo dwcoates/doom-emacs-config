@@ -212,14 +212,29 @@ export const agentPromptRow = (text = "please review", overrides?: Partial<RowIn
 export const RESPONSE_STATES = ["update", "success", "error"] as const;
 export type ResponseState = (typeof RESPONSE_STATES)[number];
 
+/** The heading a vendor-synthesized notice carries; suites echo it verbatim. */
+export const RESPONSE_NOTICE_HEADING = "the turn was interrupted";
+
 export const responseUnit = (
   state: ResponseState,
   markdown = "the answer",
   usageText = "1.2k in / 340 out",
+  /** SET = the prose is a vendor notice, drawn in the notice register. */
+  notice?: string,
 ): ActivityUnit => ({
   case: "response",
-  value: { usage: { text: usageText }, result: { case: state, value: { prose: { markdown } } } },
+  value: {
+    usage: { text: usageText },
+    result: { case: state, value: { prose: { markdown } } },
+    notice: notice === undefined ? undefined : { heading: notice },
+  },
 });
+
+/** A response bubble in the NOTICE register: vendor-synthesized, not the agent's. */
+export const responseNoticeUnit = (
+  state: ResponseState = "success",
+  heading = RESPONSE_NOTICE_HEADING,
+): ActivityUnit => responseUnit(state, "the vendor's remark", undefined, heading);
 
 export const responseRow = (
   state: ResponseState,
@@ -1179,24 +1194,32 @@ const substatusValue = (substatus: string): object => {
 export const FOOTER_ALLOWANCE_ARMS = ["allowed", "allowedWarning", "rejected"] as const;
 export type FooterAllowanceArm = (typeof FOOTER_ALLOWANCE_ARMS)[number];
 
-/** One rate-limit allowance, complete, with its verdict as a typed arm. */
+/**
+ * One rate-limit allowance.
+ *
+ * The verdict is DELIBERATELY absent when `arm` is undefined: UNSET is legal
+ * and means no rate-limit event has been observed for the window yet, so the
+ * sampled figures draw with no verdict class and the arm joins later. That is
+ * the one place in this file where leaving a oneof unset is correct rather
+ * than a malformed view.
+ */
 export function allowance(
-  arm: FooterAllowanceArm,
+  arm?: FooterAllowanceArm,
   init?: { newsworthy?: boolean; resetsAtS?: bigint; utilization?: number },
 ): MessageInitShape<typeof FooterAllowanceSchema> {
   return {
     newsworthy: init?.newsworthy ?? true,
     resetsAtS: init?.resetsAtS ?? 1_700n,
     utilization: init?.utilization ?? 0.82,
-    status: { case: arm, value: {} },
+    status: arm === undefined ? undefined : { case: arm, value: {} },
   };
 }
 
 /** A rate-limited activity whose two allowances carry the given verdicts. */
 export const rateLimitedActivity = (
-  session: FooterAllowanceArm,
-  weekly: FooterAllowanceArm = "allowed",
-): object => ({ session: allowance(session), weekly: allowance(weekly) });
+  session?: FooterAllowanceArm,
+  weekly?: FooterAllowanceArm,
+): object => ({ session: allowance(session), weekly: allowance(weekly ?? "allowed") });
 
 /** Every activity kind arm, with a complete payload for each. */
 export const FOOTER_ACTIVITY_KINDS: Record<string, object> = {
