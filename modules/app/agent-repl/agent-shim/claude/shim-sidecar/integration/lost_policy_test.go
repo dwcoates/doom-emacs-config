@@ -71,15 +71,17 @@ func lostOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOpti
 // awaitLostConclusion waits for the reader's own statement about one file: the
 // operation is "lost-terminal" and the record names the reason it concluded.
 //
-// The reason is matched in the message text because it has no context key of
-// its own — there is no DetachedLost on the wire and no correlation key for a
-// reason, and inventing either here would be inventing contract.
+// THE REASON IS MATCHED ON ITS OWN KEY, not in the message text. It has one
+// (`reason`), carrying the same word the wire's DetachedLost arm carries, so a
+// terminal and the sweep that concluded it join on it — and a substring match
+// against prose would go on passing after the arm itself regressed, which is
+// exactly how the missing wire assertion survived.
 func awaitLostConclusion(ctx context.Context, t *testing.T, logPath, path, reason string) logRecord {
 	t.Helper()
 	return awaitLog(ctx, t, logPath, "the "+reason+" conclusion for "+path, func(r logRecord) bool {
 		return r.Operation == "lost-terminal" &&
 			samePathAny(r.Context["path"], path) &&
-			strings.Contains(r.Message, reason)
+			r.Context["reason"] == reason
 	})
 }
 
