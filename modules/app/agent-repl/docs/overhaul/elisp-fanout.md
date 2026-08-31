@@ -96,7 +96,32 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - R-VERBS follow-up MERGED (33b3d2e81): workspace-owned verb records
   restored; harness reader searches global + workspace sinks; fixture
   tears the link down. integration-verbs 30/30, daemon 12/12.
-- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-NOTIFY (`opus-low`, remed4);
+- LANDING 5 merged (d597d9970): UpdateMergeQueuePause/Resume gain
+  `optional repository` (unset = every repository); the encoder field and
+  verbs.el's pause/resume argument are R-NOTIFY's added scope (own
+  commits); R-SUITE-1 extends finding #79 to both scopes.
+- R-SUITE-1 MERGED (336ace8cd): all 92 findings pinned; composer fixture
+  fixed (empty arm `[]`→`{}`); fake gains raw-body recording + /_fake/gate;
+  verbs suite repaired to landed signatures. Known-red pins awaiting
+  remediations: #11 (daemon-link drain cause text ignores DrainReason) and
+  #52 (banner must read "Agent ready: <name>") — BOTH ADDED to R-HANDOVER's
+  brief; #79-scoped awaits R-NOTIFY's encoder; host 20/22/25/33/36 await
+  remediation-1.
+- WIND-DOWN (user directive): nothing new dispatches or is queued for
+  launch. R-HANDOVER, the second adversarial audit, and the verbs-suite
+  triage are CANCELLED FOR THE PAUSE — written entries only, re-decided at
+  resume. Running implementers (remediation-1, R-NOTIFY) finish naturally
+  and merge; their two worktrees are the only ones left.
+- VERBS-SUITE REGRESSION diagnosed (post-R-SUITE-1 merge, 29/61): the
+  suite's repaired calls pass ready-made oneof plists to verbs that take
+  BARE keywords and wrap internally (create refuses "unknown creation
+  form (:arm :standard ...)"; set-priority double-wraps). Fix on resume:
+  re-repair the suite's verb calls to the landed signatures (bare form
+  arm + keyword facts; bare level keyword; flat actions), then triage the
+  21 timeout-class failures. Composer 37/42 (5 = input.el production
+  gaps: image blocks, posthooks, defer path, #66 key reuse); daemon 14/15
+  (#90 default command/no-argv).
+- RUNNING: R-NOTIFY (`opus-low`, remed4);
   remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
   remediation-1 merges (cut its worktree off that tip).
 - VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +

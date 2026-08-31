@@ -33,6 +33,9 @@
 (declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-connect-close "connect")
 (declare-function agent-repl-host-register "host")
+(declare-function agent-repl-host-ref "host")
+(declare-function agent-repl-host-conn "host")
+(declare-function agent-repl-host-state "host")
 (declare-function agent-repl--ws-put "workspace")
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-down-functions)
@@ -59,6 +62,24 @@ loop's own timing is not what a test spends its deadline on."
          (agent-repl-link-drain nil)
          (agent-repl-link-drain-segment nil)
          (agent-repl-link-reconnect-interval-seconds 0.05))
+     (unwind-protect
+         (progn
+           (agent-repl-link-connect)
+           (agent-repl-itest--await-subscriber ,daemon "daemon")
+           ,@body)
+       (ignore-errors (agent-repl-link-teardown)))))
+
+(defmacro agent-repl-itest-link--with-real-hooks (daemon &rest body)
+  "Connect the link to DAEMON with the PRODUCTION consumer hooks live.
+Unlike `agent-repl-itest-link--with-link', the `agent-repl-link-*-functions'
+variables are NOT scratch-bound here: host.el's and roster.el's own
+`add-hook' registrations (installed once at load time, on
+`agent-repl-link-up-functions' / `-down-functions') react for real.  This
+is what findings 16-18 need — \"host.el's link-up hook doing the work, not
+the test\" and \"roster.el re-subscribes\" mean production code reacting to
+the seam, never the test driving it by hand."
+  (declare (indent 1) (debug (form body)))
+  `(let ((agent-repl-link-reconnect-interval-seconds 0.05))
      (unwind-protect
          (progn
            (agent-repl-link-connect)
@@ -193,26 +214,136 @@ re-subscribes; the hooks are the seam that makes that reactive."
                   (should (equal (reverse events) '(down up))))
               (agent-repl-itest--stop-daemon successor t))))))))
 
-(ert-deftest agent-repl-itest-link-re-registration-is-idempotent-by-dir ()
-  "Re-registering the same dir after a restart reconciles to one ref.
+(ert-deftest agent-repl-itest-link-restart-re-registers-and-resubscribes-via-host-hook ()
+  "Re-registering the same dir across an ACTUAL daemon restart reconciles
+to one ref — driven by host.el's OWN `agent-repl-link-up-functions' hook,
+not by the test calling `agent-repl-host-register' by hand.
+fanout §14 scenario 2: \"Re-register + re-subscribe after a daemon
+restart ... Emacs re-registers (idempotent by dir) and re-subscribes.\"
 RegisterWorkspace is IDEMPOTENT BY DIR, which is why re-registering is
 the normal reconnect path rather than a duplicate-creation hazard."
   ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (let ((ws "itest-link-restart-ws")
+          (dir "/tmp/itest-link-restart-ws"))
+      (agent-repl--ws-put ws :project-dir dir)
+      (agent-repl-itest-link--with-real-hooks primary
+        ;; host.el's link-up hook registers and subscribes on the initial
+        ;; connect, with no test-driven call at all.
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-host-ref ws))
+         nil "host.el's own initial register+subscribe")
+        (let ((first-id (plist-get (agent-repl-host-ref ws) :id))
+              (state-dir (agent-repl-itest-daemon-state-dir primary)))
+          ;; Act: the primary dies, a successor takes its place.
+          (agent-repl-itest--stop-daemon primary t)
+          (let ((successor (agent-repl-itest--start-daemon state-dir)))
+            (unwind-protect
+                (progn
+                  (agent-repl-itest--await-subscriber successor "daemon")
+                  (agent-repl-itest--await-call successor "RegisterWorkspace")
+                  (agent-repl-itest--await-call successor "WatchHostWorkspace")
+                  ;; Assert: the SUCCESSOR itself recorded both calls, for
+                  ;; the same dir — host.el's hook did the work.
+                  (should (equal dir (agent-repl-itest--body-field
+                                      (car (agent-repl-itest--call-bodies
+                                            successor "RegisterWorkspace"))
+                                      'dir)))
+                  (should (equal dir (agent-repl-itest--body-field
+                                      (car (agent-repl-itest--call-bodies
+                                            successor "WatchHostWorkspace"))
+                                      'workspace 'dir)))
+                  ;; Re-registration is IDEMPOTENT BY DIR: the re-minted
+                  ;; ref names the same workspace id as the first one.
+                  (should (equal first-id (plist-get (agent-repl-host-ref ws) :id))))
+              (agent-repl-itest--stop-daemon successor t))))))))
+
+(ert-deftest agent-repl-itest-link-down-marks-streams-gone-but-keeps-host-state ()
+  "On link down: mark streams gone; keep the last host state.
+fanout §7: \"On link down: mark streams gone; keep the last host
+state.\"  An outage the reconnect will cover must not blank the editor in
+the meantime — `agent-repl-host-state' answers with the newest fact Emacs
+has even once `agent-repl-host-conn' no longer names a live daemon.  This
+is host.el's OWN `agent-repl-link-down-functions' hook, live via
+`agent-repl-itest-link--with-real-hooks'."
+  ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest-link--with-link daemon
-      (let ((conn (agent-repl-link-primary))
-            (first nil)
-            (second nil))
-        (agent-repl--ws-put "itest-link-ws" :project-dir "/tmp/itest-link-ws")
-        ;; Act.
-        (agent-repl-host-register conn "/tmp/itest-link-ws"
-                                  (lambda (ref) (setq first ref)))
-        (agent-repl-itest--wait-until (lambda () first) nil "the first registration")
-        (agent-repl-host-register conn "/tmp/itest-link-ws"
-                                  (lambda (ref) (setq second ref)))
-        (agent-repl-itest--wait-until (lambda () second) nil "the second registration")
-        ;; Assert.
-        (should (equal (plist-get first :id) (plist-get second :id)))))))
+    (let ((ws "itest-link-down-ws")
+          (dir "/tmp/itest-link-down-ws"))
+      (agent-repl--ws-put ws :project-dir dir)
+      (agent-repl-itest-link--with-real-hooks daemon
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-host-ref ws))
+         nil "host.el's own initial register+subscribe")
+        (let ((id (plist-get (agent-repl-host-ref ws) :id)))
+          (agent-repl-itest--push
+           daemon "host" '((host . ((none . ()) (naming . ())))) id)
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl-host-state ws)) nil "the host push to apply")
+          ;; Act: the daemon drops the link with no end frame at all.
+          (agent-repl-itest--end daemon "daemon" nil nil t)
+          (agent-repl-itest--wait-until
+           (lambda () (null (agent-repl-host-conn ws)))
+           nil "the link-down hook to mark the stream gone")
+          ;; Assert.
+          (should (null (agent-repl-host-conn ws)))
+          (should (agent-repl-host-state ws)))))))
+
+(ert-deftest agent-repl-itest-link-restart-triggers-rosters-own-resubscribe ()
+  "roster.el re-subscribes on link-up BY ITSELF: after a restart the
+successor lists one roster subscriber though nothing here ever calls
+`agent-repl-roster-subscribe'.
+fanout §8/§6: \"roster.el re-subscribes\" — reactively, off
+`agent-repl-link-up-functions', the same seam host.el hangs off."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-real-hooks primary
+      (agent-repl-itest--await-subscriber primary "roster")
+      (let ((state-dir (agent-repl-itest-daemon-state-dir primary)))
+        ;; Act: the primary dies, a successor takes its place.
+        (agent-repl-itest--stop-daemon primary t)
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                (agent-repl-itest--await-subscriber successor "daemon")
+                ;; Assert: nothing here called `agent-repl-roster-subscribe'.
+                (agent-repl-itest--await-subscriber successor "roster")
+                (should (equal 1 (length (agent-repl-itest--subscribers
+                                          successor "roster")))))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
+(ert-deftest agent-repl-itest-link-logs-elisp-link-down-up-and-handover ()
+  "Each of the link's down/up/handover branches logs its own operation
+name.
+fanout §0: \"Operation names: `elisp.<module>.<operation>'.\"  The
+remediation loop reads exactly these lines to tell one branch from
+another: `elisp.link.up' (the initial connect), `elisp.link.handover-
+announced' (a successor is announced), and `elisp.link.down' (an
+unexpected, non-handover death)."
+  ;; Arrange: connect the link — the `up' branch.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      ;; Assert (up).
+      (should (agent-repl-itest--logged-p primary "elisp.link.up" "info"))
+      (agent-repl-itest--with-second-daemon primary successor
+        ;; Act: announce the successor — the `handover' branch.
+        (agent-repl-itest-link--announce
+         primary (agent-repl-itest-daemon-address successor))
+        (agent-repl-itest--await-subscriber successor "daemon")
+        ;; Assert (handover).
+        (agent-repl-itest--await-log primary "elisp.link.handover-announced" "info")
+        (should (agent-repl-itest--logged-p primary "elisp.link.handover-announced" "info"))
+        ;; Act: the successor dies before taking over, so the OLD daemon
+        ;; dropping its own stream next is a genuine unexpected death, not
+        ;; a promotion — the `down' branch.
+        (agent-repl-itest--end successor "daemon" nil nil t)
+        (agent-repl-itest--wait-until
+         (lambda () (null (agent-repl-link-successor)))
+         nil "the dead successor to be forgotten")
+        (agent-repl-itest--end primary "daemon" nil nil t)
+        ;; Assert (down).
+        (agent-repl-itest--await-log primary "elisp.link.down" "warn")
+        (should (agent-repl-itest--logged-p primary "elisp.link.down" "warn"))))))
 
 ;;;; ---- Scenario 5, link half: dual attach and promotion ----
 
@@ -254,7 +385,12 @@ there is no daemon-to-daemon channel, so the CLIENT is the relay."
 
 (ert-deftest agent-repl-itest-link-old-stream-close-promotes-the-successor ()
   "When the old daemon's stream closes after a handover, the successor is
-promoted SILENTLY — no down/up hooks, because the workspaces were adopted."
+promoted to PRIMARY silently — no down/up hooks, because the workspaces
+were adopted.
+fanout §6: \"PROMOTE the successor to primary silently.\"  Asserting only
+that `agent-repl-link-successor' becomes nil is not enough — that is also
+true if BOTH connections died; the successor becoming the live primary is
+the actual claim."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-link--with-link primary
@@ -265,13 +401,17 @@ promoted SILENTLY — no down/up hooks, because the workspaces were adopted."
           (agent-repl-itest--await-subscriber successor "daemon")
           (add-hook 'agent-repl-link-down-functions (lambda (&rest _) (push 'down hooks)))
           (add-hook 'agent-repl-link-up-functions (lambda (&rest _) (push 'up hooks)))
-          ;; Act: the old daemon lets its stream go.
-          (agent-repl-itest--end primary "daemon" nil nil t)
-          ;; Assert.
-          (agent-repl-itest--wait-until
-           (lambda () (null (agent-repl-link-successor)))
-           nil "the successor to be promoted to primary")
-          (should (null hooks)))))))
+          (let ((successor-conn (agent-repl-link-successor)))
+            ;; Act: the old daemon lets its stream go.
+            (agent-repl-itest--end primary "daemon" nil nil t)
+            ;; Assert.
+            (agent-repl-itest--wait-until
+             (lambda () (null (agent-repl-link-successor)))
+             nil "the successor to be promoted to primary")
+            (should (null hooks))
+            ;; The former successor is now the live PRIMARY.
+            (should (eq (agent-repl-link-primary) successor-conn))
+            (should (agent-repl-link-up-p))))))))
 
 ;;;; ---- Scenario 6: the plain bounce ----
 
@@ -307,6 +447,150 @@ the wire that the client ticks against its own clock."
                 (should (agent-repl-link-up-p)))
             (agent-repl-itest--stop-daemon successor t)))))))
 
+(ert-deftest agent-repl-itest-link-late-announcement-shortens-the-quiet-window ()
+  "A LATE `shutdown_announced' shortens the quiet window by the elapsed
+time instead of restarting a fresh one.
+`endpoint_watch_daemon.proto' `DaemonShutdownAnnounced.minted_at_ms': \"A
+late receiver SHORTENS its quiet window by the time already elapsed
+rather than restarting it.\"  With 1400ms already elapsed out of a 1500ms
+outage, the reconnect must reach the successor within roughly 100ms — a
+client that restarted the whole 1500ms window from receipt would still be
+waiting when this test's deadline is checked."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let* ((state-dir (agent-repl-itest-daemon-state-dir primary))
+             (minted-at-ms (- (truncate (* 1000 (float-time))) 1400)))
+        ;; Act: minted 1400ms in the past, a 1500ms outage — ~100ms of
+        ;; quiet remains.
+        (agent-repl-itest--push
+         primary "daemon"
+         `((shutdownAnnounced
+            . ((cause . ((selfMergeRollout . ())))
+               (expectedOutageMs . "1500")
+               (mintedAtMs . ,(format "%d" minted-at-ms))))))
+        (agent-repl-itest--stop-daemon primary t)
+        (let* ((start (float-time))
+               (successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                (agent-repl-itest--await-call successor "WatchDaemon")
+                ;; Assert: nowhere near the full 1500ms outage.
+                (should (< (- (float-time) start) 1.0)))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
+(ert-deftest agent-repl-itest-link-bounce-reconnect-does-not-poll-before-the-deadline ()
+  "The reconnect loop waits UNTIL `minted_at_ms + expected_outage_ms'
+before polling at all.
+fanout §6: \"the reconnect loop waits until then before polling.\"  A
+1.5s outage announced NOW, with the successor already up, must not see a
+WatchDaemon call land before that instant — the timestamp at first
+acceptance is compared against the announced deadline, not sampled with a
+sleep."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let* ((state-dir (agent-repl-itest-daemon-state-dir primary))
+             (minted-at-ms (truncate (* 1000 (float-time))))
+             (deadline-ms (+ minted-at-ms 1500)))
+        ;; Act: an ordinary bounce; the successor is started immediately,
+        ;; racing the quiet window rather than waiting it out first.
+        (agent-repl-itest--push
+         primary "daemon"
+         `((shutdownAnnounced
+            . ((cause . ((selfMergeRollout . ())))
+               (expectedOutageMs . "1500")
+               (mintedAtMs . ,(format "%d" minted-at-ms))))))
+        (agent-repl-itest--stop-daemon primary t)
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                (agent-repl-itest--await-subscriber successor "daemon")
+                ;; Assert: first acceptance is AT OR AFTER the announced
+                ;; deadline (a small tolerance absorbs poll granularity),
+                ;; never meaningfully before it.
+                (should (>= (+ (truncate (* 1000 (float-time))) 50) deadline-ms)))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
+(ert-deftest agent-repl-itest-link-bounce-indicator-names-the-cause ()
+  "The bounce indicator reads \"daemon restarting (<cause>)\", naming the
+cause arm.
+fanout §6: \"the indicator reads 'daemon restarting (<cause>)'.\""
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      ;; Act.
+      (agent-repl-itest-link--announce primary nil)
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (equal agent-repl-link-drain-segment
+                         "daemon restarting (self-merge rollout)"))
+       nil "the bounce indicator to name the cause")
+      (should (equal agent-repl-link-drain-segment
+                     "daemon restarting (self-merge rollout)")))))
+
+(ert-deftest agent-repl-itest-link-shutdown-cause-arms-each-decode-and-name-the-indicator ()
+  "Each `DaemonShutdownCause' arm decodes, and for the REASON-BEARING arms
+the bounce indicator names the carried `DrainReason' rather than a fixed
+phrase for the cause alone.
+`endpoint_watch_daemon.proto': `scheduled_drain{reason}' and
+`immediate{reason}' both carry a `DrainReason' — THE ARM IS THE CAUSE, and
+here the cause's own arm carries a further arm the indicator must
+surface.  Every other test in this suite announces only
+`selfMergeRollout'; an unknown or unset arm would never update the
+indicator at all, which is how a decode failure would show up here."
+  ;; Arrange.
+  (let* ((self-merge '((selfMergeRollout . ())))
+         (scheduled-drain-deploy
+          `((scheduledDrain . ((reason . ((deploy . ())))))))
+         (immediate-operator-note
+          `((immediate . ((reason . ((operator . ((note . "cable work")))))))))
+         (cases (list (cons self-merge "self-merge rollout")
+                      (cons scheduled-drain-deploy "deploy")
+                      (cons immediate-operator-note "cable work"))))
+    (agent-repl-itest--with-fake-daemon daemon
+      (agent-repl-itest-link--with-link daemon
+        (dolist (case cases)
+          (let ((cause (car case))
+                (expected (cdr case)))
+            ;; Act.
+            (agent-repl-itest-link--announce daemon nil cause)
+            ;; Assert.
+            (agent-repl-itest--wait-until
+             (lambda () (and agent-repl-link-drain-segment
+                             (string-match-p (regexp-quote expected)
+                                             agent-repl-link-drain-segment)))
+             2 (format "the indicator to name %S" expected))
+            (should (string-match-p (regexp-quote expected)
+                                    agent-repl-link-drain-segment))))))))
+
+(ert-deftest agent-repl-itest-link-invalid-shutdown-announced-is-dropped-not-fatal ()
+  "A `shutdown_announced' push missing `cause' (a non-optional message) is
+logged ERROR and dropped; the link stays up and a following legal push
+still arrives.
+fanout §0: \"a push ... missing a non-optional field ... is a contract
+breach: signal `agent-repl-wire-error' and log ERROR\" — but for a PUSH,
+unlike a request, the contract is that the stream survives the breach."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act: `cause' is entirely absent.
+      (agent-repl-itest--push
+       daemon "daemon"
+       '((shutdownAnnounced . ((expectedOutageMs . "1500") (mintedAtMs . "1000")))))
+      ;; Assert: logged ERROR, and the link is untouched by the breach.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (agent-repl-link-up-p))
+      ;; Act: a following, legal push.
+      (agent-repl-itest--push
+       daemon "daemon"
+       '((drainScheduled . ((atMs . "1735689600000") (reason . ((deploy . ())))))))
+      ;; Assert: it still arrives — the stream was never taken down.
+      (agent-repl-itest--wait-until (lambda () agent-repl-link-drain) nil
+                                    "the following drainScheduled to still arrive")
+      (should (equal (plist-get agent-repl-link-drain :at-ms) 1735689600000)))))
+
 ;;;; ---- Scenario 8: the drain indicator ----
 
 (ert-deftest agent-repl-itest-link-drain-scheduled-records-the-schedule ()
@@ -326,30 +610,32 @@ wire carries no remaining-time value to go stale."
       (should (equal (plist-get agent-repl-link-drain :at-ms) 1735689600000)))))
 
 (ert-deftest agent-repl-itest-link-drain-reason-arms-each-draw-a-segment ()
-  "Each DrainReason arm draws its own indicator text.
+  "Each DrainReason arm draws its own indicator text, in the FULL \"drain
+HH:MM · <reason>\" format — not merely a reason substring somewhere in it.
 Fixed treatment per ARM: deploy, maintenance and operator{note} are three
-different facts, and the operator's note is dynamic detail."
+different facts, and the operator's note is dynamic detail; the `HH:MM'
+prefix is derived from `at_ms', independently computed here the same way
+production does."
   ;; Arrange.
-  (let ((cases '((((deploy . ())) . "deploy")
-                 (((maintenance . ())) . "maintenance")
-                 (((operator . ((note . "cable work")))) . "cable work"))))
+  (let* ((at-ms 1735689600000)
+         (prefix (format "drain %s · " (format-time-string "%H:%M" (/ at-ms 1000))))
+         (cases (list (cons '((deploy . ())) "deploy")
+                      (cons '((maintenance . ())) "maintenance")
+                      (cons '((operator . ((note . "cable work")))) "cable work"))))
     (agent-repl-itest--with-fake-daemon daemon
       (agent-repl-itest-link--with-link daemon
         (dolist (case cases)
-          (let ((reason (car case))
-                (expected (cdr case)))
+          (let* ((reason (car case))
+                 (expected (concat prefix (cdr case))))
             ;; Act.
             (agent-repl-itest--push
              daemon "daemon"
-             `((drainScheduled . ((atMs . "1735689600000") (reason . ,reason)))))
-            ;; Assert.
+             `((drainScheduled . ((atMs . ,(format "%d" at-ms)) (reason . ,reason)))))
+            ;; Assert: the FULL format, including the `drain HH:MM' prefix.
             (agent-repl-itest--wait-until
-             (lambda () (and agent-repl-link-drain-segment
-                             (string-match-p (regexp-quote expected)
-                                             agent-repl-link-drain-segment)))
-             nil (format "the drain segment to name %S" expected))
-            (should (string-match-p (regexp-quote expected)
-                                    agent-repl-link-drain-segment))))))))
+             (lambda () (equal agent-repl-link-drain-segment expected))
+             nil (format "the drain segment to read %S" expected))
+            (should (equal agent-repl-link-drain-segment expected))))))))
 
 (ert-deftest agent-repl-itest-link-drain-cancelled-clears-the-indicator ()
   "`drain_cancelled' retracts the schedule and the indicator with it.
@@ -371,9 +657,13 @@ expires a schedule on its own."
       (should (null agent-repl-link-drain)))))
 
 (ert-deftest agent-repl-itest-link-late-subscriber-gets-the-standing-schedule ()
-  "A link connecting AFTER the schedule was set still learns it.
+  "A link connecting AFTER the schedule was set still learns it — the
+FULL schedule (deadline, reason arm) and the drawn indicator, not merely
+the deadline instant.
 Streams are \"now\": the snapshot on subscribe is the only way a late
-client can know a standing drain, and every client must draw the banner."
+client can know a standing drain, and every client must draw the banner.
+`endpoint_watch_daemon.proto' `DaemonDrainScheduled': \"re-pushed to late
+subscribers per the subscription invariant.\""
   ;; Arrange: the schedule is standing before the link exists.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--push
@@ -385,7 +675,14 @@ client can know a standing drain, and every client must draw the banner."
       ;; Assert.
       (agent-repl-itest--wait-until (lambda () agent-repl-link-drain) nil
                                     "the standing schedule to be replayed")
-      (should (equal (plist-get agent-repl-link-drain :at-ms) 1735689600000)))))
+      (should (equal (plist-get agent-repl-link-drain :at-ms) 1735689600000))
+      ;; The reason arm — a full re-push, not just the deadline instant.
+      (should (eq (plist-get (plist-get agent-repl-link-drain :reason) :arm)
+                  :maintenance))
+      ;; The indicator is drawn from the replayed schedule too.
+      (agent-repl-itest--wait-until (lambda () agent-repl-link-drain-segment) nil
+                                    "the indicator to be drawn from the replay")
+      (should agent-repl-link-drain-segment))))
 
 (ert-deftest agent-repl-itest-link-drain-runs-the-drain-hooks ()
   "A drain push runs the drain hooks, which is how surfaces react.

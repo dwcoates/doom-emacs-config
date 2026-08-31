@@ -46,6 +46,9 @@
 (declare-function agent-repl--ws-live-p "workspace")
 (defvar agent-repl--workspaces)
 (declare-function agent-repl--ws-put "workspace")
+(declare-function agent-repl-frontend-daemon-stop "daemon")
+(declare-function agent-repl-link-successor "daemon-link")
+(declare-function agent-repl-host-faults "host")
 
 ;;;; ---- Fixtures ----
 
@@ -87,6 +90,55 @@ through `agent-repl-host-ref', so the workspace must be registered first."
 (defun agent-repl-itest-verbs--body (daemon method)
   "Return DAEMON's first recorded request body for METHOD."
   (car (agent-repl-itest--call-bodies daemon method)))
+
+(defmacro agent-repl-itest-verbs--with-primary (daemon var &rest body)
+  "Run BODY with VAR bound to a connection on DAEMON standing in as the primary.
+Several verbs address no particular workspace -- CreateWorkspace,
+UpdateShutdownSchedule, UpdateMergeQueue, DaemonHealth, OpenWorkspace, and
+`agent-repl-frontend-daemon-stop' -- so `agent-repl-verbs--conn' (and
+`agent-repl-frontend-daemon-stop' directly) falls back to
+`agent-repl-link-primary' rather than a workspace's own connection.  This
+fixture stands that fallback up against DAEMON directly, without
+daemon-link.el's own reconnect machinery."
+  (declare (indent 2) (debug (form symbolp body)))
+  `(let ((,var (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon))))
+     (unwind-protect
+         (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () ,var)))
+           ,@body)
+       (agent-repl-connect-close ,var))))
+
+(defun agent-repl-itest-verbs--said (text)
+  "Return the `UserSaid' plist carrying TEXT as its one text block.
+A self-contained equivalent of verbs.el's private `agent-repl-verbs--said',
+kept here so this suite does not reach into another module's internal
+helper."
+  (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
+
+(defun agent-repl-itest-verbs--host-live-with-faults (fault-detail)
+  "Return a HostWorkspace protojson alist: a LIVE, open session with one fault.
+FAULT-DETAIL is that fault's `detail' string.  Every non-optional field of
+the live arm is populated, matching what `agent-repl-host--live' requires
+to resolve at all."
+  `((existing . ((id . ((value . "host-session-verbs")))
+                 (live . ((generation . ((value . "gen-1")))
+                          (shimAttached . t)
+                          (claude . ((sessionId . "vendor-1")
+                                     (configDir . "/home/itest/.claude")))
+                          (backfill . ((done . ())))
+                          (faults . [((detail . ,fault-detail))])
+                          (open . ())))))
+    (naming . ())))
+
+(defun agent-repl-itest-verbs--ack-logged-p (daemon op)
+  "Return non-nil when DAEMON's log carries a success ack for OP.
+Every verb logs through the SAME `elisp.verbs.ack' format string
+(`agent-repl-verbs--send'), so the branch is read out of the expanded
+MESSAGE field rather than the OPERATION slug, which cannot distinguish
+them."
+  (cl-some (lambda (record)
+             (string-match-p (format "op=%s ws=" (regexp-quote op))
+                             (or (alist-get 'message record) "")))
+           (agent-repl-itest--log-entries daemon "elisp.verbs.ack" "info")))
 
 ;;;; ---- Per-verb requests ----
 
@@ -254,7 +306,7 @@ field exists — the account is DETERMINED by the repo-under-root rule."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo (list :arm :standard :value nil))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -273,8 +325,10 @@ round-trip exists."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :initial-prompt "fix the flake")
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard
+                                    :value (list :initial-prompt
+                                                 (agent-repl-itest-verbs--said "fix the flake"))))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let* ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace"))
@@ -292,9 +346,10 @@ and the DAEMON owns naming, worktree, decoration and postprocessing."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :one-shot
-                              :prompt "land the fix"
-                              :finish :self-merge)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :one-shot
+                                    :value (list :prompt (agent-repl-itest-verbs--said "land the fix")
+                                                 :finish (list :arm :self-merge :value nil))))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -311,11 +366,12 @@ value the daemon must receive, not an absence."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :one-shot
-                              :prompt "land the fix"
-                              :finish :open-pr
-                              :self-certified t
-                              :add-to-merge-queue t)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :one-shot
+                                    :value (list :prompt (agent-repl-itest-verbs--said "land the fix")
+                                                 :finish (list :arm :open-pr
+                                                               :value (list :self-certified t
+                                                                            :add-to-merge-queue t)))))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -334,7 +390,8 @@ ref is echoed, never rebuilt from a path."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard :parent ref)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo (list :arm :standard :value nil)
+                              :parent (list :workspace ref))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (should (equal (agent-repl-itest--body-field
@@ -350,8 +407,8 @@ boolean to get backwards."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent ref :fork t)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo (list :arm :standard :value nil)
+                              :parent (list :workspace ref :fork t))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert: `{}' — present and empty.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -364,7 +421,8 @@ PRESENCE, NEVER SENTINELS: the absence is the whole statement."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard :parent ref)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo (list :arm :standard :value nil)
+                              :parent (list :workspace ref))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -379,7 +437,8 @@ than a number to compare."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-create agent-repl-itest-verbs--repo :standard :priority :p1)
+      (agent-repl-verb-create agent-repl-itest-verbs--repo (list :arm :standard :value nil)
+                              :priority (list :arm :p1 :value nil))
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -395,7 +454,7 @@ model as the webapp."
       (ignore ref)
       (let ((before (agent-repl--ws-known-p "itest-verbs-created")))
         ;; Act.
-        (agent-repl-verb-create agent-repl-itest-verbs--repo :standard)
+        (agent-repl-verb-create agent-repl-itest-verbs--repo (list :arm :standard :value nil))
         (agent-repl-itest--await-call daemon "CreateWorkspace")
         ;; Assert.
         (should (equal before (agent-repl--ws-known-p "itest-verbs-created")))))))
@@ -409,7 +468,7 @@ model as the webapp."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-set-priority agent-repl-itest-verbs--ws :p05)
+      (agent-repl-verb-set-priority agent-repl-itest-verbs--ws (list :arm :p05 :value nil))
       (agent-repl-itest--await-call daemon "SetWorkspacePriority")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "SetWorkspacePriority")))
@@ -441,7 +500,9 @@ draw the standing banner with a cause."
       (ignore ref)
       ;; Act.
       (agent-repl-verb-shutdown-schedule
-       (list :arm :schedule :at-ms 1735689600000 :reason '(:arm :deploy)))
+       (list :arm :schedule
+             :value (list :at-ms 1735689600000
+                          :reason (list :arm :deploy :value nil))))
       (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule")))
@@ -454,7 +515,7 @@ draw the standing banner with a cause."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-shutdown-schedule '(:arm :cancel))
+      (agent-repl-verb-shutdown-schedule (list :arm :cancel :value nil))
       (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule")))
@@ -469,7 +530,8 @@ Emacs never KILLS a daemon that answers; it asks it to drain and exit."
       (ignore ref)
       ;; Act.
       (agent-repl-verb-shutdown-schedule
-       (list :arm :now :reason '(:arm :operator :note "emacs")))
+       (list :arm :now
+             :value (list :reason (list :arm :operator :value (list :note "emacs")))))
       (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule")))
@@ -484,10 +546,18 @@ Operator control; the visible state rides the merge bubble's queue tab."
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
       ;; Act.
-      (agent-repl-verb-merge-queue '(:arm :pause))
+      (agent-repl-verb-merge-queue (list :arm :pause :value nil))
       (agent-repl-itest--await-call daemon "UpdateMergeQueue")
       ;; Assert.
-      (should (assq 'pause (agent-repl-itest-verbs--body daemon "UpdateMergeQueue"))))))
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        (should (assq 'pause body))
+        ;; endpoint_update_merge_queue.proto, UpdateMergeQueuePause: "WHICH
+        ;; repository's queue.  UNSET = every repository that has a queue
+        ;; (the daemon-wide switch)."  The absence IS the daemon-wide
+        ;; meaning, so an encoder that started emitting an empty
+        ;; `repository' object would change what the request ASKS FOR.
+        (should-not (assq 'repository
+                          (agent-repl-itest--body-field body 'pause)))))))
 
 (ert-deftest agent-repl-itest-verbs-merge-queue-evict-carries-the-ref ()
   "Evicting from the merge queue names the workspace by ref."
@@ -495,7 +565,7 @@ Operator control; the visible state rides the merge bubble's queue tab."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
-      (agent-repl-verb-merge-queue (list :arm :evict :workspace ref))
+      (agent-repl-verb-merge-queue (list :arm :evict :value (list :workspace ref)))
       (agent-repl-itest--await-call daemon "UpdateMergeQueue")
       ;; Assert.
       (should (equal (agent-repl-itest--body-field
@@ -576,6 +646,647 @@ loudly — no staleness machinery softens it."
        (lambda () (agent-repl-itest--logged-p daemon "elisp.verbs.transport-failure" "error"))
        nil "the transport-failure log line")
       (should (agent-repl-itest--logged-p daemon "elisp.verbs.transport-failure" "error")))))
+
+;;;; ---- Kill/Nuke success: tear the tab down (audit finding 69) ----
+
+(ert-deftest agent-repl-itest-verbs-kill-success-tears-the-tab-down ()
+  "A Kill success removes the tab, exactly like Close.
+Pins fanout \"Kill/Nuke success -> tear the tab down\" (elisp-fanout.md
+§9): a stuck tab after a successful forced kill would strand the user on
+a session the daemon has already torn down."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-kill agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "KillWorkspace")
+      ;; Assert: "Kill/Nuke success -> tear the tab down" (elisp-fanout.md §9).
+      (agent-repl-itest--wait-until
+       (lambda () (not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))
+       nil "the killed workspace's tab to go away")
+      (should-not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+
+(ert-deftest agent-repl-itest-verbs-nuke-success-tears-the-tab-down ()
+  "A Nuke success removes the tab, exactly like Close and Kill.
+Pins fanout \"Kill/Nuke success -> tear the tab down\" (elisp-fanout.md
+§9): a nuked workspace whose tab lingers would let the user act on a
+worktree and branch that are already deleted."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-nuke agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "NukeWorkspace")
+      ;; Assert: "Kill/Nuke success -> tear the tab down" (elisp-fanout.md §9).
+      (agent-repl-itest--wait-until
+       (lambda () (not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))
+       nil "the nuked workspace's tab to go away")
+      (should-not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+
+;;;; ---- Success messages (audit finding 70) ----
+
+(ert-deftest agent-repl-itest-verbs-restart-success-messages ()
+  "A Restart success reports itself via `message'.
+Pins fanout \"Restart success -> `message'\" (elisp-fanout.md §9): a
+restart with no Messages-buffer feedback would leave the user unable to
+tell the daemon ever heard the request."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (apply #'format fmt args) messages)
+                     nil)))
+          ;; Act.
+          (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
+          (agent-repl-itest--await-call daemon "RestartWorkspace")
+          ;; Assert: "Restart success -> `message'" (elisp-fanout.md §9).
+          (agent-repl-itest--wait-until (lambda () messages) nil
+                                        "the restart success message")
+          (should (cl-some (lambda (m) (string-match-p "restart" m)) messages)))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-success-messages-merge-enqueued ()
+  "A Merge success reports itself as exactly \"merge enqueued\".
+Pins fanout \"Merge success -> `message \"merge enqueued\"'\"
+(elisp-fanout.md §9): Emacs holds no merge state, so this message is the
+whole of what the user learns from the ack."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (apply #'format fmt args) messages)
+                     nil)))
+          ;; Act.
+          (agent-repl-verb-merge agent-repl-itest-verbs--ws)
+          (agent-repl-itest--await-call daemon "MergeWorkspace")
+          ;; Assert: "Merge success -> `message \"merge enqueued\"'" (elisp-fanout.md §9).
+          (agent-repl-itest--wait-until (lambda () messages) nil
+                                        "the merge success message")
+          (should (member "merge enqueued" messages)))))))
+
+;;;; ---- Close `blocked' messaging, no dialog (audit finding 71) ----
+
+(ert-deftest agent-repl-itest-verbs-close-blocked-messages-without-a-dialog ()
+  "A `blocked' close messages the exact footer-pointer text and raises no dialog.
+Pins fanout \"Close `blocked' -> log INFO + `message \"close blocked --
+see the workspace footer\"', no dialog\" (elisp-fanout.md §9);
+`y-or-n-p'/`yes-or-no-p' are wired to ERROR so any dialog attempt fails
+this test loudly rather than hanging a batch run."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "CloseWorkspace" '((error . ((blocked . ())))))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (apply #'format fmt args) messages)
+                     nil))
+                  ((symbol-function 'y-or-n-p)
+                   (lambda (&rest _) (error "agent-repl-itest: a dialog was raised")))
+                  ((symbol-function 'yes-or-no-p)
+                   (lambda (&rest _) (error "agent-repl-itest: a dialog was raised"))))
+          ;; Act.
+          (agent-repl-verb-close agent-repl-itest-verbs--ws)
+          (agent-repl-itest--await-call daemon "CloseWorkspace")
+          ;; Assert: the exact footer-pointer text, and no dialog function ran
+          ;; (a run would have signalled out of the `cl-letf' stubs above).
+          (agent-repl-itest--wait-until (lambda () messages) nil
+                                        "the close-blocked message")
+          (should (member "close blocked -- see the workspace footer" messages)))))))
+
+;;;; ---- Raw-wire explicit-false assertions (audit findings 72, 73) ----
+
+(ert-deftest agent-repl-itest-verbs-restart-graceful-sends-force-false-on-the-raw-wire ()
+  "A graceful restart's raw request body spells `force' explicitly false.
+Pins \"`force' ... always encoded explicitly, false included\"
+(elisp-fanout.md §5): the PARSED body drops a zero-valued bool, so only
+the raw wire text can tell an explicit false from an omitted field."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
+      (agent-repl-itest--await-call daemon "RestartWorkspace")
+      ;; Assert.
+      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))
+        (should (string-match-p (regexp-quote "\"force\":false") raw))))))
+
+(ert-deftest agent-repl-itest-verbs-create-open-pr-both-false-sends-explicit-false-on-the-raw-wire ()
+  "A reviewed one-shot's PR flags ride the wire as explicit `false', not absence.
+Pins \"Default false\" for `self_certified'/`add_to_merge_queue'
+(endpoint_create_workspace.proto, CreateWorkspaceOneShotOpenPr): both
+flags default false, so the wire must state them rather than let the
+daemon's zero value stand in silently."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create
+       agent-repl-itest-verbs--repo
+       (list :arm :one-shot
+             :value (list :prompt (agent-repl-itest-verbs--said "land the fix")
+                          :finish (list :arm :open-pr
+                                        :value (list :self-certified nil
+                                                     :add-to-merge-queue nil)))))
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "CreateWorkspace"))))
+        (should (string-match-p (regexp-quote "\"selfCertified\":false") raw))
+        (should (string-match-p (regexp-quote "\"addToMergeQueue\":false") raw))))))
+
+;;;; ---- One-shot `finish' required before send (audit finding 74) ----
+
+(ert-deftest agent-repl-itest-verbs-create-one-shot-without-finish-refuses-before-send ()
+  "An unset one-shot `finish' is refused before send, with ZERO daemon calls.
+Pins \"an unset one-shot `finish' is refused before send\"
+(elisp-fanout.md §5): `finish' is a oneof, and an unset oneof is a
+contract breach the codec catches while encoding, before any bytes leave
+Emacs."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act / Assert: the signal happens during encoding, before the transport call.
+      (should-error
+       (agent-repl-verb-create
+        agent-repl-itest-verbs--repo
+        (list :arm :one-shot
+              :value (list :prompt (agent-repl-itest-verbs--said "x"))))
+       :type 'agent-repl-wire-error)
+      (should (null (agent-repl-itest--calls daemon "CreateWorkspace"))))))
+
+;;;; ---- CreateWorkspaceRequest fields (audit finding 75) ----
+
+(ert-deftest agent-repl-itest-verbs-create-sends-the-model ()
+  "The session model at creation rides `model' on the wire.
+Pins \"CreateWorkspaceRequest model\" (elisp-fanout.md §5): a picked
+model that never reaches the wire would start every workspace on the
+daemon's default regardless of what the user chose."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard :value nil)
+                              :model "opus")
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+        (should (equal (agent-repl-itest--body-field body 'model) "opus"))))))
+
+(ert-deftest agent-repl-itest-verbs-create-allow-ungated-is-presence-only ()
+  "Ungated consent rides `allowUngated' as a present, empty message.
+Pins \"CreateWorkspaceRequest ... allow_ungated\" (elisp-fanout.md §5):
+presence itself is the consent, never a boolean to get backwards."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard :value nil)
+                              :allow-ungated t)
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert: present, and empty (`{}').
+      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+        (should (assq 'allowUngated body))))))
+
+(ert-deftest agent-repl-itest-verbs-create-standard-sends-the-base-ref ()
+  "The standard form's base ref rides `standard.baseRef'.
+Pins \"CreateWorkspaceRequest ... standard.base_ref\" (elisp-fanout.md
+§5): an absent base ref means the repo's default resolution, so a SET
+one must actually reach the daemon to be honored."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard :value (list :base-ref "main")))
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+        (should (equal (agent-repl-itest--body-field body 'standard 'baseRef) "main"))))))
+
+(ert-deftest agent-repl-itest-verbs-create-standard-sends-the-name ()
+  "The standard form's user-supplied name rides `standard.name'.
+Pins \"CreateWorkspaceRequest ... standard.name\" (elisp-fanout.md §5):
+an absent name means the daemon mints one, so a supplied name must reach
+the wire to override that."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard :value (list :name "my-ws")))
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+        (should (equal (agent-repl-itest--body-field body 'standard 'name) "my-ws"))))))
+
+(ert-deftest agent-repl-itest-verbs-create-standard-merge-actions-before-ws-merge-is-a-usersaid ()
+  "The standard form's pre-merge action rides as a UserSaid, not a bare string.
+Pins \"CreateWorkspaceRequest ... standard.merge_actions\"
+(elisp-fanout.md §5): \"merge-action fields are UserSaid values\"."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create
+       agent-repl-itest-verbs--repo
+       (list :arm :standard
+             :value (list :merge-actions
+                          (list :before-ws-merge
+                                (agent-repl-itest-verbs--said "run the linter")))))
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let* ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace"))
+             (blocks (agent-repl-itest--body-field
+                      body 'standard 'mergeActions 'beforeWsMerge 'content 'blocks)))
+        (should (equal (agent-repl-itest--body-field (car blocks) 'text 'text)
+                       "run the linter"))))))
+
+;;;; ---- CreateWorkspaceStandard: unset prompt is absence (audit finding 76) ----
+
+(ert-deftest agent-repl-itest-verbs-create-standard-with-no-prompt-omits-initial-prompt ()
+  "An unset standard-form prompt leaves `initialPrompt' ABSENT, not an empty UserSaid.
+Pins \"UNSET = an empty workspace; presence, never an empty UserSaid\"
+(endpoint_create_workspace.proto, CreateWorkspaceStandard.initial_prompt):
+an empty-but-present UserSaid would misrepresent a workspace with
+nothing to say as one that said nothing."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard :value nil))
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+        (should-not (assq 'initialPrompt (agent-repl-itest--body-field body 'standard)))))))
+
+;;;; ---- DrainReasonOperator note required non-blank (audit finding 77) ----
+
+(ert-deftest agent-repl-itest-verbs-shutdown-schedule-blank-operator-note-refuses-before-send ()
+  "A blank operator note is refused before send, with ZERO daemon calls.
+Pins \"The note is REQUIRED non-blank -- a blank note is refused at the
+request\" (drain_reason.proto, DrainReasonOperator): a blank note would
+leave every client's standing drain banner naming no reason at all."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act / Assert.
+      (should-error
+       (agent-repl-verb-shutdown-schedule
+        (list :arm :schedule
+              :value (list :at-ms 1735689600000
+                           :reason (list :arm :operator :value (list :note "")))))
+       :type 'agent-repl-wire-error)
+      (should (null (agent-repl-itest--calls daemon "UpdateShutdownSchedule"))))))
+
+;;;; ---- UpdateShutdownSchedule.schedule.at_ms (audit finding 78) ----
+
+(ert-deftest agent-repl-itest-verbs-shutdown-schedule-sends-the-at-ms ()
+  "A scheduled shutdown carries its deadline instant on `schedule.atMs'.
+Pins \"UpdateShutdownScheduleSchedule ... at_ms\"
+(endpoint_update_shutdown_schedule.proto): a schedule without its own
+deadline would leave every client's standing banner counting down to
+nothing."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-shutdown-schedule
+       (list :arm :schedule
+             :value (list :at-ms 1735689600000
+                          :reason (list :arm :deploy :value nil))))
+      (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule")))
+        (should (equal (format "%s" (agent-repl-itest--body-field body 'schedule 'atMs))
+                       "1735689600000"))))))
+
+;;;; ---- UpdateMergeQueue `resume' arm (audit finding 79) ----
+
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-sends-the-resume-arm ()
+  "Resuming the merge queue sends the `resume' arm.
+Pins \"UpdateMergeQueue resume\" arm (endpoint_update_merge_queue.proto):
+pause and evict are pinned elsewhere, so resume must land on the wire
+too or the resume command would silently do nothing."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-merge-queue (list :arm :resume :value nil))
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        (should (assq 'resume body))
+        ;; endpoint_update_merge_queue.proto, UpdateMergeQueueResume: "UNSET
+        ;; = every repository that has a queue (the daemon-wide switch)."
+        (should-not (assq 'repository
+                          (agent-repl-itest--body-field body 'resume)))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-queue-pause-scoped-names-the-repository ()
+  "A pause that means ONE repository names it, rather than pausing everything.
+Pins UpdateMergeQueuePause's `repository' (endpoint_update_merge_queue.proto,
+added by landing 5): \"The queue is per repository, so a caller that means
+one names it.\"  Without this the scoped pause silently becomes the
+daemon-wide switch, which stops every other repository's queue too — the
+kind of blast-radius defect no unscoped assertion can catch."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-merge-queue
+       (list :arm :pause :value (list :repository agent-repl-itest-verbs--repo)))
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        ;; The RepositoryRef's own two fields, both of which ride: `id' is
+        ;; "the sole supported repository identifier", `dir' is "NOT an
+        ;; identifier" but travels with it (workspace.proto).
+        (should (equal (agent-repl-itest--body-field body 'pause 'repository 'id)
+                       "repo-itest"))
+        (should (equal (agent-repl-itest--body-field body 'pause 'repository 'dir)
+                       "/tmp/itest-verbs-repo"))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-scoped-names-the-repository ()
+  "A resume that means ONE repository names it, rather than resuming everything.
+Pins UpdateMergeQueueResume's `repository' (endpoint_update_merge_queue.proto,
+added by landing 5): \"The queue is per repository, so a caller that means
+one names it.\"  Resume carries the field independently of pause, so a
+one-sided encoder would resume every repository after a scoped pause."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-merge-queue
+       (list :arm :resume :value (list :repository agent-repl-itest-verbs--repo)))
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")))
+        (should (equal (agent-repl-itest--body-field body 'resume 'repository 'id)
+                       "repo-itest"))
+        (should (equal (agent-repl-itest--body-field body 'resume 'repository 'dir)
+                       "/tmp/itest-verbs-repo"))))))
+
+;;;; ---- Health rendering (audit finding 80) ----
+
+(ert-deftest agent-repl-itest-verbs-daemon-health-healthy-renders-a-healthy-verdict ()
+  "A HEALTHY daemon verdict renders as HEALTHY in the health buffer.
+Pins \"agent-repl-daemon-health ... (render into *agent-repl-health*:
+verdict, ...)\" (elisp-fanout.md §9): only the UNHEALTHY branch is
+pinned elsewhere, leaving the healthy branch untested without this."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "DaemonHealth" '((success . ((healthy . ())))))
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (when (get-buffer "*agent-repl-health*") (kill-buffer "*agent-repl-health*"))
+      ;; Act.
+      (agent-repl-daemon-health)
+      (agent-repl-itest--await-call daemon "DaemonHealth")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (get-buffer "*agent-repl-health*")) nil "the health buffer")
+      (with-current-buffer "*agent-repl-health*"
+        (should (string-match-p "daemon: HEALTHY" (buffer-string)))))))
+
+(ert-deftest agent-repl-itest-verbs-session-health-unhealthy-prints-faults-and-standing-host-faults ()
+  "SessionHealth renders its own pulled faults AND the host stream's standing faults.
+Pins \"agent-repl-session-health ... (render into *agent-repl-health*:
+verdict, each fault's detail, plus the host stream's standing faults for
+the workspace)\" (elisp-fanout.md §9)."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script
+     daemon "SessionHealth"
+     '((success . ((unhealthy . ((faults . [((detail . "pulled fault"))])))))))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (agent-repl-itest--push
+       daemon "host"
+       `((host . ,(agent-repl-itest-verbs--host-live-with-faults "standing fault")))
+       (plist-get ref :id))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-host-faults agent-repl-itest-verbs--ws))
+       nil "the standing host fault to reach host state")
+      (when (get-buffer "*agent-repl-health*") (kill-buffer "*agent-repl-health*"))
+      ;; Act.
+      (agent-repl-session-health agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "SessionHealth")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (get-buffer "*agent-repl-health*")) nil "the health buffer")
+      (with-current-buffer "*agent-repl-health*"
+        (should (string-match-p "pulled fault" (buffer-string)))
+        (should (string-match-p "standing fault" (buffer-string)))))))
+
+;;;; ---- Ref resolution: unregistered workspace refuses before send (audit finding 81) ----
+
+(ert-deftest agent-repl-itest-verbs-unregistered-workspace-refuses-before-send ()
+  "A verb on an unregistered workspace name signals `user-error', sending nothing.
+Pins \"Each resolves REF via `agent-repl-host-ref' (nil ->
+`user-error')\" (elisp-fanout.md §9): a workspace with no daemon
+identity cannot be addressed at all, and the failure must happen before
+any bytes leave Emacs."
+  ;; Arrange / Act / Assert.
+  (agent-repl-itest--with-fake-daemon daemon
+    (should-error (agent-repl-verb-close "itest-verbs-never-registered") :type 'user-error)
+    (should (null (agent-repl-itest--calls daemon "CloseWorkspace")))))
+
+;;;; ---- CONN resolution across a handover (audit finding 82) ----
+
+(ert-deftest agent-repl-itest-verbs-verb-lands-on-the-successor-after-a-transfer ()
+  "After a workspace transfers, its verb lands on the SUCCESSOR, not the primary.
+Pins \"CONN via `agent-repl-host-conn' (falls back to
+`agent-repl-link-primary')\" (elisp-fanout.md §9): once `transferred'
+adopts the workspace onto the new daemon, `agent-repl-host-conn' must
+resolve there, or every later verb would keep hammering a daemon that
+already released the workspace."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-verbs--with-workspace primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((successor-conn (agent-repl-connect-open
+                               (agent-repl-itest-daemon-address successor))))
+          (unwind-protect
+              (cl-letf (((symbol-function 'agent-repl-link-successor)
+                         (lambda () successor-conn)))
+                ;; Act: the transfer adopts the workspace onto the successor.
+                (agent-repl-itest--push primary "host" '((transferred . ()))
+                                        (plist-get ref :id))
+                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
+                (agent-repl-verb-close agent-repl-itest-verbs--ws)
+                ;; Assert.
+                (agent-repl-itest--await-call successor "CloseWorkspace")
+                (should (null (agent-repl-itest--calls primary "CloseWorkspace"))))
+            (agent-repl-connect-close successor-conn)))))))
+
+;;;; ---- agent-repl-frontend-daemon-stop wire shape (audit finding 83) ----
+
+(ert-deftest agent-repl-itest-verbs-frontend-daemon-stop-sends-update-shutdown-schedule-now-operator-emacs ()
+  "`agent-repl-frontend-daemon-stop' sends UpdateShutdownSchedule{now, operator \"emacs\"}.
+Pins \"`agent-repl-frontend-daemon-stop' = UpdateShutdownSchedule{now,
+operator \"emacs\"}\" (elisp-fanout.md §11): Emacs never kills a daemon
+that answers, so this is the only shutdown Emacs itself ever sends."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-frontend-daemon-stop)
+      (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+      ;; Assert.
+      (let ((body (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule")))
+        (should (assq 'now body))
+        (should (equal (agent-repl-itest--body-field body 'now 'reason 'operator 'note)
+                       "emacs"))))))
+
+;;;; ---- Success-ack log lines, named per verbs.el's vocabulary (finding 91, partial) ----
+
+(ert-deftest agent-repl-itest-verbs-close-success-logs-its-ack ()
+  "A Close success logs `elisp.verbs.ack' naming op=close.
+verbs.el's vocabulary names CloseWorkspace \"a VIEW act\"; its success
+ack must be findable in the production log by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-close agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "CloseWorkspace")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "close"))
+       nil "the close success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "close")))))
+
+(ert-deftest agent-repl-itest-verbs-kill-success-logs-its-ack ()
+  "A Kill success logs `elisp.verbs.ack' naming op=kill.
+verbs.el's vocabulary names KillWorkspace \"forced session death\"; its
+success ack must be findable in the production log by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-kill agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "KillWorkspace")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "kill"))
+       nil "the kill success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "kill")))))
+
+(ert-deftest agent-repl-itest-verbs-nuke-success-logs-its-ack ()
+  "A Nuke success logs `elisp.verbs.ack' naming op=nuke.
+verbs.el's vocabulary names NukeWorkspace \"DATA DESTRUCTION\"; its
+success ack must be findable in the production log by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-nuke agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "NukeWorkspace")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "nuke"))
+       nil "the nuke success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "nuke")))))
+
+(ert-deftest agent-repl-itest-verbs-open-success-logs-its-ack ()
+  "An Open success logs `elisp.verbs.ack' naming op=open.
+verbs.el's vocabulary names OpenWorkspace \"opens a closed row\"; its
+success ack must be findable in the production log by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (agent-repl-itest-verbs--with-primary daemon conn
+        (ignore conn)
+        ;; Act.
+        (agent-repl-verb-open ref)
+        (agent-repl-itest--await-call daemon "OpenWorkspace")
+        ;; Assert.
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "open"))
+         nil "the open success ack log line")
+        (should (agent-repl-itest-verbs--ack-logged-p daemon "open"))))))
+
+(ert-deftest agent-repl-itest-verbs-merge-success-logs-its-ack ()
+  "A Merge success logs `elisp.verbs.ack' naming op=merge.
+verbs.el's vocabulary names MergeWorkspace's success as \"ENQUEUED\"; its
+success ack must be findable in the production log by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-call daemon "MergeWorkspace")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "merge"))
+       nil "the merge success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "merge")))))
+
+(ert-deftest agent-repl-itest-verbs-restart-success-logs-its-ack ()
+  "A Restart success logs `elisp.verbs.ack' naming op=restart.
+verbs.el's vocabulary names RestartWorkspace as owning everything the
+restart entails; its success ack must be findable in the production log
+by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
+      (agent-repl-itest--await-call daemon "RestartWorkspace")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "restart"))
+       nil "the restart success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "restart")))))
+
+(ert-deftest agent-repl-itest-verbs-create-success-logs-its-ack ()
+  "A Create success logs `elisp.verbs.ack' naming op=create.
+verbs.el's vocabulary names CreateWorkspace as the daemon naming and
+creating everything; its success ack must be findable in the production
+log by that op."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-verb-create agent-repl-itest-verbs--repo
+                              (list :arm :standard :value nil))
+      (agent-repl-itest--await-call daemon "CreateWorkspace")
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-itest-verbs--ack-logged-p daemon "create"))
+       nil "the create success ack log line")
+      (should (agent-repl-itest-verbs--ack-logged-p daemon "create")))))
 
 (provide 'test-integration-verbs)
 

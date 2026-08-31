@@ -30,6 +30,10 @@ var errAborted = errors.New("fakedaemon: stream aborted without an end frame")
 type recordedCall struct {
 	Method string          `json:"method"`
 	Body   json.RawMessage `json:"body"`
+	// Raw is the request EXACTLY as the client wrote it.  Body is a
+	// re-marshal of the decoded message and so drops explicit zero values;
+	// Raw is what an assertion about explicit `false' encoding must read.
+	Raw string `json:"raw,omitempty"`
 }
 
 type endRequest struct {
@@ -61,11 +65,15 @@ type snapshotKey struct {
 type fakeServer struct {
 	mu          sync.Mutex
 	subChanged  *sync.Cond
+	callChanged *sync.Cond
 	calls       []recordedCall
 	scripts     map[string]json.RawMessage
 	subscribers map[int64]*subscriber
 	snapshots   map[snapshotKey][]proto.Message
-	nextSubID   int64
+	// gates holds one channel per method whose answer is being withheld; see
+	// gate.go.
+	gates     map[string]chan struct{}
+	nextSubID int64
 }
 
 func newFakeServer() *fakeServer {
@@ -73,8 +81,10 @@ func newFakeServer() *fakeServer {
 		scripts:     map[string]json.RawMessage{},
 		subscribers: map[int64]*subscriber{},
 		snapshots:   map[snapshotKey][]proto.Message{},
+		gates:       map[string]chan struct{}{},
 	}
 	s.subChanged = sync.NewCond(&s.mu)
+	s.callChanged = sync.NewCond(&s.mu)
 	return s
 }
 
@@ -106,7 +116,7 @@ func (s *fakeServer) countSubscribersLocked(stream, workspaceID string) int {
 
 // ---- recording ----
 
-func (s *fakeServer) record(method string, msg proto.Message) {
+func (s *fakeServer) record(ctx context.Context, method string, msg proto.Message) {
 	body, err := protojson.Marshal(msg)
 	if err != nil {
 		// Cannot happen for a message the codec already decoded; log loudly
@@ -116,11 +126,33 @@ func (s *fakeServer) record(method string, msg proto.Message) {
 		body = []byte("null")
 	}
 	s.mu.Lock()
-	s.calls = append(s.calls, recordedCall{Method: method, Body: body})
+	s.calls = append(s.calls, recordedCall{Method: method, Body: body, Raw: rawBodyFrom(ctx)})
 	n := len(s.calls)
+	s.callChanged.Broadcast()
 	s.mu.Unlock()
 	logDebug("fakedaemon.rpc.recorded", "recorded a unary request",
 		map[string]any{"method": method, "index": n - 1, "body": string(body)})
+}
+
+// awaitRecordedCalls blocks until N calls of METHOD are on the record.  Real
+// synchronization on the recorder's own condition variable, so a caller never
+// guesses how long an in-flight call takes to land.
+func (s *fakeServer) awaitRecordedCalls(method string, n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.countCallsLocked(method) < n {
+		s.callChanged.Wait()
+	}
+}
+
+func (s *fakeServer) countCallsLocked(method string) int {
+	count := 0
+	for _, call := range s.calls {
+		if call.Method == method {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *fakeServer) recordedCalls() []recordedCall {
@@ -254,12 +286,27 @@ func handleUnary[Req any, Res any](ctx context.Context, s *fakeServer, method st
 		return nil, connect.NewError(connect.CodeInternal,
 			fmt.Errorf("fakedaemon: request type for %s is not a proto message", method))
 	}
-	s.record(method, reqMsg)
+	s.record(ctx, method, reqMsg)
 
 	if err := validateRequest(reqMsg); err != nil {
 		logError("fakedaemon.rpc.invalid-request", "refused a request that breaches the validation invariant",
 			map[string]any{"method": method, "error": err.Error()})
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// The gate, if armed, holds the ANSWER — after recording and validation,
+	// so a scenario sees the call land and can assert on the client's state
+	// while it is still in flight.
+	if gate := s.gateFor(method); gate != nil {
+		logInfo("fakedaemon.gate.holding", "holding a gated answer",
+			map[string]any{"method": method})
+		select {
+		case <-gate:
+			logInfo("fakedaemon.gate.released", "a gated answer was released",
+				map[string]any{"method": method})
+		case <-ctx.Done():
+			return nil, connect.NewError(connect.CodeCanceled, ctx.Err())
+		}
 	}
 
 	out := new(Res)
