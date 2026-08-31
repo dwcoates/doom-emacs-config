@@ -586,3 +586,32 @@ func degradedUpdate() *conversationv1.SessionUpdate {
 				}},
 			}}}
 }
+
+func TestRowTakesDetachedWorkRestoredWithNoAnnouncingAgent(t *testing.T) {
+	// Arrange: live work restored from SessionStarted.live_work has no
+	// announcing agent, so the sink receives a nil one.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Act.
+	r.OnDetachedWork(theWS, nil, detachedWork("work-restored"))
+
+	// Assert: such an item is never dropped.
+	if got := statusName(onlyRow(t, r)); got != "idle_async" {
+		t.Fatalf("status = %q, want idle_async — restored live work was dropped", got)
+	}
+}
+
+func TestRowTakesAPermissionWithNoAnnouncingAgent(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.OnPermission(theWS, nil, permissionAsk("p1"))
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "permission" {
+		t.Fatalf("status = %q, want permission — an agentless ask was dropped", got)
+	}
+}
