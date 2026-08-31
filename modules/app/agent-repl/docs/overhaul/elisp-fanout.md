@@ -96,6 +96,10 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - R-VERBS follow-up MERGED (33b3d2e81): workspace-owned verb records
   restored; harness reader searches global + workspace sinks; fixture
   tears the link down. integration-verbs 30/30, daemon 12/12.
+- LANDING 5 merged (d597d9970): UpdateMergeQueuePause/Resume gain
+  `optional repository` (unset = every repository); the encoder field and
+  verbs.el's pause/resume argument are R-NOTIFY's added scope (own
+  commits); R-SUITE-1 extends finding #79 to both scopes.
 - RUNNING: R-SUITE-1 (`opus-low`, suite2); R-NOTIFY (`opus-low`, remed4);
   remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
   remediation-1 merges (cut its worktree off that tip).
