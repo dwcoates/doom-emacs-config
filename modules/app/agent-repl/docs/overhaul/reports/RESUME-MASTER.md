@@ -33,6 +33,10 @@ everything needed, so re-derive nothing.
 | Contract | overhaul/integration @ f13ca50ec | this file; PROTO-CHANGES.md (landings 1–5) | landing-6 material pending |
 
 Directives: ~/.config/doom-overhaul/directives/{COMMON,DAEMON,SHIM,WEBAPP,ELISP,STORE}.md.
+A recreated lead's mandatory reading order: TEAMLEAD.md → its system PLAN DOC
+(docs/overhaul/<system>.md — the durable rulings record, current through
+landing 5, incl. every "Landing N relay" section) → its STOP file → the
+directives. The plan docs are authoritative over memory of any prior session.
 The shim's 138-scenario mock table lives on overhaul/shim (AGENTS.md) and
 has NOT reached overhaul/integration yet.
 
