@@ -89,7 +89,6 @@
 (defvar persp-set-frame-buffer-predicate)
 (defvar persp-autokill-buffer-on-remove)
 (defvar +workspaces-switch-project-function)
-(defvar agent-repl--restored-workspaces)
 
 (cl-defstruct agent-repl-instantiation
   "Per-environment session state for a Agent REPL workspace.
@@ -1120,14 +1119,12 @@ finish-workspace path."
       (condition-case err
           (agent-repl--ws-del ws)
         (error (agent-repl--warn ws "kill-one-workspace: ws-del error: %S" err))))
-    ;; WHY: keep `agent-repl--restored-workspaces' consistent with the
-    ;; live hash — a ws that's been killed is no longer a restore-batch
-    ;; member, so a follow-up `kill-restored-workspaces' won't try to
-    ;; re-tear-down a stale name.  The defvar lives in commands.el; we
-    ;; treat it as the snapshot-restore module's state and mutate
-    ;; through the var directly (forward defvar at the top of this file).
-    (setq agent-repl--restored-workspaces
-          (delete ws agent-repl--restored-workspaces))
+    ;; NO RESTORE-BATCH BOOKKEEPING.  This used to drop WS from
+    ;; `agent-repl--restored-workspaces' so a follow-up
+    ;; `kill-restored-workspaces' would not re-tear-down a stale name.
+    ;; Both the batch and that command died with the snapshot restore:
+    ;; THE DAEMON is the source of which workspaces exist, and Emacs opens
+    ;; tabs from the roster stream rather than replaying a saved batch.
     ;; Kill every remaining buffer (and attached process) that belongs to
     ;; the persp before tearing down the persp itself.  The frontend kill
     ;; dispatch only handles the webview/input panels it tracks in the

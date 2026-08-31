@@ -334,16 +334,39 @@ every scenario that pushes after subscribing must pass through here."
 ;; the JSONL sink into the private state dir and hands the suite a reader.
 
 (defun agent-repl-itest--log-file (daemon)
-  "Return the production JSONL log path for DAEMON's state dir."
+  "Return the production GLOBAL JSONL log path for DAEMON's state dir."
   (expand-file-name "emacs.jsonl" (agent-repl-itest-daemon-state-dir daemon)))
 
-(defun agent-repl-itest--log-records (daemon)
-  "Return the production log records written during DAEMON's run.
-Each record is the parsed JSONL object; a malformed line is skipped
-rather than aborting the read, because a truncated final line is a normal
-consequence of reading a sink that is still being appended to."
-  (let ((path (agent-repl-itest--log-file daemon))
-        (records nil))
+(defvar agent-repl--workspaces)
+
+(defun agent-repl-itest--workspace-log-files ()
+  "Return the workspace `emacs.log' sinks of every registered workspace.
+THE SINK FOLLOWS THE RECORD'S OWNER.  logging-contract.md routes a record
+that owns a workspace into that workspace\='s own
+`<workspace>/.claude/emacs/emacs.log\=' -- writing it globally would be
+the routing invariant violation the contract forbids -- so a reader that
+looked only at the global sink could not see a workspace-owned line at
+all.  The canonical path is a SYMLINK to the runtime-owned target;
+`insert-file-contents\=' follows it, which is the whole of what reading it
+takes."
+  (let (paths)
+    (when (boundp 'agent-repl--workspaces)
+      (maphash
+       (lambda (_ws plist)
+         (let ((dir (plist-get plist :project-dir)))
+           (when (stringp dir)
+             (let ((path (expand-file-name ".claude/emacs/emacs.log" dir)))
+               (when (and (file-exists-p path) (not (member path paths)))
+                 (push path paths))))))
+       agent-repl--workspaces))
+    (nreverse paths)))
+
+(defun agent-repl-itest--log-records-in (path)
+  "Return the JSONL records in PATH, oldest first.
+A malformed line is skipped rather than aborting the read, because a
+truncated final line is a normal consequence of reading a sink that is
+still being appended to."
+  (let ((records nil))
     (when (file-exists-p path)
       (with-temp-buffer
         (insert-file-contents path)
@@ -360,28 +383,49 @@ consequence of reading a sink that is still being appended to."
           (forward-line 1))))
     (nreverse records)))
 
-(defun agent-repl-itest--operation-prefix (name)
-  "Return the `operation' prefix core.el derives for the log NAME.
+(defun agent-repl-itest--log-records (daemon)
+  "Return the production log records written during DAEMON's run.
+BOTH SINKS ARE READ: the global one for records that genuinely have no
+workspace, and every registered workspace\='s own `emacs.log\=' for the
+records that own one.  A scenario asserting on a workspace-owned line
+must find it where the contract puts it."
+  (apply #'append
+         (agent-repl-itest--log-records-in (agent-repl-itest--log-file daemon))
+         (mapcar #'agent-repl-itest--log-records-in
+                 (agent-repl-itest--workspace-log-files))))
+
+(defun agent-repl-itest--operation-slug (name)
+  "Return the slug core.el derives from the log NAME's format string.
 `agent-repl--log-operation' normalizes the FORMAT STRING into
 `agent-repl.<slug>', so a logical operation name like
-\"elisp.rpc.push-invalid\" becomes a PREFIX of the recorded operation
-\(the format's trailing `key=%S' fragments extend it)."
-  (concat "agent-repl."
-          (replace-regexp-in-string
-           "\\`-+\\|-+\\'" ""
-           (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase name)))))
+\"elisp.rpc.push-invalid\" becomes a PREFIX of the recorded slug (the
+format's trailing `key=%S' fragments extend it)."
+  (replace-regexp-in-string
+   "\\`-+\\|-+\\'" ""
+   (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase name))))
+
+(defun agent-repl-itest--operation-prefix (name)
+  "Return the `operation' prefix core.el derives for the log NAME."
+  (concat "agent-repl." (agent-repl-itest--operation-slug name)))
+
+(defun agent-repl-itest--operation-matches-p (operation name)
+  "Return non-nil when the recorded OPERATION names the logical NAME.
+core.el derives `operation' from the BARE format string on every rung —
+the severity rungs\' display tags never reach it, and `level' carries the
+severity instead — so a plain prefix match is the whole rule."
+  (string-prefix-p (agent-repl-itest--operation-prefix name) operation))
 
 (defun agent-repl-itest--log-entries (daemon operation &optional level)
   "Return DAEMON's log records for OPERATION, optionally at LEVEL.
 OPERATION is the logical `elisp.<module>.<operation>' name the production
 code logs; LEVEL is core.el's level string (\"debug\", \"info\", \"warn\"
 or \"error\")."
-  (let ((prefix (agent-repl-itest--operation-prefix operation)))
-    (seq-filter
-     (lambda (record)
-       (and (string-prefix-p prefix (or (alist-get 'operation record) ""))
-            (or (null level) (equal (alist-get 'level record) level))))
-     (agent-repl-itest--log-records daemon))))
+  (seq-filter
+   (lambda (record)
+     (and (agent-repl-itest--operation-matches-p
+           (or (alist-get 'operation record) "") operation)
+          (or (null level) (equal (alist-get 'level record) level))))
+   (agent-repl-itest--log-records daemon)))
 
 (defun agent-repl-itest--logged-p (daemon operation &optional level)
   "Return non-nil when DAEMON's run logged OPERATION (at LEVEL)."
@@ -397,23 +441,46 @@ suite asserting on a log line waits for it rather than racing it."
    (format "the production log to carry %s%s" operation
            (if level (format " at %s" level) ""))))
 
+;;;; ---- Link teardown ----
+
+(defun agent-repl-itest--teardown-link ()
+  "Close any standing daemon link and cancel its reconnect timer.
+`agent-repl-link-teardown\=' closes the connections and forgets the link
+state; the reconnect timer is armed separately by the close handler, so
+it is cancelled here too -- a timer that survives the scenario reconnects
+into the NEXT one\='s daemon."
+  (ignore-errors (agent-repl-link-teardown))
+  (ignore-errors (agent-repl-link--cancel-reconnect)))
+
 ;;;; ---- Boundary mocks the suite installs ----
+
+(defun agent-repl-itest--real-boundary (symbol)
+  "Return the REAL implementation of boundary SYMBOL, captured before guarding.
+The batch harness replaces every entry of
+`agent-repl--external-boundary-functions' with a guard that errors, which
+is exactly right for every boundary a scenario only has to STUB — but a
+handful of boundaries are the very thing an integration scenario exists to
+exercise against real, harmless, test-owned targets (the fake daemon on
+loopback; stub shell scripts in the test's own temp dir).  Restoring one
+is deliberate and NARROW: it happens per scenario, by name, and every
+other guard stays armed.
+
+Signals when SYMBOL is not registered — a boundary that left the registry
+must not be reachable by accident."
+  (let ((cell (assq symbol agent-repl-test--external-original-functions)))
+    (unless cell
+      (error (concat "agent-repl-itest: `%s' is not in "
+                     "`agent-repl--external-boundary-functions' — the integration "
+                     "suite cannot restore a boundary it does not know about")
+             symbol))
+    (or (cdr cell)
+        (error "agent-repl-itest: no original captured for `%s'" symbol))))
 
 (defun agent-repl-itest--real-spawn-curl ()
   "Return the REAL `agent-repl-connect--spawn-curl' captured before guarding.
-The batch harness replaces every entry of
-`agent-repl--external-boundary-functions' with a guard that errors, which
-is exactly right for every other boundary — but the transport's ONE spawn
-point is the boundary this suite exists to exercise, against a fake daemon
-on loopback.  Every OTHER guard stays armed."
-  (let ((cell (assq 'agent-repl-connect--spawn-curl
-                    agent-repl-test--external-original-functions)))
-    (unless cell
-      (error (concat "agent-repl-itest: `agent-repl-connect--spawn-curl' is not in "
-                     "`agent-repl--external-boundary-functions' — the integration suite "
-                     "cannot reach the fake daemon without the real spawn point")))
-    (or (cdr cell)
-        (error "agent-repl-itest: no original captured for `agent-repl-connect--spawn-curl'"))))
+The transport's ONE spawn point is the boundary the integration suite
+exists to exercise, against a fake daemon on loopback."
+  (agent-repl-itest--real-boundary 'agent-repl-connect--spawn-curl))
 
 (defvar agent-repl-itest-notifications nil
   "Desktop notifications the fake notifier backend recorded, newest first.
@@ -467,6 +534,12 @@ signals."
                       (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls))
                      (agent-repl--notification-backend (agent-repl-itest--fake-notifier)))
              ,@body))
+       ;; A verb may STAND THE LINK on its own (a daemon-admin verb can be
+       ;; the first thing that needs one), and a link outliving its daemon
+       ;; leaves an armed reconnect timer that fires into the next
+       ;; scenario.  Tearing it down is the only thing that actually ends
+       ;; it -- the same reason the cold-start reset exists.
+       (agent-repl-itest--teardown-link)
        (agent-repl-itest--stop-daemon ,var))))
 
 (defmacro agent-repl-itest--with-second-daemon (primary var &rest body)
@@ -487,6 +560,74 @@ address is already published and recorded before it is replaced."
 
 (defalias 'agent-repl-itest--start-second-daemon #'agent-repl-itest--start-daemon
   "Start a second fake daemon; pass the primary's state dir to stage a handover.")
+
+;;;; ---- Cold start ----
+;;
+;; Scenario 14 (§14) drives daemon.el's cold start with STUB SHELL SCRIPTS in
+;; the test's own temp dir: "build script (stub) invoked → daemon command (stub
+;; that starts the fake) → link up".  That contract is exactly "run this
+;; script, then wait for daemon.addr", so an elisp stub over the boundary would
+;; assert nothing — and the state-root export can only be observed by a child
+;; that really ran.  These three boundaries are therefore RESTORED for a
+;; cold-start scenario, per-scenario and by name, the same way the transport's
+;; spawn point is; every other guard stays armed.
+
+(defconst agent-repl-itest--cold-start-boundaries
+  '(agent-repl--frontend-run-build-script
+    agent-repl--frontend-spawn-daemon
+    agent-repl--frontend-artifact-exists-p)
+  "The external boundaries a cold-start scenario exercises for real.
+Their targets are all test-owned: a stub script and a stub argv written
+into the scenario's own temp dir, and `file-exists-p' on those paths.")
+
+(defvar agent-repl-daemon--ensure-in-flight)
+(defvar agent-repl-daemon--boot-timer)
+(defvar agent-repl-daemon--boot-deadline)
+(defvar agent-repl-daemon--boot-continuation)
+(defvar agent-repl-daemon-build-failure)
+(defvar agent-repl-daemon-mode-line-segment)
+(defvar agent-repl--frontend-daemon-process)
+(declare-function agent-repl-daemon--cancel-boot-wait "daemon")
+(declare-function agent-repl-link-teardown "daemon-link")
+(declare-function agent-repl-link--cancel-reconnect "daemon-link")
+
+(defun agent-repl-itest--reset-cold-start ()
+  "Take down everything a cold-start scenario can leave running.
+A scenario that asserts as soon as its stub script ran leaves a POLL
+TIMER armed and, on the paths that got that far, a spawned daemon and a
+standing link.  All three outlive the `let' that reset daemon.el's state,
+so the next scenario's ensure would see an in-flight boot or a live link
+and no-op — which is how one broken scenario silently disables the rest of
+the suite.  Cancelling and reaping is the only thing that actually ends
+them."
+  (agent-repl-daemon--cancel-boot-wait)
+  (when (process-live-p agent-repl--frontend-daemon-process)
+    (delete-process agent-repl--frontend-daemon-process))
+  (agent-repl-link-teardown)
+  (dolist (name '("*agent-repl-health*" "*agent-repl-build-frontend*"))
+    (when (get-buffer name) (kill-buffer name))))
+
+(defmacro agent-repl-itest--with-cold-start (&rest body)
+  "Run BODY with daemon.el's cold start reachable and its state isolated.
+Inside BODY the three `agent-repl-itest--cold-start-boundaries' are the
+real implementations, and every piece of daemon.el's cold-start state
+starts fresh.  On the way out the boot poll is cancelled, any spawned
+daemon is reaped and the link is torn down, so nothing leaks into the next
+scenario."
+  (declare (indent 0) (debug body))
+  `(let ((agent-repl-daemon--ensure-in-flight nil)
+         (agent-repl-daemon--boot-timer nil)
+         (agent-repl-daemon--boot-deadline nil)
+         (agent-repl-daemon--boot-continuation nil)
+         (agent-repl-daemon-build-failure nil)
+         (agent-repl-daemon-mode-line-segment nil)
+         (agent-repl--frontend-daemon-process nil))
+     (cl-letf ,(mapcar (lambda (boundary)
+                         `((symbol-function ',boundary)
+                           (agent-repl-itest--real-boundary ',boundary)))
+                       agent-repl-itest--cold-start-boundaries)
+       (unwind-protect (progn ,@body)
+         (agent-repl-itest--reset-cold-start)))))
 
 ;;;; ---- Small assertion helpers ----
 
