@@ -19,8 +19,19 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-// LostReason is HOW we concluded a detached run was lost. It rides the log, not
-// the wire.
+// LostReason is HOW we concluded a detached run was lost.
+//
+// IT RIDES THE WIRE. conversation.v1 carries DetachedLost with exactly these
+// three arms (file_vanished / went_silent / swept_up), reached through
+// AgentBashInterrupted.cause.lost and AgentSubagentFailure.cause.lost, so the
+// account of how we stopped seeing a run is a fact a READER can draw — not
+// something recoverable only by grepping this process's log. DetachedLostArm
+// below is the mapping, and it PANICS on a reason it does not know rather than
+// leaving the oneof unset, because an unset oneof is illegal here and a lost
+// run with no arm says nothing at all.
+//
+// It rides the log as well, in the `reason` key, so a terminal on the wire and
+// the record that concluded it can be joined.
 type LostReason string
 
 const (
