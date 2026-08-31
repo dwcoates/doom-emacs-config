@@ -700,3 +700,18 @@ Rulings already binding; code swaps to the generated arms when it lands:
   docs/overhaul/daemon.md).
 - Terminal ordering post-prompt → terminal → release → worktree removal →
   displaced turn → rollout trigger: accepted.
+
+## Landing 5 (LANDED at 081dbbba8, merged at 05b460c4b) — remediations owed
+
+- FEED (resume the feed agent): (1) `AgentBashOutput.not_observed` (and an
+  AgentBashInterrupted whose output is not_observed) maps to an UNSET
+  `FeedShell.spool` — never an empty `FeedShellSpool{text:""}` — with the
+  settled arm exactly as the record states it (completed/cancelled/lost);
+  pin with a resolver test; no new frontend element. (2) A vendor-
+  synthesized notice sets `FeedResponse.notice{heading}` instead of
+  prepending a heading to the prose; the prose stays verbatim.
+- MERGE (resume the merge agent): UpdateMergeQueuePause/Resume gained
+  `optional workspace.v1.RepositoryRef repository` — UNSET = every
+  repository (the current daemon-wide switch is the unset case); a set ref
+  scopes the pause/resume to that repo's queue; typed refusal when the ref
+  is unknown.
