@@ -162,11 +162,12 @@ func (s *sidecar) plumbObserver(kind tail.Kind, built tail.Handler, log *logging
 
 // lostEntries turns the LOST policy's conclusions into the runs' terminals.
 //
-// The reason is carried into the LOG rather than onto the wire: store.v1 and
-// conversation.v1 have no DetachedLost message this wave, so HOW we stopped
-// seeing the run survives only in the record this writes. That is a contract
-// gap, and it is stated here rather than papered over by picking an arm that
-// means something else.
+// THE REASON GOES ON THE WIRE AND IN THE LOG, and it is the same reason in
+// both. conversation.v1's DetachedLost carries the three arms this reader
+// concludes with (file_vanished / went_silent / swept_up), reached through
+// AgentBashInterrupted.cause.lost, so HOW we stopped seeing a run is a fact a
+// consumer can draw. The `reason` key on the record below is what joins that
+// terminal back to the sweep that concluded it.
 func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 	var out []*storev1.StoreEntry
 	for _, lost := range conclusions {
@@ -210,7 +211,11 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 			continue
 		}
 		entries := sink.LostTerminal(lost.TaskID, lost.RunActivityID, lost.OwnerAgentID, string(lost.Reason))
-		bound.Log("LOST terminal minted reason=%s entries=%d", lost.Reason, len(entries))
+		// THE REASON RIDES A DEDICATED KEY. It is the arm now set on the wire,
+		// and a record that only interpolated it into a sentence could not be
+		// filtered or joined against the terminal it explains.
+		bound.With(logging.Context{Reason: string(lost.Reason)}).
+			Log("LOST terminal minted reason=%s entries=%d", lost.Reason, len(entries))
 		out = append(out, entries...)
 	}
 	return out
