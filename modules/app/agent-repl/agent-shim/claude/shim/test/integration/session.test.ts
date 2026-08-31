@@ -564,7 +564,7 @@ describe("session facts with no message behind them", () => {
     "the budget warning appears as AgentUpdate.context_budget_warning on the SIDECAR's page line — the shim has no live producer, so this belongs to the file-plane suite",
   );
 
-  test("!context-budget pushes NO session-level budget arm", async () => {
+  test("!context-tip pushes NO session-level budget arm", async () => {
     // A shim still emitting the retired tag 24 would push a frame whose oneof
     // case the generated code cannot name, so an unrecognized arm is exactly
     // the failure this asserts against.
@@ -589,7 +589,7 @@ describe("session facts with no message behind them", () => {
     );
     await agent.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!context-budget" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!context-tip" }));
     // Drive to the turn's terminal so every frame this turn produces has been
     // seen before the negative assertion below.
     await agent.until((frame) => {

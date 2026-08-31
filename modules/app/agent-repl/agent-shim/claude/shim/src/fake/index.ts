@@ -80,6 +80,19 @@ import type {
 } from "./scenario.js";
 import { FAKE_CLI_VERSION, VendorFiles } from "./vendor-files.js";
 
+/**
+ * IS THIS TASK A SHELL RUN? The vendor's own distinction, read off the id.
+ *
+ * `b<hex>` is a background shell run and `a<hex>` a local agent — the shapes
+ * the sidecar already names spool and transcript paths from. It matters here
+ * because the two spools are DIFFERENT FILES IN KIND: a shell spool is
+ * incremental bytes terminated by `EXIT=<code>`, and an agent spool is the
+ * agent's own JSONL with no terminator ever.
+ */
+export function isShellTaskId(taskId: string): boolean {
+  return taskId.startsWith("b");
+}
+
 const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.query" });
 
 export {
@@ -939,9 +952,23 @@ export function createFakeQuery(
         return;
       }
       liveTasks.delete(taskId);
-      // A stopped shell's spool gets its terminator: the tailer's only way to
+      // A stopped SHELL's spool gets its terminator: the tailer's only way to
       // learn the run ended is the EXIT line, and 143 is SIGTERM's exit code.
-      if (files.unfinishedSpools().includes(taskId)) files.spool(taskId).finish(143);
+      //
+      // AN AGENT'S SPOOL NEVER DOES. An agent spool is the agent's own JSONL
+      // and carries no terminator at all, so an `EXIT=` line written into one
+      // is a line no real tree contains — and a reader that learned to parse it
+      // would be built against a shape the vendor never produces. The kind is
+      // read off the task id, which is the vendor's own distinction (`b<hex>`
+      // shell runs, `a<hex>` agents).
+      if (isShellTaskId(taskId) && files.unfinishedSpools().includes(taskId)) {
+        files.spool(taskId).finish(143);
+      } else if (files.unfinishedSpools().includes(taskId)) {
+        LOGGER.log(
+          { claude_session_id: sessionUuid, task_id: taskId },
+          "fake vendor stopped an AGENT task; its spool is left unterminated, as an agent spool always is",
+        );
+      }
       systemMessage("task_notification", {
         task_id: taskId,
         tool_use_id: live.toolUseId,

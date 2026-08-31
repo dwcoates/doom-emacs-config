@@ -66,6 +66,8 @@ import {
 } from "../service/failures.js";
 import type { Engine } from "./engine.js";
 import type { EngineFold, FoldContext } from "./fold-context.js";
+import { SYNTHETIC_MODEL } from "../model.js";
+import { fastModeUpdate } from "../convert/session-updates.js";
 import { backupTranscript } from "./backup.js";
 import {
   appendCompactionLines,
@@ -133,6 +135,13 @@ export interface EngineDeps {
   readonly acquireLock?: (sessionId: string) => () => void;
   /** How long StartSession waits for the vendor's own `system:init`. */
   readonly initTimeoutMs?: number;
+  /**
+   * The keep-alive cadence, when something overrode the module constant.
+   *
+   * `main.ts` fills this ONLY for a `--fake` process; a real session always
+   * beats on {@link KEEPALIVE_INTERVAL_MS}.
+   */
+  readonly keepaliveIntervalMs?: number;
 }
 
 /** How often the account's rate-limit windows are sampled. */
@@ -244,12 +253,58 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
+      reportFault: (_kind, detail) => {
+        noteConverterDefect(detail);
+      },
       liveTask: (taskId) => {
         const entry = live.get(taskId);
         if (entry === undefined) return undefined;
         return entry.toolUseId === undefined ? { toolUseId: "" } : { toolUseId: entry.toolUseId };
       },
     };
+  }
+
+  // -- the converter's own health -------------------------------------------
+
+  /** Which component a converter defect is reported against, on both sides. */
+  const CONVERTER_COMPONENT = "converter";
+
+  /** Open while the converter is refusing messages; counts what it refused. */
+  let converterDegraded: { droppedCount: number } | undefined;
+  /** Set by the fault channel during ONE fold call, cleared before the next. */
+  let converterDefectThisMessage = false;
+
+  /**
+   * The fold refused a vendor message.
+   *
+   * The fault is standing (the session is unhealthy) and the window is OPEN
+   * until a message converts cleanly. Every refusal counts toward the window's
+   * `dropped_count`, which is the only place the number of lost records is
+   * ever stated.
+   */
+  function noteConverterDefect(detail: string): void {
+    converterDefectThisMessage = true;
+    if (converterDegraded === undefined) {
+      converterDegraded = { droppedCount: 0 };
+      pushes.openDegradedWindow(
+        CONVERTER_COMPONENT,
+        "the fold refused a vendor message it should have modelled",
+      );
+    }
+    converterDegraded.droppedCount += 1;
+    LOGGER.log(
+      { level: "error", component: CONVERTER_COMPONENT, detail, dropped_count: converterDegraded.droppedCount },
+      "the converter refused a vendor message; the session is degraded until one converts",
+    );
+    pushes.fault(sessionFault({ kind: "converterDefect" }, CONVERTER_COMPONENT, detail));
+  }
+
+  /** A message converted cleanly (or the turn ended): the converter is well. */
+  function noteConverterHealthy(): void {
+    if (converterDegraded === undefined) return;
+    const droppedCount = converterDegraded.droppedCount;
+    converterDegraded = undefined;
+    pushes.resolveComponent(CONVERTER_COMPONENT, droppedCount);
   }
 
   // -- session-level pushes the shim itself produces ------------------------
@@ -279,6 +334,57 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         },
       }),
     );
+  }
+
+  /**
+   * THE MODEL THE VENDOR SAYS IT ANSWERED ON.
+   *
+   * The vendor can serve a model nobody asked for — a refusal fallback retries
+   * on another model and says so ONLY through the next assistant message's
+   * `message.model`. The chip a surface draws is the model in effect, not the
+   * last `SetSessionModel`, so the reported name is adopted as truth and pushed
+   * whenever it differs.
+   *
+   * A `<synthetic>` MARKER IS NEVER A MODEL: it is the CLI's stand-in for "no
+   * real nameable model", and adopting it would put an unspawnable id in the
+   * picker and in every later authoritative field.
+   */
+  function noteReportedModel(reported: unknown): void {
+    if (typeof reported !== "string") return;
+    const name = reported.trim();
+    if (name === "") return;
+    if (name === SYNTHETIC_MODEL) {
+      LOGGER.log(
+        { level: "warn", reported: name },
+        "the vendor reported the synthetic marker as its model; it is not a model and is not adopted",
+      );
+      return;
+    }
+    if (name === effectiveModel) return;
+    LOGGER.log(
+      { previous_model: effectiveModel, effective_model: name },
+      "the vendor answered on a model the shim did not ask for; adopting it as the effective model",
+    );
+    effectiveModel = name;
+    pushModel();
+  }
+
+  /**
+   * FAST MODE, from the two places the vendor states it.
+   *
+   * `init` states it at the session's start (and again after every rotation),
+   * and EVERY `result` restates it — which is what makes a mid-session change
+   * observable at all, since the vendor announces nothing when it flips. ONE
+   * PRODUCER: the fold's own `fast_mode` row still lands in the record, but the
+   * push is the engine's, so no consumer ever sees the same flip twice.
+   *
+   * Unchanged values are dropped by the fan-out itself, and a joining consumer
+   * is replayed the current one.
+   */
+  function noteFastMode(state: unknown, reason: unknown): void {
+    if (typeof state !== "string" || state === "") return;
+    LOGGER.logVerbose({ fast_mode_state: state }, "the vendor stated its fast-mode state");
+    pushes.push(fastModeUpdate(state, typeof reason === "string" ? reason : undefined));
   }
 
   function pushPermissionMode(): void {
@@ -679,7 +785,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   async function onSdkMessage(message: SdkMessage): Promise<void> {
     noteIdentityFacts(message);
     noteDetachedWork(message);
+    converterDefectThisMessage = false;
     const output = deps.fold.onSdkMessage(message, foldContext());
+    if (converterDefectThisMessage) {
+      LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
+    } else {
+      noteConverterHealthy();
+    }
     const entries = [...output.entries];
     if (entries.length > 0) deps.persistence.write(entries);
     for (const entry of entries) {
@@ -690,20 +802,52 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     const uuid = (message as { uuid?: string }).uuid;
     if (typeof uuid === "string" && uuid !== "") rewind.noteRecord(uuid, open?.keepalive === true);
-    if (output.turnEnded !== undefined) await closeTurn();
+    if (output.turnEnded !== undefined) {
+      // THE TURN'S END IS ALSO A RECOVERY POINT: a defect on the turn's last
+      // convertible message would otherwise leave the window open until some
+      // later turn happened to arrive.
+      noteConverterHealthy();
+      await closeTurn();
+    }
   }
 
   function noteIdentityFacts(message: SdkMessage): void {
     if (message.type === "system" && message.subtype === "init") {
       setClaudeSessionId(message.session_id);
       recordAgentBinaryVersion(message.claude_code_version);
-      effectiveModel = message.model;
+      if (message.model.trim() === SYNTHETIC_MODEL) {
+        LOGGER.log(
+          { level: "warn" },
+          "the vendor's init reported the synthetic marker as its model; keeping the model already in effect",
+        );
+      } else {
+        effectiveModel = message.model;
+      }
       permissionMode = fromVendorPermissionMode(message.permissionMode);
+      noteFastMode(
+        (message as { fast_mode_state?: unknown }).fast_mode_state,
+        (message as { fast_mode_disabled_reason?: unknown }).fast_mode_disabled_reason,
+      );
       if (identity !== undefined && message.session_id !== identity.vendorSessionId) {
         void rotate(message.session_id);
       }
       initResolve?.(message);
       initResolve = undefined;
+      return;
+    }
+    if (message.type === "result") {
+      // EVERY RESULT RESTATES IT, which is the only way a flip mid-session is
+      // ever seen: the vendor announces the change nowhere else.
+      noteFastMode(
+        (message as { fast_mode_state?: unknown }).fast_mode_state,
+        (message as { fast_mode_disabled_reason?: unknown }).fast_mode_disabled_reason,
+      );
+      return;
+    }
+    if (message.type === "assistant") {
+      // UNSOLICITED CHANGES ARE STILL CHANGES: nothing called SetSessionModel,
+      // so this message is the only evidence the swap happened.
+      noteReportedModel((message.message as { model?: unknown } | undefined)?.model);
       return;
     }
     if (message.type === "conversation_reset") {
@@ -1084,7 +1228,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // prompted still has a cache worth keeping warm.
     cadence = new KeepaliveCadence(
       () => void keepaliveBeat(),
-      undefined,
+      deps.keepaliveIntervalMs,
       deps.scheduler ?? REAL_SCHEDULER,
     );
     cadence.start();
@@ -1344,27 +1488,39 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // The vendor no longer has it and nobody stopped it: we simply stopped
       // being able to see it, which is what `lost.swept_up` says.
       //
-      // THE KIND COMES FROM THE RECORD, never from a guess: every terminal arm
-      // is kind-specific, so closing an unknown unit as a shell would claim it
-      // ran a command and closing it as a spawn would claim it made an agent.
-      // A unit the record cannot describe is reported and left open — the
-      // obligation is real, and inventing its kind would not discharge it.
+      // THE KIND COMES FROM WHERE THE WORK WAS FOUND (ruling, landing 5).
+      // `live_detached` is the store's NON-AGENT detached table — shell runs —
+      // so a row there is a shell run whether or not the book still describes
+      // its start, and a spawn unit found in the book is a spawn. NOTHING IS
+      // EVER LEFT OPEN: an obligation the shim declines to close is one that
+      // never gets a terminal at all, which breaks the whole invariant this
+      // reconciliation exists to hold.
       const run = toolCallActivityId(work.value);
       const item = findUnit(book, run);
-      if (item?.case === "bash") {
-        const recorded = findBashStart(book, run);
-        if (recorded !== undefined) {
-          closing.push(closingBashTerminal(agentId, run, recorded));
-          continue;
-        }
-      }
       if (item?.case === "subagent") {
         closing.push(closingSubagentTerminal(agentId, run));
         continue;
       }
-      LOGGER.log(
-        { level: "warn", work_id: work.value, kind: item?.case },
-        "the record cannot describe this live work; its terminal would have to invent the unit's kind, so it stays open",
+      const recorded = findBashStart(book, run);
+      if (recorded === undefined) {
+        LOGGER.log(
+          { level: "warn", work_id: work.value, kind: item?.case ?? "" },
+          "the record holds no describable start for this live shell run; closing it as swept up with no command stated",
+        );
+      }
+      closing.push(
+        closingBashTerminal(
+          agentId,
+          run,
+          recorded ??
+            // AN EMPTY LINE IS THE RECORD SAYING IT NEVER SAW ONE, which is
+            // exactly the situation; a terminal naming a command nobody
+            // observed would be the invention. The WARN above names the run so
+            // the gap is investigable rather than merely present.
+            create(conversationv1.AgentBashStartSchema, {
+              command: create(conversationv1.AgentBashCommandSchema, { line: "" }),
+            }),
+        ),
       );
     }
     for (const agent of open.liveAgents) {
@@ -1407,6 +1563,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       deps.persistence.write([promptEntry(prompt, identity.agentId, true)]);
       await submit(said, true);
+      LOGGER.log(
+        { turn: turn.value, outcome: "keepalive_submitted" },
+        "submitted one of the shim's own keep-alive prompts; its rows are recorded and never served",
+      );
     } catch (err) {
       open = undefined;
       pushes.fault(

@@ -268,10 +268,17 @@ export class RecordingFold implements EngineFold {
   readonly seen: SdkMessage[] = [];
   readonly contexts: FoldContext[] = [];
   entriesFor: (message: SdkMessage) => PersistEntry[] = () => [];
+  /** When it answers a detail, the fold REFUSED this message and says so. */
+  faultFor: (message: SdkMessage) => string | undefined = () => undefined;
 
   onSdkMessage(message: SdkMessage, context: FoldContext): EngineFoldOutput {
     this.seen.push(message);
     this.contexts.push(context);
+    const detail = this.faultFor(message);
+    if (detail !== undefined) {
+      context.reportFault?.("converter_defect", detail);
+      return { entries: [] };
+    }
     const entries = this.entriesFor(message);
     return message.type === "result"
       ? {
@@ -287,9 +294,12 @@ export class RecordingFold implements EngineFold {
 /** A scheduler that never schedules; the suite fires the beat itself. */
 export class ManualScheduler implements KeepaliveScheduler {
   readonly handlers: (() => void)[] = [];
+  /** The interval each handler was scheduled at, in the same order. */
+  readonly intervals: number[] = [];
   cleared = 0;
-  setInterval(handler: () => void): unknown {
+  setInterval(handler: () => void, intervalMs: number): unknown {
     this.handlers.push(handler);
+    this.intervals.push(intervalMs);
     return this.handlers.length - 1;
   }
   clearInterval(): void {

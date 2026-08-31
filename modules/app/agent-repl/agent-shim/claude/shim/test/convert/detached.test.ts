@@ -46,14 +46,16 @@ describe("lostBashEntry", () => {
     expect(interrupted.cause.case).toBe("lost");
   });
 
-  it("claims no output it did not observe", () => {
+  it("states not_observed rather than claiming output it did not see", () => {
+    // LANDING 5: distinct from empty text (a command that printed nothing) and
+    // from a `partial` omission of zero bytes, which claimed we had seen all
+    // none of what it printed.
     const entry = lostBashEntry(foldContext(), MAIN_AGENT, RUN, start(), wentSilent());
 
     const frame = entry?.item.kind === "bash_run" ? entry.item.frame : undefined;
     const success = frame?.result.value as conversationv1.AgentBashSuccess;
     const interrupted = success.outcome.value as conversationv1.AgentBashInterrupted;
-    const text = interrupted.output?.form.value as conversationv1.AgentBashOutputText;
-    expect(text.extent.case).toBe("partial");
+    expect(interrupted.output?.form.case).toBe("notObserved");
   });
 
   it("refuses to invent a command when the record holds none", () => {
@@ -68,10 +70,12 @@ describe("lostBashEntry", () => {
     expect(entry).toBeUndefined();
   });
 
-  it("keys the row as every other row of the run, so it upserts in place", () => {
+  it("keys the row as the run's TERMINAL, which supersedes nothing", () => {
+    // A run's rows are a SEQUENCE — start, deltas, terminal — so a terminal
+    // sharing the start's key would erase the output the run produced.
     const entry = lostBashEntry(foldContext(), MAIN_AGENT, RUN, start(), wentSilent());
 
-    expect(entry?.upsertKey).toBe("bash:run-1");
+    expect(entry?.upsertKey).toBe("bash:run-1:terminal");
   });
 });
 
