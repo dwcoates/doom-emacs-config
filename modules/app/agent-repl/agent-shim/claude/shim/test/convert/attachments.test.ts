@@ -169,7 +169,9 @@ describe("the context-budget warning", () => {
     );
   });
 
-  it("keys each warning by the record that stated it, so none overwrites the last", () => {
+  it("keys each warning under the CROSS-PLANE session:<arm>:<uuid> spelling", () => {
+    // Both planes produce this fact from one transcript line, and write_id
+    // dedup collapses them into one row only if the key bytes match.
     const entries = convertAttachment(
       {
         type: "attachment",
@@ -180,7 +182,7 @@ describe("the context-budget warning", () => {
       UNIT,
     );
 
-    expect(entries[0]?.upsertKey).toBe("budget:uuid-tip");
+    expect(entries[0]?.upsertKey).toBe("session:context_budget_warning:uuid-tip");
   });
 
   it("produces no update at all when the record carried no text", () => {

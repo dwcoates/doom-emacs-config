@@ -263,3 +263,27 @@ describe("writeId", () => {
     );
   });
 });
+
+describe("the cross-plane key spellings", () => {
+  it("spells a context-budget warning as session:context_budget_warning:<uuid>", () => {
+    // BOTH PLANES produce this fact from one transcript line, and write_id
+    // dedup collapses them into one row only if the key bytes match.
+    expect(keys.contextBudgetWarningUpsertKey("11111111-2222-4333-8444-555555555555")).toBe(
+      "session:context_budget_warning:11111111-2222-4333-8444-555555555555",
+    );
+  });
+
+  it("spells residue as residue:<uuid>, with no kind segment", () => {
+    expect(keys.residueUpsertKey("11111111-2222-4333-8444-555555555555")).toBe(
+      "residue:11111111-2222-4333-8444-555555555555",
+    );
+  });
+
+  it("spells a uuid-less stream record's residue as residue:stream:<sequence>", () => {
+    expect(keys.streamResidueUpsertKey(7)).toBe("residue:stream:7");
+  });
+
+  it("refuses residue with no vendor record uuid", () => {
+    expect(() => keys.residueUpsertKey("")).toThrow();
+  });
+});

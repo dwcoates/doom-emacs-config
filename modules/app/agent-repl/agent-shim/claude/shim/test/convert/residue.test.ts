@@ -109,7 +109,9 @@ describe("residueForMessage", () => {
 });
 
 describe("residueEntry", () => {
-  it("keys the row by what the record was and which record it was", () => {
+  it("keys the row by the record's own uuid and nothing else", () => {
+    // The kind lives inside the row; a kind segment in the key would stop the
+    // two planes' conversions of one record from collapsing to one row.
     const entry = residueEntry(
       foldContext(),
       { type: "system", subtype: "notification", uuid: "uuid-1" },
@@ -117,7 +119,7 @@ describe("residueEntry", () => {
       "residue.vendor_specific",
     );
 
-    expect(entry.upsertKey).toBe("residue:system/notification:uuid-1");
+    expect(entry.upsertKey).toBe("residue:uuid-1");
   });
 
   it("never marks residue keep-alive, which would lose WHY it is unserved", () => {
@@ -131,7 +133,10 @@ describe("residueEntry", () => {
     expect(entry.keepalive).toBe(false);
   });
 
-  it("names a coordinate for a record that carries no uuid", () => {
+  it("keys a record with NO uuid by this process's own stream sequence", () => {
+    // A record with no identity has nothing to be named by, so it is named by
+    // its occurrence — in a space disjoint from the sidecar's
+    // `residue:file:<path>:<offset>`.
     const entry = residueEntry(
       foldContext(),
       { type: "prompt_suggestion" },
@@ -139,6 +144,35 @@ describe("residueEntry", () => {
       "residue.vendor_specific",
     );
 
-    expect(entry.source.vendorUuid).toBe("residue:prompt_suggestion");
+    expect(entry.upsertKey.startsWith("residue:stream:")).toBe(true);
+  });
+
+  it("names the same coordinate as its source for a record with no uuid", () => {
+    const entry = residueEntry(
+      foldContext(),
+      { type: "prompt_suggestion" },
+      vendorSpecificResidue("prompt_suggestion", {}),
+      "residue.vendor_specific",
+    );
+
+    expect(entry.source.vendorUuid).toBe(entry.upsertKey);
+  });
+
+  it("gives two uuid-less records two different keys", () => {
+    const first = residueEntry(
+      foldContext(),
+      { type: "prompt_suggestion" },
+      vendorSpecificResidue("prompt_suggestion", {}),
+      "residue.vendor_specific",
+    );
+
+    const second = residueEntry(
+      foldContext(),
+      { type: "prompt_suggestion" },
+      vendorSpecificResidue("prompt_suggestion", {}),
+      "residue.vendor_specific",
+    );
+
+    expect(first.upsertKey === second.upsertKey).toBe(false);
   });
 });
