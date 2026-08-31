@@ -192,6 +192,31 @@ give every workspace a second tab."
        acc))
     (nreverse (car acc))))
 
+(defun agent-repl-roster--section-holds-id-p (section id)
+  "Return non-nil when SECTION's rows include the workspace ID."
+  (let ((acc (list nil)))
+    (agent-repl-roster--walk-rows
+     (plist-get (plist-get section :rows) :rows) nil acc)
+    (seq-some (lambda (entry)
+                (equal (agent-repl-roster-row-id (plist-get entry :row)) id))
+              (car acc))))
+
+(defun agent-repl-roster-repository-of (id &optional roster)
+  "Return the `RepositoryRef' of the section holding workspace ID, or nil.
+ROSTER defaults to `agent-repl-roster-view'.  The repository is the
+SECTION'S OWN key, never anything derived from a row: sections are the
+repository grouping, and the key is the imported join token a verb echoes
+back.  Nil when no section holds ID — including before the first push,
+when Emacs holds no roster at all."
+  (let ((sections (plist-get (plist-get (or roster agent-repl-roster-view)
+                                        :repository)
+                             :sections))
+        (found nil))
+    (dolist (section sections)
+      (when (and (null found) (agent-repl-roster--section-holds-id-p section id))
+        (setq found (plist-get (plist-get section :key) :repository))))
+    found))
+
 ;;;; ---- Invariants -------------------------------------------------------
 
 (defun agent-repl-roster--duplicate-id (entries)

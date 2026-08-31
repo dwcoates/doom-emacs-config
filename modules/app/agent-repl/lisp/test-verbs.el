@@ -659,19 +659,56 @@ this test needs the genuinely sectionless roster."
 
 ;;;; ---- Merge queue ----
 
-(ert-deftest agent-repl-verbs-merge-queue-pause-sends-the-pause-arm ()
-  "Pause is an empty arm: being set is the whole action."
-  (agent-repl-test-verbs--with nil
-    (agent-repl-merge-queue-pause)
-    (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
-                   (list :arm :pause :value nil)))))
+(defmacro agent-repl-test-verbs--with-repository (repository &rest body)
+  "Run BODY with the roster answering REPOSITORY for any workspace id."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-roster-repository-of)
+              (lambda (&rest _) ,repository)))
+     ,@body))
 
-(ert-deftest agent-repl-verbs-merge-queue-resume-sends-the-resume-arm ()
-  "Resume is an empty arm."
+(ert-deftest agent-repl-verbs-merge-queue-pause-names-the-current-repository ()
+  "THE QUEUE IS PER REPOSITORY, so a plain pause names the one the current
+workspace's roster section is keyed by."
   (agent-repl-test-verbs--with nil
-    (agent-repl-merge-queue-resume)
-    (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
-                   (list :arm :resume :value nil)))))
+    (agent-repl-test-verbs--with-repository (agent-repl-test-verbs--repo-ref)
+      (agent-repl-merge-queue-pause)
+      (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
+                     (list :arm :pause
+                           :value (list :repository (agent-repl-test-verbs--repo-ref))))))))
+
+(ert-deftest agent-repl-verbs-merge-queue-pause-daemon-wide-omits-the-repository ()
+  "A prefix argument means every repository that has a queue: UNSET."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-repository
+        (error "a daemon-wide pause must not consult the roster")
+      (agent-repl-merge-queue-pause t)
+      (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
+                     (list :arm :pause :value (list :repository nil)))))))
+
+(ert-deftest agent-repl-verbs-merge-queue-pause-without-a-repository-refuses ()
+  "No section for the workspace means no scope to send; pausing every
+repository instead would exceed what the caller asked for."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-repository nil
+      (should-error (agent-repl-merge-queue-pause) :type 'user-error))))
+
+(ert-deftest agent-repl-verbs-merge-queue-resume-names-the-current-repository ()
+  "Resume carries the same per-repository scope as pause."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-repository (agent-repl-test-verbs--repo-ref)
+      (agent-repl-merge-queue-resume)
+      (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
+                     (list :arm :resume
+                           :value (list :repository (agent-repl-test-verbs--repo-ref))))))))
+
+(ert-deftest agent-repl-verbs-merge-queue-resume-daemon-wide-omits-the-repository ()
+  "A prefix argument resumes every repository that has a queue."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-test-verbs--with-repository
+        (error "a daemon-wide resume must not consult the roster")
+      (agent-repl-merge-queue-resume t)
+      (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
+                     (list :arm :resume :value (list :repository nil)))))))
 
 (ert-deftest agent-repl-verbs-merge-queue-evict-names-the-workspace ()
   "Evict takes ONE workspace's merge off the queue, named by its ref."
