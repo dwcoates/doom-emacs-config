@@ -19,6 +19,14 @@ var statusArms = []string{
 	"inactive",
 }
 
+// The merge arms of RosterRow.status — the ones that render a RECYCLE GLYPH
+// rather than a lifecycle dot, and so are keyed in render-colors.json's
+// merge_glyphs table rather than only in roster_status.
+var mergeArms = []string{
+	"merge_enqueuing", "merging", "merge_queued", "merge_conflict",
+	"merge_failed", "merged",
+}
+
 // wsState is one workspace's live session accumulation — the half of a row the
 // durable registry cannot state. It is in-memory only.
 type wsState struct {
