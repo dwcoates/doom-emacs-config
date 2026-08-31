@@ -155,7 +155,7 @@ describe("the context-budget warning", () => {
       {
         type: "attachment",
         uuid: "uuid-tip",
-        attachment: { type: "context_tip", content: "the window is filling" },
+        attachment: { type: "context_budget_warning", content: "the window is filling" },
       },
       foldContext(),
       UNIT,
@@ -176,7 +176,7 @@ describe("the context-budget warning", () => {
       {
         type: "attachment",
         uuid: "uuid-tip",
-        attachment: { type: "context_tip", content: "the window is filling" },
+        attachment: { type: "context_budget_warning", content: "the window is filling" },
       },
       foldContext(),
       UNIT,
@@ -185,9 +185,26 @@ describe("the context-budget warning", () => {
     expect(entries[0]?.upsertKey).toBe("session:context_budget_warning:uuid-tip");
   });
 
+  it("records a generic context_tip as RESIDUE, never as the budget warning", () => {
+    // RULING (landing 5): the one real `context_tip` capture is a generic
+    // `/goal` tip, so drawing it as "your context is filling" would put a
+    // sentence in the feed that the vendor never said about the context.
+    const entries = convertAttachment(
+      {
+        type: "attachment",
+        uuid: "uuid-tip",
+        attachment: { type: "context_tip", tip: { tip: "try /goal" } },
+      },
+      foldContext(),
+      UNIT,
+    );
+
+    expect(entries[0]?.item.kind).toBe("residue");
+  });
+
   it("produces no update at all when the record carried no text", () => {
     const entries = convertAttachment(
-      { type: "attachment", uuid: "uuid-tip", attachment: { type: "context_tip" } },
+      { type: "attachment", uuid: "uuid-tip", attachment: { type: "context_budget_warning" } },
       foldContext(),
       UNIT,
     );

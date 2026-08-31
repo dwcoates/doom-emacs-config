@@ -281,23 +281,27 @@ export const RATE_LIMIT = scenario({
   },
 });
 
-export const CONTEXT_BUDGET = scenario({
-  name: "context-budget",
-  prompt: "!context-budget",
-  emits: "prose only; the budget warning is the vendor's `context_tip` ATTACHMENT, never a stream message",
+export const CONTEXT_TIP = scenario({
+  name: "context-tip",
+  prompt: "!context-tip",
+  emits:
+    "prose only, plus the vendor's `context_tip` ATTACHMENT — a GENERIC CLI TIP, which is what the one real " +
+    "capture of this record actually is. IT IS NOT THE CONTEXT-BUDGET WARNING (ruling, landing 5): which " +
+    "attachment carries that warning is on the capture run's checklist, and mapping the tip to it would draw an " +
+    "unrelated tip as \"your context is filling\"",
   writes: "a `context_tip` attachment line",
-  arms: "SessionContextBudgetWarning",
+  arms: "residue `attachment/context_tip` — the tip is recorded as itself, unconverted, and reaches no arm",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "context-budget" }, "fake context-budget-warning turn");
+    ctx.log({ turn: ctx.turn, branch: "context-tip" }, "fake generic context-tip turn");
     ctx.attachment({
       type: "context_tip",
       tip: {
-        tip: "This conversation is nearing its context budget — /compact will free room without losing the thread.",
-        featureId: "context-budget",
-        action: "/compact",
+        tip: "Set a goal for this conversation with /goal so later turns can be checked against it.",
+        featureId: "goal",
+        action: "/goal",
       },
     });
-    conclude(ctx, "The context budget is nearly spent.");
+    conclude(ctx, "The CLI offered a tip.");
   },
 });
 
@@ -510,7 +514,7 @@ export const SESSION_SCENARIOS = [
   USAGE_UTILIZATION_UNAVAILABLE,
   USAGE_SAMPLING_FAILURE,
   RATE_LIMIT,
-  CONTEXT_BUDGET,
+  CONTEXT_TIP,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,
