@@ -281,23 +281,86 @@ export const RATE_LIMIT = scenario({
   },
 });
 
-export const CONTEXT_BUDGET = scenario({
-  name: "context-budget",
-  prompt: "!context-budget",
-  emits: "prose only; the budget warning is the vendor's `context_tip` ATTACHMENT, never a stream message",
+/**
+ * One rate-limit event per NAMED WINDOW.
+ *
+ * The footer draws the account's standing window, and which window a status is
+ * about is the whole join: a five-hour limit and a seven-day limit are two
+ * different rows on that surface, and a mock that only ever named the overage
+ * window could not exercise either. `SessionRateLimitType` is a oneof, so the
+ * arm IS the window and there is nothing else to read it from.
+ */
+function rateLimitWindowScenario(
+  name: string,
+  vendorWindow: string,
+  arm: string,
+  utilization: number,
+  resetsInSeconds: number,
+) {
+  return scenario({
+    name,
+    prompt: `!${name}`,
+    emits:
+      `a \`rate_limit_event\` naming the \`${vendorWindow}\` window — \`allowed_warning\` with a utilization and a ` +
+      "reset instant, the shape the FOOTER's window row joins against",
+    writes: "the assistant line, the prompt line and the turn record",
+    arms: `SessionRateLimitStatus.rate_limit_type=${arm}`,
+    run(ctx) {
+      ctx.log({ turn: ctx.turn, branch: name, rate_limit_type: vendorWindow }, "fake rate-limit-window turn");
+      ctx.emit({
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "allowed_warning",
+          resetsAt: Math.floor(ctx.nowMs() / 1000) + resetsInSeconds,
+          rateLimitType: vendorWindow,
+          utilization,
+          isUsingOverage: false,
+          overageInUse: false,
+          surpassedThreshold: 0.75,
+        },
+      });
+      conclude(ctx, `The ${vendorWindow} window is ${Math.round(utilization * 100)}% used.`);
+    },
+  });
+}
+
+export const RATE_LIMIT_FIVE_HOUR = rateLimitWindowScenario(
+  "rate-limit-five-hour",
+  "five_hour",
+  "five_hour",
+  0.82,
+  3_600,
+);
+
+export const RATE_LIMIT_SEVEN_DAY = rateLimitWindowScenario(
+  "rate-limit-seven-day",
+  "seven_day",
+  "seven_day",
+  0.61,
+  259_200,
+);
+
+export const CONTEXT_TIP = scenario({
+  name: "context-tip",
+  prompt: "!context-tip",
+  emits:
+    "prose only, plus the vendor's `context_tip` ATTACHMENT — a GENERIC CLI TIP, which is what the one real " +
+    "capture of this record actually is. IT IS NOT THE CONTEXT-BUDGET WARNING (ruling, landing 5): which " +
+    "attachment carries that warning is on the capture run's checklist, and mapping the tip to it would draw an " +
+    "unrelated tip as \"your context is filling\"",
   writes: "a `context_tip` attachment line",
-  arms: "SessionContextBudgetWarning",
+  arms: "residue `attachment/context_tip` — the tip is recorded as itself, unconverted, and reaches no arm",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "context-budget" }, "fake context-budget-warning turn");
+    ctx.log({ turn: ctx.turn, branch: "context-tip" }, "fake generic context-tip turn");
     ctx.attachment({
       type: "context_tip",
       tip: {
-        tip: "This conversation is nearing its context budget — /compact will free room without losing the thread.",
-        featureId: "context-budget",
-        action: "/compact",
+        tip: "Set a goal for this conversation with /goal so later turns can be checked against it.",
+        featureId: "goal",
+        action: "/goal",
       },
     });
-    conclude(ctx, "The context budget is nearly spent.");
+    conclude(ctx, "The CLI offered a tip.");
   },
 });
 
@@ -510,7 +573,9 @@ export const SESSION_SCENARIOS = [
   USAGE_UTILIZATION_UNAVAILABLE,
   USAGE_SAMPLING_FAILURE,
   RATE_LIMIT,
-  CONTEXT_BUDGET,
+  RATE_LIMIT_FIVE_HOUR,
+  RATE_LIMIT_SEVEN_DAY,
+  CONTEXT_TIP,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,

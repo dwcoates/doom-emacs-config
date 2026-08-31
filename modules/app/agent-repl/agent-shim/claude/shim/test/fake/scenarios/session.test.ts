@@ -127,16 +127,28 @@ describe("rate-limit events", () => {
   });
 });
 
-describe("the context-budget warning", () => {
+describe("the generic context tip", () => {
   it("is an attachment, never a stream message", async () => {
     // Arrange + Act
-    const driven = await driveScenario(["!context-budget"]);
+    const driven = await driveScenario(["!context-tip"]);
     const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
       type: string;
     };
 
     // Assert
     expect(attachment.type).toBe("context_tip");
+  });
+
+  it("is a GENERIC tip and not the context-budget warning", async () => {
+    // RULING (landing 5): the one real capture of this record is a `/goal`
+    // tip, so a mock that dressed it as the budget warning would have every
+    // suite agree with a mapping the vendor never made.
+    const driven = await driveScenario(["!context-tip"]);
+    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as {
+      tip?: { featureId?: string };
+    };
+
+    expect(attachment.tip?.featureId).toBe("goal");
   });
 });
 
@@ -503,5 +515,58 @@ describe("fast mode as a SESSION fact", () => {
 
     // Assert
     expect(states).toEqual(["cooldown", "cooldown"]);
+  });
+});
+
+describe("the named rate-limit windows", () => {
+  /** The one `rate_limit_event` a drive produced. */
+  const rateLimitInfo = (
+    driven: Awaited<ReturnType<typeof driveScenario>>,
+  ): Record<string, unknown> =>
+    ((driven.messages as unknown as Record<string, unknown>[]).find(
+      (m) => m.type === "rate_limit_event",
+    )?.rate_limit_info ?? {}) as Record<string, unknown>;
+
+  it("names the five-hour window", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rate-limit-five-hour"]);
+
+    // Assert. The footer's window row joins on this and nothing else.
+    expect(rateLimitInfo(driven).rateLimitType).toBe("five_hour");
+  });
+
+  it("names the seven-day window", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rate-limit-seven-day"]);
+
+    // Assert
+    expect(rateLimitInfo(driven).rateLimitType).toBe("seven_day");
+  });
+
+  it("states a utilization for the five-hour window", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rate-limit-five-hour"]);
+
+    // Assert. A window with no utilization draws as a row with no figure.
+    expect(rateLimitInfo(driven).utilization).toBe(0.82);
+  });
+
+  it("states a reset instant in SECONDS, as the vendor does", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rate-limit-seven-day"]);
+
+    // Assert. The converter's job is seconds→millis, so the mock must not
+    // pre-convert or the conversion would never be exercised.
+    const resetsAt = Number(rateLimitInfo(driven).resetsAt);
+    expect(resetsAt < 100_000_000_000).toBe(true);
+  });
+
+  it("gives the two windows DIFFERENT utilizations, so a join cannot pass by luck", async () => {
+    // Arrange + Act
+    const five = await driveScenario(["!rate-limit-five-hour"]);
+    const seven = await driveScenario(["!rate-limit-seven-day"]);
+
+    // Assert
+    expect(rateLimitInfo(five).utilization === rateLimitInfo(seven).utilization).toBe(false);
   });
 });

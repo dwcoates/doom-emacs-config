@@ -52,6 +52,7 @@ export interface ContextOverrides {
   readonly subagentFor?: (toolUseId: string) => conversationv1.AgentId | undefined;
   readonly mcpServerNames?: readonly string[];
   readonly lastWriteOrEditUnit?: conversationv1.AgentActivityId;
+  readonly reportFault?: (kind: "converter_defect", detail: string) => void;
 }
 
 /** A fold context with the engine's knowledge stubbed to nothing by default. */
@@ -66,6 +67,7 @@ export function foldContext(overrides: ContextOverrides = {}): FoldContext {
     subagentFor: overrides.subagentFor ?? (() => undefined),
     mcpServerNames: () => overrides.mcpServerNames ?? [],
     lastWriteOrEditUnit: overrides.lastWriteOrEditUnit,
+    ...(overrides.reportFault === undefined ? {} : { reportFault: overrides.reportFault }),
   };
 }
 

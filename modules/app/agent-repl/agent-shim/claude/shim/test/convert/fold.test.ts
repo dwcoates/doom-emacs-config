@@ -905,6 +905,38 @@ describe("residue", () => {
     expect(residueOf(output.entries[0])).toBeDefined();
   });
 
+  it("reports a converter defect through the engine's fault channel", () => {
+    const fold = createFold();
+    const reported: { kind: string; detail: string }[] = [];
+
+    fold.onSdkMessage(
+      {
+        type: "system",
+        subtype: "hook_started",
+        uuid: "uuid-hook-broken",
+        session_id: "session-1",
+        hook_id: "",
+        hook_name: "PreToolUse:Read",
+        hook_event: "PreToolUse",
+      } as unknown as SdkMessage,
+      foldContext({ reportFault: (kind, detail) => reported.push({ kind, detail }) }),
+    );
+
+    expect(reported[0]?.kind).toBe("converter_defect");
+  });
+
+  it("reports nothing through the fault channel when the message converts", () => {
+    const fold = createFold();
+    const reported: string[] = [];
+
+    fold.onSdkMessage(
+      streamMessage("notification"),
+      foldContext({ reportFault: (_kind, detail) => reported.push(detail) }),
+    );
+
+    expect(reported).toEqual([]);
+  });
+
   it("records the vendor's own answer to a local slash command as vendor-specific residue", () => {
     const fold = createFold();
 

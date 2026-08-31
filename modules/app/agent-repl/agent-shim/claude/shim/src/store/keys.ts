@@ -120,13 +120,49 @@ export function terminalUpsertKey(
 }
 
 /**
- * A detached shell run's lifecycle rows, keyed by the RUN's activity id.
+ * A detached shell run's START row, keyed by the RUN's activity id.
  *
  * The run is the bash tool call itself, so its lifecycle rows and its page line
  * are about the same unit — different key prefixes, one identity.
+ *
+ * ONE ROW NEVER SUPERSEDES ANOTHER (project lead amendment, binding). A shell
+ * run's rows are a SEQUENCE, not a single upserted state: the start, then one
+ * row per output delta, then the terminal. They shared one key while the
+ * output was one whole, and under that spelling every delta overwrote the last
+ * and the terminal erased the output entirely — so `WatchBashRun`, which
+ * replays a run's whole history in write order, had nothing to replay.
  */
 export function bashUpsertKey(run: conversationv1.AgentActivityId): string {
   return `bash:${requireValue(run.value, "the bash run's activity id")}`;
+}
+
+/**
+ * ONE output delta of a detached shell run, keyed by WHERE IT STARTS.
+ *
+ * The offset is the delta's own identity: a re-read of the spool from the same
+ * offset is the same delta and upserts in place, while the next stretch of
+ * output is a new row. That is what makes a tailer restartable without either
+ * losing output or showing it twice.
+ */
+export function bashDeltaUpsertKey(
+  run: conversationv1.AgentActivityId,
+  fromOffset: bigint | number,
+): string {
+  const offset = typeof fromOffset === "bigint" ? fromOffset : BigInt(fromOffset);
+  if (offset < 0n) {
+    throw new Error("shim store keys: an output delta's from_offset cannot be negative");
+  }
+  return `${bashUpsertKey(run)}:${offset.toString()}`;
+}
+
+/**
+ * A detached shell run's TERMINAL row.
+ *
+ * Its own key, so settling the run adds the stop notice rather than replacing
+ * the output the run produced on its way there.
+ */
+export function bashTerminalUpsertKey(run: conversationv1.AgentActivityId): string {
+  return `${bashUpsertKey(run)}:terminal`;
 }
 
 /**
@@ -165,24 +201,43 @@ export function sessionUpsertKey(arm: string, vendorRecordUuid: string): string 
  * is not an activity, so `activity:` would be a lie, and a key naming only the
  * warning would have each new one overwrite the last — leaving a conversation
  * with exactly one visible warning however often the window filled.
+ *
+ * IT IS A `session:<arm>:<uuid>` KEY, NOT A `budget:` ONE (ruling, landing 5).
+ * BOTH PLANES produce this fact from ONE transcript line — the sidecar reads
+ * the file, the shim reads the stream — and write_id dedup collapses them into
+ * one row only if the key BYTES match. The sidecar mints `session:<arm>:<uuid>`
+ * for every arm it serves, so this plane spells it the same way.
  */
 export function contextBudgetWarningUpsertKey(vendorRecordUuid: string): string {
-  return `budget:${requireValue(vendorRecordUuid, "the vendor record uuid")}`;
+  return sessionUpsertKey("context_budget_warning", vendorRecordUuid);
 }
 
 /**
- * A residue row, keyed by WHAT KIND of record it was and which record it was.
+ * A residue row, keyed by THE RECORD IT WAS and nothing else.
  *
  * Residue has no identity of its own — that is what makes it residue — so the
  * key is its provenance. Keyed by the vendor record's own uuid so a redelivered
  * record settles as one row rather than accumulating copies of the same
  * unconverted line.
+ *
+ * NO KIND SEGMENT (ruling, landing 5). The kind lives INSIDE the row, and both
+ * planes' conversions of one record must collapse to one row — which they
+ * cannot if one plane's key carries a segment the other's does not.
  */
-export function residueUpsertKey(kind: string, vendorRecordUuid: string): string {
-  return `residue:${requireValue(kind, "the residue kind")}:${requireValue(
-    vendorRecordUuid,
-    "the vendor record uuid",
-  )}`;
+export function residueUpsertKey(vendorRecordUuid: string): string {
+  return `residue:${requireValue(vendorRecordUuid, "the vendor record uuid")}`;
+}
+
+/**
+ * The residue key for a stream record the vendor gave NO uuid.
+ *
+ * A PER-PROCESS MONOTONIC SEQUENCE, so it can never collide with the sidecar's
+ * own `residue:file:<path>:<offset>`: the two planes name their unidentified
+ * residue in disjoint spaces, because there is nothing about a record with no
+ * identity for the two to agree on.
+ */
+export function streamResidueUpsertKey(sequence: number): string {
+  return `residue:stream:${String(sequence)}`;
 }
 
 // ---------------------------------------------------------------------------

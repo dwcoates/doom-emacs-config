@@ -17,6 +17,8 @@ import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../
 import { cwdSlug } from "../../src/engine/cold.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
 import { textSaid } from "../../src/engine/turn.js";
+import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
+import { SYNTHETIC_MODEL } from "../../src/model.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -67,7 +69,9 @@ function assistantLine(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
-function harness(options: { nowMs?: number; lockThrows?: boolean } = {}): Harness {
+function harness(
+  options: { nowMs?: number; lockThrows?: boolean; keepaliveIntervalMs?: number } = {},
+): Harness {
   const stateDir = scratch();
   const configDir = scratch();
   const cwd = "/ws";
@@ -89,6 +93,9 @@ function harness(options: { nowMs?: number; lockThrows?: boolean } = {}): Harnes
     env: { stateDir, configDir, cwd },
     nowMs: () => options.nowMs ?? 1_000_100,
     scheduler,
+    ...(options.keepaliveIntervalMs === undefined
+      ? {}
+      : { keepaliveIntervalMs: options.keepaliveIntervalMs }),
     acquireLock: (sessionId) => {
       if (options.lockThrows === true) throw new Error("locked by another shim");
       locks.push(sessionId);
@@ -1037,10 +1044,13 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01")).toBe(true);
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
   });
 
-  it("leaves work the record cannot describe OPEN rather than inventing its kind", async () => {
+  it("closes work the record cannot describe rather than leaving it open", async () => {
+    // RULING (landing 5): `live_detached` is the store's shell table, so a row
+    // there IS a shell run and its kind is known from where it was found. An
+    // obligation the shim declines to close never gets a terminal at all.
     const h = harness();
     h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
       liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
@@ -1048,9 +1058,43 @@ describe("GetLiveWork reconciliation", () => {
 
     await started(h);
 
-    // Every terminal arm is kind-specific: closing an unknown unit as a shell
-    // would claim it ran a command, and as a spawn that it made an agent.
-    expect(h.persistence.buffered.some((entry) => entry.upsertKey.includes("b01"))).toBe(false);
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+  });
+
+  it("closes an undescribable run with lost.swept_up", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
+    const outcome =
+      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
+        ? entry.item.frame.result.value.outcome
+        : undefined;
+    expect(
+      outcome?.case === "interrupted" && outcome.value.cause.case === "lost"
+        ? outcome.value.cause.value.how.case
+        : "",
+    ).toBe("sweptUp");
+  });
+
+  it("states no command for a run whose start the record never held", async () => {
+    const h = harness();
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+
+    await started(h);
+
+    const entry = h.persistence.buffered.find((buffered) => buffered.upsertKey === "bash:b01:terminal");
+    const command =
+      entry?.item.kind === "bash_run" && entry.item.frame.result.case === "success"
+        ? entry.item.frame.result.value.command
+        : undefined;
+    expect(command?.line).toBe("");
   });
 
   it("writes a closing terminal for a subagent that did not survive", async () => {
@@ -1085,5 +1129,302 @@ describe("GetLiveWork reconciliation", () => {
     );
 
     expect((await started(h)).result.case).toBe("success");
+  });
+});
+
+describe("the converter's own health", () => {
+  /** The diagnostics the engine would state right now. */
+  function diagnostics(h: Harness): conversationv1.SessionDiagnostics {
+    const update = h.engine.pushes.diagnostics().update;
+    if (update.case !== "diagnostics") throw new Error("the engine stated no diagnostics");
+    return update.value;
+  }
+
+  const prose = (uuid: string): never =>
+    ({
+      type: "assistant",
+      uuid,
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model: "claude-opus-5", content: [] },
+    }) as never;
+
+  it("reports a refused message as a converter_defect fault", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "the hook firing id is empty" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    const health = diagnostics(h).health;
+    expect(health.case === "unhealthy" ? health.value.faults[0]?.kind.case : "").toBe("converterDefect");
+  });
+
+  it("names the converter as the faulting component", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    const health = diagnostics(h).health;
+    expect(health.case === "unhealthy" ? health.value.faults[0]?.component : "").toBe("converter");
+  });
+
+  it("opens a degraded window for the converter", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("open");
+  });
+
+  it("returns to healthy once a message converts", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid === "u-defect" ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    await h.engine.onSdkMessage(prose("u-good"));
+
+    expect(diagnostics(h).health.case).toBe("healthy");
+  });
+
+  it("closes the window with the number of messages it refused", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) =>
+      (message as { uuid?: string }).uuid?.startsWith("u-defect") === true ? "boom" : undefined;
+    await h.engine.onSdkMessage(prose("u-defect-1"));
+    await h.engine.onSdkMessage(prose("u-defect-2"));
+
+    await h.engine.onSdkMessage(prose("u-good"));
+
+    const window = diagnostics(h).degradedWindows[0];
+    expect(window?.extent.case === "closed" ? window.extent.value.droppedCount : -1n).toBe(2n);
+  });
+
+  it("opens ONE window across consecutive refusals", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = () => "boom";
+
+    await h.engine.onSdkMessage(prose("u-defect-1"));
+    await h.engine.onSdkMessage(prose("u-defect-2"));
+
+    expect(diagnostics(h).degradedWindows.length).toBe(1);
+  });
+
+  it("closes the window at the turn's end", async () => {
+    const h = harness();
+    await started(h);
+    h.fold.faultFor = (message) => (message.type === "assistant" ? "boom" : undefined);
+    await h.engine.onSdkMessage(prose("u-defect"));
+
+    await h.engine.onSdkMessage(resultMessage("u-result"));
+
+    expect(diagnostics(h).degradedWindows[0]?.extent.case).toBe("closed");
+  });
+});
+
+describe("the model the vendor answers on", () => {
+  /** An assistant message reporting the model that produced it. */
+  const answeredOn = (model: string): never =>
+    ({
+      type: "assistant",
+      uuid: `u-${model}`,
+      session_id: "s",
+      parent_tool_use_id: null,
+      message: { model, content: [] },
+    }) as never;
+
+  /** Every model name the engine pushed, in order. */
+  async function pushedModels(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const names: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "modelChanged") names.push(update.value.effectiveModel?.name ?? "");
+      }
+    })();
+    await act();
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+    return names;
+  }
+
+  it("pushes model_changed for a model nothing asked for", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names).toContain("claude-haiku-4-5");
+  });
+
+  it("pushes nothing when the reported model is the one in effect", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-opus-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-opus-5").length).toBe(1);
+  });
+
+  it("never adopts the synthetic marker as a model", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn(SYNTHETIC_MODEL));
+    });
+
+    expect(names).not.toContain(SYNTHETIC_MODEL);
+  });
+
+  it("keeps the adopted model for the next message that agrees with it", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5"));
+    });
+
+    expect(names.filter((name) => name === "claude-haiku-4-5").length).toBe(1);
+  });
+});
+
+describe("fast mode", () => {
+  /** A turn terminal restating the session's fast-mode state. */
+  const resultWithFastMode = (state: string, reason?: string): never =>
+    ({
+      ...(resultMessage("u-fast") as unknown as Record<string, unknown>),
+      fast_mode_state: state,
+      ...(reason === undefined ? {} : { fast_mode_disabled_reason: reason }),
+    }) as never;
+
+  /** Every fast-mode arm the engine pushed, in order. */
+  async function pushedFastMode(h: Harness, act: () => Promise<void>): Promise<string[]> {
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const arms: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "fastMode") arms.push(update.value.state.case ?? "");
+      }
+    })();
+    await act();
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+    return arms;
+  }
+
+  it("pushes the state a result reports", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+    });
+
+    expect(arms).toContain("on");
+  });
+
+  it("carries the vendor's own reason on the off arm", async () => {
+    const h = harness();
+    await started(h);
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const reasons: string[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "fastMode" && update.value.state.case === "off") {
+          reasons.push(update.value.state.value.reason);
+        }
+      }
+    })();
+
+    await h.engine.onSdkMessage(resultWithFastMode("off", "preference"));
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(reasons).toContain("preference");
+  });
+
+  it("distinguishes a cooldown from off", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("cooldown"));
+    });
+
+    expect(arms).toContain("cooldown");
+  });
+
+  it("pushes an unchanged state only once", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+      await h.engine.onSdkMessage(resultWithFastMode("on"));
+    });
+
+    expect(arms.filter((arm) => arm === "on").length).toBe(1);
+  });
+
+  it("pushes nothing for a result that states no fast-mode state", async () => {
+    const h = harness();
+    await started(h);
+
+    const arms = await pushedFastMode(h, async () => {
+      await h.engine.onSdkMessage(resultMessage("u-silent"));
+    });
+
+    expect(arms).toEqual([]);
+  });
+
+  it("replays the current state to a consumer that joins late", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage(resultWithFastMode("on"));
+
+    const arms = await pushedFastMode(h, async () => undefined);
+
+    expect(arms).toEqual(["on"]);
+  });
+});
+
+describe("the keep-alive interval", () => {
+  it("beats on the module constant when nothing overrode it", async () => {
+    const h = harness();
+
+    await started(h);
+
+    expect(h.scheduler.intervals[0]).toBe(KEEPALIVE_INTERVAL_MS);
+  });
+
+  it("beats on the interval the caller supplied", async () => {
+    const h = harness({ keepaliveIntervalMs: 200 });
+
+    await started(h);
+
+    expect(h.scheduler.intervals[0]).toBe(200);
   });
 });

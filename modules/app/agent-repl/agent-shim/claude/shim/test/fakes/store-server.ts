@@ -89,6 +89,25 @@ export interface FakeStore {
   sessionUpdates(): conversationv1.SessionUpdate[];
   /** Every unserved item written, in order. */
   unserved(): storev1.StoreUnservedItem[];
+  /**
+   * Every READ verb the store served, in order.
+   *
+   * `writes()` made the write plane observable and the read plane had no
+   * counterpart, so "GetLiveWork is called exactly once, at session start"
+   * could only be declared and never asserted. This is that lever.
+   */
+  reads(): FakeStoreRead[];
+}
+
+/** One read the fake served: which verb, and what was asked. */
+export interface FakeStoreRead {
+  readonly rpc:
+    | "GetLiveWork"
+    | "OpenAgentSession"
+    | "ReadAgentPage"
+    | "WatchBashRun"
+    | "GetSidecarCursors";
+  readonly request: unknown;
 }
 
 /** Start the fake store on `socketPath`. Resolves once it is accepting. */
@@ -99,6 +118,11 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const receivedWrites: storev1.WriteBatchRequest[] = [];
   const sessionUpdateRows: conversationv1.SessionUpdate[] = [];
   const unservedRows: storev1.StoreUnservedItem[] = [];
+  /** Every read verb served, in order — see {@link FakeStore.reads}. */
+  const servedReads: FakeStoreRead[] = [];
+  const noteRead = (rpc: FakeStoreRead["rpc"], request: unknown): void => {
+    servedReads.push({ rpc, request });
+  };
   /** Detached work ids that were announced, mapped to the run they detached from. */
   const detachedAnnounced = new Map<string, string | undefined>();
   /**
@@ -210,6 +234,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const routes = (router: ConnectRouter): void => {
     router.service(storev1.ShimStore, {
       async openAgentSession(request) {
+        noteRead("OpenAgentSession", request);
         const bookId = request.agent?.value ?? "";
         const all = rowsOf(bookId);
         const floorPointer =
@@ -279,6 +304,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       },
 
       async *watchBashRun(request) {
+        noteRead("WatchBashRun", request);
         const run = request.run?.value ?? "";
         const stored = bashRowsByRun.get(run);
         if (stored === undefined || stored.length === 0) {
@@ -325,6 +351,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       },
 
       async readAgentPage(request) {
+        noteRead("ReadAgentPage", request);
         const bookId = request.book?.value ?? "";
         const after = Number(request.after?.value ?? "0");
         // Strictly OLDER than `after`, newest first.
@@ -363,7 +390,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         );
       },
 
-      async getSidecarCursors() {
+      async getSidecarCursors(request) {
+        noteRead("GetSidecarCursors", request);
         // No sidecar is running behind this fake, so it has read no files and
         // holds no cursors. An empty SUCCESS, never a failure: "nothing yet" is
         // an answer, not an error.
@@ -375,7 +403,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         });
       },
 
-      async getLiveWork() {
+      async getLiveWork(request) {
+        noteRead("GetLiveWork", request);
         const liveAgents: conversationv1.AgentId[] = [];
         for (const [bookId, rows] of books) {
           if (bookId === "") continue;
@@ -455,6 +484,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     book: (agentId) => rowsOf(agentId).map(lineAt),
     sessionUpdates: () => [...sessionUpdateRows],
     unserved: () => [...unservedRows],
+    reads: () => [...servedReads],
     close: async () => {
       // End every parked tail first: a watcher blocked on its promise would
       // otherwise keep the server's close callback from ever firing.

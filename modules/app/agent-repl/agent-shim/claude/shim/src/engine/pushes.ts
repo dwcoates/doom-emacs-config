@@ -113,7 +113,16 @@ export class SessionPushes {
   constructor(private readonly nowMs: () => number = () => Date.now()) {}
 
   /** The arms a joining subscriber is caught up on, in the order it gets them. */
-  private static readonly REPLAYED = ["contextUsage", "modelChanged", "permissionModeChanged"];
+  //
+  // `fastMode` is replayed for the same reason the model is: it is a LEVEL the
+  // session is in, not an event, and a consumer that attached after the vendor
+  // last stated it would otherwise draw the toggle from nothing.
+  private static readonly REPLAYED = [
+    "contextUsage",
+    "modelChanged",
+    "permissionModeChanged",
+    "fastMode",
+  ];
 
   /**
    * Open one standing stream.
@@ -233,6 +242,45 @@ export class SessionPushes {
     });
     this.degradedWindows.push(window);
     return window;
+  }
+
+  /**
+   * A COMPONENT RECOVERED: drop its standing faults and close its open windows.
+   *
+   * Recovery is a real fact, not the absence of one: a shim that only ever
+   * appended faults would report a transient converter defect as a permanent
+   * unhealthy session forever. The WINDOW survives the recovery (closed, with
+   * what was lost) because a consumer that joined afterwards still needs to
+   * know there was a hole.
+   *
+   * Answers whether anything actually changed, so a caller does not restate an
+   * unchanged verdict.
+   */
+  resolveComponent(component: string, droppedCount: number): boolean {
+    let changed = false;
+    for (let index = this.faults.length - 1; index >= 0; index -= 1) {
+      if (this.faults[index]?.component !== component) continue;
+      this.faults.splice(index, 1);
+      changed = true;
+    }
+    for (const window of this.degradedWindows) {
+      if (window.component !== component || window.extent.case !== "open") continue;
+      window.extent = {
+        case: "closed",
+        value: create(conversationv1.SessionDegradedClosedSchema, {
+          endedAtMs: BigInt(this.nowMs()),
+          droppedCount: BigInt(droppedCount),
+        }),
+      };
+      changed = true;
+    }
+    if (!changed) return false;
+    LOGGER.log(
+      { component, dropped_count: droppedCount },
+      "a component recovered; its faults are cleared and its degraded window is closed",
+    );
+    this.push(this.diagnostics());
+    return true;
   }
 
   /** Record a window the record plane already closed. */

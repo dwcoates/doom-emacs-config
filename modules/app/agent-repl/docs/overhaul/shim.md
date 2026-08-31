@@ -684,7 +684,12 @@ from CONTROL ANSWERS and from fields riding other messages:
 - account usage → `query.usage_EXPERIMENTAL…()`, whose four unavailable shapes
   are distinct on the wire: `rate_limits: null` (service), a null WINDOW, a null
   `utilization` inside a present window, and `behaviors: null` (the local scan).
-- context budget → the vendor's `context_tip` ATTACHMENT record.
+- context budget → UNSETTLED, and ON THE CAPTURE RUN'S CHECKLIST (ruling,
+  landing 5). It was read as the vendor's `context_tip` ATTACHMENT record, but
+  the one real `context_tip` capture is a GENERIC `/goal` tip — so the shim
+  records `context_tip` as itself (residue `attachment/context_tip`) and only a
+  record whose own type says `context_budget_warning` becomes the warning. Which
+  record the vendor really uses is a capture-run question.
 
 ### The e2e mock additions, and what they found (mock agent evidence)
 
