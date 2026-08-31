@@ -391,6 +391,58 @@
     ;; Assert
     (should (= agent-repl-test-daemon--link-connect-calls 1))))
 
+(ert-deftest agent-repl-test-daemon-foreign-adoption-is-logged-at-info ()
+  "Adopting a daemon this Emacs did not spawn is STATED, not inferred."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl--frontend-daemon-process nil)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.foreign-adopted"))))
+
+(ert-deftest agent-repl-test-daemon-own-daemon-adoption-is-not-called-foreign ()
+  "A daemon THIS Emacs spawned is its own, whatever the address file says.
+`process-live-p' is the liveness question, and the harness's spawn stub
+answers with a symbol rather than a real process — so the answer is
+stubbed too, which is the only external thing about this branch."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9001"
+          agent-repl--frontend-daemon-process 'the-daemon-process)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (object) (eq object 'the-daemon-process))))
+      ;; Act
+      (agent-repl-daemon-ensure)
+      ;; Assert
+      (should-not (agent-repl-test-daemon--logged-p
+                   :info "elisp.daemon.foreign-adopted")))))
+
+(ert-deftest agent-repl-test-daemon-ensure-failure-releases-the-in-flight-flag ()
+  "A signal out of the ensure must not leave cold start refusing forever."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (_path) (error "the build boundary exploded"))))
+      ;; Act
+      (should-error (agent-repl-daemon-ensure))
+      ;; Assert
+      (should-not agent-repl-daemon--ensure-in-flight))))
+
+(ert-deftest agent-repl-test-daemon-ensure-failure-is-recorded-at-error ()
+  "The signal is re-raised, but it is on the record before it leaves."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (_path) (error "the build boundary exploded"))))
+      ;; Act
+      (should-error (agent-repl-daemon-ensure))
+      ;; Assert
+      (should (agent-repl-test-daemon--logged-p :error "elisp.daemon.ensure-failed")))))
+
 (ert-deftest agent-repl-test-daemon-unhealthy-answer-is-still-adopted ()
   "UNHEALTHY IS AN ANSWER: a daemon that is there is never replaced blindly."
   (agent-repl-test-daemon--with-harness

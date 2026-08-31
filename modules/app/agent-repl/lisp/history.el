@@ -354,7 +354,7 @@ stray save never clobbers it.  The project picker sorts on this key.
 `:model' records the model the USER ASKED FOR — the workspace-generation
 alias, or whatever a model-picking variant like `SPC j C-o' supplied — and
 never the model a live session happens to be running.
-`agent-repl--apply-display-state' restores it so the re-booted session
+the daemon's own pushed views restore it, so the re-booted session
 launches under the same request."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (file (agent-repl--state-file root)))
@@ -382,7 +382,7 @@ launches under the same request."
                                  (plist-get existing :last-viewed-at)))
              ;; The model the USER ASKED FOR, and only that: the
              ;; workspace-generation alias, or whatever a model-picking
-             ;; variant like `SPC j C-o' supplied.  `agent-repl--apply-display-state'
+             ;; variant like `SPC j C-o' supplied.  The daemon's pushed views
              ;; restores it onto `:model' so `agent-repl--build-start-cmd' passes
              ;; `--model' when re-booting the session.
              ;;

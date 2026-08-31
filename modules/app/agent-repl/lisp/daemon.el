@@ -307,8 +307,27 @@ probe connection is closed on both paths: it exists to ask one question."
     (dolist (fault faults)
       (insert (format "  - %s\n" (plist-get fault :detail))))))
 
+(defun agent-repl-daemon--spawned-here-p ()
+  "Return non-nil when the daemon THIS Emacs spawned is still running.
+Nil is the ordinary answer: Emacs adopts whatever answers, and the one
+process it started itself is the only daemon that is its own."
+  (and agent-repl--frontend-daemon-process
+       (process-live-p agent-repl--frontend-daemon-process)
+       t))
+
+(defun agent-repl-daemon--report-provenance (address)
+  "Record whose daemon the adopted one at ADDRESS is.
+A FOREIGN daemon — one this Emacs did not spawn — is the normal
+cold-start outcome and not a fault, but which daemon a session attached
+to is the first thing anyone reading the log needs, so it is STATED
+rather than inferred from the absence of a start line."
+  (if (agent-repl-daemon--spawned-here-p)
+      (agent-repl--info nil "elisp.daemon.own-adopted address=%S" address)
+    (agent-repl--info nil "elisp.daemon.foreign-adopted address=%S" address)))
+
 (defun agent-repl-daemon--report-verdict (address verdict)
   "Log the adopted daemon at ADDRESS and surface VERDICT's faults, if any."
+  (agent-repl-daemon--report-provenance address)
   (pcase (plist-get verdict :arm)
     (:healthy
      (agent-repl--info nil "elisp.daemon.adopted address=%S health=healthy" address))
@@ -439,6 +458,29 @@ ON-READY receives the connection, or nil."
              (agent-repl--info nil "elisp.daemon.linking address=%S" address)
              (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))))))))
 
+(defun agent-repl-daemon--begin (on-ready)
+  "Take the cold-start decision for `agent-repl-daemon-ensure'.
+Separated from the entry point so the in-flight flag's release covers the
+WHOLE decision, signals included."
+  (let ((address (condition-case err
+                     (agent-repl-connect-read-daemon-addr)
+                   (error
+                    (agent-repl--warn nil "elisp.daemon.addr-unreadable error=%S" err)
+                    nil))))
+    (if (null address)
+        (progn
+          (agent-repl--info nil "elisp.daemon.addr-absent")
+          (agent-repl-daemon--build-and-start on-ready))
+      (agent-repl-daemon--probe
+       address
+       (lambda (verdict)
+         (agent-repl-daemon--report-verdict address verdict)
+         (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))
+       (lambda (detail)
+         (agent-repl--warn nil "elisp.daemon.stale-addr address=%S detail=%S"
+                           address detail)
+         (agent-repl-daemon--build-and-start on-ready))))))
+
 (defun agent-repl-daemon-ensure (&optional on-ready)
   "Make sure a daemon is serving, adopting one wherever one answers.
 ON-READY receives the primary connection, or nil when no daemon could be
@@ -462,24 +504,17 @@ spawned beside a live one."
     nil)
    (t
     (setq agent-repl-daemon--ensure-in-flight t)
-    (let ((address (condition-case err
-                       (agent-repl-connect-read-daemon-addr)
-                     (error
-                      (agent-repl--warn nil "elisp.daemon.addr-unreadable error=%S" err)
-                      nil))))
-      (if (null address)
-          (progn
-            (agent-repl--info nil "elisp.daemon.addr-absent")
-            (agent-repl-daemon--build-and-start on-ready))
-        (agent-repl-daemon--probe
-         address
-         (lambda (verdict)
-           (agent-repl-daemon--report-verdict address verdict)
-           (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))
-         (lambda (detail)
-           (agent-repl--warn nil "elisp.daemon.stale-addr address=%S detail=%S"
-                             address detail)
-           (agent-repl-daemon--build-and-start on-ready))))))))
+    ;; A SIGNAL out of the ensure must not leave the in-flight flag raised:
+    ;; the flag is what refuses a second ensure, so one stuck at t disables
+    ;; cold start for the rest of the session — silently, because every
+    ;; later ensure would look like an ordinary concurrent one.  The signal
+    ;; itself is re-raised, never swallowed.
+    (condition-case err
+        (agent-repl-daemon--begin on-ready)
+      (error
+       (setq agent-repl-daemon--ensure-in-flight nil)
+       (agent-repl--error nil "elisp.daemon.ensure-failed error=%S" err)
+       (signal (car err) (cdr err)))))))
 
 ;;;; ---- Interactive commands ----
 

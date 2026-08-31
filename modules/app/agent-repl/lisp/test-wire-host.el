@@ -47,7 +47,8 @@
           "\"claude\":{\"sessionId\":\"vendor-9\",\"configDir\":\"/home/me/.claude\"},"
           "\"backfill\":{\"done\":{}},"
           "\"open\":{},"
-          "\"faults\":[{\"detail\":\"sidecar lag\",\"openedAtMs\":\"1756400000000\"}]}},"
+          "\"faults\":[{\"detail\":\"sidecar lag\",\"openedAtMs\":\"1756400000000\","
+          "\"linkSevered\":{}}]}},"
           "\"naming\":{\"slug\":\"fix-flaky\",\"title\":\"Fix the flaky reconnect\"}}")
   "A fully populated HostWorkspace on the live standing.")
 
@@ -68,12 +69,13 @@
                   "{\"success\":{\"workspace\":{\"id\":\"ws-7\",\"dir\":\"/w/fix\"}}}")
                  '(:arm :success :value (:workspace (:id "ws-7" :dir "/w/fix"))))))
 
-(ert-deftest agent-repl-test-wire-host-register-error-arm-is-empty ()
-  "The error message is empty on purpose until its arms are derived."
+(ert-deftest agent-repl-test-wire-host-register-error-arm-carries-its-cause ()
+  "The error arm carries the refusal the daemon named."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-register-workspace-response
-                  "{\"error\":{}}")
-                 '(:arm :error :value nil))))
+                  "{\"error\":{\"notAWorktree\":{}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :not-a-worktree :value nil))))))
 
 (ert-deftest agent-repl-test-wire-host-register-unset-result-is-a-breach ()
   "A response with no outcome arm is a contract breach."
@@ -129,10 +131,12 @@
                  '(:arm :success :value nil))))
 
 (ert-deftest agent-repl-test-wire-host-select-error-arm-decodes ()
-  "The error arm decodes to its keyword with an empty value."
+  "The error arm decodes to its keyword with the cause the daemon named."
   (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-select-workspace-response "{\"error\":{}}")
-                 '(:arm :error :value nil))))
+                  #'agent-repl-wire-decode-select-workspace-response
+                  "{\"error\":{\"unknownWorkspace\":{}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :unknown-workspace :value nil))))))
 
 (ert-deftest agent-repl-test-wire-host-select-unset-result-is-a-breach ()
   "A SelectWorkspace response with no arm is a breach."
@@ -158,11 +162,12 @@
                  '(:arm :success :value nil))))
 
 (ert-deftest agent-repl-test-wire-host-adopt-error-arm-decodes ()
-  "The adopt error arm decodes to its keyword."
+  "The adopt error arm decodes to its keyword with its cause."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-adopt-host-workspace-response
-                  "{\"error\":{}}")
-                 '(:arm :error :value nil))))
+                  "{\"error\":{\"noTransferAnnounced\":{}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :no-transfer-announced :value nil))))))
 
 (ert-deftest agent-repl-test-wire-host-adopt-unset-result-is-a-breach ()
   "An adopt response with no arm is a breach."
@@ -358,7 +363,9 @@ unknown-arm refusal at runtime."
                                      :backfill (:arm :done :value nil)
                                      :composer (:arm :open :value nil)
                                      :faults ((:detail "sidecar lag"
-                                               :opened-at-ms 1756400000000))))))
+                                               :opened-at-ms 1756400000000
+                                               :kind (:arm :link-severed
+                                                      :value nil)))))))
                    :naming (:slug "fix-flaky" :title "Fix the flaky reconnect")))))
 
 (ert-deftest agent-repl-test-wire-host-workspace-decodes-the-terminal-standing ()
@@ -521,10 +528,13 @@ composer and vendor_info arms together."
                              #'agent-repl-wire-decode-host-session-live
                              (agent-repl-test-wire-host--live
                               (concat "\"open\":{},\"faults\":["
-                                      "{\"detail\":\"a\",\"openedAtMs\":\"7\"},"
-                                      "{\"detail\":\"b\",\"openedAtMs\":9}]")))
+                                      "{\"detail\":\"a\",\"openedAtMs\":\"7\",\"bounceDied\":{}},"
+                                      "{\"detail\":\"b\",\"openedAtMs\":9,\"bounceUnknown\":{}}]")))
                             :faults)
-                 '((:detail "a" :opened-at-ms 7) (:detail "b" :opened-at-ms 9)))))
+                 '((:detail "a" :opened-at-ms 7
+                    :kind (:arm :bounce-died :value nil))
+                   (:detail "b" :opened-at-ms 9
+                    :kind (:arm :bounce-unknown :value nil))))))
 
 (ert-deftest agent-repl-test-wire-host-live-refuses-an-unknown-field ()
   "An unknown key on the live standing is refused."
@@ -672,6 +682,258 @@ composer and vendor_info arms together."
                   #'agent-repl-wire-decode-watch-daemon-response
                   "{\"configReloaded\":{}}")
                  '("WatchDaemonResponse" configReloaded "unknown field"))))
+
+;;;; ---- <Rpc>Error cause arms (landing 4) --------------------------------
+;;
+;; One test per arm the proto declares, plus the unset and unknown refusals
+;; and the pin against the checked-in Go bindings — the PROTO is the arm
+;; list, and the pin is what makes a landed arm the codec has not been taught
+;; fail loudly instead of decoding as an unknown key.
+
+(ert-deftest agent-repl-test-wire-host-register-error-not-a-worktree-arm ()
+  "RegisterWorkspaceError's `not_a_worktree' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-register-workspace-error
+                  "{\"notAWorktree\":{}}")
+                 '(:cause (:arm :not-a-worktree :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-register-error-unset-cause-is-a-breach ()
+  "RegisterWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (should (equal (agent-repl-test-wire-host--breach #'agent-repl-wire-decode-register-workspace-error "{}")
+                 '("RegisterWorkspaceError" cause "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-register-error-unknown-arm-is-a-breach ()
+  "An arm RegisterWorkspaceError does not declare here is refused, never
+guessed at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-register-workspace-error "{\"noSuchArm\":{}}")
+                 '("RegisterWorkspaceError" noSuchArm "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-register-error-arms-pinned ()
+  "RegisterWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_register_workspace.pb.go" "RegisterWorkspaceError")
+                       #'string<)
+                 (sort (list "notAWorktree")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-unknown-workspace-arm ()
+  "SelectWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-error
+                  "{\"unknownWorkspace\":{}}")
+                 '(:cause (:arm :unknown-workspace :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-workspace-ref-mismatch-arm ()
+  "SelectWorkspaceError's `workspace_ref_mismatch' arm decodes with everything
+it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-error
+                  "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}")
+                 '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry"))))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-transferring-away-arm ()
+  "SelectWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-error
+                  "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}")
+                 '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999"))))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-not-yet-adopted-arm ()
+  "SelectWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-select-workspace-error
+                  "{\"notYetAdopted\":{}}")
+                 '(:cause (:arm :not-yet-adopted :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-unset-cause-is-a-breach ()
+  "SelectWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (should (equal (agent-repl-test-wire-host--breach #'agent-repl-wire-decode-select-workspace-error "{}")
+                 '("SelectWorkspaceError" cause "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-unknown-arm-is-a-breach ()
+  "An arm SelectWorkspaceError does not declare here is refused, never guessed
+at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-select-workspace-error "{\"noSuchArm\":{}}")
+                 '("SelectWorkspaceError" noSuchArm "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-select-error-arms-pinned ()
+  "SelectWorkspaceError's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_select_workspace.pb.go" "SelectWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted")
+                       #'string<))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-unknown-workspace-arm ()
+  "AdoptHostWorkspaceError's `unknown_workspace' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"unknownWorkspace\":{}}")
+                 '(:cause (:arm :unknown-workspace :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-workspace-ref-mismatch-arm ()
+  "AdoptHostWorkspaceError's `workspace_ref_mismatch' arm decodes with
+everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"workspaceRefMismatch\":{\"registryDir\":\"/w/registry\"}}")
+                 '(:cause (:arm :workspace-ref-mismatch :value (:registry-dir "/w/registry"))))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-transferring-away-arm ()
+  "AdoptHostWorkspaceError's `transferring_away' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"transferringAway\":{\"address\":\"127.0.0.1:9999\"}}")
+                 '(:cause (:arm :transferring-away :value (:address "127.0.0.1:9999"))))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-not-yet-adopted-arm ()
+  "AdoptHostWorkspaceError's `not_yet_adopted' arm decodes with everything it
+carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"notYetAdopted\":{}}")
+                 '(:cause (:arm :not-yet-adopted :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-no-transfer-announced-arm ()
+  "AdoptHostWorkspaceError's `no_transfer_announced' arm decodes with
+everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"noTransferAnnounced\":{}}")
+                 '(:cause (:arm :no-transfer-announced :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-participant-not-expected-arm ()
+  "AdoptHostWorkspaceError's `participant_not_expected' arm decodes with
+everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-adopt-host-workspace-error
+                  "{\"participantNotExpected\":{}}")
+                 '(:cause (:arm :participant-not-expected :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-unset-cause-is-a-breach ()
+  "AdoptHostWorkspaceError with no arm set says nothing actionable, so it is a
+breach."
+  (should (equal (agent-repl-test-wire-host--breach #'agent-repl-wire-decode-adopt-host-workspace-error "{}")
+                 '("AdoptHostWorkspaceError" cause "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-unknown-arm-is-a-breach ()
+  "An arm AdoptHostWorkspaceError does not declare here is refused, never
+guessed at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-adopt-host-workspace-error "{\"noSuchArm\":{}}")
+                 '("AdoptHostWorkspaceError" noSuchArm "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-adopt-error-arms-pinned ()
+  "AdoptHostWorkspaceError's arm set is exactly what the frozen schema
+declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_adopt_host_workspace.pb.go" "AdoptHostWorkspaceError")
+                       #'string<)
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "noTransferAnnounced" "participantNotExpected")
+                       #'string<))))
+
+;;;; ---- HostFault kinds (landing 4) --------------------------------------
+;;
+;; The eight session-controller fault classes, shared verbatim with
+;; SessionHealth's SessionFault: the stream reporting a fault never changes
+;; its class.
+
+(ert-deftest agent-repl-test-wire-host-fault-shim-start-failed-kind ()
+  "HostFault's `shim_start_failed' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"shimStartFailed\":{\"exitCode\":3,\"stderrTail\":\"panic\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :shim-start-failed :value (:exit-code 3 :stderr-tail "panic"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-shim-died-kind ()
+  "HostFault's `shim_died' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"shimDied\":{\"exitCode\":9}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :shim-died :value (:exit-code 9))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-link-severed-kind ()
+  "HostFault's `link_severed' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"linkSevered\":{}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :link-severed :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-fault-resume-failed-kind ()
+  "HostFault's `resume_failed' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"resumeFailed\":{\"cause\":\"no transcript\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :resume-failed :value (:cause "no transcript"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-bounce-died-kind ()
+  "HostFault's `bounce_died' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"bounceDied\":{}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :bounce-died :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-fault-bounce-unknown-kind ()
+  "HostFault's `bounce_unknown' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"bounceUnknown\":{}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :bounce-unknown :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-fault-classifier-failed-kind ()
+  "HostFault's `classifier_failed' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"classifierFailed\":{\"detail\":\"regex blew up\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :classifier-failed :value (:detail "regex blew up"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-shim-reported-kind ()
+  "HostFault's `shim_reported' kind decodes with everything it carries."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"d\",\"openedAtMs\":\"5\",\"shimReported\":{\"component\":\"stdout\",\"kind\":\"parse\"}}")
+                 '(:detail "d" :opened-at-ms 5
+                   :kind (:arm :shim-reported :value (:component "stdout" :kind "parse"))))))
+
+(ert-deftest agent-repl-test-wire-host-fault-unset-kind-is-a-breach ()
+  "A fault with no kind is a breach: `detail' supplements the class, never
+replaces it."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-fault
+                  "{\"detail\":\"prose\",\"openedAtMs\":\"5\"}")
+                 '("HostFault" kind "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-fault-unknown-kind-is-a-breach ()
+  "A HostFault kind this codec does not know is refused, never dropped."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-fault "{\"shimDead\":{}}")
+                 '("HostFault" shimDead "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-fault-kind-arms-pinned ()
+  "HostFault's kind oneof has exactly the eight arms decoded here."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_watch_host_workspace.pb.go"
+                        "HostFault")
+                       #'string<)
+                 (sort (list "shimStartFailed" "shimDied" "linkSevered" "resumeFailed" "bounceDied" "bounceUnknown" "classifierFailed" "shimReported")
+                       #'string<))))
 
 (provide 'test-wire-host)
 

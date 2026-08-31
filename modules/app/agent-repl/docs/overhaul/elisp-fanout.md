@@ -62,17 +62,68 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   W2-B (roster, status, popup, workspace, session, frontend,
   webview-recovery, open-progress, panels, window); integration suite +
   Go fake daemon (lisp/testsupport/fakedaemon). Landings 1–3 merged.
-- RUNNING (keep their opus-medium tier): W2-C composer+verbs in
-  elisp-agents/w2c (branch overhaul/elisp-w2c); remediation-1
+- W2-C MERGED (74b1445df): composer + verbs + worktree slimming +
+  doctor; every unit suite green. RUNNING (opus-medium tier): remediation-1
   (R-ACCEPT, R-QUESTION, R-STREAMCLOSE) in elisp-agents/remed1;
   R-DAEMON in elisp-agents/remed2. Resume by SendMessage to the existing
   agent, never re-dispatch.
 - PRE-CUT, unassigned: elisp-agents/suite2 (overhaul/elisp-suite2) for
   R-SUITE-1 (the 92 audit findings, docs/overhaul/reports/
   elisp-suite-audit-1.md) — dispatch as `opus-low` when a slot frees.
-- QUEUE, in order, one slot each, all `opus-low`: R-SUITE-1 →
+- LANDING 4 merged (41d7c3321): typed `<Rpc>Error` arms on every rpc
+  Emacs calls (cross-cutting unknown_workspace / workspace_ref_mismatch
+  {registry_dir} / transferring_away{address} / not_yet_adopted + per-rpc
+  arms) and HostFault.kind's eight arms. The codec refuses them until
+  R-ARMS lands (test-wire-verbs 109/111 by design).
+- R-DAEMON MERGED (e5fdae538): cold-start suite 12/12. Findings: the
+  integration log reader could not find warn/error records because
+  core.el derives `operation` from the severity-prefixed format string
+  (R-LOGOP, assigned to the R-ARMS agent, fixes core.el at the source);
+  cold-start boundary functions are restored per scenario by the harness;
+  daemon.el now logs own-/foreign-adopted and releases its in-flight flag
+  on a signal. AGENTS.md owes a line on restoring a boundary in
+  integration tests (R-SUITE-1 carries it). R-PUSHINVALID may be moot
+  after the reader fix — re-run host/roster before dispatching it.
+- R-ARMS + R-LOGOP MERGED (b00b2e58b): every `<Rpc>Error` arm set,
+  HostFault/SessionFault/DaemonFault kinds decoded and pinned; core.el
+  derives `operation` from the bare format string. Treatments still owed
+  (R-HANDOVER: transferring_away/not_yet_adopted in host.el).
+- R-VERBS MERGED (1f433f54d): integration-verbs 30/30 (oneof shapes built
+  at the verb boundary; verbs fall back to `agent-repl-link-connect`).
+  REVERSED deviation in flight (same agent, remed5): verb records must
+  stay WORKSPACE-owned per logging-contract.md; the harness reader now
+  searches the workspace sinks too; link teardown added to the fixture.
+- R-VERBS follow-up MERGED (33b3d2e81): workspace-owned verb records
+  restored; harness reader searches global + workspace sinks; fixture
+  tears the link down. integration-verbs 30/30, daemon 12/12.
+- RUNNING: R-SUITE-1 (`opus-low`, suite2); R-NOTIFY (`opus-low`, remed4);
+  remediation-1 (opus-medium, remed1). NEXT: R-HANDOVER after
+  remediation-1 merges (cut its worktree off that tip).
+- VOCAB SEAM CLOSED: integration carries the trimmed vocabulary +
+  footer_allowance verbatim (f1132d3a7); merged, resolved to theirs; the
+  files are identical on both branches. HostWorkspaceTransferred stays
+  EMPTY by design — the successor address is always WatchDaemon's
+  announcement; the webview reload uses that address.
+- RE-RUN after the reader fix: host 24/32, roster 19/20, link 14/18,
+  connect 12/16, daemon 12/12.
+- FIRST RUN composer 2/21 (17 on the suite's malformed host-push literal —
+  R-SUITE-1 fixes the fixture), verbs 10/30. R-VERBS (queued, worktree
+  elisp-agents/remed5): verbs.el hands the codec BARE keywords where §2
+  requires oneof plists — e.g. priority `:p05` must be `(:arm :p05 :value
+  nil)`; the same applies to create's form/finish/priority arms,
+  shutdown's action/reason arms, merge-queue's action arm. Fix verbs.el
+  (and the suite where it passes bare keywords), keep the codec as is;
+  also the close-success tab teardown and the transport-failure /
+  merge-refused log assertions. R-PUSHINVALID is RETIRED (the reader was
+  the cause); its residue, if any, folds into R-NOTIFY.
+- QUEUE, in order, one slot each, all `opus-low`: R-ARMS (codec: every
+  new error arm on the rpcs Emacs calls + HostFault.kind, decoded per §2,
+  arm sets pinned against the regenerated Go bindings; unit tests only —
+  treatments live in host.el (remediation-1) and verbs.el (W2-C)) →
+  R-SUITE-1 →
   R-PUSHINVALID → R-NOTIFY (incl. R-CLICK, gate `:unknown`) → R-HANDOVER
-  (re-run link/host first; remediate the remainder) → second adversarial
+  (re-run link/host first; remediate the remainder; MUST cover the webview
+  redial after adoption per §7 HANDOVER REDIAL) → second adversarial
   audit (fable, fresh context) → loop until green.
 - PER-MERGE ROUTINE: `git merge overhaul/elisp-<slug>` into overhaul/elisp
   (worktree /Users/dodgecoates/.config/doom-overhaul/elisp); resolve
@@ -345,6 +396,24 @@ are deleted by the verbs agent once verbs.el replaces them.
   AdoptHostWorkspace on NEW; success → cancel the old stream, subscribe on
   NEW, update `:conn`; error arm → ERROR log, keep the old stream.
 - `reload_webapp` → `(agent-repl-frontend-reload-webview WS)`.
+- HANDOVER REDIAL (project-lead ruling): on every successful adoption —
+  the `transferred` push and the `transferring_away{address}` refusal
+  (`agent-repl-host-handle-refusal WS ARM-PLIST`) — host.el updates the
+  workspace's `:conn` to the successor FIRST and then calls
+  `(agent-repl-frontend-reload-webview WS)`, so the webview navigates to
+  `http://<successor address>/?workspace=<id>&dir=<dir>`. The webapp only
+  draws a "moved" notice and stops its streams; it never reconnects
+  itself — the host owns the redial. `not_yet_adopted` → INFO, retry the
+  adopt once the successor's WatchDaemon is accepted.
+- FINAL HANDOVER SEQUENCE (project lead): on `transferred{address}` (the
+  push now carries the successor address — decode it; when absent, fall
+  back to `agent-repl-link-successor`) and on `transferring_away{address}`:
+  (a) AdoptHostWorkspace on a connection to ADDRESS (reuse the link's
+  successor when its address matches, else open one and WatchDaemon it);
+  (b) reload the workspace's webview to `http://<address>/?workspace=<id>
+  &dir=<dir>` — the reloaded page adopts itself (AdoptWebWorkspace at
+  boot); Emacs does nothing else for the web side. Roster and daemon-link
+  then follow the successor's address as the current daemon (promotion).
 - `open_in_editor` (Q2 ruling) → `(agent-repl-popup-open PATH LINE)` — the
   ONE shared subroutine; a directory opens in dired. Log INFO with the path.
 - On `agent-repl-link-up-functions`: for every live workspace
