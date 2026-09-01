@@ -507,6 +507,122 @@ gate is the point, so it is exercised here rather than bypassed."
       ;; Assert
       (should (null (agent-repl-link-successor))))))
 
+(defvar agent-repl-test-link--containment-ran nil
+  "Set by `agent-repl-test-link--second-consumer' when it actually runs.")
+
+(defun agent-repl-test-link--failing-consumer (&rest _args)
+  "A hook consumer that signals, standing in for any module that errors."
+  (error "consumer blew up"))
+
+(defun agent-repl-test-link--second-consumer (&rest _args)
+  "The consumer registered BEHIND the failing one."
+  (setq agent-repl-test-link--containment-ran t))
+
+;;;; ---- Hook containment ----
+
+(ert-deftest agent-repl-test-link-hook-consumer-error-does-not-cancel-the-rest ()
+  "A signaling consumer must not take the consumers behind it down with it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((agent-repl-test-link--containment-ran nil))
+      (add-hook 'agent-repl-link-up-functions
+                #'agent-repl-test-link--failing-consumer)
+      (add-hook 'agent-repl-link-up-functions
+                #'agent-repl-test-link--second-consumer t)
+      ;; Act
+      (agent-repl-test-link--connect "127.0.0.1:9001")
+      ;; Assert
+      (should agent-repl-test-link--containment-ran))))
+
+(ert-deftest agent-repl-test-link-hook-consumer-error-is-recorded ()
+  "Containment is not swallowing: the failure is recorded at ERROR."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions
+              #'agent-repl-test-link--failing-consumer)
+    ;; Act
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p
+             :error "elisp.link.hook-consumer-failed"))))
+
+(ert-deftest agent-repl-test-link-hook-consumer-error-names-the-hook ()
+  "The record names WHICH hook run failed, so the seam is identifiable."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions
+              #'agent-repl-test-link--failing-consumer)
+    ;; Act
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p
+             :error "hook=agent-repl-link-up-functions"))))
+
+(ert-deftest agent-repl-test-link-hook-consumer-error-names-the-consumer ()
+  "The record names the CONSUMER, so the culprit module is identifiable."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions
+              #'agent-repl-test-link--failing-consumer)
+    ;; Act
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p
+             :error "consumer=agent-repl-test-link--failing-consumer"))))
+
+(ert-deftest agent-repl-test-link-hook-consumer-error-carries-the-datum ()
+  "The error DATUM rides the context: a bare name would not be debuggable."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions
+              #'agent-repl-test-link--failing-consumer)
+    ;; Act
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    ;; Assert
+    (should (agent-repl-test-link--logged-p :error "consumer blew up"))))
+
+(ert-deftest agent-repl-test-link-down-hook-consumer-error-is-contained ()
+  "The containment is the RUNNER's, so every hook run gets it -- down too."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((agent-repl-test-link--containment-ran nil)
+          (conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-down-functions
+                #'agent-repl-test-link--failing-consumer)
+      (add-hook 'agent-repl-link-down-functions
+                #'agent-repl-test-link--second-consumer t)
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should agent-repl-test-link--containment-ran))))
+
+(ert-deftest agent-repl-test-link-handover-hook-consumer-error-is-contained ()
+  "A failing handover consumer must not stop the adopters behind it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((agent-repl-test-link--containment-ran nil)
+          (conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-handover-functions
+                #'agent-repl-test-link--failing-consumer)
+      (add-hook 'agent-repl-link-handover-functions
+                #'agent-repl-test-link--second-consumer t)
+      ;; Act
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      ;; Assert
+      (should agent-repl-test-link--containment-ran))))
+
+(ert-deftest agent-repl-test-link-hook-runner-ignores-the-buffer-local-marker ()
+  "`add-hook' LOCAL appends `t\=' to mean the globals; applying it would signal."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((agent-repl-test-link--containment-ran nil))
+      (setq agent-repl-link-up-functions
+            (list #'agent-repl-test-link--second-consumer t))
+      ;; Act
+      (agent-repl-link--run-hook 'agent-repl-link-up-functions nil)
+      ;; Assert
+      (should agent-repl-test-link--containment-ran))))
+
 (ert-deftest agent-repl-test-link-successor-stream-loss-drops-the-successor ()
   "host.el must never adopt onto a successor that is already gone."
   (agent-repl-test-link--with-harness
