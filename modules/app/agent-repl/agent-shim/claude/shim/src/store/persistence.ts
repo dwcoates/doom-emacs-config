@@ -105,6 +105,19 @@ export interface AgentPageSession {
   readonly page: conversationv1.HistoryPage;
   /** Every entry written after the page, in order, each with its pointer. */
   readonly tail: AsyncIterable<conversationv1.HistoryEntryAt>;
+  /**
+   * Serve everything up to `through`, then END the tail rather than standing.
+   *
+   * The session teardown needs this: a `WatchAgent` tail is a STANDING stream
+   * by contract, so cutting it at the exit would reach the consumer as a
+   * transport failure exactly when it is waiting for the interrupted terminal
+   * the teardown just wrote. Concluding it through the book's head at that
+   * moment delivers the terminal and then ends the stream honestly.
+   *
+   * `through` unset — or a pointer already served — ends the tail at once.
+   * Idempotent.
+   */
+  concludeThrough(through?: conversationv1.HistoryPointer): void;
   /** Stop following. Idempotent. */
   close(): void;
 }
