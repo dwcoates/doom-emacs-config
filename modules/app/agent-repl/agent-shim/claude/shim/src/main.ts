@@ -502,6 +502,10 @@ export function queryFactory(fake: boolean, environment: ShimEnvironment, cwd: s
         permissionMode: spec.permissionMode,
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.binding.kind === "resume" ? { resume: spec.binding.resumeSessionId } : {}),
+        // THE REWIND TARGET REACHES THE MOCK TOO. It was dropped here, so the
+        // keep-alive rewind was unobservable on the vendor side: the shim's own
+        // log said what it intended, which is not evidence the value arrived.
+        ...(spec.resumeSessionAt === undefined ? {} : { resumeSessionAt: spec.resumeSessionAt }),
       }),
     );
 }
