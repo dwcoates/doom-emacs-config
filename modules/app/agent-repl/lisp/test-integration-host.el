@@ -948,6 +948,10 @@ flag and nothing else, ever, in this suite's non-dev-mode mount."
     (agent-repl-itest-host--with-subscription daemon ref
       (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p) (lambda () t))
+                ;; The xwidget itself is an external boundary and this test is
+                ;; about the URL the mount asks for, not the widget behind it.
+                ((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--call-in-background-workspace)
                  (lambda (_ws fn) (funcall fn))))
         ;; Act.
@@ -1095,7 +1099,12 @@ subscriber yet, then release it and assert the re-subscribe follows."
 
 (ert-deftest agent-repl-itest-host-transferred-adopt-error-keeps-the-old-stream ()
   "AdoptHostWorkspace's error arm logs ERROR and keeps the OLD stream standing.
-fanout §7: \"error arm → ERROR log, keep the old stream.\""
+fanout §7: \"error arm → ERROR log, keep the old stream.\"  The scripted
+refusal names a REAL cause arm: `AdoptHostWorkspaceError.cause' is a
+oneof over the daemon\='s own refusal sites, so an error carrying no arm
+at all is not a legal message and is refused as a contract breach one
+layer earlier (`elisp.rpc.response-invalid'), which would test the
+decoder rather than this arm."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-subscription primary ref
@@ -1105,7 +1114,9 @@ fanout §7: \"error arm → ERROR log, keep the old stream.\""
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn)))
-                (agent-repl-itest--script successor "AdoptHostWorkspace" '((error . ())))
+                (agent-repl-itest--script
+                 successor "AdoptHostWorkspace"
+                 '((error . ((unknownWorkspace . ())))))
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
                                         (plist-get ref :id))
