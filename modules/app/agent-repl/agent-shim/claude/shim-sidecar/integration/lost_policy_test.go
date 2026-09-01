@@ -78,8 +78,12 @@ func lostOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOpti
 // exactly how the missing wire assertion survived.
 func awaitLostConclusion(ctx context.Context, t *testing.T, logPath, path, reason string) logRecord {
 	t.Helper()
+	// ANY of the reader's four outcomes is the conclusion this waits for. They
+	// are separate operations so a reader can tell a minted terminal from a
+	// refused one; a wait that named only the minted one would hang forever on a
+	// residue spool, which names no run and can never mint one.
 	return awaitLog(ctx, t, logPath, "the "+reason+" conclusion for "+path, func(r logRecord) bool {
-		return r.Operation == "lost-terminal" &&
+		return lostTerminalOperations[r.Operation] &&
 			samePathAny(r.Context["path"], path) &&
 			r.Context["reason"] == reason
 	})
@@ -94,11 +98,14 @@ func lostConclusions(t *testing.T, logPath, path string) []logRecord {
 		if !samePathAny(r.Context["path"], path) {
 			continue
 		}
-		// The policy's own statement, and the reader's attempt to spell it as a
-		// terminal. Nothing else in either operation is a conclusion: a settled
-		// run says it can no longer BE concluded, which is the opposite.
-		concluded := r.Operation == "lost-terminal" ||
-			(r.Operation == "lost-policy" && strings.Contains(r.Message, "concluded LOST reason="))
+		// The policy's own statement, and every outcome of the reader's attempt
+		// to spell it as a terminal. Nothing else in `lost-policy` is a
+		// conclusion: a settled run says it can no longer BE concluded, which is
+		// the opposite — and the policy states its conclusions at WARN while its
+		// ordinary bookkeeping is verbose, so the LEVEL separates them without
+		// reading a sentence.
+		concluded := (r.Operation == "lost-policy" && r.Level == "warn") ||
+			lostTerminalOperations[r.Operation]
 		if concluded {
 			out = append(out, r)
 		}

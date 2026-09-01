@@ -22,28 +22,39 @@ func TestAFailedBatchDoesNotAdvanceTheCursor(t *testing.T) {
 	fake := startFakeStore(t)
 	tree := newVendorTree(t)
 	captured := loadCapturedSession(t)
-	fake.FailWrites(3, "the store refused this batch")
+	fake.FailWrites(refusalsBeforeRecovery, "the store refused this batch")
 
-	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	// THE FILE IS COMPLETE BEFORE THE SIDECAR STARTS. A file still growing while
+	// the store refuses gives the next batch a legitimately larger cursor, and
+	// this subject would then read the reader's honest progress as the very
+	// defect it exists to catch.
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
 	for _, line := range captured.Lines {
 		g.AppendLine(line)
 	}
-	fake.awaitBatches(ctx, t, 4)
 
-	// Assert: the first three batches all state the SAME cursor, because none of
-	// them was ever committed.
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	fake.awaitBatches(ctx, t, refusalsBeforeRecovery+1)
+
+	// Assert: every REFUSED batch states the same cursor, because none of them
+	// was ever committed. The acked one is what is allowed to differ.
 	batches := batchesCarryingCursorFor(fake.Batches(), g.Path())
 	if len(batches) < 2 {
 		t.Fatalf("the sidecar offered %d cursor-bearing batches, wanted at least 2 to compare", len(batches))
 	}
 	first := batches[0].GetBatch().GetCursorAdvance().GetOffset()
-	second := batches[1].GetBatch().GetCursorAdvance().GetOffset()
-	if second > first {
-		t.Errorf("the cursor advanced from %d to %d across a refused batch; a failure commits nothing", first, second)
+	for i, b := range batches[:min(len(batches), refusalsBeforeRecovery)] {
+		if got := b.GetBatch().GetCursorAdvance().GetOffset(); got != first {
+			t.Errorf("refused batch %d offered cursor %d where the first offered %d; a failure commits nothing, so the position does not move",
+				i, got, first)
+		}
 	}
 }
+
+// refusalsBeforeRecovery is how many writes the scripted store refuses before it
+// starts accepting them.
+const refusalsBeforeRecovery = 3
 
 // TestARefusedBatchIsReplayedIdentically asserts the re-sent records carry the
 // SAME write_ids, so the store can absorb them once it recovers.
@@ -56,12 +67,15 @@ func TestARefusedBatchIsReplayedIdentically(t *testing.T) {
 	captured := loadCapturedSession(t)
 	fake.FailWrites(2, "the store refused this batch")
 
-	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	// The file is complete before the sidecar starts, so the replayed batch is
+	// compared against the refused one rather than against a longer file.
 	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
 	for _, line := range captured.Lines {
 		g.AppendLine(line)
 	}
+
+	// Act.
+	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
 	fake.awaitBatches(ctx, t, 3)
 
 	// Assert.
@@ -117,9 +131,44 @@ func TestAStoreOutageSuspendsProductionOfEveryFile(t *testing.T) {
 	second.AppendLine(encodeRecord(t, retargetSession(t, decodeRecord(t, captured.Lines[7]), other, cwd)))
 	fake.awaitBatches(ctx, t, 4)
 
-	// Assert: nothing was produced for the second file while the store refused.
-	if latestCursorFor(fake.Batches(), second.Path()) != nil {
-		t.Errorf("a store outage must suspend production of EVERY file; %s was still being written", second.Path())
+	// Assert: PRODUCTION NEVER RESUMES ON ITS OWN, for either file.
+	//
+	// The per-file check this replaced ("no cursor was ever offered for the
+	// second file") depended on WHICH FILE the reader happened to poll first.
+	// The second file can appear while the sidecar is still inside the cycle
+	// that has not yet learned the store is refusing, and a cursor offered in
+	// that cycle is not a resumption — it is the same suspended-in-a-moment
+	// cycle finishing its pass, and it commits nothing. The rule below is what
+	// the subject was always about, and it holds under every interleaving:
+	// every write that follows a failure is separated from it by a full cursor
+	// recovery, so no file's production restarts without one.
+	requireNoWriteResumesWithoutACursorRead(t, fake.Calls())
+}
+
+// requireNoWriteResumesWithoutACursorRead states the recovery invariant over the
+// WHOLE call sequence: once a write has failed, the next write is preceded by a
+// GetSidecarCursors. Reading the sequence this way asserts the rule rather than
+// one particular interleaving of the two files' polls.
+func requireNoWriteResumesWithoutACursorRead(t *testing.T, calls []string) {
+	t.Helper()
+	// Every WriteBatch in this scenario is refused, so each one is a failure and
+	// each one must be preceded by its own recovery.
+	var sinceFailure int
+	var recovered bool
+	for i, name := range calls {
+		switch name {
+		case "GetSidecarCursors":
+			recovered = true
+		case "WriteBatch":
+			if sinceFailure > 0 && !recovered {
+				t.Fatalf("a write at call %d resumed production without recovering cursors first; the calls were %v", i, calls)
+			}
+			sinceFailure++
+			recovered = false
+		}
+	}
+	if sinceFailure < 2 {
+		t.Fatalf("expected at least two refused writes to check the recovery rule; the calls were %v", calls)
 	}
 }
 
