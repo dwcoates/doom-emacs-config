@@ -243,8 +243,14 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     // The listener's own record, written the moment it is accepting. Racing it
     // against the exit means a shim that DIED during startup reports as the
     // death it was rather than as a hang.
+    // MATCHED ON THIS CHILD'S PID. A reused directory set replays the previous
+    // shim's log file, whose own "serving" record is still in it; without the
+    // pid the wait would settle on the DEAD shim's record and the test would
+    // then dial a socket the exit had already removed.
     await Promise.race([
-      log.record((record) => record.context.outcome === "serving").then(() => undefined),
+      log
+        .record((record) => record.context.outcome === "serving" && record.pid === child.pid)
+        .then(() => undefined),
       exited.then((exit) => {
         throw new Error(
           `shim exited before it served (code ${String(exit.code)}, signal ${String(exit.signal)}):\n${stderrText}`,
