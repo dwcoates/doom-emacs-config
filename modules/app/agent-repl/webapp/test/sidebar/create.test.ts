@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { CreateWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
+import {
+  CreateWorkspaceErrorSchema,
+  CreateWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
+import { MalformedView } from "../../src/rpc/malformed.js";
+import { createWorkspaceRefusal } from "../../src/sidebar/create.js";
+import { oneofArms } from "../arms.js";
 import { RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import {
   buildCreateWorkspaceRequest,
@@ -366,12 +372,72 @@ describe("the form on screen", () => {
     const sc = sidebarContext(
       appContext({
         createWorkspace: () =>
-          create(CreateWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+          create(CreateWorkspaceResponseSchema, {
+            result: { case: "error", value: { cause: { case: "noSlug", value: {} } } },
+          }),
       }),
     );
     const form = drawCreateWorkspaceForm(REPO, sc);
     document.body.replaceChildren(form);
     await click(form.querySelector("[data-create-submit]") as Element);
-    expect(form.querySelector(".refusal")?.textContent).toBe("CreateWorkspace refused");
+    expect(form.querySelector(".refusal")?.textContent).toBe(
+      "the daemon could not derive a name for this workspace",
+    );
+  });
+
+  it("labels that refusal with the cause's own arm", async () => {
+    const sc = sidebarContext(
+      appContext({
+        createWorkspace: () =>
+          create(CreateWorkspaceResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
+          }),
+      }),
+    );
+    const form = drawCreateWorkspaceForm(REPO, sc);
+    document.body.replaceChildren(form);
+    await click(form.querySelector("[data-create-submit]") as Element);
+    expect(form.querySelector(".refusal")?.getAttribute("data-arm")).toBe("unknownRepository");
+  });
+});
+
+/** What each fact-carrying arm must carry for its sentence to be complete. */
+const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  briefMissing: { name: "ship-the-rail" },
+  baseRefUnresolved: { ref: "origin/nope" },
+  worktreeCreationFailed: { detail: "index.lock exists" },
+};
+
+describe("CreateWorkspace's typed refusal", () => {
+  it.each(oneofArms(CreateWorkspaceErrorSchema, "cause"))("words the %s arm", (arm) => {
+    const said = createWorkspaceRefusal({ case: arm, value: CAUSE_FILL[arm] ?? {} } as never);
+    expect(said).not.toBe("");
+  });
+
+  it("names the workspace whose brief is missing", () => {
+    expect(
+      createWorkspaceRefusal({ case: "briefMissing", value: { name: "ship-the-rail" } } as never),
+    ).toContain("ship-the-rail");
+  });
+
+  it("names the base ref that would not resolve", () => {
+    expect(
+      createWorkspaceRefusal({ case: "baseRefUnresolved", value: { ref: "origin/nope" } } as never),
+    ).toContain("origin/nope");
+  });
+
+  it("carries git's own detail when the worktree could not be made", () => {
+    expect(
+      createWorkspaceRefusal({
+        case: "worktreeCreationFailed",
+        value: { detail: "index.lock exists" },
+      } as never),
+    ).toContain("index.lock exists");
+  });
+
+  it("refuses an arm this build does not know", () => {
+    expect(() => createWorkspaceRefusal({ case: "somethingNewer", value: {} } as never)).toThrow(
+      MalformedView,
+    );
   });
 });
