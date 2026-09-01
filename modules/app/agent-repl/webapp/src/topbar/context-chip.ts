@@ -59,8 +59,10 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
   asAnchor(button, "context");
   wrap.append(button);
 
+  const body = (): HTMLElement => drawTokenBreakdownView(breakdown);
+  tc.reveals.register("context", "context", body);
   button.addEventListener("click", () => {
-    tc.reveals.toggle("context", button, () => drawTokenBreakdownView(breakdown));
+    tc.reveals.toggle("context", "context", body);
   });
   return wrap;
 }

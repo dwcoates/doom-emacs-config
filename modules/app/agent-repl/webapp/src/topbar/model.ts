@@ -120,8 +120,10 @@ export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContex
   asAnchor(button, "model");
   wrap.append(button);
 
+  const body = (): HTMLElement => drawModelOptions(u, tc, wrap, button);
+  tc.reveals.register("model", "model", body);
   button.addEventListener("click", () => {
-    tc.reveals.toggle("model", button, () => drawModelOptions(u, tc, wrap, button));
+    tc.reveals.toggle("model", "model", body);
   });
   return wrap;
 }

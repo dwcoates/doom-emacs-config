@@ -61,8 +61,10 @@ export function drawTopbarPermissionModePicker(
   asAnchor(button, "mode");
   wrap.append(button);
 
+  const body = (): HTMLElement => drawPermissionModeOptions(u, tc, wrap, button);
+  tc.reveals.register("mode", "mode", body);
   button.addEventListener("click", () => {
-    tc.reveals.toggle("mode", button, () => drawPermissionModeOptions(u, tc, wrap, button));
+    tc.reveals.toggle("mode", "mode", body);
   });
   return wrap;
 }
