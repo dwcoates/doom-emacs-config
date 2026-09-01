@@ -61,8 +61,17 @@ type wsState struct {
 	// `permission`.
 	permissions map[string]struct{}
 	// detached are the live detached-work items announced on this session, by
-	// work id. They are what makes a row `idle_async` after its turn ends.
+	// work id. They are what makes a row `idle_async` after its turn ends —
+	// but ONLY until the watcher states its own set: an announcement can raise
+	// `idle_async` and nothing on the agent's stream can ever retire it.
 	detached map[string]struct{}
+	// liveWork is the watcher's authoritative live-work set, which retires
+	// `idle_async` the moment the last detached item ends.
+	liveWork LiveWorkSet
+	// liveWorkSeen reports whether the watcher has stated a set at all. Once
+	// it has, it is the ONLY source the arm reads: the announcements it
+	// supersedes cannot outlive the items they announced.
+	liveWorkSeen bool
 
 	// vendorBlocked reports evidence that the block is the vendor's or the
 	// account's rather than agent-repl's.
@@ -94,9 +103,21 @@ func (s *wsState) startTurn(turn *footer.TurnStarted) {
 	s.vendorBlocked = false
 	s.compacting = turn.Act == footer.ActCompact
 	// A new turn is new foreground work: the detached items announced by the
-	// turn before it belong to that turn's account, not this one's.
+	// turn before it belong to that turn's account, not this one's. The
+	// WATCHER's set is not reset here: an item that outlives the turn that
+	// spawned it is still running, and only the watcher knows when it ends.
 	s.detached = map[string]struct{}{}
 	s.permissions = map[string]struct{}{}
+}
+
+// asyncLive reports whether detached work is running right now. The watcher's
+// set is authoritative once it has stated one; until then the announcements
+// are all the roster has.
+func (s *wsState) asyncLive() bool {
+	if s.liveWorkSeen {
+		return !s.liveWork.Empty()
+	}
+	return len(s.detached) > 0
 }
 
 // live reports whether a live session backs the workspace right now. It is

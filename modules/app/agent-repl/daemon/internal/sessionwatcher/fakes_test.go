@@ -478,6 +478,11 @@ func (s *sidebarSink) OnLink(_ ids.WorkspaceID, link LinkState) {
 	s.rec.emit(event{sink: "sidebar", method: "OnLink", link: link})
 }
 
+func (s *sidebarSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
+	held := live
+	s.rec.emit(event{sink: "sidebar", method: "OnLiveWorkChanged", live: &held})
+}
+
 type lifecycleSink struct{ rec *recorder }
 
 func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how TurnClose) {

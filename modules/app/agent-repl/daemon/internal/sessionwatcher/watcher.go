@@ -441,6 +441,9 @@ func (w *watcher) publishLiveWorkLocked() {
 		"agents": len(live.Agents), "shells": len(live.Shells), "monitors": len(live.Monitors),
 	})
 	w.sinks.Lifecycle.OnLiveWorkChanged(w.ws, live)
+	// The roster hears the same set: its `idle_async` arm retires on an empty
+	// one, which no announcement can ever state.
+	w.sinks.Sidebar.OnLiveWorkChanged(w.ws, live)
 }
 
 // ---- connectivity ----
