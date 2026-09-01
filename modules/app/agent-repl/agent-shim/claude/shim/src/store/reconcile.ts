@@ -368,7 +368,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
           { level: "warn", detail: result.value.detail },
           "the store refused to state the open obligations",
         );
-        throw readFailure(result.value.detail);
+        // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
+        // handled by the same default, so a store that answers with no reason
+        // is unavailable rather than silently benign.
+        throw readFailure(result.value);
       }
       if (result.case !== "success") {
         throw new PersistenceError(

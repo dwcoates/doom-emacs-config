@@ -145,17 +145,55 @@ export const CATCHUP_PAGE_SIZE = 1024;
 // Failure translation
 // ---------------------------------------------------------------------------
 
-/** A store refusal, as the kind the engine switches on. */
-export function readFailure(detail: string): PersistenceError {
-  // The store's `kind` arms on these failures are DERIVED at this wave and are
-  // not yet declared, so the detail string is all there is to classify by. The
-  // classification stays here, in one place, rather than at every call site.
-  const lowered = detail.toLowerCase();
-  if (lowered.includes("unknown agent") || lowered.includes("no such agent")) {
-    return new PersistenceError("unknown_agent", detail);
+/**
+ * Any store read refusal that carries a typed `kind`, narrowed to the arm.
+ *
+ * `detail` is the store's prose account and is NEVER switched on: it is the
+ * driver's text, a field name, a sentence a store maintainer may reword at any
+ * time, and classifying by substring made the reader's behavior depend on that
+ * wording. An earlier version did exactly that — "unknown agent" and "pointer"
+ * matched anywhere in the string — so a storage failure whose driver text
+ * happened to say "pointer" was reported to the engine as a stale pointer and
+ * the engine re-read a book that was actually unreachable.
+ */
+type TypedReadFailure = {
+  readonly detail: string;
+  readonly kind:
+    | { readonly case: "invalidRequest" }
+    | { readonly case: "stalePointer" }
+    | { readonly case: "storageFailure" }
+    | { readonly case: undefined };
+};
+
+/**
+ * A store read refusal, as the kind the engine switches on.
+ *
+ * THE ARM DECIDES, never the detail:
+ *   - `stale_pointer` → `stale_pointer`. The caller's mark names no line of
+ *     this book; it re-reads from the floor.
+ *   - `invalid_request` → `unknown_agent`. The store validates the book before
+ *     anything else, so on a read the only request the shim can malform is the
+ *     agent id — page_size and the pointer are minted by this process. Reported
+ *     as the condition the engine can act on rather than as a generic refusal.
+ *   - `storage_failure` → `store_unavailable`, and so is an UNSET arm: a
+ *     refusal that names no reason is a store the shim cannot trust, and
+ *     guessing a kinder arm would make the engine retry into a broken store.
+ */
+export function readFailure(failure: TypedReadFailure): PersistenceError {
+  switch (failure.kind.case) {
+    case "stalePointer":
+      return new PersistenceError("stale_pointer", failure.detail);
+    case "invalidRequest":
+      return new PersistenceError("unknown_agent", failure.detail);
+    case "storageFailure":
+      return new PersistenceError("store_unavailable", failure.detail);
+    default:
+      LOGGER.log(
+        { level: "error", detail: failure.detail },
+        "the store refused a read and named no reason; treated as unavailable",
+      );
+      return new PersistenceError("store_unavailable", failure.detail);
   }
-  if (lowered.includes("pointer")) return new PersistenceError("stale_pointer", detail);
-  return new PersistenceError("store_unavailable", detail);
 }
 
 /** A thrown transport error, as the kind the engine switches on. */
@@ -227,7 +265,7 @@ export function createReader(options: ReaderOptions): Reader {
         { level: "warn", agent: agent.value, detail: result.value.detail },
         "the store refused to open an agent's book",
       );
-      throw readFailure(result.value.detail);
+      throw readFailure(result.value);
     }
     throw new PersistenceError(
       "store_unavailable",
@@ -357,7 +395,7 @@ export function createReader(options: ReaderOptions): Reader {
           { level: "warn", agent: agent.value, detail: result.value.detail },
           "the store refused an older page",
         );
-        throw readFailure(result.value.detail);
+        throw readFailure(result.value);
       }
       if (result.case !== "success") {
         throw new PersistenceError(
