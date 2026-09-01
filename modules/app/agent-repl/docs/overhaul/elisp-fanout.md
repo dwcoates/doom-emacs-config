@@ -231,6 +231,16 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   two link flakes + R-LOGFORGET), R-DEADCODE (elisp-agents/deadcode: the
   programmatic dead-code rule); audit 2 (fable, fresh context, read-only
   against the teamlead worktree) runs alongside.
+- AUDIT 2 DONE (reports/elisp-suite-audit-2.md, 46 findings, all
+  accepted). Production defects it exposed: #1 roster does not re-subscribe
+  after promotion (live defect: tabs stop reconciling after a blue-green
+  rollout); #32 input.el treats transferring_away / not_yet_adopted on
+  SubmitPrompt as unknown arms — RULED: route to
+  `agent-repl-host-handle-refusal` exactly as verbs.el does; #26 verify the
+  fork-without-parent guard. R-SUITE-2 dispatched (`opus-low`,
+  elisp-agents/suite2 off f193fb0e8; writes tests, never runs the suite).
+  R-AUDIT2-PROD (the three defects) queued behind R-STABILITY + R-DEADCODE.
+  Running: stability, deadcode, suite2.
 
 ## 1. Module map (final tree of lisp/)
 
