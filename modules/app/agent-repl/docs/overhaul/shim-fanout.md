@@ -573,3 +573,11 @@ every UX or contract gap you surfaced instead of improvising.
   reader-side join (mock layout stays vendor-faithful). The spawning tool is
   `Agent` on the wire, `Task` in init.tools. toolUseResult is polymorphic
   (object | bare string on denials/StructuredOutput | list for MCP).
+- LEDGER: harness batch merged at 48ed642eb (multi-turn drain held across
+  turns via drainToResult; transport-closed control_failed quarantines;
+  permission-undecidable-parked expects_error_subtypes; denied-by-user
+  prompt rewrite); harness worktree/branch retired. Re-capture list (12)
+  sent to the project lead: compaction-directed, identity-rotation-clear,
+  fan-wide-cancel, permission-mode-changed, model-changed, account-usage,
+  bash-detached, subagent-detached, context-usage, mcp-server-healths,
+  permission-undecidable-parked, permission-denied-by-user.
