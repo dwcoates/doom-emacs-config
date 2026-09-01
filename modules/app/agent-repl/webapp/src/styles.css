@@ -5380,3 +5380,39 @@ body.ungated #mode-select {
   font-size: 0.75rem;
   margin-bottom: 0.35em;
 }
+
+/* ---- lifecycle banners (src/lifecycle) --------------------------------- */
+
+/* THE STANDING NOTICE that this page's daemon is going away — a scheduled
+   drain, an announced restart, or a workspace that has already moved. All
+   three are the same sentence at three distances, so they share one host and
+   one look, ported from the old drain banner: the merge/bounce amber the app
+   already uses for coordinated daemon work, OUTLINED rather than filled.
+
+   Deliberately not an alarm. A pending bounce is an announcement, and painting
+   it in the failure overlay's register would spend the reader's attention on a
+   routine restart. */
+#drain-banner:empty { display: none; }
+
+.lifecycle-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--merge-card);
+  color: var(--fg);
+  border: 1px solid var(--merge-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  margin: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+/* THE MOVED NOTICE IS TERMINAL: this page will never update again, and the
+   host is about to reload the view at the successor's address. Dimmed and
+   italic rather than amber — nothing here is pending, so the amber that means
+   "something is about to happen" would be a lie by the time it is read. */
+.lifecycle-banner.lifecycle-moved {
+  border-style: dashed;
+  color: var(--muted);
+  font-style: italic;
+}
