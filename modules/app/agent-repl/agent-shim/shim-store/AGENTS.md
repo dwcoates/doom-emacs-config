@@ -348,11 +348,18 @@ arms are derived from, and each one is logged once with `refusal_site`.
 - Correlation keys, each in its own `context` field and never left to the
   message text: `producer`, `agent_id`, `vendor_session_id`, `book_agent_id`,
   `write_id`, `upsert_key`, `position`, `write_seq`, `watch_token_hash`, `rpc`,
-  `refusal_site`, `file_id`, `path`, `offset`, `task_id`, `activity_id`,
-  `turn_id`. Top-level `request_id` comes from the `X-Agent-Repl-Request-Id`
+  `refusal_site`, `refusal_kind`, `file_id`, `path`, `offset`, `task_id`,
+  `activity_id`, `turn_id`. Top-level `request_id` comes from the `X-Agent-Repl-Request-Id`
   header when a caller sends one. `rpc` is the Connect procedure spelled
   exactly as Connect spells it, leading slash included
   (`/store.v1.ShimStore/WriteBatch`).
+- **EVERY REFUSAL RECORD CARRIES BOTH `refusal_site` AND `refusal_kind`.** The
+  site is which of the store's checks said no; the kind is the wire arm the
+  caller received (`invalid_request`, `stale_pointer`, `storage_failure`,
+  `not_implemented`), derived from the refusal's class in `logRefusal` and never
+  restated by hand. Several sites map to one arm, so a record naming only the
+  site leaves a reader unable to tell whether the caller could ever have retried,
+  and one naming only the arm leaves it unable to find the check that fired.
 - **The retired addressing keys are DEAD**: `claude_session_id`, `seq`,
   `from_seq`, `replay_*_seq` and anything else naming the old `(session_id,
   seq)` addressing. Do not add one back.
@@ -401,7 +408,8 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
   A refusal subject scopes to the operation that owns it (`recordsAtOperation`),
   counts it (`assertExactlyOneNormalRecord` — every error is logged exactly once
   by its owning layer), and asserts the correlation keys the refusal is looked up
-  by (`refusal_site`, `watch_token_hash`, `rpc`, `write_id`, `task_id`). A level
+  by (`refusal_site` AND `refusal_kind` together, `watch_token_hash`, `rpc`,
+  `write_id`, `task_id`) — `assertRefusalKeys` is the helper for the first pair. A level
   filter alone is not an assertion: "some warn was logged" passes for a reclaimed
   socket or a slow query as readily as for the thing under test.
 - **`assertNoDatabaseTouch` is scoped by `request_id` and needs `verbose: true`.**

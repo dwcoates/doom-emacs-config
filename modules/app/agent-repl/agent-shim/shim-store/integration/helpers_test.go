@@ -647,6 +647,23 @@ func assertNoDatabaseTouch(t *testing.T, records []logRecord, requestID string) 
 	}
 }
 
+// assertRefusalKeys asserts the two keys every refusal record carries: the SITE
+// that said no and the wire ARM the caller received.
+//
+// THEY ARE NOT THE SAME FACT. Several sites map to one arm, so a record naming
+// only the site leaves a reader unable to tell whether the caller could ever
+// have retried, and a record naming only the arm leaves it unable to find the
+// check that fired.
+func assertRefusalKeys(t *testing.T, rec logRecord, wantSite, wantKind string) {
+	t.Helper()
+	if rec.Context["refusal_site"] != wantSite {
+		t.Errorf("the refusal record's refusal_site is %v, want %q", rec.Context["refusal_site"], wantSite)
+	}
+	if rec.Context["refusal_kind"] != wantKind {
+		t.Errorf("the refusal record's refusal_kind is %v, want %q", rec.Context["refusal_kind"], wantKind)
+	}
+}
+
 // requestIDHeader is the header the store reads a caller's correlation id from.
 const requestIDHeader = "X-Agent-Repl-Request-Id"
 

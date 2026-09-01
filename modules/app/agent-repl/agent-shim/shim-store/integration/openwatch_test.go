@@ -191,9 +191,7 @@ func TestUnknownWatchTokenIsRefused(t *testing.T) {
 	// token hash" would pass for the open's own success record as readily as
 	// for the refusal, and said nothing about two layers each writing one.
 	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "an unknown watch token")
-	if rec.Context["refusal_site"] != "unknown_watch_token" {
-		t.Errorf("the refusal record's refusal_site is %v, want unknown_watch_token", rec.Context["refusal_site"])
-	}
+	assertRefusalKeys(t, rec, "unknown_watch_token", "invalid_request")
 	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
 		t.Errorf("the refusal record carries no watch_token_hash: %v", rec.Context)
 	}
@@ -219,9 +217,7 @@ func TestAConsumedWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	// Assert.
 	assertWatchRefused(t, second)
 	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a consumed watch token")
-	if rec.Context["refusal_site"] != "unknown_watch_token" {
-		t.Errorf("the refusal record's refusal_site is %v, want unknown_watch_token", rec.Context["refusal_site"])
-	}
+	assertRefusalKeys(t, rec, "unknown_watch_token", "invalid_request")
 	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
 		t.Errorf("the refusal record carries no watch_token_hash: %v", rec.Context)
 	}
@@ -250,9 +246,7 @@ func TestAPostRestartWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	// Assert.
 	assertWatchRefused(t, stream)
 	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a watch token from a dead process")
-	if rec.Context["refusal_site"] != "unknown_watch_token" {
-		t.Errorf("the refusal record's refusal_site is %v, want unknown_watch_token", rec.Context["refusal_site"])
-	}
+	assertRefusalKeys(t, rec, "unknown_watch_token", "invalid_request")
 	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
 		t.Errorf("the refusal record carries no watch_token_hash: %v", rec.Context)
 	}
