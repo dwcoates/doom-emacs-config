@@ -139,6 +139,11 @@ type sidecar struct {
 	// rewound remembers which files have had their one boot rewind, so the
 	// bounded backward scan happens once per file per process rather than on
 	// every reconnect.
+	//
+	// KEYED BY THE FILE'S IDENTITY, NOT ITS PATH. "Once per file per boot" is a
+	// statement about a FILE, and the vendor may rename one under us at any
+	// moment: keyed by path, a rename bought the same file a second rewind and
+	// a second re-read of its in-progress turn.
 	rewound map[string]bool
 
 	nextAttemptAt  time.Time
@@ -448,16 +453,77 @@ func (s *sidecar) rescan() {
 			}).Log("not watching this file yet: its identity could not be read, and a tailer may only be built from the cursor that identity keys: %v", err)
 			continue
 		}
-		s.watch(resolved, identity, now)
+		cursor, reached := s.cursorFor(resolved, identity)
+		if !reached {
+			// The store could not answer for this file, so there is no position
+			// to build a tailer from and the suspension is already open. The
+			// REST OF THE PASS IS ABANDONED rather than continued: production is
+			// suspended now, and every remaining target would be watched with
+			// cursors this cycle no longer has.
+			return
+		}
+		s.watch(resolved, identity, cursor, now)
 	}
+}
+
+// cursorFor answers the position THIS CYCLE'S store holds for a file, and
+// whether the store answered at all.
+//
+// THE CYCLE'S SNAPSHOT IS NOT THE WHOLE ANSWER. Cursors are recovered once, when
+// the cycle begins, so a file that appears afterwards — a spool whose hold
+// expired, a transcript the vendor RENAMED mid-cycle — is simply absent from it.
+// Absent from a snapshot is not the same fact as "the store holds none", and
+// treating the two as one is precisely the silent cold start the store-unreachable
+// invariant exists to forbid: the renamed file was re-read from zero and its whole
+// conversation re-converted, masked only because the write ids are deterministic.
+//
+// So a miss ASKS THE STORE for that one identity. Only a reached store's empty
+// answer means offset zero, which is the honest backfill path; a store that could
+// not answer suspends production and the file is left unwatched until a cycle
+// that has a store behind it.
+func (s *sidecar) cursorFor(target discover.Target, identity string) (*storev1.CursorState, bool) {
+	s.requireCursors("cursorFor")
+	if cursor := s.cursors[identity]; cursor != nil {
+		return cursor, true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), rpcTimeout)
+	defer cancel()
+	cursors, err := s.store.Cursors(ctx, identity)
+	if err != nil {
+		// storeclient owns the causal record with its rpc and refusal detail.
+		s.noteStoreErr("recover-cursors", err)
+		s.log.With(logging.Context{
+			Operation: "recover-cursors", Path: target.Path, TaskID: target.TaskID,
+			FileID: identity, Level: "warn",
+		}).Log("not watching this file: the store could not say what position it holds for it, and a tailer may only be built from a position the store handed us: %v", err)
+		return nil, false
+	}
+	for _, cursor := range cursors {
+		if cursor.GetFileId() != identity {
+			continue
+		}
+		// Remembered for the rest of the cycle, so one late-appearing file costs
+		// one rpc rather than one per rescan.
+		s.cursors[identity] = cursor
+		s.log.With(logging.Context{
+			Operation: "recover-cursors", Path: target.Path, FileID: identity,
+			Offset: logging.Off(cursor.GetOffset()),
+		}).Log("a file discovered after this cycle began has a stored position; it resumes there rather than from zero")
+		return cursor, true
+	}
+	s.log.With(logging.Context{
+		Operation: "recover-cursors", Path: target.Path, FileID: identity,
+	}).LogVerbose("the store holds no cursor for this file; it is read from zero")
+	return nil, true
 }
 
 // watch builds one tailer for a resolved target and starts reading it.
 //
-// `identity` is the file's own dev:inode, read by the caller, and it is what the
-// recovered cursor is looked up by — never the path, which the vendor may
-// rename under us at any moment.
-func (s *sidecar) watch(target discover.Target, identity string, now time.Time) {
+// `identity` is the file's own dev:inode and `cursor` the position THIS CYCLE'S
+// store holds under it — nil only when the store was reached and genuinely holds
+// none. Neither is derived from the path, which the vendor may rename under us
+// at any moment.
+func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1.CursorState, now time.Time) {
 	s.requireCursors("watch")
 	bound := s.log.With(logging.Context{
 		Component: "tail", Path: target.Path, TaskID: target.TaskID,
@@ -478,9 +544,9 @@ func (s *sidecar) watch(target discover.Target, identity string, now time.Time) 
 		RunActivityID:     s.owners.activityFor(target.TaskID),
 	}
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
-	if cursor := s.cursors[identity]; cursor != nil {
+	if cursor != nil {
 		tailer.Restore(cursor)
-		s.rewindOnce(target, tailer)
+		s.rewindOnce(target, identity, tailer)
 	}
 	s.watchers[target.Path] = &watched{target: target, tailer: tailer}
 	s.trackDetached(target, now)
@@ -546,11 +612,11 @@ func (s *sidecar) bookFor(target discover.Target) string {
 //
 // Spools are never rewound: they carry no turns, and their deltas are already
 // offset-carrying.
-func (s *sidecar) rewindOnce(target discover.Target, tailer *tail.Tailer) {
-	if s.rewound[target.Path] {
+func (s *sidecar) rewindOnce(target discover.Target, identity string, tailer *tail.Tailer) {
+	if s.rewound[identity] {
 		return
 	}
-	s.rewound[target.Path] = true
+	s.rewound[identity] = true
 	switch target.Kind {
 	case tail.KindSessionTranscript, tail.KindAgentTranscript:
 		tailer.RewindToTurnStart(tail.DefaultRewindWindow, tail.IsUserPromptRecord)
