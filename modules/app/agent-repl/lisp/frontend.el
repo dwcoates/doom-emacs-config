@@ -337,7 +337,6 @@ webview OURS never drift apart:
     %-constructs), so the webapp's `document.title' changes never rename it;
   - `xwidget-webkit-mode's \"WebKit: <title>\" header-line is cleared,
     since the webview is a panel, not a browser;
-  - `agent-repl-frontend-webview-mode' arms the copy chords;
   - `agent-repl--owning-workspace' records OWNER, the workspace name whose
     REPL this webview shows.
 
@@ -356,7 +355,6 @@ to no workspace and is therefore foreign to none."
     (setq-local agent-repl--owning-workspace owner)
     (setq-local xwidget-webkit-buffer-name-format name)
     (setq-local header-line-format nil)
-    (agent-repl-frontend-webview-mode 1)
     (rename-buffer name t)
     ;; Last, so consumers see a fully adopted buffer (final name, mode armed).
     ;; Wrapped because a decoration that fails must not cost the user a

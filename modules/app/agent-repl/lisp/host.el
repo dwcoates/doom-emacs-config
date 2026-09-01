@@ -467,37 +467,29 @@ be served by nobody."
        (lambda (detail)
          (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S" ws detail))))))
 
-(defun agent-repl-host--successor-for (ws address)
-  "Return the adoptable successor connection for WS at ADDRESS, or nil.
-A DECODED ADDRESS TAKES PRECEDENCE: it names the daemon that now owns WS,
-so it is dialed (reusing the link's successor when the address matches).
-A nil ADDRESS falls back to the link's standing successor, which is the
-shape the `transferred' push has while `HostWorkspaceTransferred' carries
-no address of its own.  Nil while a dial has not been ACCEPTED."
-  (if address
-      (agent-repl-host--redial-successor ws address)
-    (agent-repl-link-successor)))
-
-(defun agent-repl-host--transferred (ws &optional value)
+(defun agent-repl-host--transferred (ws &optional _value)
   "Adopt WS onto the successor daemon after the old one released it.
-VALUE is the decoded `HostWorkspaceTransferred'; when it carries an
-`:address' that address names the successor, otherwise the link's
-standing successor is it.  `transferred' is a PUSH, never a terminal
-frame, so the old stream stays standing until the adopt lands and the
-shared walk cancels it."
-  (let* ((address (plist-get value :address))
-         (new (agent-repl-host--successor-for ws address)))
-    (cond
-     (new
-      (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
-                        ws address)
-      (agent-repl-host--adopt-onto ws new))
-     (address
-      ;; The dial stands but is not accepted; the gate forbids adopting.
-      (agent-repl--info ws "elisp.host.awaiting-successor ws=%s address=%S" ws address)
-      (agent-repl-host--adopt-on-acceptance ws))
-     (t
-      (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws)))))
+
+`HostWorkspaceTransferred' IS EMPTY ON THE WIRE, so the push names no
+daemon and _VALUE carries nothing to read.  THE SUCCESSOR IS THE ONE THE
+LINK RECORDED: `shutdown_announced{address}' is the single place an
+address for the joining daemon ever comes from, and daemon-link dialed
+and accepted it there — a per-workspace release cannot introduce a
+daemon the link has never heard of.
+
+`transferred' is a PUSH, never a terminal frame, so the old stream stays
+standing until the adopt lands and the shared walk cancels it.  With no
+recorded successor there is nothing to adopt ONTO and no address to
+recover one from, which is a breach of the announcement order rather than
+a state to wait in: it is logged ERROR and the workspace keeps the old
+stream."
+  (let ((new (agent-repl-link-successor)))
+    (if new
+        (progn
+          (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
+                            ws (agent-repl-connect-connection-address new))
+          (agent-repl-host--adopt-onto ws new))
+      (agent-repl--error ws "elisp.host.transferred-without-successor ws=%s" ws))))
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 
@@ -553,7 +545,7 @@ through here, so a repeated refusal cannot recurse into a loop."
          (if (null address)
              (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s" ws)
            (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
-           (let ((new (agent-repl-host--successor-for ws address)))
+           (let ((new (agent-repl-host--redial-successor ws address)))
              (if new
                  (agent-repl-host--adopt-onto ws new)
                ;; The dial stands but is not accepted yet; adopting onto an

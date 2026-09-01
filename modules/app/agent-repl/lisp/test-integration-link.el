@@ -358,8 +358,13 @@ it, so both connections must stand during the window."
         ;; Act.
         (agent-repl-itest-link--announce
          primary (agent-repl-itest-daemon-address successor))
-        ;; Assert: a WatchDaemon stream stands on BOTH instances.
+        ;; Assert: a WatchDaemon stream stands on BOTH instances.  The
+        ;; successor is ADOPTABLE only from ACCEPTANCE, which reaches Emacs
+        ;; strictly after the daemon registers the subscriber, so it is
+        ;; waited for rather than sampled.
         (agent-repl-itest--await-subscriber successor "daemon")
+        (agent-repl-itest--wait-until
+         #'agent-repl-link-successor nil "the successor to be ACCEPTED")
         (should (agent-repl-link-successor))
         (should (equal 1 (length (agent-repl-itest--subscribers successor "daemon"))))
         (should (equal 1 (length (agent-repl-itest--subscribers primary "daemon"))))))))
@@ -399,6 +404,12 @@ the actual claim."
               (successor-address (agent-repl-itest-daemon-address successor)))
           (agent-repl-itest-link--announce primary successor-address)
           (agent-repl-itest--await-subscriber successor "daemon")
+          ;; ACCEPTANCE, NEVER A SPAWN: the connection only becomes the
+          ;; successor once its own WatchDaemon is accepted, which lands
+          ;; after the daemon-side subscriber appears.  Sampling here would
+          ;; capture nil and assert nothing.
+          (agent-repl-itest--wait-until
+           #'agent-repl-link-successor nil "the successor to be ACCEPTED")
           (add-hook 'agent-repl-link-down-functions (lambda (&rest _) (push 'down hooks)))
           (add-hook 'agent-repl-link-up-functions (lambda (&rest _) (push 'up hooks)))
           (let ((successor-conn (agent-repl-link-successor)))
@@ -442,8 +453,15 @@ the wire that the client ticks against its own clock."
         (let ((successor (agent-repl-itest--start-daemon state-dir)))
           (unwind-protect
               (progn
-                ;; Assert.
+                ;; Assert.  The subscriber appearing daemon-side STRICTLY
+                ;; PRECEDES acceptance reaching Emacs (the handler registers,
+                ;; then flushes the 200 headers the link keys `up' on), so
+                ;; `up-p' is waited for rather than sampled the instant the
+                ;; daemon says it has a subscriber.
                 (agent-repl-itest--await-subscriber successor "daemon")
+                (agent-repl-itest--wait-until
+                 #'agent-repl-link-up-p nil
+                 "the reconnected link to be ACCEPTED on the successor")
                 (should (agent-repl-link-up-p)))
             (agent-repl-itest--stop-daemon successor t)))))))
 

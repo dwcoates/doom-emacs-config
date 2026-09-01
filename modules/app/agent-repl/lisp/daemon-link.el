@@ -170,7 +170,11 @@ announced end of the outage, not a duration, so a LATE receiver waits
 what is left rather than the whole window again.")
 
 (defvar agent-repl-link--bounce-cause nil
-  "The cause arm keyword of the plain bounce being waited out, or nil.")
+  "The decoded `DaemonShutdownCause' of the plain bounce being waited out.
+Nil when no bounce stands.  THE WHOLE CAUSE, not just its arm keyword:
+`scheduled_drain' and `immediate' each carry a `DrainReason', and the
+indicator names THAT reason rather than a fixed phrase for the arm — the
+arm alone would tell the user a drain is happening but never why.")
 
 (defvar agent-repl-link--reconnect-timer nil
   "The pending reconnect timer, or nil when no reconnect is scheduled.")
@@ -495,7 +499,7 @@ window from the announced instants."
     (if address
         (agent-repl-link--attach-successor conn address cause)
       (setq agent-repl-link--quiet-until-ms (+ minted outage)
-            agent-repl-link--bounce-cause (plist-get cause :arm))
+            agent-repl-link--bounce-cause cause)
       (agent-repl--info nil
                         "elisp.link.plain-bounce cause=%S minted-at-ms=%S expected-outage-ms=%S quiet-until-ms=%S"
                         (plist-get cause :arm) minted outage
@@ -615,13 +619,27 @@ naming rather than an empty segment."
        (agent-repl--error nil "elisp.link.drain-reason-unknown arm=%S" arm)
        "unknown"))))
 
-(defun agent-repl-link--cause-text (arm)
-  "Return the human phrase for a `DaemonShutdownCause' ARM keyword."
-  (pcase arm
-    (:self-merge-rollout "self-merge rollout")
-    (:scheduled-drain "scheduled drain")
-    (:immediate "immediate")
-    (_ "unknown")))
+(defun agent-repl-link--cause-text (cause)
+  "Return the human phrase for the decoded `DaemonShutdownCause' CAUSE.
+THE ARM IS THE CAUSE, and two of the three arms carry a further arm the
+user is owed: `scheduled_drain{reason}' and `immediate{reason}' each name
+a `DrainReason', so the phrase names the REASON (deploy, maintenance, the
+operator\='s own note) beside the arm instead of a fixed word that would
+leave every drain reading alike.  `self_merge_rollout' carries nothing —
+the arm is the whole fact there."
+  (let ((arm (plist-get cause :arm))
+        (value (plist-get cause :value)))
+    (pcase arm
+      (:self-merge-rollout "self-merge rollout")
+      (:scheduled-drain
+       (format "scheduled drain: %s"
+               (agent-repl-link--reason-text (plist-get value :reason))))
+      (:immediate
+       (format "immediate: %s"
+               (agent-repl-link--reason-text (plist-get value :reason))))
+      (_
+       (agent-repl--error nil "elisp.link.shutdown-cause-unknown arm=%S" arm)
+       "unknown"))))
 
 (defun agent-repl-link--compute-drain-segment ()
   "Return the mode-line text for the standing drain or bounce, or nil.

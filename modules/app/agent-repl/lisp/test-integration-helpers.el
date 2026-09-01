@@ -142,9 +142,16 @@ almost useless."
 Waits for it to publish `daemon.addr' and returns the
 `agent-repl-itest-daemon' describing it.  The process environment carries
 `AGENT_REPL_STATE_DIR' and `AGENT_REPL_FORBID_VENDOR_CALLS=1'; nothing
-this process can reach is a vendor, and the variable says so anyway."
+this process can reach is a vendor, and the variable says so anyway.
+
+A HANDOVER STAGES TWO DAEMONS IN ONE STATE ROOT, so the wait is for the
+address to CHANGE, not merely to exist: an already-published address is
+the INCUMBENT'S, and returning it would hand the caller a struct whose
+`address' names the wrong process — every rpc aimed at the successor
+(including the orderly exit) would land on the daemon it is replacing."
   (let* ((binary (agent-repl-itest--ensure-binary))
          (dir (or state-dir (agent-repl-itest--private-state-dir)))
+         (incumbent (agent-repl-itest--read-addr-file dir))
          (stderr (generate-new-buffer (format " *agent-repl-itest-fakedaemon-log %s*"
                                               (file-name-nondirectory
                                                (directory-file-name dir)))))
@@ -165,8 +172,10 @@ this process can reach is a vendor, and the variable says so anyway."
              :noquery t
              :stderr stderr))))
     (agent-repl-itest--wait-until
-     (lambda () (or (agent-repl-itest--read-addr-file dir)
-                    (not (process-live-p process))))
+     (lambda ()
+       (let ((published (agent-repl-itest--read-addr-file dir)))
+         (or (and published (not (equal published incumbent)))
+             (not (process-live-p process)))))
      agent-repl-itest-default-timeout
      (format "the fake daemon to publish %s" (agent-repl-itest--addr-file dir)))
     (unless (process-live-p process)
