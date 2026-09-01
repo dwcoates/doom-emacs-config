@@ -194,9 +194,29 @@ describe("detached shells", () => {
 });
 
 describe("Ctrl-B", () => {
+  /**
+   * Drive `!ctrl-b` all the way through its detach.
+   *
+   * The scenario PARKS until something backgrounds the call, because a real
+   * Ctrl-B is a caller's action and not something the scenario can decide the
+   * moment of. Nothing detaches it here, so a plain `driveScenario` would sit
+   * on the parked run forever.
+   */
+  const driveCtrlB = async (): Promise<Record<string, unknown>> => {
+    const driven = await driveScenario(["!ctrl-b"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        const started = messages.find((m) => m.subtype === "task_started");
+        if (started === undefined) throw new Error("no task to detach");
+        await query.backgroundTasks(String(started.tool_use_id));
+      },
+    });
+    return toolUseResults(driven.transcript())[0] as Record<string, unknown>;
+  };
+
   it("states a USER backgrounding through backgroundedByUser, not timedOutAfterMs", async () => {
     // Arrange + Act
-    const detached = await result("!ctrl-b");
+    const detached = await driveCtrlB();
 
     // Assert
     expect({ byUser: detached.backgroundedByUser, timedOut: detached.timedOutAfterMs }).toEqual({
@@ -207,10 +227,34 @@ describe("Ctrl-B", () => {
 
   it("keeps the output produced before the detach on the foreground result", async () => {
     // Arrange + Act
-    const detached = await result("!ctrl-b");
+    const detached = await driveCtrlB();
 
     // Assert
     expect(detached.stdout).toBe("first line before the detach\n");
+  });
+
+  it("puts the backgrounded result on the stream BEFORE backgroundTasks answers", async () => {
+    // A real Ctrl-B has already published the detachment by the time the binary
+    // reports it; answering first would let a caller observe DetachForeground
+    // succeeding against a conversation that still shows foreground work.
+    // Arrange.
+    let resultsWhenAnswered = -1;
+
+    // Act.
+    await driveScenario(["!ctrl-b"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        const started = messages.find((m) => m.subtype === "task_started");
+        if (started === undefined) throw new Error("no task to detach");
+        await query.backgroundTasks(String(started.tool_use_id));
+        resultsWhenAnswered = messages.filter(
+          (m) => m.type === "user" && m.tool_use_result !== undefined,
+        ).length;
+      },
+    });
+
+    // Assert.
+    expect(resultsWhenAnswered).toBe(1);
   });
 
   it("marks the task is_backgrounded when backgroundTasks names its tool call", async () => {

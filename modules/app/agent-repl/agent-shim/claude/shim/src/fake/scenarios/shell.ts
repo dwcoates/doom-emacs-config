@@ -277,7 +277,11 @@ export const CTRL_B = scenario({
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "tail -f" });
     ctx.announceLiveTasks();
     ctx.files.spool(taskId).appendLine("first line before the detach");
-    await ctx.tick();
+    // PARK UNTIL THE USER ACTUALLY DETACHES. The scenario cannot decide when
+    // Ctrl-B happens — a caller's DetachForeground does — and emitting the
+    // backgrounded result on a timer instead would make the test's ordering a
+    // race it has to sleep around.
+    const detached = await ctx.awaitBackgrounded(call.toolUseId);
     ctx.toolResult(
       call,
       "",
@@ -289,6 +293,10 @@ export const CTRL_B = scenario({
       }),
     );
     conclude(ctx, "Moved the command to the background.");
+    // Acknowledged only now: `backgroundTasks` answers the caller AFTER the
+    // vendor's own detachment record is on the stream, which is the order a
+    // real Ctrl-B has.
+    detached();
   },
 });
 
