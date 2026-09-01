@@ -22,10 +22,12 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		name      string
 		entry     func(*producer) *storev1.StoreEntry
 		wantField string
+		wantSite  string
 	}{
 		{
 			name:      "missing write_id",
 			wantField: "entries[0].write_id",
+			wantSite:  "entry_write_id_empty",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 			},
@@ -33,6 +35,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		{
 			name:      "missing upsert_key",
 			wantField: "entries[0].upsert_key",
+			wantSite:  "entry_upsert_key_empty",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("w-valid", "", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 			},
@@ -40,6 +43,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		{
 			name:      "missing plane arm",
 			wantField: "entries[0].plane",
+			wantSite:  "entry_plane_unset",
 			entry: func(p *producer) *storev1.StoreEntry {
 				e := p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 				e.Plane = &storev1.Plane{}
@@ -49,6 +53,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		{
 			name:      "missing plane message",
 			wantField: "entries[0].plane",
+			wantSite:  "entry_plane_unset",
 			entry: func(p *producer) *storev1.StoreEntry {
 				e := p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x")))
 				e.Plane = nil
@@ -58,6 +63,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		{
 			name:      "missing entry arm",
 			wantField: "entries[0].entry",
+			wantSite:  "entry_arm_unset",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return &storev1.StoreEntry{Plane: p.plane(), WriteId: "w-valid", UpsertKey: "u-valid"}
 			},
@@ -65,6 +71,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		{
 			name:      "missing agent_info arm",
 			wantField: "entries[0].agent_update",
+			wantSite:  "store_refused_request",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("w-valid", "u-valid", &storev1.StoreAgentUpdate{TopLevel: agentID("main")})
 			},
@@ -72,6 +79,7 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 		{
 			name:      "page line naming no book",
 			wantField: "entries[0].agent_update.serveable_frame.page_agent_id",
+			wantSite:  "store_refused_request",
 			entry: func(p *producer) *storev1.StoreEntry {
 				return p.agentEntry("w-valid", "u-valid", &storev1.StoreAgentUpdate{
 					AgentInfo: &storev1.StoreAgentUpdate_ServeableFrame{
@@ -105,6 +113,79 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 			if len(recordsWithContextKey(records, "rpc")) == 0 {
 				t.Errorf("the refusal logged no record carrying the rpc correlation key")
 			}
+			assertRefusalKeys(t, assertExactlyOneNormalRecord(t, records, "a malformed entry"), tc.wantSite, "invalid_request")
+		})
+	}
+}
+
+// TestWriteBatchRefusesAMalformedRequestEnvelope covers the refusals ABOVE the
+// entries: the producer string, the batch itself, and the cursor advance riding
+// it. Each names the field the store blames, and each is refused before any
+// storage happens.
+func TestWriteBatchRefusesAMalformedRequestEnvelope(t *testing.T) {
+	tests := []struct {
+		name      string
+		request   func(*producer) *storev1.WriteBatchRequest
+		wantField string
+		wantSite  string
+	}{
+		{
+			name:      "empty producer",
+			wantField: "producer",
+			wantSite:  "producer_empty",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+					p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x"))),
+				}}}
+			},
+		},
+		{
+			name:      "missing batch",
+			wantField: "batch",
+			wantSite:  "batch_missing",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Producer: p.name}
+			},
+		},
+		{
+			name:      "cursor advance naming no file",
+			wantField: "cursor_advance.file_id",
+			wantSite:  "cursor_file_id_empty",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Producer: p.name, Batch: &storev1.EntryBatch{
+					CursorAdvance: cursorState("", "/transcripts/a.jsonl", 4096, nil),
+				}}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := startStore(t, storeOptions{verbose: true})
+			ctx, cancel := callContext(t)
+			defer cancel()
+			requestID := newRequestID(t)
+			sidecar := fileProducer(store.client()).correlated(requestID)
+			mark := store.logMark()
+			call := connect.NewRequest(tc.request(sidecar))
+			call.Header().Set(requestIDHeader, requestID)
+
+			// Act.
+			resp, err := store.client().WriteBatch(ctx, call)
+			if err != nil {
+				t.Fatalf("WriteBatch answered a transport error where a typed failure was owed: %v", err)
+			}
+
+			// Assert.
+			failure := resp.Msg.GetFailure()
+			if failure == nil {
+				t.Fatalf("WriteBatch accepted a request it owed a typed failure for: %v", resp.Msg)
+			}
+			assertWriteInvalidRequest(t, failure, tc.wantField)
+			records := store.logRecordsAfter(mark)
+			assertNoDatabaseTouch(t, records, requestID)
+			assertRefusalKeys(t, assertExactlyOneNormalRecord(t, records, "a malformed write request"), tc.wantSite, "invalid_request")
 		})
 	}
 }

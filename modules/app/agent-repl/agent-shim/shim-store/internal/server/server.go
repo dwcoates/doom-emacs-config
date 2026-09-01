@@ -141,6 +141,7 @@ func (s *Server) logRefusal(log *logging.Logger, operation string, ref *refusal,
 	fields.Operation = operation
 	fields.Level = "warn"
 	fields.RefusalSite = ref.site
+	fields.RefusalKind = ref.class.armName()
 	log.Log(fields, "refused: %s", ref.detail)
 }
 

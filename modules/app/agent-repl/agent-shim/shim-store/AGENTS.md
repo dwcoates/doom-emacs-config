@@ -222,7 +222,13 @@ transaction that begins DEFERRED.
 - `WatchBashRun` replays every stored row of a run in **FIRST-INSERT order**
   (`position`), then follows live rows, and ENDS after a `success`/`failure` row
   — including when the terminal was already stored, in which case the replay IS
-  the whole answer. The order is `position` and not `write_seq` because a run's
+  the whole answer. **THE REPLAY SERVES EVERY STORED ROW AND THE END FIRES AFTER
+  THE LAST OF THEM**, not at the terminal: a delta the sidecar reached only once
+  the spool was already closed is first inserted AFTER the terminal's row, and
+  stopping there handed the consumer a run that produced less output than it did.
+  A terminal re-upsert against an ended stream is absorbed silently — nothing is
+  re-sent to watchers that already ended, and a fresh replay still serves the
+  terminal exactly once. The order is `position` and not `write_seq` because a run's
   rows are a spool being filled in: a redelivered delta upserts its row and must
   appear where it always was. (`WatchAgentSession` replays by `write_seq` for the
   opposite reason: a book's upsert is NEW INFORMATION about a line the caller has
@@ -237,6 +243,13 @@ transaction that begins DEFERRED.
   can never stall a writer's acknowledgement. On overflow the store logs a
   WARNING and **ENDS that stream with `CodeResourceExhausted`**; recovery is a
   re-open with `known_through`. Never silently thin a subscriber.
+- **`AgentFrame.detached_work` IS A PAGE LINE FOR EVERY `DetachableWork` KIND,
+  WORKFLOW INCLUDED.** "Work left this stream" is the handoff the announcing
+  agent's book has to show, and it is the one durable copy of what was announced;
+  drawing the spawning call without it leaves the feed claiming work that is
+  still in the turn. The workflow kick affects only what is SERVED BACK:
+  `live_detached` excludes workflow and `GetWorkflow` answers `not_implemented`,
+  while the announcement itself is stored and paged like any other.
 - `GetLiveWork` is the `ended_at IS NULL` scans. "Live" is a claim about the
   RECORD — a start was written and no terminal ever was — so it is timeless and
   cannot go stale. Main agents are never listed; `live_workflows` is empty this
@@ -266,7 +279,21 @@ arms are derived from, and each one is logged once with `refusal_site`.
 - **EVERY REFUSAL SETS ITS `kind` ARM AND NAMES THE FIELD IT BLAMES.** `detail`
   is prose; a caller switches on the arm and reads `invalid_request.field`, which
   is the store's own name for what was wrong, with the entry index where one
-  applies (`entries[1].upsert_key`). `internal/server` never opens a frame, so
+  applies (`entries[1].upsert_key`).
+- **`invalid_request.field` IS A FULL ENVELOPE PATH.** The vocabulary is owned by
+  the store — `internal/db` for anything inside an entry, `internal/server` for
+  the request around it — and every path is walkable from the message the
+  producer sent, so a caller never has to guess the top of it. The forms are:
+  request-level (`producer`, `batch`, `agent`, `book`, `page_size`,
+  `known_through`, `after`, `watch`, `run`, `file_id`, `work`); batch-level
+  (`cursor_advance.file_id`); and entry-level, always rooted at
+  `entries[i]` — `entries[i].write_id`, `entries[i].upsert_key`,
+  `entries[i].plane`, `entries[i].entry`, `entries[i].agent_update…`,
+  `entries[i].session_update`. Anything inside a page line's frame carries the
+  whole prefix it is reached through:
+  `entries[i].agent_update.serveable_frame.agent_item.agent_frame.agent_id`, not
+  `agent_frame.agent_id`. A path that starts halfway down names a field that
+  appears nowhere in the request. `internal/server` never opens a frame, so
   the site and the field for anything INSIDE one come up from `internal/db`
   through the refusal it returns. Per verb: `WriteBatch`
   invalid_request|storage_failure (a stale pointer is unreachable — the verb
@@ -321,11 +348,18 @@ arms are derived from, and each one is logged once with `refusal_site`.
 - Correlation keys, each in its own `context` field and never left to the
   message text: `producer`, `agent_id`, `vendor_session_id`, `book_agent_id`,
   `write_id`, `upsert_key`, `position`, `write_seq`, `watch_token_hash`, `rpc`,
-  `refusal_site`, `file_id`, `path`, `offset`, `task_id`, `activity_id`,
-  `turn_id`. Top-level `request_id` comes from the `X-Agent-Repl-Request-Id`
+  `refusal_site`, `refusal_kind`, `file_id`, `path`, `offset`, `task_id`,
+  `activity_id`, `turn_id`. Top-level `request_id` comes from the `X-Agent-Repl-Request-Id`
   header when a caller sends one. `rpc` is the Connect procedure spelled
   exactly as Connect spells it, leading slash included
   (`/store.v1.ShimStore/WriteBatch`).
+- **EVERY REFUSAL RECORD CARRIES BOTH `refusal_site` AND `refusal_kind`.** The
+  site is which of the store's checks said no; the kind is the wire arm the
+  caller received (`invalid_request`, `stale_pointer`, `storage_failure`,
+  `not_implemented`), derived from the refusal's class in `logRefusal` and never
+  restated by hand. Several sites map to one arm, so a record naming only the
+  site leaves a reader unable to tell whether the caller could ever have retried,
+  and one naming only the arm leaves it unable to find the check that fired.
 - **The retired addressing keys are DEAD**: `claude_session_id`, `seq`,
   `from_seq`, `replay_*_seq` and anything else naming the old `(session_id,
   seq)` addressing. Do not add one back.
@@ -370,6 +404,28 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
   cleanup.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1` from `TestMain`.
   Nothing here ever calls a vendor.
+- **`integration/` asserts on record KIND AND FIELD SET, never on detail prose.**
+  A refusal subject scopes to the operation that owns it (`recordsAtOperation`),
+  counts it (`assertExactlyOneNormalRecord` — every error is logged exactly once
+  by its owning layer), and asserts the correlation keys the refusal is looked up
+  by (`refusal_site` AND `refusal_kind` together, `watch_token_hash`, `rpc`,
+  `write_id`, `task_id`) — `assertRefusalKeys` is the helper for the first pair. A level
+  filter alone is not an assertion: "some warn was logged" passes for a reclaimed
+  socket or a slow query as readily as for the thing under test.
+- **`assertNoDatabaseTouch` is scoped by `request_id` and needs `verbose: true`.**
+  It proves one refused request never opened a transaction, by finding no
+  statement trace carrying that request's id. It carries no per-window positive
+  control on purpose — a refusal is often the only call in its window — so the
+  control is the global one,
+  `TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId`, which fails the
+  moment the store stops leaving the mark the scan looks for.
+- Store-side fixture keys reproduce the producers' real spellings exactly:
+  `bash:<run>:start` / `bash:<run>:<from_offset>` / `bash:<run>:terminal`,
+  `detached:<work id>` for an announcement,
+  `session:context_budget_warning:<uuid>`, and
+  `residue:<vendor record uuid>` with the `residue:file:<path>:<offset>`
+  fallback. A subject that keys an announcement by a unit key is testing a
+  spelling no producer uses.
 - **The fan-out is generic over its item**, keyed by book for page lines and by
   run for bash rows. Two hand-copied registries would be two places for the
   non-blocking-publish and overflow rules to drift apart. They are still two

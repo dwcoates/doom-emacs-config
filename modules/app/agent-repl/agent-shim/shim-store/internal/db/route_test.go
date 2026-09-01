@@ -552,3 +552,29 @@ func terminalFixture(item any) *conversationv1.AgentActivity {
 	}
 	return activity
 }
+
+// TestClassifyBlamesAFullEnvelopePath is the field-path vocabulary: the string
+// a refusal blames is walkable from the StoreEntry root.
+//
+// A frame-depth refusal that blamed `agent_frame.agent_id` named a field that
+// appears nowhere in the message the producer sent — the frame is reached
+// through agent_update.serveable_frame.agent_item — so a caller had to guess
+// the top of the path the store had already computed for it.
+func TestClassifyBlamesAFullEnvelopePath(t *testing.T) {
+	// Arrange
+	entry := pageEntry("w", "u", "agent-1", frameItem(&conversationv1.AgentFrame{
+		Result: &conversationv1.AgentFrame_Update{Update: proseUpdate("act-1")},
+	}))
+
+	// Act
+	_, err := classify(entry, 0)
+
+	// Assert
+	if err == nil {
+		t.Fatal("classify accepted a frame with no agent id")
+	}
+	const want = "entries[0].agent_update.serveable_frame.agent_item.agent_frame.agent_id"
+	if got := RefusalField(err); got != want {
+		t.Fatalf("the refusal blames field %q, want the full envelope path %q", got, want)
+	}
+}

@@ -1211,3 +1211,62 @@ func TestNewPanicsWithoutAStore(t *testing.T) {
 	// Act.
 	New(nil, logging.New(&syncBuffer{}, io.Discard, false), 0)
 }
+
+func TestARefusalRecordNamesBothTheSiteAndTheWireArm(t *testing.T) {
+	// Arrange. THE SITE IS NOT THE ARM: several sites map to one arm, so a
+	// reader triaging refusals needs the site to find the check that said no
+	// and the kind to know whether the caller could ever have retried.
+	tests := []struct {
+		name      string
+		operation string
+		call      func(*harness)
+		wantSite  string
+		wantKind  string
+	}{
+		{
+			name:      "an empty batch is invalid_request",
+			operation: "store.rpc.write-batch",
+			wantSite:  SiteBatchEmpty,
+			wantKind:  "invalid_request",
+			call: func(h *harness) {
+				h.client.WriteBatch(context.Background(), connect.NewRequest(&storev1.WriteBatchRequest{ //nolint:errcheck // the refusal is the subject
+					Producer: "claude-shim:s1",
+					Batch:    &storev1.EntryBatch{},
+				}))
+			},
+		},
+		{
+			name:      "workflow is not_implemented",
+			operation: "store.rpc.get-workflow",
+			wantSite:  SiteWorkflowNotImplemented,
+			wantKind:  "not_implemented",
+			call: func(h *harness) {
+				h.client.GetWorkflow(context.Background(), connect.NewRequest(&storev1.GetWorkflowRequest{ //nolint:errcheck // the refusal is the subject
+					Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+				}))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, newFakeStore(), 0)
+
+			// Act.
+			tc.call(h)
+
+			// Assert.
+			rec, ok := findRecord(t, h.logs, tc.operation, "warn")
+			if !ok {
+				t.Fatalf("records = %+v, want a warn record at %q", records(t, h.logs), tc.operation)
+			}
+			if rec.Context["refusal_site"] != tc.wantSite {
+				t.Errorf("refusal_site = %v, want %q", rec.Context["refusal_site"], tc.wantSite)
+			}
+			if rec.Context["refusal_kind"] != tc.wantKind {
+				t.Errorf("refusal_kind = %v, want %q", rec.Context["refusal_kind"], tc.wantKind)
+			}
+		})
+	}
+}

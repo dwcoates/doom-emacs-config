@@ -53,19 +53,32 @@ func (s *Server) WatchBashRun(ctx context.Context, req *connect.Request[storev1.
 	}
 
 	replayed := make(map[uint64]struct{}, len(replay.Rows))
+	// THE REPLAY SERVES EVERY STORED ROW, TERMINAL OR NOT.
+	//
+	// Returning at the terminal row dropped anything first inserted after it —
+	// a late delta the sidecar reached only once the spool was already closed,
+	// which is ordinary rather than exceptional. The consumer would then have
+	// concatenated a run that produced less output than it did, with no way to
+	// tell. So the natural end fires AFTER the last stored row, once a terminal
+	// has been sent.
+	terminated := false
+	var terminalSeq uint64
 	for _, row := range replay.Rows {
 		if err := s.sendBashRow(log, stream, row); err != nil {
 			return err
 		}
 		replayed[row.WriteSeq] = struct{}{}
 		if db.BashRowIsTerminal(row.Row) {
-			// THE RUN IS ALREADY OVER. Replaying its terminal is the whole
-			// answer, so the stream ends here rather than standing open on a
-			// run that can never speak again.
-			log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: row.WriteSeq},
-				"bash run watch ended: the terminal row was already stored replayed=%d", len(replayed))
-			return nil
+			terminated = true
+			terminalSeq = row.WriteSeq
 		}
+	}
+	if terminated {
+		// The run is already over: it can never speak again, so the stream ends
+		// rather than standing open on it.
+		log.Log(logging.Fields{Operation: "store.rpc.watch-bash-run", WriteSeq: terminalSeq},
+			"bash run watch ended: the terminal row was already stored replayed=%d", len(replayed))
+		return nil
 	}
 	// The headers go out before the tail blocks, for the reason openStream
 	// documents: until they do, the producer that would write the next row is

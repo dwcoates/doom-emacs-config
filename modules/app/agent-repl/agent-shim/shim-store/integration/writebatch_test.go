@@ -104,7 +104,7 @@ func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
 
 	// Assert: the arm names WHICH entry and which field, so the producer's own
 	// logs can say what it sent wrong without parsing prose.
-	assertWriteInvalidRequest(t, failure, "entries[1].agent_frame.agent_id")
+	assertWriteInvalidRequest(t, failure, "entries[1].agent_update.serveable_frame.agent_item.agent_frame.agent_id")
 	if !strings.Contains(failure.GetDetail(), "entries[1]") {
 		t.Errorf("the detail %q does not name the offending entry index", failure.GetDetail())
 	}
@@ -151,6 +151,102 @@ func TestWriteBatchWithoutCursorAdvanceLeavesCursorsUntouched(t *testing.T) {
 	}
 	if got[0].GetOffset() != cursor.GetOffset() {
 		t.Errorf("a stream-plane write moved the cursor to %d, want it left at %d", got[0].GetOffset(), cursor.GetOffset())
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestACursorOnlyBatchIsDurablySuccessful: a sidecar that read bytes yielding
+// no entries — a partial line, a block of records it had already absorbed —
+// must still make its file position durable. Refusing the batch would leave the
+// reader re-reading the same bytes forever, so the cursor alone is a legal
+// batch, and its success means the same durable thing every other success does.
+func TestACursorOnlyBatchIsDurablySuccessful(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	sidecar := fileProducer(store.client())
+	cursor := cursorState("16777232:900010", "/transcripts/partial.jsonl", 2048, []byte(`{"partial":`))
+
+	// Act: no entries at all.
+	sidecar.writeWithCursor(ctx, t, cursor)
+	store.restart()
+
+	// Assert.
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	got := sidecarCursors(after, t, store.client(), nil)
+	if len(got) != 1 {
+		t.Fatalf("after restart the store holds %d cursors, want the cursor-only batch's 1", len(got))
+	}
+	if got[0].GetOffset() != cursor.GetOffset() || string(got[0].GetCarry()) != string(cursor.GetCarry()) {
+		t.Fatalf("the cursor-only batch survived as %v, want offset=%d carry=%q", got[0], cursor.GetOffset(), cursor.GetCarry())
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestCursorsPerFileLatestWins: the cursor table is keyed by the file's stable
+// identity, so one file has exactly one position and the newest advance is it.
+// Two files are two rows, and the file_id filter answers about one of them.
+func TestCursorsPerFileLatestWins(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	const fileA = "16777232:900020"
+	const fileB = "16777232:900021"
+	sidecar.writeWithCursor(ctx, t, cursorState(fileA, "/transcripts/a.jsonl", 100, nil),
+		sidecar.agentEntry("w-cur-a1", "u-cur-a1", frameLine(agentID("main"), responseFrame("main", "act-a1", "A1"))))
+	sidecar.writeWithCursor(ctx, t, cursorState(fileB, "/transcripts/b.jsonl", 700, nil),
+		sidecar.agentEntry("w-cur-b1", "u-cur-b1", frameLine(agentID("main"), responseFrame("main", "act-b1", "B1"))))
+
+	// Act: file A advances again.
+	sidecar.writeWithCursor(ctx, t, cursorState(fileA, "/transcripts/a.jsonl", 900, []byte("tail")),
+		sidecar.agentEntry("w-cur-a2", "u-cur-a2", frameLine(agentID("main"), responseFrame("main", "act-a2", "A2"))))
+
+	// Assert: two rows, A at its newest position.
+	all := sidecarCursors(ctx, t, cli, nil)
+	if len(all) != 2 {
+		t.Fatalf("the store holds %d cursors, want one per file (2)", len(all))
+	}
+	filter := fileA
+	only := sidecarCursors(ctx, t, cli, &filter)
+	if len(only) != 1 {
+		t.Fatalf("the file_id filter answered %d cursors, want exactly the one file's", len(only))
+	}
+	if only[0].GetFileId() != fileA {
+		t.Fatalf("the file_id filter answered file %q, want %q", only[0].GetFileId(), fileA)
+	}
+	if only[0].GetOffset() != 900 {
+		t.Errorf("the file's cursor is at offset %d, want the latest advance's 900", only[0].GetOffset())
+	}
+	if string(only[0].GetCarry()) != "tail" {
+		t.Errorf("the file's carry is %q, want the latest advance's %q", only[0].GetCarry(), "tail")
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestTheFileIdFilterAnswersEmptyForAFileWithNoCursor: an unknown file is an
+// empty answer, never a refusal — the sidecar asks about a file precisely
+// because it does not know whether it has a position in it yet.
+func TestTheFileIdFilterAnswersEmptyForAFileWithNoCursor(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	sidecar.writeWithCursor(ctx, t, cursorState("16777232:900030", "/transcripts/known.jsonl", 10, nil))
+
+	// Act.
+	unknown := "16777232:900031"
+	got := sidecarCursors(ctx, t, cli, &unknown)
+
+	// Assert.
+	if len(got) != 0 {
+		t.Fatalf("the file_id filter answered %v for a file with no cursor, want nothing", got)
 	}
 	store.assertNoErrorRecords()
 }

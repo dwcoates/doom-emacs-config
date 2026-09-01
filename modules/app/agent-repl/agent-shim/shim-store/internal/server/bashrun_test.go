@@ -273,3 +273,33 @@ func TestWatchBashRunEndsAnOverflowedSubscriberWithAnError(t *testing.T) {
 		t.Fatalf("code = %v, want %v (error: %v)", code, connect.CodeResourceExhausted, stream.Err())
 	}
 }
+
+func TestWatchBashRunReplaysARowStoredAfterTheTerminal(t *testing.T) {
+	// Arrange. A delta the sidecar reached only once the spool was already
+	// closed is first inserted AFTER the terminal row. Ending at the terminal
+	// dropped it, and the consumer concatenated a run that produced less output
+	// than it did with no way to tell.
+	store := newFakeStore()
+	store.bashRun = BashRunReplay{Rows: []BashRowWritten{
+		{RunID: "run-1", Row: bashRow("run-1", false).Row, WriteSeq: 1},
+		{RunID: "run-1", Row: bashRow("run-1", true).Row, WriteSeq: 2},
+		{RunID: "run-1", Row: bashRow("run-1", false).Row, WriteSeq: 3},
+	}, PinSeq: 3}
+	h := newHarness(t, store, 0)
+
+	// Act.
+	w := startBashWatch(h, context.Background(), "run-1")
+	stream := w.open(t)
+	var rows int
+	for stream.Receive() {
+		rows++
+	}
+
+	// Assert.
+	if err := stream.Err(); err != nil {
+		t.Fatalf("stream error = %v, want a clean natural end", err)
+	}
+	if rows != 3 {
+		t.Fatalf("rows = %d, want every stored row including the one after the terminal", rows)
+	}
+}
