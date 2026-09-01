@@ -162,6 +162,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - FINAL REPORT owes: commit range, every suite + result, overrides of
   prescribed details, escalations outstanding, what was left out, the UX
   gaps filled from the API (one line each), the toss-ups for the user.
+- RESUMED 2026-09-01 (recreated teamlead, fable-low): worktrees cut off
+  3d3ea3a2c and dispatched (`opus-low`, cap three): R-VERBS-SUITE
+  (elisp-agents/verbs-suite), R-HANDOVER (elisp-agents/handover; the
+  successor address is always WatchDaemon's announcement — Transferred is
+  empty on the wire), R-ROSTER (elisp-agents/roster). Queued behind them:
+  R-COMPOSER, R-POLISH, then adversarial audit 2.
 
 ## 1. Module map (final tree of lisp/)
 
