@@ -1349,19 +1349,34 @@ would navigate the page straight back at the daemon that released it."
       (should (eq (cdr (assq :reload-conn agent-repl-test-host--effects))
                   successor)))))
 
-(ert-deftest agent-repl-test-host-transferred-address-takes-precedence ()
-  "A `transferred' push that names an address dials THAT daemon.
-HostWorkspaceTransferred is empty in this tree, so the field is absent
-today; the walk is written so a decoded address wins the moment it lands."
+(ert-deftest agent-repl-test-host-transferred-adopts-the-recorded-successor ()
+  "A `transferred' push adopts onto the link\='s RECORDED successor.
+`HostWorkspaceTransferred' is EMPTY on the wire, so the push names no
+daemon: the successor is the one `shutdown_announced{address}' already
+made the link dial and accept.  Nothing is dialed here."
   (agent-repl-test-host--with-harness
-    ;; Arrange — the link's successor is somewhere else entirely
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9999"))
+    ;; Arrange
+    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
+      (setq agent-repl-test-host--successor successor)
+      (agent-repl-test-host--subscribe "ws-1")
+      ;; Act
+      (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
+      ;; Assert
+      (should (eq (nth 1 (assoc "AdoptHostWorkspace" agent-repl-test-host--calls))
+                  successor)))))
+
+(ert-deftest agent-repl-test-host-transferred-dials-nobody ()
+  "The `transferred' push dials NO daemon of its own.
+The message is empty, so there is no address to dial toward: a dial here
+could only be invented, and the link already holds the accepted successor."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push
-     "ws-1" '(:arm :transferred :value (:address "127.0.0.1:9100")))
+    (agent-repl-test-host--push "ws-1" '(:arm :transferred :value nil))
     ;; Assert
-    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9100")))))
+    (should (null agent-repl-test-host--dialled))))
 
 ;;;; ---- Subscription acceptance ----
 
