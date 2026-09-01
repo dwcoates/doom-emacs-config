@@ -19,13 +19,15 @@ Every such site is recorded here. The daemon teamlead batches the table to the
 project lead, who lands the arms; a landed arm is deleted from this table in
 the same commit that switches the handler onto it.
 
-THE TABLE IS EMPTY: every arm the daemon had recorded here landed in the
-landing-4 contract batch, and each row was deleted as its rpc's `<Rpc>Error`
-gained the arm. Record the next one the same way — a row here, then the row
-deleted in the commit that switches the handler onto the landed arm.
+Every arm the daemon had recorded here landed in the landing-4 contract batch,
+and each row was deleted as its rpc's `<Rpc>Error` gained the arm; the table
+below holds what landing 5 opened. Record the next one the same way — a row
+here, then the row deleted in the commit that switches the handler onto the
+landed arm.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
+| UpdateMergeQueue | `unknown_repository` | `UpdateMergeQueuePause`/`UpdateMergeQueueResume` carries a `repository` ref that matches no registered repository (or names neither an id nor a dir) | merge |
 
 One thing the batch did NOT land: `CloseWorkspaceError.blocked` exists but
 `CloseWorkspaceBlocked` is still an EMPTY message, so the composed reason the
