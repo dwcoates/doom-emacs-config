@@ -30,16 +30,19 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 		return Disposition{}, fmt.Errorf("record turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
 
+	// THE ACCEPTED PROMPT'S FEED ROW, DRAWN BEFORE StartTurn. The prompt is
+	// mirrored to the user the moment it is accepted for delivery, not once
+	// the shim answers — a composer that cleared its text has nothing to show
+	// for the round trip otherwise. The row carries the same FeedId the main
+	// watch's own history entry will carry, so the two upsert onto one row
+	// rather than drawing the prompt twice.
+	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
+
 	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	if err != nil {
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
-
-	// THE ACCEPTED PROMPT'S FEED ROW. It carries the same FeedId the main
-	// watch's own history entry will carry, so the two upsert onto one row
-	// rather than drawing the prompt twice.
-	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 
 	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
 		watcher.SetMainAgent(agent)
