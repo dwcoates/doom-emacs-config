@@ -30,7 +30,7 @@
   "SubmitPrompt requests received, oldest first.")
 
 (defvar agent-repl-test-input--queued nil
-  "Prompts offered to the hold queue, as (WS SAID ORIGIN RAW).")
+  "Prompts offered to the hold queue, as (WS SAID ORIGIN RAW KEY).")
 
 (defvar agent-repl-test-input--messages nil
   "Strings passed to `message' during a test.")
@@ -90,8 +90,9 @@ fake would not exercise them."
                       ((symbol-function 'agent-repl--kickoff-prompt-summary)
                        (lambda (_ws _raw) nil))
                       ((symbol-function 'agent-repl-prompt-queue-offer)
-                       (lambda (ws said origin raw)
-                         (push (list ws said origin raw) agent-repl-test-input--queued)))
+                       (lambda (ws said origin raw &optional key)
+                         (push (list ws said origin raw key)
+                               agent-repl-test-input--queued)))
                       ((symbol-function 'run-at-time) (lambda (&rest _) nil))
                       ((symbol-function 'message)
                        (lambda (fmt &rest args)
@@ -517,6 +518,30 @@ fake would not exercise them."
     (agent-repl--send :user-sent)
     (should (equal (length agent-repl-test-input--queued) 1))
     (should (equal (nth 3 (car agent-repl-test-input--queued)) "hello"))))
+
+(ert-deftest agent-repl-input-transport-failure-offers-this-attempts-key ()
+  "The offer carries THIS attempt\='s key: the re-drive is a retry of it."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer '(:failure (:kind :transport :message "gone")))
+    (agent-repl-test-input--type "hello")
+    (let ((key (agent-repl--send :user-sent)))
+      (should (equal (nth 4 (car agent-repl-test-input--queued)) key)))))
+
+(ert-deftest agent-repl-input-submit-reuses-a-supplied-key ()
+  "A supplied key rides the wire instead of a freshly minted one."
+  (agent-repl-test-input--with
+    (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
+                              :deferred-prompt "hello" "key-failed")
+    (should (equal (plist-get (car agent-repl-test-input--submitted) :idempotency-key)
+                   "key-failed"))))
+
+(ert-deftest agent-repl-input-submit-mints-a-key-when-none-is-supplied ()
+  "With no key supplied the composer mints one, as a first attempt must."
+  (agent-repl-test-input--with
+    (agent-repl--input-submit "ws-1" (list :content (list :blocks nil))
+                              :user-sent "hello")
+    (should (stringp (plist-get (car agent-repl-test-input--submitted)
+                                :idempotency-key)))))
 
 (ert-deftest agent-repl-input-no-connection-offers-to-the-queue ()
   "No connection at all is the same fact as a transport failure."
