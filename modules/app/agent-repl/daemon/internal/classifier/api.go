@@ -13,8 +13,9 @@ import (
 	"claude-repld/internal/envc"
 )
 
-// ExplicitInterrupts is the fast path: a prompt that is exactly one of these
-// words interrupts without asking the model at all.
+// ExplicitInterrupts is the fast path: a prompt whose FIRST WORD is one of
+// these interrupts without asking the model at all (project-lead ruling — the
+// rule is first-word, not whole-prompt).
 var ExplicitInterrupts = []string{"stop", "abort", "cancel", "halt", "wait"}
 
 // Verdict is the judge's answer.
