@@ -299,3 +299,39 @@ func writeIdentity(t *testing.T, configDir, body string) {
 		t.Fatalf("WriteFile() = %v", err)
 	}
 }
+
+func TestReadNeverWritesTheIdentityFileOrTheRoot(t *testing.T) {
+	// Arrange: a config root the process cannot write to at all, so any write
+	// the daemon attempted would fail loudly instead of passing unnoticed.
+	// The daemon READS oauthAccount.emailAddress and nothing else; it never
+	// writes .claude.json and never touches the CLI's projects.<cwd> entry.
+	dir := t.TempDir()
+	writeIdentity(t, dir, `{"oauthAccount":{"emailAddress":"who@example.com"},"projects":{"/home/user/proj":{"allowedTools":[]}}}`)
+	before, err := os.ReadFile(filepath.Join(dir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("reading the identity file back = %v, want nil", err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("making the config root read-only = %v, want nil", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	r := newResolver(t, account.Roots{Default: dir, MultiRepo: "/roots/multi"})
+
+	// Act.
+	got, err := r.Read(context.Background(), dir)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Read() = %v, want nil", err)
+	}
+	if got.Email != "who@example.com" {
+		t.Fatalf("Read() = %+v, want who@example.com", got)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, ".claude.json"))
+	if err != nil {
+		t.Fatalf("reading the identity file after Read = %v, want nil", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("identity file changed across Read:\n before = %s\n after  = %s", before, after)
+	}
+}
