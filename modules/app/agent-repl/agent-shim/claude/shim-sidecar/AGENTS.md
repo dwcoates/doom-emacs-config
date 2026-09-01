@@ -271,6 +271,20 @@ is a different thing:
   use its record structure. It is deliberately NOT `unparsed`: the day workflow
   ingestion lands, every one of these rows is findable by that kind, which a
   row saying "no conversion could be selected" would never be.
+
+  RESIDUE-ONLY IS THE WHOLE OUTCOME WHILE WORKFLOW IS KICKED, and which residue
+  ARM a given w* spool lands on is not settled by this wave. Owner resolution is
+  what selects between them: a w* spool with no observed spawn is held and then
+  demoted, so its bytes land as `unparsed` residue rather than as the declared
+  kind above — and nothing attributes one today, because a workflow launch result
+  is keyed by its `run_id` while the spool is named by the harness's `task_id`,
+  and no mechanism reconciles the two. THAT IS A KICKED FEATURE'S CONSEQUENCE,
+  NOT A DEFECT TO PATCH AROUND: both arms are unservable residue holding the same
+  bytes, so nothing is lost, and the day workflow ingestion lands is the day the
+  attribution is designed. Do not add a run_id-to-task_id mapping to make the
+  declared kind reachable sooner. The integration suite asserts what is actually
+  guaranteed — the bytes land, and nothing workflow-shaped is ever converted or
+  paged — and deliberately does not assert the arm.
 - anything else — a TOTAL-INGESTION VIOLATION. Logged at ERROR and ingested
   whole as `unparsed` residue, because a file dropped from discovery is the one
   thing total ingestion forbids.
