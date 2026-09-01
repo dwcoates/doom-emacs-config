@@ -885,6 +885,24 @@ repository instead would exceed what the caller asked for."
     (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
       (should-not (plist-get (plist-get form :value) :merge-actions)))))
 
+(ert-deftest agent-repl-verbs-create-fork-without-a-parent-is-refused ()
+  "A fork without a parent is unrepresentable, so it is refused, not encoded."
+  (agent-repl-test-verbs--with nil
+    ;; Act / Assert
+    (should-error (agent-repl-verb-create (agent-repl-test-verbs--repo-ref)
+                                          :standard :fork t)
+                  :type 'user-error)))
+
+(ert-deftest agent-repl-verbs-create-fork-without-a-parent-sends-nothing ()
+  "The refusal is BEFORE the send: silently dropping the fork would create
+a plain workspace the caller never asked for."
+  (agent-repl-test-verbs--with nil
+    ;; Act
+    (ignore-errors
+      (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard :fork t))
+    ;; Assert
+    (should-not agent-repl-test-verbs--sent)))
+
 (ert-deftest agent-repl-verbs-create-fork-rides-inside-the-parent ()
   "FORK lives INSIDE the parent: a fork without a parent is unrepresentable."
   (agent-repl-test-verbs--with nil
