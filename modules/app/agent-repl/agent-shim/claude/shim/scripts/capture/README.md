@@ -210,6 +210,46 @@ scenario looked correctly configured. A non-zero exit fails the scenario rather
 than warning, because a scenario whose precondition failed captures a golden of
 the wrong situation.
 
+## The trigger vocabulary
+
+A scenario's `controls` are scripted verbs, each with a trigger point `at`:
+
+| `at` | Fires when | `after` matches against |
+|---|---|---|
+| `session_start` | once, right after the query opens | — |
+| `on_message` | the first stream message the matcher accepts | an SDK message: `type`, `subtype`, `contains` |
+| `on_control` | the first CONTROL RECORD the matcher accepts | a `{kind, tool_name, …}` control entry: `kind`, `tool_name`, `contains` |
+| `turn_end` | once, after every turn has finished | — |
+
+`on_control` exists because the permission callback's own records are not stream
+messages. A gate the scenario parks is recorded as
+`{kind: "can_use_tool_parked", tool_name}` on the `control` plane, and an
+`on_message` trigger — however it is spelled — can never observe it, so
+`permission-undecidable-parked` waited forever for an interrupt that had nothing
+to fire off. It now triggers on `{at: "on_control", after: {kind:
+"can_use_tool_parked"}, do: "interrupt"}`. The two planes are strictly separate:
+an `on_control` control never sees a stream message, and an `on_message` control
+never sees a control record.
+
+## The sweep-end late reclaim
+
+Under `--config-root` the per-scenario reclaim is not the end of the story: the
+vendor flushes small late transcript writes into `<config-root>/projects/<slug>/`
+*after* that reclaim has already emptied and deleted it, while the SDK child is
+still alive — which left the operator's real `~/.claude` dirty.
+
+A SECOND reclaim pass therefore runs once at sweep end, after every query is
+closed and every SDK child is gone. For each scenario slug **this run created**
+— never any other project directory — it re-copies whatever reappeared into that
+scenario's `files/projects/<slug>/`, merging rather than replacing (a destination
+file is never overwritten by a SMALLER one, so a truncated late re-write cannot
+destroy the captured golden), then deletes the slug directory from the root. Each
+late reclaim is logged to stderr:
+
+```
+capture.mjs: late reclaim <slug> — N file(s) re-copied, <dir> removed
+```
+
 ## The corpus
 
 `prompts.json` holds one entry per item in the SHIM directive's coverage list.
