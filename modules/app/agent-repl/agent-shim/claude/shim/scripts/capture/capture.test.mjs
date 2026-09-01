@@ -984,3 +984,65 @@ describe("drainToResult", () => {
     expect(query.state.closed).toBe(false);
   });
 });
+
+describe("the corpus's declared error terminals", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const scenarioNamed = (name) => doc.scenarios.find((entry) => entry.name === name);
+
+  // The parked gate's golden IS an aborted terminal: the interrupt fires while
+  // a permission callback is pending, and the vendor ends the turn with
+  // subtype "error_during_execution" / terminal_reason "aborted_tools"
+  // (observed in captures/_failed/permission-undecidable-parked). Without the
+  // declaration the quarantine rule condemns the capture the scenario exists
+  // for, exactly as it did on the first real run.
+  it("declares the aborted terminal permission-undecidable-parked exists to capture", () => {
+    expect(scenarioNamed("permission-undecidable-parked").expects_error_subtypes).toEqual([
+      "error_during_execution",
+    ]);
+  });
+
+  it("keeps that scenario's interrupt scripted off the parked control record", () => {
+    expect(scenarioNamed("permission-undecidable-parked").controls).toEqual([
+      { at: "on_control", after: { kind: "can_use_tool_parked" }, do: "interrupt" },
+    ]);
+  });
+
+  // NOT every interrupt-driven scenario: hook-cancelled's real capture ended
+  // `success` / `completed`, so declaring an error terminal for it would
+  // whitelist a failure it is not supposed to have.
+  it("declares an error terminal only as a non-empty list of subtypes", () => {
+    const malformed = doc.scenarios
+      .filter((entry) => entry.expects_error_subtypes !== undefined)
+      .filter((entry) => {
+        const declared = entry.expects_error_subtypes;
+        return (
+          !Array.isArray(declared) ||
+          declared.length === 0 ||
+          declared.some((subtype) => typeof subtype !== "string" || subtype === "")
+        );
+      })
+      .map((entry) => entry.name);
+    expect(malformed).toEqual([]);
+  });
+
+  // A provocation the model declines on its own judgement never reaches the
+  // gate: `rm -rf .` recorded no can_use_tool at all, so the scenario captured
+  // nothing about denial.
+  it("provokes permission-denied-by-user with a command the model will attempt", () => {
+    expect(scenarioNamed("permission-denied-by-user").prompt).not.toContain("rm -rf");
+  });
+
+  it("materializes the file that scenario's command acts on", () => {
+    expect(scenarioNamed("permission-denied-by-user").cwd_setup).toEqual([
+      { path: "stale.log", content: "stale\n" },
+    ]);
+  });
+
+  it("keeps that scenario's expectations about the denial", () => {
+    expect(scenarioNamed("permission-denied-by-user").expect).toEqual([
+      "can_use_tool request",
+      "PermissionResult deny",
+      "no activity frames for the denied call",
+    ]);
+  });
+});
