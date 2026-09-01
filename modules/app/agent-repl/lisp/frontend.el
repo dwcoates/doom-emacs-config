@@ -267,25 +267,6 @@ external call; tests mock via `cl-letf'.  Registered in
   (require 'xwidget)
   (xwidget-webkit-uri xwidget)) ;; ALLOW-EXTERNAL-BOUNDARY
 
-(defun agent-repl--frontend-webview-workspace (buf)
-  "Return the workspace name webview BUF belongs to.
-Prefers the permanent-local `agent-repl--owning-workspace' recorded on
-the buffer, falling back to the name the buffer is pinned to — the
-webview name format encodes the workspace, and a webview mounted before
-the owner was stamped still has to be identifiable in the log."
-  (or (agent-repl--buffer-owner buf)
-      (let ((name (buffer-name buf)))
-        (when (string-match "\\`\\*agent-frontend-\\(.+\\)\\*\\'" name)
-          (match-string 1 name)))))
-
-(defun agent-repl--frontend-live-webview-buffers ()
-  "Return every live workspace webview buffer, in `buffer-list' order."
-  (seq-filter (lambda (buf)
-                (and (buffer-live-p buf)
-                     (agent-repl--agent-view-buffer-p buf)))
-              (buffer-list)))
-
-;;;###autoload
 (defun agent-repl-refresh-webviews ()
   "Bring every workspace webview onto the deployed bundle, returning the count.
 
@@ -856,14 +837,6 @@ webview open at all, matching `agent-repl-frontend-reload-webview'."
            ws "webview brought home from %s"
            (list (agent-repl--frontend-webview-host uri))
            :detail (format "stray-uri=%s" uri)))))))
-
-(defun agent-repl--frontend-parent-ws-name (ws)
-  "Return the basename of WS's recorded parent worktree, or nil.
-Reads WS's `:source-ws-dir'; nil when no parent was recorded or the
-recorded value is empty."
-  (let ((source-dir (agent-repl--ws-get ws :source-ws-dir)))
-    (when (and source-dir (not (string-empty-p source-dir)))
-      (file-name-nondirectory (directory-file-name source-dir)))))
 
 (defun agent-repl--gui-show (ws)
   "The gui frontend's show capability (registry `:show-fn').
