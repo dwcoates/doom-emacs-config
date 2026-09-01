@@ -106,6 +106,12 @@ func TestReopeningAfterARestartRecoversTheTail(t *testing.T) {
 
 	// Assert: nothing already held is repainted, and the tail resumes.
 	assertTexts(t, "the catch-up page after a restart", pageTexts(reopened.GetPage()), nil)
+	// AN EMPTY CATCH-UP PAGE IS `floor`, NOT `more`. The caller asked for what
+	// it does not have yet and there is nothing, so the boundary says the walk
+	// is over: the caller is current, and nothing older is owed below its mark.
+	// `more` would hand it a continuation pointer to a page that can only ever
+	// come back empty, which is a repaint loop dressed as pagination.
+	assertPageFloor(t, reopened.GetPage())
 	assertTexts(t, "the tail after a restart", receivedTexts(receiveLines(t, stream, 1)), []string{"L2"})
 	store.assertNoErrorRecords()
 }
