@@ -86,3 +86,12 @@ The `turn_already_open` arm on `SubmitPromptError` HAS NO PRODUCER: the sentinel
 `promptqueue.ErrTurnAlreadyOpen` is declared and documented but is never
 returned by any code path in the daemon. The server maps it if it ever appears;
 the arm is a candidate for retirement.
+
+## Panel commands with no producer (server, wave 3a)
+
+`server.Panels` is the prompt handler's panel source. Only `/context` has a
+producer (the topbar resolver's context tree). `/status`, `/todos`, `/mcp` have
+no resolver at all, and `/agents` and `/help` are ruled UNPRODUCED (Q1) — they
+answer as `command_refused` before recognition ever reaches a panel. A panel
+command with no producer fails LOUDLY out of the handler rather than drawing an
+empty card.
