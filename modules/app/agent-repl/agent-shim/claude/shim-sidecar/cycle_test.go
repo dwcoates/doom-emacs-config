@@ -60,9 +60,7 @@ func TestSuspensionIsStatedOnce(t *testing.T) {
 	h.sc.suspend("second", nil)
 
 	// Assert.
-	if got := strings.Count(h.logText(), "production suspended"); got != 1 {
-		t.Fatalf("suspension stated %d times, want once", got)
-	}
+	h.requireOnce(t, "production-suspended", "warn")
 }
 
 func TestBeginCycleStartsReading(t *testing.T) {
@@ -134,9 +132,7 @@ func TestTheBootRewindHappensOncePerFile(t *testing.T) {
 	}
 
 	// Assert: one bounded backward scan per file per boot, not per reconnect.
-	if got := strings.Count(h.logText(), "rewound the restored cursor"); got != 1 {
-		t.Fatalf("rewind ran %d times, want once per file per boot", got)
-	}
+	h.requireOnce(t, "boot-rewind", "info")
 }
 
 func TestRescanWithoutCursorsPanics(t *testing.T) {
@@ -384,9 +380,14 @@ func TestResumeReportsTheOutage(t *testing.T) {
 		t.Fatalf("beginCycle: %v", err)
 	}
 
-	// Assert.
-	if !strings.Contains(h.logText(), "production resumed") {
-		t.Fatalf("the outage window was never closed in the log; got %s", h.logText())
+	// Assert: the outage window is closed by its own operation, naming the store
+	// it waited on and how many attempts it took.
+	rec := h.requireOnce(t, "production-resumed", "info")
+	if got := ctxString(t, rec, "store_socket"); got != h.socket {
+		t.Fatalf("store_socket = %q, want the store the outage was against", got)
+	}
+	if got, ok := rec.Context["attempt"]; !ok || got.(float64) != 2 {
+		t.Fatalf("attempt = %v, want the failed-attempt count the outage accrued", rec.Context["attempt"])
 	}
 }
 
@@ -400,9 +401,7 @@ func TestAFirstAttemptCycleReportsNoOutage(t *testing.T) {
 	}
 
 	// Assert.
-	if strings.Contains(h.logText(), "production resumed") {
-		t.Fatalf("a cycle that began immediately reported an outage; got %s", h.logText())
-	}
+	h.requireNone(t, "production-resumed", "")
 }
 
 func TestNoHeartbeatPathRemains(t *testing.T) {
@@ -417,9 +416,16 @@ func TestNoHeartbeatPathRemains(t *testing.T) {
 	h.sc.pollAll()
 
 	// Assert.
-	for _, retired := range []string{"heartbeat", "health"} {
-		if strings.Contains(strings.ToLower(h.logText()), retired) {
-			t.Fatalf("the retired %q path is still exercised; got %s", retired, h.logText())
+	// The retired path would be its OWN operation and its own rpc, so both
+	// vocabularies are checked rather than the prose that would have named it.
+	for _, r := range h.records(t) {
+		for _, retired := range []string{"heartbeat", "health"} {
+			if strings.Contains(strings.ToLower(r.Operation), retired) {
+				t.Errorf("the retired %q path is still exercised: operation=%q", retired, r.Operation)
+			}
+			if rpc, ok := r.Context["rpc"].(string); ok && strings.Contains(strings.ToLower(rpc), retired) {
+				t.Errorf("the retired %q verb is still called: rpc=%q", retired, rpc)
+			}
 		}
 	}
 }
@@ -535,9 +541,7 @@ func TestAVanishedFileIsStatedOnce(t *testing.T) {
 	h.sc.pollAll()
 
 	// Assert.
-	if got := strings.Count(h.logText(), "the watched file vanished"); got != 1 {
-		t.Fatalf("the disappearance is stated %d time(s), want exactly 1", got)
-	}
+	h.requireOnce(t, "file-vanished", "warn")
 }
 
 func TestAFirstCycleThatNeverBeganStatesTheOutage(t *testing.T) {
@@ -551,9 +555,7 @@ func TestAFirstCycleThatNeverBeganStatesTheOutage(t *testing.T) {
 	h.sc.attempt()
 
 	// Assert.
-	if got := strings.Count(h.logText(), "production suspended"); got != 1 {
-		t.Fatalf("the boot outage was stated %d times, want exactly once: %s", got, h.logText())
-	}
+	h.requireOnce(t, "production-suspended", "warn")
 }
 
 func TestRepeatedFailedAttemptsRestateNothing(t *testing.T) {
@@ -569,9 +571,7 @@ func TestRepeatedFailedAttemptsRestateNothing(t *testing.T) {
 	h.sc.attemptDue()
 
 	// Assert.
-	if got := strings.Count(h.logText(), "production suspended"); got != 1 {
-		t.Fatalf("the outage was stated %d times across three attempts, want once", got)
-	}
+	h.requireOnce(t, "production-suspended", "warn")
 }
 
 func TestASecondOutageIsStatedAgain(t *testing.T) {
@@ -591,8 +591,8 @@ func TestASecondOutageIsStatedAgain(t *testing.T) {
 	h.sc.suspend("second outage", nil)
 
 	// Assert.
-	if got := strings.Count(h.logText(), "production suspended"); got != 2 {
-		t.Fatalf("two outages were stated %d times, want twice", got)
+	if got := opsAt(h.records(t), "production-suspended", "warn"); len(got) != 2 {
+		t.Fatalf("two outages were stated %d times, want twice; the log held %v", len(got), operationLevels(h.records(t)))
 	}
 }
 
@@ -606,18 +606,9 @@ func TestTheSuspensionRecordNamesTheStoreItIsWaitingOn(t *testing.T) {
 	h.sc.attempt()
 
 	// Assert.
-	var found bool
-	for _, line := range *h.logs {
-		if !strings.Contains(line, "production suspended") {
-			continue
-		}
-		found = true
-		if !strings.Contains(line, `"store_socket":"`+h.socket+`"`) {
-			t.Fatalf("the suspension record names no store_socket: %s", line)
-		}
-	}
-	if !found {
-		t.Fatal("no suspension record was written at all")
+	rec := h.requireOnce(t, "production-suspended", "warn")
+	if got := ctxString(t, rec, "store_socket"); got != h.socket {
+		t.Fatalf("store_socket = %q, want the store the file plane is waiting on", got)
 	}
 }
 
@@ -679,10 +670,9 @@ func TestASettledRunIsNeverConcludedLost(t *testing.T) {
 	h.advance(24 * time.Hour)
 	h.sc.sweep()
 
-	// Assert.
-	if strings.Contains(h.logText(), "run concluded LOST") {
-		t.Fatalf("a run that ended on its own EXIT marker was restated LOST: %s", h.logText())
-	}
+	// Assert: a LOST conclusion is the warn-level `lost-policy` record, and the
+	// sweep reached none.
+	h.requireNone(t, "lost-policy", "warn")
 }
 
 // ---- ruling R-S2: the refusal's KIND decides what the cycle does about it ----
@@ -793,21 +783,18 @@ func TestTheProducerDefectIsStatedWithTheStoresOwnField(t *testing.T) {
 	// Act.
 	h.sc.pollAll()
 
-	// Assert.
-	text := h.logText()
-	for _, want := range []string{
-		`"operation":"producer-defect"`,
-		`"level":"error"`,
-		`"refusal_kind":"invalid_request"`,
-		`"field":"batch.entries[0].upsert_key"`,
-		`"write_ids":`,
-	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("the producer-defect record does not carry %s; it read:\n%s", want, text)
-		}
+	// Assert: exactly one record, carrying the arm, the field and the whole
+	// refused batch's write ids on dedicated keys.
+	rec := h.requireOnce(t, "producer-defect", "error")
+	if got := ctxString(t, rec, "refusal_kind"); got != "invalid_request" {
+		t.Errorf("refusal_kind = %q, want the arm that says a retry cannot help", got)
 	}
-	if got := strings.Count(text, `"operation":"producer-defect"`); got != 1 {
-		t.Errorf("the defect was stated %d times, want exactly once per refused batch", got)
+	if got := ctxString(t, rec, "field"); got != "batch.entries[0].upsert_key" {
+		t.Errorf("field = %q, want the offending field the store named", got)
+	}
+	ids, ok := rec.Context["write_ids"].([]any)
+	if !ok || len(ids) == 0 {
+		t.Errorf("write_ids = %v, want the write ids of the whole refused batch", rec.Context["write_ids"])
 	}
 }
 
@@ -861,8 +848,9 @@ func TestAKindLessFailureIsStatedAsAContractViolationAndSuspends(t *testing.T) {
 	if h.sc.cursors != nil {
 		t.Fatal("a kind-less failure did not suspend production; it is treated as a storage failure")
 	}
-	if !strings.Contains(h.logText(), "refused with NO failure kind") {
-		t.Fatalf("the contract violation was not stated; the log read:\n%s", h.logText())
+	rec := h.requireOnce(t, "store-write", "error")
+	if _, ok := rec.Context["refusal_kind"]; ok {
+		t.Fatalf("a kind-less refusal named a refusal_kind: %v", rec.Context)
 	}
 }
 
@@ -911,7 +899,8 @@ func TestAnAgentSpoolWithNoResolvedSpawnStatesTheReaderDefect(t *testing.T) {
 	if got != "" {
 		t.Fatalf("bookFor = %q, want no book for an unresolved spawn", got)
 	}
-	if !strings.Contains(h.logText(), "would name no book") {
-		t.Fatalf("the reader defect was not stated; the log read:\n%s", h.logText())
+	rec := h.requireOnce(t, "spool-book", "error")
+	if got := ctxString(t, rec, "task_id"); got != "a9" {
+		t.Fatalf("task_id = %q, want the spool with no resolved spawn", got)
 	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -89,10 +88,11 @@ func TestConflictingSpawnsAreLoggedAsAnError(t *testing.T) {
 	// Act.
 	index.observe(observation{taskID: "b1", activityID: "call-2"})
 
-	// Assert.
-	joined := strings.Join(*logs, "\n")
-	if !strings.Contains(joined, "CONFLICTING") || !strings.Contains(joined, `"level":"error"`) {
-		t.Fatalf("the conflict was not stated loudly; got %v", *logs)
+	// Assert: the conflict is its own operation at error, naming the task it
+	// made permanently unresolvable.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "record-spawn-conflict", "error")
+	if got := ctxString(t, rec, "task_id"); got != "b1" {
+		t.Fatalf("task_id = %q, want the conflicted task", got)
 	}
 }
 
@@ -136,9 +136,7 @@ func TestASpawnWithNoCallIsRejected(t *testing.T) {
 	if _, ok := index.resolve(spoolTarget("/private/tmp/b1.output", "b1")); ok {
 		t.Fatal("a spawn naming no call was recorded")
 	}
-	if !strings.Contains(strings.Join(*logs, "\n"), "names no task or no spawning call") {
-		t.Fatalf("the rejection was silent; got %v", *logs)
-	}
+	requireOnceIn(t, parseLogLines(t, *logs), "record-spawn", "error")
 }
 
 func TestMainAgentOfASessionTranscriptIsItsFileName(t *testing.T) {
@@ -215,9 +213,11 @@ func TestAStoppedRunIsNeverConcludedLost(t *testing.T) {
 	h.advance(24 * time.Hour)
 	h.sc.sweep()
 
-	// Assert.
-	if strings.Contains(h.logText(), "run concluded LOST") {
-		t.Fatalf("a run a person stopped was restated LOST: %s", h.logText())
+	// Assert: the policy reached no LOST conclusion (its conclusions are the
+	// warn-level `lost-policy` records), so no terminal branch of the seam ran.
+	h.requireNone(t, "lost-policy", "warn")
+	for _, operation := range []string{"lost-terminal", "lost-terminal-unwatched", "lost-terminal-residue", "lost-terminal-unsupported"} {
+		h.requireNone(t, operation, "")
 	}
 }
 
@@ -261,9 +261,7 @@ func TestAStopWithNoTaskIsRefusedLoudly(t *testing.T) {
 	h.sc.TaskStopped("")
 
 	// Assert.
-	if !strings.Contains(h.logText(), "task stop reported with no task id") {
-		t.Fatalf("an unattributable stop was not stated: %s", h.logText())
-	}
+	h.requireOnce(t, "task-stopped", "error")
 }
 
 // interruptedFor answers the interrupted terminal a producer wrote for a run,
