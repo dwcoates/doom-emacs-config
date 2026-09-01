@@ -14,6 +14,7 @@
  */
 import { existsSync, readdirSync, readFileSync, realpathSync, watch } from "node:fs";
 import path from "node:path";
+import { ReDrain } from "./redrain.js";
 import {
   cwdSlug,
   spoolPath,
@@ -127,17 +128,20 @@ export async function awaitFile(file: string): Promise<void> {
   if (existsSync(file)) return;
   const dir = path.dirname(file);
   await new Promise<void>((resolve) => {
-    const watcher = watch(dir, () => {
-      if (!existsSync(file)) return;
+    let settled = false;
+    const finish = (): void => {
+      if (settled || !existsSync(file)) return;
+      settled = true;
+      redrain.stop();
       watcher.close();
       resolve();
-    });
+    };
+    const redrain = new ReDrain(finish);
+    const watcher = watch(dir, finish);
+    redrain.start();
     // The file may have appeared between the check above and the watcher being
     // installed; re-checking here closes that window without a poll.
-    if (existsSync(file)) {
-      watcher.close();
-      resolve();
-    }
+    finish();
   });
 }
 
@@ -199,17 +203,23 @@ export async function awaitSpoolExit(
   const dir = spoolDir(dirs, vendorSessionId);
   await awaitFile(dir);
   return new Promise<string>((resolve) => {
-    const watcher = watch(dir, () => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
       const hit = found();
       if (hit === null) return;
+      settled = true;
+      redrain.stop();
       watcher.close();
       resolve(hit);
-    });
-    const raced = found();
-    if (raced !== null) {
-      watcher.close();
-      resolve(raced);
-    }
+    };
+    const redrain = new ReDrain(finish);
+    // The directory event covers a spool being CREATED; the marker, though,
+    // arrives as an APPEND to a spool that already exists, which a directory
+    // watch on macOS need not report at all — hence the re-drain.
+    const watcher = watch(dir, finish);
+    redrain.start();
+    finish();
   });
 }
 
