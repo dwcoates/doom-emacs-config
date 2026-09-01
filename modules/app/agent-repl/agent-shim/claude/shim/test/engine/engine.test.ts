@@ -81,6 +81,6 @@ describe("NotImplementedEngine", () => {
     const engine: Engine = new NotImplementedEngine();
 
     // Act, Assert.
-    await expect(engine.standDown("SIGTERM")).resolves.toBeUndefined();
+    await expect(engine.standDown("SIGTERM")).resolves.toBe(0);
   });
 });

@@ -53,6 +53,7 @@ import {
   DEFAULT_RETRY_POLICY,
   PersistenceError,
   type AgentPageSession,
+  type FlushOutcome,
   type PersistEntry,
   type Persistence,
   type PersistenceOptions,
@@ -234,6 +235,8 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   let degradedSince: number | undefined;
   let degradedReason = "";
   let droppedWhileDegraded = 0n;
+  /** Every row this writer has lost, over the process's whole life. */
+  let lostRows = 0;
 
   const emitFault = (kind: "store_unreachable" | "converter_defect", detail: string): void => {
     const fault = create(conversationv1.SessionFaultSchema, {
@@ -326,6 +329,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
   const dropLoudly = (batch: PendingBatch, detail: string): void => {
     const lost = batch.entries.map((entry) => entry.upsertKey);
     droppedWhileDegraded += BigInt(lost.length);
+    lostRows += lost.length;
     LOGGER.log(
       { level: "error", attempts: batch.attempts, detail, lost_upsert_keys: lost },
       "DROPPING store writes: the retry schedule is exhausted and there is no spill",
@@ -453,8 +457,9 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       startDraining();
     },
 
-    async flush(): Promise<void> {
+    async flush(): Promise<FlushOutcome> {
       while (draining !== undefined) await draining;
+      return { lostRows };
     },
 
     openAgentPage(

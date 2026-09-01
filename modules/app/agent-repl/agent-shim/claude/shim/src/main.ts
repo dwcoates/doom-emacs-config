@@ -352,6 +352,16 @@ export function versionLine(): string {
 // signals
 // ---------------------------------------------------------------------------
 
+/**
+ * How long the exit after `KillSession` waits for the wire to go quiet.
+ *
+ * A LAST RESORT, never the mechanism: the responses' own close events settle
+ * the wait in microseconds. This only bounds the pathological case — a stream
+ * the teardown somehow failed to conclude — so that a killed shim cannot be
+ * kept alive by one wedged consumer.
+ */
+export const EXIT_QUIET_BUDGET_MS = 5_000;
+
 /** What a signal handler set needs to reach. */
 export interface SignalTargets {
   /** The session, stood down before the process ends. */
@@ -394,13 +404,21 @@ export function shutdownSignalHandlers(targets: SignalTargets): SignalHandlers {
       );
       standDown = (async (): Promise<void> => {
         try {
-          await targets.engine.standDown("SIGTERM");
+          const code = await targets.engine.standDown("SIGTERM");
           await targets.server.close();
           logMainLifecycle(
-            { signal: "SIGTERM", outcome: "graceful_stand_down_complete", exit_code: 0 },
-            "stood down cleanly",
+            {
+              ...(code === 0 ? {} : { level: "error" as const }),
+              signal: "SIGTERM",
+              outcome:
+                code === 0 ? "graceful_stand_down_complete" : "stand_down_with_lost_writes",
+              exit_code: code,
+            },
+            code === 0
+              ? "stood down cleanly"
+              : "stood down with writes the store never acked; exiting nonzero",
           );
-          targets.exit(0);
+          targets.exit(code);
         } catch (err) {
           // A failed stand-down is still an exit, but NOT a clean one: reporting
           // 0 here would tell the daemon the session ended in good order when
@@ -563,7 +581,20 @@ export async function main(): Promise<void> {
   // and it names itself then (`Persistence.setProducer`). Nothing writes before
   // that, and a write that tried would raise rather than land rows under a
   // placeholder name no replay could absorb against.
+  // Filled the moment the listener exists; `KillSession` cannot fire before
+  // then, because it arrives over that listener.
+  let endProcess: (code: number) => void = (code) => {
+    logMainLifecycle(
+      { level: "error", outcome: "exit_before_serving", exit_code: code },
+      "a session end was requested before the listener existed; exiting immediately",
+    );
+    process.exit(code);
+  };
+
   const engine: Engine = createEngine({
+    endProcess: (code) => {
+      endProcess(code);
+    },
     persistence: createPersistence({
       client: createStoreClient(environment.storeSocket),
       nowMs: () => Date.now(),
@@ -581,6 +612,36 @@ export async function main(): Promise<void> {
     { listen_socket: args.listen, outcome: "serving" },
     "shim.v1 is being served; the daemon may dial",
   );
+
+  // KillSession's own exit. The engine has already torn the session down and
+  // built its response; the process may only end once that response — and every
+  // stream terminal the teardown produced — is off the wire, which is what
+  // `quiet` waits for. Closing first would destroy the socket carrying it.
+  let ending = false;
+  endProcess = (code): void => {
+    if (ending) return;
+    ending = true;
+    void (async (): Promise<void> => {
+      try {
+        await server.quiet(EXIT_QUIET_BUDGET_MS);
+        await server.close();
+        logMainLifecycle(
+          {
+            ...(code === 0 ? {} : { level: "error" as const }),
+            outcome: code === 0 ? "session_killed_exit" : "session_killed_exit_lost_writes",
+            exit_code: code,
+          },
+          code === 0
+            ? "the session was killed over the wire; the process is ending"
+            : "the session was killed with writes the store never acked; exiting nonzero",
+        );
+      } catch (err) {
+        reportFatal(err);
+        process.exit(1);
+      }
+      process.exit(code);
+    })();
+  };
 
   const handlers = shutdownSignalHandlers({
     engine,
