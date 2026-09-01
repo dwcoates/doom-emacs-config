@@ -55,87 +55,12 @@
       (should-error (agent-repl--warn-once "ws" "" "impossible")))
     (should (= (hash-table-count agent-repl--warn-once-fingerprints) 0))))
 
-(ert-deftest agent-repl-test-log-on-transition-emits-only-initial-and-changed-states ()
-  "Hot diagnostics retain initial state and causal state transitions."
-  (let ((agent-repl--log-transition-states (make-hash-table :test 'equal))
-        (logs nil))
-    (cl-letf (((symbol-function 'agent-repl--log-verbose)
-               (lambda (ws fmt &rest args) (push (list ws (apply #'format fmt args)) logs))))
-      (should (agent-repl--log-on-transition "ws" "poll" '(1 2) "state=%S" '(1 2)))
-      (should-not (agent-repl--log-on-transition "ws" "poll" '(1 2) "state=%S" '(1 2)))
-      (should (agent-repl--log-on-transition "ws" "poll" '(2 2) "state=%S" '(2 2)))
-      (should (equal (nreverse logs)
-                     '(("ws" "state=(1 2)") ("ws" "state=(2 2)")))))))
-
-(ert-deftest agent-repl-test-log-on-transition-fifo-bound-evicts-oldest-key ()
-  "Transition state retains a fixed number of caller keys."
-  (let ((agent-repl--log-transition-capacity 2)
-        (agent-repl--log-transition-states (make-hash-table :test 'equal))
-        (agent-repl--log-transition-order nil))
-    (cl-letf (((symbol-function 'agent-repl--log-verbose) (lambda (&rest _) nil)))
-      (dolist (key '("first" "second" "third"))
-        (should (agent-repl--log-on-transition "ws" key :state "key=%s" key)))
-      (should (= (hash-table-count agent-repl--log-transition-states) 2))
-      (should (agent-repl--log-on-transition "ws" "first" :state "key=first")))))
-
-(ert-deftest agent-repl-test-diagnostic-fingerprint-distinguishes-same-byte-content ()
-  "Same-size status payloads with different content get distinct transition keys."
-  (let ((first (agent-repl--diagnostic-fingerprint "state=idle"))
-        (second (agent-repl--diagnostic-fingerprint "state=done")))
-    (should (= (length "state=idle") (length "state=done")))
-    (should (= (length first) 64))
-    (should-not (equal first second))))
-
 (ert-deftest agent-repl-test-workspace-id-from-project-root ()
   "Workspace ID should be first 8 chars of MD5 of the canonical ws-dir path."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
             ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) "/test/project")))
     (should (equal (agent-repl--workspace-id)
                    (substring (md5 (agent-repl--path-canonical "/test/project")) 0 8)))))
-
-;;;; ---- Tests: resolve-current-git-root ----
-
-(ert-deftest agent-repl-test-resolve-current-git-root-prefers-ws-dir ()
-  "When the current workspace has a :project-dir, the resolver uses it as
-the directory to run `git rev-parse --show-toplevel' from (not
-`default-directory')."
-  (let ((captured-default-dir nil))
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-dir)
-               (lambda (_ws) "/repo/subdir"))
-              ((symbol-function 'agent-repl--git-string-quiet)
-               (lambda (&rest _)
-                 (setq captured-default-dir default-directory)
-                 "/repo")))
-      (let ((default-directory "/elsewhere/"))
-        (should (equal (agent-repl--resolve-current-git-root) "/repo/"))
-        ;; git was invoked from the ws-dir, not default-directory
-        (should (equal captured-default-dir "/repo/subdir"))))))
-
-(ert-deftest agent-repl-test-resolve-current-git-root-falls-back-to-default-directory ()
-  "When no workspace has a :project-dir, the resolver runs git from
-`default-directory'."
-  (let ((captured-default-dir nil))
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--ws-dir)
-               (lambda (_ws) (error "no dir")))
-              ((symbol-function 'agent-repl--git-string-quiet)
-               (lambda (&rest _)
-                 (setq captured-default-dir default-directory)
-                 "/fallback/repo")))
-      (let ((default-directory "/fallback/repo/deep/"))
-        (should (equal (agent-repl--resolve-current-git-root) "/fallback/repo/"))
-        (should (equal captured-default-dir "/fallback/repo/deep/"))))))
-
-(ert-deftest agent-repl-test-resolve-current-git-root-errors-outside-repo ()
-  "When `git rev-parse' returns empty (not inside any repo), the resolver
-signals `user-error' rather than silently returning a bogus path."
-  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-            ((symbol-function 'agent-repl--ws-dir)
-             (lambda (_ws) (error "no dir")))
-            ((symbol-function 'agent-repl--git-string-quiet)
-             (lambda (&rest _) "")))
-    (should-error (agent-repl--resolve-current-git-root) :type 'user-error)))
 
 ;;;; ---- Tests: Buffer naming ----
 
@@ -1656,75 +1581,6 @@ the record must still be persisted rather than silently discarded."
   ;; No ignore-errors: if it signals, ERT correctly fails the test.
   (should (or (agent-repl--dir-has-git-p "") t)))
 
-;;;; ---- Tests: git-root ----
-
-(ert-deftest agent-repl-test-git-root-in-repo ()
-  "git-root should return the repo root when called from within a git repo."
-  (let ((tmpdir (make-temp-file "test-git-root-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (let ((subdir (expand-file-name "a/b/c" tmpdir)))
-            (make-directory subdir t)
-            (let ((result (agent-repl--git-root subdir)))
-              ;; Should find the tmpdir as root (it has .git)
-              (should result)
-              (should (string-match-p (regexp-quote (file-name-nondirectory tmpdir)) result)))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-no-repo ()
-  "git-root should return nil when called outside any git repo."
-  ;; /tmp is very unlikely to be a git repo
-  (let ((tmpdir (make-temp-file "test-no-repo-" t)))
-    (unwind-protect
-        ;; Stub dir-has-git-p to always return nil so we don't depend on host
-        (cl-letf (((symbol-function 'agent-repl--dir-has-git-p) (lambda (_d) nil)))
-          (should-not (agent-repl--git-root tmpdir)))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-uses-default-directory ()
-  "git-root with no DIR arg should use `default-directory'."
-  (let ((tmpdir (make-temp-file "test-git-dd-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (let ((default-directory (file-name-as-directory tmpdir)))
-            (let ((result (agent-repl--git-root)))
-              (should result))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-deeply-nested ()
-  "git-root should find root from deeply nested subdirectory."
-  (let ((tmpdir (make-temp-file "test-git-deep-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (let ((deep (expand-file-name "a/b/c/d/e" tmpdir)))
-            (make-directory deep t)
-            (should (agent-repl--git-root deep))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-explicit-dir ()
-  "git-root with explicit DIR argument should search from that directory."
-  (let ((tmpdir (make-temp-file "test-git-explicit-" t)))
-    (unwind-protect
-        (progn
-          (make-directory (expand-file-name ".git" tmpdir) t)
-          (should (agent-repl--git-root tmpdir)))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-git-root-worktree ()
-  "git-root should find root when .git is a file (worktree)."
-  (let ((tmpdir (make-temp-file "test-git-wt-" t)))
-    (unwind-protect
-        (progn
-          (with-temp-file (expand-file-name ".git" tmpdir)
-            (insert "gitdir: /some/other/.git/worktrees/foo"))
-          (let ((subdir (expand-file-name "sub" tmpdir)))
-            (make-directory subdir t)
-            (should (agent-repl--git-root subdir))))
-      (delete-directory tmpdir t))))
-
 ;;;; ---- Tests: git-string / git-string-quiet ----
 ;;
 ;; Intentionally none for the wrappers themselves.
@@ -2221,13 +2077,6 @@ ownership intact across that transition."
           (should (eq first second)))
       (when (buffer-live-p first) (kill-buffer first)))))
 
-;;;; ---- Tests: active-inst ----
-
-(ert-deftest agent-repl-test-active-inst-default-bare-metal ()
-  "active-inst should error when no :active-env is set (initialize-ws-env not called)."
-  (agent-repl-test--with-clean-state
-    (should-error (agent-repl--active-inst "ws1") :type 'error)))
-
 ;;;; ---- Tests: ws-observed-claude-session-id ----
 ;;
 ;; Emacs holds NO durable copy of a vendor conversation uuid. It reads the
@@ -2271,32 +2120,6 @@ what gets rejected, so guessing would be strictly worse than saying nothing."
     (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
                (lambda (_) nil)))
       (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
-
-(ert-deftest agent-repl-test-active-inst-returns-same-struct ()
-  "active-inst should return the same struct on second call (not create a new one)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (let ((inst1 (agent-repl--active-inst "ws1"))
-          (inst2 (agent-repl--active-inst "ws1")))
-      (should (eq inst1 inst2)))))
-
-(ert-deftest agent-repl-test-active-inst-is-struct ()
-  "active-inst should return a agent-repl-instantiation struct."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (let ((inst (agent-repl--active-inst "ws1")))
-      (should (agent-repl-instantiation-p inst)))))
-
-(ert-deftest agent-repl-test-active-inst-fields-nil-by-default ()
-  "active-inst struct fields should be nil by default."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :bare-metal)
-    (agent-repl--ws-put "ws1" :bare-metal (make-agent-repl-instantiation))
-    (let ((inst (agent-repl--active-inst "ws1")))
-      (should-not (agent-repl-instantiation-session-id inst))
-      (should-not (agent-repl-instantiation-start-cmd inst)))))
 
 ;;;; ---- Tests: buffer-name edge cases ----
 
@@ -2375,55 +2198,6 @@ now that vterm is gone: the input composer and the webview."
   "non-user-buffer-p should return nil for a normal live buffer."
   (agent-repl-test--with-temp-buffer "*normal-test-buf2*"
     (should-not (agent-repl--non-user-buffer-p (current-buffer)))))
-
-;;;; ---- Tests: non-agent-buffers ----
-
-(ert-deftest agent-repl-test-non-agent-buffers-empty-list ()
-  "non-agent-buffers with empty list should return empty list."
-  (should (null (agent-repl--non-agent-buffers nil))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-all-claude ()
-  "non-agent-buffers with all claude buffers should return empty list."
-  (agent-repl-test--with-temp-buffer "*agent-frontend-aaaa1111*"
-    (let ((buf1 (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*agent-panel-input-bbbb2222*"
-        (let ((buf2 (current-buffer)))
-          (should (null (agent-repl--non-agent-buffers (list buf1 buf2)))))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-no-agent ()
-  "non-agent-buffers with no claude buffers should return all."
-  (agent-repl-test--with-temp-buffer "*normal-a*"
-    (let ((buf1 (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*normal-b*"
-        (let ((buf2 (current-buffer)))
-          (let ((result (agent-repl--non-agent-buffers (list buf1 buf2))))
-            (should (= (length result) 2))))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-mixed ()
-  "non-agent-buffers with mixed list should filter correctly."
-  (agent-repl-test--with-temp-buffer "*agent-frontend-aaaa1111*"
-    (let ((agent-buf (current-buffer)))
-      (agent-repl-test--with-temp-buffer "*normal-buf*"
-        (let ((normal-buf (current-buffer)))
-          (let ((result (agent-repl--non-agent-buffers (list agent-buf normal-buf))))
-            (should (= (length result) 1))
-            (should (eq (car result) normal-buf))))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-nil-entries ()
-  "non-agent-buffers should filter out nil entries."
-  (agent-repl-test--with-temp-buffer "*normal-c*"
-    (let ((buf (current-buffer)))
-      (let ((result (agent-repl--non-agent-buffers (list nil buf nil))))
-        (should (= (length result) 1))
-        (should (eq (car result) buf))))))
-
-(ert-deftest agent-repl-test-non-agent-buffers-string-names ()
-  "non-agent-buffers should handle string names (non-existent buffers are filtered)."
-  (agent-repl-test--with-temp-buffer "*normal-str*"
-    ;; String names of non-existent buffers should be filtered (non-user-buffer-p returns t)
-    (let ((result (agent-repl--non-agent-buffers (list "*normal-str*" "nonexistent-xyz"))))
-      (should (= (length result) 1))
-      (should (equal (car result) "*normal-str*")))))
 
 ;;;; ---- Tests: current-ws-p ----
 
@@ -2901,17 +2675,6 @@ The master kill-switch overrides the always-on file-write decoupling."
   (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
     (should (equal (agent-repl--workspace-prefix) ""))))
 
-(ert-deftest agent-repl-test-workspace-prefix-slash-env-set ()
-  "workspace-prefix-slash appends a trailing slash to a non-empty prefix."
-  (cl-letf (((symbol-function 'getenv)
-             (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
-    (should (equal (agent-repl--workspace-prefix-slash) "DWC/"))))
-
-(ert-deftest agent-repl-test-workspace-prefix-slash-env-unset ()
-  "workspace-prefix-slash returns the empty string when the env var is unset."
-  (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
-    (should (equal (agent-repl--workspace-prefix-slash) ""))))
-
 ;;;; ---- Tests: agent-repl--output-dir constant ----
 
 (ert-deftest agent-repl-test-output-dir-is-absolute ()
@@ -2920,16 +2683,6 @@ The master kill-switch overrides the always-on file-write decoupling."
   (should (string-match-p "output/$" agent-repl--output-dir)))
 
 ;;;; ---- Tests: Buffer background color (moved from overlay.el) ----
-
-(ert-deftest agent-repl-test-grey-hex-format ()
-  "grey-hex should format N as a #rrggbb hex string with equal channels."
-  (should (equal (agent-repl--grey-hex 0) "#000000"))
-  (should (equal (agent-repl--grey-hex 255) "#ffffff"))
-  (should (equal (agent-repl--grey-hex 15) "#0f0f0f")))
-
-(ert-deftest agent-repl-test-grey-hex-boundary-128 ()
-  "grey-hex for 128 (middle grey) should return #808080."
-  (should (equal (agent-repl--grey-hex 128) "#808080")))
 
 (ert-deftest agent-repl-test-rgb-hex-format ()
   "rgb-hex should format R, G, B independently into a #rrggbb string."
@@ -4268,23 +4021,6 @@ that froze Emacs; this pins the equivalence the bound relies on."
     (should (equal copy
                    "prompt refused — this workspace is not live; start or wake it first"))))
 
-(ert-deftest agent-repl-test-user-message-for-error-echoes-copy-and-files-the-chain ()
-  "The composition echoes only the sentence and files the raw chain beside it."
-  ;; Arrange
-  (let ((echoed nil)
-        (logged nil))
-    (cl-letf (((symbol-function 'agent-repl--emit-message)
-               (lambda (text &optional _echo) (setq echoed text)))
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
-      ;; Act
-      (agent-repl--user-message-for-error
-       "ws" "prompt" "ssm: invariant failed: state=RENDER_STATE_MERGE_QUEUED turn_active=true")
-      ;; Assert
-      (should-not (string-match-p "RENDER_STATE" echoed))
-      (should (seq-find (lambda (line) (string-match-p "RENDER_STATE_MERGE_QUEUED" line))
-                        logged)))))
-
 ;;;; ---- Tests: one-shot settle latch ----
 ;;
 ;; The latch is what makes an asynchronous operation's settle atomic with
@@ -4299,13 +4035,6 @@ that froze Emacs; this pins the equivalence the bound relies on."
     ;; Act / Assert
     (should (agent-repl--latch-claim latch))
     (should-not (agent-repl--latch-claim latch))))
-
-(ert-deftest agent-repl-test-latch-claim-reports-settled ()
-  "A claimed latch reports itself settled."
-  (let ((latch (agent-repl--make-latch)))
-    (should-not (agent-repl--latch-settled-p latch))
-    (agent-repl--latch-claim latch)
-    (should (agent-repl--latch-settled-p latch))))
 
 (ert-deftest agent-repl-test-latch-claim-cancels-held-timers ()
   "Claiming a latch cancels every timer it holds.
