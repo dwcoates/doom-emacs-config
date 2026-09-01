@@ -182,6 +182,18 @@
     (should (equal (car agent-repl-test-daemon--build-runs)
                    (list agent-repl-daemon-build-script)))))
 
+(ert-deftest agent-repl-test-daemon-command-defaults-to-the-module-binary ()
+  "The default argv is the module's own `daemon/bin/claude-repld', alone.
+fanout \u00a711: \"the default the module's `daemon/bin/claude-repld', no argv\"
+\u2014 a wrong default path would point cold start at nothing, and a default
+argument would hand the daemon input it is not supposed to need."
+  ;; Arrange / Act: the default, independent of any buffer-local override.
+  (let ((default (default-value 'agent-repl-daemon-command)))
+    ;; Assert
+    (should (equal default
+                   (list (expand-file-name "daemon/bin/claude-repld"
+                                           agent-repl--frontend-root))))))
+
 (ert-deftest agent-repl-test-daemon-absent-address-starts-the-daemon ()
   "After a clean build the daemon is started, with NO argv of its own."
   (agent-repl-test-daemon--with-harness
