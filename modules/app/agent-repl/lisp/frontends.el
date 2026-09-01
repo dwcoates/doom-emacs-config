@@ -76,18 +76,6 @@ paths know the worktree path and environment before any state file
 exists).  The view follows later, when the user actually switches to
 WS (`:pending-show-panels').
 KILL-FN (WS): destroy WS's session AND its view.
-SEND-FN (WS INPUT RAW PROMPT-ORIGIN ON-SETTLE): deliver one prepared user turn.
-INPUT is the decorated text actually sent; RAW the undecorated
-original (history/posthooks currency).  ON-SETTLE, when non-nil, runs
-once the send is committed.
-INTERRUPT-FN (WS KIND): interrupt the in-flight turn.  KIND names the
-gesture: `ctrl-c' (clear the prompt line) vs `escape' (stop
-generation).  Both began as the vterm TUI's two keystrokes; they now
-differ by INTENT, since `escape' before the agent has answered is an
-undo and may additionally retract the sent turn.  Returns `retracted'
-when the frontend withdrew the turn's prompt (the caller then owns that
-text and is expected to restore it), or any other non-nil value when
-the interrupt merely landed.  Nil means not delivered.
 CANCEL-DETACHED-FN (WS): stop WS's DETACHED background agents — the
 subagents and shells still working after the turn that launched them
 ended.  Distinct from INTERRUPT-FN and never a variant of it: an
@@ -130,8 +118,6 @@ gui."
   open-fn
   boot-fn
   kill-fn
-  send-fn
-  interrupt-fn
   cancel-detached-fn
   running-p-fn
   show-fn
@@ -155,7 +141,7 @@ a configuration to cope with."
   (unless (agent-repl-frontend-p frontend)
     (agent-repl--log nil "frontend-register: rejected non-frontend value=%S" frontend)
     (error "agent-repl-register-frontend: not a frontend struct: %S" frontend))
-  (dolist (slot '(name open-fn boot-fn kill-fn send-fn interrupt-fn running-p-fn
+  (dolist (slot '(name open-fn boot-fn kill-fn running-p-fn
                   supported-backends supported-envs))
     (unless (funcall (intern (format "agent-repl-frontend-%s" slot)) frontend)
       (agent-repl--log nil "frontend-register: rejected frontend=%S missing-slot=%s"
@@ -333,26 +319,6 @@ both capability axes (WS's backend and its `:active-env')."
                                       ws))
 
 ;;;; ---- Dispatch helpers ----------------------------------------------------------
-
-(defun agent-repl--frontend-dispatch-send (ws input raw prompt-origin &optional on-settle)
-  "Send one prepared turn through WS's frontend."
-  (let* ((fe (agent-repl--ws-frontend ws))
-         (frontend (agent-repl-frontend-name fe))
-         (result (funcall (agent-repl-frontend-send-fn fe) ws input raw prompt-origin on-settle)))
-    (agent-repl--log ws "frontend-dispatch-send: frontend=%s input-length=%d raw-length=%d input-equals-raw=%s prompt-origin=%s on-settle-p=%s result=%S"
-                     frontend (length input) (length raw) (equal input raw)
-                     prompt-origin (not (null on-settle)) result)
-    result))
-
-(defun agent-repl--frontend-dispatch-interrupt (ws kind)
-  "Interrupt WS's in-flight turn through its frontend.
-KIND is `ctrl-c' or `escape' (see the struct docstring)."
-  (let* ((fe (agent-repl--ws-frontend ws))
-         (frontend (agent-repl-frontend-name fe))
-         (result (funcall (agent-repl-frontend-interrupt-fn fe) ws kind)))
-    (agent-repl--log ws "frontend-dispatch-interrupt: frontend=%s kind=%s result=%S"
-                     frontend kind result)
-    result))
 
 (defun agent-repl--frontend-dispatch-cancel-detached (ws)
   "Cancel WS\='s detached background agents through its frontend.
