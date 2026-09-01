@@ -199,6 +199,18 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   were already correct — four fixture bugs fixed. Follow-up noted: a
   suite-wide `agent-repl--prompt-queue` cleanup helper (one entry of
   cross-test residue). Running: verbs-suite only.
+- NEW STANDING RULE (user ruling, TEAMLEAD.md on integration @ 7deb982cc,
+  "Dead code is hunted programmatically"): once the seven suites are green
+  and before the final report, an `opus-low` R-DEADCODE pass finds dead
+  code with tools (byte-compile with unused-lexical warnings as errors;
+  elisp-refs/grep for defuns with no caller outside their file and no
+  test). Every uncalled production defun is deleted or named in the final
+  report with its live reason (interactive, hook target, autoload) and
+  pinned by a test; any ruled-dead file (elisp.md 2026-08-29 list) still on
+  disk at the final tip is a defect. Audit-2 triage applies R-POLISH's
+  lesson: check a red's payload against the codec before calling it a
+  production gap. Queue after R-VERBS-SUITE: R-DEADCODE and audit 2 in
+  parallel, then the loop.
 
 ## 1. Module map (final tree of lisp/)
 
