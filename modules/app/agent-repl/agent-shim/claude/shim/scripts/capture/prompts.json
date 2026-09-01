@@ -15,6 +15,7 @@
     "controls": "[{at: session_start|on_message|turn_end, after?: {type, subtype, contains}, do: <verb>, args}].",
     "expect": "What the capture must contain for the scenario to have discharged its coverage. Prose, read by a human at review time — not asserted by code.",
     "expects_api_error": "True only for a scenario whose GOLDEN is an API error. Every other scenario is quarantined if its result carries is_error / terminal_reason api_error / api_error_status, or if any message carries is_api_error_message.",
+    "expects_error_subtypes": "Result subtypes this scenario's GOLDEN is allowed to end in with is_error true (e.g. [\"error_max_turns\"]). Never excuses an api_error terminal; use expects_api_error for that.",
     "config_root": "\"shared-world:<name>\": scenarios naming the same world share ONE cwd and account root and run in corpus order, so a later scenario sees what the earlier ones did. Absent = an isolated world of its own.",
     "prompts": "An ordered array of turns, instead of `prompt`. Each entry is a string, or { text, resume: true } to close the query and reopen it resuming the same vendor session id.",
     "cwd_init": "A shell command run in the scratch cwd BEFORE the query (e.g. `git init`). A non-zero exit fails the scenario."
@@ -1032,6 +1033,9 @@
       "expect": [
         "SDKControlInterruptResponse (still_queued, or undefined on an older CLI)",
         "result:error_during_execution or the vendor's own interrupt terminal"
+      ],
+      "expects_error_subtypes": [
+        "error_during_execution"
       ]
     },
     {
@@ -1043,6 +1047,9 @@
       },
       "expect": [
         "result:error_max_turns"
+      ],
+      "expects_error_subtypes": [
+        "error_max_turns"
       ]
     },
     {
@@ -1054,6 +1061,9 @@
       },
       "expect": [
         "result:error_max_budget_usd"
+      ],
+      "expects_error_subtypes": [
+        "error_max_budget_usd"
       ]
     },
     {
@@ -1101,6 +1111,9 @@
       ],
       "expect": [
         "result:error_during_execution"
+      ],
+      "expects_error_subtypes": [
+        "error_during_execution"
       ]
     },
     {

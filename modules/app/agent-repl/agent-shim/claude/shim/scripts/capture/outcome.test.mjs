@@ -14,6 +14,7 @@ import {
   API_ERROR_SCENARIO,
   apiKeySource,
   classifyCapture,
+  expectedErrorSubtypes,
   expectsApiError,
   hasTruthyKeyAtAnyDepth,
   initMessage,
@@ -250,5 +251,39 @@ describe("verdictLine", () => {
     expect(verdictLine("prose-streamed", { ok: false, reasons: ["a", "b"] })).toBe(
       "capture: prose-streamed FAILED — a; b",
     );
+  });
+});
+
+describe("expectedErrorSubtypes", () => {
+  it("is empty when the scenario declares nothing", () => {
+    expect(expectedErrorSubtypes({ name: "x" }).size).toBe(0);
+  });
+
+  it("refuses a non-string or empty declaration", () => {
+    expect(() => expectedErrorSubtypes({ name: "x", expects_error_subtypes: [""] })).toThrow(/non-empty strings/);
+  });
+
+  it("tolerates is_error on exactly the declared subtype", () => {
+    const entries = [
+      { dir: "sdk", msg: { type: "system", subtype: "init", apiKeySource: "none" } },
+      { dir: "sdk", msg: { type: "result", subtype: "error_max_turns", is_error: true, terminal_reason: "max_turns", api_error_status: null } },
+    ];
+    expect(classifyCapture(entries, { name: "t", expects_error_subtypes: ["error_max_turns"] }).ok).toBe(true);
+  });
+
+  it("still quarantines is_error on an undeclared subtype", () => {
+    const entries = [
+      { dir: "sdk", msg: { type: "system", subtype: "init", apiKeySource: "none" } },
+      { dir: "sdk", msg: { type: "result", subtype: "error_during_execution", is_error: true, api_error_status: null } },
+    ];
+    expect(classifyCapture(entries, { name: "t", expects_error_subtypes: ["error_max_turns"] }).reasons).toContain("result.is_error is true");
+  });
+
+  it("never lets a declared subtype excuse an api_error terminal", () => {
+    const entries = [
+      { dir: "sdk", msg: { type: "system", subtype: "init", apiKeySource: "none" } },
+      { dir: "sdk", msg: { type: "result", subtype: "success", is_error: true, terminal_reason: "api_error", api_error_status: null } },
+    ];
+    expect(classifyCapture(entries, { name: "t", expects_error_subtypes: ["success"] }).reasons).toContain('result.terminal_reason is "api_error"');
   });
 });

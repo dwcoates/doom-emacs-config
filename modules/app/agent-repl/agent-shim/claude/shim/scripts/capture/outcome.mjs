@@ -89,10 +89,32 @@ export function apiKeySource(entries) {
  * naming the exact field that condemned the capture, so the operator can act
  * on the report without opening the stream.
  */
+/**
+ * Result subtypes a scenario DECLARES as its intended terminal.
+ *
+ * Several scenarios exist to capture an error-shaped terminal (max_turns,
+ * budget exhaustion, an interrupt's aborted stream). The vendor marks those
+ * `is_error: true`, so without this allowance the golden the scenario exists
+ * for would be quarantined as a failure. The allowance is per declared
+ * subtype and never covers `api_error`: an api_error is still a real failure
+ * unless the scenario `expects_api_error`.
+ */
+export function expectedErrorSubtypes(scenario) {
+  const declared = scenario?.expects_error_subtypes;
+  if (!Array.isArray(declared)) return new Set();
+  for (const subtype of declared) {
+    if (typeof subtype !== "string" || subtype === "") {
+      throw new Error(`${scenario?.name ?? "?"}: expects_error_subtypes must be non-empty strings`);
+    }
+  }
+  return new Set(declared);
+}
+
 export function classifyCapture(entries, scenario, report = { errors: [] }) {
   const reasons = [];
   const messages = sdkMessages(entries);
   const allowApiError = expectsApiError(scenario);
+  const errorSubtypes = expectedErrorSubtypes(scenario);
 
   if (messages.length === 0) {
     reasons.push("the SDK produced no messages at all");
@@ -105,7 +127,7 @@ export function classifyCapture(entries, scenario, report = { errors: [] }) {
 
   for (const result of results) {
     // NOT `subtype`: the poisoned capture's subtype was "success".
-    if (result.is_error === true && !allowApiError) {
+    if (result.is_error === true && !allowApiError && !errorSubtypes.has(result.subtype)) {
       reasons.push("result.is_error is true");
     }
     if (result.terminal_reason === "api_error" && !allowApiError) {
