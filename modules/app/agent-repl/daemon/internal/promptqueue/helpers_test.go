@@ -618,3 +618,7 @@ func userSaid(text string) *conversationv1.UserSaid {
 		}},
 	}}
 }
+
+// idsTurn spells a turn id in tests, so a subject reads as prose rather than as
+// a conversion.
+func idsTurn(v string) ids.TurnID { return ids.TurnID(v) }
