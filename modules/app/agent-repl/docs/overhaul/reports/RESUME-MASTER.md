@@ -42,11 +42,18 @@ has NOT reached overhaul/integration yet.
 
 ## Project lead's own queue, in order
 
-1. Answer the shim's parked ruling: the "empty opening page" test vs R15's
-   prompt-row-before-page contradiction (STOP-shim.md).
+1. DONE 2026-09-01 — shim's parked ruling: R15 WINS. On a fresh session the
+   page StartTurn returns contains exactly the just-delivered AgentPrompt
+   row (durable before the page is read; StartTurn submits AND paints).
+   The "a fresh session's opening page is EMPTY" test is wrong and is
+   amended; only a WatchAgent opened before any turn legitimately opens
+   with an empty page. Goes into the shim lead's recreation brief.
 2. Recreate the five teamleads (fable-low) with: their STOP file path, the
    resumption rules above, and their recorded dispatch queues. The old
    subagent ids are in the project ledger but treat them as unreachable.
+   2026-09-01: daemon, webapp, elisp, store leads RECREATED and running;
+   shim lead waits on the capture sweep (its brief carries the captures
+   directory + the ruling above).
 3. Landing 6 when the daemon's wave 3 lands: six pending ERROR-ARMS rows +
    wave-3 server arms; retire landed-but-unused arms; FeedPermissionArguments'
    wire source; consider FeedFindingsRow identity (position-keyed folds).
