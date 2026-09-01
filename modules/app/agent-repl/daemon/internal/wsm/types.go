@@ -49,6 +49,12 @@ type Workspace struct {
 	Branch string
 	// ParentBranch is the base the branch was cut from.
 	ParentBranch string
+	// Parent is the workspace this one was SPAWNED FROM, recorded at creation
+	// when the creation request named one, and nil otherwise. It is the
+	// roster's nesting fact stated directly rather than derived: a workspace
+	// registered by Emacs (never created through the daemon) carries none, and
+	// the roster falls back to the branch lineage for it.
+	Parent *WorkspaceID
 	// Closed reports whether the workspace's editor state has been torn down.
 	Closed bool
 	// Attention marks the roster's attention badge; set on a host
@@ -86,6 +92,10 @@ type RegisterFacts struct {
 	Branch string
 	// ParentBranch is the base the branch was cut from, empty when unknown.
 	ParentBranch string
+	// Parent is the workspace this one was spawned from, nil when the
+	// announcement names none. Only the creation path supplies it; a bare
+	// registration has no parent workspace to state.
+	Parent *WorkspaceID
 	// RepoDir is the repository's canonicalized common dir.
 	RepoDir string
 	// DefaultBranch is the repository's default branch, as the announcing
