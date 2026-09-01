@@ -170,7 +170,7 @@ func TestPauseStopsAdmission(t *testing.T) {
 	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
-	if err := h.o.Pause(context.Background()); err != nil {
+	if err := h.o.Pause(context.Background(), nil); err != nil {
 		t.Fatalf("pausing: %v", err)
 	}
 
@@ -198,10 +198,10 @@ func TestUnpauseResumesAdmission(t *testing.T) {
 	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
-	if err := h.o.Pause(context.Background()); err != nil {
+	if err := h.o.Pause(context.Background(), nil); err != nil {
 		t.Fatalf("pausing: %v", err)
 	}
-	if err := h.o.Unpause(context.Background()); err != nil {
+	if err := h.o.Unpause(context.Background(), nil); err != nil {
 		t.Fatalf("unpausing: %v", err)
 	}
 
@@ -222,12 +222,12 @@ func TestPauseRefusesAnAlreadyPausedQueue(t *testing.T) {
 	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
-	if err := h.o.Pause(context.Background()); err != nil {
+	if err := h.o.Pause(context.Background(), nil); err != nil {
 		t.Fatalf("the first pause failed: %v", err)
 	}
 
 	// Act.
-	err := h.o.Pause(context.Background())
+	err := h.o.Pause(context.Background(), nil)
 
 	// Assert.
 	arm, refused := Refused(err)
@@ -245,7 +245,7 @@ func TestUnpauseRefusesAQueueThatIsNotPaused(t *testing.T) {
 	}
 
 	// Act.
-	err := h.o.Unpause(context.Background())
+	err := h.o.Unpause(context.Background(), nil)
 
 	// Assert.
 	arm, refused := Refused(err)
@@ -427,5 +427,144 @@ func TestEnqueueSurfacesAnUnexpectedStoreFailure(t *testing.T) {
 	}
 	if _, arm := Refused(err); arm {
 		t.Fatal("a store failure was reported as a refusal")
+	}
+}
+
+// TestPauseWithNoScopePausesEveryRepository covers the UNSET repository ref:
+// the daemon-wide switch touches every repository that has a queue.
+func TestPauseWithNoScopePausesEveryRepository(t *testing.T) {
+	// Arrange: two repositories with a queue each.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	other := wsm.RepoKey("/other/repo/.git")
+	if _, err := h.db.EnqueueMerge(context.Background(), other, ids.WorkspaceID("ws-2"), h.clock()); err != nil {
+		t.Fatalf("enqueueing on the second repository: %v", err)
+	}
+
+	// Act.
+	err := h.o.Pause(context.Background(), nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the daemon-wide pause failed: %v", err)
+	}
+	for _, repo := range []wsm.RepoKey{h.repoKey(), other} {
+		paused, err := h.db.MergeQueuePaused(context.Background(), repo)
+		if err != nil {
+			t.Fatalf("reading %s's pause state: %v", repo, err)
+		}
+		if !paused {
+			t.Fatalf("%s is not paused after the daemon-wide pause", repo)
+		}
+	}
+}
+
+// TestPauseWithAScopePausesOnlyThatRepository covers a set repository ref:
+// exactly the named repository's queue stops admitting.
+func TestPauseWithAScopePausesOnlyThatRepository(t *testing.T) {
+	// Arrange: two repositories with a queue each, both registered.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	other := wsm.RepoKey("/other/repo/.git")
+	if _, err := h.db.EnqueueMerge(context.Background(), other, ids.WorkspaceID("ws-2"), h.clock()); err != nil {
+		t.Fatalf("enqueueing on the second repository: %v", err)
+	}
+	h.registerRepo("repo-one", string(h.repoKey()))
+	h.registerRepo("repo-two", string(other))
+
+	// Act.
+	err := h.o.Pause(context.Background(), &RepositoryScope{ID: "repo-one"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the scoped pause failed: %v", err)
+	}
+	paused, err := h.db.MergeQueuePaused(context.Background(), other)
+	if err != nil {
+		t.Fatalf("reading the unnamed repository's pause state: %v", err)
+	}
+	if paused {
+		t.Fatal("the scoped pause paused a repository it did not name")
+	}
+}
+
+// TestUnpauseWithAScopeResumesOnlyThatRepository covers the resume half of the
+// scoping: the repository the ref does not name stays paused.
+func TestUnpauseWithAScopeResumesOnlyThatRepository(t *testing.T) {
+	// Arrange: two paused repositories, both registered.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	other := wsm.RepoKey("/other/repo/.git")
+	if _, err := h.db.EnqueueMerge(context.Background(), other, ids.WorkspaceID("ws-2"), h.clock()); err != nil {
+		t.Fatalf("enqueueing on the second repository: %v", err)
+	}
+	h.registerRepo("repo-one", string(h.repoKey()))
+	h.registerRepo("repo-two", string(other))
+	if err := h.o.Pause(context.Background(), nil); err != nil {
+		t.Fatalf("pausing: %v", err)
+	}
+
+	// Act.
+	err := h.o.Unpause(context.Background(), &RepositoryScope{ID: "repo-one"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("the scoped resume failed: %v", err)
+	}
+	paused, err := h.db.MergeQueuePaused(context.Background(), other)
+	if err != nil {
+		t.Fatalf("reading the unnamed repository's pause state: %v", err)
+	}
+	if !paused {
+		t.Fatal("the scoped resume resumed a repository it did not name")
+	}
+}
+
+// TestPauseRefusesAnUnknownRepositoryRef covers the ref the registry does not
+// hold: it is refused rather than pausing a key nobody owns.
+func TestPauseRefusesAnUnknownRepositoryRef(t *testing.T) {
+	// Arrange: a registry holding one repository, and a ref naming another.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	h.registerRepo("repo-one", string(h.repoKey()))
+
+	// Act.
+	err := h.o.Pause(context.Background(), &RepositoryScope{ID: "repo-nope"})
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmUnknownRepository {
+		t.Fatalf("the pause answered %v, want the %s refusal", err, ArmUnknownRepository)
+	}
+}
+
+// TestUnpauseRefusesAnUnknownRepositoryRef covers the mirror refusal on the
+// resume verb.
+func TestUnpauseRefusesAnUnknownRepositoryRef(t *testing.T) {
+	// Arrange: a paused queue and a registry holding one repository.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	h.registerRepo("repo-one", string(h.repoKey()))
+	if err := h.o.Pause(context.Background(), nil); err != nil {
+		t.Fatalf("pausing: %v", err)
+	}
+
+	// Act.
+	err := h.o.Unpause(context.Background(), &RepositoryScope{Dir: "/not/registered/.git"})
+
+	// Assert.
+	arm, refused := Refused(err)
+	if !refused || arm != ArmUnknownRepository {
+		t.Fatalf("the resume answered %v, want the %s refusal", err, ArmUnknownRepository)
 	}
 }
