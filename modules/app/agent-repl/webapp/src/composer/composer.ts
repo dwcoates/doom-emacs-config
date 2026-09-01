@@ -42,6 +42,7 @@ import type {
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { refusalSentence } from "../rpc/refusal.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
@@ -185,7 +186,11 @@ export function mountComposer(
     }
     inFlight = true;
     send.disabled = true;
-    void send1(text, pending.key).finally(() => {
+    // THE HANDLER OWNS THE DETACHED PROMISE. `send1` lets a MalformedView
+    // travel up rather than mislabelling it a transport failure, and nothing
+    // awaits this call — so the guard is what stops it becoming an unhandled
+    // rejection: logged once, filed as frame_undecodable. The words stay put.
+    void guardMalformed(ctx, "composer.submit", send1(text, pending.key)).finally(() => {
       inFlight = false;
       applyGate(opts.gate.current());
     });
