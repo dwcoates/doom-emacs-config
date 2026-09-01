@@ -17,6 +17,7 @@
 ;;   `agent-repl-link-down-functions' (CONN) the link died unexpectedly
 ;;   `agent-repl-link-handover-functions' (OLD NEW)  a successor is up
 ;;   `agent-repl-link-drain-functions' (DRAIN)  the drain schedule moved
+;;   `agent-repl-link-promote-functions' (OLD NEW)  the successor took over
 ;;
 ;; THE HANDOVER, from this file's seat.  `shutdown_announced' WITH an
 ;; address means a successor daemon is already listening: Emacs DUAL
@@ -452,6 +453,13 @@ the reconnect hooks would re-register a fleet that is already registered."
           agent-repl-link--successor-stream nil)
     (agent-repl--info nil "elisp.link.successor-promoted address=%S"
                       (agent-repl-connect-connection-address agent-repl-link--primary))
+    ;; BEFORE the close, and BEFORE any consumer sees the old connection
+    ;; die: a promotion kills every stream that rode OLD, so the consumers
+    ;; holding connection-scoped streams re-subscribe from here.  This is
+    ;; not a link-up and does not pretend to be one -- nothing is
+    ;; re-registered, only re-subscribed.
+    (agent-repl-link--run-hook 'agent-repl-link-promote-functions
+                               old agent-repl-link--primary)
     (when old (agent-repl-connect-close old))))
 
 (defun agent-repl-link--handle-close (conn outcome)
