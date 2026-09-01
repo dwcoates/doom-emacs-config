@@ -7,7 +7,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -374,14 +373,25 @@ func TestWorkflowArmIsAcceptedDurablyWithAWarning(t *testing.T) {
 	)
 
 	// Assert: durable and warned about, never dropped and never served.
-	warnings := recordsAtLevel(store.logRecordsAfter(mark), "warn")
-	if len(warnings) == 0 {
-		t.Errorf("accepting a workflow frame logged no warning; the wave's disposition must be loud")
+	//
+	// THE WARNING IS SCOPED AND COUNTED. "Some warn was logged in this window"
+	// passed for a reclaimed socket or a slow query as readily as for the
+	// disposition under test, and it said nothing about the warning being
+	// written once per entry rather than once per retry.
+	written := recordsAtLevel(recordsAtOperation(store.logRecordsAfter(mark), "store.db.write-batch"), "warn")
+	if len(written) != 1 {
+		t.Fatalf("store.db.write-batch warn records = %d, want exactly 1 for one workflow entry: %v", len(written), written)
+	}
+	if written[0].Context["write_id"] != "w-workflow-1" {
+		t.Errorf("the workflow warning names write_id %v, want w-workflow-1", written[0].Context["write_id"])
 	}
 
 	page := openSession(ctx, t, cli, "main", 10, nil)
 	assertTexts(t, "a book beside a workflow frame", pageTexts(page.GetPage()), nil)
 
+	// THE ARM IS THE ANSWER, NEVER THE DETAIL. `detail` is prose for a human
+	// and nothing may switch on it; a caller learns from `not_implemented` that
+	// re-asking cannot help, which is the whole point of the arm.
 	resp, err := cli.GetWorkflow(ctx, connectGetWorkflow("work-run-1"))
 	if err != nil {
 		t.Fatalf("GetWorkflow answered a transport error where a typed failure was owed: %v", err)
@@ -390,7 +400,40 @@ func TestWorkflowArmIsAcceptedDurablyWithAWarning(t *testing.T) {
 	if failure == nil {
 		t.Fatalf("GetWorkflow answered success for a wave where nothing routes into the workflow table: %v", resp.Msg)
 	}
-	if !strings.Contains(strings.ToLower(failure.GetDetail()), "workflow") {
-		t.Errorf("GetWorkflow's refusal detail %q does not name workflow", failure.GetDetail())
+	if failure.GetNotImplemented() == nil {
+		t.Fatalf("GetWorkflow failure kind = %v, want not_implemented", failure.GetKind())
+	}
+	assertDetail(t, "the GetWorkflow refusal", failure.GetDetail())
+}
+
+// TestAnAcceptedWorkflowFrameIsDurableAndWarnedAboutOnlyOnce proves the other
+// half of the disposition: the entry LANDED.
+//
+// Durability is shown by the write ledger surviving the process. After a
+// restart the same write_id is absorbed rather than applied again — and the
+// absorption is observable precisely because the not-implemented warning is
+// written on the apply path, so a replay that was absorbed writes none.
+func TestAnAcceptedWorkflowFrameIsDurableAndWarnedAboutOnlyOnce(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	entry := shim.agentEntry("w-workflow-durable", "u-workflow-run-durable",
+		workflowRun(agentID("main"), "run-agent-durable", workflowStartFrame("nightly", 6000)))
+	shim.write(ctx, t, entry)
+
+	// Act.
+	store.restart()
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	revived := streamProducer(store.client())
+	mark := store.logMark()
+	revived.write(after, t, entry)
+
+	// Assert: the replay was absorbed, so no second warning was written.
+	written := recordsAtLevel(recordsAtOperation(store.logRecordsAfter(mark), "store.db.write-batch"), "warn")
+	if len(written) != 0 {
+		t.Fatalf("replaying a landed workflow write warned again = %v; the write did not survive the restart", written)
 	}
 }
