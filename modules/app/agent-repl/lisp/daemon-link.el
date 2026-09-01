@@ -117,6 +117,46 @@ when a hook sees it.")
   "Functions run with the current value of `agent-repl-link-drain'.
 Nil means the standing schedule was cancelled.")
 
+(defvar agent-repl-link-promote-functions nil
+  "Functions run with (OLD-CONN NEW-CONN) when the successor is PROMOTED.
+The old daemon dropped its stream after a handover, so NEW-CONN is now the
+primary and OLD-CONN is about to be closed.  This is NOT a link-up: every
+workspace was already adopted onto the successor and nothing has to be
+rebuilt.  What it IS, is the moment every stream that rode the OLD
+connection died with it — the roster's above all — so a consumer holding a
+connection-scoped stream re-subscribes here and nowhere else.")
+
+(defun agent-repl-link--run-hook (hook &rest args)
+  "Run HOOK's consumers with ARGS, CONTAINED: one failure cannot cancel the rest.
+These hooks are the seam between independent modules, so a consumer that
+signals must not silently take the consumers behind it down with it — that
+is how a roster stops reconciling because host.el errored.  Every consumer
+runs under its own `condition-case'; an error is recorded at ERROR naming
+the hook, the consumer and the datum, and the remaining consumers still
+run.  Nothing is swallowed: the error is reported, only its propagation is
+stopped at this boundary."
+  (dolist (consumer (agent-repl-link--hook-consumers hook))
+    (condition-case err
+        (apply consumer args)
+      (error
+       (agent-repl--error nil
+                          "elisp.link.hook-consumer-failed hook=%S consumer=%S error=%S"
+                          hook consumer err)))))
+
+(defun agent-repl-link--hook-consumers (hook)
+  "Return HOOK's consumers, resolving the buffer-local `t' marker.
+`add-hook' with LOCAL appends `t' to the local value to mean \='and then
+the global ones\='; a runner that applied `t' as a function would signal."
+  (let ((value (and (boundp hook) (symbol-value hook))))
+    (cond
+     ((null value) nil)
+     ((functionp value) (list value))
+     (t (mapcan (lambda (entry)
+                  (if (eq entry t)
+                      (copy-sequence (default-value hook))
+                    (list entry)))
+                value)))))
+
 ;;;; ---- State ----
 
 (defvar agent-repl-link--primary nil
@@ -258,7 +298,7 @@ the cold start's entry point — rather than failing."
       (if (null address)
           (progn
             (agent-repl--info nil "elisp.link.no-daemon")
-            (run-hooks 'agent-repl-link-no-daemon-functions)
+            (agent-repl-link--run-hook 'agent-repl-link-no-daemon-functions)
             nil)
         (agent-repl-link--open-primary address nil))))))
 
@@ -303,7 +343,7 @@ workspace against a connection the daemon never answered."
       (if reconnect-p
           (agent-repl--info nil "elisp.link.reconnected address=%S" address)
         (agent-repl--info nil "elisp.link.up address=%S" address))
-      (run-hook-with-args 'agent-repl-link-up-functions agent-repl-link--primary))))
+      (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))))
 
 (defun agent-repl-link-teardown ()
   "Close every connection this link holds and forget all of its state.
@@ -470,7 +510,7 @@ of a STANDING stream, which the contract calls a transport failure; and
                         (agent-repl-connect-connection-address conn))
       (setq agent-repl-link--primary nil
             agent-repl-link--primary-stream nil)
-      (run-hook-with-args 'agent-repl-link-down-functions conn)
+      (agent-repl-link--run-hook 'agent-repl-link-down-functions conn)
       (agent-repl-connect-close conn)
       (agent-repl-link--schedule-reconnect)))))
 
@@ -575,11 +615,11 @@ connections."
           (agent-repl-link--cancel-reconnect)
           (agent-repl-link--refresh-indicator)
           (agent-repl--info nil "elisp.link.up address=%S" address)
-          (run-hook-with-args 'agent-repl-link-up-functions agent-repl-link--primary))
+          (agent-repl-link--run-hook 'agent-repl-link-up-functions agent-repl-link--primary))
       (agent-repl--info nil "elisp.link.handover-announced address=%S cause=%S"
                         address (plist-get cause :arm))
-      (run-hook-with-args 'agent-repl-link-handover-functions
-                          old agent-repl-link--successor))))
+      (agent-repl-link--run-hook 'agent-repl-link-handover-functions
+                                 old agent-repl-link--successor))))
 
 (defun agent-repl-link--drain-scheduled (schedule)
   "Record the standing drain SCHEDULE and redraw the indicator."
@@ -588,14 +628,14 @@ connections."
                     (plist-get schedule :at-ms)
                     (plist-get (plist-get schedule :reason) :arm))
   (agent-repl-link--refresh-indicator)
-  (run-hook-with-args 'agent-repl-link-drain-functions agent-repl-link-drain))
+  (agent-repl-link--run-hook 'agent-repl-link-drain-functions agent-repl-link-drain))
 
 (defun agent-repl-link--drain-cancelled ()
   "Drop the standing drain schedule and take the indicator down."
   (setq agent-repl-link-drain nil)
   (agent-repl--info nil "elisp.link.drain-cancelled")
   (agent-repl-link--refresh-indicator)
-  (run-hook-with-args 'agent-repl-link-drain-functions nil))
+  (agent-repl-link--run-hook 'agent-repl-link-drain-functions nil))
 
 ;;;; ---- The indicator ----
 
