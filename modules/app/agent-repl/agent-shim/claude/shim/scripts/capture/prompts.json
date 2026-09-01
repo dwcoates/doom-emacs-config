@@ -708,9 +708,9 @@
       },
       "controls": [
         {
-          "at": "on_message",
+          "at": "on_control",
           "after": {
-            "contains": "can_use_tool"
+            "kind": "can_use_tool_parked"
           },
           "do": "interrupt"
         }
