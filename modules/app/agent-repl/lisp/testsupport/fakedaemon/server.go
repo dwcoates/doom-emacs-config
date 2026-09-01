@@ -34,6 +34,12 @@ type recordedCall struct {
 	// re-marshal of the decoded message and so drops explicit zero values;
 	// Raw is what an assertion about explicit `false' encoding must read.
 	Raw string `json:"raw,omitempty"`
+	// Headers are the request headers EXACTLY as the client sent them,
+	// canonically named.  The Connect protocol fixes them (fanout §3:
+	// `Content-Type' plus `Connect-Protocol-Version: 1', and a distinct
+	// streaming content type), and nothing else in the recording can see
+	// them.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type endRequest struct {
@@ -126,7 +132,12 @@ func (s *fakeServer) record(ctx context.Context, method string, msg proto.Messag
 		body = []byte("null")
 	}
 	s.mu.Lock()
-	s.calls = append(s.calls, recordedCall{Method: method, Body: body, Raw: rawBodyFrom(ctx)})
+	s.calls = append(s.calls, recordedCall{
+		Method:  method,
+		Body:    body,
+		Raw:     rawBodyFrom(ctx),
+		Headers: headersFrom(ctx),
+	})
 	n := len(s.calls)
 	s.callChanged.Broadcast()
 	s.mu.Unlock()
