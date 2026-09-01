@@ -155,8 +155,12 @@ func TestASeededCursorIsResumedFromTheInProgressTurnsFirstRecord(t *testing.T) {
 	// Assert: the rewind is a STATED decision naming the offset it rewound to,
 	// and that offset is the in-progress turn's first record.
 	rec := awaitLog(ctx, t, opts.LogPath, "the boot rewind record", func(r logRecord) bool {
-		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], path) &&
-			strings.Contains(r.Message, "rewound")
+		// The rewind that MOVED the cursor is the one that names the offset it
+		// moved to; the operation's other record decides not to rewind and
+		// names none. Addressing it by the key rather than by a word in its
+		// sentence is what makes this a subject about the decision.
+		_, named := r.Context["offset"]
+		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], path) && named
 	})
 	rewound, ok := rec.Context["offset"].(float64)
 	if !ok {
@@ -338,8 +342,8 @@ func TestARewindIsStatedInTheLog(t *testing.T) {
 
 	// Assert.
 	rec := awaitLog(ctx, t, secondLog, "the boot rewind record", func(r logRecord) bool {
-		return strings.Contains(strings.ToLower(r.Operation+" "+r.Message), "rewind") &&
-			samePathAny(r.Context["path"], g.Path())
+		_, named := r.Context["offset"]
+		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], g.Path()) && named
 	})
 	if _, ok := rec.Context["offset"]; !ok {
 		t.Errorf("the rewind record must name the offset it rewound to; its context was %v", rec.Context)
