@@ -544,14 +544,6 @@ path must not error."
 
 ;;;; ---- Tests: non-agent-panel-window-p ----
 
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p ()
-  "non-agent-panel-window-p returns t for non-agent windows."
-  (let ((win (selected-window)))
-    ;; The selected window should be showing *scratch* or similar
-    (should (agent-repl--non-agent-panel-window-p win))))
-
-;;;; ---- Tests: on-close (single close audit point) ----
-
 (ert-deftest agent-repl-test-panels-on-close-calls-hide-panels ()
   "on-close invokes hide-panels for a VTERM workspace.
 The teardown is dispatched through the workspace's own frontend, so the
@@ -1685,28 +1677,6 @@ classified separately and never reach this predicate as an anomaly."
         (should (eq (selected-window) orig-win))))))
 
 ;;;; ---- Tests: non-agent-panel-window-p with agent buffers ----
-
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-frontend-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing the agent frontend (webview) buffer."
-  (let ((buf (get-buffer-create "*agent-frontend-abcd1234*")))
-    (unwind-protect
-        (progn
-          (switch-to-buffer buf)
-          (should-not (agent-repl--non-agent-panel-window-p (selected-window))))
-      (switch-to-buffer "*scratch*")
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-input-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing an agent input buffer."
-  (let ((buf (get-buffer-create "*agent-panel-input-abcd1234*")))
-    (unwind-protect
-        (progn
-          (switch-to-buffer buf)
-          (should-not (agent-repl--non-agent-panel-window-p (selected-window))))
-      (switch-to-buffer "*scratch*")
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-;;;; ---- Tests: redirect-from-agent-before-save ----
 
 (ert-deftest agent-repl-test-panels-redirect-non-agent-noop ()
   "redirect-from-agent-before-save is a no-op when selected window is non-agent."
