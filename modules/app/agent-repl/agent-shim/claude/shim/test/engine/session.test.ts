@@ -571,6 +571,48 @@ describe("the turn loop", () => {
     const after = h.queries[0]?.query.calls.filter((call) => call === "getContextUsage").length ?? 0;
     expect(after).toBeGreaterThan(before);
   });
+
+  it("re-probes account usage at the turn's end", async () => {
+    // Account usage is PULLED from the vendor, so a session that probed once at
+    // StartSession would never notice a limit being approached.
+    const h = harness();
+    await started(h);
+    const usageCall = "usage";
+    const before = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const after = h.queries[0]?.query.calls.filter((call) => call === usageCall).length ?? 0;
+    expect(after).toBeGreaterThan(before);
+  });
+
+  it("re-probes mcp server health at the turn's end", async () => {
+    // Same reason: a server going down between turns is invisible otherwise.
+    const h = harness();
+    await started(h);
+    const before = h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    h.queries[0]?.query.emit(resultMessage());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const after = h.queries[0]?.query.calls.filter((call) => call === "mcpServerStatus").length ?? 0;
+    expect(after).toBeGreaterThan(before);
+  });
 });
 
 describe("the keep-alive turn", () => {
