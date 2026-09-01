@@ -17,6 +17,7 @@
  * the watcher existed is already in the buffer by the time anyone waits on it.
  */
 import { closeSync, openSync, readSync, statSync, watch, type FSWatcher } from "node:fs";
+import { ReDrain } from "./redrain.js";
 
 /** One record, in the shape `src/log.ts` writes. */
 export interface LogRecord {
@@ -69,6 +70,9 @@ export class LogTail implements RecordSink {
   private offset = 0;
   private carry = "";
   private closed = false;
+  private readonly redrain = new ReDrain(() => {
+    this.drain();
+  });
 
   private constructor(readonly path: string) {
     this.fd = openSync(path, "r");
@@ -99,15 +103,24 @@ export class LogTail implements RecordSink {
     this.drain();
     const already = this.parsed.find(predicate);
     if (already !== undefined) return already;
-    return new Promise<LogRecord>((resolve) => {
+    const pending = new Promise<LogRecord>((resolve) => {
       this.waiters.push({ predicate, resolve });
     });
+    // The watcher is the fast path; the re-drain covers an FSEvents
+    // notification the kernel never delivers, which would otherwise hang the
+    // wait for the whole test budget rather than fail it.
+    this.redrain.start();
+    // A record may have landed between the drain above and the waiter being
+    // registered, so re-check the level now that the edge is armed.
+    this.drain();
+    return pending;
   }
 
   /** Stop watching and release the descriptor. */
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.redrain.stop();
     this.watcher?.close();
     this.watcher = null;
     closeSync(this.fd);
@@ -150,6 +163,7 @@ export class LogTail implements RecordSink {
       this.waiters.splice(index, 1);
       waiter.resolve(record);
     }
+    if (this.waiters.length === 0) this.redrain.stop();
   }
 }
 
