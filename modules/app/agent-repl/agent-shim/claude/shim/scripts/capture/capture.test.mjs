@@ -25,8 +25,10 @@ import {
   answersFor,
   assertCaptureAuthorized,
   createInputChannel,
+  controlMatches,
   createWorld,
   cwdSlug,
+  fireTriggers,
   loadPrompts,
   messageMatches,
   parseArgv,
@@ -604,5 +606,116 @@ describe("createInputChannel", () => {
     const channel = createInputChannel();
     channel.close();
     expect(() => channel.push({})).toThrow(/closed input channel/);
+  });
+});
+
+describe("controlMatches", () => {
+  it("does not match when there is no matcher at all", () => {
+    expect(controlMatches(undefined, { kind: "can_use_tool_parked" })).toBe(false);
+  });
+
+  it("matches a parked gate on kind", () => {
+    expect(controlMatches({ kind: "can_use_tool_parked" }, { kind: "can_use_tool_parked" })).toBe(true);
+  });
+
+  it("rejects a different control kind", () => {
+    expect(controlMatches({ kind: "can_use_tool_parked" }, { kind: "can_use_tool_request" })).toBe(false);
+  });
+
+  it("matches on tool_name", () => {
+    expect(
+      controlMatches({ tool_name: "Bash" }, { kind: "can_use_tool_parked", tool_name: "Bash" }),
+    ).toBe(true);
+  });
+
+  it("rejects a different tool_name", () => {
+    expect(
+      controlMatches({ tool_name: "Bash" }, { kind: "can_use_tool_parked", tool_name: "Read" }),
+    ).toBe(false);
+  });
+
+  it("matches on a substring of the serialized control record", () => {
+    expect(controlMatches({ contains: "park" }, { kind: "can_use_tool_parked" })).toBe(true);
+  });
+});
+
+/** A query stub that records which control verbs were driven against it. */
+function recordingQuery() {
+  const calls = [];
+  return {
+    calls,
+    interrupt: async () => {
+      calls.push("interrupt");
+      return { ok: true };
+    },
+  };
+}
+
+describe("fireTriggers", () => {
+  const parkedControl = {
+    at: "on_control",
+    after: { kind: "can_use_tool_parked" },
+    do: "interrupt",
+  };
+
+  it("fires the interrupt when a parked-gate control record is replayed", async () => {
+    const query = recordingQuery();
+    await fireTriggers(
+      query,
+      [parkedControl],
+      "on_control",
+      { kind: "can_use_tool_parked", tool_name: "Bash", rule: "park" },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual(["interrupt"]);
+  });
+
+  it("reports the driven verb back to the caller", async () => {
+    const results = await fireTriggers(
+      recordingQuery(),
+      [parkedControl],
+      "on_control",
+      { kind: "can_use_tool_parked" },
+      new Set(),
+      () => {},
+    );
+    expect(results).toEqual([{ verb: "interrupt", ok: true }]);
+  });
+
+  it("does not fire an on_control trigger for a plain stream message", async () => {
+    const query = recordingQuery();
+    await fireTriggers(
+      query,
+      [parkedControl],
+      "on_message",
+      { type: "assistant", message: { content: "can_use_tool_parked" } },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual([]);
+  });
+
+  it("does not fire the same control twice", async () => {
+    const query = recordingQuery();
+    const fired = new Set();
+    const payload = { kind: "can_use_tool_parked" };
+    await fireTriggers(query, [parkedControl], "on_control", payload, fired, () => {});
+    await fireTriggers(query, [parkedControl], "on_control", payload, fired, () => {});
+    expect(query.calls).toEqual(["interrupt"]);
+  });
+
+  it("leaves an on_message control alone while dispatching on_control", async () => {
+    const query = recordingQuery();
+    const messageControl = { at: "on_message", after: { type: "assistant" }, do: "interrupt" };
+    await fireTriggers(
+      query,
+      [messageControl],
+      "on_control",
+      { kind: "can_use_tool_parked" },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual([]);
   });
 });
