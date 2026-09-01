@@ -25,7 +25,7 @@ everything needed, so re-derive nothing.
 | System | Branch @ tip | STOP file (on that branch) | Left in place |
 |---|---|---|---|
 | Daemon | overhaul/daemon @ e2694b20f | docs/overhaul/reports/STOP-daemon.md | worktrees daemon-agents/{hostside 87e3ca5f1, integration-tests 438c81e12} unmerged; stale paintvocab/promptflow to delete |
-| Shim | overhaul/shim @ 6669d9f37 | docs/overhaul/reports/STOP-shim.md | none |
+| Shim | overhaul/shim @ 98f23d9c7 (6669d9f37 + three capture-harness fixes, project lead, 2026-09-01) | docs/overhaul/reports/STOP-shim.md | none |
 | Webapp | overhaul/webapp @ b8aeaabaa | docs/overhaul/reports/STOP-webapp.md (+ reports/webapp-briefs/ incl. UX-LIST.md) | worktrees webapp-agents/{topbar-login, merge-bubble} |
 | Elisp | overhaul/elisp @ 3d3ea3a2c | docs/overhaul/reports/STOP-elisp.md | none |
 | Store+sidecar | overhaul/store @ 00edf4d4c | docs/overhaul/reports/STOP-store.md | none (carries a merge of overhaul/shim 731aa5f00 — expected) |
@@ -62,12 +62,21 @@ has NOT reached overhaul/integration yet.
 
 ## Open user decisions (parked, ask again at resume)
 
-1. CAPTURE RUN permission: `node scripts/capture/capture.mjs --config-root
-   ~/.claude` is classifier-denied; options were /permissions allowlist,
-   `!`-prefix run, or defer. The capture checklist now carries: the real
-   budget-warning attachment spelling (`context_tip` is NOT it), the
-   failed-subagent transcript shape, a real compaction-summary line, the
-   api_error taxonomy fixtures.
+1. CAPTURE RUN: RESOLVED 2026-09-01. User granted the run; one prose-streamed
+   golden validated end to end at ~/.config/doom-overhaul/captures/ (stream,
+   meta, transcript copy; account root left clean). Three harness fixes were
+   needed and are committed on overhaul/shim (0369dffe3 config-root at the
+   default root must leave CLAUDE_CONFIG_DIR unset; c50feea4d realpath the
+   scratch world; 98f23d9c7 slug underscores). Invocation that works:
+   `unset AGENT_REPL_FORBID_VENDOR_CALLS && node scripts/capture/capture.mjs
+   --i-am-the-project-lead-capture-run --config-root ~/.claude --out
+   ~/.config/doom-overhaul/captures [--only ...]`. Remaining: the full
+   sweep (project lead only; may run concurrently with the fanout, it is an
+   input the shim lead consumes, not a gate), and the MANUAL scenarios
+   (api-error-classes, model-refusal) which need non-prompt provocation.
+   The capture checklist still carries: the real budget-warning attachment
+   spelling (`context_tip` is NOT it), the failed-subagent transcript
+   shape, a real compaction-summary line, the api_error taxonomy fixtures.
 2. Hide vs show-and-refuse this wave (default: show + refuse honestly):
    the subagent bubble composer (`not_deliverable`) and the Ctrl-B detach
    control (`unsupported`).
