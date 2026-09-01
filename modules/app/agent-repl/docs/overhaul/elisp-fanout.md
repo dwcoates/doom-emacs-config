@@ -176,6 +176,16 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   merely exist (a second daemon in one state root used to return the
   incumbent's address). R-POLISH dispatched (elisp-agents/polish, off
   d482b3648): daemon #90, host #33/#30.
+- R-ROSTER MERGED (0a8286ca1): roster 47/47. Production: session.el banner
+  "Agent ready: <name>" (#52); core.el `agent-repl--current-ws-p` no longer
+  signals on a nil current name. Suite: the roster fixtures copied before
+  deletion (a shared literal was being mutated), reactions restore the one
+  consumer they test (R-NOTIFY pattern confirmed adequate), the harness
+  notifier now uses production's `agent-repl-notify-make-fake-backend`
+  (the hand-rolled one had drifted in arity). Follow-up noted: sweep
+  test-integration-helpers.el for other hand-rolled duplicates of
+  production seams. R-COMPOSER dispatched (elisp-agents/composer, off
+  0a8286ca1). Running: verbs-suite, polish, composer.
 
 ## 1. Module map (final tree of lisp/)
 
