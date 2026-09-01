@@ -10,6 +10,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/account"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
@@ -208,7 +209,7 @@ func TestCreateTargetsTheParentWorktreeWhenCutFromOne(t *testing.T) {
 	id := parent.ID
 	spec.ForkFrom = &id
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = "/transcripts/vendor-1.jsonl"
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
 
 	// Act.
 	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
@@ -452,7 +453,7 @@ func TestCreateForksTheParentTranscriptBeforeTheSessionStarts(t *testing.T) {
 	f := newFixture(t)
 	parent := f.workspace("parent", t.TempDir())
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = "/transcripts/vendor-1.jsonl"
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
 	spec := standardSpec(t)
 	id := parent.ID
 	spec.ForkFrom = &id
@@ -473,7 +474,7 @@ func TestCreateForkRecordsTheParentConversationForResume(t *testing.T) {
 	f := newFixture(t)
 	parent := f.workspace("parent", t.TempDir())
 	f.db.sessions[parent.ID] = wsm.Session{Workspace: parent.ID, VendorSessionID: "vendor-1"}
-	f.account.transcript = "/transcripts/vendor-1.jsonl"
+	f.account.transcript = account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/roots/default"}
 	spec := standardSpec(t)
 	id := parent.ID
 	spec.ForkFrom = &id

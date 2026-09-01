@@ -289,7 +289,7 @@ type fakeAccounts struct {
 	account.Resolver
 
 	configDir     string
-	transcript    string
+	transcript    account.Transcript
 	transcriptErr error
 	ported        []portedTranscript
 	portErr       error
@@ -299,7 +299,7 @@ type portedTranscript struct{ Path, ConfigDir, WorkspaceDir string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
 
-func (a *fakeAccounts) FindTranscript(context.Context, string, string) (string, error) {
+func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.Transcript, error) {
 	return a.transcript, a.transcriptErr
 }
 
@@ -685,7 +685,7 @@ type fakeBorrowed struct {
 	file *os.File
 }
 
-func (b *fakeBorrowed) File() uintptr {
+func (b *fakeBorrowed) File() *os.File {
 	if b.file == nil {
 		file, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 		if err != nil {
@@ -693,7 +693,7 @@ func (b *fakeBorrowed) File() uintptr {
 		}
 		b.file = file
 	}
-	return b.file.Fd()
+	return b.file
 }
 
 func (b *fakeBorrowed) Close() error { return nil }
