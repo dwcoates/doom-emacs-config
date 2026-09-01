@@ -211,6 +211,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   lesson: check a red's payload against the codec before calling it a
   production gap. Queue after R-VERBS-SUITE: R-DEADCODE and audit 2 in
   parallel, then the loop.
+- R-VERBS-SUITE MERGED (0677708d1): verbs 61/61 (21 call-convention
+  repairs, 5 log-history orphaning reads fixed in the fixture, 2 kill/nuke
+  teardown assertions corrected to liveness, 2 stale payloads, 1 health
+  buffer order dependence, 1 successor-address wait — same fix as
+  R-HANDOVER, conflict resolved keeping HEAD). Production: create's
+  standard form gained merge_actions (fanout §5; the encoder already
+  carried it). SURFACED for the teamlead: workspace.el's teardown forgets
+  the workspace's durable log target and keeps logging, re-pointing the
+  canonical <ws>/.claude/emacs/emacs.log link and detaching the
+  pre-teardown history → R-LOGFORGET (defer the forget until the
+  teardown's own records are written). No agent worktrees remain.
 
 ## 1. Module map (final tree of lisp/)
 
