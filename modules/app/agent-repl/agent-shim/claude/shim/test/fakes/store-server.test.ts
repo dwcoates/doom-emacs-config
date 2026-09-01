@@ -813,3 +813,248 @@ describe("the read ledger", () => {
     ]);
   });
 });
+
+describe("typed read refusals", () => {
+  // THE FAKE MUST BE ABLE TO REFUSE. Every typed arm the store declares is a
+  // branch of the shim's reader, and a fake that only ever succeeds leaves
+  // those branches asserted nowhere.
+
+  it("refuses OpenAgentSession under the stale_pointer arm", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("OpenAgentSession", "stale_pointer", "no such line in this book");
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("stalePointer");
+  });
+
+  it("refuses OpenAgentSession under the invalid_request arm", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("OpenAgentSession", "invalid_request", "no book by that name");
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("invalidRequest");
+  });
+
+  it("carries the caller's detail through on a refusal", async () => {
+    // The detail is deliberately the caller's to choose, so a test can pair an
+    // arm with contradicting prose and catch a consumer classifying by string.
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("OpenAgentSession", "storage_failure", "that pointer is unknown");
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(response.result.case === "failure" ? response.result.value.detail : "").toBe(
+      "that pointer is unknown",
+    );
+  });
+
+  it("refuses ReadAgentPage under the named arm", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("ReadAgentPage", "storage_failure", "the disk is full");
+
+    // Act.
+    const response = await client.readAgentPage(
+      create(storev1.ReadAgentPageRequestSchema, {
+        book: agentId("a"),
+        pageSize: 10,
+        after: create(storev1.StoreItemPointerSchema, { value: "9" }),
+      }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("storageFailure");
+  });
+
+  it("refuses GetLiveWork under storage_failure, its only declared arm", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("GetLiveWork", "storage_failure", "sqlite: no such table");
+
+    // Act.
+    const response = await client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("storageFailure");
+  });
+
+  it("REFUSES to serve GetLiveWork an arm the proto does not declare", async () => {
+    // Fabricating one would put a shape on the wire the proto forbids and test
+    // a consumer against a store that cannot exist.
+    // Arrange.
+    const { store: fake } = await store();
+
+    // Act, Assert.
+    expect(() => fake.failReads("GetLiveWork", "stale_pointer")).toThrow(
+      /declares only storage_failure/,
+    );
+  });
+
+  it("serves the verb again once its arm is cleared", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("OpenAgentSession", "storage_failure");
+
+    // Act.
+    fake.failReads("OpenAgentSession", null);
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+
+  it("refuses ONLY the verb that was armed", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("ReadAgentPage", "storage_failure");
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(response.result.case).toBe("success");
+  });
+});
+
+describe("typed write refusals", () => {
+  it("gives failWrites the RETRYABLE storage_failure arm", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failWrites("the store is down");
+
+    // Act.
+    const response = await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, { entries: [] }),
+      }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("storageFailure");
+  });
+
+  it("names invalid_request when the bytes can never be accepted", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failWritesWith("invalid_request", "entry 0 sets no arm");
+
+    // Act.
+    const response = await client.writeBatch(
+      create(storev1.WriteBatchRequestSchema, {
+        producer: "claude-shim:test",
+        batch: create(storev1.EntryBatchSchema, { entries: [] }),
+      }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("invalidRequest");
+  });
+});
+
+describe("the open-tail ledger", () => {
+  it("lists no tail before anything watches", async () => {
+    // Arrange, Act.
+    const { store: fake } = await store();
+
+    // Assert.
+    expect(fake.openTails()).toEqual([]);
+  });
+
+  it("lists a tail while its stream is being read", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+
+    // Act. Pull one line, so the generator is certainly running.
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Assert.
+    expect(fake.openTails()).toEqual([success.watch?.value]);
+  });
+
+  it("DROPS the entry once the client ABORTS the call", async () => {
+    // A client that stops reading must CANCEL THE CALL, not merely stop pulling
+    // its iterator: Connect's stream close drains the body, which on a standing
+    // tail never completes, so only an abort ends the subscription. A store
+    // holding a stream open for a reader that never returns leaks one
+    // subscription per closed watch — this is the ledger that proves it does
+    // not, and the reader (src/store/reader.ts) aborts for exactly this reason.
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a", 10);
+    const abort = new AbortController();
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+      abort.signal,
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Act.
+    abort.abort();
+    await fake.tailClosed(success.watch?.value ?? "");
+
+    // Assert.
+    expect(fake.openTails()).toEqual([]);
+  });
+
+  it("KEEPS the entry while a client merely stops pulling without aborting", async () => {
+    // The negative that gives the assertion above its meaning: if walking away
+    // were enough, the ledger would prove nothing about cancellation.
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Act. Stop pulling, and let every already-scheduled task run.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Assert.
+    expect(fake.openTails()).toEqual([success.watch?.value]);
+  });
+});
