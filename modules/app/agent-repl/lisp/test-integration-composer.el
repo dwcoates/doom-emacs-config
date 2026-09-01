@@ -531,15 +531,19 @@ keeps the attachment list per buffer and clears it on a successful send."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir)))
-        ;; Act.
-        (agent-repl-input-attach-image image "image/png")
-        (agent-repl--send :user-sent "look at this"
-                          agent-repl-itest-composer--ws)
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        ;; Assert.
-        (let ((body (agent-repl-itest-composer--submit-body daemon)))
-          (should (equal (agent-repl-itest-composer--image-paths body) (list image))))))))
+      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "look at this")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (let ((body (agent-repl-itest-composer--submit-body daemon)))
+                (should (equal (agent-repl-itest-composer--image-paths body) (list image)))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-attached-image-carries-its-media-type ()
   "An ImageBlock carries its `media_type' beside the location oneof.
@@ -549,18 +553,22 @@ WHERE the bytes are, the media type says WHAT they are."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir)))
-        ;; Act.
-        (agent-repl-input-attach-image image "image/png")
-        (agent-repl--send :user-sent "look at this"
-                          agent-repl-itest-composer--ws)
-        (agent-repl-itest--await-call daemon "SubmitPrompt")
-        ;; Assert.
-        (let* ((body (agent-repl-itest-composer--submit-body daemon))
-               (blocks (agent-repl-itest--body-field body 'said 'content 'blocks))
-               (image-block (seq-find (lambda (block) (assq 'image block)) blocks)))
-          (should (equal (agent-repl-itest--body-field image-block 'image 'mediaType)
-                         "image/png")))))))
+      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "look at this")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (let* ((body (agent-repl-itest-composer--submit-body daemon))
+                     (blocks (agent-repl-itest--body-field body 'said 'content 'blocks))
+                     (image-block (seq-find (lambda (block) (assq 'image block)) blocks)))
+                (should (equal (agent-repl-itest--body-field image-block 'image 'mediaType)
+                               "image/png"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 (ert-deftest agent-repl-itest-composer-attachments-clear-after-a-successful-turn-send ()
   "Attachments clear on a successful `turn' send: the NEXT send has none.
@@ -663,7 +671,8 @@ in the order the person composed them -- attach order, not reverse."
                   agent-repl-itest-composer--ws "run the tests")))
         (unwind-protect
             (progn
-              (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (push t ran)))
+              (setq agent-repl-send-posthooks
+                    (list (cons "" (lambda (_ws _raw) (push t ran)))))
               ;; Act.
               (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
               ;; Assert.
@@ -755,7 +764,8 @@ merge in flight\\='\"."
                   agent-repl-itest-composer--ws "run the tests")))
         (unwind-protect
             (progn
-              (add-hook 'agent-repl-send-posthooks (lambda (&rest _) (setq cleared t)))
+              (setq agent-repl-send-posthooks
+                    (list (cons "" (lambda (_ws _raw) (setq cleared t)))))
               (cl-letf (((symbol-function 'message)
                          (lambda (fmt &rest args)
                            (push (if args (apply #'format fmt args) fmt) messages)
@@ -946,17 +956,18 @@ on link-up."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
-      (let ((queued nil))
-        (cl-letf (((symbol-function 'agent-repl-queue-deferred-prompt)
-                   (lambda (&rest args) (push args queued))))
-          ;; The daemon goes away mid-composition.
-          (agent-repl-itest--stop-daemon daemon t)
-          ;; Act.
-          (ignore-errors (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws))
-          ;; Assert.
-          (agent-repl-itest--wait-until (lambda () queued) nil
-                                        "the prompt to reach the outage queue")
-          (should queued))))))
+      ;; The daemon goes away mid-composition.
+      (agent-repl-itest--stop-daemon daemon t)
+      ;; Act.
+      (ignore-errors (agent-repl--send :user-sent "run the tests"
+                                       agent-repl-itest-composer--ws))
+      ;; Assert: the OUTAGE queue holds it -- link-up releases it, not the
+      ;; roster's finish edge, so `agent-repl-queue-deferred-prompt' is the
+      ;; wrong sink to watch.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
+       nil "the prompt to reach the outage queue")
+      (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage)))))
 
 ;;;; ---- Finding 91 (partial): the submit log names its origin ----
 

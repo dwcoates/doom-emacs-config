@@ -26,7 +26,7 @@
 ;;;; ---- Fixtures ----
 
 (defvar agent-repl-test-pq--submitted nil
-  "Submissions the stubbed composer received, as (WS SAID ORIGIN RAW).")
+  "Submissions the stubbed composer received, as (WS SAID ORIGIN RAW KEY).")
 
 (defvar agent-repl-test-pq--link-up t
   "Whether the stubbed daemon link reports up.")
@@ -51,9 +51,9 @@
                ((symbol-function 'agent-repl-host-composer-gate)
                 (lambda (_ws) agent-repl-test-pq--gate))
                ((symbol-function 'agent-repl--input-submit)
-                (lambda (ws said origin raw)
-                  (push (list ws said origin raw) agent-repl-test-pq--submitted)
-                  "key-1"))
+                (lambda (ws said origin raw &optional key)
+                  (push (list ws said origin raw key) agent-repl-test-pq--submitted)
+                  (or key "key-1")))
                ((symbol-function 'message) (lambda (&rest _) nil)))
        ,@body)))
 
@@ -301,6 +301,39 @@
             (agent-repl-queue-deferred-prompt)
             (should-not (agent-repl-prompt-queue-pending "ws-one")))
         (kill-buffer buf)))))
+
+
+;;;; ---- Finding 66: the re-drive is a RETRY, not a second turn ----
+
+(ert-deftest agent-repl-pq-offer-records-the-failed-attempts-key ()
+  "An offered entry carries the failed attempt\='s idempotency key."
+  (agent-repl-test-pq--with
+    (let ((entry (agent-repl-prompt-queue-offer
+                  "ws-one" (agent-repl-test-pq--said "a") :user-sent "a" "key-failed")))
+      (should (equal (plist-get entry :idempotency-key) "key-failed")))))
+
+(ert-deftest agent-repl-pq-outage-drain-resends-under-the-failed-key ()
+  "The outage drain re-submits under the SAME key: a re-drive is a retry."
+  (agent-repl-test-pq--with
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-failed")
+    (agent-repl--prompt-queue-on-link-up 'conn)
+    (should (equal (nth 4 (car agent-repl-test-pq--submitted)) "key-failed"))))
+
+(ert-deftest agent-repl-pq-deferred-entry-carries-no-key ()
+  "A deferral never attempted anything, so it holds no key to retry under."
+  (agent-repl-test-pq--with
+    (let ((entry (agent-repl--prompt-queue-enqueue
+                  "ws-one" :deferred (agent-repl-test-pq--said "a") :deferred-prompt "a")))
+      (should (null (plist-get entry :idempotency-key))))))
+
+(ert-deftest agent-repl-pq-deferred-drain-mints-a-fresh-key ()
+  "A deferred drain passes no key, so the composer mints one."
+  (agent-repl-test-pq--with
+    (agent-repl--prompt-queue-enqueue "ws-one" :deferred (agent-repl-test-pq--said "a")
+                                      :deferred-prompt "a")
+    (agent-repl-prompt-queue-drain "ws-one" :deferred)
+    (should (null (nth 4 (car agent-repl-test-pq--submitted))))))
 
 (provide 'test-prompt-queue)
 
