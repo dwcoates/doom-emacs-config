@@ -1353,6 +1353,8 @@ actually pins IT."
 (declare-function agent-repl-connect-connection-address "connect")
 (declare-function agent-repl--ws-get "workspace")
 (defvar agent-repl-itest-notifications)
+(defvar persp-activated-functions)
+(defvar persp-before-deactivate-functions)
 
 (defun agent-repl-itest-host--announce (daemon address)
   "Push `shutdown_announced' on DAEMON's daemon stream naming ADDRESS.
@@ -1850,6 +1852,34 @@ user can see."
               (should (string-match-p (regexp-quote "Refactor the codec")
                                       (buffer-name buffer))))
           (kill-buffer buffer))))))
+
+;; audit-2 #46
+(ert-deftest agent-repl-itest-host-registers-the-workspace-activation-hook ()
+  "PRODUCTION installs the tab-switch hook once persp-mode loads.
+fanout §7: `agent-repl-host--on-workspace-activated' is \"called from
+workspace.el's perspective-activated hook\", registered through
+`agent-repl--ws-add-activated-hook' — a `with-eval-after-load' on
+persp-mode.  persp-mode is absent in this batch harness, so that form has
+never run in any test: the roster suite registers the function BY HAND to
+get a real SelectWorkspace, which means a production that dropped its
+registration would break every tab switch and no test would notice.
+
+Providing the feature is what runs the queued form, and it is the only
+way to observe the registration without persp-mode itself.  The hook
+variables are scratch-bound and the feature is withdrawn afterwards, so
+nothing here leaks into another scenario."
+  ;; Arrange.
+  (let ((persp-activated-functions nil)
+        (persp-before-deactivate-functions nil)
+        (already (featurep 'persp-mode)))
+    (unwind-protect
+        (progn
+          ;; Act: loading persp-mode is exactly what the registration waits on.
+          (unless already (provide 'persp-mode))
+          ;; Assert.
+          (should (memq #'agent-repl-host--on-workspace-activated
+                        persp-activated-functions)))
+      (unless already (setq features (delq 'persp-mode features))))))
 
 (provide 'test-integration-host)
 
