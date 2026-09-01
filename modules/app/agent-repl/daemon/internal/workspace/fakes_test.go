@@ -684,7 +684,7 @@ type fakeBorrowed struct {
 	file *os.File
 }
 
-func (b *fakeBorrowed) File() uintptr {
+func (b *fakeBorrowed) File() *os.File {
 	if b.file == nil {
 		file, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 		if err != nil {
@@ -692,7 +692,7 @@ func (b *fakeBorrowed) File() uintptr {
 		}
 		b.file = file
 	}
-	return b.file.Fd()
+	return b.file
 }
 
 func (b *fakeBorrowed) Close() error { return nil }

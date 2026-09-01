@@ -63,8 +63,9 @@ func TestBorrowedFileIsTheDescriptor(t *testing.T) {
 	defer f.Close()
 	b := &borrowed{f: f, log: NewTestLogger(), name: "shim.log"}
 
-	// Act, Assert.
-	if b.File() != f.Fd() {
-		t.Fatalf("File() = %d, want the sink's descriptor %d", b.File(), f.Fd())
+	// Act, Assert: the borrower gets the surfaces' own handle, not a second
+	// os.File over the same descriptor (whose finalizer would close the sink).
+	if b.File() != f {
+		t.Fatalf("File() = %p, want the sink's own handle %p", b.File(), f)
 	}
 }
