@@ -273,6 +273,22 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   `--ws-registered-dir-owner`, `--ws-repo-folded-p`; test-only helpers
   reviewed one by one), (b), (c), and the stale explain-config comment
   mentions in frontend.el.
+- R-STABILITY MERGED (928f4d744): both link flakes root-caused (fixtures
+  awaited the daemon's subscriber registry, a hop before ON-OPEN; the
+  composer suite leaked a prompt-queue entry + a host entry on a dead
+  conn, whose drain signalled out of `agent-repl-link-up-functions` and
+  cancelled every consumer behind it); R-LOGFORGET landed (forget the log
+  target as the LAST act of `agent-repl--ws-del`, 3 unit tests).
+  TEAMLEAD RULING on the surfaced production question: a consumer
+  signalling inside `agent-repl-link-up-functions` (and the down/handover/
+  finish hook runs alike) must not cancel the consumers behind it — the
+  runner contains each consumer's error, logs it at ERROR
+  (`elisp.link.up-hook-failed`, consumer + error in context; never
+  swallowed silently), and continues; additionally the outage drain skips
+  a dead conn and re-queues. → R-AUDIT2-PROD. Dispatched off 928f4d744:
+  R-AUDIT2-PROD (`opus-low`, elisp-agents/audit2-prod: audit-2 #1, #32,
+  #26 + the hook-containment ruling) and R-DEADCODE-2 (`sonnet-medium`,
+  elisp-agents/deadcode2). Running: suite2, audit2-prod, deadcode2.
 
 ## 1. Module map (final tree of lisp/)
 
