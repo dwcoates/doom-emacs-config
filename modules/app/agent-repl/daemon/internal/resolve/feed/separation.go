@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
 )
 
 // ⑤ THE SEPARATION DIVIDER: the session changed shape or place here, and a
@@ -47,8 +48,8 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 		// does no arithmetic and no unit rounding of its own.
 		if tokens := compacted.GetTokens(); tokens != nil {
 			separation.Tokens = &frontendv1.FeedContextCutTokens{
-				BeforeText: formatTokens(uint64(tokens.GetTokensBefore())),
-				AfterText:  formatTokens(uint64(tokens.GetTokensAfter())),
+				BeforeText: figures.Tokens(uint64(tokens.GetTokensBefore())),
+				AfterText:  figures.Tokens(uint64(tokens.GetTokensAfter())),
 			}
 		}
 	case *conversationv1.ContextCut_CompactionFailed:
