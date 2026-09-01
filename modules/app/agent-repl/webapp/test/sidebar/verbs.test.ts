@@ -1,8 +1,42 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
-import { OpenWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import {
+  CloseWorkspaceErrorSchema,
+  CloseWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
+import {
+  OpenWorkspaceErrorSchema,
+  OpenWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import {
+  AssignWorkspaceTaskErrorSchema,
+  AssignWorkspaceTaskResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
+import {
+  KillWorkspaceErrorSchema,
+  KillWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_kill_workspace_pb";
+import {
+  MergeWorkspaceErrorSchema,
+  MergeWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
+import {
+  NukeWorkspaceErrorSchema,
+  NukeWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
+import {
+  RestartWorkspaceErrorSchema,
+  RestartWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
+import {
+  SelectWorkspaceErrorSchema,
+  SelectWorkspaceResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
+import {
+  SetWorkspacePriorityErrorSchema,
+  SetWorkspacePriorityResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_priority_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
@@ -17,11 +51,17 @@ import {
   buildSetWorkspacePriorityRequest,
   drawKillConfirm,
   drawNukeConfirm,
+  assignWorkspaceTaskRefusal,
+  closeWorkspaceRefusal,
   drawRowMenu,
   fillAssignSubmenu,
-  refusalArm,
+  mergeWorkspaceRefusal,
+  nukeWorkspaceRefusal,
+  openWorkspaceRefusal,
+  restartWorkspaceRefusal,
   runVerb,
 } from "../../src/sidebar/verbs.js";
+import { oneofArms } from "../arms.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const TARGET_WS = create(WorkspaceRefSchema, { id: "ws-7", dir: "/w/seven" });
@@ -184,42 +224,239 @@ describe("the two destructive verbs", () => {
   });
 });
 
-describe("a refusal", () => {
-  it("names the close-blocked cause", () => {
-    const error = create(CloseWorkspaceResponseSchema, {
-      result: { case: "error", value: { cause: { case: "blocked", value: {} } } },
+/**
+ * A payload for every arm that carries a fact, so the schema-driven sweep can
+ * build a WELL-FORMED refusal for each arm without a per-arm test body.
+ */
+const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  workspaceRefMismatch: { registryDir: "/w/registry" },
+  transferringAway: { address: "127.0.0.1:7777" },
+  transcriptMissing: { vendorSessionId: "vs-1", searchedPaths: ["/a", "/b"] },
+  spawnFailed: { detail: "exec format error" },
+  gitFailed: { detail: "worktree is dirty" },
+};
+
+/** One verb, enough to issue it and to enumerate what it can refuse with. */
+interface VerbUnderTest {
+  rpc: string;
+  method: string;
+  responseSchema: Parameters<typeof create>[0];
+  errorSchema: Parameters<typeof oneofArms>[0];
+  call: (t: ReturnType<typeof target>, control: HTMLElement) => Promise<boolean>;
+}
+
+const VERBS: readonly VerbUnderTest[] = [
+  {
+    rpc: "OpenWorkspace",
+    method: "openWorkspace",
+    responseSchema: OpenWorkspaceResponseSchema,
+    errorSchema: OpenWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+        refusalText: (cause) => openWorkspaceRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "CloseWorkspace",
+    method: "closeWorkspace",
+    responseSchema: CloseWorkspaceResponseSchema,
+    errorSchema: CloseWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "CloseWorkspace",
+        call: (client) => client.closeWorkspace(buildCloseWorkspaceRequest(TARGET_WS)),
+        schema: CloseWorkspaceResponseSchema,
+        refusalText: (cause) => closeWorkspaceRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "KillWorkspace",
+    method: "killWorkspace",
+    responseSchema: KillWorkspaceResponseSchema,
+    errorSchema: KillWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "KillWorkspace",
+        call: (client) => client.killWorkspace(buildKillWorkspaceRequest(TARGET_WS)),
+        schema: KillWorkspaceResponseSchema,
+      }),
+  },
+  {
+    rpc: "NukeWorkspace",
+    method: "nukeWorkspace",
+    responseSchema: NukeWorkspaceResponseSchema,
+    errorSchema: NukeWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "NukeWorkspace",
+        call: (client) => client.nukeWorkspace(buildNukeWorkspaceRequest(TARGET_WS)),
+        schema: NukeWorkspaceResponseSchema,
+        refusalText: (cause) => nukeWorkspaceRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "MergeWorkspace",
+    method: "mergeWorkspace",
+    responseSchema: MergeWorkspaceResponseSchema,
+    errorSchema: MergeWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "MergeWorkspace",
+        call: (client) => client.mergeWorkspace(buildMergeWorkspaceRequest(TARGET_WS)),
+        schema: MergeWorkspaceResponseSchema,
+        refusalText: (cause) => mergeWorkspaceRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "RestartWorkspace",
+    method: "restartWorkspace",
+    responseSchema: RestartWorkspaceResponseSchema,
+    errorSchema: RestartWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "RestartWorkspace",
+        call: (client) => client.restartWorkspace(buildRestartWorkspaceRequest(TARGET_WS, false)),
+        schema: RestartWorkspaceResponseSchema,
+        refusalText: (cause) => restartWorkspaceRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "SetWorkspacePriority",
+    method: "setWorkspacePriority",
+    responseSchema: SetWorkspacePriorityResponseSchema,
+    errorSchema: SetWorkspacePriorityErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "SetWorkspacePriority",
+        call: (client) =>
+          client.setWorkspacePriority(buildSetWorkspacePriorityRequest(TARGET_WS, "p1")),
+        schema: SetWorkspacePriorityResponseSchema,
+      }),
+  },
+  {
+    rpc: "AssignWorkspaceTask",
+    method: "assignWorkspaceTask",
+    responseSchema: AssignWorkspaceTaskResponseSchema,
+    errorSchema: AssignWorkspaceTaskErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "AssignWorkspaceTask",
+        call: (client) =>
+          client.assignWorkspaceTask(buildAssignWorkspaceTaskRequest(TARGET_WS, "task-3")),
+        schema: AssignWorkspaceTaskResponseSchema,
+        refusalText: (cause) => assignWorkspaceTaskRefusal(cause as never),
+      }),
+  },
+  {
+    rpc: "SelectWorkspace",
+    method: "selectWorkspace",
+    responseSchema: SelectWorkspaceResponseSchema,
+    errorSchema: SelectWorkspaceErrorSchema,
+    call: (t, control) =>
+      runVerb(control, {
+        sc: t.sc,
+        rpc: "SelectWorkspace",
+        call: (client) => client.selectWorkspace(buildSelectWorkspaceRequest(TARGET_WS)),
+        schema: SelectWorkspaceResponseSchema,
+      }),
+  },
+];
+
+/** Issue VERB against a daemon that refuses with ARM, and answer the element. */
+async function refuseWith(verb: VerbUnderTest, arm: string): Promise<Element | null> {
+  const t = target({
+    [verb.method]: () =>
+      create(verb.responseSchema as typeof OpenWorkspaceResponseSchema, {
+        result: {
+          case: "error",
+          value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } },
+        },
+      } as never),
+  });
+  const host = document.createElement("div");
+  const control = document.createElement("button");
+  host.appendChild(control);
+  await verb.call(t, control);
+  return host.querySelector(".refusal[data-arm]");
+}
+
+describe.each(VERBS.map((verb) => [verb.rpc, verb] as const))(
+  "%s's typed refusal",
+  (_rpc, verb) => {
+    const arms = oneofArms(verb.errorSchema, "cause");
+
+    it.each(arms)("labels the %s arm with its own case name", async (arm) => {
+      expect((await refuseWith(verb, arm))?.getAttribute("data-arm")).toBe(arm);
     });
-    expect(refusalArm((error.result as { value: unknown }).value)).toBe("blocked");
+
+    it.each(arms)("says something about the %s arm", async (arm) => {
+      expect((await refuseWith(verb, arm))?.textContent).not.toBe("");
+    });
+  },
+);
+
+describe("the cross-cutting causes, worded once", () => {
+  it("names the registry's directory on a mismatch", async () => {
+    const refusal = await refuseWith(VERBS[0], "workspaceRefMismatch");
+    expect(refusal?.textContent).toContain("/w/registry");
   });
 
-  it("falls back to the error itself where the arm carries no cause", () => {
-    const error = create(OpenWorkspaceResponseSchema, {
-      result: { case: "error", value: {} },
-    });
-    expect(refusalArm((error.result as { value: unknown }).value)).toBe("error");
+  it("names the successor daemon on a transfer", async () => {
+    const refusal = await refuseWith(VERBS[0], "transferringAway");
+    expect(refusal?.textContent).toContain("127.0.0.1:7777");
   });
+});
 
-  it("renders at the control that made the call", async () => {
-    const t = target({
-      openWorkspace: () => create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
-    });
-    const menu = drawRowMenu(t);
-    document.body.replaceChildren(menu);
-    await click(menu.querySelector("[data-verb='open']") as Element);
-    const refusal = menu.querySelector(".refusal[data-arm]");
-    expect(refusal?.getAttribute("data-arm")).toBe("error");
-  });
-
-  it("names the rpc when the error message is empty on purpose", async () => {
-    const t = target({
-      openWorkspace: () => create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
-    });
-    const menu = drawRowMenu(t);
-    await click(menu.querySelector("[data-verb='open']") as Element);
-    expect(menu.querySelector(".refusal")?.textContent).toBe("OpenWorkspace refused");
-  });
-
+describe("the per-rpc causes, worded at their own site", () => {
   it("points a blocked close at the footer, which carries the reasons", async () => {
+    const refusal = await refuseWith(VERBS[1], "blocked");
+    expect(refusal?.textContent).toBe("close refused: work in flight (see the footer)");
+  });
+
+  it("names the session a missing transcript belongs to", async () => {
+    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    expect(refusal?.textContent).toContain("vs-1");
+  });
+
+  it("carries the spawn failure's own detail", async () => {
+    const refusal = await refuseWith(VERBS[0], "spawnFailed");
+    expect(refusal?.textContent).toContain("exec format error");
+  });
+
+  it("carries git's own detail when a nuke fails", async () => {
+    const refusal = await refuseWith(VERBS[3], "gitFailed");
+    expect(refusal?.textContent).toContain("worktree is dirty");
+  });
+
+  it("says a merge is already queued", async () => {
+    const refusal = await refuseWith(VERBS[4], "alreadyQueued");
+    expect(refusal?.textContent).toContain("already in the merge queue");
+  });
+
+  it("says a restart has no session to restart", async () => {
+    const refusal = await refuseWith(VERBS[5], "noSession");
+    expect(refusal?.textContent).toContain("no session to restart");
+  });
+
+  it("says an assignment names a task the daemon does not know", async () => {
+    const refusal = await refuseWith(VERBS[7], "unknownTask");
+    expect(refusal?.textContent).toContain("does not know that task");
+  });
+});
+
+describe("a refusal", () => {
+  it("renders at the control that made the call", async () => {
     const t = target({
       closeWorkspace: () =>
         create(CloseWorkspaceResponseSchema, {
@@ -227,31 +464,75 @@ describe("a refusal", () => {
         }),
     });
     const menu = drawRowMenu(t);
+    document.body.replaceChildren(menu);
     await click(menu.querySelector("[data-verb='close']") as Element);
-    expect(menu.querySelector(".refusal")?.textContent).toBe(
-      "close refused: work in flight (see the footer)",
-    );
+    const refusal = menu.querySelector(".refusal[data-arm]");
+    expect(refusal?.getAttribute("data-arm")).toBe("blocked");
   });
 
   it("re-enables the control so the user can try again", async () => {
     const t = target({
-      openWorkspace: () => create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+      closeWorkspace: () =>
+        create(CloseWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "blocked", value: {} } } },
+        }),
     });
     const menu = drawRowMenu(t);
-    const button = menu.querySelector("[data-verb='open']") as HTMLButtonElement;
+    const button = menu.querySelector("[data-verb='close']") as HTMLButtonElement;
     await click(button);
     expect(button.disabled).toBe(false);
   });
 
   it("replaces a previous attempt's refusal rather than stacking one", async () => {
     const t = target({
-      openWorkspace: () => create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+      closeWorkspace: () =>
+        create(CloseWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "blocked", value: {} } } },
+        }),
     });
     const menu = drawRowMenu(t);
-    const button = menu.querySelector("[data-verb='open']") as Element;
+    const button = menu.querySelector("[data-verb='close']") as Element;
     await click(button);
     await click(button);
     expect(menu.querySelectorAll(".sb-refusal").length).toBe(1);
+  });
+});
+
+describe("an error with no cause", () => {
+  it("is a malformed view, because every refusal has been typed since landing 4", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const button = document.createElement("button");
+    await expect(
+      runVerb(button, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+      }),
+    ).rejects.toThrow(MalformedView);
+  });
+
+  it("is a malformed view for an arm no build knows", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, {
+          result: { case: "error", value: { cause: { case: "sessionDeleted", value: {} } } },
+        }),
+    });
+    const button = document.createElement("button");
+    await expect(
+      runVerb(button, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+        // A site whose hook does not know the arm must refuse, never draw blank.
+        refusalText: () => undefined as unknown as string,
+      }),
+    ).rejects.toThrow(MalformedView);
   });
 });
 

@@ -4,13 +4,16 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
+  OpenExternalErrorSchema,
   OpenExternalResponseSchema,
   type OpenExternalRequest,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import {
+  OpenInEditorErrorSchema,
   OpenInEditorResponseSchema,
   type OpenInEditorRequest,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import { oneofArms } from "./arms.js";
 import { WorkspaceRefSchema } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../src/clock.js";
 import type { FailureSink } from "../src/failure/sink.js";
@@ -28,8 +31,24 @@ interface Harness {
   editor: OpenInEditorRequest[];
 }
 
-/** A context whose two link verbs answer ARM and record their requests. */
-function harness(arm: "success" | "error" | "throw" = "success"): Harness {
+/** What each fact-carrying arm must carry for its sentence to be complete. */
+const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  workspaceRefMismatch: { registryDir: "/w/registry" },
+  transferringAway: { address: "127.0.0.1:7777" },
+  launchFailed: { detail: "no such file" },
+};
+
+/**
+ * A context whose two link verbs answer ARM and record their requests.
+ *
+ * "error" refuses with CAUSE, since landing 4 gave every error a typed cause
+ * and an unset one is a malformed view rather than a drawable refusal.
+ */
+function harness(
+  arm: "success" | "error" | "throw" = "success",
+  cause = "invalidUrl",
+  editorCause = "pathEscapesWorkspace",
+): Harness {
   const external: OpenExternalRequest[] = [];
   const editor: OpenInEditorRequest[] = [];
   const transport = createRouterTransport(({ service }) => {
@@ -37,12 +56,25 @@ function harness(arm: "success" | "error" | "throw" = "success"): Harness {
       openExternal: (req) => {
         external.push(req);
         if (arm === "throw") throw new ConnectError("gone", Code.Unavailable);
-        return create(OpenExternalResponseSchema, { result: { case: arm, value: {} } });
+        return create(OpenExternalResponseSchema, {
+          result:
+            arm === "error"
+              ? { case: "error", value: { cause: { case: cause, value: CAUSE_FILL[cause] ?? {} } } }
+              : { case: "success", value: {} },
+        } as never);
       },
       openInEditor: (req) => {
         editor.push(req);
         if (arm === "throw") throw new ConnectError("gone", Code.Unavailable);
-        return create(OpenInEditorResponseSchema, { result: { case: arm, value: {} } });
+        return create(OpenInEditorResponseSchema, {
+          result:
+            arm === "error"
+              ? {
+                  case: "error",
+                  value: { cause: { case: editorCause, value: CAUSE_FILL[editorCause] ?? {} } },
+                }
+              : { case: "success", value: {} },
+        } as never);
       },
     });
   });
@@ -183,7 +215,34 @@ describe("renderExternalLink: the click", () => {
     click(a);
     await settle();
     // ASSERT
-    expect(a.getAttribute("data-arm")).toBe("error");
+    expect(a.getAttribute("data-arm")).toBe("invalidUrl");
+  });
+
+  it.each(oneofArms(OpenExternalErrorSchema, "cause"))(
+    "labels the %s arm and says something about it",
+    async (arm) => {
+      const { ctx } = harness("error", arm);
+      const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
+      click(a);
+      await settle();
+      expect([a.getAttribute("data-arm"), a.title === ""]).toEqual([arm, false]);
+    },
+  );
+
+  it("names the successor daemon on a transfer, from the one shared wording", async () => {
+    const { ctx } = harness("error", "transferringAway");
+    const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
+    click(a);
+    await settle();
+    expect(a.title).toContain("127.0.0.1:7777");
+  });
+
+  it("carries the launcher's own detail", async () => {
+    const { ctx } = harness("error", "launchFailed");
+    const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
+    click(a);
+    await settle();
+    expect(a.title).toContain("no such file");
   });
 
   it("marks the refusal with the shared class the suite targets", async () => {
@@ -224,7 +283,7 @@ describe("renderExternalLink: the click", () => {
     const { ctx, external } = harness("success");
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     a.classList.add("refusal");
-    a.setAttribute("data-arm", "error");
+    a.setAttribute("data-arm", "invalidUrl");
     // ACT
     click(a);
     await settle();
@@ -364,7 +423,26 @@ describe("renderEditorLink", () => {
     const a = renderEditorLink(ctx, { text: "x", path: "/w/x" });
     click(a);
     await settle();
-    expect(a.getAttribute("data-arm")).toBe("error");
+    expect(a.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
+  });
+
+  it.each(oneofArms(OpenInEditorErrorSchema, "cause"))(
+    "labels the %s arm and says something about it",
+    async (arm) => {
+      const { ctx } = harness("error", "invalidUrl", arm);
+      const a = renderEditorLink(ctx, { text: "x", path: "/w/x" });
+      click(a);
+      await settle();
+      expect([a.getAttribute("data-arm"), a.title === ""]).toEqual([arm, false]);
+    },
+  );
+
+  it("says a path outside the workspace is outside it", async () => {
+    const { ctx } = harness("error", "invalidUrl", "pathEscapesWorkspace");
+    const a = renderEditorLink(ctx, { text: "x", path: "/elsewhere" });
+    click(a);
+    await settle();
+    expect(a.title).toContain("outside this workspace");
   });
 
   it("warns on a refusal", async () => {

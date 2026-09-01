@@ -25,9 +25,14 @@ import type {
   HeldOfferHeadline,
   HeldOfferMergeDequeue,
 } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
-import { AnswerHeldOfferResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
+import {
+  AnswerHeldOfferResponseSchema,
+  type AnswerHeldOfferError,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
 import { log } from "../log.js";
 import { callUnary } from "../rpc/unary.js";
+import { isMalformedView } from "../rpc/malformed.js";
+import { refusalSentence } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
 
@@ -146,12 +151,21 @@ async function answer(
     );
     const result = requireCase(response.result, "AnswerHeldOfferResponse.result");
     if (result.case === "success") return;
-    drawRefusal(actions, result.case, "the daemon refused this answer");
+    const cause = requireCase(
+      (result.value as AnswerHeldOfferError).cause,
+      "AnswerHeldOfferError.cause",
+    );
+    const say = refusalSentence("AnswerHeldOffer", cause) ?? answerHeldOfferRefusal(cause);
+    drawRefusal(actions, cause.case, say);
     log("warn", `AnswerHeldOffer refused a ${decision}`, {
       operation: "tray.held-offer.refused",
-      context: { decision, arm: result.case },
+      context: { decision, arm: cause.case, sentence: say },
     });
   } catch (err) {
+    // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
+    // this renderer could not read the answer. It travels up loudly rather
+    // than being drawn as "could not be reached", which would be a lie.
+    if (isMalformedView(err)) throw err;
     drawRefusal(actions, "error", "the daemon could not be reached");
     log("error", `AnswerHeldOffer failed for a ${decision}: ${String(err)}`, {
       operation: "tray.held-offer.failed",
@@ -179,6 +193,27 @@ function mergeDequeueDecision(
 function setDisabled(actions: Element | null, disabled: boolean): void {
   if (actions === null) return;
   for (const control of actions.querySelectorAll("button")) control.disabled = disabled;
+}
+
+/** `AnswerHeldOfferError`'s cause union, narrowed to a SET arm. */
+type AnswerHeldOfferCause = NonNullable<AnswerHeldOfferError["cause"]> & { case: string };
+
+/**
+ * This endpoint's OWN two arms, both of which mean the question the card is
+ * asking no longer exists — so each says which way it stopped existing rather
+ * than leaving a card standing over a button that appears to do nothing.
+ */
+export function answerHeldOfferRefusal(cause: AnswerHeldOfferCause): string {
+  switch (cause.case) {
+    case "noOfferStanding":
+      return "there is no offer standing to answer";
+    case "offerSuperseded":
+      return "this offer has been superseded by a newer one";
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("AnswerHeldOfferError.cause", other.case);
+    }
+  }
 }
 
 function drawRefusal(actions: Element | null, arm: string, message: string): void {

@@ -4,9 +4,11 @@ import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
+  AnswerHeldOfferErrorSchema,
   AnswerHeldOfferResponseSchema,
   type AnswerHeldOfferRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_held_offer_pb";
+import { oneofArms } from "../arms.js";
 import { HeldOfferSchema, type HeldOffer } from "../../../proto/gen/ts/frontend/v1/daemon_hold_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../../src/clock.js";
@@ -22,8 +24,18 @@ const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
 
 const successResponse = () =>
   create(AnswerHeldOfferResponseSchema, { result: { case: "success", value: {} } });
-const errorResponse = () =>
-  create(AnswerHeldOfferResponseSchema, { result: { case: "error", value: {} } });
+/** A refusal carrying ARM, with the payload that arm's sentence needs. */
+const refusalResponse = (arm: string) => () =>
+  create(AnswerHeldOfferResponseSchema, {
+    result: { case: "error", value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } } },
+  } as never);
+const errorResponse = refusalResponse("noOfferStanding");
+
+/** What each fact-carrying arm must carry for its sentence to be complete. */
+const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  workspaceRefMismatch: { registryDir: "/w/registry" },
+  transferringAway: { address: "127.0.0.1:7777" },
+};
 
 function trayContext(
   answer: () => ReturnType<typeof successResponse> = successResponse,
@@ -131,7 +143,37 @@ describe("answering an offer", () => {
     const card = drawHeldOffer(offer(), tc);
     card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
     await settle();
-    expect(card.querySelector(".offer-refusal")?.getAttribute("data-arm")).toBe("error");
+    expect(card.querySelector(".offer-refusal")?.getAttribute("data-arm")).toBe(
+      "noOfferStanding",
+    );
+  });
+
+  it.each(oneofArms(AnswerHeldOfferErrorSchema, "cause"))(
+    "labels the %s arm and says something about it",
+    async (arm) => {
+      const { tc } = trayContext(refusalResponse(arm));
+      const card = drawHeldOffer(offer(), tc);
+      card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+      await settle();
+      const refusal = card.querySelector(".offer-refusal");
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+    },
+  );
+
+  it("names the successor daemon on a transfer, from the one shared wording", async () => {
+    const { tc } = trayContext(refusalResponse("transferringAway"));
+    const card = drawHeldOffer(offer(), tc);
+    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    await settle();
+    expect(card.querySelector(".offer-refusal")?.textContent).toContain("127.0.0.1:7777");
+  });
+
+  it("says a superseded offer is superseded", async () => {
+    const { tc } = trayContext(refusalResponse("offerSuperseded"));
+    const card = drawHeldOffer(offer(), tc);
+    card.querySelector<HTMLButtonElement>('[data-offer-decision="release"]')?.click();
+    await settle();
+    expect(card.querySelector(".offer-refusal")?.textContent).toContain("superseded");
   });
 
   it("re-enables the answers after a refusal", async () => {
