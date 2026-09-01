@@ -145,7 +145,9 @@ describe("drawFeedArtifact", () => {
 
   it("draws a refusal at the link when the daemon would not open it", async () => {
     const h = harness(
-      create(OpenExternalResponseSchema, { result: { case: "error", value: {} } }),
+      create(OpenExternalResponseSchema, {
+        result: { case: "error", value: { cause: { case: "invalidUrl", value: {} } } },
+      }),
     );
     const el = drawFeedArtifact(
       artifact({ case: "published", value: { url: { url: URL } } }),
@@ -154,7 +156,7 @@ describe("drawFeedArtifact", () => {
     const anchor = el.querySelector<HTMLAnchorElement>(".artifact-url a");
     anchor?.click();
     await settle();
-    expect(anchor?.getAttribute("data-arm")).toBe("error");
+    expect(anchor?.getAttribute("data-arm")).toBe("invalidUrl");
   });
 
   it("draws the failed reason where the url would have been", () => {
