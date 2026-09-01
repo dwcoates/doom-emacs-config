@@ -79,6 +79,7 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
     },
     async standDown() {
       record("standDown")(undefined);
+      return 0;
     },
   };
   return { engine, calls };

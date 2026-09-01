@@ -19,6 +19,7 @@ import {
   HTTP2_PREFACE,
   flushStreamHead,
   isStreamingContentType,
+  isStreamingPath,
   probeSocket,
   serve,
   sniffProtocol,
@@ -344,6 +345,44 @@ describe("standing streams", () => {
     })();
 
     expect(failure).toBe(Code.Unimplemented);
+  });
+});
+
+describe("isStreamingPath", () => {
+  it("names WatchAgent a streaming rpc, so the exit never waits on its tail", () => {
+    // Arrange, Act, Assert.
+    expect(isStreamingPath("/shim.v1.Shim/WatchAgent")).toBe(true);
+  });
+
+  it("names KillSession a unary rpc, so the exit waits for its response", () => {
+    // Arrange, Act, Assert.
+    expect(isStreamingPath("/shim.v1.Shim/KillSession")).toBe(false);
+  });
+});
+
+describe("quiet", () => {
+  it("resolves at once when no response is in flight", async () => {
+    // Arrange.
+    const server = await start(socketPath());
+
+    // Act, Assert.
+    await expect(server.quiet(50)).resolves.toBeUndefined();
+  });
+
+  it("resolves once the unary response in flight has closed", async () => {
+    // The KillSession exit rides this: the process may only end after the
+    // daemon actually has its answer.
+    // Arrange.
+    const sock = socketPath();
+    const server = await start(sock);
+
+    // Act.
+    await client(sock, "1.1")
+      .hibernate(create(shimv1.HibernateRequestSchema, {}))
+      .catch(() => undefined);
+
+    // Assert.
+    await expect(server.quiet(1_000)).resolves.toBeUndefined();
   });
 });
 

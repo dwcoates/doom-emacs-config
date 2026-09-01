@@ -362,12 +362,16 @@ describe("processIdentity", () => {
 });
 
 /** An engine that records its stand-down, and can be made to fail it. */
-function standDownEngine(failure?: Error): { engine: Engine; calls: string[] } {
+function standDownEngine(
+  failure?: Error,
+  exitCode = 0,
+): { engine: Engine; calls: string[] } {
   const calls: string[] = [];
   const engine = {
-    standDown: async (reason: string): Promise<void> => {
+    standDown: async (reason: string): Promise<number> => {
       calls.push(reason);
       if (failure !== undefined) throw failure;
+      return exitCode;
     },
   } as unknown as Engine;
   return { engine, calls };
@@ -411,6 +415,26 @@ describe("shutdownSignalHandlers", () => {
 
     // Assert.
     expect(closed).toBe(true);
+  });
+
+  it("exits with the code the stand-down earned when writes were lost", async () => {
+    // A23: a stand-down that flushed with rows the store never acked has NOT
+    // stood down cleanly, and reporting 0 would tell the daemon otherwise.
+    // Arrange.
+    const { engine } = standDownEngine(undefined, 1);
+    const codes: number[] = [];
+    const handlers = shutdownSignalHandlers({
+      engine,
+      server: { close: async () => undefined },
+      exit: (code) => codes.push(code),
+    });
+
+    // Act.
+    handlers.onSigterm();
+    await handlers.standingDown();
+
+    // Assert.
+    expect(codes).toEqual([1]);
   });
 
   it("exits 0 after a clean stand-down", async () => {
