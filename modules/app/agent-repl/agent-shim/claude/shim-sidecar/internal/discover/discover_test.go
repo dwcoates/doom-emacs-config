@@ -243,9 +243,11 @@ func TestUnknownSpoolPrefixIsLoggedAsAViolation(t *testing.T) {
 	d.Scan()
 
 	// Assert.
-	joined := strings.Join(*logs, "\n")
-	if !strings.Contains(joined, "no a/b/w kind prefix") || !strings.Contains(joined, `"level":"error"`) {
-		t.Fatalf("the ingestion violation was not stated loudly; got %v", *logs)
+	// The branch is the OPERATION at ERROR, and it names the path and the task id
+	// whose prefix could not select a conversion.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "classify-spool", "error")
+	if got := ctxString(t, rec, "task_id"); got != "q17" {
+		t.Fatalf("task_id = %q, want the unclassifiable spool's task id", got)
 	}
 }
 
@@ -283,9 +285,7 @@ func TestHeldTranscriptWarnsOnce(t *testing.T) {
 	d.Scan()
 
 	// Assert: a rescan every few seconds must not repeat the same line forever.
-	if got := strings.Count(strings.Join(*logs, "\n"), "transcript held"); got != 1 {
-		t.Fatalf("held warning emitted %d times, want once", got)
-	}
+	requireOnceIn(t, parseLogLines(t, *logs), "discover-meta", "warn")
 }
 
 func TestMetaAppearingClearsTheHold(t *testing.T) {
@@ -586,7 +586,23 @@ func TestAnUnparsableMetaFileHoldsTheTranscriptLoudly(t *testing.T) {
 	if !got.MetaMissing {
 		t.Fatal("an unreadable meta file must hold its transcript")
 	}
-	if !strings.Contains(strings.Join(*logs, "\n"), `"level":"error"`) {
-		t.Fatalf("an unreadable meta file was not stated as an error: %v", *logs)
+	requireOnceIn(t, parseLogLines(t, *logs), "discover-meta", "error")
+}
+
+func TestAnUnknownSpoolPrefixIsStatedOncePerPath(t *testing.T) {
+	// Arrange. Every scan re-classifies every file, and a task id with no kind
+	// prefix will never grow one, so a defect stated per scan is a defect stated
+	// forever — the loop that drowns every other reader's records.
+	d, _, _, logs := fixture(t, "spool/claude-501/proj/sess-1/tasks/q17.output")
+
+	// Act: three scans over the same unclassifiable spool.
+	d.Scan()
+	d.Scan()
+	d.Scan()
+
+	// Assert.
+	stated := opsAt(parseLogLines(t, *logs), "classify-spool", "error")
+	if len(stated) != 1 {
+		t.Fatalf("the classification defect was stated %d times across three scans, want exactly once", len(stated))
 	}
 }
