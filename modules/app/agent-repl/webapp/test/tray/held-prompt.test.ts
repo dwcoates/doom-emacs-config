@@ -4,9 +4,11 @@ import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
+  UpdateHeldPromptErrorSchema,
   UpdateHeldPromptResponseSchema,
   type UpdateHeldPromptRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
+import { oneofArms } from "../arms.js";
 import {
   HeldPromptSchema,
   type HeldPrompt,
@@ -74,8 +76,18 @@ function trayContext(
 
 const successResponse = () =>
   create(UpdateHeldPromptResponseSchema, { result: { case: "success", value: {} } });
-const errorResponse = () =>
-  create(UpdateHeldPromptResponseSchema, { result: { case: "error", value: {} } });
+/** What each fact-carrying arm must carry for its sentence to be complete. */
+const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  workspaceRefMismatch: { registryDir: "/w/registry" },
+  transferringAway: { address: "127.0.0.1:7777" },
+};
+
+/** A refusal carrying ARM, with the payload that arm's sentence needs. */
+const refusalResponse = (arm: string) => () =>
+  create(UpdateHeldPromptResponseSchema, {
+    result: { case: "error", value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } } },
+  } as never);
+const errorResponse = refusalResponse("noSuchHold");
 
 /** A held prompt with every required field, overridden by OVERRIDES. */
 type HeldPromptInit = Exclude<MessageInitShape<typeof HeldPromptSchema>, HeldPrompt>;
@@ -395,7 +407,43 @@ describe("drawHeldPrompt actions", () => {
     const card = drawHeldPrompt(heldPrompt(), tc);
     card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
     await settle();
-    expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("error");
+    expect(card.querySelector(".queued-refusal")?.getAttribute("data-arm")).toBe("noSuchHold");
+  });
+
+  it.each(oneofArms(UpdateHeldPromptErrorSchema, "cause"))(
+    "labels the %s arm and says something about it",
+    async (arm) => {
+      const { tc } = trayContext(refusalResponse(arm));
+      const card = drawHeldPrompt(heldPrompt(), tc);
+      card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+      await settle();
+      const refusal = card.querySelector(".queued-refusal");
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+    },
+  );
+
+  it("names the registry's directory on a mismatch, from the one shared wording", async () => {
+    const { tc } = trayContext(refusalResponse("workspaceRefMismatch"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    await settle();
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain("/w/registry");
+  });
+
+  it("says an already-delivered prompt has been delivered", async () => {
+    const { tc } = trayContext(refusalResponse("alreadyDelivered"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    await settle();
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain("already been delivered");
+  });
+
+  it("says accept applies only to a turn-end hold", async () => {
+    const { tc } = trayContext(refusalResponse("acceptNotApplicable"));
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    card.querySelector<HTMLButtonElement>('[data-held-action="drop"]')?.click();
+    await settle();
+    expect(card.querySelector(".queued-refusal")?.textContent).toContain("the turn's end");
   });
 
   it("re-enables the row after a refusal so it can be retried", async () => {

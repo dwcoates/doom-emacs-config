@@ -59,12 +59,17 @@ import type {
   UserContentBlock,
   UserSaid,
 } from "../../../proto/gen/ts/conversation/v1/user_pb";
-import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
+import {
+  UpdateHeldPromptResponseSchema,
+  type UpdateHeldPromptError,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 import { formatAge } from "../duration.js";
 import { log } from "../log.js";
 import { renderMarkdown } from "../markdown.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
+import { isMalformedView } from "../rpc/malformed.js";
+import { refusalSentence } from "../rpc/refusal.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
 
@@ -495,10 +500,16 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     );
     const result = requireCase(response.result, "UpdateHeldPromptResponse.result");
     if (result.case !== "success") {
-      drawRowRefusal(row, result.case, `the daemon refused to ${action} this prompt`);
+      const cause = requireCase(
+        (result.value as UpdateHeldPromptError).cause,
+        "UpdateHeldPromptError.cause",
+      );
+      const say =
+        refusalSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
+      drawRowRefusal(row, cause.case, say);
       log("warn", `UpdateHeldPrompt refused a ${action}`, {
         operation: "tray.held-prompt.action-refused",
-        context: { turn: spec.turn.value, action, arm: result.case },
+        context: { turn: spec.turn.value, action, arm: cause.case, sentence: say },
       });
       return;
     }
@@ -508,6 +519,10 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     // Success leaves the row alone: the tray's own push is what takes the card
     // down, and re-enabling a row about to be replaced would only flicker.
   } catch (err) {
+    // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
+    // this renderer could not read the answer. It travels up loudly rather
+    // than being drawn as "could not be reached", which would be a lie.
+    if (isMalformedView(err)) throw err;
     drawRowRefusal(row, "error", "the daemon could not be reached");
     log("error", `UpdateHeldPrompt failed for a ${action}: ${String(err)}`, {
       operation: "tray.held-prompt.action-failed",
@@ -517,6 +532,37 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
     // Only a refusal leaves the row on screen; re-enable so it can be retried.
     if (row !== null && row.parentElement?.querySelector(".queued-refusal") != null) {
       setRowDisabled(row, false);
+    }
+  }
+}
+
+/** `UpdateHeldPromptError`'s cause union, narrowed to a SET arm. */
+type UpdateHeldPromptCause = NonNullable<UpdateHeldPromptError["cause"]> & { case: string };
+
+/**
+ * What each of this endpoint's OWN arms says.
+ *
+ * The four cross-cutting causes are worded once in `rpc/refusal.ts`; these four
+ * are about the hold itself, and three of them mean THE CARD IS ALREADY STALE
+ * — the tray's next push takes it down — so each says which kind of stale it
+ * is rather than a single "refused" that would read as a dead button.
+ */
+export function updateHeldPromptRefusal(
+  cause: UpdateHeldPromptCause,
+  action: HeldAction,
+): string {
+  switch (cause.case) {
+    case "noSuchHold":
+      return "this prompt is no longer held";
+    case "alreadyDelivered":
+      return "this prompt has already been delivered";
+    case "acceptNotApplicable":
+      return "accept applies only to a prompt held for the turn's end";
+    case "releaseRefused":
+      return "the session would not take this prompt now";
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm(`UpdateHeldPromptError.cause (on a ${action})`, other.case);
     }
   }
 }
