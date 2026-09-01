@@ -400,6 +400,16 @@ nothing here can hang past it."
 
 ;;;; ---- The default daemon command and no argv ----
 
+(defconst agent-repl-itest-daemon--module-root
+  (file-name-as-directory
+   (expand-file-name ".." (file-name-directory (or load-file-name
+                                                   buffer-file-name
+                                                   default-directory))))
+  "Absolute path to the `modules/app/agent-repl/' directory.
+Captured AT LOAD TIME, the way daemon.el captures its own root: inside an
+ERT body `load-file-name' is already nil, so deriving it there would ask
+the test to know the path the module derives for itself.")
+
 (ert-deftest agent-repl-itest-daemon-command-default-and-no-argv ()
   "`agent-repl-daemon-command' defaults to the module's own binary,
 with NO required argv: the state root travels in the environment only.
@@ -410,9 +420,8 @@ supposed to need."
   ;; file lives in the same `lisp/' directory as daemon.el, so the module
   ;; root is derived the same way daemon.el derives it, without depending
   ;; on the harness's own notion of that path.
-  (let* ((suite-dir (file-name-directory (or load-file-name buffer-file-name)))
-         (module-root (file-name-as-directory (expand-file-name ".." suite-dir)))
-         (expected (expand-file-name "daemon/bin/claude-repld" module-root)))
+  (let* ((expected (expand-file-name "daemon/bin/claude-repld"
+                                     agent-repl-itest-daemon--module-root)))
     ;; Assert: "the default the module's `daemon/bin/claude-repld', no argv".
     (should (equal (default-value 'agent-repl-daemon-command) (list expected))))
   ;; Arrange: a cold start whose start stub records its own argument count.
