@@ -367,6 +367,48 @@ export function messageMatches(matcher, msg) {
 }
 
 /**
+ * Whether a CONTROL record satisfies a control's `after` matcher.
+ *
+ * A parked permission gate is recorded as a control entry (`can_use_tool_parked`),
+ * never as a stream message, so an `on_message` trigger can never observe it and
+ * the scenario waits forever. `at: "on_control"` matches these records instead:
+ * `kind` and `tool_name` select the record, `contains` is a substring of it.
+ */
+export function controlMatches(matcher, entry) {
+  if (matcher === undefined) return false;
+  if (matcher.kind !== undefined && entry?.kind !== matcher.kind) return false;
+  if (matcher.tool_name !== undefined && entry?.tool_name !== matcher.tool_name) return false;
+  if (matcher.contains !== undefined) {
+    if (!JSON.stringify(entry ?? null).includes(matcher.contains)) return false;
+  }
+  return true;
+}
+
+/**
+ * Fire every not-yet-fired control whose trigger point is `at` and whose
+ * matcher accepts `payload`.
+ *
+ * ONE dispatcher for both trigger kinds, so the two can never drift: an
+ * `on_message` control is matched against a stream message and an `on_control`
+ * control against a control record, and neither ever sees the other's payload.
+ */
+export async function fireTriggers(query, controls, at, payload, fired, record) {
+  const results = [];
+  for (const control of controls ?? []) {
+    if (control.at !== at) continue;
+    const key = JSON.stringify([control.at, control.do, control.after ?? null]);
+    if (fired.has(key)) continue;
+    const matched = at === "on_control"
+      ? controlMatches(control.after, payload)
+      : messageMatches(control.after, payload);
+    if (!matched) continue;
+    fired.add(key);
+    results.push(await driveControl(query, control, record));
+  }
+  return results;
+}
+
+/**
  * Drive one scripted control verb against the live query.
  *
  * Every verb the shim relies on is reachable from here, because the capture is
@@ -599,31 +641,44 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   const abort = new AbortController();
   const input = createInputChannel();
   const parked = [];
+  // Controls fire at most once per scenario. Tracked in a LOCAL set rather than
+  // by stamping the control object: the corpus is loaded once per process, so a
+  // flag written onto it would leak across runs (and across tests).
+  const firedControls = new Set();
   let query;
   // The vendor's own session id, learned from system:init and needed by a
   // `resume` turn.
   let vendorSessionId = null;
 
+  // A control record the VENDOR provoked (not one the capture drove itself),
+  // recorded and then offered to the scenario's `on_control` triggers.
+  const recordVendorControl = async (payload) => {
+    record("control", payload);
+    report.controls.push(
+      ...(await fireTriggers(query, scenario.controls, "on_control", payload, firedControls, record)),
+    );
+  };
+
   const canUseTool = async (toolName, toolInput, options) => {
-    record("control", { kind: "can_use_tool_request", tool_name: toolName, input: toolInput, options });
+    await recordVendorControl({ kind: "can_use_tool_request", tool_name: toolName, input: toolInput, options });
     if (toolName === "AskUserQuestion") {
       const answers = answersFor(scenario.question_script, toolInput);
       const result = Object.keys(answers).length === 0
         ? { behavior: "deny", message: "left unanswered by the capture script" }
         : { behavior: "allow", updatedInput: { ...toolInput, answers } };
-      record("control", { kind: "can_use_tool_response", tool_name: toolName, result });
+      await recordVendorControl({ kind: "can_use_tool_response", tool_name: toolName, result });
       return result;
     }
     const rule = resolvePermissionDecision(scenario.permission_script, toolName);
     const result = permissionResultFor(rule, toolInput, options);
     if (result === null) {
-      record("control", { kind: "can_use_tool_parked", tool_name: toolName, rule });
-      // The undecidable arm: never resolved here. The scenario's controls are
-      // expected to abort, and the settle below denies every parked callback
-      // so the vendor process is not left wedged.
+      // The undecidable arm: never resolved here. The scenario's `on_control`
+      // trigger fires off THIS record and aborts the turn, and the settle below
+      // denies every parked callback so the vendor process is not left wedged.
+      await recordVendorControl({ kind: "can_use_tool_parked", tool_name: toolName, rule });
       return new Promise((resolve) => parked.push(resolve));
     }
-    record("control", { kind: "can_use_tool_response", tool_name: toolName, result });
+    await recordVendorControl({ kind: "can_use_tool_response", tool_name: toolName, result });
     return result;
   };
 
@@ -661,10 +716,6 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   }
 
   const turns = promptTurnsOf(scenario);
-  // Controls fire at most once per scenario. Tracked in a LOCAL set rather than
-  // by stamping the control object: the corpus is loaded once per process, so a
-  // flag written onto it would leak across runs (and across tests).
-  const firedControls = new Set();
 
   const openQuery = (extraOptions) => {
     query = sdk.query({ prompt: input, options: { ...options, ...extraOptions } });
@@ -721,14 +772,9 @@ async function runScenario(sdk, scenario, opts, auth, world) {
         if (msg?.type === "system" && msg?.subtype === "init" && typeof msg.session_id === "string") {
           vendorSessionId = msg.session_id;
         }
-        for (const control of scenario.controls ?? []) {
-          if (control.at !== "on_message") continue;
-          const controlKey = JSON.stringify([control.at, control.do, control.after ?? null]);
-          if (firedControls.has(controlKey)) continue;
-          if (!messageMatches(control.after, msg)) continue;
-          firedControls.add(controlKey);
-          report.controls.push(await driveControl(query, control, record));
-        }
+        report.controls.push(
+          ...(await fireTriggers(query, scenario.controls, "on_message", msg, firedControls, record)),
+        );
         if (msg.type === "result") break;
       }
     }
