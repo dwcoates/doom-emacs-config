@@ -1,7 +1,9 @@
 package integration
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	storev1 "agentrepl/proto/store/v1"
 )
@@ -14,6 +16,47 @@ import (
 // evidence, the handler HOLDS the trailing frame and the cursor advances SHORT
 // of what was read — to the held frame's offset — so the next scan, and a
 // restart, both read it again. The hold is bounded to ONE redelivery.
+
+// holdOptions gives a hold subject a poll interval it can act INSIDE.
+//
+// THE HOLD IS BOUNDED TO ONE REDELIVERY, so a subject that must append the
+// summary between the first delivery and the second is racing the poll tick. At
+// the suite's ordinary 50ms that race is real: the forced redelivery can land
+// before the append does, and the subject then asserts the coalescing path
+// against a run that took the bounded-expiry path. A longer tick removes the
+// race outright, and the subjects still WAIT on the parked cursor rather than on
+// the tick — nothing here is timed, only unhurried.
+func holdOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOptions {
+	t.Helper()
+	opts := defaultSidecarOptions(t, storeSocket, tree)
+	opts.PollInterval = 500 * time.Millisecond
+	return opts
+}
+
+// awaitParkedCursor waits for the batch that carried the PARKED cursor — the one
+// stating the hold, at exactly the held frame's offset.
+//
+// It is the hold's own observable event. Waiting for "any cursor" instead cannot
+// tell a parked cursor from one that already advanced past the boundary, which
+// is the difference every subject in this file turns on.
+func awaitParkedCursor(ctx context.Context, t *testing.T, f *fakeStore, path string, held int64) {
+	t.Helper()
+	tick := time.NewTicker(pollTick)
+	defer tick.Stop()
+	for {
+		for _, b := range f.Batches() {
+			cursor := b.GetBatch().GetCursorAdvance()
+			if cursor != nil && samePath(cursor.GetPath(), path) && cursor.GetOffset() == held {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("no batch parked the cursor at the held boundary %d for %s within the deadline", held, path)
+		case <-tick.C:
+		}
+	}
+}
 
 // compactionFixture writes a session whose last line is a compaction boundary.
 type compactionFixture struct {
@@ -59,17 +102,18 @@ func TestABoundaryWithoutItsSummaryParksTheCursorShort(t *testing.T) {
 		"70707070-7070-4070-8070-707070707070")
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	awaitCursorInBatches(ctx, t, fake, fx.File.Path(), 1)
+	startSidecar(t, holdOptions(t, fake.Socket, tree))
+	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
 
-	// Assert.
+	// Assert: the parked cursor is exactly the held frame's offset. Anything
+	// short of it would re-read converted records; anything past it would have
+	// consumed the boundary the hold exists to defer.
 	cs := latestCursorFor(fake.Batches(), fx.File.Path())
 	if cs == nil {
 		t.Fatalf("the sidecar offered no cursor for %s", fx.File.Path())
 	}
-	if cs.GetOffset() > fx.BoundaryOffset {
-		t.Errorf("the cursor advanced to %d, past the held boundary at %d; a hold parks the cursor BEFORE the held frame",
-			cs.GetOffset(), fx.BoundaryOffset)
+	if cs.GetOffset() != fx.BoundaryOffset {
+		t.Errorf("the cursor parked at %d, want the held boundary's offset %d", cs.GetOffset(), fx.BoundaryOffset)
 	}
 }
 
@@ -85,8 +129,8 @@ func TestABoundaryWithoutItsSummaryWritesNothingForIt(t *testing.T) {
 		"80808080-8080-4080-8080-808080808080")
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	awaitCursorInBatches(ctx, t, fake, fx.File.Path(), 1)
+	startSidecar(t, holdOptions(t, fake.Socket, tree))
+	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
 
 	// Assert.
 	wantKey := "session:context_cut:" + fx.BoundaryUUID
@@ -108,8 +152,10 @@ func TestTheSummaryCoalescesWithItsBoundaryIntoOneRecord(t *testing.T) {
 	summaryText := "Previously: the harness held a background probe alive."
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	awaitCursorInBatches(ctx, t, fake, fx.File.Path(), 1)
+	startSidecar(t, holdOptions(t, fake.Socket, tree))
+	// The summary is appended once the cursor is PARKED, which is the event that
+	// says the boundary was held and its forced redelivery has not run yet.
+	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
 	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
 		"90909090-9090-4090-8090-90909090abcd", fx.BoundaryUUID, summaryText))
 
@@ -156,7 +202,8 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 		"a0a0a0a0-a0a0-40a0-80a0-a0a0a0a0a0a0")
 
 	// Act: the summary NEVER arrives; the file simply keeps being polled.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
+	opts := holdOptions(t, fake.Socket, tree)
+	startSidecar(t, opts)
 	wantKey := "session:context_cut:" + fx.BoundaryUUID
 	fake.awaitEntry(ctx, t, "the boundary converted after its bounded redelivery", func(e *storev1.StoreEntry) bool {
 		return e.GetUpsertKey() == wantKey
@@ -167,6 +214,25 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	if cs.GetOffset() <= fx.BoundaryOffset {
 		t.Errorf("the cursor stayed at %d after the bounded hold expired; a converted frame releases the cursor",
 			cs.GetOffset())
+	}
+
+	// Assert the BOUND itself: the frame was held EXACTLY once. The tailer states
+	// each rewind it performs, so more than one of those records is a frame held
+	// twice — the unbounded deferral this file's whole design forbids — and none
+	// would mean the record was converted without ever being held at all.
+	records := readLog(t, opts.LogPath)
+	rewinds := recordsFor(records, "tailer-hold")
+	if len(rewinds) != 1 {
+		t.Fatalf("the boundary was held %d times, want exactly one redelivery; the log held %v",
+			len(rewinds), operationLevels(records))
+	}
+	if got := rewinds[0].Context["offset"]; got != float64(fx.BoundaryOffset) {
+		t.Errorf("the hold rewound to offset %v, want the boundary at %d", got, fx.BoundaryOffset)
+	}
+	// And the handler converted it on the forced delivery rather than holding
+	// again, which the tailer would have had to refuse.
+	if got := recordsFor(records, "hold-exhausted"); len(got) != 0 {
+		t.Errorf("the handler held the boundary again on its forced redelivery; the tailer had to refuse %d hold(s)", len(got))
 	}
 }
 
@@ -183,8 +249,8 @@ func TestABoundaryHeldOnceIsNotWrittenTwice(t *testing.T) {
 	summaryText := "Previously: nothing much."
 
 	// Act.
-	startSidecar(t, defaultSidecarOptions(t, fake.Socket, tree))
-	awaitCursorInBatches(ctx, t, fake, fx.File.Path(), 1)
+	startSidecar(t, holdOptions(t, fake.Socket, tree))
+	awaitParkedCursor(ctx, t, fake, fx.File.Path(), fx.BoundaryOffset)
 	fx.File.AppendLine(compactSummaryLine(t, fx.Session, fx.Cwd,
 		"b0b0b0b0-b0b0-40b0-80b0-b0b0b0b0abcd", fx.BoundaryUUID, summaryText))
 	wantKey := "session:context_cut:" + fx.BoundaryUUID
