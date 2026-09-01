@@ -658,7 +658,14 @@
     {
       "name": "permission-denied-by-user",
       "covers": "permission DENIED by the user",
-      "prompt": "Run `rm -rf .` in this directory.",
+      "note": "The prompt used to be `rm -rf .`, which the model refused on its own judgement, so the capture never reached the permission gate at all and recorded no can_use_tool. The provocation has to be a command the model will ACTUALLY attempt; the denial is the capture script's job, not the model's.",
+      "prompt": "Run `rm -f stale.log`.",
+      "cwd_setup": [
+        {
+          "path": "stale.log",
+          "content": "stale\n"
+        }
+      ],
       "permission_mode": "default",
       "permission_script": {
         "default": "deny",
@@ -717,7 +724,11 @@
       ],
       "expect": [
         "can_use_tool request never answered",
-        "whatever the SDK emits when the query is interrupted with a pending gate"
+        "whatever the SDK emits when the query is interrupted with a pending gate",
+        "result:error_during_execution with terminal_reason aborted_tools"
+      ],
+      "expects_error_subtypes": [
+        "error_during_execution"
       ]
     },
     {
