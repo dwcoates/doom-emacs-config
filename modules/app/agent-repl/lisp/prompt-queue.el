@@ -68,6 +68,7 @@
 ;; whichever module loads first.
 (defvar agent-repl-roster-finish-functions)
 (defvar agent-repl-link-up-functions)
+(defvar agent-repl-link-promote-functions)
 
 ;;;; ---- State -----------------------------------------------------------
 
@@ -309,7 +310,17 @@ deferral was asked for."
       (agent-repl-prompt-queue-drain ws :outage))))
 
 (add-hook 'agent-repl-roster-finish-functions #'agent-repl--prompt-queue-on-finish)
+(defun agent-repl--prompt-queue-on-link-promote (&optional _old _new)
+  "Release every OUTAGE-held prompt on the PROMOTION edge.
+The same release as link-up, on the other edge that ends an outage.  A
+handover never brings the link down, so link-up never fires for it, yet a
+prompt refused with `transferring_away' or `not_yet_adopted' is held
+exactly until the successor owns the workspace -- and the promotion is
+that moment."
+  (agent-repl--prompt-queue-on-link-up))
+
 (add-hook 'agent-repl-link-up-functions #'agent-repl--prompt-queue-on-link-up)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl--prompt-queue-on-link-promote)
 
 (provide 'prompt-queue)
 
