@@ -8,7 +8,7 @@
  * the gate.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,7 @@ import {
   answersFor,
   assertCaptureAuthorized,
   createInputChannel,
+  createWorld,
   cwdSlug,
   loadPrompts,
   messageMatches,
@@ -389,6 +390,14 @@ describe("the structured-output scenario carries an unsatisfiable schema", () =>
 describe("cwdSlug", () => {
   it("replaces every slash and dot, matching the observed vendor spelling", () => {
     expect(cwdSlug("/Users/x/.config/y")).toBe("-Users-x--config-y");
+  });
+});
+
+describe("createWorld", () => {
+  it("returns a cwd whose path is already resolved, so the vendor's slug and the reclaim slug agree", () => {
+    const world = createWorld({ mode: "inherited_token", tokenVar: "ANTHROPIC_API_KEY" }, "slug-test");
+    expect(world.cwd).toBe(realpathSync(world.cwd));
+    expect(world.scratch).toBe(realpathSync(world.scratch));
   });
 });
 

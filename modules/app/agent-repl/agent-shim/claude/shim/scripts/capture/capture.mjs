@@ -41,6 +41,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -530,7 +531,10 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
  * afterwards.
  */
 export function createWorld(auth, label) {
-  const scratch = mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${label}-`));
+  // realpath, not the mkdtemp spelling: the vendor slugs the project directory
+  // from the cwd's RESOLVED path (macOS `/var` is `/private/var`), and the
+  // reclaim step must compute the same slug or it misses the transcripts.
+  const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), `agent-repl-capture-${label}-`)));
   const cwd = path.join(scratch, "cwd");
   const scratchConfigDir = path.join(scratch, "config");
   const spoolRoot = path.join(scratch, "spool");
