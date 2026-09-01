@@ -1,9 +1,16 @@
-package main
+package storeclient
 
 import (
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
 	"strings"
 	"testing"
+
+	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 // The unit harness reads its own log the way the integration suite reads the
@@ -112,29 +119,75 @@ func ctxString(t *testing.T, r logRecord, key string) string {
 	return value
 }
 
-// ---- harness conveniences -------------------------------------------------
-
-func (h *harness) records(t *testing.T) []logRecord {
+// serveLogged is serve with a CAPTURING logger, for the subjects that are about
+// the records the client writes rather than the value it returns.
+func serveLogged(t *testing.T, store *fakeStore) (*Client, *[]string) {
 	t.Helper()
-	return parseLogLines(t, *h.logs)
+	socket := shortSocket(t)
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatalf("listening on %s: %v", socket, err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle(storev1connect.NewShimStoreHandler(store))
+	server := &http.Server{Handler: mux}
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		server.Close()
+		<-served
+	})
+	var lines []string
+	log := logging.New(sliceWriter{lines: &lines}, io.Discard).With(logging.Context{Component: "storeclient-test"})
+	return New(socket, log), &lines
 }
 
-func (h *harness) ops(t *testing.T, operation string) []logRecord {
-	t.Helper()
-	return opsAt(h.records(t), operation, "")
+// sliceWriter collects each written record as one line.
+type sliceWriter struct{ lines *[]string }
+
+func (w sliceWriter) Write(p []byte) (int, error) {
+	*w.lines = append(*w.lines, string(p))
+	return len(p), nil
 }
 
-func (h *harness) opsAt(t *testing.T, operation, level string) []logRecord {
-	t.Helper()
-	return opsAt(h.records(t), operation, level)
-}
+// TestARefusedWriteNamesBothTheRefusalsKindAndItsSite asserts the two refusal
+// keys ride together.
+//
+// THEY ANSWER DIFFERENT QUESTIONS. The KIND is the store's oneof arm and says
+// whether a retry can help; the SITE is which call was refused and is what joins
+// this record to the store's own record of the same refusal. A reader with only
+// the kind knows the verdict but not what it was about.
+func TestARefusedWriteNamesBothTheRefusalsKindAndItsSite(t *testing.T) {
+	// Arrange.
+	client, logs := serveLogged(t, &fakeStore{write: &storev1.WriteBatchResponse{
+		Result: &storev1.WriteBatchResponse_Failure{
+			Failure: &storev1.WriteBatchFailure{
+				Detail: "entry 0 carries no upsert_key",
+				Kind: &storev1.WriteBatchFailure_InvalidRequest{
+					InvalidRequest: &storev1.WriteBatchInvalidRequest{Field: "batch.entries[0].upsert_key"},
+				},
+			},
+		},
+	}})
 
-func (h *harness) requireOnce(t *testing.T, operation, level string) logRecord {
-	t.Helper()
-	return requireOnceIn(t, h.records(t), operation, level)
-}
+	// Act.
+	err := client.WriteBatch(ctx(), &storev1.EntryBatch{})
 
-func (h *harness) requireNone(t *testing.T, operation, level string) {
-	t.Helper()
-	requireNoneIn(t, h.records(t), operation, level)
+	// Assert.
+	if err == nil {
+		t.Fatal("a refused write returned no error")
+	}
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "storeclient-write-batch", "error")
+	if got := ctxString(t, rec, "refusal_kind"); got != string(RefusalInvalidRequest) {
+		t.Errorf("refusal_kind = %q, want the arm the store answered with", got)
+	}
+	if got := ctxString(t, rec, "refusal_site"); got != WriteBatchSite {
+		t.Errorf("refusal_site = %q, want the write call that was refused", got)
+	}
+	if got := ctxString(t, rec, "field"); got != "batch.entries[0].upsert_key" {
+		t.Errorf("field = %q, want the offending field the store named", got)
+	}
 }

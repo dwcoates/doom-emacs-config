@@ -465,7 +465,16 @@ pre-logger bootstrap failure and the sink-emergency path.
   `book_agent_id`, `write_id`, `upsert_key`, `position`, `write_seq`,
   `watch_token_hash`, `rpc`, `file_id`, `path`, `offset`, `task_id`,
   `activity_id`, `turn_id`, plus `component` and `store_socket`. Top-level
-  `request_id` stays.
+  `request_id` stays (the sidecar serves no inbound rpc, so it emits none).
+- A REFUSAL RECORD CARRIES BOTH `refusal_kind` AND `refusal_site`. They answer
+  different questions: the KIND is the store's oneof arm and says whether a
+  retry can help; the SITE is which call was refused and is what joins the
+  sidecar's record to the store's own record of the same refusal.
+- THE OUTAGE LADDER'S LEVELS DESCEND: the FIRST refused recovery attempt of an
+  outage is an `error`, every attempt after it is a `warn`, and both carry
+  `attempt` and `backoff_ms`. None of them is verbose — an outage visible only
+  with verbose emission on is an outage nobody sees. Recovery closes the window
+  with exactly one `info` record.
 - Numeric keys carry PRESENCE (`logging.Off`, `logging.Seq`), so an unset
   offset is absent rather than a zero that reads as the start of the file.
 - RETIRED KEYS ARE GONE AND STAY GONE: `claude_session_id`,

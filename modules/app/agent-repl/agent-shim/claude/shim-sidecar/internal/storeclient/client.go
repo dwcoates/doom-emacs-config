@@ -48,6 +48,11 @@ const Producer = "shim-claude-sidecar"
 const (
 	rpcWriteBatch        = storev1connect.ShimStoreWriteBatchProcedure
 	rpcGetSidecarCursors = storev1connect.ShimStoreGetSidecarCursorsProcedure
+
+	// WriteBatchSite is the `refusal_site` a refused write is reported under.
+	// A caller that states the refusal itself — the cycle parking a file on an
+	// invalid_request — names the same site, so the two records join.
+	WriteBatchSite = rpcWriteBatch
 )
 
 // baseURL is a syntactic requirement of the Connect client: the unix socket is
@@ -239,7 +244,13 @@ func (c *Client) WriteBatch(ctx context.Context, batch *storev1.EntryBatch) erro
 			refusal.Kind = RefusalStorageFailure
 			return refusal
 		}
-		bound.With(logging.Context{Level: "error", RefusalKind: string(refusal.Kind), Field: refusal.Field}).Log(
+		// THE SITE RIDES WITH THE KIND. The kind says whether a retry can help;
+		// the site says which call was refused, which is what a reader joins
+		// against the store's own refusal record for this batch.
+		bound.With(logging.Context{
+			Level: "error", RefusalKind: string(refusal.Kind),
+			RefusalSite: rpcWriteBatch, Field: refusal.Field,
+		}).Log(
 			"write refused as %s for %d entrie(s), nothing committed: %s", refusal.Kind, len(batch.GetEntries()), refusal.Detail)
 		return refusal
 	default:
