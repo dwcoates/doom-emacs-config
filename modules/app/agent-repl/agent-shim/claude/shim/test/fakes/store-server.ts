@@ -26,9 +26,14 @@
  *   - `known_through` IS THE CALLER'S HIGH-WATER MARK. The store remembers
  *     nothing about what it served; a set pointer means "only items strictly
  *     newer than this".
- *   - A WATCH TOKEN IS PINNED AFTER THE NEWEST ITEM at open. The tail is PURE:
- *     it never replays what the opening page already carried, which is what
- *     makes open-then-watch race-free.
+ *   - THE TAIL IS PURE: it carries WRITES, never replays. Opening a reading
+ *     session delivers nothing to the tail, so the opening page is never
+ *     repeated and open-then-watch is race-free. But EVERY write is a tail
+ *     line, INCLUDING an upsert of a row the opening page already carried: a
+ *     write supersedes the row whole, and a unit that started before the
+ *     reader opened and settles afterwards is a real change served at the
+ *     row's own stable pointer. Dropping those was what made a mid-turn
+ *     subscriber never learn how the turn's earlier units ended.
  *   - AN UNKNOWN WATCH TOKEN IS A CONNECT `NotFound`. A refused stream open has
  *     no failure message to live in — the response type is the frame it
  *     streams — so the refusal closes the stream at the transport.
@@ -58,8 +63,6 @@ interface StoredRow {
 /** An opened reading session: which book, and where its tail begins. */
 interface WatchSessionState {
   readonly book: string;
-  /** Rows at or below this pointer were already served by the opening page. */
-  readonly pinnedAfter: number;
   /** Lines waiting to be pulled by the tail, oldest first. */
   readonly pending: storev1.StoreLineAt[];
   /** Resolvers of pulls that arrived before any line did. */
@@ -150,11 +153,23 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const lineAt = (row: StoredRow): storev1.StoreLineAt =>
     create(storev1.StoreLineAtSchema, { at: pointerOf(row), line: row.line });
 
-  /** Deliver a line to every tail watching its book, if the tail is past its pin. */
+  /**
+   * Deliver a line to every tail watching its book.
+   *
+   * EVERY WRITE IS SERVED, INCLUDING AN UPSERT OF A ROW OLDER THAN THE WATCH.
+   * A write supersedes the row WHOLE, so a unit that started before the reader
+   * opened and settles afterwards is a genuine change the tail must carry —
+   * served, per store.v1, at the row's own (stable, original) pointer. An
+   * earlier version of this fake compared that pointer against a pin taken at
+   * open and silently dropped exactly those settle frames, so a reader that
+   * subscribed mid-turn never learned how the turn's earlier units ended.
+   *
+   * The tail is still PURE: nothing is delivered without a write, so the
+   * opening page is never replayed and open-then-watch stays race-free.
+   */
   const fanOut = (bookId: string, row: StoredRow): void => {
     for (const state of watches.values()) {
       if (state.book !== bookId) continue;
-      if (Number(row.pointer) <= state.pinnedAfter) continue;
       const waiter = state.waiters.shift();
       if (waiter !== undefined) waiter(lineAt(row));
       else state.pending.push(lineAt(row));
@@ -246,11 +261,9 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         const lines = [...window].reverse().map(lineAt);
         const olderExist = eligible.length > window.length;
         const oldestInPage = window[0];
-        const newestOverall = all[all.length - 1];
         const token = `watch-${nextToken++}`;
         watches.set(token, {
           book: bookId,
-          pinnedAfter: newestOverall === undefined ? 0 : Number(newestOverall.pointer),
           pending: [],
           waiters: [],
           closed: false,

@@ -479,7 +479,47 @@ describe("WatchAgentSession", () => {
     expect(first.value?.line?.at?.value).toBe("2");
   });
 
-  it("delivers an UPSERT of an existing row down the tail", async () => {
+  it("delivers an UPSERT OF A ROW THE OPENING PAGE ALREADY CARRIED", async () => {
+    // A unit that started before the reader subscribed and settles afterwards
+    // is a real change: the write supersedes the row whole, so the tail must
+    // serve it even though the row predates the watch. Pinning the tail
+    // against the row's original pointer silently dropped exactly these.
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "started"));
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "settled"));
+    const first = await tail.next();
+
+    // Assert.
+    expect(first.value?.line?.at?.value).toBe("1");
+  });
+
+  it("serves an upserted row at its ORIGINAL pointer, not a fresh one", async () => {
+    // Arrange.
+    const { client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "started"));
+    await write(client, pageLineEntry("a", "prompt:t2", "other"));
+    const success = await open(client, "a", 10);
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+
+    // Act.
+    await write(client, pageLineEntry("a", "prompt:t1", "settled"));
+    const first = await tail.next();
+
+    // Assert.
+    expect(first.value?.line?.at?.value).toBe("1");
+    expect(first.value?.line?.line?.agentItem?.item.value?.id?.value).toBe("settled");
+  });
+
+  it("delivers a NEW row written after the open down the tail", async () => {
     // Arrange.
     const { client } = await store();
     await write(client, pageLineEntry("a", "prompt:t1", "first"));
