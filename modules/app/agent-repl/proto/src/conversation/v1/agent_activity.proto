@@ -649,6 +649,25 @@ message AgentPushNotificationFailure {
   optional AgentToolFailure error = 1;
 }
 
+// WE STOPPED BEING ABLE TO SEE THE WORK — not known to have failed, not
+// known to have finished. THE ARM IS HOW WE CONCLUDED IT, stated by the file
+// reader (the sidecar) or the stream owner (the shim) loudly rather than by
+// silently dropping the run. Drawn as its own word ("lost"), never as a
+// failure or a cancel.
+message DetachedLost {
+  oneof how {
+    // The spool or transcript file disappeared from disk.
+    DetachedLostFileVanished file_vanished = 1;
+    // The run produced nothing past the reader's silence ruling.
+    DetachedLostWentSilent went_silent = 2;
+    // A boot sweep found the run open with no living producer.
+    DetachedLostSweptUp swept_up = 3;
+  }
+}
+message DetachedLostFileVanished {}
+message DetachedLostWentSilent {}
+message DetachedLostSweptUp {}
+
 // The vendor's per-call progress beat, relayed as observed: the call is
 // alive. A RELAY of an observed fact, never a shim-invented ping — the shim
 // forwards the beat and keeps the wedge RULING for itself (a stalled call
@@ -667,6 +686,14 @@ message AgentToolCallProgress {
 // unit of the caller's work, and the agent it produced is a different thing. A
 // consumer asking "whose work is this" reads this and never the enclosing unit's
 // identity.
+//
+// CROSS-PLANE MINTING RULE (binding on every producer, so the stream plane and
+// the file plane agree on one id for one agent): the MAIN agent's id is the
+// ORIGINAL vendor session id (a resume, rotation or fork keeps it); a SUBAGENT's
+// id is the `tool_use_id` of the call that SPAWNED it, as the vendor's stream
+// carries it and as the file plane records it in the agent's meta.json. The
+// space stays the agent's own — consumers never derive the spawning unit's
+// identity from it, even though the bytes coincide.
 message AgentId {
   // The producer's identifier for the agent instance, carried verbatim. Compare
   // for equality; never parse or construct one.
@@ -1842,6 +1869,9 @@ message AgentBashInterrupted {
     AgentBashInterruptedByUser by_user = 2;
     // It outlived its own timeout.
     AgentBashInterruptedByTimeout timed_out = 3;
+    // We stopped being able to see it — the spool vanished or went silent;
+    // not known to have failed. Draws as "lost", never as a cancel.
+    DetachedLost lost = 4;
   }
 }
 
@@ -1867,8 +1897,16 @@ message AgentBashOutput {
     // The output is image data rather than characters. Draw it as an image;
     // there is no text to show.
     AgentBashOutputImage image = 2;
+    // NO OUTPUT WAS OBSERVED — the run was lost or reconciled after a restart
+    // and nothing on disk or on the stream said what it printed. Distinct from
+    // empty text (a command that printed nothing) and from `partial`
+    // omission: the producer states that it does not know.
+    AgentBashOutputNotObserved not_observed = 3;
   }
 }
+
+// No output was observed for this run. Empty: the arm is the whole fact.
+message AgentBashOutputNotObserved {}
 
 // Character output, with the two streams kept apart.
 message AgentBashOutputText {
@@ -2351,6 +2389,9 @@ message AgentSubagentFailure {
     // A person stopped the subagent by hand. Not a fault: the run did what it
     // was told, and a consumer must not draw it as an error.
     AgentSubagentStoppedByUser stopped_by_user = 2;
+    // We stopped being able to see it — its transcript vanished or went
+    // silent; not known to have failed. Draws as "lost".
+    DetachedLost lost = 3;
   }
 }
 

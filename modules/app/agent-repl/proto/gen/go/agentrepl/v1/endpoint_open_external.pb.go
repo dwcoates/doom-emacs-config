@@ -201,10 +201,20 @@ func (*OpenExternalSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (browser missing,
-// launch failed, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type OpenExternalError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*OpenExternalError_UnknownWorkspace
+	//	*OpenExternalError_WorkspaceRefMismatch
+	//	*OpenExternalError_TransferringAway
+	//	*OpenExternalError_NotYetAdopted
+	//	*OpenExternalError_InvalidUrl
+	//	*OpenExternalError_NoBrowserConfigured
+	//	*OpenExternalError_LaunchFailed
+	Cause         isOpenExternalError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -239,6 +249,408 @@ func (*OpenExternalError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *OpenExternalError) GetCause() isOpenExternalError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetUnknownWorkspace() *OpenExternalUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetWorkspaceRefMismatch() *OpenExternalWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetTransferringAway() *OpenExternalTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetNotYetAdopted() *OpenExternalNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetInvalidUrl() *OpenExternalInvalidUrl {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_InvalidUrl); ok {
+			return x.InvalidUrl
+		}
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetNoBrowserConfigured() *OpenExternalNoBrowserConfigured {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_NoBrowserConfigured); ok {
+			return x.NoBrowserConfigured
+		}
+	}
+	return nil
+}
+
+func (x *OpenExternalError) GetLaunchFailed() *OpenExternalLaunchFailed {
+	if x != nil {
+		if x, ok := x.Cause.(*OpenExternalError_LaunchFailed); ok {
+			return x.LaunchFailed
+		}
+	}
+	return nil
+}
+
+type isOpenExternalError_Cause interface {
+	isOpenExternalError_Cause()
+}
+
+type OpenExternalError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *OpenExternalUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type OpenExternalError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *OpenExternalWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type OpenExternalError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *OpenExternalTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type OpenExternalError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *OpenExternalNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type OpenExternalError_InvalidUrl struct {
+	// The url does not parse.
+	InvalidUrl *OpenExternalInvalidUrl `protobuf:"bytes,5,opt,name=invalid_url,json=invalidUrl,proto3,oneof"`
+}
+
+type OpenExternalError_NoBrowserConfigured struct {
+	// No browser is configured to open it with.
+	NoBrowserConfigured *OpenExternalNoBrowserConfigured `protobuf:"bytes,6,opt,name=no_browser_configured,json=noBrowserConfigured,proto3,oneof"`
+}
+
+type OpenExternalError_LaunchFailed struct {
+	// Launching the browser failed.
+	LaunchFailed *OpenExternalLaunchFailed `protobuf:"bytes,7,opt,name=launch_failed,json=launchFailed,proto3,oneof"`
+}
+
+func (*OpenExternalError_UnknownWorkspace) isOpenExternalError_Cause() {}
+
+func (*OpenExternalError_WorkspaceRefMismatch) isOpenExternalError_Cause() {}
+
+func (*OpenExternalError_TransferringAway) isOpenExternalError_Cause() {}
+
+func (*OpenExternalError_NotYetAdopted) isOpenExternalError_Cause() {}
+
+func (*OpenExternalError_InvalidUrl) isOpenExternalError_Cause() {}
+
+func (*OpenExternalError_NoBrowserConfigured) isOpenExternalError_Cause() {}
+
+func (*OpenExternalError_LaunchFailed) isOpenExternalError_Cause() {}
+
+type OpenExternalUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalUnknownWorkspace) Reset() {
+	*x = OpenExternalUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalUnknownWorkspace) ProtoMessage() {}
+
+func (x *OpenExternalUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*OpenExternalUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{4}
+}
+
+type OpenExternalWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalWorkspaceRefMismatch) Reset() {
+	*x = OpenExternalWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *OpenExternalWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*OpenExternalWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenExternalWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type OpenExternalTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalTransferringAway) Reset() {
+	*x = OpenExternalTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalTransferringAway) ProtoMessage() {}
+
+func (x *OpenExternalTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalTransferringAway.ProtoReflect.Descriptor instead.
+func (*OpenExternalTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *OpenExternalTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type OpenExternalNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalNotYetAdopted) Reset() {
+	*x = OpenExternalNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalNotYetAdopted) ProtoMessage() {}
+
+func (x *OpenExternalNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*OpenExternalNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{7}
+}
+
+type OpenExternalInvalidUrl struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalInvalidUrl) Reset() {
+	*x = OpenExternalInvalidUrl{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalInvalidUrl) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalInvalidUrl) ProtoMessage() {}
+
+func (x *OpenExternalInvalidUrl) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalInvalidUrl.ProtoReflect.Descriptor instead.
+func (*OpenExternalInvalidUrl) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{8}
+}
+
+type OpenExternalNoBrowserConfigured struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalNoBrowserConfigured) Reset() {
+	*x = OpenExternalNoBrowserConfigured{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalNoBrowserConfigured) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalNoBrowserConfigured) ProtoMessage() {}
+
+func (x *OpenExternalNoBrowserConfigured) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalNoBrowserConfigured.ProtoReflect.Descriptor instead.
+func (*OpenExternalNoBrowserConfigured) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{9}
+}
+
+type OpenExternalLaunchFailed struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The launch's own account of the failure.
+	Detail        string `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenExternalLaunchFailed) Reset() {
+	*x = OpenExternalLaunchFailed{}
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenExternalLaunchFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenExternalLaunchFailed) ProtoMessage() {}
+
+func (x *OpenExternalLaunchFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_open_external_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenExternalLaunchFailed.ProtoReflect.Descriptor instead.
+func (*OpenExternalLaunchFailed) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *OpenExternalLaunchFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_open_external_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_open_external_proto_rawDesc = "" +
@@ -251,8 +663,27 @@ const file_agentrepl_v1_endpoint_open_external_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2!.agentrepl.v1.OpenExternalSuccessH\x00R\asuccess\x127\n" +
 	"\x05error\x18\x02 \x01(\v2\x1f.agentrepl.v1.OpenExternalErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x15\n" +
-	"\x13OpenExternalSuccess\"\x13\n" +
-	"\x11OpenExternalErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x13OpenExternalSuccess\"\x8a\x05\n" +
+	"\x11OpenExternalError\x12Y\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2*.agentrepl.v1.OpenExternalUnknownWorkspaceH\x00R\x10unknownWorkspace\x12f\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2..agentrepl.v1.OpenExternalWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Y\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2*.agentrepl.v1.OpenExternalTransferringAwayH\x00R\x10transferringAway\x12Q\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2'.agentrepl.v1.OpenExternalNotYetAdoptedH\x00R\rnotYetAdopted\x12G\n" +
+	"\vinvalid_url\x18\x05 \x01(\v2$.agentrepl.v1.OpenExternalInvalidUrlH\x00R\n" +
+	"invalidUrl\x12c\n" +
+	"\x15no_browser_configured\x18\x06 \x01(\v2-.agentrepl.v1.OpenExternalNoBrowserConfiguredH\x00R\x13noBrowserConfigured\x12M\n" +
+	"\rlaunch_failed\x18\a \x01(\v2&.agentrepl.v1.OpenExternalLaunchFailedH\x00R\flaunchFailedB\a\n" +
+	"\x05cause\"\x1e\n" +
+	"\x1cOpenExternalUnknownWorkspace\"E\n" +
+	" OpenExternalWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"8\n" +
+	"\x1cOpenExternalTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1b\n" +
+	"\x19OpenExternalNotYetAdopted\"\x18\n" +
+	"\x16OpenExternalInvalidUrl\"!\n" +
+	"\x1fOpenExternalNoBrowserConfigured\"2\n" +
+	"\x18OpenExternalLaunchFailed\x12\x16\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detailB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_open_external_proto_rawDescOnce sync.Once
@@ -266,23 +697,37 @@ func file_agentrepl_v1_endpoint_open_external_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_open_external_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_open_external_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_open_external_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_agentrepl_v1_endpoint_open_external_proto_goTypes = []any{
-	(*OpenExternalRequest)(nil),  // 0: agentrepl.v1.OpenExternalRequest
-	(*OpenExternalResponse)(nil), // 1: agentrepl.v1.OpenExternalResponse
-	(*OpenExternalSuccess)(nil),  // 2: agentrepl.v1.OpenExternalSuccess
-	(*OpenExternalError)(nil),    // 3: agentrepl.v1.OpenExternalError
-	(*v1.WorkspaceRef)(nil),      // 4: workspace.v1.WorkspaceRef
+	(*OpenExternalRequest)(nil),              // 0: agentrepl.v1.OpenExternalRequest
+	(*OpenExternalResponse)(nil),             // 1: agentrepl.v1.OpenExternalResponse
+	(*OpenExternalSuccess)(nil),              // 2: agentrepl.v1.OpenExternalSuccess
+	(*OpenExternalError)(nil),                // 3: agentrepl.v1.OpenExternalError
+	(*OpenExternalUnknownWorkspace)(nil),     // 4: agentrepl.v1.OpenExternalUnknownWorkspace
+	(*OpenExternalWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.OpenExternalWorkspaceRefMismatch
+	(*OpenExternalTransferringAway)(nil),     // 6: agentrepl.v1.OpenExternalTransferringAway
+	(*OpenExternalNotYetAdopted)(nil),        // 7: agentrepl.v1.OpenExternalNotYetAdopted
+	(*OpenExternalInvalidUrl)(nil),           // 8: agentrepl.v1.OpenExternalInvalidUrl
+	(*OpenExternalNoBrowserConfigured)(nil),  // 9: agentrepl.v1.OpenExternalNoBrowserConfigured
+	(*OpenExternalLaunchFailed)(nil),         // 10: agentrepl.v1.OpenExternalLaunchFailed
+	(*v1.WorkspaceRef)(nil),                  // 11: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_open_external_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.OpenExternalRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.OpenExternalResponse.success:type_name -> agentrepl.v1.OpenExternalSuccess
-	3, // 2: agentrepl.v1.OpenExternalResponse.error:type_name -> agentrepl.v1.OpenExternalError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	11, // 0: agentrepl.v1.OpenExternalRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.OpenExternalResponse.success:type_name -> agentrepl.v1.OpenExternalSuccess
+	3,  // 2: agentrepl.v1.OpenExternalResponse.error:type_name -> agentrepl.v1.OpenExternalError
+	4,  // 3: agentrepl.v1.OpenExternalError.unknown_workspace:type_name -> agentrepl.v1.OpenExternalUnknownWorkspace
+	5,  // 4: agentrepl.v1.OpenExternalError.workspace_ref_mismatch:type_name -> agentrepl.v1.OpenExternalWorkspaceRefMismatch
+	6,  // 5: agentrepl.v1.OpenExternalError.transferring_away:type_name -> agentrepl.v1.OpenExternalTransferringAway
+	7,  // 6: agentrepl.v1.OpenExternalError.not_yet_adopted:type_name -> agentrepl.v1.OpenExternalNotYetAdopted
+	8,  // 7: agentrepl.v1.OpenExternalError.invalid_url:type_name -> agentrepl.v1.OpenExternalInvalidUrl
+	9,  // 8: agentrepl.v1.OpenExternalError.no_browser_configured:type_name -> agentrepl.v1.OpenExternalNoBrowserConfigured
+	10, // 9: agentrepl.v1.OpenExternalError.launch_failed:type_name -> agentrepl.v1.OpenExternalLaunchFailed
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_open_external_proto_init() }
@@ -294,13 +739,22 @@ func file_agentrepl_v1_endpoint_open_external_proto_init() {
 		(*OpenExternalResponse_Success)(nil),
 		(*OpenExternalResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_open_external_proto_msgTypes[3].OneofWrappers = []any{
+		(*OpenExternalError_UnknownWorkspace)(nil),
+		(*OpenExternalError_WorkspaceRefMismatch)(nil),
+		(*OpenExternalError_TransferringAway)(nil),
+		(*OpenExternalError_NotYetAdopted)(nil),
+		(*OpenExternalError_InvalidUrl)(nil),
+		(*OpenExternalError_NoBrowserConfigured)(nil),
+		(*OpenExternalError_LaunchFailed)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_open_external_proto_rawDesc), len(file_agentrepl_v1_endpoint_open_external_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

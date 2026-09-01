@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_write_batch.proto.
  */
 export const file_store_v1_endpoint_write_batch: GenFile = /*@__PURE__*/
-  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEiSgoRV3JpdGVCYXRjaFJlcXVlc3QSEAoIcHJvZHVjZXIYASABKAkSIwoFYmF0Y2gYAiABKAsyFC5zdG9yZS52MS5FbnRyeUJhdGNoIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiEwoRV3JpdGVCYXRjaFN1Y2Nlc3MiIwoRV3JpdGVCYXRjaEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_store_v1_store]);
+  fileDesc("CiNzdG9yZS92MS9lbmRwb2ludF93cml0ZV9iYXRjaC5wcm90bxIIc3RvcmUudjEiSgoRV3JpdGVCYXRjaFJlcXVlc3QSEAoIcHJvZHVjZXIYASABKAkSIwoFYmF0Y2gYAiABKAsyFC5zdG9yZS52MS5FbnRyeUJhdGNoIn4KEldyaXRlQmF0Y2hSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc3RvcmUudjEuV3JpdGVCYXRjaEZhaWx1cmVIAEIICgZyZXN1bHQiEwoRV3JpdGVCYXRjaFN1Y2Nlc3MiqQEKEVdyaXRlQmF0Y2hGYWlsdXJlEg4KBmRldGFpbBgBIAEoCRI9Cg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoSW52YWxpZFJlcXVlc3RIABI9Cg9zdG9yYWdlX2ZhaWx1cmUYAyABKAsyIi5zdG9yZS52MS5Xcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVIAEIGCgRraW5kIikKGFdyaXRlQmF0Y2hJbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIaChhXcml0ZUJhdGNoU3RvcmFnZUZhaWx1cmVCIlogYWdlbnRyZXBsL3Byb3RvL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_store_v1_store]);
 
 /**
  * One producer's write. The rpc is the envelope: no separate carrier message
@@ -104,8 +104,7 @@ export const WriteBatchSuccessSchema: GenMessage<WriteBatchSuccess> = /*@__PURE_
  * persistent inability to reach the store indicates a lifetime-sequencing
  * defect to fix, not a condition to paper over with fallback persistence.
  * (The sidecar needs no buffer at all — its sources are durable files it
- * re-reads from the cursor.) `kind` arms are DERIVED at the wave from the
- * store's real failure sites.
+ * re-reads from the cursor.) THE ARM IS WHY.
  *
  * @generated from message store.v1.WriteBatchFailure
  */
@@ -116,6 +115,28 @@ export type WriteBatchFailure = Message<"store.v1.WriteBatchFailure"> & {
    * @generated from field: string detail = 1;
    */
   detail: string;
+
+  /**
+   * @generated from oneof store.v1.WriteBatchFailure.kind
+   */
+  kind: {
+    /**
+     * The batch violated validation (unset arm, empty id, negative offset,
+     * …); nothing was committed and a retry of the same bytes cannot help.
+     *
+     * @generated from field: store.v1.WriteBatchInvalidRequest invalid_request = 2;
+     */
+    value: WriteBatchInvalidRequest;
+    case: "invalidRequest";
+  } | {
+    /**
+     * The transaction failed in the database; a retry may succeed.
+     *
+     * @generated from field: store.v1.WriteBatchStorageFailure storage_failure = 3;
+     */
+    value: WriteBatchStorageFailure;
+    case: "storageFailure";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -124,4 +145,41 @@ export type WriteBatchFailure = Message<"store.v1.WriteBatchFailure"> & {
  */
 export const WriteBatchFailureSchema: GenMessage<WriteBatchFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_write_batch, 3);
+
+/**
+ * The request was malformed or violated the validation invariant.
+ *
+ * @generated from message store.v1.WriteBatchInvalidRequest
+ */
+export type WriteBatchInvalidRequest = Message<"store.v1.WriteBatchInvalidRequest"> & {
+  /**
+   * Which field (with the offending entry's index where one applies), as
+   * the store names it — for the producer's logs, never switched on.
+   *
+   * @generated from field: string field = 1;
+   */
+  field: string;
+};
+
+/**
+ * Describes the message store.v1.WriteBatchInvalidRequest.
+ * Use `create(WriteBatchInvalidRequestSchema)` to create a new message.
+ */
+export const WriteBatchInvalidRequestSchema: GenMessage<WriteBatchInvalidRequest> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 4);
+
+/**
+ * The database failed; `detail` carries the driver's text.
+ *
+ * @generated from message store.v1.WriteBatchStorageFailure
+ */
+export type WriteBatchStorageFailure = Message<"store.v1.WriteBatchStorageFailure"> & {
+};
+
+/**
+ * Describes the message store.v1.WriteBatchStorageFailure.
+ * Use `create(WriteBatchStorageFailureSchema)` to create a new message.
+ */
+export const WriteBatchStorageFailureSchema: GenMessage<WriteBatchStorageFailure> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_write_batch, 5);
 

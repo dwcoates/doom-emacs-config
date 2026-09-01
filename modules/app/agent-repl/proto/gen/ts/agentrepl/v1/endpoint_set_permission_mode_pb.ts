@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_permission_mode.proto.
  */
 export const file_agentrepl_v1_endpoint_set_permission_mode: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3Blcm1pc3Npb25fbW9kZS5wcm90bxIMYWdlbnRyZXBsLnYxIlcKGFNldFBlcm1pc3Npb25Nb2RlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG1vZGUYAiABKAkilwEKGVNldFBlcm1pc3Npb25Nb2RlUmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZVN1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZUVycm9ySABCCAoGcmVzdWx0IhoKGFNldFBlcm1pc3Npb25Nb2RlU3VjY2VzcyIYChZTZXRQZXJtaXNzaW9uTW9kZUVycm9yQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3Blcm1pc3Npb25fbW9kZS5wcm90bxIMYWdlbnRyZXBsLnYxIlcKGFNldFBlcm1pc3Npb25Nb2RlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEgwKBG1vZGUYAiABKAkilwEKGVNldFBlcm1pc3Npb25Nb2RlUmVzcG9uc2USOQoHc3VjY2VzcxgBIAEoCzImLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZVN1Y2Nlc3NIABI1CgVlcnJvchgCIAEoCzIkLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZUVycm9ySABCCAoGcmVzdWx0IhoKGFNldFBlcm1pc3Npb25Nb2RlU3VjY2VzcyKHBQoWU2V0UGVybWlzc2lvbk1vZGVFcnJvchJMChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzIvLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZVVua25vd25Xb3Jrc3BhY2VIABJVChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMjMuYWdlbnRyZXBsLnYxLlNldFBlcm1pc3Npb25Nb2RlV29ya3NwYWNlUmVmTWlzbWF0Y2hIABJMChF0cmFuc2ZlcnJpbmdfYXdheRgDIAEoCzIvLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZVRyYW5zZmVycmluZ0F3YXlIABJHCg9ub3RfeWV0X2Fkb3B0ZWQYBCABKAsyLC5hZ2VudHJlcGwudjEuU2V0UGVybWlzc2lvbk1vZGVOb3RZZXRBZG9wdGVkSAASRwoPbW9kZV9ub3Rfc2VydmVkGAUgASgLMiwuYWdlbnRyZXBsLnYxLlNldFBlcm1pc3Npb25Nb2RlTW9kZU5vdFNlcnZlZEgAElcKF3VuZ2F0ZWRfd2l0aG91dF9jb25zZW50GAYgASgLMjQuYWdlbnRyZXBsLnYxLlNldFBlcm1pc3Npb25Nb2RlVW5nYXRlZFdpdGhvdXRDb25zZW50SAASPgoKbm9fc2Vzc2lvbhgHIAEoCzIoLmFnZW50cmVwbC52MS5TZXRQZXJtaXNzaW9uTW9kZU5vU2Vzc2lvbkgAEkYKDnZlbmRvcl9yZWZ1c2VkGAggASgLMiwuYWdlbnRyZXBsLnYxLlNldFBlcm1pc3Npb25Nb2RlVmVuZG9yUmVmdXNlZEgAQgcKBWNhdXNlIiMKIVNldFBlcm1pc3Npb25Nb2RlVW5rbm93bldvcmtzcGFjZSI9CiVTZXRQZXJtaXNzaW9uTW9kZVdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSI0CiFTZXRQZXJtaXNzaW9uTW9kZVRyYW5zZmVycmluZ0F3YXkSDwoHYWRkcmVzcxgBIAEoCSIgCh5TZXRQZXJtaXNzaW9uTW9kZU5vdFlldEFkb3B0ZWQiIAoeU2V0UGVybWlzc2lvbk1vZGVNb2RlTm90U2VydmVkIigKJlNldFBlcm1pc3Npb25Nb2RlVW5nYXRlZFdpdGhvdXRDb25zZW50IhwKGlNldFBlcm1pc3Npb25Nb2RlTm9TZXNzaW9uIjAKHlNldFBlcm1pc3Npb25Nb2RlVmVuZG9yUmVmdXNlZBIOCgZkZXRhaWwYASABKAlCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetPermissionModeRequest
@@ -94,13 +94,80 @@ export const SetPermissionModeSuccessSchema: GenMessage<SetPermissionModeSuccess
   messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown mode,
- * unswitchable mode, ungated mode without consent, no session, …),
- * spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.SetPermissionModeError
  */
 export type SetPermissionModeError = Message<"agentrepl.v1.SetPermissionModeError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SetPermissionModeError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeUnknownWorkspace unknown_workspace = 1;
+     */
+    value: SetPermissionModeUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: SetPermissionModeWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeTransferringAway transferring_away = 3;
+     */
+    value: SetPermissionModeTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeNotYetAdopted not_yet_adopted = 4;
+     */
+    value: SetPermissionModeNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The mode is not among the ones served.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeModeNotServed mode_not_served = 5;
+     */
+    value: SetPermissionModeModeNotServed;
+    case: "modeNotServed";
+  } | {
+    /**
+     * An ungated mode was asked for without the explicit consent.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeUngatedWithoutConsent ungated_without_consent = 6;
+     */
+    value: SetPermissionModeUngatedWithoutConsent;
+    case: "ungatedWithoutConsent";
+  } | {
+    /**
+     * The workspace has no session to set a mode on.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeNoSession no_session = 7;
+     */
+    value: SetPermissionModeNoSession;
+    case: "noSession";
+  } | {
+    /**
+     * The vendor refused the change.
+     *
+     * @generated from field: agentrepl.v1.SetPermissionModeVendorRefused vendor_refused = 8;
+     */
+    value: SetPermissionModeVendorRefused;
+    case: "vendorRefused";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -109,4 +176,126 @@ export type SetPermissionModeError = Message<"agentrepl.v1.SetPermissionModeErro
  */
 export const SetPermissionModeErrorSchema: GenMessage<SetPermissionModeError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 3);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeUnknownWorkspace
+ */
+export type SetPermissionModeUnknownWorkspace = Message<"agentrepl.v1.SetPermissionModeUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeUnknownWorkspace.
+ * Use `create(SetPermissionModeUnknownWorkspaceSchema)` to create a new message.
+ */
+export const SetPermissionModeUnknownWorkspaceSchema: GenMessage<SetPermissionModeUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 4);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeWorkspaceRefMismatch
+ */
+export type SetPermissionModeWorkspaceRefMismatch = Message<"agentrepl.v1.SetPermissionModeWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeWorkspaceRefMismatch.
+ * Use `create(SetPermissionModeWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const SetPermissionModeWorkspaceRefMismatchSchema: GenMessage<SetPermissionModeWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 5);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeTransferringAway
+ */
+export type SetPermissionModeTransferringAway = Message<"agentrepl.v1.SetPermissionModeTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeTransferringAway.
+ * Use `create(SetPermissionModeTransferringAwaySchema)` to create a new message.
+ */
+export const SetPermissionModeTransferringAwaySchema: GenMessage<SetPermissionModeTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 6);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeNotYetAdopted
+ */
+export type SetPermissionModeNotYetAdopted = Message<"agentrepl.v1.SetPermissionModeNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeNotYetAdopted.
+ * Use `create(SetPermissionModeNotYetAdoptedSchema)` to create a new message.
+ */
+export const SetPermissionModeNotYetAdoptedSchema: GenMessage<SetPermissionModeNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 7);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeModeNotServed
+ */
+export type SetPermissionModeModeNotServed = Message<"agentrepl.v1.SetPermissionModeModeNotServed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeModeNotServed.
+ * Use `create(SetPermissionModeModeNotServedSchema)` to create a new message.
+ */
+export const SetPermissionModeModeNotServedSchema: GenMessage<SetPermissionModeModeNotServed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 8);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeUngatedWithoutConsent
+ */
+export type SetPermissionModeUngatedWithoutConsent = Message<"agentrepl.v1.SetPermissionModeUngatedWithoutConsent"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeUngatedWithoutConsent.
+ * Use `create(SetPermissionModeUngatedWithoutConsentSchema)` to create a new message.
+ */
+export const SetPermissionModeUngatedWithoutConsentSchema: GenMessage<SetPermissionModeUngatedWithoutConsent> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 9);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeNoSession
+ */
+export type SetPermissionModeNoSession = Message<"agentrepl.v1.SetPermissionModeNoSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeNoSession.
+ * Use `create(SetPermissionModeNoSessionSchema)` to create a new message.
+ */
+export const SetPermissionModeNoSessionSchema: GenMessage<SetPermissionModeNoSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 10);
+
+/**
+ * @generated from message agentrepl.v1.SetPermissionModeVendorRefused
+ */
+export type SetPermissionModeVendorRefused = Message<"agentrepl.v1.SetPermissionModeVendorRefused"> & {
+  /**
+   * The vendor's own account of the refusal.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetPermissionModeVendorRefused.
+ * Use `create(SetPermissionModeVendorRefusedSchema)` to create a new message.
+ */
+export const SetPermissionModeVendorRefusedSchema: GenMessage<SetPermissionModeVendorRefused> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_permission_mode, 11);
 

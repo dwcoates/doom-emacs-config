@@ -1,0 +1,476 @@
+package commandfile
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/workspace"
+)
+
+func TestNewRefusesMissingCollaborators(t *testing.T) {
+	full := Deps{
+		Dir: "/output", Verbs: newFakeVerbs(), Merge: &fakeMerge{},
+		Prompts: &fakePrompts{}, Log: newFakeSurfaces(),
+	}
+	tests := []struct {
+		name  string
+		strip func(*Deps)
+	}{
+		{name: "no directory", strip: func(d *Deps) { d.Dir = "" }},
+		{name: "no verbs", strip: func(d *Deps) { d.Verbs = nil }},
+		{name: "no merge orchestrator", strip: func(d *Deps) { d.Merge = nil }},
+		{name: "no prompt handler", strip: func(d *Deps) { d.Prompts = nil }},
+		{name: "no log surfaces", strip: func(d *Deps) { d.Log = nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			deps := full
+			tt.strip(&deps)
+			// Act.
+			_, err := New(deps)
+			// Assert.
+			if err == nil {
+				t.Fatalf("New(%s) = nil error, want a refusal", tt.name)
+			}
+		})
+	}
+}
+
+func TestApplyFileClaimsByRename(t *testing.T) {
+	// Arrange: the rename IS the claim, so nothing else marks a file as taken.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_a.json", `[{"type":"merge","workspace":"w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("the original file still exists: %v", err)
+	}
+	if got := entries(t, filepath.Join(f.dir, "claimed")); len(got) != 1 {
+		t.Fatalf("claimed files = %v, want exactly one", got)
+	}
+}
+
+func TestApplyFileQuarantinesAMalformedFile(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_bad.json", `{not even an array`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyFile(malformed) = nil error, want the parse failure surfaced")
+	}
+	if got := entries(t, filepath.Join(f.dir, "quarantine")); len(got) != 1 {
+		t.Fatalf("quarantined files = %v, want exactly one", got)
+	}
+}
+
+func TestApplyFileAppliesNothingFromAMalformedFile(t *testing.T) {
+	// Arrange: one bad entry means the whole array applies nothing.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_mixed.json",
+		`[{"type":"merge","workspace":"w1"},{"type":"merge"}]`)
+
+	// Act.
+	_ = f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if len(f.merge.enqueued) != 0 {
+		t.Fatalf("enqueued merges = %v, want none", f.merge.enqueued)
+	}
+}
+
+func TestApplyFileLogsAWarningForAQuarantine(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_bad.json", `nope`)
+
+	// Act.
+	_ = f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	var warned bool
+	for _, record := range f.log.logger.Records() {
+		if record.Operation == opQuarantine && record.Level == "warn" {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Fatalf("records = %v, want a warning under %s", f.log.logger.Records(), opQuarantine)
+	}
+}
+
+func TestApplyFileMapsCreateOntoTheCreationVerb(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_c.json",
+		`[{"type":"create","name":"DWC/x","git_root":"/repo","prompt":"do a thing"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].Verb != "create" {
+		t.Fatalf("verb calls = %v, want one create", verbNames(f.verbs.calls))
+	}
+	spec := f.verbs.calls[0].Spec
+	if spec.RepoDir != "/repo" || spec.Name != "DWC/x" || spec.InitialPrompt != "do a thing" {
+		t.Fatalf("create spec = %+v, want the entry's own fields", spec)
+	}
+}
+
+func TestApplyFileOneShotCreateCarriesTheSelfMergeFinish(t *testing.T) {
+	// Arrange: the channel carries no finish field, and the self-merge one-shot
+	// is the flow it has always dispatched.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_c.json",
+		`[{"type":"create","git_root":"/repo","prompt":"do a thing","one_shot":true}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	spec := f.verbs.calls[0].Spec
+	if !spec.OneShot || spec.Finish == nil || !spec.Finish.SelfMerge {
+		t.Fatalf("create spec = %+v, want a one-shot with the self-merge finish", spec)
+	}
+}
+
+func TestApplyFileMapsPromptOntoSubmitPromptsOwnBody(t *testing.T) {
+	// Arrange: a command-file prompt must be indistinguishable from a typed one.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_p.json",
+		`[{"type":"prompt","workspace":"w1","prompt":"hello"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.prompts.submissions) != 1 || f.prompts.submissions[0].Text != "hello" {
+		t.Fatalf("submissions = %+v, want one carrying the entry's text", f.prompts.submissions)
+	}
+}
+
+func TestApplyFileTreatsSendAsPrompt(t *testing.T) {
+	// Arrange: "send" is the older spelling of the same request.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_s.json",
+		`[{"type":"send","workspace":"w1","prompt":"hello"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.prompts.submissions) != 1 {
+		t.Fatalf("submissions = %+v, want exactly one", f.prompts.submissions)
+	}
+}
+
+func TestApplyFileStampsThePromptOrigin(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_p.json",
+		`[{"type":"prompt","workspace":"w1","prompt":"hello"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if f.prompts.submissions[0].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT {
+		t.Fatalf("origin = %v, want the host-written channel's origin", f.prompts.submissions[0].Origin)
+	}
+}
+
+func TestApplyFileKeysTheIdempotencyOnTheFileAndIndex(t *testing.T) {
+	// Arrange: a file dropped twice must not run one prompt twice.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_p.json",
+		`[{"type":"prompt","workspace":"w1","prompt":"a"},{"type":"prompt","workspace":"w1","prompt":"b"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	keys := []string{f.prompts.submissions[0].Key, f.prompts.submissions[1].Key}
+	if keys[0] != "workspace_commands_p.json:0" || keys[1] != "workspace_commands_p.json:1" {
+		t.Fatalf("idempotency keys = %v, want the file name and entry index", keys)
+	}
+}
+
+func TestApplyFileMapsEveryWorkspaceVerb(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "close", body: `[{"type":"close","workspace":"w1"}]`, want: "close"},
+		{name: "open", body: `[{"type":"open","workspace":"w1"}]`, want: "open"},
+		{name: "switch", body: `[{"type":"switch","workspace":"w1"}]`, want: "select"},
+		{name: "task create", body: `[{"type":"task-create","title":"t"}]`, want: "create_task"},
+		{
+			name: "task toggle done",
+			body: `[{"type":"task-toggle-done","id":"task-1","done":true}]`,
+			want: "update_task",
+		},
+		{
+			name: "task add workspace",
+			body: `[{"type":"task-add-workspace","id":"task-1","workspace":"w1"}]`,
+			want: "assign_task",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", "/tree/w1")
+			path := f.write(t, "workspace_commands_v.json", tt.body)
+			// Act.
+			if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+				t.Fatalf("ApplyFile: %v", err)
+			}
+			// Assert.
+			if len(f.verbs.calls) != 1 || f.verbs.calls[0].Verb != tt.want {
+				t.Fatalf("verb calls = %v, want one %s", verbNames(f.verbs.calls), tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyFileMapsMergeOntoTheOrchestrator(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_m.json", `[{"type":"merge","workspace":"w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.enqueued) != 1 || f.merge.enqueued[0] != "w1" {
+		t.Fatalf("enqueued merges = %v, want w1", f.merge.enqueued)
+	}
+}
+
+func TestApplyFileResolvesAnEntryNamingOnlyADirectory(t *testing.T) {
+	// Arrange: the older producers write a dir rather than an id.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_d.json", `[{"type":"close","dir":"/tree/w1"}]`)
+
+	// Act.
+	if err := f.ingress.ApplyFile(context.Background(), path); err != nil {
+		t.Fatalf("ApplyFile: %v", err)
+	}
+
+	// Assert.
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].WS != "w1" {
+		t.Fatalf("verb calls = %+v, want one close of w1", f.verbs.calls)
+	}
+}
+
+func TestApplyFileRefusesAnEntryWhoseDirDisagreesWithTheRegistry(t *testing.T) {
+	// Arrange: the command-file channel is held to the same mismatch refusal as
+	// the wire.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	path := f.write(t, "workspace_commands_d.json",
+		`[{"type":"close","workspace":"w1","dir":"/somewhere/else"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyFile(mismatched dir) = nil error, want the refusal surfaced")
+	}
+	if len(f.verbs.calls) != 0 {
+		t.Fatalf("verb calls = %v, want none", verbNames(f.verbs.calls))
+	}
+}
+
+func TestApplyFileSurfacesAVerbFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.verbs.err = errors.New("the workspace is not quiet")
+	path := f.write(t, "workspace_commands_e.json", `[{"type":"close","workspace":"w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyFile() = nil error, want the verb failure surfaced")
+	}
+}
+
+func TestApplyFileAppliesEveryEntryEvenWhenOneFails(t *testing.T) {
+	// Arrange: the entries were all validated, so a later one is still owed its
+	// attempt when an earlier one's verb refuses.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.merge.err = errors.New("no layout facts")
+	path := f.write(t, "workspace_commands_e.json",
+		`[{"type":"merge","workspace":"w1"},{"type":"close","workspace":"w1"}]`)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), path)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyFile() = nil error, want the merge failure surfaced")
+	}
+	if len(f.verbs.calls) != 1 || f.verbs.calls[0].Verb != "close" {
+		t.Fatalf("verb calls = %v, want the close still attempted", verbNames(f.verbs.calls))
+	}
+}
+
+func TestApplyFileRefusesAMissingFile(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	err := f.ingress.ApplyFile(context.Background(), filepath.Join(f.dir, "workspace_commands_gone.json"))
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyFile(missing) = nil error, want the claim failure surfaced")
+	}
+}
+
+func TestSettledAcceptsAnAgedFile(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	path := f.write(t, "workspace_commands_a.json", `[{"type":"task-create","title":"t"}]`)
+
+	// Act.
+	got, err := f.ingress.(*ingress).settled(path)
+
+	// Assert.
+	if err != nil || !got {
+		t.Fatalf("settled() = (%v, %v), want a settled file", got, err)
+	}
+}
+
+func TestSettledLeavesAYoungHalfWrittenFile(t *testing.T) {
+	// Arrange: a file still mid-token must never be ingested.
+	f := newFixture(t)
+	path := filepath.Join(f.dir, "workspace_commands_young.json")
+	if err := os.WriteFile(path, []byte(`[{"type":"task-cre`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f.now = time.Now()
+
+	// Act.
+	got, err := f.ingress.(*ingress).settled(path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("settled: %v", err)
+	}
+	if got {
+		t.Fatal("settled() accepted a young, half-written file")
+	}
+}
+
+func TestSettledAcceptsAYoungButCompleteFile(t *testing.T) {
+	// Arrange: a complete document needs no settling window.
+	f := newFixture(t)
+	path := filepath.Join(f.dir, "workspace_commands_young.json")
+	if err := os.WriteFile(path, []byte(`[{"type":"task-create","title":"t"}]`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f.now = time.Now()
+
+	// Act.
+	got, err := f.ingress.(*ingress).settled(path)
+
+	// Assert.
+	if err != nil || !got {
+		t.Fatalf("settled() = (%v, %v), want the complete document accepted", got, err)
+	}
+}
+
+func TestRunAppliesAFileAndStops(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.write(t, "workspace_commands_r.json", `[{"type":"merge","workspace":"w1"}]`)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the first sweep runs before the loop ever selects on the ticker, so
+	// cancelling immediately still leaves the file applied.
+	cancel()
+	err := f.ingress.Run(ctx)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() = %v, want the cancellation", err)
+	}
+	if len(f.merge.enqueued) != 1 {
+		t.Fatalf("enqueued merges = %v, want the file applied by the first sweep", f.merge.enqueued)
+	}
+}
+
+func TestRunIgnoresAFileTheGlobDoesNotMatch(t *testing.T) {
+	// Arrange: producers write through a dot-prefixed temp name the glob cannot
+	// claim, then rename into place.
+	f := newFixture(t)
+	f.workspace("w1", "/tree/w1")
+	f.write(t, ".workspace_commands_tmp.json", `[{"type":"merge","workspace":"w1"}]`)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act.
+	cancel()
+	_ = f.ingress.Run(ctx)
+
+	// Assert.
+	if len(f.merge.enqueued) != 0 {
+		t.Fatalf("enqueued merges = %v, want none from an unmatched name", f.merge.enqueued)
+	}
+}
+
+func TestSaidTextIsTheSharedPromptComposition(t *testing.T) {
+	// Arrange: the ingress composes prompts exactly as the creation verb does.
+	// Act.
+	said := workspace.SaidText("hello")
+
+	// Assert.
+	if said.GetContent().GetBlocks()[0].GetText().GetText() != "hello" {
+		t.Fatalf("SaidText() = %v, want one text block", said)
+	}
+}

@@ -1,0 +1,297 @@
+package wsm
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
+
+func TestPutSessionRoundTripsTheSpawnIdentity(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	session := Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}
+
+	// Act
+	if err := s.PutSession(context.Background(), session); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	got, found, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if !found {
+		t.Fatalf("found = false for a recorded session")
+	}
+	if got.VendorSessionID != "vendor-1" || got.ConfigDir != "/root/.claude" || got.Model != "opus" || got.PermissionMode != "default" {
+		t.Fatalf("session = %+v, want %+v", got, session)
+	}
+	if got.Terminal != nil {
+		t.Fatalf("terminal = %+v on a live session, want nil", got.Terminal)
+	}
+}
+
+func TestSessionReportsAbsence(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	_, found, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if found {
+		t.Fatalf("found = true with no session recorded")
+	}
+}
+
+func TestSetSessionTerminalPersistsTheCause(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	terminal := SessionTerminal{Kind: "shim_died", Detail: "exit status 1", At: instant}
+
+	// Act
+	if err := s.SetSessionTerminal(context.Background(), ws.ID, terminal); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+
+	// Assert
+	got, _, err := s.Session(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.Terminal == nil || got.Terminal.Kind != "shim_died" || got.Terminal.Detail != "exit status 1" || !got.Terminal.At.Equal(instant) {
+		t.Fatalf("terminal = %+v, want %+v", got.Terminal, terminal)
+	}
+}
+
+func TestSetSessionTerminalRefusesAnUnknownSession(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "killed", At: instant})
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetSessionTerminal = %v, want ErrNotFound", err)
+	}
+}
+
+func TestPutSessionRefusesResurrectionOfADeletedSession(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	if err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "deleted", At: instant}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+
+	// Act
+	err := s.PutSession(context.Background(), Session{Workspace: ws.ID, VendorSessionID: "second", StartedAt: instant, LastEngagementAt: instant})
+
+	// Assert
+	if !errors.Is(err, ErrSessionDeleted) {
+		t.Fatalf("PutSession = %v, want ErrSessionDeleted", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.put_session", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+}
+
+func TestSetSessionTerminalRefusesReterminatingADeletedSession(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	if err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "deleted", At: instant}); err != nil {
+		t.Fatalf("SetSessionTerminal: %v", err)
+	}
+
+	// Act
+	err := s.SetSessionTerminal(context.Background(), ws.ID, SessionTerminal{Kind: "killed", At: instant})
+
+	// Assert
+	if !errors.Is(err, ErrSessionDeleted) {
+		t.Fatalf("SetSessionTerminal = %v, want ErrSessionDeleted", err)
+	}
+}
+
+func TestTouchEngagementStampsTheIdleSweepsInput(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	later := instant.Add(time.Hour)
+
+	// Act
+	if err := s.TouchEngagement(context.Background(), ws.ID, later); err != nil {
+		t.Fatalf("TouchEngagement: %v", err)
+	}
+
+	// Assert
+	got, _, err := s.Session(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if !got.LastEngagementAt.Equal(later) {
+		t.Fatalf("last engagement = %v, want %v", got.LastEngagementAt, later)
+	}
+}
+
+func TestTouchEngagementRefusesAnUnknownSession(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	err := s.TouchEngagement(context.Background(), ws.ID, instant)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("TouchEngagement = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSessionFailsWholeOnAHalfWrittenTerminal(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{Workspace: ws.ID, StartedAt: instant, LastEngagementAt: instant}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	corrupt(t, s, `UPDATE sessions SET terminal_at = 1 WHERE workspace_id = ?`, ws.ID)
+
+	// Act
+	_, found, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	var refusal *DecodeError
+	if !errors.As(err, &refusal) || refusal.Table != "sessions" || refusal.Field != "terminal" {
+		t.Fatalf("Session = %v, want a *DecodeError naming sessions.terminal", err)
+	}
+	if found {
+		t.Fatalf("found = true alongside the refusal")
+	}
+	if !loggedOperation(log, "daemon.wsm.session", "error") {
+		t.Fatalf("the decode failure was not logged at error: %v", log.Records())
+	}
+}
+
+func TestSetShimPIDRoundTripsTheManifestPid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	pid := 4242
+
+	// Act
+	if err := s.SetShimPID(context.Background(), ws.ID, &pid); err != nil {
+		t.Fatalf("SetShimPID: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.ShimPID == nil || *got.ShimPID != pid {
+		t.Fatalf("shim pid = %v, want %d", got.ShimPID, pid)
+	}
+}
+
+func TestSetShimPIDClearsThePidAtStandDown(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	pid := 4242
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+		ShimPID: &pid,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+
+	// Act
+	if err := s.SetShimPID(context.Background(), ws.ID, nil); err != nil {
+		t.Fatalf("SetShimPID: %v", err)
+	}
+	got, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Session: %v", err)
+	}
+	if got.ShimPID != nil {
+		t.Fatalf("shim pid = %d, want nil after a stand-down", *got.ShimPID)
+	}
+}
+
+func TestSetShimPIDRefusesANonPositivePid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	zero := 0
+
+	// Act
+	err := s.SetShimPID(context.Background(), ws.ID, &zero)
+
+	// Assert
+	if err == nil {
+		t.Fatalf("SetShimPID accepted a non-positive pid")
+	}
+}
+
+func TestSessionRefusesACorruptShimPid(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	if err := s.PutSession(context.Background(), Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/root/.claude",
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	corrupt(t, s, `UPDATE sessions SET shim_pid = -1 WHERE workspace_id = ?`, ws.ID)
+
+	// Act
+	_, _, err := s.Session(context.Background(), ws.ID)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) {
+		t.Fatalf("Session error = %v, want a DecodeError for a corrupt shim pid", err)
+	}
+}

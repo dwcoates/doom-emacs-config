@@ -195,10 +195,17 @@ func (*KillWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unregistered
-// workspace; nothing live to kill is a SUCCESS, not an error).
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type KillWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*KillWorkspaceError_UnknownWorkspace
+	//	*KillWorkspaceError_WorkspaceRefMismatch
+	//	*KillWorkspaceError_TransferringAway
+	//	*KillWorkspaceError_NotYetAdopted
+	Cause         isKillWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -233,6 +240,243 @@ func (*KillWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *KillWorkspaceError) GetCause() isKillWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *KillWorkspaceError) GetUnknownWorkspace() *KillWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*KillWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *KillWorkspaceError) GetWorkspaceRefMismatch() *KillWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*KillWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *KillWorkspaceError) GetTransferringAway() *KillWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*KillWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *KillWorkspaceError) GetNotYetAdopted() *KillWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*KillWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+type isKillWorkspaceError_Cause interface {
+	isKillWorkspaceError_Cause()
+}
+
+type KillWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *KillWorkspaceUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type KillWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *KillWorkspaceWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type KillWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *KillWorkspaceTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type KillWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *KillWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+func (*KillWorkspaceError_UnknownWorkspace) isKillWorkspaceError_Cause() {}
+
+func (*KillWorkspaceError_WorkspaceRefMismatch) isKillWorkspaceError_Cause() {}
+
+func (*KillWorkspaceError_TransferringAway) isKillWorkspaceError_Cause() {}
+
+func (*KillWorkspaceError_NotYetAdopted) isKillWorkspaceError_Cause() {}
+
+type KillWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillWorkspaceUnknownWorkspace) Reset() {
+	*x = KillWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *KillWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*KillWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+type KillWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = KillWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *KillWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*KillWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *KillWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type KillWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillWorkspaceTransferringAway) Reset() {
+	*x = KillWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *KillWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*KillWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *KillWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type KillWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KillWorkspaceNotYetAdopted) Reset() {
+	*x = KillWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KillWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KillWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *KillWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KillWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*KillWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP(), []int{7}
+}
+
 var File_agentrepl_v1_endpoint_kill_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
@@ -244,8 +488,19 @@ const file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\".agentrepl.v1.KillWorkspaceSuccessH\x00R\asuccess\x128\n" +
 	"\x05error\x18\x02 \x01(\v2 .agentrepl.v1.KillWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x16\n" +
-	"\x14KillWorkspaceSuccess\"\x14\n" +
-	"\x12KillWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x14KillWorkspaceSuccess\"\x92\x03\n" +
+	"\x12KillWorkspaceError\x12Z\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2+.agentrepl.v1.KillWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12g\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2/.agentrepl.v1.KillWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12Z\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2+.agentrepl.v1.KillWorkspaceTransferringAwayH\x00R\x10transferringAway\x12R\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2(.agentrepl.v1.KillWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x05cause\"\x1f\n" +
+	"\x1dKillWorkspaceUnknownWorkspace\"F\n" +
+	"!KillWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"9\n" +
+	"\x1dKillWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1c\n" +
+	"\x1aKillWorkspaceNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescOnce sync.Once
@@ -259,23 +514,31 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_kill_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_kill_workspace_proto_goTypes = []any{
-	(*KillWorkspaceRequest)(nil),  // 0: agentrepl.v1.KillWorkspaceRequest
-	(*KillWorkspaceResponse)(nil), // 1: agentrepl.v1.KillWorkspaceResponse
-	(*KillWorkspaceSuccess)(nil),  // 2: agentrepl.v1.KillWorkspaceSuccess
-	(*KillWorkspaceError)(nil),    // 3: agentrepl.v1.KillWorkspaceError
-	(*v1.WorkspaceRef)(nil),       // 4: workspace.v1.WorkspaceRef
+	(*KillWorkspaceRequest)(nil),              // 0: agentrepl.v1.KillWorkspaceRequest
+	(*KillWorkspaceResponse)(nil),             // 1: agentrepl.v1.KillWorkspaceResponse
+	(*KillWorkspaceSuccess)(nil),              // 2: agentrepl.v1.KillWorkspaceSuccess
+	(*KillWorkspaceError)(nil),                // 3: agentrepl.v1.KillWorkspaceError
+	(*KillWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.KillWorkspaceUnknownWorkspace
+	(*KillWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
+	(*KillWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.KillWorkspaceTransferringAway
+	(*KillWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.KillWorkspaceNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                   // 8: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_kill_workspace_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.KillWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	8, // 0: agentrepl.v1.KillWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.KillWorkspaceResponse.success:type_name -> agentrepl.v1.KillWorkspaceSuccess
 	3, // 2: agentrepl.v1.KillWorkspaceResponse.error:type_name -> agentrepl.v1.KillWorkspaceError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: agentrepl.v1.KillWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.KillWorkspaceUnknownWorkspace
+	5, // 4: agentrepl.v1.KillWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.KillWorkspaceWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.KillWorkspaceError.transferring_away:type_name -> agentrepl.v1.KillWorkspaceTransferringAway
+	7, // 6: agentrepl.v1.KillWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.KillWorkspaceNotYetAdopted
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_kill_workspace_proto_init() }
@@ -287,13 +550,19 @@ func file_agentrepl_v1_endpoint_kill_workspace_proto_init() {
 		(*KillWorkspaceResponse_Success)(nil),
 		(*KillWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_kill_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*KillWorkspaceError_UnknownWorkspace)(nil),
+		(*KillWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*KillWorkspaceError_TransferringAway)(nil),
+		(*KillWorkspaceError_NotYetAdopted)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_kill_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

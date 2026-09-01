@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_detach_foreground.proto.
  */
 export const file_shim_v1_endpoint_detach_foreground: GenFile = /*@__PURE__*/
-  fileDesc("CihzaGltL3YxL2VuZHBvaW50X2RldGFjaF9mb3JlZ3JvdW5kLnByb3RvEgdzaGltLnYxIkkKF0RldGFjaEZvcmVncm91bmRSZXF1ZXN0Ei4KBHVuaXQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkIo4BChhEZXRhY2hGb3JlZ3JvdW5kUmVzcG9uc2USMwoHc3VjY2VzcxgBIAEoCzIgLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFN1Y2Nlc3NIABIzCgdmYWlsdXJlGAIgASgLMiAuc2hpbS52MS5EZXRhY2hGb3JlZ3JvdW5kRmFpbHVyZUgAQggKBnJlc3VsdCIZChdEZXRhY2hGb3JlZ3JvdW5kU3VjY2VzcyKzAgoXRGV0YWNoRm9yZWdyb3VuZEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjwKDHVua25vd25fdW5pdBgCIAEoCzIkLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFVua25vd25Vbml0SAASRgoRYWxyZWFkeV9jb25jbHVkZWQYAyABKAsyKS5zaGltLnYxLkRldGFjaEZvcmVncm91bmRBbHJlYWR5Q29uY2x1ZGVkSAASQAoObm90X2RldGFjaGFibGUYBCABKAsyJi5zaGltLnYxLkRldGFjaEZvcmVncm91bmROb3REZXRhY2hhYmxlSAASOAoKbm9fc2Vzc2lvbhgFIAEoCzIiLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZE5vU2Vzc2lvbkgAQgYKBGtpbmQiHQobRGV0YWNoRm9yZWdyb3VuZFVua25vd25Vbml0IiIKIERldGFjaEZvcmVncm91bmRBbHJlYWR5Q29uY2x1ZGVkIh8KHURldGFjaEZvcmVncm91bmROb3REZXRhY2hhYmxlIhsKGURldGFjaEZvcmVncm91bmROb1Nlc3Npb25CIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent_activity]);
+  fileDesc("CihzaGltL3YxL2VuZHBvaW50X2RldGFjaF9mb3JlZ3JvdW5kLnByb3RvEgdzaGltLnYxIkkKF0RldGFjaEZvcmVncm91bmRSZXF1ZXN0Ei4KBHVuaXQYASABKAsyIC5jb252ZXJzYXRpb24udjEuQWdlbnRBY3Rpdml0eUlkIo4BChhEZXRhY2hGb3JlZ3JvdW5kUmVzcG9uc2USMwoHc3VjY2VzcxgBIAEoCzIgLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFN1Y2Nlc3NIABIzCgdmYWlsdXJlGAIgASgLMiAuc2hpbS52MS5EZXRhY2hGb3JlZ3JvdW5kRmFpbHVyZUgAQggKBnJlc3VsdCIZChdEZXRhY2hGb3JlZ3JvdW5kU3VjY2VzcyLwAgoXRGV0YWNoRm9yZWdyb3VuZEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjwKDHVua25vd25fdW5pdBgCIAEoCzIkLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZFVua25vd25Vbml0SAASRgoRYWxyZWFkeV9jb25jbHVkZWQYAyABKAsyKS5zaGltLnYxLkRldGFjaEZvcmVncm91bmRBbHJlYWR5Q29uY2x1ZGVkSAASQAoObm90X2RldGFjaGFibGUYBCABKAsyJi5zaGltLnYxLkRldGFjaEZvcmVncm91bmROb3REZXRhY2hhYmxlSAASOAoKbm9fc2Vzc2lvbhgFIAEoCzIiLnNoaW0udjEuRGV0YWNoRm9yZWdyb3VuZE5vU2Vzc2lvbkgAEjsKC3Vuc3VwcG9ydGVkGAYgASgLMiQuc2hpbS52MS5EZXRhY2hGb3JlZ3JvdW5kVW5zdXBwb3J0ZWRIAEIGCgRraW5kIh0KG0RldGFjaEZvcmVncm91bmRVbmtub3duVW5pdCIiCiBEZXRhY2hGb3JlZ3JvdW5kQWxyZWFkeUNvbmNsdWRlZCIfCh1EZXRhY2hGb3JlZ3JvdW5kTm90RGV0YWNoYWJsZSIbChlEZXRhY2hGb3JlZ3JvdW5kTm9TZXNzaW9uIh0KG0RldGFjaEZvcmVncm91bmRVbnN1cHBvcnRlZEIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_agent_activity]);
 
 /**
  * What to background.
@@ -133,6 +133,17 @@ export type DetachForegroundFailure = Message<"shim.v1.DetachForegroundFailure">
      */
     value: DetachForegroundNoSession;
     case: "noSession";
+  } | {
+    /**
+     * The unit is detachable in kind and still in flight, but the vendor
+     * offers NO VERB to initiate a detachment on the pinned SDK: the shim can
+     * only observe detachments the vendor made on its own (announced on the
+     * turn's stream as `detached_work.detached`), never cause one.
+     *
+     * @generated from field: shim.v1.DetachForegroundUnsupported unsupported = 6;
+     */
+    value: DetachForegroundUnsupported;
+    case: "unsupported";
   } | { case: undefined; value?: undefined };
 };
 
@@ -194,4 +205,17 @@ export type DetachForegroundNoSession = Message<"shim.v1.DetachForegroundNoSessi
  */
 export const DetachForegroundNoSessionSchema: GenMessage<DetachForegroundNoSession> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_detach_foreground, 7);
+
+/**
+ * @generated from message shim.v1.DetachForegroundUnsupported
+ */
+export type DetachForegroundUnsupported = Message<"shim.v1.DetachForegroundUnsupported"> & {
+};
+
+/**
+ * Describes the message shim.v1.DetachForegroundUnsupported.
+ * Use `create(DetachForegroundUnsupportedSchema)` to create a new message.
+ */
+export const DetachForegroundUnsupportedSchema: GenMessage<DetachForegroundUnsupported> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_detach_foreground, 8);
 

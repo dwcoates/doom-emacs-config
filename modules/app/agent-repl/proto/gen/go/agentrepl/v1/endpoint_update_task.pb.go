@@ -372,10 +372,16 @@ func (*UpdateTaskSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_task_proto_rawDescGZIP(), []int{5}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown task, blank
-// title, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type UpdateTaskError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*UpdateTaskError_BlankTitle
+	//	*UpdateTaskError_NoChange
+	//	*UpdateTaskError_UnknownTask
+	Cause         isUpdateTaskError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -410,6 +416,173 @@ func (*UpdateTaskError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_task_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *UpdateTaskError) GetCause() isUpdateTaskError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *UpdateTaskError) GetBlankTitle() *UpdateTaskBlankTitle {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateTaskError_BlankTitle); ok {
+			return x.BlankTitle
+		}
+	}
+	return nil
+}
+
+func (x *UpdateTaskError) GetNoChange() *UpdateTaskNoChange {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateTaskError_NoChange); ok {
+			return x.NoChange
+		}
+	}
+	return nil
+}
+
+func (x *UpdateTaskError) GetUnknownTask() *UpdateTaskUnknownTask {
+	if x != nil {
+		if x, ok := x.Cause.(*UpdateTaskError_UnknownTask); ok {
+			return x.UnknownTask
+		}
+	}
+	return nil
+}
+
+type isUpdateTaskError_Cause interface {
+	isUpdateTaskError_Cause()
+}
+
+type UpdateTaskError_BlankTitle struct {
+	// The new title is blank once trimmed.
+	BlankTitle *UpdateTaskBlankTitle `protobuf:"bytes,1,opt,name=blank_title,json=blankTitle,proto3,oneof"`
+}
+
+type UpdateTaskError_NoChange struct {
+	// The change asked for is what the task already holds.
+	NoChange *UpdateTaskNoChange `protobuf:"bytes,2,opt,name=no_change,json=noChange,proto3,oneof"`
+}
+
+type UpdateTaskError_UnknownTask struct {
+	// No task by that id.
+	UnknownTask *UpdateTaskUnknownTask `protobuf:"bytes,3,opt,name=unknown_task,json=unknownTask,proto3,oneof"`
+}
+
+func (*UpdateTaskError_BlankTitle) isUpdateTaskError_Cause() {}
+
+func (*UpdateTaskError_NoChange) isUpdateTaskError_Cause() {}
+
+func (*UpdateTaskError_UnknownTask) isUpdateTaskError_Cause() {}
+
+type UpdateTaskBlankTitle struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTaskBlankTitle) Reset() {
+	*x = UpdateTaskBlankTitle{}
+	mi := &file_agentrepl_v1_endpoint_update_task_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTaskBlankTitle) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTaskBlankTitle) ProtoMessage() {}
+
+func (x *UpdateTaskBlankTitle) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_task_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTaskBlankTitle.ProtoReflect.Descriptor instead.
+func (*UpdateTaskBlankTitle) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_task_proto_rawDescGZIP(), []int{7}
+}
+
+type UpdateTaskNoChange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTaskNoChange) Reset() {
+	*x = UpdateTaskNoChange{}
+	mi := &file_agentrepl_v1_endpoint_update_task_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTaskNoChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTaskNoChange) ProtoMessage() {}
+
+func (x *UpdateTaskNoChange) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_task_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTaskNoChange.ProtoReflect.Descriptor instead.
+func (*UpdateTaskNoChange) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_task_proto_rawDescGZIP(), []int{8}
+}
+
+type UpdateTaskUnknownTask struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateTaskUnknownTask) Reset() {
+	*x = UpdateTaskUnknownTask{}
+	mi := &file_agentrepl_v1_endpoint_update_task_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateTaskUnknownTask) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateTaskUnknownTask) ProtoMessage() {}
+
+func (x *UpdateTaskUnknownTask) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_update_task_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateTaskUnknownTask.ProtoReflect.Descriptor instead.
+func (*UpdateTaskUnknownTask) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_update_task_proto_rawDescGZIP(), []int{9}
+}
+
 var File_agentrepl_v1_endpoint_update_task_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_update_task_proto_rawDesc = "" +
@@ -429,8 +602,16 @@ const file_agentrepl_v1_endpoint_update_task_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\x1f.agentrepl.v1.UpdateTaskSuccessH\x00R\asuccess\x125\n" +
 	"\x05error\x18\x02 \x01(\v2\x1d.agentrepl.v1.UpdateTaskErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x13\n" +
-	"\x11UpdateTaskSuccess\"\x11\n" +
-	"\x0fUpdateTaskErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x11UpdateTaskSuccess\"\xec\x01\n" +
+	"\x0fUpdateTaskError\x12E\n" +
+	"\vblank_title\x18\x01 \x01(\v2\".agentrepl.v1.UpdateTaskBlankTitleH\x00R\n" +
+	"blankTitle\x12?\n" +
+	"\tno_change\x18\x02 \x01(\v2 .agentrepl.v1.UpdateTaskNoChangeH\x00R\bnoChange\x12H\n" +
+	"\funknown_task\x18\x03 \x01(\v2#.agentrepl.v1.UpdateTaskUnknownTaskH\x00R\vunknownTaskB\a\n" +
+	"\x05cause\"\x16\n" +
+	"\x14UpdateTaskBlankTitle\"\x14\n" +
+	"\x12UpdateTaskNoChange\"\x17\n" +
+	"\x15UpdateTaskUnknownTaskB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_update_task_proto_rawDescOnce sync.Once
@@ -444,29 +625,35 @@ func file_agentrepl_v1_endpoint_update_task_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_update_task_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_update_task_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_agentrepl_v1_endpoint_update_task_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_update_task_proto_goTypes = []any{
-	(*UpdateTaskRequest)(nil),  // 0: agentrepl.v1.UpdateTaskRequest
-	(*UpdateTaskSetTitle)(nil), // 1: agentrepl.v1.UpdateTaskSetTitle
-	(*UpdateTaskSetDone)(nil),  // 2: agentrepl.v1.UpdateTaskSetDone
-	(*UpdateTaskSetOpen)(nil),  // 3: agentrepl.v1.UpdateTaskSetOpen
-	(*UpdateTaskResponse)(nil), // 4: agentrepl.v1.UpdateTaskResponse
-	(*UpdateTaskSuccess)(nil),  // 5: agentrepl.v1.UpdateTaskSuccess
-	(*UpdateTaskError)(nil),    // 6: agentrepl.v1.UpdateTaskError
-	(*TaskRef)(nil),            // 7: agentrepl.v1.TaskRef
+	(*UpdateTaskRequest)(nil),     // 0: agentrepl.v1.UpdateTaskRequest
+	(*UpdateTaskSetTitle)(nil),    // 1: agentrepl.v1.UpdateTaskSetTitle
+	(*UpdateTaskSetDone)(nil),     // 2: agentrepl.v1.UpdateTaskSetDone
+	(*UpdateTaskSetOpen)(nil),     // 3: agentrepl.v1.UpdateTaskSetOpen
+	(*UpdateTaskResponse)(nil),    // 4: agentrepl.v1.UpdateTaskResponse
+	(*UpdateTaskSuccess)(nil),     // 5: agentrepl.v1.UpdateTaskSuccess
+	(*UpdateTaskError)(nil),       // 6: agentrepl.v1.UpdateTaskError
+	(*UpdateTaskBlankTitle)(nil),  // 7: agentrepl.v1.UpdateTaskBlankTitle
+	(*UpdateTaskNoChange)(nil),    // 8: agentrepl.v1.UpdateTaskNoChange
+	(*UpdateTaskUnknownTask)(nil), // 9: agentrepl.v1.UpdateTaskUnknownTask
+	(*TaskRef)(nil),               // 10: agentrepl.v1.TaskRef
 }
 var file_agentrepl_v1_endpoint_update_task_proto_depIdxs = []int32{
-	7, // 0: agentrepl.v1.UpdateTaskRequest.task:type_name -> agentrepl.v1.TaskRef
-	1, // 1: agentrepl.v1.UpdateTaskRequest.set_title:type_name -> agentrepl.v1.UpdateTaskSetTitle
-	2, // 2: agentrepl.v1.UpdateTaskRequest.set_done:type_name -> agentrepl.v1.UpdateTaskSetDone
-	3, // 3: agentrepl.v1.UpdateTaskRequest.set_open:type_name -> agentrepl.v1.UpdateTaskSetOpen
-	5, // 4: agentrepl.v1.UpdateTaskResponse.success:type_name -> agentrepl.v1.UpdateTaskSuccess
-	6, // 5: agentrepl.v1.UpdateTaskResponse.error:type_name -> agentrepl.v1.UpdateTaskError
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	10, // 0: agentrepl.v1.UpdateTaskRequest.task:type_name -> agentrepl.v1.TaskRef
+	1,  // 1: agentrepl.v1.UpdateTaskRequest.set_title:type_name -> agentrepl.v1.UpdateTaskSetTitle
+	2,  // 2: agentrepl.v1.UpdateTaskRequest.set_done:type_name -> agentrepl.v1.UpdateTaskSetDone
+	3,  // 3: agentrepl.v1.UpdateTaskRequest.set_open:type_name -> agentrepl.v1.UpdateTaskSetOpen
+	5,  // 4: agentrepl.v1.UpdateTaskResponse.success:type_name -> agentrepl.v1.UpdateTaskSuccess
+	6,  // 5: agentrepl.v1.UpdateTaskResponse.error:type_name -> agentrepl.v1.UpdateTaskError
+	7,  // 6: agentrepl.v1.UpdateTaskError.blank_title:type_name -> agentrepl.v1.UpdateTaskBlankTitle
+	8,  // 7: agentrepl.v1.UpdateTaskError.no_change:type_name -> agentrepl.v1.UpdateTaskNoChange
+	9,  // 8: agentrepl.v1.UpdateTaskError.unknown_task:type_name -> agentrepl.v1.UpdateTaskUnknownTask
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_task_proto_init() }
@@ -484,13 +671,18 @@ func file_agentrepl_v1_endpoint_update_task_proto_init() {
 		(*UpdateTaskResponse_Success)(nil),
 		(*UpdateTaskResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_update_task_proto_msgTypes[6].OneofWrappers = []any{
+		(*UpdateTaskError_BlankTitle)(nil),
+		(*UpdateTaskError_NoChange)(nil),
+		(*UpdateTaskError_UnknownTask)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_update_task_proto_rawDesc), len(file_agentrepl_v1_endpoint_update_task_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

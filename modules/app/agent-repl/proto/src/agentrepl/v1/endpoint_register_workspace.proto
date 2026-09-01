@@ -33,7 +33,12 @@ message RegisterWorkspaceSuccess {
   // view uses; the path the host sent is never the identity.
   workspace.v1.WorkspaceRef workspace = 1;
 }
-// EMPTY ON PURPOSE: arms DERIVED at the wave (dir does not exist, not a
-// worktree the daemon can adopt, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message RegisterWorkspaceError {
+  oneof cause {
+    // The dir exists but is not a git worktree the daemon can adopt.
+    RegisterWorkspaceNotAWorktree not_a_worktree = 1;
+  }
 }
+message RegisterWorkspaceNotAWorktree {}

@@ -325,11 +325,21 @@ func (*AnswerQuestionSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{4}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown card, already
-// answered or expired, an echoed question or label the batch never served,
-// a multi-pick on a single-select).
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type AnswerQuestionError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*AnswerQuestionError_UnknownWorkspace
+	//	*AnswerQuestionError_WorkspaceRefMismatch
+	//	*AnswerQuestionError_TransferringAway
+	//	*AnswerQuestionError_NotYetAdopted
+	//	*AnswerQuestionError_AskNotStanding
+	//	*AnswerQuestionError_UnservedValue
+	//	*AnswerQuestionError_MultiPickOnSingleSelect
+	//	*AnswerQuestionError_NoSession
+	Cause         isAnswerQuestionError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -364,6 +374,460 @@ func (*AnswerQuestionError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{5}
 }
 
+func (x *AnswerQuestionError) GetCause() isAnswerQuestionError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetUnknownWorkspace() *AnswerQuestionUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetWorkspaceRefMismatch() *AnswerQuestionWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetTransferringAway() *AnswerQuestionTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetNotYetAdopted() *AnswerQuestionNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetAskNotStanding() *AnswerQuestionAskNotStanding {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_AskNotStanding); ok {
+			return x.AskNotStanding
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetUnservedValue() *AnswerQuestionUnservedValue {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_UnservedValue); ok {
+			return x.UnservedValue
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetMultiPickOnSingleSelect() *AnswerQuestionMultiPickOnSingleSelect {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_MultiPickOnSingleSelect); ok {
+			return x.MultiPickOnSingleSelect
+		}
+	}
+	return nil
+}
+
+func (x *AnswerQuestionError) GetNoSession() *AnswerQuestionNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*AnswerQuestionError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+type isAnswerQuestionError_Cause interface {
+	isAnswerQuestionError_Cause()
+}
+
+type AnswerQuestionError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *AnswerQuestionUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type AnswerQuestionError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *AnswerQuestionWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type AnswerQuestionError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *AnswerQuestionTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type AnswerQuestionError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *AnswerQuestionNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type AnswerQuestionError_AskNotStanding struct {
+	// The question card is no longer standing.
+	AskNotStanding *AnswerQuestionAskNotStanding `protobuf:"bytes,5,opt,name=ask_not_standing,json=askNotStanding,proto3,oneof"`
+}
+
+type AnswerQuestionError_UnservedValue struct {
+	// A question text or option label the batch never served.
+	UnservedValue *AnswerQuestionUnservedValue `protobuf:"bytes,6,opt,name=unserved_value,json=unservedValue,proto3,oneof"`
+}
+
+type AnswerQuestionError_MultiPickOnSingleSelect struct {
+	// Several options were picked on a single-select question.
+	MultiPickOnSingleSelect *AnswerQuestionMultiPickOnSingleSelect `protobuf:"bytes,7,opt,name=multi_pick_on_single_select,json=multiPickOnSingleSelect,proto3,oneof"`
+}
+
+type AnswerQuestionError_NoSession struct {
+	// The workspace has no session to answer to.
+	NoSession *AnswerQuestionNoSession `protobuf:"bytes,8,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+func (*AnswerQuestionError_UnknownWorkspace) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_WorkspaceRefMismatch) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_TransferringAway) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_NotYetAdopted) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_AskNotStanding) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_UnservedValue) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_MultiPickOnSingleSelect) isAnswerQuestionError_Cause() {}
+
+func (*AnswerQuestionError_NoSession) isAnswerQuestionError_Cause() {}
+
+type AnswerQuestionUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionUnknownWorkspace) Reset() {
+	*x = AnswerQuestionUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionUnknownWorkspace) ProtoMessage() {}
+
+func (x *AnswerQuestionUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{6}
+}
+
+type AnswerQuestionWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionWorkspaceRefMismatch) Reset() {
+	*x = AnswerQuestionWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *AnswerQuestionWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AnswerQuestionWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type AnswerQuestionTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionTransferringAway) Reset() {
+	*x = AnswerQuestionTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionTransferringAway) ProtoMessage() {}
+
+func (x *AnswerQuestionTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionTransferringAway.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AnswerQuestionTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type AnswerQuestionNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionNotYetAdopted) Reset() {
+	*x = AnswerQuestionNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionNotYetAdopted) ProtoMessage() {}
+
+func (x *AnswerQuestionNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{9}
+}
+
+type AnswerQuestionAskNotStanding struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionAskNotStanding) Reset() {
+	*x = AnswerQuestionAskNotStanding{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionAskNotStanding) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionAskNotStanding) ProtoMessage() {}
+
+func (x *AnswerQuestionAskNotStanding) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionAskNotStanding.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionAskNotStanding) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{10}
+}
+
+type AnswerQuestionUnservedValue struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The unserved text, as echoed.
+	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionUnservedValue) Reset() {
+	*x = AnswerQuestionUnservedValue{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionUnservedValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionUnservedValue) ProtoMessage() {}
+
+func (x *AnswerQuestionUnservedValue) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionUnservedValue.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionUnservedValue) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AnswerQuestionUnservedValue) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type AnswerQuestionMultiPickOnSingleSelect struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionMultiPickOnSingleSelect) Reset() {
+	*x = AnswerQuestionMultiPickOnSingleSelect{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionMultiPickOnSingleSelect) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionMultiPickOnSingleSelect) ProtoMessage() {}
+
+func (x *AnswerQuestionMultiPickOnSingleSelect) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionMultiPickOnSingleSelect.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionMultiPickOnSingleSelect) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{12}
+}
+
+type AnswerQuestionNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AnswerQuestionNoSession) Reset() {
+	*x = AnswerQuestionNoSession{}
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AnswerQuestionNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AnswerQuestionNoSession) ProtoMessage() {}
+
+func (x *AnswerQuestionNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AnswerQuestionNoSession.ProtoReflect.Descriptor instead.
+func (*AnswerQuestionNoSession) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP(), []int{13}
+}
+
 var File_agentrepl_v1_endpoint_answer_question_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_answer_question_proto_rawDesc = "" +
@@ -385,8 +849,29 @@ const file_agentrepl_v1_endpoint_answer_question_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.AnswerQuestionSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.AnswerQuestionErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x17\n" +
-	"\x15AnswerQuestionSuccess\"\x15\n" +
-	"\x13AnswerQuestionErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x15AnswerQuestionSuccess\"\x80\x06\n" +
+	"\x13AnswerQuestionError\x12[\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2,.agentrepl.v1.AnswerQuestionUnknownWorkspaceH\x00R\x10unknownWorkspace\x12h\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v20.agentrepl.v1.AnswerQuestionWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2,.agentrepl.v1.AnswerQuestionTransferringAwayH\x00R\x10transferringAway\x12S\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2).agentrepl.v1.AnswerQuestionNotYetAdoptedH\x00R\rnotYetAdopted\x12V\n" +
+	"\x10ask_not_standing\x18\x05 \x01(\v2*.agentrepl.v1.AnswerQuestionAskNotStandingH\x00R\x0easkNotStanding\x12R\n" +
+	"\x0eunserved_value\x18\x06 \x01(\v2).agentrepl.v1.AnswerQuestionUnservedValueH\x00R\runservedValue\x12s\n" +
+	"\x1bmulti_pick_on_single_select\x18\a \x01(\v23.agentrepl.v1.AnswerQuestionMultiPickOnSingleSelectH\x00R\x17multiPickOnSingleSelect\x12F\n" +
+	"\n" +
+	"no_session\x18\b \x01(\v2%.agentrepl.v1.AnswerQuestionNoSessionH\x00R\tnoSessionB\a\n" +
+	"\x05cause\" \n" +
+	"\x1eAnswerQuestionUnknownWorkspace\"G\n" +
+	"\"AnswerQuestionWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +
+	"\x1eAnswerQuestionTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1d\n" +
+	"\x1bAnswerQuestionNotYetAdopted\"\x1e\n" +
+	"\x1cAnswerQuestionAskNotStanding\"1\n" +
+	"\x1bAnswerQuestionUnservedValue\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\"'\n" +
+	"%AnswerQuestionMultiPickOnSingleSelect\"\x19\n" +
+	"\x17AnswerQuestionNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_answer_question_proto_rawDescOnce sync.Once
@@ -400,29 +885,45 @@ func file_agentrepl_v1_endpoint_answer_question_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_answer_question_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_answer_question_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_agentrepl_v1_endpoint_answer_question_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_answer_question_proto_goTypes = []any{
-	(*AnswerQuestionRequest)(nil),   // 0: agentrepl.v1.AnswerQuestionRequest
-	(*AnswerQuestionAnswer)(nil),    // 1: agentrepl.v1.AnswerQuestionAnswer
-	(*AnswerQuestionOtherText)(nil), // 2: agentrepl.v1.AnswerQuestionOtherText
-	(*AnswerQuestionResponse)(nil),  // 3: agentrepl.v1.AnswerQuestionResponse
-	(*AnswerQuestionSuccess)(nil),   // 4: agentrepl.v1.AnswerQuestionSuccess
-	(*AnswerQuestionError)(nil),     // 5: agentrepl.v1.AnswerQuestionError
-	(*v1.WorkspaceRef)(nil),         // 6: workspace.v1.WorkspaceRef
-	(*v11.FeedId)(nil),              // 7: frontend.v1.FeedId
+	(*AnswerQuestionRequest)(nil),                 // 0: agentrepl.v1.AnswerQuestionRequest
+	(*AnswerQuestionAnswer)(nil),                  // 1: agentrepl.v1.AnswerQuestionAnswer
+	(*AnswerQuestionOtherText)(nil),               // 2: agentrepl.v1.AnswerQuestionOtherText
+	(*AnswerQuestionResponse)(nil),                // 3: agentrepl.v1.AnswerQuestionResponse
+	(*AnswerQuestionSuccess)(nil),                 // 4: agentrepl.v1.AnswerQuestionSuccess
+	(*AnswerQuestionError)(nil),                   // 5: agentrepl.v1.AnswerQuestionError
+	(*AnswerQuestionUnknownWorkspace)(nil),        // 6: agentrepl.v1.AnswerQuestionUnknownWorkspace
+	(*AnswerQuestionWorkspaceRefMismatch)(nil),    // 7: agentrepl.v1.AnswerQuestionWorkspaceRefMismatch
+	(*AnswerQuestionTransferringAway)(nil),        // 8: agentrepl.v1.AnswerQuestionTransferringAway
+	(*AnswerQuestionNotYetAdopted)(nil),           // 9: agentrepl.v1.AnswerQuestionNotYetAdopted
+	(*AnswerQuestionAskNotStanding)(nil),          // 10: agentrepl.v1.AnswerQuestionAskNotStanding
+	(*AnswerQuestionUnservedValue)(nil),           // 11: agentrepl.v1.AnswerQuestionUnservedValue
+	(*AnswerQuestionMultiPickOnSingleSelect)(nil), // 12: agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
+	(*AnswerQuestionNoSession)(nil),               // 13: agentrepl.v1.AnswerQuestionNoSession
+	(*v1.WorkspaceRef)(nil),                       // 14: workspace.v1.WorkspaceRef
+	(*v11.FeedId)(nil),                            // 15: frontend.v1.FeedId
 }
 var file_agentrepl_v1_endpoint_answer_question_proto_depIdxs = []int32{
-	6, // 0: agentrepl.v1.AnswerQuestionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	7, // 1: agentrepl.v1.AnswerQuestionRequest.question:type_name -> frontend.v1.FeedId
-	1, // 2: agentrepl.v1.AnswerQuestionRequest.answers:type_name -> agentrepl.v1.AnswerQuestionAnswer
-	2, // 3: agentrepl.v1.AnswerQuestionAnswer.other_text:type_name -> agentrepl.v1.AnswerQuestionOtherText
-	4, // 4: agentrepl.v1.AnswerQuestionResponse.success:type_name -> agentrepl.v1.AnswerQuestionSuccess
-	5, // 5: agentrepl.v1.AnswerQuestionResponse.error:type_name -> agentrepl.v1.AnswerQuestionError
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	14, // 0: agentrepl.v1.AnswerQuestionRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	15, // 1: agentrepl.v1.AnswerQuestionRequest.question:type_name -> frontend.v1.FeedId
+	1,  // 2: agentrepl.v1.AnswerQuestionRequest.answers:type_name -> agentrepl.v1.AnswerQuestionAnswer
+	2,  // 3: agentrepl.v1.AnswerQuestionAnswer.other_text:type_name -> agentrepl.v1.AnswerQuestionOtherText
+	4,  // 4: agentrepl.v1.AnswerQuestionResponse.success:type_name -> agentrepl.v1.AnswerQuestionSuccess
+	5,  // 5: agentrepl.v1.AnswerQuestionResponse.error:type_name -> agentrepl.v1.AnswerQuestionError
+	6,  // 6: agentrepl.v1.AnswerQuestionError.unknown_workspace:type_name -> agentrepl.v1.AnswerQuestionUnknownWorkspace
+	7,  // 7: agentrepl.v1.AnswerQuestionError.workspace_ref_mismatch:type_name -> agentrepl.v1.AnswerQuestionWorkspaceRefMismatch
+	8,  // 8: agentrepl.v1.AnswerQuestionError.transferring_away:type_name -> agentrepl.v1.AnswerQuestionTransferringAway
+	9,  // 9: agentrepl.v1.AnswerQuestionError.not_yet_adopted:type_name -> agentrepl.v1.AnswerQuestionNotYetAdopted
+	10, // 10: agentrepl.v1.AnswerQuestionError.ask_not_standing:type_name -> agentrepl.v1.AnswerQuestionAskNotStanding
+	11, // 11: agentrepl.v1.AnswerQuestionError.unserved_value:type_name -> agentrepl.v1.AnswerQuestionUnservedValue
+	12, // 12: agentrepl.v1.AnswerQuestionError.multi_pick_on_single_select:type_name -> agentrepl.v1.AnswerQuestionMultiPickOnSingleSelect
+	13, // 13: agentrepl.v1.AnswerQuestionError.no_session:type_name -> agentrepl.v1.AnswerQuestionNoSession
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_answer_question_proto_init() }
@@ -435,13 +936,23 @@ func file_agentrepl_v1_endpoint_answer_question_proto_init() {
 		(*AnswerQuestionResponse_Success)(nil),
 		(*AnswerQuestionResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_answer_question_proto_msgTypes[5].OneofWrappers = []any{
+		(*AnswerQuestionError_UnknownWorkspace)(nil),
+		(*AnswerQuestionError_WorkspaceRefMismatch)(nil),
+		(*AnswerQuestionError_TransferringAway)(nil),
+		(*AnswerQuestionError_NotYetAdopted)(nil),
+		(*AnswerQuestionError_AskNotStanding)(nil),
+		(*AnswerQuestionError_UnservedValue)(nil),
+		(*AnswerQuestionError_MultiPickOnSingleSelect)(nil),
+		(*AnswerQuestionError_NoSession)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_answer_question_proto_rawDesc), len(file_agentrepl_v1_endpoint_answer_question_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

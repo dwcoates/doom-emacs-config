@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_set_workspace_priority.proto.
  */
 export const file_agentrepl_v1_endpoint_set_workspace_priority: GenFile = /*@__PURE__*/
-  fileDesc("CjJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9wcmlvcml0eS5wcm90bxIMYWdlbnRyZXBsLnYxIpEBChtTZXRXb3Jrc3BhY2VQcmlvcml0eVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhI2Cghwcmlvcml0eRgCIAEoCzIfLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQcmlvcml0eUgAiAEBQgsKCV9wcmlvcml0eSKgAQocU2V0V29ya3NwYWNlUHJpb3JpdHlSZXNwb25zZRI8CgdzdWNjZXNzGAEgASgLMikuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVByaW9yaXR5U3VjY2Vzc0gAEjgKBWVycm9yGAIgASgLMicuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVByaW9yaXR5RXJyb3JIAEIICgZyZXN1bHQiHQobU2V0V29ya3NwYWNlUHJpb3JpdHlTdWNjZXNzIhsKGVNldFdvcmtzcGFjZVByaW9yaXR5RXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_workspace_priority, file_workspace_v1_workspace]);
+  fileDesc("CjJhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc2V0X3dvcmtzcGFjZV9wcmlvcml0eS5wcm90bxIMYWdlbnRyZXBsLnYxIpEBChtTZXRXb3Jrc3BhY2VQcmlvcml0eVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhI2Cghwcmlvcml0eRgCIAEoCzIfLmFnZW50cmVwbC52MS5Xb3Jrc3BhY2VQcmlvcml0eUgAiAEBQgsKCV9wcmlvcml0eSKgAQocU2V0V29ya3NwYWNlUHJpb3JpdHlSZXNwb25zZRI8CgdzdWNjZXNzGAEgASgLMikuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVByaW9yaXR5U3VjY2Vzc0gAEjgKBWVycm9yGAIgASgLMicuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVByaW9yaXR5RXJyb3JIAEIICgZyZXN1bHQiHQobU2V0V29ya3NwYWNlUHJpb3JpdHlTdWNjZXNzIuwCChlTZXRXb3Jrc3BhY2VQcmlvcml0eUVycm9yEk8KEXVua25vd25fd29ya3NwYWNlGAEgASgLMjIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVByaW9yaXR5VW5rbm93bldvcmtzcGFjZUgAElgKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAiABKAsyNi5hZ2VudHJlcGwudjEuU2V0V29ya3NwYWNlUHJpb3JpdHlXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEk8KEXRyYW5zZmVycmluZ19hd2F5GAMgASgLMjIuYWdlbnRyZXBsLnYxLlNldFdvcmtzcGFjZVByaW9yaXR5VHJhbnNmZXJyaW5nQXdheUgAEkoKD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIvLmFnZW50cmVwbC52MS5TZXRXb3Jrc3BhY2VQcmlvcml0eU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSImCiRTZXRXb3Jrc3BhY2VQcmlvcml0eVVua25vd25Xb3Jrc3BhY2UiQAooU2V0V29ya3NwYWNlUHJpb3JpdHlXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiNwokU2V0V29ya3NwYWNlUHJpb3JpdHlUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiIwohU2V0V29ya3NwYWNlUHJpb3JpdHlOb3RZZXRBZG9wdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_priority, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SetWorkspacePriorityRequest
@@ -93,12 +93,48 @@ export const SetWorkspacePrioritySuccessSchema: GenMessage<SetWorkspacePriorityS
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_priority, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace,
- * …), spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.SetWorkspacePriorityError
  */
 export type SetWorkspacePriorityError = Message<"agentrepl.v1.SetWorkspacePriorityError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SetWorkspacePriorityError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspacePriorityUnknownWorkspace unknown_workspace = 1;
+     */
+    value: SetWorkspacePriorityUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: SetWorkspacePriorityWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspacePriorityTransferringAway transferring_away = 3;
+     */
+    value: SetWorkspacePriorityTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.SetWorkspacePriorityNotYetAdopted not_yet_adopted = 4;
+     */
+    value: SetWorkspacePriorityNotYetAdopted;
+    case: "notYetAdopted";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -107,4 +143,68 @@ export type SetWorkspacePriorityError = Message<"agentrepl.v1.SetWorkspacePriori
  */
 export const SetWorkspacePriorityErrorSchema: GenMessage<SetWorkspacePriorityError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_set_workspace_priority, 3);
+
+/**
+ * @generated from message agentrepl.v1.SetWorkspacePriorityUnknownWorkspace
+ */
+export type SetWorkspacePriorityUnknownWorkspace = Message<"agentrepl.v1.SetWorkspacePriorityUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspacePriorityUnknownWorkspace.
+ * Use `create(SetWorkspacePriorityUnknownWorkspaceSchema)` to create a new message.
+ */
+export const SetWorkspacePriorityUnknownWorkspaceSchema: GenMessage<SetWorkspacePriorityUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_priority, 4);
+
+/**
+ * @generated from message agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatch
+ */
+export type SetWorkspacePriorityWorkspaceRefMismatch = Message<"agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatch.
+ * Use `create(SetWorkspacePriorityWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const SetWorkspacePriorityWorkspaceRefMismatchSchema: GenMessage<SetWorkspacePriorityWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_priority, 5);
+
+/**
+ * @generated from message agentrepl.v1.SetWorkspacePriorityTransferringAway
+ */
+export type SetWorkspacePriorityTransferringAway = Message<"agentrepl.v1.SetWorkspacePriorityTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspacePriorityTransferringAway.
+ * Use `create(SetWorkspacePriorityTransferringAwaySchema)` to create a new message.
+ */
+export const SetWorkspacePriorityTransferringAwaySchema: GenMessage<SetWorkspacePriorityTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_priority, 6);
+
+/**
+ * @generated from message agentrepl.v1.SetWorkspacePriorityNotYetAdopted
+ */
+export type SetWorkspacePriorityNotYetAdopted = Message<"agentrepl.v1.SetWorkspacePriorityNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SetWorkspacePriorityNotYetAdopted.
+ * Use `create(SetWorkspacePriorityNotYetAdoptedSchema)` to create a new message.
+ */
+export const SetWorkspacePriorityNotYetAdoptedSchema: GenMessage<SetWorkspacePriorityNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_set_workspace_priority, 7);
 

@@ -4,8 +4,6 @@ import (
 	"context"
 	"time"
 
-	"claude-repld/internal/notimpl"
-
 	// The daemon's SQLite driver. Registered here because wsm is the sole
 	// owner of the database handle; nothing else opens it.
 	_ "modernc.org/sqlite"
@@ -66,6 +64,9 @@ type DB interface {
 	SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error
 	// TouchEngagement records last engagement — the idle sweep's input.
 	TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error
+	// SetShimPID records, or clears with nil, the pid of the shim process
+	// serving a workspace's session. The rollout's intent manifest names it.
+	SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error
 
 	// AcquireLease takes the workspace's occupancy lease for holder under
 	// policy, refusing when it is already held.
@@ -84,8 +85,14 @@ type DB interface {
 	PutHeldPrompt(ctx context.Context, h HeldPrompt) error
 	// UpdateHeldPromptClassification records the classifier's verdict.
 	UpdateHeldPromptClassification(ctx context.Context, turn TurnID, c Classification) error
-	// UpdateHeldPromptHold changes or clears why a prompt is held.
-	UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKind) error
+	// UpdateHeldPromptHold changes or clears the daemon-side condition holding a
+	// prompt. scheduleID is the drain schedule a HoldShutdown waits on and is
+	// required for that arm, empty for every other kind.
+	UpdateHeldPromptHold(ctx context.Context, turn TurnID, h *HoldKind, scheduleID string) error
+	// SetHeldPromptAccepted records the user's acceptance of the tray's offer to
+	// let the prompt wait for the turn's end. Legal ONLY on a hold_for_turn_end
+	// verdict.
+	SetHeldPromptAccepted(ctx context.Context, turn TurnID) error
 	// TombstoneHeldPrompt retires a held prompt with its reason.
 	TombstoneHeldPrompt(ctx context.Context, turn TurnID, why Tombstone) error
 	// HeldPrompts loads one workspace's standing holds, all-or-nothing.
@@ -125,12 +132,33 @@ type DB interface {
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
 
+	// EnqueueMerge puts a workspace in its target repository's DURABLE merge
+	// queue and returns its one-based position, refusing a workspace already
+	// queued there.
+	EnqueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, at time.Time) (int, error)
+	// AdmitMerge marks the entry the orchestrator is running now.
+	AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) error
+	// RemoveMergeQueueEntry drops one entry with the cause it was dropped for.
+	RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error
+	// MergeQueue loads one repository's queue in order, all-or-nothing.
+	MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error)
+	// AllMergeQueues loads every repository's queue for the boot re-enqueue,
+	// all-or-nothing.
+	AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEntry, error)
+	// SetMergeQueuePaused pauses or resumes one repository's queue.
+	SetMergeQueuePaused(ctx context.Context, repo RepoKey, paused bool) error
+	// MergeQueuePaused reports whether one repository's queue is paused.
+	MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error)
+
 	// OpenFault records a fault and returns its id.
 	OpenFault(ctx context.Context, f Fault) (FaultID, error)
 	// CloseFault stamps a fault's persisted resolved-at.
 	CloseFault(ctx context.Context, id FaultID, at time.Time) error
 	// OpenFaults loads the open faults matching scope, all-or-nothing.
 	OpenFaults(ctx context.Context, scope FaultScope) ([]Fault, error)
+	// Fault loads one fault by id, open or resolved — the read that proves a
+	// closing edge was persisted rather than reopening on the next boot.
+	Fault(ctx context.Context, id FaultID) (Fault, error)
 
 	// PutDrainSchedule puts a drain schedule in force, replacing any current
 	// one.
@@ -149,16 +177,4 @@ type DB interface {
 	// ReleaseServing gives up serving ownership, refusing when this instance
 	// does not hold it.
 	ReleaseServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error
-}
-
-// Open opens the workspace-state-manager database at path, creating and
-// migrating it as needed. A layout newer than this build's refuses to open.
-func Open(ctx context.Context, path string) (DB, error) {
-	return nil, notimpl.Err
-}
-
-// OpenReadOnly opens the database with mode=ro&_pragma=query_only(1), for a
-// process that must observe without writing.
-func OpenReadOnly(ctx context.Context, path string) (DB, error) {
-	return nil, notimpl.Err
 }

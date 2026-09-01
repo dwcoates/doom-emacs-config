@@ -1,0 +1,1175 @@
+package merge
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/gitclient"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/paint"
+	"claude-repld/internal/promptqueue"
+	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/resolve/holds"
+	"claude-repld/internal/resolve/sidebar"
+	"claude-repld/internal/wsm"
+)
+
+// This file holds the merge orchestrator's fakes.
+//
+// GIT IS NEVER CALLED DURING TESTING (user directive): every git fact a merge
+// depends on — the default branch, the merge's outcome, the conflicted files,
+// the landed range, the changed paths — is scripted on fakeGit, and the test
+// gate is a scripted runner rather than the repository's own suite. No test
+// creates a repository, and none spawns a process.
+
+// fakeDB is the durable state, in memory. It embeds wsm.DB so the fake declares
+// only what the orchestrator actually calls: anything else would panic loudly
+// rather than quietly answering a zero value.
+type fakeDB struct {
+	wsm.DB
+
+	mu sync.Mutex
+
+	workspaces map[ids.WorkspaceID]wsm.Workspace
+	jobs       map[ids.WorkspaceID]wsm.CreationJob
+	sessions   map[ids.WorkspaceID]wsm.Session
+	leases     map[ids.WorkspaceID]wsm.Lease
+	turns      map[ids.WorkspaceID][]wsm.Turn
+	ledger     map[ids.WorkspaceID][]wsm.MergeLedgerEntry
+	queues     map[wsm.RepoKey][]wsm.MergeQueueEntry
+	paused     map[wsm.RepoKey]bool
+	repos      []wsm.Repository
+	seq        int
+
+	// mergedAt, closed and releasedLeases are what the teardown's ordering is
+	// asserted against.
+	mergedAt       map[ids.WorkspaceID]time.Time
+	closed         map[ids.WorkspaceID]bool
+	releasedLeases []wsm.LeaseID
+	policies       map[wsm.LeaseID]wsm.LeasePolicy
+	dropped        []string
+	// enqueueErr, when set, fails the next EnqueueMerge.
+	enqueueErr error
+}
+
+func newFakeDB() *fakeDB {
+	return &fakeDB{
+		workspaces: map[ids.WorkspaceID]wsm.Workspace{},
+		jobs:       map[ids.WorkspaceID]wsm.CreationJob{},
+		sessions:   map[ids.WorkspaceID]wsm.Session{},
+		leases:     map[ids.WorkspaceID]wsm.Lease{},
+		turns:      map[ids.WorkspaceID][]wsm.Turn{},
+		ledger:     map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
+		queues:     map[wsm.RepoKey][]wsm.MergeQueueEntry{},
+		paused:     map[wsm.RepoKey]bool{},
+		mergedAt:   map[ids.WorkspaceID]time.Time{},
+		closed:     map[ids.WorkspaceID]bool{},
+		policies:   map[wsm.LeaseID]wsm.LeasePolicy{},
+	}
+}
+
+func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ws, ok := f.workspaces[id]
+	if !ok {
+		return wsm.Workspace{}, fmt.Errorf("no workspace %s", id)
+	}
+	return ws, nil
+}
+
+func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	job, ok := f.jobs[id]
+	return job, ok, nil
+}
+
+func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.sessions[id]
+	return s, ok, nil
+}
+
+func (f *fakeDB) AcquireLease(_ context.Context, id ids.WorkspaceID, holder wsm.LeaseHolder, policy wsm.LeasePolicy) (wsm.Lease, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if existing, held := f.leases[id]; held {
+		return wsm.Lease{}, &wsm.LeaseHeldError{Workspace: id, Lease: existing.ID, Holder: existing.Holder, Policy: existing.Policy}
+	}
+	lease := wsm.Lease{ID: wsm.NewLeaseID(), Workspace: id, Holder: holder, Policy: policy}
+	f.leases[id] = lease
+	f.policies[lease.ID] = policy
+	return lease, nil
+}
+
+func (f *fakeDB) ReleaseLease(_ context.Context, lease wsm.LeaseID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, held := range f.leases {
+		if held.ID == lease {
+			delete(f.leases, id)
+		}
+	}
+	f.releasedLeases = append(f.releasedLeases, lease)
+	return nil
+}
+
+func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	lease, ok := f.leases[id]
+	return lease, ok, nil
+}
+
+func (f *fakeDB) SetLeasePolicy(_ context.Context, lease wsm.LeaseID, p wsm.LeasePolicy) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.policies[lease] = p
+	return nil
+}
+
+func (f *fakeDB) SetMergedAt(_ context.Context, id ids.WorkspaceID, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mergedAt[id] = at
+	return nil
+}
+
+func (f *fakeDB) SetClosed(_ context.Context, id ids.WorkspaceID, closed bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed[id] = closed
+	return nil
+}
+
+func (f *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsm.Turn(nil), f.turns[id]...), nil
+}
+
+func (f *fakeDB) CloseTurn(_ context.Context, turn wsm.TurnID, at time.Time, how wsm.TurnClose) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, list := range f.turns {
+		kept := list[:0]
+		for _, t := range list {
+			if t.ID != turn {
+				kept = append(kept, t)
+			}
+		}
+		f.turns[id] = kept
+	}
+	return nil
+}
+
+func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease wsm.LeaseID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ledger[id] = append(f.ledger[id], wsm.MergeLedgerEntry{Workspace: id, Lease: lease})
+	return nil
+}
+
+func (f *fakeDB) RecordTabInterval(_ context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, entries := range f.ledger {
+		for i := range entries {
+			if entries[i].Lease == lease {
+				entries[i].Intervals = append(entries[i].Intervals, interval)
+				f.ledger[id] = entries
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("no ledger for lease %s", lease)
+}
+
+func (f *fakeDB) MergeLedger(_ context.Context, id ids.WorkspaceID) ([]wsm.MergeLedgerEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsm.MergeLedgerEntry(nil), f.ledger[id]...), nil
+}
+
+func (f *fakeDB) EnqueueMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, at time.Time) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.enqueueErr != nil {
+		err := f.enqueueErr
+		f.enqueueErr = nil
+		return 0, err
+	}
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace == id {
+			return 0, &wsm.MergeQueuedError{Repo: repo, Workspace: id, Position: i + 1, State: entry.State}
+		}
+	}
+	f.seq++
+	f.queues[repo] = append(f.queues[repo], wsm.MergeQueueEntry{
+		Repo: repo, Workspace: id, State: wsm.MergeQueued, EnqueuedAt: at,
+	})
+	f.renumber(repo)
+	return len(f.queues[repo]), nil
+}
+
+// renumber restates the positions, which are derived from order rather than
+// stored — exactly as the durable queue derives them.
+func (f *fakeDB) renumber(repo wsm.RepoKey) {
+	for i := range f.queues[repo] {
+		f.queues[repo][i].Position = i + 1
+	}
+}
+
+func (f *fakeDB) AdmitMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace == id {
+			f.queues[repo][i].State = wsm.MergeAdmitted
+			return nil
+		}
+	}
+	return fmt.Errorf("no queue entry for %s", id)
+}
+
+func (f *fakeDB) RemoveMergeQueueEntry(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, cause string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace == id {
+			f.queues[repo] = append(f.queues[repo][:i], f.queues[repo][i+1:]...)
+			f.renumber(repo)
+			f.dropped = append(f.dropped, fmt.Sprintf("%s:%s", id, cause))
+			return nil
+		}
+	}
+	return fmt.Errorf("no queue entry for %s", id)
+}
+
+func (f *fakeDB) MergeQueue(_ context.Context, repo wsm.RepoKey) ([]wsm.MergeQueueEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]wsm.MergeQueueEntry(nil), f.queues[repo]...), nil
+}
+
+func (f *fakeDB) AllMergeQueues(_ context.Context) (map[wsm.RepoKey][]wsm.MergeQueueEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[wsm.RepoKey][]wsm.MergeQueueEntry{}
+	for repo, entries := range f.queues {
+		out[repo] = append([]wsm.MergeQueueEntry(nil), entries...)
+	}
+	return out, nil
+}
+
+func (f *fakeDB) SetMergeQueuePaused(_ context.Context, repo wsm.RepoKey, paused bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paused[repo] = paused
+	return nil
+}
+
+func (f *fakeDB) MergeQueuePaused(_ context.Context, repo wsm.RepoKey) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.paused[repo], nil
+}
+
+// policyOf reports a lease's current policy, which is how a parked merge is
+// asserted.
+func (f *fakeDB) policyOf(lease wsm.LeaseID) wsm.LeasePolicy {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.policies[lease]
+}
+
+// fakeGit answers every git fact from a script. It embeds nothing: the whole
+// interface is declared, so a call the orchestrator adds later is a compile
+// error rather than a surprise at run time.
+type fakeGit struct {
+	mu sync.Mutex
+	// seq stamps every call with the harness's shared sequence, so an ordering
+	// between a git call and a feed push is asserted on the real order rather
+	// than inferred.
+	seq func() int
+	at  map[string]int
+
+	defaultBranch string
+	commonDirs    map[string]string
+	sameRepo      bool
+	sameRepoErr   error
+	refs          map[string]string
+	// outcomes are the MergeNoFF answers, consumed in order.
+	outcomes []gitclient.MergeOutcome
+	// conflicted are the ConflictedFiles answers, consumed in order.
+	conflicted [][]string
+	// commits are the Commit shas, consumed in order; an exhausted script
+	// answers a standing sha.
+	commits []string
+	// commitErr fails every Commit when set.
+	commitErr error
+	// commitMessages records what each Commit was asked to record.
+	commitMessages []string
+	landed         []gitclient.Commit
+	changed        []string
+	changedErr     error
+	clean          bool
+	cleanErr       error
+
+	// calls records what was asked of git, in order.
+	calls []string
+	// removedWorktrees records the teardown's removals.
+	removedWorktrees []string
+}
+
+func newFakeGit(seq func() int) *fakeGit {
+	return &fakeGit{
+		seq:           seq,
+		at:            map[string]int{},
+		defaultBranch: "master",
+		commonDirs:    map[string]string{},
+		refs:          map[string]string{},
+		clean:         true,
+	}
+}
+
+func (g *fakeGit) record(call string) {
+	at := g.seq()
+	g.mu.Lock()
+	g.calls = append(g.calls, call)
+	if _, seen := g.at[call]; !seen {
+		g.at[call] = at
+	}
+	g.mu.Unlock()
+}
+
+func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
+	g.record("default_branch")
+	return g.defaultBranch, nil
+}
+
+func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
+	g.record("resolve_ref")
+	if sha, ok := g.refs[ref]; ok {
+		return sha, nil
+	}
+	return "0000000000000000000000000000000000000000", nil
+}
+
+func (g *fakeGit) CreateWorktree(context.Context, string, string, string, string) error {
+	g.record("create_worktree")
+	return nil
+}
+
+func (g *fakeGit) RemoveWorktree(_ context.Context, _, worktreeDir string) error {
+	g.record("remove_worktree")
+	g.mu.Lock()
+	g.removedWorktrees = append(g.removedWorktrees, worktreeDir)
+	g.mu.Unlock()
+	return nil
+}
+
+func (g *fakeGit) Nuke(context.Context, string, string, string) error {
+	g.record("nuke")
+	return nil
+}
+
+func (g *fakeGit) CommonDir(_ context.Context, dir string) (string, error) {
+	g.record("common_dir")
+	if common, ok := g.commonDirs[dir]; ok {
+		return common, nil
+	}
+	return dir + "/.git", nil
+}
+
+func (g *fakeGit) SameRepo(context.Context, string, string) (bool, error) {
+	g.record("same_repo")
+	return g.sameRepo, g.sameRepoErr
+}
+
+func (g *fakeGit) MergeNoFF(context.Context, string, string, string) (gitclient.MergeOutcome, error) {
+	g.record("merge_no_ff")
+	g.mu.Lock()
+	var out gitclient.MergeOutcome
+	if len(g.outcomes) > 0 {
+		out = g.outcomes[0]
+		g.outcomes = g.outcomes[1:]
+	}
+	g.mu.Unlock()
+	return out, nil
+}
+
+func (g *fakeGit) ConflictedFiles(context.Context, string) ([]string, error) {
+	g.record("conflicted_files")
+	g.mu.Lock()
+	var files []string
+	if len(g.conflicted) > 0 {
+		files = g.conflicted[0]
+		g.conflicted = g.conflicted[1:]
+	}
+	g.mu.Unlock()
+	return files, nil
+}
+
+func (g *fakeGit) Commit(_ context.Context, _, message string) (string, error) {
+	g.record("commit")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.commitMessages = append(g.commitMessages, message)
+	if g.commitErr != nil {
+		return "", g.commitErr
+	}
+	if len(g.commits) == 0 {
+		return "concluded000000", nil
+	}
+	sha := g.commits[0]
+	g.commits = g.commits[1:]
+	return sha, nil
+}
+
+func (g *fakeGit) AbortMerge(context.Context, string) error {
+	g.record("abort_merge")
+	return nil
+}
+
+func (g *fakeGit) RevertMerge(context.Context, string, string) error {
+	g.record("revert_merge")
+	return nil
+}
+
+func (g *fakeGit) LandedRange(context.Context, string, string) ([]gitclient.Commit, error) {
+	g.record("landed_range")
+	return g.landed, nil
+}
+
+func (g *fakeGit) ChangedPaths(context.Context, string, string) ([]string, error) {
+	g.record("changed_paths")
+	return g.changed, g.changedErr
+}
+
+func (g *fakeGit) IsClean(context.Context, string) (bool, error) {
+	g.record("is_clean")
+	return g.clean, g.cleanErr
+}
+
+func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
+	g.record("current_branch")
+	return "master", nil
+}
+
+// seen reports whether git was asked for something.
+func (g *fakeGit) seen(call string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, c := range g.calls {
+		if c == call {
+			return true
+		}
+	}
+	return false
+}
+
+// fakeQueue records what the merge submitted down the one delivery path.
+type fakeQueue struct {
+	mu sync.Mutex
+
+	submissions []promptqueue.Submission
+	disposition promptqueue.Disposition
+	err         error
+	leaseEvents int
+}
+
+func (q *fakeQueue) Submit(_ context.Context, sub promptqueue.Submission) (promptqueue.Disposition, error) {
+	q.mu.Lock()
+	q.submissions = append(q.submissions, sub)
+	q.mu.Unlock()
+	return q.disposition, q.err
+}
+
+func (q *fakeQueue) Release(context.Context, ids.WorkspaceID, ids.TurnID) error { return nil }
+func (q *fakeQueue) Drop(context.Context, ids.WorkspaceID, ids.TurnID) error    { return nil }
+func (q *fakeQueue) Accept(context.Context, ids.WorkspaceID, ids.TurnID) error  { return nil }
+func (q *fakeQueue) SubmitSessionAct(context.Context, ids.WorkspaceID, promptqueue.Act) error {
+	return nil
+}
+func (q *fakeQueue) OnTurnEnded(ids.WorkspaceID, ids.TurnID, wsm.TurnClose) {}
+func (q *fakeQueue) OnLeaseChanged(ids.WorkspaceID) {
+	q.mu.Lock()
+	q.leaseEvents++
+	q.mu.Unlock()
+}
+func (q *fakeQueue) RestoreHolds(context.Context) error { return nil }
+
+// origins reports the origins the merge submitted under, in order. The origin
+// is the merge's whole attribution, so it is what the phase tests assert.
+func (q *fakeQueue) origins() []conversationv1.PromptOrigin {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []conversationv1.PromptOrigin
+	for _, sub := range q.submissions {
+		out = append(out, sub.Origin)
+	}
+	return out
+}
+
+// countOrigin reports how many submissions carried one origin, which is how
+// "exactly once" is asserted.
+func (q *fakeQueue) countOrigin(origin conversationv1.PromptOrigin) int {
+	n := 0
+	for _, got := range q.origins() {
+		if got == origin {
+			n++
+		}
+	}
+	return n
+}
+
+// fakeFeed records the synthesized rows and the output addresses. Like every
+// resolver fake here it embeds its interface, so it declares only what the
+// orchestrator calls and any other call panics loudly rather than answering a
+// zero value.
+type fakeFeed struct {
+	feed.Resolver
+	// seq stamps every push with the harness's shared sequence.
+	seq func() int
+	mu  sync.Mutex
+
+	rows      []synthesized
+	addresses []*wsm.OutputAddress
+}
+
+// synthesized is one published row with the feed it landed on and when it was
+// pushed, in the harness's shared sequence.
+type synthesized struct {
+	WS   ids.WorkspaceID
+	Feed feedid.Feed
+	Row  *frontendv1.FeedRow
+	At   int
+}
+
+func (f *fakeFeed) UpsertSynthesized(ws ids.WorkspaceID, feed feedid.Feed, row *frontendv1.FeedRow) {
+	at := f.seq()
+	f.mu.Lock()
+	f.rows = append(f.rows, synthesized{WS: ws, Feed: feed, Row: row, At: at})
+	f.mu.Unlock()
+}
+
+func (f *fakeFeed) SetOutputAddress(_ ids.WorkspaceID, addr *wsm.OutputAddress) {
+	f.mu.Lock()
+	f.addresses = append(f.addresses, addr)
+	f.mu.Unlock()
+}
+
+// tabs reports the tab kinds published, in order, one entry per push.
+func (f *fakeFeed) tabs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab == nil {
+			continue
+		}
+		out = append(out, tabKindOf(tab))
+	}
+	return out
+}
+
+// tabSequence reports the tab kinds in the order they were FIRST opened, which
+// is the sequence a method's test asserts.
+func (f *fakeFeed) tabSequence() []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, kind := range f.tabs() {
+		if seen[kind] {
+			continue
+		}
+		seen[kind] = true
+		out = append(out, kind)
+	}
+	return out
+}
+
+// lastTabOfKind reports the last push of one tab kind.
+func (f *fakeFeed) lastTabOfKind(kind string) *frontendv1.FeedMergeTab {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var found *frontendv1.FeedMergeTab
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab != nil && tabKindOf(tab) == kind {
+			found = tab
+		}
+	}
+	return found
+}
+
+// heads reports every head-row push's result arm name.
+func (f *fakeFeed) heads() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, row := range f.rows {
+		activity := row.Row.GetActivity()
+		if activity == nil || activity.GetMerge() == nil {
+			continue
+		}
+		switch activity.GetMerge().GetResult().(type) {
+		case *frontendv1.FeedMerge_Success:
+			out = append(out, "success")
+		case *frontendv1.FeedMerge_Error:
+			out = append(out, "error")
+		default:
+			out = append(out, "update")
+		}
+	}
+	return out
+}
+
+// tabKindOf names a tab row's kind arm.
+func tabKindOf(tab *frontendv1.FeedMergeTab) string {
+	switch tab.GetKind().(type) {
+	case *frontendv1.FeedMergeTab_Queue:
+		return TabQueue
+	case *frontendv1.FeedMergeTab_PrePrompt:
+		return TabPrePrompt
+	case *frontendv1.FeedMergeTab_Merge:
+		return TabMerge
+	case *frontendv1.FeedMergeTab_Conflicts:
+		return TabConflicts
+	case *frontendv1.FeedMergeTab_Tests:
+		return TabTests
+	case *frontendv1.FeedMergeTab_Fixes:
+		return TabFixes
+	case *frontendv1.FeedMergeTab_PostPrompt:
+		return TabPostPrompt
+	}
+	return ""
+}
+
+// fakeFooter and fakeSidebar record the facts each surface was told.
+type fakeFooter struct {
+	footer.Resolver
+	mu    sync.Mutex
+	facts []footer.MergeFacts
+}
+
+func (f *fakeFooter) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
+	f.mu.Lock()
+	f.facts = append(f.facts, facts)
+	f.mu.Unlock()
+}
+
+// states reports the state words the footer was told, in order.
+func (f *fakeFooter) states() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, facts := range f.facts {
+		out = append(out, facts.State)
+	}
+	return out
+}
+
+// last reports the footer's most recent facts.
+func (f *fakeFooter) last() footer.MergeFacts {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.facts) == 0 {
+		return footer.MergeFacts{}
+	}
+	return f.facts[len(f.facts)-1]
+}
+
+type fakeSidebar struct {
+	sidebar.Resolver
+	mu    sync.Mutex
+	facts []footer.MergeFacts
+}
+
+func (s *fakeSidebar) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
+	s.mu.Lock()
+	s.facts = append(s.facts, facts)
+	s.mu.Unlock()
+}
+
+// fakeHolds records the tray's offers.
+type fakeHolds struct {
+	holds.Resolver
+	mu     sync.Mutex
+	offers []*frontendv1.HeldOffer
+}
+
+func (h *fakeHolds) SetOffer(_ ids.WorkspaceID, offer *frontendv1.HeldOffer) {
+	h.mu.Lock()
+	h.offers = append(h.offers, offer)
+	h.mu.Unlock()
+}
+
+// standing reports the offer currently standing, nil when none is.
+func (h *fakeHolds) standing() *frontendv1.HeldOffer {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.offers) == 0 {
+		return nil
+	}
+	return h.offers[len(h.offers)-1]
+}
+
+// fakePainter turns text into one plain span, which is enough for the gate's
+// tests: what the painter does with an escape is the paint package's own
+// subject, not the merge's.
+type fakePainter struct{}
+
+func (fakePainter) ParseANSI(text string) (paint.Spans, error) {
+	return paint.Spans{{Text: text}}, nil
+}
+func (fakePainter) Highlight(_, code string) (paint.Spans, error) {
+	return paint.Spans{{Text: code}}, nil
+}
+
+// fakeRunner is the scripted test-all script. It answers from a queue of runs,
+// so a fixes loop's second round can differ from its first.
+type fakeRunner struct {
+	mu sync.Mutex
+
+	runs []scriptedRun
+	// argv records every invocation, which is what the --suites contract is
+	// asserted against.
+	argv [][]string
+	dirs []string
+}
+
+// scriptedRun is one answer from the fake script.
+type scriptedRun struct {
+	Output string
+	Code   int
+	Err    error
+}
+
+func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.argv = append(r.argv, argv)
+	r.dirs = append(r.dirs, dir)
+	if len(r.runs) == 0 {
+		return "", 0, nil
+	}
+	run := r.runs[0]
+	r.runs = r.runs[1:]
+	return run.Output, run.Code, run.Err
+}
+
+// harness is one orchestrator with every fake it was built from.
+type harness struct {
+	t *testing.T
+
+	o        *orchestrator
+	db       *fakeDB
+	git      *fakeGit
+	queue    *fakeQueue
+	feed     *fakeFeed
+	footer   *fakeFooter
+	sidebar  *fakeSidebar
+	holds    *fakeHolds
+	runner   *fakeRunner
+	logs     *dlog.TestSurfaces
+	rollout  *fakeRollout
+	stateDir string
+	targetD  string
+	sourceD  string
+
+	// briefs answers the brief loader; a name absent from it is a LOUD failure,
+	// exactly as a missing file is.
+	briefs map[string][]string
+	// briefValues records the values each brief was spliced with, which is how
+	// the escalation constants are asserted to reach the agent.
+	briefValues []map[string]string
+	// turnCloses answers AwaitTurnEnd, consumed in order.
+	turnCloses []wsm.TurnClose
+	// startedSessions records the revivals a configured prompt caused.
+	startedSessions []ids.WorkspaceID
+	// occupancyReleases counts the occupancy guards dropped.
+	occupancyReleases int
+	// displaced is the turn CaptureDisplaced answers with, nil for none.
+	displaced *ids.TurnID
+	// parkedTurns answers ParkedRoute, consumed in order.
+	parkedTurns []ids.TurnID
+	// parkedSaid records what guidance was delivered.
+	parkedSaid []*conversationv1.UserSaid
+
+	// parked is signalled the moment a run parks, so a test synchronizes on the
+	// state rather than on elapsed time.
+	parked chan ids.WorkspaceID
+	// seq is the shared monotonic sequence both the feed and the git fakes
+	// stamp their calls with, so an ordering between two subsystems is asserted
+	// on the real order.
+	seq int
+
+	mu  sync.Mutex
+	now time.Time
+}
+
+// fakeRollout records the self-reload trigger and when it fired.
+type fakeRollout struct {
+	mu sync.Mutex
+
+	fired  int
+	landed []gitclient.Commit
+	// leasesAtFire records how many leases had been released when it fired,
+	// which is how "only after release" is asserted.
+	leasesAtFire int
+	db           *fakeDB
+	err          error
+}
+
+func (t *fakeRollout) Trigger(_ context.Context, landed []gitclient.Commit) error {
+	t.mu.Lock()
+	t.fired++
+	t.landed = landed
+	t.db.mu.Lock()
+	t.leasesAtFire = len(t.db.releasedLeases)
+	t.db.mu.Unlock()
+	t.mu.Unlock()
+	return t.err
+}
+
+// theWorkspace is the workspace every harness merges.
+const theWorkspace = ids.WorkspaceID("ws-1")
+
+// newHarness builds an orchestrator whose admission is driven a step at a time,
+// so a queue's ordering is asserted without waiting on a goroutine.
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	h := &harness{
+		t:        t,
+		db:       newFakeDB(),
+		queue:    &fakeQueue{},
+		footer:   &fakeFooter{},
+		sidebar:  &fakeSidebar{},
+		holds:    &fakeHolds{},
+		runner:   &fakeRunner{},
+		logs:     dlog.NewTestSurfaces(),
+		stateDir: t.TempDir(),
+		now:      time.Unix(1700000000, 0).UTC(),
+		briefs:   map[string][]string{},
+	}
+	h.git = newFakeGit(h.next)
+	h.feed = &fakeFeed{seq: h.next}
+	h.rollout = &fakeRollout{db: h.db}
+	h.targetD = t.TempDir()
+	h.sourceD = t.TempDir()
+	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "target_dir"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "target_dir", "failure_tail", "escalation_file", "escalation_marker"}
+
+	h.register(theWorkspace, "ws-one")
+	o, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the orchestrator: %v", err)
+	}
+	h.o = o
+	h.parked = make(chan ids.WorkspaceID, 8)
+	o.onPark = func(ws ids.WorkspaceID) { h.parked <- ws }
+	return h
+}
+
+// deps assembles the dependency set from the harness's fakes.
+func (h *harness) deps() Deps {
+	return Deps{
+		DB: h.db, Git: h.git, Queue: h.queue, Feed: h.feed, Footer: h.footer,
+		Sidebar: h.sidebar, Holds: h.holds, PromptsDir: "prompts",
+		Briefs:      h.loadBrief,
+		SelfRepoDir: "/self/checkout",
+		StateDir:    h.stateDir,
+		TestCommand: []string{"bash", "/fake/test-all.sh"},
+		TestRunner:  h.runner,
+		Painter:     fakePainter{},
+		StartSession: func(_ context.Context, ws ids.WorkspaceID) error {
+			h.mu.Lock()
+			h.startedSessions = append(h.startedSessions, ws)
+			h.mu.Unlock()
+			h.db.mu.Lock()
+			h.db.sessions[ws] = wsm.Session{Workspace: ws}
+			h.db.mu.Unlock()
+			return nil
+		},
+		Occupy: func(ids.WorkspaceID, string) (func(), bool, error) {
+			return func() {
+				h.mu.Lock()
+				h.occupancyReleases++
+				h.mu.Unlock()
+			}, true, nil
+		},
+		AwaitTurnEnd: func(context.Context, ids.WorkspaceID, ids.TurnID) (wsm.TurnClose, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if len(h.turnCloses) == 0 {
+				return wsm.CloseCompleted, nil
+			}
+			close := h.turnCloses[0]
+			h.turnCloses = h.turnCloses[1:]
+			return close, nil
+		},
+		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (ids.TurnID, bool, error) {
+			if h.displaced == nil {
+				return "", false, nil
+			}
+			return *h.displaced, true, nil
+		},
+		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.parkedSaid = append(h.parkedSaid, said)
+			if len(h.parkedTurns) == 0 {
+				return wsm.NewTurnID(), nil
+			}
+			turn := h.parkedTurns[0]
+			h.parkedTurns = h.parkedTurns[1:]
+			return turn, nil
+		},
+		Rollout: h.rollout,
+		Now:     h.clock,
+		Log:     h.logs,
+	}
+}
+
+// next stamps the shared sequence.
+func (h *harness) next() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.seq++
+	return h.seq
+}
+
+// clock advances a millisecond per read, so two stamps in one run are ordered
+// without any test ever sleeping.
+func (h *harness) clock() time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.now = h.now.Add(time.Millisecond)
+	return h.now
+}
+
+// loadBrief answers the brief loader. A brief the harness does not hold fails
+// LOUDLY, which is what a missing file does; a placeholder the values do not
+// cover fails the same way, which is what a bad splice does.
+func (h *harness) loadBrief(name string, values map[string]string) (string, error) {
+	placeholders, ok := h.briefs[name]
+	if !ok {
+		return "", fmt.Errorf("no brief %q", name)
+	}
+	text := name
+	for _, key := range placeholders {
+		value, covered := values[key]
+		if !covered {
+			return "", fmt.Errorf("brief %q has no value for %q", name, key)
+		}
+		text += " " + value
+	}
+	h.mu.Lock()
+	h.briefValues = append(h.briefValues, values)
+	h.mu.Unlock()
+	return text, nil
+}
+
+// register records a workspace with the geometry a merge needs.
+func (h *harness) register(ws ids.WorkspaceID, name string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: name, Dir: h.sourceD, Branch: "feature"}
+	h.db.jobs[ws] = wsm.CreationJob{
+		Workspace: ws,
+		Layout: wsm.MergeLayout{
+			SourceBranch: "feature", SourceDir: h.sourceD, TargetDir: h.targetD, Origin: "create",
+		},
+	}
+	h.db.sessions[ws] = wsm.Session{Workspace: ws}
+}
+
+// registerRepo records one repository in the fake registry, which is what a
+// scoped pause resolves its repository ref against.
+func (h *harness) registerRepo(id ids.RepoID, dir string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.repos = append(h.db.repos, wsm.Repository{ID: id, Dir: dir, Name: string(id), DefaultBranch: "master"})
+}
+
+// repoKey is the queue key the harness's target resolves to.
+func (h *harness) repoKey() wsm.RepoKey { return wsm.RepoKey(h.targetD + "/.git") }
+
+// landsCleanly scripts a clean no-ff merge producing one commit.
+func (h *harness) landsCleanly(sha string) {
+	h.git.outcomes = append(h.git.outcomes, gitclient.MergeOutcome{Landed: &gitclient.Commit{SHA: sha}})
+	h.git.landed = []gitclient.Commit{{SHA: sha, Subject: "the work"}}
+}
+
+// gatePasses scripts one passing gate run.
+func (h *harness) gatePasses(suites ...string) {
+	out := ""
+	for _, suite := range suites {
+		out += fmt.Sprintf("[agent-repl-tests] %s: passed in 3s\n", suite)
+	}
+	h.runner.runs = append(h.runner.runs, scriptedRun{Output: out, Code: 0})
+}
+
+// gateFails scripts one failing gate run.
+func (h *harness) gateFails(suite string) {
+	h.runner.runs = append(h.runner.runs, scriptedRun{
+		Output: fmt.Sprintf("[agent-repl-tests] ERROR: %s failed after 4s with exit code 1\n", suite),
+		Code:   1,
+	})
+}
+
+// admit runs the pump once for the harness's repository.
+func (h *harness) admit(ctx context.Context) error {
+	_, err := h.o.pumpOnce(ctx, h.repoKey())
+	return err
+}
+
+// emacsRepo makes the harness's target this daemon's OWN repository, which is
+// what selects the merge-commit method.
+func (h *harness) emacsRepo() {
+	h.git.sameRepo = true
+	h.git.commonDirs[h.targetD] = string(h.repoKey())
+}
+
+// ownCheckout makes the target the daemon's own checkout rather than a sibling
+// worktree of it, which is the extra condition the self-reload requires.
+func (h *harness) ownCheckout() {
+	h.emacsRepo()
+	h.o.deps.SelfRepoDir = h.targetD
+}
+
+// mergeConflicted scripts a no-ff merge that stopped on conflicts.
+func mergeConflicted(files ...string) gitclient.MergeOutcome {
+	return gitclient.MergeOutcome{Conflicted: files}
+}
+
+// parks arms the harness's park signal and answers the channel a test waits on.
+// Synchronization is on the PARK ITSELF: nothing here waits for elapsed time.
+func (h *harness) parks() <-chan ids.WorkspaceID {
+	parked := make(chan ids.WorkspaceID, 8)
+	h.o.onPark = func(ws ids.WorkspaceID) { parked <- ws }
+	return parked
+}
+
+// configureActions records the workspace's configured before/after prompts.
+func (h *harness) configureActions(before, after []string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	job := h.db.jobs[theWorkspace]
+	job.Actions = wsm.MergeActions{Before: before, After: after}
+	h.db.jobs[theWorkspace] = job
+}
+
+// escalate writes the record the fixes agent uses to end its loop without a
+// passing suite.
+func (h *harness) escalate(why string) {
+	h.t.Helper()
+	body := EscalationMarker + "\n" + why + "\n"
+	if err := os.WriteFile(filepath.Join(h.targetD, EscalationFile), []byte(body), 0o644); err != nil {
+		h.t.Fatalf("writing the escalation record: %v", err)
+	}
+}
+
+// leaseID reports the lease the harness's merge holds.
+func (h *harness) leaseID(t *testing.T) wsm.LeaseID {
+	t.Helper()
+	lease, held, err := h.db.Lease(context.Background(), theWorkspace)
+	if err != nil || !held {
+		t.Fatalf("no lease is held: %v", err)
+	}
+	return lease.ID
+}
+
+// enqueue queues the harness's merge, failing the test if it is refused.
+func enqueue(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+}
+
+// admitAsync admits the harness's merge on its own goroutine, for the tests whose
+// merge parks and therefore never returns on its own.
+func admitAsync(h *harness, ctx context.Context) <-chan error {
+	done := make(chan error, 1)
+	go func() { _, err := h.o.pumpOnce(ctx, h.repoKey()); done <- err }()
+	return done
+}
+
+// equal reports whether two string slices match.
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// names renders a directory listing for a failure message.
+func names(entries []os.DirEntry) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// roundsOfKind reports the rounds one tab kind was drawn with, in order, once
+// per round.
+func (f *fakeFeed) roundsOfKind(kind string) []int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []int
+	seen := map[uint32]bool{}
+	for _, row := range f.rows {
+		tab := row.Row.GetMergeTab()
+		if tab == nil || tabKindOf(tab) != kind {
+			continue
+		}
+		round := tab.GetLabel().GetRound()
+		if seen[round] {
+			continue
+		}
+		seen[round] = true
+		out = append(out, int(round))
+	}
+	return out
+}
+
+// waitForParked blocks until the harness's merge parks.
+func waitForParked(t *testing.T, h *harness) {
+	t.Helper()
+	select {
+	case <-h.parked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the merge never parked")
+	}
+}
+
+// ListRepositories answers the fake registry, in registration order.
+func (d *fakeDB) ListRepositories(ctx context.Context) ([]wsm.Repository, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]wsm.Repository, len(d.repos))
+	copy(out, d.repos)
+	return out, nil
+}
