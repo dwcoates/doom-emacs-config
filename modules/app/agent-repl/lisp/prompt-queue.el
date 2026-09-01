@@ -54,7 +54,7 @@
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl--prepare-input "agent-repl-input" (ws raw &optional force))
 (declare-function agent-repl--input-said "agent-repl-input" (text attachments))
-(declare-function agent-repl--input-submit "agent-repl-input" (ws said origin raw))
+(declare-function agent-repl--input-submit "agent-repl-input" (ws said origin raw &optional key))
 (declare-function agent-repl-input-attachments "agent-repl-input" (ws))
 (declare-function agent-repl-input-clear-attachments "agent-repl-input" (ws))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
@@ -71,7 +71,7 @@
 (defvar agent-repl--prompt-queue (make-hash-table :test 'equal)
   "Workspace name -> ordered list of held entries, oldest first.
 Each entry is the plist `(:id ID :kind KIND :said SAID :origin ORIGIN
-:raw RAW :queued-at SECONDS)'.  KIND is `:deferred' or `:outage' and
+:raw RAW :idempotency-key KEY :queued-at SECONDS)'.  KIND is `:deferred' or `:outage' and
 names WHICH EDGE releases the entry; SAID is the fully composed
 `UserSaid' the composer already built, so a drain re-composes nothing and
 cannot decorate a prompt twice.")
@@ -108,18 +108,24 @@ editor situation from the one it was typed in.")
   "Remove ENTRY from WS's queue."
   (agent-repl--prompt-queue-set ws (delq entry (gethash ws agent-repl--prompt-queue))))
 
-(defun agent-repl--prompt-queue-enqueue (ws kind said origin raw)
-  "Append a KIND entry for WS carrying SAID, ORIGIN and RAW; return it."
+(defun agent-repl--prompt-queue-enqueue (ws kind said origin raw &optional key)
+  "Append a KIND entry for WS carrying SAID, ORIGIN and RAW; return it.
+KEY is the idempotency key of the attempt this entry re-drives, when
+there was one: an OUTAGE entry is a RETRY of a submission that may
+already have landed, so it must go back out under the SAME key and let
+the daemon\='s duplicate refusal do its job.  A DEFERRAL never attempted
+anything, so it carries no key and mints a fresh one at drain."
   (let ((entry (list :id (format "held:%d" (cl-incf agent-repl--prompt-queue-seq))
                      :kind kind
                      :said said
                      :origin origin
                      :raw raw
+                     :idempotency-key key
                      :queued-at (float-time))))
     (agent-repl--prompt-queue-set
      ws (append (gethash ws agent-repl--prompt-queue) (list entry)))
-    (agent-repl--info ws "elisp.prompt-queue.held ws=%s id=%s kind=%S origin=%S depth=%d"
-                      ws (plist-get entry :id) kind origin
+    (agent-repl--info ws "elisp.prompt-queue.held ws=%s id=%s kind=%S origin=%S key=%s depth=%d"
+                      ws (plist-get entry :id) kind origin key
                       (length (gethash ws agent-repl--prompt-queue)))
     entry))
 
@@ -145,13 +151,15 @@ not one of the refusing arms."
 
 ;;;; ---- Offering ---------------------------------------------------------
 
-(defun agent-repl-prompt-queue-offer (ws said origin raw)
+(defun agent-repl-prompt-queue-offer (ws said origin raw &optional key)
   "Hold SAID for WS after a transport failure; return the held entry.
 Called by the composer when the daemon never answered a submission.  The
 composer keeps its text as well: nothing here is evidence the prompt did
 not land, so the user is left able to see and resend exactly what they
-wrote."
-  (agent-repl--prompt-queue-enqueue ws :outage said origin raw))
+wrote.  KEY is the failed attempt\='s idempotency key, carried so the
+re-drive goes out as a RETRY of that attempt rather than as a second
+turn."
+  (agent-repl--prompt-queue-enqueue ws :outage said origin raw key))
 
 (defun agent-repl-queue-deferred-prompt ()
   "Hold the composer's contents until the agent finishes its current turn.
@@ -200,12 +208,13 @@ prompt per turn in the order they were written."
 The `UserSaid' was composed when the prompt was written, so this
 re-composes nothing: a second `agent-repl--prepare-input' pass would
 decorate an already-decorated prompt."
-  (agent-repl--info ws "elisp.prompt-queue.sending ws=%s id=%s kind=%S composed-origin=%S"
+  (agent-repl--info ws "elisp.prompt-queue.sending ws=%s id=%s kind=%S composed-origin=%S key=%s"
                     ws (plist-get entry :id) (plist-get entry :kind)
-                    (plist-get entry :origin))
+                    (plist-get entry :origin) (plist-get entry :idempotency-key))
   (agent-repl--input-submit ws (plist-get entry :said)
                             agent-repl--prompt-queue-drain-origin
-                            (plist-get entry :raw)))
+                            (plist-get entry :raw)
+                            (plist-get entry :idempotency-key)))
 
 (defun agent-repl-prompt-queue-drain (ws &optional kind)
   "Send WS's held prompts, oldest first; only those of KIND when given.
