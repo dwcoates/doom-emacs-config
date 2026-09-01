@@ -78,8 +78,12 @@ func lostOptions(t *testing.T, storeSocket string, tree *vendorTree) sidecarOpti
 // exactly how the missing wire assertion survived.
 func awaitLostConclusion(ctx context.Context, t *testing.T, logPath, path, reason string) logRecord {
 	t.Helper()
+	// ANY of the reader's four outcomes is the conclusion this waits for. They
+	// are separate operations so a reader can tell a minted terminal from a
+	// refused one; a wait that named only the minted one would hang forever on a
+	// residue spool, which names no run and can never mint one.
 	return awaitLog(ctx, t, logPath, "the "+reason+" conclusion for "+path, func(r logRecord) bool {
-		return r.Operation == "lost-terminal" &&
+		return lostTerminalOperations[r.Operation] &&
 			samePathAny(r.Context["path"], path) &&
 			r.Context["reason"] == reason
 	})
