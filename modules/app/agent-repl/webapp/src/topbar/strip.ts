@@ -88,8 +88,12 @@ export function bindSessionReveal(
 ): void {
   if (line === undefined) return;
   asAnchor(button, "session");
+  const body = (): HTMLElement => drawTopbarSessionLine(line);
+  // Registered as it is drawn, so a push that arrives while the reveal is open
+  // re-opens it with THIS push's session line rather than the previous one's.
+  tc.reveals.register("session", "session", body);
   button.addEventListener("click", () => {
-    tc.reveals.toggle("session", button, () => drawTopbarSessionLine(line));
+    tc.reveals.toggle("session", "session", body);
   });
 }
 

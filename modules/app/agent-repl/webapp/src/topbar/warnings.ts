@@ -81,22 +81,20 @@ export function drawTopbarWarningStrip(
   button.append(mark, badge);
   wrap.append(button);
 
+  const body = (): HTMLElement => drawWarningList(u, tc);
+  tc.reveals.register("warnings", "warnings", body);
   button.addEventListener("click", () => {
-    tc.reveals.toggle("warnings", button, () => drawWarningList(u, tc, button));
+    tc.reveals.toggle("warnings", "warnings", body);
   });
   return wrap;
 }
 
 /** The first level: one row per warning, newest first as served. */
-export function drawWarningList(
-  u: TopbarWarningStrip,
-  tc: TopbarContext,
-  anchor: HTMLElement,
-): HTMLElement {
+export function drawWarningList(u: TopbarWarningStrip, tc: TopbarContext): HTMLElement {
   const list = document.createElement("div");
   list.className = "topbar-warning-list list-rows";
   for (const [index, warning] of u.warnings.entries()) {
-    list.append(drawTopbarWarning(warning, tc, anchor, u, `TopbarWarningStrip.warnings[${index}]`));
+    list.append(drawTopbarWarning(warning, tc, u, `TopbarWarningStrip.warnings[${index}]`));
   }
   return list;
 }
@@ -105,7 +103,6 @@ export function drawWarningList(
 export function drawTopbarWarning(
   u: TopbarWarning,
   tc: TopbarContext,
-  anchor: HTMLElement,
   strip: TopbarWarningStrip,
   path: string,
 ): HTMLElement {
@@ -123,8 +120,8 @@ export function drawTopbarWarning(
     // The list is inside the reveal, so this click must not reach the layer's
     // outside-click handler as a close.
     event.stopPropagation();
-    tc.reveals.open("warning-detail", anchor, () =>
-      drawWarningDetailOverlay(u, tc, anchor, strip, path),
+    tc.reveals.open("warning-detail", "warnings", () =>
+      drawWarningDetailOverlay(u, tc, strip, path),
     );
   });
   return row;
@@ -134,7 +131,6 @@ export function drawTopbarWarning(
 export function drawWarningDetailOverlay(
   u: TopbarWarning,
   tc: TopbarContext,
-  anchor: HTMLElement,
   strip: TopbarWarningStrip,
   path: string,
 ): HTMLElement {
@@ -149,7 +145,7 @@ export function drawWarningDetailOverlay(
   back.textContent = "‹ warnings";
   back.addEventListener("click", (event) => {
     event.stopPropagation();
-    tc.reveals.open("warnings", anchor, () => drawWarningList(strip, tc, anchor));
+    tc.reveals.open("warnings", "warnings", () => drawWarningList(strip, tc));
   });
   overlay.append(back);
 
