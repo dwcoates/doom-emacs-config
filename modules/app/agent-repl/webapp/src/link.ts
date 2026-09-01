@@ -27,10 +27,18 @@
  * drawn, at the link itself, per the call-site rule.
  */
 import { log } from "./log.js";
-import { OpenExternalResponseSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
-import { OpenInEditorResponseSchema } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
+import {
+  OpenExternalResponseSchema,
+  type OpenExternalError,
+} from "../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import {
+  OpenInEditorResponseSchema,
+  type OpenInEditorError,
+} from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import type { AppContext } from "./rpc/context.js";
-import { requireCase } from "./rpc/strict.js";
+import { isMalformedView } from "./rpc/malformed.js";
+import { refusalSentence } from "./rpc/refusal.js";
+import { requireCase, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 
 /** Only these two schemes are a hyperlink; everything else is text. */
@@ -143,15 +151,21 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
     );
     const result = requireCase(response.result, "OpenExternalResponse.result");
     if (result.case === "success") return;
-    drawRefusal(anchor, "the daemon could not open this link");
+    const cause = requireCase(
+      (result.value as OpenExternalError).cause,
+      "OpenExternalError.cause",
+    );
+    const say = refusalSentence("OpenExternal", cause) ?? openExternalRefusal(cause);
+    drawRefusal(anchor, cause.case, say);
     log("warn", `OpenExternal refused ${url}`, {
       operation: "link.open-external-refused",
-      context: { url, arm: result.case },
+      context: { url, arm: cause.case, sentence: say },
     });
   } catch (err) {
     // A link that went nowhere must say so: the user just clicked expecting a
     // browser window, and silence would read as a dead rail.
-    drawRefusal(anchor, "the daemon could not be reached");
+    if (isMalformedView(err)) throw err;
+    drawRefusal(anchor, "transport", "the daemon could not be reached");
     log("error", `OpenExternal failed for ${url}: ${String(err)}`, {
       operation: "link.open-external-failed",
       context: { url, cause: err },
@@ -175,13 +189,19 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
     );
     const result = requireCase(response.result, "OpenInEditorResponse.result");
     if (result.case === "success") return;
-    drawRefusal(anchor, "the editor could not be opened there");
+    const cause = requireCase(
+      (result.value as OpenInEditorError).cause,
+      "OpenInEditorError.cause",
+    );
+    const say = refusalSentence("OpenInEditor", cause) ?? openInEditorRefusal(cause);
+    drawRefusal(anchor, cause.case, say);
     log("warn", `OpenInEditor refused ${spec.path}`, {
       operation: "link.open-in-editor-refused",
-      context: { path: spec.path, line: spec.line, arm: result.case },
+      context: { path: spec.path, line: spec.line, arm: cause.case, sentence: say },
     });
   } catch (err) {
-    drawRefusal(anchor, "the daemon could not be reached");
+    if (isMalformedView(err)) throw err;
+    drawRefusal(anchor, "transport", "the daemon could not be reached");
     log("error", `OpenInEditor failed for ${spec.path}: ${String(err)}`, {
       operation: "link.open-in-editor-failed",
       context: { path: spec.path, line: spec.line, cause: err },
@@ -198,10 +218,51 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
  * already gives) and as the shared `.refusal[data-arm]` marker the integration
  * suite targets.
  */
-function drawRefusal(anchor: HTMLElement, message: string): void {
+function drawRefusal(anchor: HTMLElement, arm: string, message: string): void {
   anchor.classList.add("refusal");
-  anchor.setAttribute("data-arm", "error");
+  anchor.setAttribute("data-arm", arm);
   anchor.title = message;
+}
+
+/** `OpenExternalError`'s cause union, narrowed to a SET arm. */
+type OpenExternalCause = NonNullable<OpenExternalError["cause"]> & { case: string };
+
+/** `OpenInEditorError`'s cause union, narrowed to a SET arm. */
+type OpenInEditorCause = NonNullable<OpenInEditorError["cause"]> & { case: string };
+
+/**
+ * OpenExternal's own three arms.
+ *
+ * The url is NOT restated in the sentence — the anchor the refusal lands on is
+ * the url — so each says the one thing the anchor cannot: whether the address
+ * was rejected, whether the host has no browser to open it with, or what the
+ * launch itself failed on.
+ */
+export function openExternalRefusal(cause: OpenExternalCause): string {
+  switch (cause.case) {
+    case "invalidUrl":
+      return "the daemon would not accept this address";
+    case "noBrowserConfigured":
+      return "the host has no browser configured to open links with";
+    case "launchFailed":
+      return `the browser could not be launched: ${cause.value.detail}`;
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("OpenExternalError.cause", other.case);
+    }
+  }
+}
+
+/** OpenInEditor's own arm: the path guard the daemon applies. */
+export function openInEditorRefusal(cause: OpenInEditorCause): string {
+  switch (cause.case) {
+    case "pathEscapesWorkspace":
+      return "that path is outside this workspace";
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("OpenInEditorError.cause", other.case);
+    }
+  }
 }
 
 function clearRefusal(anchor: HTMLElement): void {
