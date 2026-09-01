@@ -227,26 +227,6 @@ message's own key check, which is the same breach seen from the key side."
   (cond ((stringp value) value)
         (t (agent-repl-wire--fail message-name field "expected a string"))))
 
-(defun agent-repl-wire--encode-int64 (message-name field value)
-  "Return VALUE as an encodable int64 for MESSAGE-NAME's FIELD.
-An integer is emitted: protojson accepts numbers for int64 as readily as
-the decimal strings it emits."
-  (cond ((integerp value) value)
-        (t (agent-repl-wire--fail message-name field "expected an integer"))))
-
-(defun agent-repl-wire--encode-uint32 (message-name field value)
-  "Return VALUE as an encodable uint32 for MESSAGE-NAME's FIELD."
-  (unless (integerp value)
-    (agent-repl-wire--fail message-name field "expected an integer"))
-  (when (< value 0)
-    (agent-repl-wire--fail message-name field "expected a non-negative integer"))
-  value)
-
-(defun agent-repl-wire--encode-bool (message-name field value)
-  "Return VALUE as `json-serialize''s boolean spelling for FIELD."
-  (ignore message-name field)
-  (if value t :false))
-
 (defun agent-repl-wire--encode-repeated (message-name field values encoder)
   "Return VALUES encoded with ENCODER as a vector, for MESSAGE-NAME's FIELD."
   (unless (listp values)
