@@ -26,11 +26,13 @@ import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
   CreateWorkspaceRequestSchema,
   CreateWorkspaceResponseSchema,
+  type CreateWorkspaceError,
   type CreateWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_workspace_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { buildUserSaid } from "../composer/composer.js";
 import { log } from "../log.js";
+import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { runVerb, type PriorityChoice } from "./verbs.js";
 
@@ -278,6 +280,7 @@ export function drawCreateWorkspaceForm(
       rpc: "CreateWorkspace",
       call: (client) => client.createWorkspace(buildCreateWorkspaceRequest(spec)),
       schema: CreateWorkspaceResponseSchema,
+      refusalText: (cause) => createWorkspaceRefusal(cause as CreateWorkspaceCause),
     }).then((ok) => {
       // The new row arrives on the roster push; the form's only job on success
       // is to get out of the way.
@@ -286,6 +289,49 @@ export function drawCreateWorkspaceForm(
   });
   form.appendChild(submit);
   return form;
+}
+
+/** `CreateWorkspaceError`'s cause union, narrowed to a SET arm. */
+type CreateWorkspaceCause = NonNullable<CreateWorkspaceError["cause"]> & { case: string };
+
+/**
+ * What each of CreateWorkspace's ten refusals says.
+ *
+ * NONE OF THE CROSS-CUTTING FOUR CAN REACH THIS RPC: a creation is addressed
+ * to a repository, not to an existing workspace, so every arm here is the
+ * endpoint's own and this table is the whole vocabulary.
+ *
+ * The four that name a fact — the brief's workspace, the unresolved base ref,
+ * git's own message — carry it into the sentence, because the form's next move
+ * depends on which of them it was.
+ */
+export function createWorkspaceRefusal(cause: CreateWorkspaceCause): string {
+  switch (cause.case) {
+    case "ungatedWithoutConsent":
+      return "this repository is ungated: tick the consent box to create here anyway";
+    case "noSlug":
+      return "the daemon could not derive a name for this workspace";
+    case "finishRequired":
+      return "a one-shot needs a finishing action";
+    case "finishNotOneShot":
+      return "a finishing action belongs to a one-shot, not to a standard workspace";
+    case "forkParentHasNoConversation":
+      return "the parent workspace has no conversation to fork";
+    case "briefMissing":
+      return `the brief for ${cause.value.name} was not found`;
+    case "unknownRepository":
+      return "the daemon does not know this repository";
+    case "unknownParent":
+      return "the daemon does not know the parent workspace";
+    case "baseRefUnresolved":
+      return `the base ref ${cause.value.ref} could not be resolved`;
+    case "worktreeCreationFailed":
+      return `the worktree could not be created: ${cause.value.detail}`;
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("CreateWorkspaceError.cause", other.case);
+    }
+  }
 }
 
 /** What the form's controls read as, before blanks are dropped. */

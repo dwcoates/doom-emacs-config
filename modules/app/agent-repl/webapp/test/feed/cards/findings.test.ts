@@ -303,12 +303,19 @@ describe("a finding's location click", () => {
   });
 
   it("draws the refusal at the location when the editor could not be opened", async () => {
-    const h = harness(create(OpenInEditorResponseSchema, { result: { case: "error", value: {} } }));
+    const h = harness(
+      create(OpenInEditorResponseSchema, {
+        result: {
+          case: "error",
+          value: { cause: { case: "pathEscapesWorkspace", value: {} } },
+        },
+      }),
+    );
     const el = drawFeedFindings(findings([finding()]), h.rc);
     const anchor = el.querySelector<HTMLAnchorElement>(".finding-location a");
     anchor?.click();
     await settle();
-    expect(anchor?.getAttribute("data-arm")).toBe("error");
+    expect(anchor?.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
   });
 });
 

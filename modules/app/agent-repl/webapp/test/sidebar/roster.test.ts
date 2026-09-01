@@ -328,6 +328,38 @@ describe("the task section's header", () => {
     await click(taskHead(drawn).querySelector("[data-task-change='setTitle']") as Element);
     expect(calls).toBe(0);
   });
+
+  it("says an UpdateTask refusal at the control that made the call", async () => {
+    const sc = sidebarContext(
+      appContext({
+        updateTask: () =>
+          create(UpdateTaskResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownTask", value: {} } } },
+          }),
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(taskHead(drawn).querySelector("[data-task-status]") as Element);
+    expect(taskHead(drawn).querySelector(".refusal[data-arm]")?.getAttribute("data-arm")).toBe(
+      "unknownTask",
+    );
+  });
+
+  it("words that refusal from the task verbs' own table", async () => {
+    const sc = sidebarContext(
+      appContext({
+        updateTask: () =>
+          create(UpdateTaskResponseSchema, {
+            result: { case: "error", value: { cause: { case: "noChange", value: {} } } },
+          }),
+      }),
+      memoryPrefs({ grouping: "task" }),
+    );
+    const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
+    await click(taskHead(drawn).querySelector("[data-task-status]") as Element);
+    expect(taskHead(drawn).querySelector(".refusal")?.textContent).toContain("exactly as it is");
+  });
 });
 
 describe("the create controls", () => {
