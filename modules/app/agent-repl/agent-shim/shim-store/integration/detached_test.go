@@ -183,3 +183,88 @@ func TestADetachedRunFrameIsServedAsAPageLineOfTheAnnouncersBook(t *testing.T) {
 	assertTexts(t, "the announcer's book", pageTexts(page.GetPage()), []string{"detached:" + itestBashHandle})
 	store.assertNoErrorRecords()
 }
+
+// TestACoincidentHandleAndUnitIdIsOneObligation is the convergence edge of the
+// two identities: nothing stops a producer from minting a DetachedWorkId and an
+// AgentActivityId with the SAME opaque value, and when it does the run must
+// still be ONE obligation rather than two rows that happen to look alike.
+func TestACoincidentHandleAndUnitIdIsOneObligation(t *testing.T) {
+	// Arrange: the handle and the unit id are deliberately the same string.
+	const coincident = "work-and-run-coincide"
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	sidecar := fileProducer(cli)
+	shim.write(ctx, t, shim.agentEntry("w-c-1", "detached:"+coincident,
+		frameLine(agentID("main"), detachedRunFrame("main", coincident, coincident))))
+
+	// Act
+	sidecar.write(ctx, t, sidecar.agentEntry("w-c-2", "bash:"+coincident+":start",
+		bashRun(agentID("main"), coincident, bashStart("sleep 60", 1000))))
+
+	// Assert
+	if got := workValues(liveWork(ctx, t, cli).GetLiveDetached()); len(got) != 1 {
+		t.Fatalf("live_detached = %v, want exactly one entry for one run", got)
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestACoincidentHandleAndUnitIdIsClosedByOneTerminal is the other half: one
+// terminal on the shared string closes the one obligation, leaving nothing
+// open that a reconciler would have to resolve against a run that never was.
+func TestACoincidentHandleAndUnitIdIsClosedByOneTerminal(t *testing.T) {
+	// Arrange
+	const coincident = "work-and-run-coincide"
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	sidecar := fileProducer(cli)
+	shim.write(ctx, t, shim.agentEntry("w-c-1", "detached:"+coincident,
+		frameLine(agentID("main"), detachedRunFrame("main", coincident, coincident))))
+	sidecar.write(ctx, t, sidecar.agentEntry("w-c-2", "bash:"+coincident+":start",
+		bashRun(agentID("main"), coincident, bashStart("sleep 60", 1000))))
+
+	// Act
+	sidecar.write(ctx, t, sidecar.agentEntry("w-c-3", "bash:"+coincident+":terminal",
+		bashRun(agentID("main"), coincident, bashSuccess("sleep 60", 0))))
+
+	// Assert
+	if got := workValues(liveWork(ctx, t, cli).GetLiveDetached()); len(got) != 0 {
+		t.Fatalf("live_detached = %v, want empty after the one run concluded", got)
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestAnAnnouncedRunWithNoRowsIsARefusedWatchButAnOpenObligation is the edge
+// the shim's reconciliation has to survive.
+//
+// The announcement and the run's rows come from DIFFERENT producers, so there
+// is a real window in which the obligation exists and the run has no row at
+// all. GetLiveWork answers from the lifecycle table and lists it; WatchBashRun
+// answers from the entry spine and has nothing to serve, so it refuses the open
+// with CodeNotFound rather than standing open on a run it cannot replay.
+func TestAnAnnouncedRunWithNoRowsIsARefusedWatchButAnOpenObligation(t *testing.T) {
+	// Arrange
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+
+	// Act: only the announcement is ever written.
+	shim.write(ctx, t, shim.agentEntry("w-announced-only", "detached:"+itestBashHandle,
+		frameLine(agentID("main"), detachedRunFrame("main", itestBashHandle, itestBashRunID))))
+
+	// Assert: the obligation is open...
+	if got := workValues(liveWork(ctx, t, cli).GetLiveDetached()); !contains(got, itestBashHandle) {
+		t.Fatalf("live_detached = %v, want the announced run", got)
+	}
+	// ...and the run's own stream is refused, because there is no row.
+	stream := watchBashRun(ctx, t, cli, itestBashRunID)
+	defer stream.Close()
+	assertBashRunRefused(t, stream)
+}

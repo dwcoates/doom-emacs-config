@@ -66,7 +66,7 @@ func TestLiveWorkScansDetachedWorkBesideAgents(t *testing.T) {
 	shim.write(ctx, t,
 		shim.agentEntry("w-lw-both-1", "u-lw-both-1",
 			frameLine(agentID("main"), subagentSpawnFrame("main", "act-spawn", "sub-live", "work", 2000))),
-		shim.agentEntry("w-lw-both-2", "u-lw-both-2",
+		shim.agentEntry("w-lw-both-2", "detached:work-bash-live",
 			frameLine(agentID("main"), detachedBashFrame("main", "work-bash-live", "tail -f log", 2100))),
 	)
 
@@ -124,6 +124,61 @@ func TestLiveWorkSurvivesARestart(t *testing.T) {
 	defer cancelAfter()
 	if got := agentValues(liveWork(after, t, store.client()).GetLiveAgents()); !contains(got, "sub-restart") {
 		t.Errorf("an open obligation did not survive a restart: live_agents is %v", got)
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestLiveDetachedSurvivesARestart: the detached side of the same claim. A
+// store bounce mid-run must not silently retire an obligation the shim is still
+// holding a spool open for — the answer comes from the lifecycle table, which
+// is on disk, and not from anything the dead process knew.
+func TestLiveDetachedSurvivesARestart(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	shim.write(ctx, t,
+		shim.agentEntry("w-lwd-restart", "detached:work-restart",
+			frameLine(agentID("main"), detachedBashFrame("main", "work-restart", "tail -f log", 5000))),
+	)
+
+	// Act.
+	store.restart()
+
+	// Assert.
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	if got := workValues(liveWork(after, t, store.client()).GetLiveDetached()); !contains(got, "work-restart") {
+		t.Errorf("an announced run did not survive a restart: live_detached is %v", got)
+	}
+	store.assertNoErrorRecords()
+}
+
+// TestARunConcludedBeforeARestartStaysClosedAcrossIt is the negative half: the
+// terminal is as durable as the announcement, so a bounce must not resurrect a
+// run the record already closed.
+func TestARunConcludedBeforeARestartStaysClosedAcrossIt(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	shim.write(ctx, t,
+		shim.agentEntry("w-lwd-closed-1", "detached:work-closed",
+			frameLine(agentID("main"), detachedBashFrame("main", "work-closed", "make test", 5100))),
+		shim.agentEntry("w-lwd-closed-2", "bash:work-closed:terminal",
+			bashRun(agentID("main"), "work-closed", bashSuccess("make test", 0))),
+	)
+
+	// Act.
+	store.restart()
+
+	// Assert.
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	if got := workValues(liveWork(after, t, store.client()).GetLiveDetached()); contains(got, "work-closed") {
+		t.Errorf("a restart resurrected a concluded run: live_detached is %v", got)
 	}
 	store.assertNoErrorRecords()
 }
