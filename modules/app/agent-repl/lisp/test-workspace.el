@@ -2630,3 +2630,71 @@ resolving an identity that would raise."
             ;; Assert — forgetting through EITHER name clears the one entry.
             (should (= 0 (hash-table-count agent-repl--workspace-log-targets))))
         (delete-directory project t)))))
+
+;;;; ---- R-LOGFORGET: the teardown forgets its sink LAST ----
+;;
+;; `agent-repl--ws-del' used to forget WS's owned log target FIRST, then go
+;; on logging the teardown it was in the middle of: the `ws-del-hook'
+;; records, every runtime-key clear, and the closing `ws-del:' line.  The
+;; first of those minted a FRESH durable target and re-pointed the canonical
+;; `<ws>/.claude/emacs/emacs.log' symlink at it, so the path every reader
+;; follows no longer reached one line of that workspace's history.  The
+;; forget is now the last act of the teardown.
+
+(ert-deftest agent-repl-test-ws-del-leaves-the-canonical-link-on-the-old-target ()
+  "After a teardown the canonical link still names the pre-teardown target."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-del-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (agent-repl-log-to-file t))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "del-link-ws" :project-dir project)
+            (let ((target (agent-repl--workspace-emacs-log-target "del-link-ws")))
+              ;; Act
+              (agent-repl--ws-del "del-link-ws")
+              ;; Assert
+              (should (equal target
+                             (file-symlink-p
+                              (agent-repl--workspace-emacs-log-path project))))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-ws-del-writes-its-own-record-into-the-old-target ()
+  "The teardown's own closing record lands in the pre-teardown target."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-del-record-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (agent-repl-log-to-file t))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "del-record-ws" :project-dir project)
+            (let ((target (agent-repl--workspace-emacs-log-target "del-record-ws")))
+              ;; Act
+              (agent-repl--ws-del "del-record-ws")
+              ;; Assert
+              (should (string-match-p
+                       "ws-del: ws=del-record-ws"
+                       (with-temp-buffer
+                         (insert-file-contents target)
+                         (buffer-string))))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-a-record-after-ws-del-mints-a-fresh-target ()
+  "Ownership really is released: the NEXT record for the name gets a new sink."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-del-fresh-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (agent-repl-log-to-file t))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "del-fresh-ws" :project-dir project)
+            (let ((target (agent-repl--workspace-emacs-log-target "del-fresh-ws")))
+              (agent-repl--ws-del "del-fresh-ws")
+              ;; Act
+              (let ((next (agent-repl--workspace-emacs-log-target "del-fresh-ws")))
+                ;; Assert
+                (should-not (equal target next)))))
+        (delete-directory project t)))))
