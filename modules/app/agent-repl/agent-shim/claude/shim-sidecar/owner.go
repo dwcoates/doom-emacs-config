@@ -173,6 +173,10 @@ func newOwnerIndex(log *logging.Bound) *ownerIndex {
 }
 
 // observe records one spawn.
+//
+// A CONFLICT IS ITS OWN OPERATION (`record-spawn-conflict`): it is the branch
+// that makes a task permanently unresolvable, and sharing `record-spawn` with an
+// ordinary rejection left the two findable only by their prose.
 func (o *ownerIndex) observe(obs observation) {
 	bound := o.log.With(logging.Context{
 		Operation: "record-spawn", TaskID: obs.taskID, ActivityID: obs.activityID,
@@ -185,7 +189,7 @@ func (o *ownerIndex) observe(obs observation) {
 	if prior, ok := o.byTask[obs.taskID]; ok {
 		if prior.activityID != obs.activityID {
 			o.conflicts[obs.taskID] = true
-			bound.With(logging.Context{Level: "error"}).Log(
+			bound.With(logging.Context{Operation: "record-spawn-conflict", Level: "error"}).Log(
 				"CONFLICTING spawn observation: task already claimed by call %s; it resolves to nothing rather than to a guess", prior.activityID)
 			return
 		}
@@ -200,17 +204,22 @@ func (o *ownerIndex) observe(obs observation) {
 }
 
 // resolve returns the spawn that owns a spool, and whether it is known.
+//
+// THE TWO REFUSALS ARE DISTINCT BRANCHES: `resolve-spool-owner-conflicted` is a
+// task two calls claim, `resolve-spool-owner-path-mismatch` is a spool whose
+// authoritative output is a different file. They are fixed differently, so a
+// reader must be able to filter for one without reading sentences.
 func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	bound := o.log.With(logging.Context{Operation: "resolve-spool-owner", Path: target.Path, TaskID: target.TaskID})
 	if o.conflicts[target.TaskID] {
-		bound.With(logging.Context{Level: "error"}).Log("owner resolution refused: two calls claim this task")
+		bound.With(logging.Context{Operation: "resolve-spool-owner-conflicted", Level: "error"}).Log("owner resolution refused: two calls claim this task")
 		return observation{}, false
 	}
 	// An exact output path is the strongest evidence: the vendor named this
 	// file, so no id comparison is needed at all.
 	if taskID, ok := o.byOutput[target.Path]; ok {
 		if taskID != target.TaskID {
-			bound.With(logging.Context{Level: "error"}).Log(
+			bound.With(logging.Context{Operation: "resolve-spool-owner-path-mismatch", Level: "error"}).Log(
 				"owner resolution refused: this exact output path is recorded for task %s", taskID)
 			return observation{}, false
 		}
@@ -219,7 +228,7 @@ func (o *ownerIndex) resolve(target discover.Target) (observation, bool) {
 	}
 	if obs, ok := o.byTask[target.TaskID]; ok {
 		if obs.outputPath != "" && obs.outputPath != target.Path {
-			bound.With(logging.Context{Level: "error"}).Log(
+			bound.With(logging.Context{Operation: "resolve-spool-owner-path-mismatch", Level: "error"}).Log(
 				"owner resolution refused: the task's authoritative output path is %s", obs.outputPath)
 			return observation{}, false
 		}

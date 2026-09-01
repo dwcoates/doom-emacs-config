@@ -3,7 +3,6 @@ package stale
 import (
 	"io"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -214,9 +213,7 @@ func TestBootSweepWithoutABootTimeIsLoud(t *testing.T) {
 	if len(lost) != 0 {
 		t.Fatalf("swept %+v without a boot time", lost)
 	}
-	if !strings.Contains(strings.Join(*logs, "\n"), "boot time unavailable") {
-		t.Fatalf("an unrunnable boot sweep was silent; got %v", *logs)
-	}
+	requireOnceIn(t, parseLogLines(t, *logs), "boot-sweep", "warn")
 }
 
 func TestSweepStopsTrackingWhatItConcluded(t *testing.T) {
@@ -242,9 +239,9 @@ func TestConclusionIsLoggedAsAWarning(t *testing.T) {
 	tr.Sweep(bootMs, nowMs+shellMs)
 
 	// Assert.
-	joined := strings.Join(*logs, "\n")
-	if !strings.Contains(joined, "concluded LOST") || !strings.Contains(joined, `"level":"warn"`) {
-		t.Fatalf("the LOST conclusion was not stated loudly; got %v", *logs)
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "warn")
+	if got := ctxString(t, rec, "task_id"); got != "b1" {
+		t.Fatalf("lost-policy/warn task_id = %q, want b1", got)
 	}
 }
 
@@ -414,8 +411,9 @@ func TestSweepStatesAnUnknownBootTimeOnce(t *testing.T) {
 	tr.Sweep(0, nowMs)
 
 	// Assert.
-	if got := strings.Count(strings.Join(*logs, "\n"), "boot time unavailable"); got != 1 {
-		t.Fatalf("the unknown-boot-time statement appears %d time(s), want exactly 1", got)
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "lost-policy", "info")
+	if rec.Verbosity != "verbose" {
+		t.Fatalf("the inert-boot-arm statement was recorded at verbosity %q, want verbose", rec.Verbosity)
 	}
 }
 
