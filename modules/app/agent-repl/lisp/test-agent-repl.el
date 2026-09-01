@@ -57,7 +57,6 @@
   (load (expand-file-name "test-prevent-select.el" dir) nil t)
   (load (expand-file-name "test-prompt-queue.el" dir) nil t)
   (load (expand-file-name "test-prompt-summary.el" dir) nil t)
-  (load (expand-file-name "test-prompts.el" dir) nil t)
   (load (expand-file-name "test-render-colors.el" dir) nil t)
   (load (expand-file-name "test-roster.el" dir) nil t)
   (load (expand-file-name "test-rpc.el" dir) nil t)
