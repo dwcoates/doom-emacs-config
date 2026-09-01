@@ -362,7 +362,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			NodeBin:      f.deps.NodeBin,
 			MainJS:       f.deps.MainJS,
 			Fake:         f.deps.Fake,
-			LogSink:      os.NewFile(sink.File(), dir+"/.claude/emacs/shim.log"),
+			LogSink:      sink.File(),
 			ForbidVendor: f.deps.ForbidVendor,
 		})
 		if err != nil {
