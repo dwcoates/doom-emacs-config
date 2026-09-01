@@ -690,6 +690,16 @@ from CONTROL ANSWERS and from fields riding other messages:
   records `context_tip` as itself (residue `attachment/context_tip`) and only a
   record whose own type says `context_budget_warning` becomes the warning. Which
   record the vendor really uses is a capture-run question.
+  CAPTURE RUN RESULT (2026-09-01, read from the 67 goldens): NO capture
+  carries a `context_tip` or any budget-warning attachment (the scenario ran
+  to success without one); the only token-budget carrier observed is a
+  `total_tokens_reminder` attachment (`text: "<total_tokens>N tokens
+  left</total_tokens>"`, once). The spelling is an OPEN EVIDENCE GAP — the
+  `context_budget_warning` producer (sidecar plane) stays marked ungrounded,
+  never guessed. Also recorded as negatives from the same run: no failed
+  subagent, no compaction summary line, no /clear rotation record (the last
+  two because the harness closed the query before the later turns — fixed,
+  re-capture owed).
 
 ### The e2e mock additions, and what they found (mock agent evidence)
 
