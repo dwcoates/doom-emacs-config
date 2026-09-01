@@ -250,6 +250,24 @@ late reclaim is logged to stderr:
 capture.mjs: late reclaim <slug> — N file(s) re-copied, <dir> removed
 ```
 
+## A provocation the model declines captures nothing
+
+`permission-denied-by-user` used to prompt `rm -rf .`. The model refused that on
+its own judgement, so the turn never reached the permission gate and the capture
+recorded no `can_use_tool` at all — a golden for denial containing no denial. A
+gated scenario's prompt must be a command the model will ACTUALLY attempt
+(`rm -f stale.log`, with the file materialized by `cwd_setup`); the refusal is
+the capture script's `permission_script` job, never the model's.
+
+The same principle governs `expects_error_subtypes`. A scenario whose golden IS
+an error terminal declares it, or the quarantine rule condemns the very capture
+it exists for: `permission-undecidable-parked` interrupts a pending gate and the
+vendor ends the turn `subtype: "error_during_execution"`,
+`terminal_reason: "aborted_tools"`, so that subtype is declared. It is declared
+only where the real capture showed it — `hook-cancelled` also drives an
+interrupt but terminates `success`/`completed`, and whitelisting an error there
+would hide a real failure.
+
 ## The corpus
 
 `prompts.json` holds one entry per item in the SHIM directive's coverage list.
