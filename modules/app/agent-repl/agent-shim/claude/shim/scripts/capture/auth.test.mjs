@@ -28,6 +28,7 @@ import {
   reclaimScratchProject,
   releaseScratchProject,
   resolveAuthMode,
+  accountRootEnvFor,
   sdkEnvFor,
   wipeSeededCredentials,
 } from "./auth.mjs";
@@ -381,6 +382,50 @@ describe("sdkEnvFor", () => {
 
   it("adds nothing for a seeded run", () => {
     expect(sdkEnvFor({ mode: AUTH_SEED_CREDENTIALS }, {})).toEqual({});
+  });
+});
+
+describe("accountRootEnvFor", () => {
+  it("hands a config-root run at the default root NO CLAUDE_CONFIG_DIR", () => {
+    const home = scratch();
+    const root = path.join(home, ".claude");
+    const env = accountRootEnvFor({ mode: AUTH_CONFIG_ROOT }, root, { CLAUDE_CONFIG_DIR: root, KEEP: "1" }, home);
+    expect(env).toEqual({ KEEP: "1" });
+  });
+
+  it("removes an inherited CLAUDE_CONFIG_DIR at the default root even when it names another root", () => {
+    const home = scratch();
+    const root = path.join(home, ".claude");
+    const env = accountRootEnvFor({ mode: AUTH_CONFIG_ROOT }, root, { CLAUDE_CONFIG_DIR: "/elsewhere" }, home);
+    expect("CLAUDE_CONFIG_DIR" in env).toBe(false);
+  });
+
+  it("names a config-root run at a non-default root explicitly", () => {
+    const home = scratch();
+    const root = path.join(home, ".claude-other");
+    const env = accountRootEnvFor({ mode: AUTH_CONFIG_ROOT }, root, {}, home);
+    expect(env).toEqual({ CLAUDE_CONFIG_DIR: root });
+  });
+
+  it("names a seeded scratch root explicitly", () => {
+    const home = scratch();
+    const dir = scratch();
+    expect(accountRootEnvFor({ mode: AUTH_SEED_CREDENTIALS }, dir, {}, home)).toEqual({ CLAUDE_CONFIG_DIR: dir });
+  });
+
+  it("names an inherited-token scratch root explicitly", () => {
+    const home = scratch();
+    const dir = scratch();
+    expect(accountRootEnvFor({ mode: AUTH_INHERITED_TOKEN, tokenVar: "ANTHROPIC_API_KEY" }, dir, {}, home)).toEqual({
+      CLAUDE_CONFIG_DIR: dir,
+    });
+  });
+
+  it("does not mutate the environment it was given", () => {
+    const home = scratch();
+    const given = { CLAUDE_CONFIG_DIR: "/x" };
+    accountRootEnvFor({ mode: AUTH_CONFIG_ROOT }, path.join(home, ".claude"), given, home);
+    expect(given).toEqual({ CLAUDE_CONFIG_DIR: "/x" });
   });
 });
 
