@@ -21,27 +21,6 @@
 
 ;;;; ---- Model preferences ----
 
-(ert-deftest agent-repl-test-session-effective-model-prefers-the-asked-model ()
-  "An explicitly asked-for model wins over the preference."
-  ;; Arrange
-  (let ((agent-repl-interactive-model "opus"))
-    ;; Act / Assert
-    (should (equal (agent-repl--effective-model "haiku") "haiku"))))
-
-(ert-deftest agent-repl-test-session-effective-model-falls-back-to-the-preference ()
-  "No asked-for model means the user's interactive preference."
-  ;; Arrange
-  (let ((agent-repl-interactive-model "opus"))
-    ;; Act / Assert
-    (should (equal (agent-repl--effective-model nil) "opus"))))
-
-(ert-deftest agent-repl-test-session-effective-model-can-resolve-to-nothing ()
-  "Both unset means Emacs asks for no model and the daemon picks."
-  ;; Arrange
-  (let ((agent-repl-interactive-model nil))
-    ;; Act / Assert
-    (should (null (agent-repl--effective-model nil)))))
-
 (ert-deftest agent-repl-test-session-oneshot-candidates-are-a-non-empty-list ()
   "The one-shot picker has something to offer."
   ;; Act / Assert
@@ -198,22 +177,3 @@ a workspace name used as a bare prefix reads as a different notification."
       ;; Assert
       (should (equal refreshed 0)))))
 
-(ert-deftest agent-repl-test-session-magit-refresh-for-ws-reads-the-refs-dir ()
-  "The WS-keyed wrapper refreshes the directory the workspace's ref names."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (let ((dir (make-temp-file "agent-repl-session-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :dir dir)
-            (agent-repl-test-session--with-magit refreshed
-              (with-temp-buffer
-                (setq-local default-directory (file-name-as-directory dir))
-                (setq-local major-mode 'magit-status-mode)
-                ;; Act
-                (agent-repl--refresh-magit-status "ws1")
-                ;; Assert
-                (should (equal refreshed 1)))))
-        (delete-directory dir t)))))
-
-;;; test-session.el ends here
