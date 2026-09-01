@@ -109,6 +109,72 @@ func TestWriteBatchRefusesMalformedEntries(t *testing.T) {
 	}
 }
 
+// TestWriteBatchRefusesAMalformedRequestEnvelope covers the refusals ABOVE the
+// entries: the producer string, the batch itself, and the cursor advance riding
+// it. Each names the field the store blames, and each is refused before any
+// storage happens.
+func TestWriteBatchRefusesAMalformedRequestEnvelope(t *testing.T) {
+	tests := []struct {
+		name      string
+		request   func(*producer) *storev1.WriteBatchRequest
+		wantField string
+	}{
+		{
+			name:      "empty producer",
+			wantField: "producer",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Batch: &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+					p.agentEntry("w-valid", "u-valid", frameLine(agentID("main"), responseFrame("main", "act-1", "x"))),
+				}}}
+			},
+		},
+		{
+			name:      "missing batch",
+			wantField: "batch",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Producer: p.name}
+			},
+		},
+		{
+			name:      "cursor advance naming no file",
+			wantField: "cursor_advance.file_id",
+			request: func(p *producer) *storev1.WriteBatchRequest {
+				return &storev1.WriteBatchRequest{Producer: p.name, Batch: &storev1.EntryBatch{
+					CursorAdvance: cursorState("", "/transcripts/a.jsonl", 4096, nil),
+				}}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := startStore(t, storeOptions{verbose: true})
+			ctx, cancel := callContext(t)
+			defer cancel()
+			requestID := newRequestID(t)
+			sidecar := fileProducer(store.client()).correlated(requestID)
+			mark := store.logMark()
+			call := connect.NewRequest(tc.request(sidecar))
+			call.Header().Set(requestIDHeader, requestID)
+
+			// Act.
+			resp, err := store.client().WriteBatch(ctx, call)
+			if err != nil {
+				t.Fatalf("WriteBatch answered a transport error where a typed failure was owed: %v", err)
+			}
+
+			// Assert.
+			failure := resp.Msg.GetFailure()
+			if failure == nil {
+				t.Fatalf("WriteBatch accepted a request it owed a typed failure for: %v", resp.Msg)
+			}
+			assertWriteInvalidRequest(t, failure, tc.wantField)
+			assertNoDatabaseTouch(t, store.logRecordsAfter(mark), requestID)
+		})
+	}
+}
+
 // TestWriteBatchRefusesAnEmptyBatch: a write of nothing is a producer defect,
 // not a no-op to absorb quietly.
 func TestWriteBatchRefusesAnEmptyBatch(t *testing.T) {

@@ -273,3 +273,41 @@ func TestInterleavedPlanesReplayInFirstInsertOrder(t *testing.T) {
 		[]string{"start:make test", "delta:chunk-0-final", "delta:chunk-1", "success"})
 	store.assertNoErrorRecords()
 }
+
+func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
+	// Arrange: the two ways a WatchBashRun open is refused. Neither has a
+	// failure arm on the wire, so the log record IS the store's account of it —
+	// and a reader that cannot tell one refusal from two cannot count either.
+	tests := []struct {
+		name     string
+		run      string
+		wantSite string
+	}{
+		{name: "a run the store never saw", run: "never-ran-at-all", wantSite: "unknown_bash_run"},
+		{name: "a run named by nothing", run: "", wantSite: "run_empty"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := startStore(t, storeOptions{})
+			ctx, cancel := callContext(t)
+			defer cancel()
+			mark := store.logMark()
+
+			// Act.
+			stream := watchBashRun(ctx, t, store.client(), tc.run)
+			defer stream.Close()
+			_ = awaitBashRunEnd(t, stream)
+
+			// Assert.
+			rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a refused bash run open")
+			if rec.Context["refusal_site"] != tc.wantSite {
+				t.Errorf("the refusal record's refusal_site is %v, want %s", rec.Context["refusal_site"], tc.wantSite)
+			}
+			if rec.Context["rpc"] == nil {
+				t.Errorf("the refusal record names no rpc: %v", rec.Context)
+			}
+		})
+	}
+}

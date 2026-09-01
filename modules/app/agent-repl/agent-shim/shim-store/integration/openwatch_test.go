@@ -187,9 +187,74 @@ func TestUnknownWatchTokenIsRefused(t *testing.T) {
 
 	// Assert.
 	assertWatchRefused(t, stream)
-	refusals := recordsWithContextKey(store.logRecordsAfter(mark), "watch_token_hash")
-	if len(refusals) == 0 {
-		t.Errorf("a refused watch logged no record carrying watch_token_hash")
+	// EXACTLY ONE RECORD, NAMING THE SITE AND THE TOKEN. "Some record carried a
+	// token hash" would pass for the open's own success record as readily as
+	// for the refusal, and said nothing about two layers each writing one.
+	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "an unknown watch token")
+	if rec.Context["refusal_site"] != "unknown_watch_token" {
+		t.Errorf("the refusal record's refusal_site is %v, want unknown_watch_token", rec.Context["refusal_site"])
+	}
+	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
+		t.Errorf("the refusal record carries no watch_token_hash: %v", rec.Context)
+	}
+}
+
+// TestAConsumedWatchTokenIsRefusedInExactlyOneRecord: a token spent by a live
+// watcher is refused for the same reason an unminted one is, and says so once.
+func TestAConsumedWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
+	// Arrange: the first watch consumes the token.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	opened := openSession(ctx, t, cli, "main", 10, nil)
+	first := watchStream(ctx, t, cli, opened.GetWatch())
+	defer first.Close()
+	mark := store.logMark()
+
+	// Act.
+	second := watchStream(ctx, t, cli, opened.GetWatch())
+	defer second.Close()
+
+	// Assert.
+	assertWatchRefused(t, second)
+	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a consumed watch token")
+	if rec.Context["refusal_site"] != "unknown_watch_token" {
+		t.Errorf("the refusal record's refusal_site is %v, want unknown_watch_token", rec.Context["refusal_site"])
+	}
+	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
+		t.Errorf("the refusal record carries no watch_token_hash: %v", rec.Context)
+	}
+}
+
+// TestAPostRestartWatchTokenIsRefusedInExactlyOneRecord: the registry is in
+// memory by design, so a token minted by the dead process is refused by the
+// live one — and it is the same one record, because a reader alerting on
+// refusals must be able to count store bounces without double-counting them.
+func TestAPostRestartWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	opened := openSession(ctx, t, store.client(), "main", 10, nil)
+	staleToken := opened.GetWatch()
+	store.restart()
+	mark := store.logMark()
+
+	// Act.
+	after, cancelAfter := callContext(t)
+	defer cancelAfter()
+	stream := watchStream(after, t, store.client(), staleToken)
+	defer stream.Close()
+
+	// Assert.
+	assertWatchRefused(t, stream)
+	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a watch token from a dead process")
+	if rec.Context["refusal_site"] != "unknown_watch_token" {
+		t.Errorf("the refusal record's refusal_site is %v, want unknown_watch_token", rec.Context["refusal_site"])
+	}
+	if hash, ok := rec.Context["watch_token_hash"].(string); !ok || hash == "" {
+		t.Errorf("the refusal record carries no watch_token_hash: %v", rec.Context)
 	}
 }
 
