@@ -76,6 +76,28 @@ const (
 	classNotImplemented
 )
 
+// armName is the WIRE ARM this class becomes, spelled as the proto spells it.
+//
+// It is what `refusal_kind` carries, so a log reader counts refusals by the
+// answer the caller actually received rather than by re-deriving it from the
+// site. A class with no arm would be a refusal the store could not answer, so
+// the default is deliberately unreachable rather than an empty string quietly
+// dropped from the record.
+func (c refusalClass) armName() string {
+	switch c {
+	case classInvalid:
+		return "invalid_request"
+	case classStalePointer:
+		return "stale_pointer"
+	case classStorage:
+		return "storage_failure"
+	case classNotImplemented:
+		return "not_implemented"
+	default:
+		panic(fmt.Sprintf("shim-store server: refusal class %d has no wire arm", int(c)))
+	}
+}
+
 // refusal is one typed refusal: the site the server logs, the store's own name
 // for the field at fault, the class that selects the wire arm, and the human
 // detail. `detail` is for humans and logs and is NEVER switched on by a caller;
