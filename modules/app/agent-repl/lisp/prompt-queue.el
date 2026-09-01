@@ -75,8 +75,8 @@
 (defvar agent-repl--prompt-queue (make-hash-table :test 'equal)
   "Workspace name -> ordered list of held entries, oldest first.
 Each entry is the plist `(:id ID :kind KIND :said SAID :origin ORIGIN
-:raw RAW :idempotency-key KEY :queued-at SECONDS)'.  KIND is `:deferred' or `:outage' and
-names WHICH EDGE releases the entry; SAID is the fully composed
+:raw RAW :idempotency-key KEY :queued-at SECONDS)'.  KIND is `:deferred'
+or `:outage' and names WHICH EDGE releases the entry; SAID is the fully composed
 `UserSaid' the composer already built, so a drain re-composes nothing and
 cannot decorate a prompt twice.")
 
