@@ -362,7 +362,8 @@ scope to the generation, which is why the generation rides the live arm."
        daemon (plist-get ref :id)
        (agent-repl-itest-host--live
         'open '(faults . [((detail . "store socket unreachable")
-                           (openedAtMs . "1735689600000"))])))
+                           (openedAtMs . "1735689600000")
+                           (linkSevered . ()))])))
       ;; Assert.
       (agent-repl-itest--wait-until
        (lambda () (agent-repl-host-faults agent-repl-itest-host--ws))
@@ -469,7 +470,8 @@ regression that drops the fault from the printed report."
        daemon (plist-get ref :id)
        (agent-repl-itest-host--live
         'open '(faults . [((detail . "store socket unreachable")
-                           (openedAtMs . "1735689600000"))])))
+                           (openedAtMs . "1735689600000")
+                           (linkSevered . ()))])))
       (agent-repl-itest--wait-until
        (lambda () (agent-repl-host-faults agent-repl-itest-host--ws))
        nil "the standing fault to reach host state")
@@ -547,7 +549,8 @@ cancels.\""
 fanout §7: \"error arm → `agent-repl--error' and ON-DONE nil.\""
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
-    (agent-repl-itest--script daemon "RegisterWorkspace" '((error . ())))
+    (agent-repl-itest--script daemon "RegisterWorkspace"
+                              '((error . ((notAWorktree . ())))))
     (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon)))
           (done-called nil)
           (result :never))
