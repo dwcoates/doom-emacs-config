@@ -9,6 +9,7 @@
 package integration
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -108,5 +109,45 @@ func TestAStoreReclaimsTheSocketAKilledPredecessorLeftBehind(t *testing.T) {
 	}
 	if !reclaimed {
 		t.Fatalf("the successor did not record a store.listen.reclaim warning\nstderr:\n%s", store.stderrText())
+	}
+}
+
+// TestARegularFileAtTheListenPathIsRefusedAndLeftIntact: the reclaim rule is
+// about a SOCKET a dead store left behind. A regular file at the listen path is
+// somebody's file — a typo'd flag, a log, a note — and unlinking it would be
+// the store deleting data it was never given. The mode is proved before the
+// path is removed, so this boot fails and the file survives byte for byte.
+func TestARegularFileAtTheListenPathIsRefusedAndLeftIntact(t *testing.T) {
+	// Arrange.
+	const contents = "this is somebody's file, not a socket"
+	path := shortSocketPath(t)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("staging a regular file at the listen path: %v", err)
+	}
+
+	// Act.
+	store := startStore(t, storeOptions{socketPath: path, noWait: true})
+
+	// Assert: the boot failed...
+	if err := store.awaitExit(); err == nil {
+		t.Fatalf("the store bound a listen path occupied by a regular file\nstderr:\n%s", store.stderrText())
+	}
+	// ...loudly...
+	refused := false
+	for _, rec := range recordsAtOperation(store.logRecords(), "store.listen") {
+		if rec.Level == "error" {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Errorf("the refused boot wrote no store.listen error record\nstderr:\n%s", store.stderrText())
+	}
+	// ...and the file is exactly as it was.
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the refused boot removed the file at the listen path: %v", err)
+	}
+	if string(got) != contents {
+		t.Errorf("the refused boot rewrote the file at the listen path as %q, want %q", got, contents)
 	}
 }

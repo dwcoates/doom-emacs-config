@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -104,13 +105,93 @@ func TestNukingAnUnreadableDatabaseNamesTheCause(t *testing.T) {
 
 	// Assert: the warning says WHY, so an operator is not left guessing whether
 	// the store deleted their file for a good reason.
-	named := false
-	for _, rec := range store.logRecords() {
-		if rec.Level == "warn" && rec.Context["error"] != nil {
-			named = true
+	//
+	// IT IS SCOPED TO THE OPERATION THAT OWNS IT. "Some warn carried an error
+	// key" passed for a reclaimed socket or an enabled pprof surface as readily
+	// as for the nuke, so the assertion held without the record ever existing.
+	schema := recordsAtOperation(store.logRecords(), "store.db.schema")
+	warned := recordsAtLevel(schema, "warn")
+	if len(warned) != 1 {
+		t.Fatalf("store.db.schema warn records = %d, want exactly 1: %v\nstderr:\n%s", len(warned), warned, store.stderrText())
+	}
+	cause, ok := warned[0].Context["error"].(string)
+	if !ok || cause == "" {
+		t.Fatalf("the nuke warning carries no error context: %v", warned[0].Context)
+	}
+	if warned[0].Context["db"] != dbPath {
+		t.Errorf("the nuke warning names db %v, want %q", warned[0].Context["database_path"], dbPath)
+	}
+}
+
+// TestADbPathThatIsADirectoryIsRefusedAndLeftIntact: the nuke rule is about a
+// FILE this binary cannot read. A directory at --db is a configuration mistake,
+// and removing it would be the store deleting a tree an operator pointed it at
+// by accident — so the boot fails instead, and the directory is untouched.
+func TestADbPathThatIsADirectoryIsRefusedAndLeftIntact(t *testing.T) {
+	// Arrange.
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	if err := os.MkdirAll(dbPath, 0o755); err != nil {
+		t.Fatalf("staging a directory at the database path: %v", err)
+	}
+	witness := filepath.Join(dbPath, "somebody-elses-file")
+	if err := os.WriteFile(witness, []byte("do not delete me"), 0o600); err != nil {
+		t.Fatalf("staging the directory's contents: %v", err)
+	}
+
+	// Act.
+	store := startStore(t, storeOptions{dbPath: dbPath, noWait: true})
+
+	// Assert: the boot failed loudly...
+	if err := store.awaitExit(); err == nil {
+		t.Fatalf("the store booted over a directory at --db\nstderr:\n%s", store.stderrText())
+	}
+	// ...and nothing was removed.
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatalf("the refused boot removed the directory at %q: %v", dbPath, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("the refused boot replaced the directory at %q with a %s", dbPath, info.Mode())
+	}
+	if _, err := os.Stat(witness); err != nil {
+		t.Fatalf("the refused boot removed the directory's contents: %v", err)
+	}
+}
+
+// TestNukingRemovesTheStaleWalSibling: a -wal or a -shm belongs to the file
+// that was nuked, and a survivor is a fragment of a database this binary
+// already decided it cannot read. Left behind, SQLite meets it on the next open
+// and reports corruption for a file that was recreated cleanly.
+func TestNukingRemovesTheStaleWalSibling(t *testing.T) {
+	// Arrange: a garbage database with siblings beside it.
+	dbPath := filepath.Join(t.TempDir(), "events.db")
+	if err := os.WriteFile(dbPath, []byte("this is not a SQLite database at all"), 0o600); err != nil {
+		t.Fatalf("staging garbage: %v", err)
+	}
+	for _, sibling := range []string{dbPath + "-wal", dbPath + "-shm"} {
+		if err := os.WriteFile(sibling, []byte("stale sibling bytes"), 0o600); err != nil {
+			t.Fatalf("staging %q: %v", sibling, err)
 		}
 	}
-	if !named {
-		t.Fatalf("the nuke warning named no cause\nstderr:\n%s", store.stderrText())
+
+	// Act.
+	store := startStore(t, storeOptions{dbPath: dbPath})
+
+	// Assert: the store serves, and the STAGED siblings are gone. A live store
+	// writes its own -wal, so the assertion is on the staged bytes rather than
+	// on the paths existing at all.
+	ctx, cancel := callContext(t)
+	defer cancel()
+	shim := streamProducer(store.client())
+	shim.write(ctx, t, shim.agentEntry("w-wal", "u-wal",
+		frameLine(agentID("main"), responseFrame("main", "act-1", "after the nuke"))))
+	for _, sibling := range []string{dbPath + "-wal", dbPath + "-shm"} {
+		data, err := os.ReadFile(sibling)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), "stale sibling bytes") {
+			t.Errorf("the nuke left the stale sibling %q behind", sibling)
+		}
 	}
 }
