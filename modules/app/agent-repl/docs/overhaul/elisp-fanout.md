@@ -192,6 +192,13 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   kind, module root read from load-file-name inside an ERT body). Lesson
   for the remaining board: check payloads against the codec before
   dispatching production work. Running: verbs-suite, composer.
+- R-COMPOSER MERGED (ceaf5f716): composer 42/42. Production (#66 only):
+  `agent-repl--input-submit` accepts an existing idempotency key; the
+  outage queue stores the failed attempt's key and the drain resends under
+  it (deferrals mint fresh). Image blocks, posthooks and the defer path
+  were already correct — four fixture bugs fixed. Follow-up noted: a
+  suite-wide `agent-repl--prompt-queue` cleanup helper (one entry of
+  cross-test residue). Running: verbs-suite only.
 
 ## 1. Module map (final tree of lisp/)
 
