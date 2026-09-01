@@ -46,6 +46,17 @@ export interface TabSpec {
   payload?: Record<string, unknown>;
 }
 
+/** The smallest legal queue snapshot: this workspace, waiting, alone. */
+const DEFAULT_QUEUE = {
+  ahead: [],
+  current: {
+    workspace: { ref: { id: "mine", dir: "/w/mine" } },
+    label: { text: "mine" },
+    status: { case: "waiting" as const, value: {} },
+  },
+  behind: [],
+};
+
 /** A merge-tab row, built from the generated schemas. */
 export function tabRow(rowId: string, spec: TabSpec): FeedRow {
   const state =
@@ -63,6 +74,13 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
                   : { case: "succeeded" as const, value: {} },
             },
           };
+  // A queue tab MUST carry its snapshot; a fixture that omits one would be a
+  // malformed view rather than a queue tab, so the default supplies the
+  // smallest legal one.
+  const payload =
+    spec.kind === "queue" && spec.payload?.["queue"] === undefined
+      ? { ...(spec.payload ?? {}), queue: DEFAULT_QUEUE }
+      : (spec.payload ?? {});
   return create(FeedRowSchema, {
     id: id(rowId),
     row: {
@@ -71,7 +89,7 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
         label: { text: spec.label ?? spec.kind, round: spec.round ?? 1 },
         kind: {
           case: spec.kind,
-          value: { state, ...(spec.payload ?? {}) },
+          value: { state, ...payload },
         },
       } as never),
     },
