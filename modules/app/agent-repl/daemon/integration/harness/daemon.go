@@ -22,6 +22,8 @@ import (
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"claude-repld/integration/fakegit"
+
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 )
@@ -91,6 +93,8 @@ type Daemon struct {
 	MultiRepoConfigDir string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
+	// Git is the fake git world every scripted `git` answers from.
+	Git *GitWorld
 
 	t      *testing.T
 	ctx    context.Context
@@ -106,6 +110,48 @@ type Daemon struct {
 	waitOnce      sync.Once
 	expected      map[string]bool
 	shims         map[string]*ShimControl
+}
+
+// installFakeGit copies the scripted `git` into the directory that leads the
+// daemon's PATH.
+func installFakeGit(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("harness: mkdir %s: %v", dir, err)
+	}
+	body, err := os.ReadFile(FakeGitBinary(t))
+	if err != nil {
+		t.Fatalf("harness: read the fake git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "git"), body, 0o755); err != nil {
+		t.Fatalf("harness: install the fake git: %v", err)
+	}
+}
+
+// gitEnvKeys are the repository-selecting variables that must never be
+// inherited by a git child: a hook-leaked GIT_DIR is a real, previously
+// observed source of bogus work-tree errors.
+var gitEnvKeys = []string{
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+}
+
+func cleanGitEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		drop := false
+		for _, bad := range gitEnvKeys {
+			if key == bad {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, kv)
+		}
+	}
+	return out
 }
 
 // syncBuffer collects a process's stderr without racing the reader.
@@ -164,6 +210,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	writeFile(t, mainJS, "// placeholder shim module\n")
 	fakeBin := filepath.Join(root, "bin")
 	fakeClaude := NewFakeClaude(t, fakeBin)
+	// The scripted `git` goes first on the daemon's PATH, so every git fact the
+	// daemon reads comes out of this test's fixture file and the real binary is
+	// never reached.
+	d.Git = World(t)
+	installFakeGit(t, fakeBin)
 
 	multiRoot := opts.MultiRepoRoot
 	if multiRoot == "" {
@@ -208,6 +259,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_SCRIPT="+d.Deploy.Path,
 		"AGENT_REPL_CLAUDE_BIN="+fakeClaude,
+		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
