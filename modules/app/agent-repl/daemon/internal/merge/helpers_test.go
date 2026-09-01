@@ -49,6 +49,7 @@ type fakeDB struct {
 	ledger     map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues     map[wsm.RepoKey][]wsm.MergeQueueEntry
 	paused     map[wsm.RepoKey]bool
+	repos      []wsm.Repository
 	seq        int
 
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
@@ -322,11 +323,11 @@ type fakeGit struct {
 	commitErr error
 	// commitMessages records what each Commit was asked to record.
 	commitMessages []string
-	landed     []gitclient.Commit
-	changed    []string
-	changedErr error
-	clean      bool
-	cleanErr   error
+	landed         []gitclient.Commit
+	changed        []string
+	changedErr     error
+	clean          bool
+	cleanErr       error
 
 	// calls records what was asked of git, in order.
 	calls []string
@@ -998,6 +999,14 @@ func (h *harness) register(ws ids.WorkspaceID, name string) {
 	h.db.sessions[ws] = wsm.Session{Workspace: ws}
 }
 
+// registerRepo records one repository in the fake registry, which is what a
+// scoped pause resolves its repository ref against.
+func (h *harness) registerRepo(id ids.RepoID, dir string) {
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	h.db.repos = append(h.db.repos, wsm.Repository{ID: id, Dir: dir, Name: string(id), DefaultBranch: "master"})
+}
+
 // repoKey is the queue key the harness's target resolves to.
 func (h *harness) repoKey() wsm.RepoKey { return wsm.RepoKey(h.targetD + "/.git") }
 
@@ -1154,4 +1163,13 @@ func waitForParked(t *testing.T, h *harness) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the merge never parked")
 	}
+}
+
+// ListRepositories answers the fake registry, in registration order.
+func (d *fakeDB) ListRepositories(ctx context.Context) ([]wsm.Repository, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]wsm.Repository, len(d.repos))
+	copy(out, d.repos)
+	return out, nil
 }

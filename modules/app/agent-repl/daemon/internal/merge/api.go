@@ -61,10 +61,11 @@ type Orchestrator interface {
 	// queued or merging.
 	Enqueue(ctx context.Context, ws ids.WorkspaceID) error
 	// Pause stops the queue from starting new merges; an in-flight merge runs
-	// on.
-	Pause(ctx context.Context) error
-	// Unpause resumes starting merges.
-	Unpause(ctx context.Context) error
+	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
+	// UNSET repository); a scope names ONE repository's queue.
+	Pause(ctx context.Context, scope *RepositoryScope) error
+	// Unpause resumes starting merges, with the same scoping as Pause.
+	Unpause(ctx context.Context, scope *RepositoryScope) error
 	// Evict removes a queued workspace from the queue.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
 	// AnswerDequeue answers the tray's dequeue offer: keep the merge queued,
@@ -87,6 +88,21 @@ type Orchestrator interface {
 	// re-enqueues every merge that was queued but not started, in the order it
 	// was waiting in. It never silently abandons one.
 	Recover(ctx context.Context) error
+}
+
+// RepositoryScope names WHICH repository's merge queue a pause or a resume
+// addresses. It is the daemon-side spelling of the optional
+// workspace.v1.RepositoryRef the request carries, so merge never imports the
+// wire types: nil means every repository (the unset ref), and a value is
+// resolved against the registry, which is what makes an unknown ref a refusal
+// rather than a pause of a queue nobody has.
+type RepositoryScope struct {
+	// ID is the daemon-minted repository id the ref carried, empty when the
+	// ref named only a dir.
+	ID ids.RepoID
+	// Dir is the repository's common dir the ref carried, empty when the ref
+	// named only an id.
+	Dir string
 }
 
 // Deps are the orchestrator's collaborators.
