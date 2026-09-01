@@ -322,11 +322,11 @@ type fakeGit struct {
 	commitErr error
 	// commitMessages records what each Commit was asked to record.
 	commitMessages []string
-	landed     []gitclient.Commit
-	changed    []string
-	changedErr error
-	clean      bool
-	cleanErr   error
+	landed         []gitclient.Commit
+	changed        []string
+	changedErr     error
+	clean          bool
+	cleanErr       error
 
 	// calls records what was asked of git, in order.
 	calls []string
