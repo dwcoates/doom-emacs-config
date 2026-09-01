@@ -161,6 +161,16 @@ export interface FakeQueryOpts {
   readonly sessionId: string;
   /** The vendor session being continued, when this is a resume. */
   readonly resume?: string;
+  /**
+   * The transcript record the resume is REWOUND TO, when the shim named one.
+   *
+   * The keep-alive rewind's whole claim is that the resumed session stops at a
+   * particular record, and until now nothing on the vendor side recorded which
+   * uuid was named — the shim's own log said what it INTENDED, which is not
+   * evidence that the value reached the vendor at all. The mock records it (see
+   * the `resume_session_at` field of the mock's session-start record) so that claim is assertable.
+   */
+  readonly resumeSessionAt?: string;
   /** Mint a uuid. Injectable so goldens are stable. */
   readonly newUuid: () => string;
   /** Milliseconds since the epoch. Injectable so goldens are stable. */
@@ -806,7 +816,19 @@ export function createFakeQuery(
   const main = async (): Promise<void> => {
     emitInit();
     LOGGER.log(
-      { claude_session_id: sessionUuid, resumed: opts.resume !== undefined, workspace_dir: cwd },
+      {
+        claude_session_id: sessionUuid,
+        resumed: opts.resume !== undefined,
+        workspace_dir: cwd,
+        // THE REWIND TARGET, as the vendor received it. PRESENT ONLY WHEN THE
+        // SHIM NAMED ONE — a sentinel would make every plain start look like a
+        // rewind to a reader keying on the field. A spawned shim's only
+        // observable is its log, so this is where "the rewind actually reached
+        // the vendor" is asserted from.
+        ...(opts.resumeSessionAt === undefined
+          ? {}
+          : { vendor_resume_session_at: opts.resumeSessionAt }),
+      },
       opts.resume === undefined
         ? "fake vendor session STARTED"
         : "fake vendor session RESUMED; init reports the resumed id and re-emits NO history",
