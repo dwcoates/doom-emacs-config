@@ -19,7 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_adopt_web_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_adopt_web_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGEFkb3B0V2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpcBChlBZG9wdFdlYldvcmtzcGFjZVJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIaChhBZG9wdFdlYldvcmtzcGFjZVN1Y2Nlc3MiGAoWQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfYWRvcHRfd2ViX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIkkKGEFkb3B0V2ViV29ya3NwYWNlUmVxdWVzdBItCgl3b3Jrc3BhY2UYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmIpcBChlBZG9wdFdlYldvcmtzcGFjZVJlc3BvbnNlEjkKB3N1Y2Nlc3MYASABKAsyJi5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VTdWNjZXNzSAASNQoFZXJyb3IYAiABKAsyJC5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VFcnJvckgAQggKBnJlc3VsdCIaChhBZG9wdFdlYldvcmtzcGFjZVN1Y2Nlc3MijQQKFkFkb3B0V2ViV29ya3NwYWNlRXJyb3ISTAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlSAASVQoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzIzLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASTAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyLy5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5SAASRwoPbm90X3lldF9hZG9wdGVkGAQgASgLMiwuYWdlbnRyZXBsLnYxLkFkb3B0V2ViV29ya3NwYWNlTm90WWV0QWRvcHRlZEgAElMKFW5vX3RyYW5zZmVyX2Fubm91bmNlZBgFIAEoCzIyLmFnZW50cmVwbC52MS5BZG9wdFdlYldvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWRIABJZChhwYXJ0aWNpcGFudF9ub3RfZXhwZWN0ZWQYBiABKAsyNS5hZ2VudHJlcGwudjEuQWRvcHRXZWJXb3Jrc3BhY2VQYXJ0aWNpcGFudE5vdEV4cGVjdGVkSABCBwoFY2F1c2UiIwohQWRvcHRXZWJXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIj0KJUFkb3B0V2ViV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjQKIUFkb3B0V2ViV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIiAKHkFkb3B0V2ViV29ya3NwYWNlTm90WWV0QWRvcHRlZCImCiRBZG9wdFdlYldvcmtzcGFjZU5vVHJhbnNmZXJBbm5vdW5jZWQiKQonQWRvcHRXZWJXb3Jrc3BhY2VQYXJ0aWNpcGFudE5vdEV4cGVjdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.AdoptWebWorkspaceRequest
@@ -86,11 +86,64 @@ export const AdoptWebWorkspaceSuccessSchema: GenMessage<AdoptWebWorkspaceSuccess
   messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 2);
 
 /**
- * Arms derived at the wave from the new daemon's real refusal sites.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.AdoptWebWorkspaceError
  */
 export type AdoptWebWorkspaceError = Message<"agentrepl.v1.AdoptWebWorkspaceError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.AdoptWebWorkspaceError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace unknown_workspace = 1;
+     */
+    value: AdoptWebWorkspaceUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: AdoptWebWorkspaceWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.AdoptWebWorkspaceTransferringAway transferring_away = 3;
+     */
+    value: AdoptWebWorkspaceTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.AdoptWebWorkspaceNotYetAdopted not_yet_adopted = 4;
+     */
+    value: AdoptWebWorkspaceNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * No transfer was announced for this workspace.
+     *
+     * @generated from field: agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced no_transfer_announced = 5;
+     */
+    value: AdoptWebWorkspaceNoTransferAnnounced;
+    case: "noTransferAnnounced";
+  } | {
+    /**
+     * The caller's stream was not open at announcement.
+     *
+     * @generated from field: agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected participant_not_expected = 6;
+     */
+    value: AdoptWebWorkspaceParticipantNotExpected;
+    case: "participantNotExpected";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -99,4 +152,94 @@ export type AdoptWebWorkspaceError = Message<"agentrepl.v1.AdoptWebWorkspaceErro
  */
 export const AdoptWebWorkspaceErrorSchema: GenMessage<AdoptWebWorkspaceError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 3);
+
+/**
+ * @generated from message agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace
+ */
+export type AdoptWebWorkspaceUnknownWorkspace = Message<"agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace.
+ * Use `create(AdoptWebWorkspaceUnknownWorkspaceSchema)` to create a new message.
+ */
+export const AdoptWebWorkspaceUnknownWorkspaceSchema: GenMessage<AdoptWebWorkspaceUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 4);
+
+/**
+ * @generated from message agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch
+ */
+export type AdoptWebWorkspaceWorkspaceRefMismatch = Message<"agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch.
+ * Use `create(AdoptWebWorkspaceWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const AdoptWebWorkspaceWorkspaceRefMismatchSchema: GenMessage<AdoptWebWorkspaceWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 5);
+
+/**
+ * @generated from message agentrepl.v1.AdoptWebWorkspaceTransferringAway
+ */
+export type AdoptWebWorkspaceTransferringAway = Message<"agentrepl.v1.AdoptWebWorkspaceTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptWebWorkspaceTransferringAway.
+ * Use `create(AdoptWebWorkspaceTransferringAwaySchema)` to create a new message.
+ */
+export const AdoptWebWorkspaceTransferringAwaySchema: GenMessage<AdoptWebWorkspaceTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 6);
+
+/**
+ * @generated from message agentrepl.v1.AdoptWebWorkspaceNotYetAdopted
+ */
+export type AdoptWebWorkspaceNotYetAdopted = Message<"agentrepl.v1.AdoptWebWorkspaceNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptWebWorkspaceNotYetAdopted.
+ * Use `create(AdoptWebWorkspaceNotYetAdoptedSchema)` to create a new message.
+ */
+export const AdoptWebWorkspaceNotYetAdoptedSchema: GenMessage<AdoptWebWorkspaceNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 7);
+
+/**
+ * @generated from message agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
+ */
+export type AdoptWebWorkspaceNoTransferAnnounced = Message<"agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced.
+ * Use `create(AdoptWebWorkspaceNoTransferAnnouncedSchema)` to create a new message.
+ */
+export const AdoptWebWorkspaceNoTransferAnnouncedSchema: GenMessage<AdoptWebWorkspaceNoTransferAnnounced> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 8);
+
+/**
+ * @generated from message agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
+ */
+export type AdoptWebWorkspaceParticipantNotExpected = Message<"agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected.
+ * Use `create(AdoptWebWorkspaceParticipantNotExpectedSchema)` to create a new message.
+ */
+export const AdoptWebWorkspaceParticipantNotExpectedSchema: GenMessage<AdoptWebWorkspaceParticipantNotExpected> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_adopt_web_workspace, 9);
 

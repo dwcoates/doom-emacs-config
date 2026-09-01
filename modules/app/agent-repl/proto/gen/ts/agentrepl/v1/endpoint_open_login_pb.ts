@@ -21,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_open_login.proto.
  */
 export const file_agentrepl_v1_endpoint_open_login: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9sb2dpbi5wcm90bxIMYWdlbnRyZXBsLnYxIkEKEE9wZW5Mb2dpblJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiJ/ChFPcGVuTG9naW5SZXNwb25zZRIxCgdzdWNjZXNzGAEgASgLMh4uYWdlbnRyZXBsLnYxLk9wZW5Mb2dpblN1Y2Nlc3NIABItCgVlcnJvchgCIAEoCzIcLmFnZW50cmVwbC52MS5PcGVuTG9naW5FcnJvckgAQggKBnJlc3VsdCImChBPcGVuTG9naW5TdWNjZXNzEhIKCmNvbmZpZ19kaXIYASABKAkiEAoOT3BlbkxvZ2luRXJyb3JCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfb3Blbl9sb2dpbi5wcm90bxIMYWdlbnRyZXBsLnYxIkEKEE9wZW5Mb2dpblJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZiJ/ChFPcGVuTG9naW5SZXNwb25zZRIxCgdzdWNjZXNzGAEgASgLMh4uYWdlbnRyZXBsLnYxLk9wZW5Mb2dpblN1Y2Nlc3NIABItCgVlcnJvchgCIAEoCzIcLmFnZW50cmVwbC52MS5PcGVuTG9naW5FcnJvckgAQggKBnJlc3VsdCImChBPcGVuTG9naW5TdWNjZXNzEhIKCmNvbmZpZ19kaXIYASABKAki8QIKDk9wZW5Mb2dpbkVycm9yEkQKEXVua25vd25fd29ya3NwYWNlGAEgASgLMicuYWdlbnRyZXBsLnYxLk9wZW5Mb2dpblVua25vd25Xb3Jrc3BhY2VIABJNChZ3b3Jrc3BhY2VfcmVmX21pc21hdGNoGAIgASgLMisuYWdlbnRyZXBsLnYxLk9wZW5Mb2dpbldvcmtzcGFjZVJlZk1pc21hdGNoSAASRAoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyJy5hZ2VudHJlcGwudjEuT3BlbkxvZ2luVHJhbnNmZXJyaW5nQXdheUgAEj8KD25vdF95ZXRfYWRvcHRlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5PcGVuTG9naW5Ob3RZZXRBZG9wdGVkSAASOgoMc3Bhd25fZmFpbGVkGAUgASgLMiIuYWdlbnRyZXBsLnYxLk9wZW5Mb2dpblNwYXduRmFpbGVkSABCBwoFY2F1c2UiGwoZT3BlbkxvZ2luVW5rbm93bldvcmtzcGFjZSI1Ch1PcGVuTG9naW5Xb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLAoZT3BlbkxvZ2luVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIhgKFk9wZW5Mb2dpbk5vdFlldEFkb3B0ZWQiJgoUT3BlbkxvZ2luU3Bhd25GYWlsZWQSDgoGZGV0YWlsGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.OpenLoginRequest
@@ -95,12 +95,56 @@ export const OpenLoginSuccessSchema: GenMessage<OpenLoginSuccess> = /*@__PURE__*
   messageDesc(file_agentrepl_v1_endpoint_open_login, 2);
 
 /**
- * EMPTY ON PURPOSE: refusal arms DERIVED at the wave (spawn failed, …),
- * spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.OpenLoginError
  */
 export type OpenLoginError = Message<"agentrepl.v1.OpenLoginError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.OpenLoginError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.OpenLoginUnknownWorkspace unknown_workspace = 1;
+     */
+    value: OpenLoginUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.OpenLoginWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: OpenLoginWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.OpenLoginTransferringAway transferring_away = 3;
+     */
+    value: OpenLoginTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.OpenLoginNotYetAdopted not_yet_adopted = 4;
+     */
+    value: OpenLoginNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * Spawning the login terminal failed.
+     *
+     * @generated from field: agentrepl.v1.OpenLoginSpawnFailed spawn_failed = 5;
+     */
+    value: OpenLoginSpawnFailed;
+    case: "spawnFailed";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -109,4 +153,87 @@ export type OpenLoginError = Message<"agentrepl.v1.OpenLoginError"> & {
  */
 export const OpenLoginErrorSchema: GenMessage<OpenLoginError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_open_login, 3);
+
+/**
+ * @generated from message agentrepl.v1.OpenLoginUnknownWorkspace
+ */
+export type OpenLoginUnknownWorkspace = Message<"agentrepl.v1.OpenLoginUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenLoginUnknownWorkspace.
+ * Use `create(OpenLoginUnknownWorkspaceSchema)` to create a new message.
+ */
+export const OpenLoginUnknownWorkspaceSchema: GenMessage<OpenLoginUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_login, 4);
+
+/**
+ * @generated from message agentrepl.v1.OpenLoginWorkspaceRefMismatch
+ */
+export type OpenLoginWorkspaceRefMismatch = Message<"agentrepl.v1.OpenLoginWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenLoginWorkspaceRefMismatch.
+ * Use `create(OpenLoginWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const OpenLoginWorkspaceRefMismatchSchema: GenMessage<OpenLoginWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_login, 5);
+
+/**
+ * @generated from message agentrepl.v1.OpenLoginTransferringAway
+ */
+export type OpenLoginTransferringAway = Message<"agentrepl.v1.OpenLoginTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenLoginTransferringAway.
+ * Use `create(OpenLoginTransferringAwaySchema)` to create a new message.
+ */
+export const OpenLoginTransferringAwaySchema: GenMessage<OpenLoginTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_login, 6);
+
+/**
+ * @generated from message agentrepl.v1.OpenLoginNotYetAdopted
+ */
+export type OpenLoginNotYetAdopted = Message<"agentrepl.v1.OpenLoginNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenLoginNotYetAdopted.
+ * Use `create(OpenLoginNotYetAdoptedSchema)` to create a new message.
+ */
+export const OpenLoginNotYetAdoptedSchema: GenMessage<OpenLoginNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_login, 7);
+
+/**
+ * @generated from message agentrepl.v1.OpenLoginSpawnFailed
+ */
+export type OpenLoginSpawnFailed = Message<"agentrepl.v1.OpenLoginSpawnFailed"> & {
+  /**
+   * The spawn's own account of the failure.
+   *
+   * @generated from field: string detail = 1;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.OpenLoginSpawnFailed.
+ * Use `create(OpenLoginSpawnFailedSchema)` to create a new message.
+ */
+export const OpenLoginSpawnFailedSchema: GenMessage<OpenLoginSpawnFailed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_open_login, 8);
 

@@ -23,8 +23,18 @@ message UpdateMergeQueueRequest {
     UpdateMergeQueueEvict evict = 3;
   }
 }
-message UpdateMergeQueuePause {}
-message UpdateMergeQueueResume {}
+message UpdateMergeQueuePause {
+  // WHICH repository's queue. UNSET = every repository that has a queue
+  // (the daemon-wide switch). The queue is per repository, so a caller that
+  // means one names it (added 2026-08-29; the request carried no scope).
+  optional workspace.v1.RepositoryRef repository = 1;
+}
+message UpdateMergeQueueResume {
+  // WHICH repository's queue. UNSET = every repository that has a queue
+  // (the daemon-wide switch). The queue is per repository, so a caller that
+  // means one names it (added 2026-08-29; the request carried no scope).
+  optional workspace.v1.RepositoryRef repository = 1;
+}
 message UpdateMergeQueueEvict {
   // Whose merge to evict.
   workspace.v1.WorkspaceRef workspace = 1;
@@ -39,7 +49,36 @@ message UpdateMergeQueueResponse {
 }
 // Done; the bubbles and roster reflect it.
 message UpdateMergeQueueSuccess {}
-// EMPTY ON PURPOSE: arms DERIVED at the wave (already paused, not paused,
-// no such queued merge), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message UpdateMergeQueueError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    UpdateMergeQueueUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    UpdateMergeQueueWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    UpdateMergeQueueTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    UpdateMergeQueueNotYetAdopted not_yet_adopted = 4;
+    // The queue is already paused.
+    UpdateMergeQueueAlreadyPaused already_paused = 5;
+    // The queue is not paused.
+    UpdateMergeQueueNotPaused not_paused = 6;
+    // No queued merge for that workspace.
+    UpdateMergeQueueNoSuchQueuedMerge no_such_queued_merge = 7;
+  }
 }
+message UpdateMergeQueueUnknownWorkspace {}
+message UpdateMergeQueueWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message UpdateMergeQueueTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message UpdateMergeQueueNotYetAdopted {}
+message UpdateMergeQueueAlreadyPaused {}
+message UpdateMergeQueueNotPaused {}
+message UpdateMergeQueueNoSuchQueuedMerge {}

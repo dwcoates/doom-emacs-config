@@ -24,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_get_feed_page.proto.
  */
 export const file_agentrepl_v1_endpoint_get_feed_page: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X2ZlZWRfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxItwBChJHZXRGZWVkUGFnZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhImCgRmZWVkGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAGIAQESLwoFZmlyc3QYAyABKAsyHi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGaXJzdEgAEi0KBG5leHQYBCABKAsyHS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOZXh0SABCBgoEcGFnZUIHCgVfZmVlZCISChBHZXRGZWVkUGFnZUZpcnN0IhEKD0dldEZlZWRQYWdlTmV4dCJ6ChNHZXRGZWVkUGFnZVJlc3BvbnNlEigKB3N1Y2Nlc3MYASABKAsyFS5mcm9udGVuZC52MS5GZWVkUGFnZUgAEi8KBWVycm9yGAIgASgLMh4uYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRXJyb3JIAEIICgZyZXN1bHQiEgoQR2V0RmVlZFBhZ2VFcnJvckIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfZ2V0X2ZlZWRfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxItwBChJHZXRGZWVkUGFnZVJlcXVlc3QSLQoJd29ya3NwYWNlGAEgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhImCgRmZWVkGAIgASgLMhMuZnJvbnRlbmQudjEuRmVlZElkSAGIAQESLwoFZmlyc3QYAyABKAsyHi5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGaXJzdEgAEi0KBG5leHQYBCABKAsyHS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOZXh0SABCBgoEcGFnZUIHCgVfZmVlZCISChBHZXRGZWVkUGFnZUZpcnN0IhEKD0dldEZlZWRQYWdlTmV4dCJ6ChNHZXRGZWVkUGFnZVJlc3BvbnNlEigKB3N1Y2Nlc3MYASABKAsyFS5mcm9udGVuZC52MS5GZWVkUGFnZUgAEi8KBWVycm9yGAIgASgLMh4uYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlRXJyb3JIAEIICgZyZXN1bHQimAQKEEdldEZlZWRQYWdlRXJyb3ISRgoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VVbmtub3duV29ya3NwYWNlSAASTwoWd29ya3NwYWNlX3JlZl9taXNtYXRjaBgCIAEoCzItLmFnZW50cmVwbC52MS5HZXRGZWVkUGFnZVdvcmtzcGFjZVJlZk1pc21hdGNoSAASRgoRdHJhbnNmZXJyaW5nX2F3YXkYAyABKAsyKS5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5SAASQQoPbm90X3lldF9hZG9wdGVkGAQgASgLMiYuYWdlbnRyZXBsLnYxLkdldEZlZWRQYWdlTm90WWV0QWRvcHRlZEgAEkMKEG5vX3dhbGtfc3RhbmRpbmcYBSABKAsyJy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VOb1dhbGtTdGFuZGluZ0gAEkQKEGZlZWRfdW5kZWNvZGFibGUYBiABKAsyKC5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGVIABJMChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYByABKAsyKy5hZ2VudHJlcGwudjEuR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VIAEIHCgVjYXVzZSIdChtHZXRGZWVkUGFnZVVua25vd25Xb3Jrc3BhY2UiNwofR2V0RmVlZFBhZ2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiLgobR2V0RmVlZFBhZ2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGgoYR2V0RmVlZFBhZ2VOb3RZZXRBZG9wdGVkIhsKGUdldEZlZWRQYWdlTm9XYWxrU3RhbmRpbmciHAoaR2V0RmVlZFBhZ2VGZWVkVW5kZWNvZGFibGUiHwodR2V0RmVlZFBhZ2VGZWVkTm90SW5Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_frontend_v1_feed]);
 
 /**
  * @generated from message agentrepl.v1.GetFeedPageRequest
@@ -138,12 +138,72 @@ export const GetFeedPageResponseSchema: GenMessage<GetFeedPageResponse> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 3);
 
 /**
- * EMPTY ON PURPOSE (the SubmitPromptError precedent): the refusal arms are
- * DERIVED from the daemon's real refusal sites at the wave, spelled per 3b.
+ * Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.GetFeedPageError
  */
 export type GetFeedPageError = Message<"agentrepl.v1.GetFeedPageError"> & {
+  /**
+   * @generated from oneof agentrepl.v1.GetFeedPageError.cause
+   */
+  cause: {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageUnknownWorkspace unknown_workspace = 1;
+     */
+    value: GetFeedPageUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageWorkspaceRefMismatch workspace_ref_mismatch = 2;
+     */
+    value: GetFeedPageWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageTransferringAway transferring_away = 3;
+     */
+    value: GetFeedPageTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageNotYetAdopted not_yet_adopted = 4;
+     */
+    value: GetFeedPageNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * A next page was asked for with no walk standing.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageNoWalkStanding no_walk_standing = 5;
+     */
+    value: GetFeedPageNoWalkStanding;
+    case: "noWalkStanding";
+  } | {
+    /**
+     * The FeedId does not decode.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageFeedUndecodable feed_undecodable = 6;
+     */
+    value: GetFeedPageFeedUndecodable;
+    case: "feedUndecodable";
+  } | {
+    /**
+     * The FeedId decodes to another workspace.
+     *
+     * @generated from field: agentrepl.v1.GetFeedPageFeedNotInWorkspace feed_not_in_workspace = 7;
+     */
+    value: GetFeedPageFeedNotInWorkspace;
+    case: "feedNotInWorkspace";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -152,4 +212,107 @@ export type GetFeedPageError = Message<"agentrepl.v1.GetFeedPageError"> & {
  */
 export const GetFeedPageErrorSchema: GenMessage<GetFeedPageError> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 4);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageUnknownWorkspace
+ */
+export type GetFeedPageUnknownWorkspace = Message<"agentrepl.v1.GetFeedPageUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageUnknownWorkspace.
+ * Use `create(GetFeedPageUnknownWorkspaceSchema)` to create a new message.
+ */
+export const GetFeedPageUnknownWorkspaceSchema: GenMessage<GetFeedPageUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 5);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageWorkspaceRefMismatch
+ */
+export type GetFeedPageWorkspaceRefMismatch = Message<"agentrepl.v1.GetFeedPageWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageWorkspaceRefMismatch.
+ * Use `create(GetFeedPageWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const GetFeedPageWorkspaceRefMismatchSchema: GenMessage<GetFeedPageWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 6);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageTransferringAway
+ */
+export type GetFeedPageTransferringAway = Message<"agentrepl.v1.GetFeedPageTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageTransferringAway.
+ * Use `create(GetFeedPageTransferringAwaySchema)` to create a new message.
+ */
+export const GetFeedPageTransferringAwaySchema: GenMessage<GetFeedPageTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 7);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageNotYetAdopted
+ */
+export type GetFeedPageNotYetAdopted = Message<"agentrepl.v1.GetFeedPageNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageNotYetAdopted.
+ * Use `create(GetFeedPageNotYetAdoptedSchema)` to create a new message.
+ */
+export const GetFeedPageNotYetAdoptedSchema: GenMessage<GetFeedPageNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 8);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageNoWalkStanding
+ */
+export type GetFeedPageNoWalkStanding = Message<"agentrepl.v1.GetFeedPageNoWalkStanding"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageNoWalkStanding.
+ * Use `create(GetFeedPageNoWalkStandingSchema)` to create a new message.
+ */
+export const GetFeedPageNoWalkStandingSchema: GenMessage<GetFeedPageNoWalkStanding> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 9);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageFeedUndecodable
+ */
+export type GetFeedPageFeedUndecodable = Message<"agentrepl.v1.GetFeedPageFeedUndecodable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageFeedUndecodable.
+ * Use `create(GetFeedPageFeedUndecodableSchema)` to create a new message.
+ */
+export const GetFeedPageFeedUndecodableSchema: GenMessage<GetFeedPageFeedUndecodable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 10);
+
+/**
+ * @generated from message agentrepl.v1.GetFeedPageFeedNotInWorkspace
+ */
+export type GetFeedPageFeedNotInWorkspace = Message<"agentrepl.v1.GetFeedPageFeedNotInWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.GetFeedPageFeedNotInWorkspace.
+ * Use `create(GetFeedPageFeedNotInWorkspaceSchema)` to create a new message.
+ */
+export const GetFeedPageFeedNotInWorkspaceSchema: GenMessage<GetFeedPageFeedNotInWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_get_feed_page, 11);
 

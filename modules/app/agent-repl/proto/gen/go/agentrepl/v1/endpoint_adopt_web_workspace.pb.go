@@ -194,9 +194,19 @@ func (*AdoptWebWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-// Arms derived at the wave from the new daemon's real refusal sites.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type AdoptWebWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*AdoptWebWorkspaceError_UnknownWorkspace
+	//	*AdoptWebWorkspaceError_WorkspaceRefMismatch
+	//	*AdoptWebWorkspaceError_TransferringAway
+	//	*AdoptWebWorkspaceError_NotYetAdopted
+	//	*AdoptWebWorkspaceError_NoTransferAnnounced
+	//	*AdoptWebWorkspaceError_ParticipantNotExpected
+	Cause         isAdoptWebWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -231,6 +241,347 @@ func (*AdoptWebWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *AdoptWebWorkspaceError) GetCause() isAdoptWebWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *AdoptWebWorkspaceError) GetUnknownWorkspace() *AdoptWebWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *AdoptWebWorkspaceError) GetWorkspaceRefMismatch() *AdoptWebWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *AdoptWebWorkspaceError) GetTransferringAway() *AdoptWebWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *AdoptWebWorkspaceError) GetNotYetAdopted() *AdoptWebWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *AdoptWebWorkspaceError) GetNoTransferAnnounced() *AdoptWebWorkspaceNoTransferAnnounced {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_NoTransferAnnounced); ok {
+			return x.NoTransferAnnounced
+		}
+	}
+	return nil
+}
+
+func (x *AdoptWebWorkspaceError) GetParticipantNotExpected() *AdoptWebWorkspaceParticipantNotExpected {
+	if x != nil {
+		if x, ok := x.Cause.(*AdoptWebWorkspaceError_ParticipantNotExpected); ok {
+			return x.ParticipantNotExpected
+		}
+	}
+	return nil
+}
+
+type isAdoptWebWorkspaceError_Cause interface {
+	isAdoptWebWorkspaceError_Cause()
+}
+
+type AdoptWebWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *AdoptWebWorkspaceUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type AdoptWebWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *AdoptWebWorkspaceWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type AdoptWebWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *AdoptWebWorkspaceTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type AdoptWebWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *AdoptWebWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type AdoptWebWorkspaceError_NoTransferAnnounced struct {
+	// No transfer was announced for this workspace.
+	NoTransferAnnounced *AdoptWebWorkspaceNoTransferAnnounced `protobuf:"bytes,5,opt,name=no_transfer_announced,json=noTransferAnnounced,proto3,oneof"`
+}
+
+type AdoptWebWorkspaceError_ParticipantNotExpected struct {
+	// The caller's stream was not open at announcement.
+	ParticipantNotExpected *AdoptWebWorkspaceParticipantNotExpected `protobuf:"bytes,6,opt,name=participant_not_expected,json=participantNotExpected,proto3,oneof"`
+}
+
+func (*AdoptWebWorkspaceError_UnknownWorkspace) isAdoptWebWorkspaceError_Cause() {}
+
+func (*AdoptWebWorkspaceError_WorkspaceRefMismatch) isAdoptWebWorkspaceError_Cause() {}
+
+func (*AdoptWebWorkspaceError_TransferringAway) isAdoptWebWorkspaceError_Cause() {}
+
+func (*AdoptWebWorkspaceError_NotYetAdopted) isAdoptWebWorkspaceError_Cause() {}
+
+func (*AdoptWebWorkspaceError_NoTransferAnnounced) isAdoptWebWorkspaceError_Cause() {}
+
+func (*AdoptWebWorkspaceError_ParticipantNotExpected) isAdoptWebWorkspaceError_Cause() {}
+
+type AdoptWebWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceUnknownWorkspace) Reset() {
+	*x = AdoptWebWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+type AdoptWebWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = AdoptWebWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AdoptWebWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type AdoptWebWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceTransferringAway) Reset() {
+	*x = AdoptWebWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AdoptWebWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type AdoptWebWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceNotYetAdopted) Reset() {
+	*x = AdoptWebWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+type AdoptWebWorkspaceNoTransferAnnounced struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceNoTransferAnnounced) Reset() {
+	*x = AdoptWebWorkspaceNoTransferAnnounced{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceNoTransferAnnounced) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceNoTransferAnnounced) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceNoTransferAnnounced) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceNoTransferAnnounced.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceNoTransferAnnounced) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{8}
+}
+
+type AdoptWebWorkspaceParticipantNotExpected struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptWebWorkspaceParticipantNotExpected) Reset() {
+	*x = AdoptWebWorkspaceParticipantNotExpected{}
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptWebWorkspaceParticipantNotExpected) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptWebWorkspaceParticipantNotExpected) ProtoMessage() {}
+
+func (x *AdoptWebWorkspaceParticipantNotExpected) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptWebWorkspaceParticipantNotExpected.ProtoReflect.Descriptor instead.
+func (*AdoptWebWorkspaceParticipantNotExpected) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP(), []int{9}
+}
+
 var File_agentrepl_v1_endpoint_adopt_web_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
@@ -242,8 +593,23 @@ const file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2&.agentrepl.v1.AdoptWebWorkspaceSuccessH\x00R\asuccess\x12<\n" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.AdoptWebWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1a\n" +
-	"\x18AdoptWebWorkspaceSuccess\"\x18\n" +
-	"\x16AdoptWebWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x18AdoptWebWorkspaceSuccess\"\x83\x05\n" +
+	"\x16AdoptWebWorkspaceError\x12^\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2/.agentrepl.v1.AdoptWebWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12k\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v23.agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12^\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2/.agentrepl.v1.AdoptWebWorkspaceTransferringAwayH\x00R\x10transferringAway\x12V\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2,.agentrepl.v1.AdoptWebWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12h\n" +
+	"\x15no_transfer_announced\x18\x05 \x01(\v22.agentrepl.v1.AdoptWebWorkspaceNoTransferAnnouncedH\x00R\x13noTransferAnnounced\x12q\n" +
+	"\x18participant_not_expected\x18\x06 \x01(\v25.agentrepl.v1.AdoptWebWorkspaceParticipantNotExpectedH\x00R\x16participantNotExpectedB\a\n" +
+	"\x05cause\"#\n" +
+	"!AdoptWebWorkspaceUnknownWorkspace\"J\n" +
+	"%AdoptWebWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"=\n" +
+	"!AdoptWebWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\" \n" +
+	"\x1eAdoptWebWorkspaceNotYetAdopted\"&\n" +
+	"$AdoptWebWorkspaceNoTransferAnnounced\")\n" +
+	"'AdoptWebWorkspaceParticipantNotExpectedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescOnce sync.Once
@@ -257,23 +623,35 @@ func file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_goTypes = []any{
-	(*AdoptWebWorkspaceRequest)(nil),  // 0: agentrepl.v1.AdoptWebWorkspaceRequest
-	(*AdoptWebWorkspaceResponse)(nil), // 1: agentrepl.v1.AdoptWebWorkspaceResponse
-	(*AdoptWebWorkspaceSuccess)(nil),  // 2: agentrepl.v1.AdoptWebWorkspaceSuccess
-	(*AdoptWebWorkspaceError)(nil),    // 3: agentrepl.v1.AdoptWebWorkspaceError
-	(*v1.WorkspaceRef)(nil),           // 4: workspace.v1.WorkspaceRef
+	(*AdoptWebWorkspaceRequest)(nil),                // 0: agentrepl.v1.AdoptWebWorkspaceRequest
+	(*AdoptWebWorkspaceResponse)(nil),               // 1: agentrepl.v1.AdoptWebWorkspaceResponse
+	(*AdoptWebWorkspaceSuccess)(nil),                // 2: agentrepl.v1.AdoptWebWorkspaceSuccess
+	(*AdoptWebWorkspaceError)(nil),                  // 3: agentrepl.v1.AdoptWebWorkspaceError
+	(*AdoptWebWorkspaceUnknownWorkspace)(nil),       // 4: agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace
+	(*AdoptWebWorkspaceWorkspaceRefMismatch)(nil),   // 5: agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch
+	(*AdoptWebWorkspaceTransferringAway)(nil),       // 6: agentrepl.v1.AdoptWebWorkspaceTransferringAway
+	(*AdoptWebWorkspaceNotYetAdopted)(nil),          // 7: agentrepl.v1.AdoptWebWorkspaceNotYetAdopted
+	(*AdoptWebWorkspaceNoTransferAnnounced)(nil),    // 8: agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
+	(*AdoptWebWorkspaceParticipantNotExpected)(nil), // 9: agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
+	(*v1.WorkspaceRef)(nil),                         // 10: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_adopt_web_workspace_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.AdoptWebWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 1: agentrepl.v1.AdoptWebWorkspaceResponse.success:type_name -> agentrepl.v1.AdoptWebWorkspaceSuccess
-	3, // 2: agentrepl.v1.AdoptWebWorkspaceResponse.error:type_name -> agentrepl.v1.AdoptWebWorkspaceError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	10, // 0: agentrepl.v1.AdoptWebWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	2,  // 1: agentrepl.v1.AdoptWebWorkspaceResponse.success:type_name -> agentrepl.v1.AdoptWebWorkspaceSuccess
+	3,  // 2: agentrepl.v1.AdoptWebWorkspaceResponse.error:type_name -> agentrepl.v1.AdoptWebWorkspaceError
+	4,  // 3: agentrepl.v1.AdoptWebWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.AdoptWebWorkspaceUnknownWorkspace
+	5,  // 4: agentrepl.v1.AdoptWebWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.AdoptWebWorkspaceWorkspaceRefMismatch
+	6,  // 5: agentrepl.v1.AdoptWebWorkspaceError.transferring_away:type_name -> agentrepl.v1.AdoptWebWorkspaceTransferringAway
+	7,  // 6: agentrepl.v1.AdoptWebWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.AdoptWebWorkspaceNotYetAdopted
+	8,  // 7: agentrepl.v1.AdoptWebWorkspaceError.no_transfer_announced:type_name -> agentrepl.v1.AdoptWebWorkspaceNoTransferAnnounced
+	9,  // 8: agentrepl.v1.AdoptWebWorkspaceError.participant_not_expected:type_name -> agentrepl.v1.AdoptWebWorkspaceParticipantNotExpected
+	9,  // [9:9] is the sub-list for method output_type
+	9,  // [9:9] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() }
@@ -285,13 +663,21 @@ func file_agentrepl_v1_endpoint_adopt_web_workspace_proto_init() {
 		(*AdoptWebWorkspaceResponse_Success)(nil),
 		(*AdoptWebWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_adopt_web_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*AdoptWebWorkspaceError_UnknownWorkspace)(nil),
+		(*AdoptWebWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*AdoptWebWorkspaceError_TransferringAway)(nil),
+		(*AdoptWebWorkspaceError_NotYetAdopted)(nil),
+		(*AdoptWebWorkspaceError_NoTransferAnnounced)(nil),
+		(*AdoptWebWorkspaceError_ParticipantNotExpected)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_adopt_web_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

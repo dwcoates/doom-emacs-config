@@ -1,0 +1,277 @@
+package rollout
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/wsm"
+)
+
+// Intent is what the outgoing daemon MEANT to happen to one session. It is half
+// of the bounce accounting: the other half is the kernel lock the incoming
+// daemon probes, and the two together name the disposition.
+type Intent string
+
+// The intents.
+const (
+	// IntentPreserve is a session handed over alive: its shim keeps running and
+	// keeps its kernel lock across the whole handover.
+	IntentPreserve Intent = "preserve"
+	// IntentStandDown is a session the outgoing daemon deliberately ended.
+	IntentStandDown Intent = "stand_down"
+)
+
+// DispositionKind is what actually became of one session. THE FOUR ARE NEVER
+// COLLAPSED and never counted: after a crash or a force-kill, WHICH sessions
+// silently died is the whole point of the record.
+type DispositionKind string
+
+// The dispositions.
+const (
+	// DispositionPreserved is a session meant to survive that did: its lock is
+	// still held.
+	DispositionPreserved DispositionKind = "PRESERVED"
+	// DispositionRolled is a session meant to end that did: its lock is free.
+	DispositionRolled DispositionKind = "ROLLED"
+	// DispositionDied is a session meant to survive whose lock is free — it
+	// died silently, and this record is the only place that says so.
+	DispositionDied DispositionKind = "DIED"
+	// DispositionUnknown is a probe that could not tell, or a session meant to
+	// end whose lock is still held. Never read as either of the other two.
+	DispositionUnknown DispositionKind = "UNKNOWN"
+)
+
+// Manifest is the stand-down intent manifest: what the outgoing daemon meant
+// for every session it was serving. It is a FILE in the shared state root, not
+// a channel — the writer never reads it back, and the reader is a different
+// process that came up afterwards.
+type Manifest struct {
+	// Daemon is the outgoing daemon's instance id.
+	Daemon ids.InstanceID `json:"daemon"`
+	// Successor is the address the outgoing daemon announced.
+	Successor string `json:"successor"`
+	// WrittenAt is when the manifest was written.
+	WrittenAt time.Time `json:"written_at"`
+	// Sessions is one record per session, in workspace order.
+	Sessions []ManifestSession `json:"sessions"`
+}
+
+// ManifestSession is one session's stand-down record.
+type ManifestSession struct {
+	// Workspace is the session's workspace.
+	Workspace ids.WorkspaceID `json:"workspace"`
+	// Dir is the workspace directory, so the incoming daemon can derive the
+	// kernel lock path without the registry having to agree first.
+	Dir string `json:"dir"`
+	// ShimPID is the shim process serving the session, 0 when none was up.
+	ShimPID int `json:"shim_pid"`
+	// VendorSessionID is the vendor's own identity for the session.
+	VendorSessionID string `json:"vendor_session_id"`
+	// Intent is what the outgoing daemon meant to happen to it.
+	Intent Intent `json:"intent"`
+	// ExpectedHost records that a WatchHostWorkspace stream was held at
+	// announcement, so the incoming daemon knows the rendezvous owes a host
+	// call. It rides the manifest because there is NO daemon-to-daemon channel
+	// to carry it.
+	ExpectedHost bool `json:"expected_host"`
+	// ExpectedWeb records the same for the WatchWebWorkspace stream.
+	ExpectedWeb bool `json:"expected_web"`
+}
+
+// Disposition is one session's reconciled outcome.
+type Disposition struct {
+	// Workspace is the session's workspace.
+	Workspace ids.WorkspaceID
+	// Intent is what the outgoing daemon meant.
+	Intent Intent
+	// Lock is what the kernel lock said.
+	Lock sessionlock.State
+	// Kind is the disposition the two together name.
+	Kind DispositionKind
+}
+
+// FaultBounceDisposition is the fault kind every reconciled session is recorded
+// under.
+const FaultBounceDisposition = "bounce_disposition"
+
+// writeManifest records the outgoing daemon's intent for every workspace it is
+// handing over. It is written ATOMICALLY — a half-written manifest would make
+// the incoming daemon's accounting worse than no manifest at all.
+func (c *controller) writeManifest(ctx context.Context, m Manifest) error {
+	fields := dlog.Context{"path": c.deps.IntentManifest, "sessions": len(m.Sessions)}
+	if c.deps.IntentManifest == "" {
+		err := errors.New("rollout: no intent manifest path is configured")
+		c.log.Error(opManifest, "cannot write the stand-down intent manifest", withCause(fields, err))
+		return err
+	}
+	body, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		c.log.Error(opManifest, "could not encode the intent manifest", withCause(fields, err))
+		return fmt.Errorf("rollout: encode the intent manifest: %w", err)
+	}
+	dir := filepath.Dir(c.deps.IntentManifest)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		c.log.Error(opManifest, "could not create the intent directory", withCause(fields, err))
+		return fmt.Errorf("rollout: create %s: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, "manifest-*.json")
+	if err != nil {
+		c.log.Error(opManifest, "could not open the intent manifest for writing", withCause(fields, err))
+		return fmt.Errorf("rollout: create the intent manifest: %w", err)
+	}
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		c.log.Error(opManifest, "could not write the intent manifest", withCause(fields, err))
+		return fmt.Errorf("rollout: write the intent manifest: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		c.log.Error(opManifest, "could not close the intent manifest", withCause(fields, err))
+		return fmt.Errorf("rollout: close the intent manifest: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), c.deps.IntentManifest); err != nil {
+		os.Remove(tmp.Name())
+		c.log.Error(opManifest, "could not install the intent manifest", withCause(fields, err))
+		return fmt.Errorf("rollout: install the intent manifest: %w", err)
+	}
+	c.log.Info(opManifest, "wrote the stand-down intent manifest", fields)
+	_ = ctx
+	return nil
+}
+
+// ReadManifest loads the stand-down intent manifest. The bool reports whether
+// one was there at all: an ordinary boot finds none, which is not a failure.
+func ReadManifest(path string) (Manifest, bool, error) {
+	body, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return Manifest{}, false, nil
+	}
+	if err != nil {
+		return Manifest{}, false, fmt.Errorf("rollout: read the intent manifest %s: %w", path, err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		return Manifest{}, false, fmt.Errorf("rollout: decode the intent manifest %s: %w", path, err)
+	}
+	return m, true, nil
+}
+
+// Reconcile reads the intent manifest against the kernel locks actually held
+// and records ONE DISPOSITION PER SESSION.
+//
+// The matrix is the whole of the accounting:
+//
+//	preserve   + held    → PRESERVED   (survived, as intended)
+//	preserve   + free    → DIED        (meant to survive; it did not)
+//	stand_down + free    → ROLLED      (ended, as intended)
+//	stand_down + held    → UNKNOWN     (meant to end; something still holds it)
+//	any        + unknown → UNKNOWN     (the probe could not tell)
+//
+// PRESERVED and ROLLED are recorded as ALREADY-RESOLVED faults, so the record
+// exists per session without polluting the open-fault set; DIED and UNKNOWN
+// stay OPEN, because each is a workspace whose session state needs a human.
+func (c *controller) Reconcile(ctx context.Context) ([]Disposition, error) {
+	m, found, err := ReadManifest(c.deps.IntentManifest)
+	if err != nil {
+		c.log.Error(opReconcile, "could not read the intent manifest",
+			withCause(dlog.Context{"path": c.deps.IntentManifest}, err))
+		return nil, err
+	}
+	if !found {
+		c.log.Debug(opReconcile, "no intent manifest is present; this is an ordinary boot",
+			dlog.Context{"path": c.deps.IntentManifest})
+		return nil, nil
+	}
+	out := make([]Disposition, 0, len(m.Sessions))
+	for _, session := range m.Sessions {
+		state := sessionlock.StateUnknown
+		if c.deps.LockProbe != nil {
+			probed, err := c.deps.LockProbe(session.Dir)
+			if err != nil {
+				c.log.Warn(opReconcile, "a workspace's lock probe could not tell", withCause(dlog.Context{
+					"workspace": string(session.Workspace), "dir": session.Dir,
+				}, err))
+			}
+			state = probed
+		}
+		d := Disposition{
+			Workspace: session.Workspace,
+			Intent:    session.Intent,
+			Lock:      state,
+			Kind:      disposition(session.Intent, state),
+		}
+		out = append(out, d)
+		c.recordDisposition(ctx, session, d)
+	}
+	c.log.Info(opReconcile, "reconciled the stand-down intent manifest against the kernel locks",
+		dlog.Context{"outgoing_daemon": string(m.Daemon), "sessions": len(out)})
+	return out, nil
+}
+
+// disposition names what an intent and a lock state together mean.
+func disposition(intent Intent, state sessionlock.State) DispositionKind {
+	switch {
+	case state == sessionlock.StateUnknown:
+		return DispositionUnknown
+	case intent == IntentPreserve && state == sessionlock.StateHeld:
+		return DispositionPreserved
+	case intent == IntentPreserve && state == sessionlock.StateFree:
+		return DispositionDied
+	case intent == IntentStandDown && state == sessionlock.StateFree:
+		return DispositionRolled
+	default:
+		return DispositionUnknown
+	}
+}
+
+// recordDisposition writes one session's disposition as a WSM fault. It is
+// never collapsed into a count: one record per session, naming the workspace.
+func (c *controller) recordDisposition(ctx context.Context, session ManifestSession, d Disposition) {
+	ws := session.Workspace
+	fields := dlog.Context{
+		"workspace":   string(ws),
+		"intent":      string(d.Intent),
+		"lock":        d.Lock.String(),
+		"disposition": string(d.Kind),
+		"shim_pid":    session.ShimPID,
+	}
+	id, err := c.deps.DB.OpenFault(ctx, wsm.Fault{
+		Workspace: &ws,
+		Kind:      FaultBounceDisposition,
+		Detail: fmt.Sprintf("the bounce meant to %s this session; its workspace lock reads %s",
+			d.Intent, d.Lock),
+		Evidence: map[string]string{
+			"disposition":       string(d.Kind),
+			"intent":            string(d.Intent),
+			"lock_state":        d.Lock.String(),
+			"shim_pid":          fmt.Sprint(session.ShimPID),
+			"vendor_session_id": session.VendorSessionID,
+		},
+		OpenedAt: c.deps.Clock.Now(),
+	})
+	if err != nil {
+		c.log.Error(opReconcile, "could not record a session's bounce disposition", withCause(fields, err))
+		return
+	}
+	if d.Kind == DispositionPreserved || d.Kind == DispositionRolled {
+		// The record exists; nothing needs doing about it. Closing it here is
+		// what keeps the OPEN fault set meaningful without losing the per
+		// session accounting.
+		if err := c.deps.DB.CloseFault(ctx, id, c.deps.Clock.Now()); err != nil {
+			c.log.Error(opReconcile, "could not resolve an ordinary bounce disposition", withCause(fields, err))
+			return
+		}
+		c.log.Debug(opReconcile, "recorded an ordinary bounce disposition", fields)
+		return
+	}
+	c.log.Warn(opReconcile, "a session's bounce disposition needs a human", fields)
+}

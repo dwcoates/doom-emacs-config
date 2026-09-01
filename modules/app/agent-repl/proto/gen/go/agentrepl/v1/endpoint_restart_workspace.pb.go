@@ -206,9 +206,18 @@ func (*RestartWorkspaceSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave, spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type RestartWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*RestartWorkspaceError_UnknownWorkspace
+	//	*RestartWorkspaceError_WorkspaceRefMismatch
+	//	*RestartWorkspaceError_TransferringAway
+	//	*RestartWorkspaceError_NotYetAdopted
+	//	*RestartWorkspaceError_NoSession
+	Cause         isRestartWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,6 +252,295 @@ func (*RestartWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *RestartWorkspaceError) GetCause() isRestartWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *RestartWorkspaceError) GetUnknownWorkspace() *RestartWorkspaceUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*RestartWorkspaceError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *RestartWorkspaceError) GetWorkspaceRefMismatch() *RestartWorkspaceWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*RestartWorkspaceError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *RestartWorkspaceError) GetTransferringAway() *RestartWorkspaceTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*RestartWorkspaceError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *RestartWorkspaceError) GetNotYetAdopted() *RestartWorkspaceNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*RestartWorkspaceError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+func (x *RestartWorkspaceError) GetNoSession() *RestartWorkspaceNoSession {
+	if x != nil {
+		if x, ok := x.Cause.(*RestartWorkspaceError_NoSession); ok {
+			return x.NoSession
+		}
+	}
+	return nil
+}
+
+type isRestartWorkspaceError_Cause interface {
+	isRestartWorkspaceError_Cause()
+}
+
+type RestartWorkspaceError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *RestartWorkspaceUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type RestartWorkspaceError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *RestartWorkspaceWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type RestartWorkspaceError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *RestartWorkspaceTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type RestartWorkspaceError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *RestartWorkspaceNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+type RestartWorkspaceError_NoSession struct {
+	// The workspace has no session to restart.
+	NoSession *RestartWorkspaceNoSession `protobuf:"bytes,5,opt,name=no_session,json=noSession,proto3,oneof"`
+}
+
+func (*RestartWorkspaceError_UnknownWorkspace) isRestartWorkspaceError_Cause() {}
+
+func (*RestartWorkspaceError_WorkspaceRefMismatch) isRestartWorkspaceError_Cause() {}
+
+func (*RestartWorkspaceError_TransferringAway) isRestartWorkspaceError_Cause() {}
+
+func (*RestartWorkspaceError_NotYetAdopted) isRestartWorkspaceError_Cause() {}
+
+func (*RestartWorkspaceError_NoSession) isRestartWorkspaceError_Cause() {}
+
+type RestartWorkspaceUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartWorkspaceUnknownWorkspace) Reset() {
+	*x = RestartWorkspaceUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartWorkspaceUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartWorkspaceUnknownWorkspace) ProtoMessage() {}
+
+func (x *RestartWorkspaceUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartWorkspaceUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*RestartWorkspaceUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+type RestartWorkspaceWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartWorkspaceWorkspaceRefMismatch) Reset() {
+	*x = RestartWorkspaceWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartWorkspaceWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartWorkspaceWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *RestartWorkspaceWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartWorkspaceWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*RestartWorkspaceWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RestartWorkspaceWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type RestartWorkspaceTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartWorkspaceTransferringAway) Reset() {
+	*x = RestartWorkspaceTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartWorkspaceTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartWorkspaceTransferringAway) ProtoMessage() {}
+
+func (x *RestartWorkspaceTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartWorkspaceTransferringAway.ProtoReflect.Descriptor instead.
+func (*RestartWorkspaceTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RestartWorkspaceTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type RestartWorkspaceNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartWorkspaceNotYetAdopted) Reset() {
+	*x = RestartWorkspaceNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartWorkspaceNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartWorkspaceNotYetAdopted) ProtoMessage() {}
+
+func (x *RestartWorkspaceNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartWorkspaceNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*RestartWorkspaceNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{7}
+}
+
+type RestartWorkspaceNoSession struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartWorkspaceNoSession) Reset() {
+	*x = RestartWorkspaceNoSession{}
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartWorkspaceNoSession) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartWorkspaceNoSession) ProtoMessage() {}
+
+func (x *RestartWorkspaceNoSession) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartWorkspaceNoSession.ProtoReflect.Descriptor instead.
+func (*RestartWorkspaceNoSession) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP(), []int{8}
+}
+
 var File_agentrepl_v1_endpoint_restart_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc = "" +
@@ -255,8 +553,22 @@ const file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2%.agentrepl.v1.RestartWorkspaceSuccessH\x00R\asuccess\x12;\n" +
 	"\x05error\x18\x02 \x01(\v2#.agentrepl.v1.RestartWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x19\n" +
-	"\x17RestartWorkspaceSuccess\"\x17\n" +
-	"\x15RestartWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x17RestartWorkspaceSuccess\"\xeb\x03\n" +
+	"\x15RestartWorkspaceError\x12]\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v2..agentrepl.v1.RestartWorkspaceUnknownWorkspaceH\x00R\x10unknownWorkspace\x12j\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v22.agentrepl.v1.RestartWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12]\n" +
+	"\x11transferring_away\x18\x03 \x01(\v2..agentrepl.v1.RestartWorkspaceTransferringAwayH\x00R\x10transferringAway\x12U\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2+.agentrepl.v1.RestartWorkspaceNotYetAdoptedH\x00R\rnotYetAdopted\x12H\n" +
+	"\n" +
+	"no_session\x18\x05 \x01(\v2'.agentrepl.v1.RestartWorkspaceNoSessionH\x00R\tnoSessionB\a\n" +
+	"\x05cause\"\"\n" +
+	" RestartWorkspaceUnknownWorkspace\"I\n" +
+	"$RestartWorkspaceWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"<\n" +
+	" RestartWorkspaceTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\x1f\n" +
+	"\x1dRestartWorkspaceNotYetAdopted\"\x1b\n" +
+	"\x19RestartWorkspaceNoSessionB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescOnce sync.Once
@@ -270,23 +582,33 @@ func file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_restart_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_restart_workspace_proto_goTypes = []any{
-	(*RestartWorkspaceRequest)(nil),  // 0: agentrepl.v1.RestartWorkspaceRequest
-	(*RestartWorkspaceResponse)(nil), // 1: agentrepl.v1.RestartWorkspaceResponse
-	(*RestartWorkspaceSuccess)(nil),  // 2: agentrepl.v1.RestartWorkspaceSuccess
-	(*RestartWorkspaceError)(nil),    // 3: agentrepl.v1.RestartWorkspaceError
-	(*v1.WorkspaceRef)(nil),          // 4: workspace.v1.WorkspaceRef
+	(*RestartWorkspaceRequest)(nil),              // 0: agentrepl.v1.RestartWorkspaceRequest
+	(*RestartWorkspaceResponse)(nil),             // 1: agentrepl.v1.RestartWorkspaceResponse
+	(*RestartWorkspaceSuccess)(nil),              // 2: agentrepl.v1.RestartWorkspaceSuccess
+	(*RestartWorkspaceError)(nil),                // 3: agentrepl.v1.RestartWorkspaceError
+	(*RestartWorkspaceUnknownWorkspace)(nil),     // 4: agentrepl.v1.RestartWorkspaceUnknownWorkspace
+	(*RestartWorkspaceWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
+	(*RestartWorkspaceTransferringAway)(nil),     // 6: agentrepl.v1.RestartWorkspaceTransferringAway
+	(*RestartWorkspaceNotYetAdopted)(nil),        // 7: agentrepl.v1.RestartWorkspaceNotYetAdopted
+	(*RestartWorkspaceNoSession)(nil),            // 8: agentrepl.v1.RestartWorkspaceNoSession
+	(*v1.WorkspaceRef)(nil),                      // 9: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_restart_workspace_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.RestartWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 0: agentrepl.v1.RestartWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	2, // 1: agentrepl.v1.RestartWorkspaceResponse.success:type_name -> agentrepl.v1.RestartWorkspaceSuccess
 	3, // 2: agentrepl.v1.RestartWorkspaceResponse.error:type_name -> agentrepl.v1.RestartWorkspaceError
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: agentrepl.v1.RestartWorkspaceError.unknown_workspace:type_name -> agentrepl.v1.RestartWorkspaceUnknownWorkspace
+	5, // 4: agentrepl.v1.RestartWorkspaceError.workspace_ref_mismatch:type_name -> agentrepl.v1.RestartWorkspaceWorkspaceRefMismatch
+	6, // 5: agentrepl.v1.RestartWorkspaceError.transferring_away:type_name -> agentrepl.v1.RestartWorkspaceTransferringAway
+	7, // 6: agentrepl.v1.RestartWorkspaceError.not_yet_adopted:type_name -> agentrepl.v1.RestartWorkspaceNotYetAdopted
+	8, // 7: agentrepl.v1.RestartWorkspaceError.no_session:type_name -> agentrepl.v1.RestartWorkspaceNoSession
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_restart_workspace_proto_init() }
@@ -298,13 +620,20 @@ func file_agentrepl_v1_endpoint_restart_workspace_proto_init() {
 		(*RestartWorkspaceResponse_Success)(nil),
 		(*RestartWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_restart_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*RestartWorkspaceError_UnknownWorkspace)(nil),
+		(*RestartWorkspaceError_WorkspaceRefMismatch)(nil),
+		(*RestartWorkspaceError_TransferringAway)(nil),
+		(*RestartWorkspaceError_NotYetAdopted)(nil),
+		(*RestartWorkspaceError_NoSession)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_restart_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

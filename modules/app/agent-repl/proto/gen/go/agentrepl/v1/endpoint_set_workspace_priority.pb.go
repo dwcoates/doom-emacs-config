@@ -201,10 +201,17 @@ func (*SetWorkspacePrioritySuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP(), []int{2}
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (unknown workspace,
-// …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type SetWorkspacePriorityError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*SetWorkspacePriorityError_UnknownWorkspace
+	//	*SetWorkspacePriorityError_WorkspaceRefMismatch
+	//	*SetWorkspacePriorityError_TransferringAway
+	//	*SetWorkspacePriorityError_NotYetAdopted
+	Cause         isSetWorkspacePriorityError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -239,6 +246,243 @@ func (*SetWorkspacePriorityError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *SetWorkspacePriorityError) GetCause() isSetWorkspacePriorityError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *SetWorkspacePriorityError) GetUnknownWorkspace() *SetWorkspacePriorityUnknownWorkspace {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspacePriorityError_UnknownWorkspace); ok {
+			return x.UnknownWorkspace
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspacePriorityError) GetWorkspaceRefMismatch() *SetWorkspacePriorityWorkspaceRefMismatch {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspacePriorityError_WorkspaceRefMismatch); ok {
+			return x.WorkspaceRefMismatch
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspacePriorityError) GetTransferringAway() *SetWorkspacePriorityTransferringAway {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspacePriorityError_TransferringAway); ok {
+			return x.TransferringAway
+		}
+	}
+	return nil
+}
+
+func (x *SetWorkspacePriorityError) GetNotYetAdopted() *SetWorkspacePriorityNotYetAdopted {
+	if x != nil {
+		if x, ok := x.Cause.(*SetWorkspacePriorityError_NotYetAdopted); ok {
+			return x.NotYetAdopted
+		}
+	}
+	return nil
+}
+
+type isSetWorkspacePriorityError_Cause interface {
+	isSetWorkspacePriorityError_Cause()
+}
+
+type SetWorkspacePriorityError_UnknownWorkspace struct {
+	// The workspace id is not in the daemon's registry.
+	UnknownWorkspace *SetWorkspacePriorityUnknownWorkspace `protobuf:"bytes,1,opt,name=unknown_workspace,json=unknownWorkspace,proto3,oneof"`
+}
+
+type SetWorkspacePriorityError_WorkspaceRefMismatch struct {
+	// The echoed dir disagrees with the registry's dir for this id.
+	WorkspaceRefMismatch *SetWorkspacePriorityWorkspaceRefMismatch `protobuf:"bytes,2,opt,name=workspace_ref_mismatch,json=workspaceRefMismatch,proto3,oneof"`
+}
+
+type SetWorkspacePriorityError_TransferringAway struct {
+	// This daemon released the workspace to a successor; dial `address`.
+	TransferringAway *SetWorkspacePriorityTransferringAway `protobuf:"bytes,3,opt,name=transferring_away,json=transferringAway,proto3,oneof"`
+}
+
+type SetWorkspacePriorityError_NotYetAdopted struct {
+	// A joining daemon has not finished adopting this workspace yet.
+	NotYetAdopted *SetWorkspacePriorityNotYetAdopted `protobuf:"bytes,4,opt,name=not_yet_adopted,json=notYetAdopted,proto3,oneof"`
+}
+
+func (*SetWorkspacePriorityError_UnknownWorkspace) isSetWorkspacePriorityError_Cause() {}
+
+func (*SetWorkspacePriorityError_WorkspaceRefMismatch) isSetWorkspacePriorityError_Cause() {}
+
+func (*SetWorkspacePriorityError_TransferringAway) isSetWorkspacePriorityError_Cause() {}
+
+func (*SetWorkspacePriorityError_NotYetAdopted) isSetWorkspacePriorityError_Cause() {}
+
+type SetWorkspacePriorityUnknownWorkspace struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspacePriorityUnknownWorkspace) Reset() {
+	*x = SetWorkspacePriorityUnknownWorkspace{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspacePriorityUnknownWorkspace) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspacePriorityUnknownWorkspace) ProtoMessage() {}
+
+func (x *SetWorkspacePriorityUnknownWorkspace) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspacePriorityUnknownWorkspace.ProtoReflect.Descriptor instead.
+func (*SetWorkspacePriorityUnknownWorkspace) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP(), []int{4}
+}
+
+type SetWorkspacePriorityWorkspaceRefMismatch struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The dir the registry holds for this id.
+	RegistryDir   string `protobuf:"bytes,1,opt,name=registry_dir,json=registryDir,proto3" json:"registry_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspacePriorityWorkspaceRefMismatch) Reset() {
+	*x = SetWorkspacePriorityWorkspaceRefMismatch{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspacePriorityWorkspaceRefMismatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspacePriorityWorkspaceRefMismatch) ProtoMessage() {}
+
+func (x *SetWorkspacePriorityWorkspaceRefMismatch) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspacePriorityWorkspaceRefMismatch.ProtoReflect.Descriptor instead.
+func (*SetWorkspacePriorityWorkspaceRefMismatch) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SetWorkspacePriorityWorkspaceRefMismatch) GetRegistryDir() string {
+	if x != nil {
+		return x.RegistryDir
+	}
+	return ""
+}
+
+type SetWorkspacePriorityTransferringAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspacePriorityTransferringAway) Reset() {
+	*x = SetWorkspacePriorityTransferringAway{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspacePriorityTransferringAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspacePriorityTransferringAway) ProtoMessage() {}
+
+func (x *SetWorkspacePriorityTransferringAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspacePriorityTransferringAway.ProtoReflect.Descriptor instead.
+func (*SetWorkspacePriorityTransferringAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SetWorkspacePriorityTransferringAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type SetWorkspacePriorityNotYetAdopted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetWorkspacePriorityNotYetAdopted) Reset() {
+	*x = SetWorkspacePriorityNotYetAdopted{}
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetWorkspacePriorityNotYetAdopted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetWorkspacePriorityNotYetAdopted) ProtoMessage() {}
+
+func (x *SetWorkspacePriorityNotYetAdopted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetWorkspacePriorityNotYetAdopted.ProtoReflect.Descriptor instead.
+func (*SetWorkspacePriorityNotYetAdopted) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP(), []int{7}
+}
+
 var File_agentrepl_v1_endpoint_set_workspace_priority_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDesc = "" +
@@ -252,8 +496,19 @@ const file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2).agentrepl.v1.SetWorkspacePrioritySuccessH\x00R\asuccess\x12?\n" +
 	"\x05error\x18\x02 \x01(\v2'.agentrepl.v1.SetWorkspacePriorityErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"\x1d\n" +
-	"\x1bSetWorkspacePrioritySuccess\"\x1b\n" +
-	"\x19SetWorkspacePriorityErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1bSetWorkspacePrioritySuccess\"\xb5\x03\n" +
+	"\x19SetWorkspacePriorityError\x12a\n" +
+	"\x11unknown_workspace\x18\x01 \x01(\v22.agentrepl.v1.SetWorkspacePriorityUnknownWorkspaceH\x00R\x10unknownWorkspace\x12n\n" +
+	"\x16workspace_ref_mismatch\x18\x02 \x01(\v26.agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12a\n" +
+	"\x11transferring_away\x18\x03 \x01(\v22.agentrepl.v1.SetWorkspacePriorityTransferringAwayH\x00R\x10transferringAway\x12Y\n" +
+	"\x0fnot_yet_adopted\x18\x04 \x01(\v2/.agentrepl.v1.SetWorkspacePriorityNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
+	"\x05cause\"&\n" +
+	"$SetWorkspacePriorityUnknownWorkspace\"M\n" +
+	"(SetWorkspacePriorityWorkspaceRefMismatch\x12!\n" +
+	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\"@\n" +
+	"$SetWorkspacePriorityTransferringAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"#\n" +
+	"!SetWorkspacePriorityNotYetAdoptedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescOnce sync.Once
@@ -267,25 +522,33 @@ func file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescGZIP() []byt
 	return file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_agentrepl_v1_endpoint_set_workspace_priority_proto_goTypes = []any{
-	(*SetWorkspacePriorityRequest)(nil),  // 0: agentrepl.v1.SetWorkspacePriorityRequest
-	(*SetWorkspacePriorityResponse)(nil), // 1: agentrepl.v1.SetWorkspacePriorityResponse
-	(*SetWorkspacePrioritySuccess)(nil),  // 2: agentrepl.v1.SetWorkspacePrioritySuccess
-	(*SetWorkspacePriorityError)(nil),    // 3: agentrepl.v1.SetWorkspacePriorityError
-	(*v1.WorkspaceRef)(nil),              // 4: workspace.v1.WorkspaceRef
-	(*WorkspacePriority)(nil),            // 5: agentrepl.v1.WorkspacePriority
+	(*SetWorkspacePriorityRequest)(nil),              // 0: agentrepl.v1.SetWorkspacePriorityRequest
+	(*SetWorkspacePriorityResponse)(nil),             // 1: agentrepl.v1.SetWorkspacePriorityResponse
+	(*SetWorkspacePrioritySuccess)(nil),              // 2: agentrepl.v1.SetWorkspacePrioritySuccess
+	(*SetWorkspacePriorityError)(nil),                // 3: agentrepl.v1.SetWorkspacePriorityError
+	(*SetWorkspacePriorityUnknownWorkspace)(nil),     // 4: agentrepl.v1.SetWorkspacePriorityUnknownWorkspace
+	(*SetWorkspacePriorityWorkspaceRefMismatch)(nil), // 5: agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatch
+	(*SetWorkspacePriorityTransferringAway)(nil),     // 6: agentrepl.v1.SetWorkspacePriorityTransferringAway
+	(*SetWorkspacePriorityNotYetAdopted)(nil),        // 7: agentrepl.v1.SetWorkspacePriorityNotYetAdopted
+	(*v1.WorkspaceRef)(nil),                          // 8: workspace.v1.WorkspaceRef
+	(*WorkspacePriority)(nil),                        // 9: agentrepl.v1.WorkspacePriority
 }
 var file_agentrepl_v1_endpoint_set_workspace_priority_proto_depIdxs = []int32{
-	4, // 0: agentrepl.v1.SetWorkspacePriorityRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	5, // 1: agentrepl.v1.SetWorkspacePriorityRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
+	8, // 0: agentrepl.v1.SetWorkspacePriorityRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9, // 1: agentrepl.v1.SetWorkspacePriorityRequest.priority:type_name -> agentrepl.v1.WorkspacePriority
 	2, // 2: agentrepl.v1.SetWorkspacePriorityResponse.success:type_name -> agentrepl.v1.SetWorkspacePrioritySuccess
 	3, // 3: agentrepl.v1.SetWorkspacePriorityResponse.error:type_name -> agentrepl.v1.SetWorkspacePriorityError
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	4, // 4: agentrepl.v1.SetWorkspacePriorityError.unknown_workspace:type_name -> agentrepl.v1.SetWorkspacePriorityUnknownWorkspace
+	5, // 5: agentrepl.v1.SetWorkspacePriorityError.workspace_ref_mismatch:type_name -> agentrepl.v1.SetWorkspacePriorityWorkspaceRefMismatch
+	6, // 6: agentrepl.v1.SetWorkspacePriorityError.transferring_away:type_name -> agentrepl.v1.SetWorkspacePriorityTransferringAway
+	7, // 7: agentrepl.v1.SetWorkspacePriorityError.not_yet_adopted:type_name -> agentrepl.v1.SetWorkspacePriorityNotYetAdopted
+	8, // [8:8] is the sub-list for method output_type
+	8, // [8:8] is the sub-list for method input_type
+	8, // [8:8] is the sub-list for extension type_name
+	8, // [8:8] is the sub-list for extension extendee
+	0, // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_set_workspace_priority_proto_init() }
@@ -299,13 +562,19 @@ func file_agentrepl_v1_endpoint_set_workspace_priority_proto_init() {
 		(*SetWorkspacePriorityResponse_Success)(nil),
 		(*SetWorkspacePriorityResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_set_workspace_priority_proto_msgTypes[3].OneofWrappers = []any{
+		(*SetWorkspacePriorityError_UnknownWorkspace)(nil),
+		(*SetWorkspacePriorityError_WorkspaceRefMismatch)(nil),
+		(*SetWorkspacePriorityError_TransferringAway)(nil),
+		(*SetWorkspacePriorityError_NotYetAdopted)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDesc), len(file_agentrepl_v1_endpoint_set_workspace_priority_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

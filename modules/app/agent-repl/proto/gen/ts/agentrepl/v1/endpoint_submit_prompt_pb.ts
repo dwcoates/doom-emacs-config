@@ -38,7 +38,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_submit_prompt.proto.
  */
 export const file_agentrepl_v1_endpoint_submit_prompt: GenFile = /*@__PURE__*/
-  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIuYBChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW5CBwoFX2ZlZWQiiAEKFFN1Ym1pdFByb21wdFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0U3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEVycm9ySABCCAoGcmVzdWx0ItYBChNTdWJtaXRQcm9tcHRTdWNjZXNzEi4KBHR1cm4YASABKAsyHi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0VHVybkgAEj8KDWNvbW1hbmRfcGFuZWwYAiABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZFBhbmVsSAASQwoPY29tbWFuZF9yZWZ1c2VkGAMgASgLMiguYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRSZWZ1c2VkSABCCQoHb3V0Y29tZSItChpTdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZBIPCgdjb21tYW5kGAEgASgJIjkKEFN1Ym1pdFByb21wdFR1cm4SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiuQIKGFN1Ym1pdFByb21wdENvbW1hbmRQYW5lbBIuCgZzdGF0dXMYASABKAsyHC5mcm9udGVuZC52MS5TdGF0dXNQYW5lbFZpZXdIABIsCgV0b2RvcxgEIAEoCzIbLmZyb250ZW5kLnYxLlRvZG9zUGFuZWxWaWV3SAASLgoGYWdlbnRzGAUgASgLMhwuZnJvbnRlbmQudjEuQWdlbnRzUGFuZWxWaWV3SAASKAoDbWNwGAYgASgLMhkuZnJvbnRlbmQudjEuTWNwUGFuZWxWaWV3SAASMAoHY29udGV4dBgHIAEoCzIdLmZyb250ZW5kLnYxLkNvbnRleHRQYW5lbFZpZXdIABIqCgRoZWxwGAggASgLMhouZnJvbnRlbmQudjEuSGVscFBhbmVsVmlld0gAQgcKBXBhbmVsIloKEVN1Ym1pdFByb21wdEVycm9yEjsKB21lcmdpbmcYASABKAsyKC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdIAEIICgZyZWFzb24iHAoaU3VibWl0UHJvbXB0UmVmdXNlZE1lcmdpbmdCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
+  fileDesc("CilhZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3VibWl0X3Byb21wdC5wcm90bxIMYWdlbnRyZXBsLnYxIuYBChNTdWJtaXRQcm9tcHRSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgFIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSJwoEc2FpZBgBIAEoCzIZLmNvbnZlcnNhdGlvbi52MS5Vc2VyU2FpZBIXCg9pZGVtcG90ZW5jeV9rZXkYAiABKAkSJgoEZmVlZBgDIAEoCzITLmZyb250ZW5kLnYxLkZlZWRJZEgAiAEBEi0KBm9yaWdpbhgEIAEoDjIdLmNvbnZlcnNhdGlvbi52MS5Qcm9tcHRPcmlnaW5CBwoFX2ZlZWQiiAEKFFN1Ym1pdFByb21wdFJlc3BvbnNlEjQKB3N1Y2Nlc3MYASABKAsyIS5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0U3VjY2Vzc0gAEjAKBWVycm9yGAIgASgLMh8uYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdEVycm9ySABCCAoGcmVzdWx0ItYBChNTdWJtaXRQcm9tcHRTdWNjZXNzEi4KBHR1cm4YASABKAsyHi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0VHVybkgAEj8KDWNvbW1hbmRfcGFuZWwYAiABKAsyJi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0Q29tbWFuZFBhbmVsSAASQwoPY29tbWFuZF9yZWZ1c2VkGAMgASgLMiguYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdENvbW1hbmRSZWZ1c2VkSABCCQoHb3V0Y29tZSItChpTdWJtaXRQcm9tcHRDb21tYW5kUmVmdXNlZBIPCgdjb21tYW5kGAEgASgJIjkKEFN1Ym1pdFByb21wdFR1cm4SJQoEdHVybhgBIAEoCzIXLmNvbnZlcnNhdGlvbi52MS5UdXJuSWQiuQIKGFN1Ym1pdFByb21wdENvbW1hbmRQYW5lbBIuCgZzdGF0dXMYASABKAsyHC5mcm9udGVuZC52MS5TdGF0dXNQYW5lbFZpZXdIABIsCgV0b2RvcxgEIAEoCzIbLmZyb250ZW5kLnYxLlRvZG9zUGFuZWxWaWV3SAASLgoGYWdlbnRzGAUgASgLMhwuZnJvbnRlbmQudjEuQWdlbnRzUGFuZWxWaWV3SAASKAoDbWNwGAYgASgLMhkuZnJvbnRlbmQudjEuTWNwUGFuZWxWaWV3SAASMAoHY29udGV4dBgHIAEoCzIdLmZyb250ZW5kLnYxLkNvbnRleHRQYW5lbFZpZXdIABIqCgRoZWxwGAggASgLMhouZnJvbnRlbmQudjEuSGVscFBhbmVsVmlld0gAQgcKBXBhbmVsIpsFChFTdWJtaXRQcm9tcHRFcnJvchI7CgdtZXJnaW5nGAEgASgLMiguYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdFJlZnVzZWRNZXJnaW5nSAASRwoRdW5rbm93bl93b3Jrc3BhY2UYAiABKAsyKi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0VW5rbm93bldvcmtzcGFjZUgAElAKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyLi5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0V29ya3NwYWNlUmVmTWlzbWF0Y2hIABJHChF0cmFuc2ZlcnJpbmdfYXdheRgEIAEoCzIqLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5SAASQgoPbm90X3lldF9hZG9wdGVkGAUgASgLMicuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdE5vdFlldEFkb3B0ZWRIABJNChVmZWVkX25vdF9pbl93b3Jrc3BhY2UYBiABKAsyLC5hZ2VudHJlcGwudjEuU3VibWl0UHJvbXB0RmVlZE5vdEluV29ya3NwYWNlSAASRQoQZmVlZF91bmRlY29kYWJsZRgHIAEoCzIpLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRGZWVkVW5kZWNvZGFibGVIABJGChF0dXJuX2FscmVhZHlfb3BlbhgIIAEoCzIpLmFnZW50cmVwbC52MS5TdWJtaXRQcm9tcHRUdXJuQWxyZWFkeU9wZW5IABI5Cgpub19zZXNzaW9uGAkgASgLMiMuYWdlbnRyZXBsLnYxLlN1Ym1pdFByb21wdE5vU2Vzc2lvbkgAQggKBnJlYXNvbiIcChpTdWJtaXRQcm9tcHRSZWZ1c2VkTWVyZ2luZyIeChxTdWJtaXRQcm9tcHRVbmtub3duV29ya3NwYWNlIjgKIFN1Ym1pdFByb21wdFdvcmtzcGFjZVJlZk1pc21hdGNoEhQKDHJlZ2lzdHJ5X2RpchgBIAEoCSIvChxTdWJtaXRQcm9tcHRUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiGwoZU3VibWl0UHJvbXB0Tm90WWV0QWRvcHRlZCIgCh5TdWJtaXRQcm9tcHRGZWVkTm90SW5Xb3Jrc3BhY2UiHQobU3VibWl0UHJvbXB0RmVlZFVuZGVjb2RhYmxlIh0KG1N1Ym1pdFByb21wdFR1cm5BbHJlYWR5T3BlbiIXChVTdWJtaXRQcm9tcHROb1Nlc3Npb25CKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_conversation_v1_turn, file_conversation_v1_user, file_conversation_v1_prompt_origin, file_workspace_v1_workspace, file_frontend_v1_status_panel, file_frontend_v1_todos_panel, file_frontend_v1_agents_panel, file_frontend_v1_mcp_panel, file_frontend_v1_context_panel, file_frontend_v1_help_panel, file_frontend_v1_feed]);
 
 /**
  * What the user typed, submitted whole.
@@ -301,8 +301,8 @@ export const SubmitPromptCommandPanelSchema: GenMessage<SubmitPromptCommandPanel
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 5);
 
 /**
- * The submission was refused. The reason oneof gains further arms as they
- * are derived from the daemon's real refusal sites.
+ * The submission was refused. Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+ * Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
  *
  * @generated from message agentrepl.v1.SubmitPromptError
  */
@@ -325,6 +325,70 @@ export type SubmitPromptError = Message<"agentrepl.v1.SubmitPromptError"> & {
      */
     value: SubmitPromptRefusedMerging;
     case: "merging";
+  } | {
+    /**
+     * The workspace id is not in the daemon's registry.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptUnknownWorkspace unknown_workspace = 2;
+     */
+    value: SubmitPromptUnknownWorkspace;
+    case: "unknownWorkspace";
+  } | {
+    /**
+     * The echoed dir disagrees with the registry's dir for this id.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptWorkspaceRefMismatch workspace_ref_mismatch = 3;
+     */
+    value: SubmitPromptWorkspaceRefMismatch;
+    case: "workspaceRefMismatch";
+  } | {
+    /**
+     * This daemon released the workspace to a successor; dial `address`.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptTransferringAway transferring_away = 4;
+     */
+    value: SubmitPromptTransferringAway;
+    case: "transferringAway";
+  } | {
+    /**
+     * A joining daemon has not finished adopting this workspace yet.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptNotYetAdopted not_yet_adopted = 5;
+     */
+    value: SubmitPromptNotYetAdopted;
+    case: "notYetAdopted";
+  } | {
+    /**
+     * The FeedId decodes to another workspace.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptFeedNotInWorkspace feed_not_in_workspace = 6;
+     */
+    value: SubmitPromptFeedNotInWorkspace;
+    case: "feedNotInWorkspace";
+  } | {
+    /**
+     * The FeedId does not decode.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptFeedUndecodable feed_undecodable = 7;
+     */
+    value: SubmitPromptFeedUndecodable;
+    case: "feedUndecodable";
+  } | {
+    /**
+     * A bubble-addressed submit while that agent's turn runs.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptTurnAlreadyOpen turn_already_open = 8;
+     */
+    value: SubmitPromptTurnAlreadyOpen;
+    case: "turnAlreadyOpen";
+  } | {
+    /**
+     * The workspace has no session to submit to.
+     *
+     * @generated from field: agentrepl.v1.SubmitPromptNoSession no_session = 9;
+     */
+    value: SubmitPromptNoSession;
+    case: "noSession";
   } | { case: undefined; value?: undefined };
 };
 
@@ -351,4 +415,120 @@ export type SubmitPromptRefusedMerging = Message<"agentrepl.v1.SubmitPromptRefus
  */
 export const SubmitPromptRefusedMergingSchema: GenMessage<SubmitPromptRefusedMerging> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 7);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptUnknownWorkspace
+ */
+export type SubmitPromptUnknownWorkspace = Message<"agentrepl.v1.SubmitPromptUnknownWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptUnknownWorkspace.
+ * Use `create(SubmitPromptUnknownWorkspaceSchema)` to create a new message.
+ */
+export const SubmitPromptUnknownWorkspaceSchema: GenMessage<SubmitPromptUnknownWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 8);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptWorkspaceRefMismatch
+ */
+export type SubmitPromptWorkspaceRefMismatch = Message<"agentrepl.v1.SubmitPromptWorkspaceRefMismatch"> & {
+  /**
+   * The dir the registry holds for this id.
+   *
+   * @generated from field: string registry_dir = 1;
+   */
+  registryDir: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptWorkspaceRefMismatch.
+ * Use `create(SubmitPromptWorkspaceRefMismatchSchema)` to create a new message.
+ */
+export const SubmitPromptWorkspaceRefMismatchSchema: GenMessage<SubmitPromptWorkspaceRefMismatch> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 9);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptTransferringAway
+ */
+export type SubmitPromptTransferringAway = Message<"agentrepl.v1.SubmitPromptTransferringAway"> & {
+  /**
+   * The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+   *
+   * @generated from field: string address = 1;
+   */
+  address: string;
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptTransferringAway.
+ * Use `create(SubmitPromptTransferringAwaySchema)` to create a new message.
+ */
+export const SubmitPromptTransferringAwaySchema: GenMessage<SubmitPromptTransferringAway> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 10);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptNotYetAdopted
+ */
+export type SubmitPromptNotYetAdopted = Message<"agentrepl.v1.SubmitPromptNotYetAdopted"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptNotYetAdopted.
+ * Use `create(SubmitPromptNotYetAdoptedSchema)` to create a new message.
+ */
+export const SubmitPromptNotYetAdoptedSchema: GenMessage<SubmitPromptNotYetAdopted> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 11);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptFeedNotInWorkspace
+ */
+export type SubmitPromptFeedNotInWorkspace = Message<"agentrepl.v1.SubmitPromptFeedNotInWorkspace"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptFeedNotInWorkspace.
+ * Use `create(SubmitPromptFeedNotInWorkspaceSchema)` to create a new message.
+ */
+export const SubmitPromptFeedNotInWorkspaceSchema: GenMessage<SubmitPromptFeedNotInWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 12);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptFeedUndecodable
+ */
+export type SubmitPromptFeedUndecodable = Message<"agentrepl.v1.SubmitPromptFeedUndecodable"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptFeedUndecodable.
+ * Use `create(SubmitPromptFeedUndecodableSchema)` to create a new message.
+ */
+export const SubmitPromptFeedUndecodableSchema: GenMessage<SubmitPromptFeedUndecodable> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 13);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptTurnAlreadyOpen
+ */
+export type SubmitPromptTurnAlreadyOpen = Message<"agentrepl.v1.SubmitPromptTurnAlreadyOpen"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptTurnAlreadyOpen.
+ * Use `create(SubmitPromptTurnAlreadyOpenSchema)` to create a new message.
+ */
+export const SubmitPromptTurnAlreadyOpenSchema: GenMessage<SubmitPromptTurnAlreadyOpen> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 14);
+
+/**
+ * @generated from message agentrepl.v1.SubmitPromptNoSession
+ */
+export type SubmitPromptNoSession = Message<"agentrepl.v1.SubmitPromptNoSession"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubmitPromptNoSession.
+ * Use `create(SubmitPromptNoSessionSchema)` to create a new message.
+ */
+export const SubmitPromptNoSessionSchema: GenMessage<SubmitPromptNoSession> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_submit_prompt, 15);
 

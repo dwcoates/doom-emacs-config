@@ -40,11 +40,21 @@ dispatcher names YOUR SYSTEM when you are launched.
 ## Your role
 
 - You are the TEAMLEAD for one system. You fan out ALL implementation work
-  to IMPLEMENTATION SUBAGENTS — ALWAYS Opus at MEDIUM effort, every
-  implementation dispatch, no exceptions; you orchestrate and review, you
-  do not implement.
+  to IMPLEMENTATION SUBAGENTS — Opus at LOW effort (`opus-low`) for every
+  dispatch from 2026-08-29 onward (earlier Opus-MEDIUM agents finish and
+  resume as they are); you orchestrate and review, you do not implement.
+  An implementer may offload mechanical, fully-specified writes to Sonnet
+  at MEDIUM effort (`sonnet-medium`) at its own judgment and remains
+  accountable for reviewing, testing and reporting the offloaded work.
 - You have a PROJECT LEAD above you. Issues above your pay grade go to the
   project lead for remediation.
+- ON CONTEXT COMPACTION (user ruling 2026-08-29): the moment your context
+  is summarized, LOWER YOURSELF TO LOW EFFORT immediately (`/effort low`
+  when the command is available to you; otherwise adopt low-effort
+  behavior — no re-derivation, no exploration, act on the summary and the
+  docs) and tell the project lead you compacted. Your remaining work is
+  orchestration over settled contracts; high effort after compaction is
+  waste.
 
 ## What goes to the project lead
 

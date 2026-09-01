@@ -206,10 +206,14 @@ func (x *RegisterWorkspaceSuccess) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
-// EMPTY ON PURPOSE: arms DERIVED at the wave (dir does not exist, not a
-// worktree the daemon can adopt, …), spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type RegisterWorkspaceError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*RegisterWorkspaceError_NotAWorktree
+	Cause         isRegisterWorkspaceError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -244,6 +248,69 @@ func (*RegisterWorkspaceError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *RegisterWorkspaceError) GetCause() isRegisterWorkspaceError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *RegisterWorkspaceError) GetNotAWorktree() *RegisterWorkspaceNotAWorktree {
+	if x != nil {
+		if x, ok := x.Cause.(*RegisterWorkspaceError_NotAWorktree); ok {
+			return x.NotAWorktree
+		}
+	}
+	return nil
+}
+
+type isRegisterWorkspaceError_Cause interface {
+	isRegisterWorkspaceError_Cause()
+}
+
+type RegisterWorkspaceError_NotAWorktree struct {
+	// The dir exists but is not a git worktree the daemon can adopt.
+	NotAWorktree *RegisterWorkspaceNotAWorktree `protobuf:"bytes,1,opt,name=not_a_worktree,json=notAWorktree,proto3,oneof"`
+}
+
+func (*RegisterWorkspaceError_NotAWorktree) isRegisterWorkspaceError_Cause() {}
+
+type RegisterWorkspaceNotAWorktree struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterWorkspaceNotAWorktree) Reset() {
+	*x = RegisterWorkspaceNotAWorktree{}
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterWorkspaceNotAWorktree) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterWorkspaceNotAWorktree) ProtoMessage() {}
+
+func (x *RegisterWorkspaceNotAWorktree) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterWorkspaceNotAWorktree.ProtoReflect.Descriptor instead.
+func (*RegisterWorkspaceNotAWorktree) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP(), []int{4}
+}
+
 var File_agentrepl_v1_endpoint_register_workspace_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
@@ -256,8 +323,11 @@ const file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2$.agentrepl.v1.RegisterWorkspaceErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"T\n" +
 	"\x18RegisterWorkspaceSuccess\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x18\n" +
-	"\x16RegisterWorkspaceErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"v\n" +
+	"\x16RegisterWorkspaceError\x12S\n" +
+	"\x0enot_a_worktree\x18\x01 \x01(\v2+.agentrepl.v1.RegisterWorkspaceNotAWorktreeH\x00R\fnotAWorktreeB\a\n" +
+	"\x05cause\"\x1f\n" +
+	"\x1dRegisterWorkspaceNotAWorktreeB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_register_workspace_proto_rawDescOnce sync.Once
@@ -271,23 +341,25 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_register_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_agentrepl_v1_endpoint_register_workspace_proto_goTypes = []any{
-	(*RegisterWorkspaceRequest)(nil),  // 0: agentrepl.v1.RegisterWorkspaceRequest
-	(*RegisterWorkspaceResponse)(nil), // 1: agentrepl.v1.RegisterWorkspaceResponse
-	(*RegisterWorkspaceSuccess)(nil),  // 2: agentrepl.v1.RegisterWorkspaceSuccess
-	(*RegisterWorkspaceError)(nil),    // 3: agentrepl.v1.RegisterWorkspaceError
-	(*v1.WorkspaceRef)(nil),           // 4: workspace.v1.WorkspaceRef
+	(*RegisterWorkspaceRequest)(nil),      // 0: agentrepl.v1.RegisterWorkspaceRequest
+	(*RegisterWorkspaceResponse)(nil),     // 1: agentrepl.v1.RegisterWorkspaceResponse
+	(*RegisterWorkspaceSuccess)(nil),      // 2: agentrepl.v1.RegisterWorkspaceSuccess
+	(*RegisterWorkspaceError)(nil),        // 3: agentrepl.v1.RegisterWorkspaceError
+	(*RegisterWorkspaceNotAWorktree)(nil), // 4: agentrepl.v1.RegisterWorkspaceNotAWorktree
+	(*v1.WorkspaceRef)(nil),               // 5: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_register_workspace_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.RegisterWorkspaceResponse.success:type_name -> agentrepl.v1.RegisterWorkspaceSuccess
 	3, // 1: agentrepl.v1.RegisterWorkspaceResponse.error:type_name -> agentrepl.v1.RegisterWorkspaceError
-	4, // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5, // 2: agentrepl.v1.RegisterWorkspaceSuccess.workspace:type_name -> workspace.v1.WorkspaceRef
+	4, // 3: agentrepl.v1.RegisterWorkspaceError.not_a_worktree:type_name -> agentrepl.v1.RegisterWorkspaceNotAWorktree
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_register_workspace_proto_init() }
@@ -299,13 +371,16 @@ func file_agentrepl_v1_endpoint_register_workspace_proto_init() {
 		(*RegisterWorkspaceResponse_Success)(nil),
 		(*RegisterWorkspaceResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_register_workspace_proto_msgTypes[3].OneofWrappers = []any{
+		(*RegisterWorkspaceError_NotAWorktree)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_register_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

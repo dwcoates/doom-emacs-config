@@ -1,0 +1,156 @@
+package daemonaddr
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// LoopbackHost is the only interface the daemon ever binds. The daemon serves
+// a local editor and a local browser; a routable bind would expose every
+// workspace on the machine to the network.
+const LoopbackHost = "127.0.0.1"
+
+// claim is the Claim implementation: the boot lock, the bound listener, and
+// the advertisement it may publish.
+type claim struct {
+	lock     *bootLock
+	ln       net.Listener
+	addrPath string
+	address  string
+}
+
+// bind takes the boot claim and binds the listener, in that order. The lock
+// comes FIRST so a second daemon loses before it has bound anything: it never
+// creates a listener, never writes daemon.addr, and so cannot disturb the
+// incumbent on its way out.
+func bind(addrPath string, port int) (Claim, error) {
+	if addrPath == "" {
+		return nil, fmt.Errorf("daemon.addr path is empty")
+	}
+	if port < 0 || port > 65535 {
+		return nil, fmt.Errorf("port %d is out of range", port)
+	}
+	dir := filepath.Dir(addrPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create the state root %q: %w", dir, err)
+	}
+	lock, err := acquireBootLock(LockPath(addrPath))
+	if err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(LoopbackHost, strconv.Itoa(port)))
+	if err != nil {
+		lock.release()
+		return nil, fmt.Errorf("bind the daemon listener on %s:%d: %w", LoopbackHost, port, err)
+	}
+	bound, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		ln.Close()
+		lock.release()
+		return nil, fmt.Errorf("bound listener address %q is not TCP", ln.Addr())
+	}
+	return &claim{
+		lock:     lock,
+		ln:       ln,
+		addrPath: addrPath,
+		address:  net.JoinHostPort(LoopbackHost, strconv.Itoa(bound.Port)),
+	}, nil
+}
+
+// Listener implements Claim.
+func (c *claim) Listener() net.Listener { return c.ln }
+
+// Address implements Claim.
+func (c *claim) Address() string { return c.address }
+
+// Publish implements Claim. The write is atomic — a temporary file in the
+// same directory, then a rename — so a reader either sees the previous
+// address or this one, never a half-written line.
+func (c *claim) Publish() error {
+	dir := filepath.Dir(c.addrPath)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(c.addrPath)+".*")
+	if err != nil {
+		return fmt.Errorf("create a temporary daemon.addr beside %q: %w", c.addrPath, err)
+	}
+	name := tmp.Name()
+	if _, err := tmp.WriteString(c.address + "\n"); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return fmt.Errorf("write the daemon address to %q: %w", name, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return fmt.Errorf("flush %q: %w", name, err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("close %q: %w", name, err)
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("set the mode of %q: %w", name, err)
+	}
+	if err := os.Rename(name, c.addrPath); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("atomically replace %q: %w", c.addrPath, err)
+	}
+	return nil
+}
+
+// Withdraw implements Claim. Removing an absent file is success: an orderly
+// exit that never published still withdraws.
+func (c *claim) Withdraw() error {
+	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove %q: %w", c.addrPath, err)
+	}
+	return nil
+}
+
+// Close implements Claim: it closes the listener and releases the boot claim,
+// which is the end of this daemon's exclusivity. It deliberately does NOT
+// withdraw the advertisement — a blue-green handover closes the incumbent's
+// listener while the successor's daemon.addr already stands.
+func (c *claim) Close() error {
+	var firstErr error
+	if err := c.ln.Close(); err != nil {
+		firstErr = fmt.Errorf("close the daemon listener: %w", err)
+	}
+	if err := c.lock.release(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+// read parses an existing daemon.addr. A missing file, an empty file and a
+// malformed line are each an error: "no daemon is running" and "the daemon is
+// at nowhere" are different answers, and only the caller may decide what an
+// absent incumbent means.
+func read(addrPath string) (string, error) {
+	if addrPath == "" {
+		return "", fmt.Errorf("daemon.addr path is empty")
+	}
+	raw, err := os.ReadFile(addrPath)
+	if err != nil {
+		return "", fmt.Errorf("read %q: %w", addrPath, err)
+	}
+	addr := strings.TrimSpace(string(raw))
+	if addr == "" {
+		return "", fmt.Errorf("%q is empty: no daemon address is advertised", addrPath)
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", fmt.Errorf("parse the daemon address %q from %q: %w", addr, addrPath, err)
+	}
+	if host == "" {
+		return "", fmt.Errorf("daemon address %q in %q has no host", addr, addrPath)
+	}
+	if _, err := strconv.Atoi(port); err != nil {
+		return "", fmt.Errorf("daemon address %q in %q has a non-numeric port: %w", addr, addrPath, err)
+	}
+	return addr, nil
+}

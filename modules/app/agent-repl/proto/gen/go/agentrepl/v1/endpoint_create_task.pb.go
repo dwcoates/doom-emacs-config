@@ -198,10 +198,14 @@ func (x *CreateTaskSuccess) GetTask() *TaskRef {
 	return nil
 }
 
-// EMPTY ON PURPOSE: refusal arms DERIVED at the wave (blank title, …),
-// spelled per 3b.
+// Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
+// Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 type CreateTaskError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Cause:
+	//
+	//	*CreateTaskError_BlankTitle
+	Cause         isCreateTaskError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -236,6 +240,69 @@ func (*CreateTaskError) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_create_task_proto_rawDescGZIP(), []int{3}
 }
 
+func (x *CreateTaskError) GetCause() isCreateTaskError_Cause {
+	if x != nil {
+		return x.Cause
+	}
+	return nil
+}
+
+func (x *CreateTaskError) GetBlankTitle() *CreateTaskBlankTitle {
+	if x != nil {
+		if x, ok := x.Cause.(*CreateTaskError_BlankTitle); ok {
+			return x.BlankTitle
+		}
+	}
+	return nil
+}
+
+type isCreateTaskError_Cause interface {
+	isCreateTaskError_Cause()
+}
+
+type CreateTaskError_BlankTitle struct {
+	// The title is blank once trimmed.
+	BlankTitle *CreateTaskBlankTitle `protobuf:"bytes,1,opt,name=blank_title,json=blankTitle,proto3,oneof"`
+}
+
+func (*CreateTaskError_BlankTitle) isCreateTaskError_Cause() {}
+
+type CreateTaskBlankTitle struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateTaskBlankTitle) Reset() {
+	*x = CreateTaskBlankTitle{}
+	mi := &file_agentrepl_v1_endpoint_create_task_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateTaskBlankTitle) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateTaskBlankTitle) ProtoMessage() {}
+
+func (x *CreateTaskBlankTitle) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_create_task_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateTaskBlankTitle.ProtoReflect.Descriptor instead.
+func (*CreateTaskBlankTitle) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_create_task_proto_rawDescGZIP(), []int{4}
+}
+
 var File_agentrepl_v1_endpoint_create_task_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_create_task_proto_rawDesc = "" +
@@ -248,8 +315,12 @@ const file_agentrepl_v1_endpoint_create_task_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2\x1d.agentrepl.v1.CreateTaskErrorH\x00R\x05errorB\b\n" +
 	"\x06result\">\n" +
 	"\x11CreateTaskSuccess\x12)\n" +
-	"\x04task\x18\x01 \x01(\v2\x15.agentrepl.v1.TaskRefR\x04task\"\x11\n" +
-	"\x0fCreateTaskErrorB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x04task\x18\x01 \x01(\v2\x15.agentrepl.v1.TaskRefR\x04task\"a\n" +
+	"\x0fCreateTaskError\x12E\n" +
+	"\vblank_title\x18\x01 \x01(\v2\".agentrepl.v1.CreateTaskBlankTitleH\x00R\n" +
+	"blankTitleB\a\n" +
+	"\x05cause\"\x16\n" +
+	"\x14CreateTaskBlankTitleB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_create_task_proto_rawDescOnce sync.Once
@@ -263,23 +334,25 @@ func file_agentrepl_v1_endpoint_create_task_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_create_task_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_create_task_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_agentrepl_v1_endpoint_create_task_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_agentrepl_v1_endpoint_create_task_proto_goTypes = []any{
-	(*CreateTaskRequest)(nil),  // 0: agentrepl.v1.CreateTaskRequest
-	(*CreateTaskResponse)(nil), // 1: agentrepl.v1.CreateTaskResponse
-	(*CreateTaskSuccess)(nil),  // 2: agentrepl.v1.CreateTaskSuccess
-	(*CreateTaskError)(nil),    // 3: agentrepl.v1.CreateTaskError
-	(*TaskRef)(nil),            // 4: agentrepl.v1.TaskRef
+	(*CreateTaskRequest)(nil),    // 0: agentrepl.v1.CreateTaskRequest
+	(*CreateTaskResponse)(nil),   // 1: agentrepl.v1.CreateTaskResponse
+	(*CreateTaskSuccess)(nil),    // 2: agentrepl.v1.CreateTaskSuccess
+	(*CreateTaskError)(nil),      // 3: agentrepl.v1.CreateTaskError
+	(*CreateTaskBlankTitle)(nil), // 4: agentrepl.v1.CreateTaskBlankTitle
+	(*TaskRef)(nil),              // 5: agentrepl.v1.TaskRef
 }
 var file_agentrepl_v1_endpoint_create_task_proto_depIdxs = []int32{
 	2, // 0: agentrepl.v1.CreateTaskResponse.success:type_name -> agentrepl.v1.CreateTaskSuccess
 	3, // 1: agentrepl.v1.CreateTaskResponse.error:type_name -> agentrepl.v1.CreateTaskError
-	4, // 2: agentrepl.v1.CreateTaskSuccess.task:type_name -> agentrepl.v1.TaskRef
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5, // 2: agentrepl.v1.CreateTaskSuccess.task:type_name -> agentrepl.v1.TaskRef
+	4, // 3: agentrepl.v1.CreateTaskError.blank_title:type_name -> agentrepl.v1.CreateTaskBlankTitle
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_create_task_proto_init() }
@@ -292,13 +365,16 @@ func file_agentrepl_v1_endpoint_create_task_proto_init() {
 		(*CreateTaskResponse_Success)(nil),
 		(*CreateTaskResponse_Error)(nil),
 	}
+	file_agentrepl_v1_endpoint_create_task_proto_msgTypes[3].OneofWrappers = []any{
+		(*CreateTaskError_BlankTitle)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_create_task_proto_rawDesc), len(file_agentrepl_v1_endpoint_create_task_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

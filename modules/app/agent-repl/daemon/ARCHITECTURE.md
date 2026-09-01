@@ -132,8 +132,10 @@ read as free.
 (the store socket is ALWAYS passed explicitly: `-store-socket` flag beats
 env `AGENT_REPL_STORE_SOCKET` beats the default
 `~/.cache/agent-repl/sock/store.sock`),
-env `CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
-`AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA`, and in tests
+env = the daemon's OWN environment passed through (never an allowlist) with
+`CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
+`AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA`, `AGENT_REPL_SESSION_ID=<HostSessionId.value>`
+(log correlation only) set/overridden, and in tests
 `AGENT_REPL_FORBID_VENDOR_CALLS=1`; cwd is the workspace dir; fd 3 is the
 already-open shim log sink (never a pipe to the daemon's stderr). Process
 group discipline; stderr captured in a ring buffer as failure evidence.
@@ -441,6 +443,11 @@ UpdateAgent.stop / StopBash; all_agents → fan-wide), `AnswerPermission`,
   (`foo_test.go` beside `foo.go`), one edge case per test, no `time.Sleep`
   for synchronization (channels, WaitGroups, or injected clocks). Every
   production package ships its own unit tests and returns green.
+- GIT IS NEVER CALLED DURING TESTING (user directive, binding): packages
+  above the git client test against a fake `gitclient.Git`; the integration
+  harness scripts git facts as fixtures; the git-client leaf tests against a
+  scripted fake `git` executable first on PATH; the merge test gate is a
+  scripted fake script. No `git init`, no temp repositories in any test.
 - No real vendor calls anywhere: every test sets
   `AGENT_REPL_FORBID_VENDOR_CALLS=1`; the classifier and any exec site
   check `envc.VendorGuard`.
@@ -520,3 +527,211 @@ syntax highlighting emits the highlight classes (keyword, string, comment,
 number, type, function, operator, punctuation, variable, constant, attribute,
 tag, heading, link, emphasis, strong, added, removed, meta). `paint` asserts
 its emitted classes are in the vocabulary file.
+
+## Landing 3 (LANDED at overhaul/integration 87234e51c, merged at c0a4cf153 — see docs/overhaul/daemon.md "Landing 3 relay"; the error-arm batch is landing 4)
+
+Build against these shapes behind your OWN seam types now; swap to the
+generated arms when the landing merges (one place each):
+- `FeedTurnEndedErrored.headline` — a daemon-composed per-arm sentence (the
+  feed resolver composes it; the client's sentence table dies).
+- `FeedToolCallReturned.form.none` — a returned call with nothing to draw;
+  never `text{""}`.
+- `FeedToolCallInput.form` = command | path | query — the daemon states the
+  input line's drawn form (shell line vs muted path vs query).
+- `HostNotificationKind.question_asked{header}` — a blocked question's
+  notification (route as agent_addressed until it lands).
+- `DetachedLost{file_vanished | went_silent | swept_up}` as `lost` arms on
+  AgentBashInterrupted.cause, AgentSubagentFailure.cause and
+  AgentFailure.failure — the feed resolver maps them to FeedShellLost /
+  FeedSubagentLost; the sessionwatcher routes them as ordinary terminals.
+- `FeedColdGateResolvedCompact.scope` (SessionCompactScope) — the resolved
+  trace names what was summarized; the feed resolver carries model + scope.
+- Ungated permission modes are exactly `bypass` and `dont_ask`; `auto` keeps
+  a gate and needs no creation consent.
+- One-shot FINISH execution (self_merge / open_pr on the turn that concludes
+  with the success marker) is the prompt queue's turn-terminal hook calling
+  a workspace verb; the workspace verbs only record the finish action.
+- The error-arm batch (every `<Rpc>Error` arm incl. transferring_away /
+  not_yet_adopted, and the DaemonFault / SessionFault / HostFault kind arms)
+  is collected in ERROR-ARMS.md and sent by the teamlead once the server
+  handlers expose the sites.
+
+## Deploy chain adaptation (wave 3)
+
+- `bin/deploy-all.sh` step 5 evaluates an elisp restart hook via emacsclient;
+  the function it names today, `agent-repl-frontend-daemon-restart-await`,
+  is DEAD on overhaul/elisp. The successor is
+  `(agent-repl-runtime-restart-await)` in `lisp/services.el` (build script +
+  store/sidecar bounce + UpdateShutdownSchedule{now} + re-ensure, pumping
+  until DaemonHealth answers). The rewritten chain calls that name; the
+  elisp lead edits nothing under bin/.
+- The chain's order stays proto → bindings → shim → webapp → daemon →
+  store/sidecar; `build-frontend.sh` builds `daemon/bin/claude-repld` from
+  `./cmd/claude-repld`; the daemon's self-reload invokes the ONE chain with
+  `--no-bounce`.
+- `agent-shim/wire` is deleted with the rewrite (nothing in the daemon
+  imports it) and its `bin/test-all.sh` roster entry dropped.
+
+## Standing-stream mechanics (connect-go v1.17.0, system-wide rule)
+
+- SERVER: every Watch* handler (WatchFeed, WatchFooter, WatchTopbar,
+  WatchWorkspaceRoster, WatchDaemonHolds, WatchHostWorkspace, WatchDaemon,
+  WatchWebWorkspace, WatchLoginTerminal) FLUSHES its response headers the
+  moment it accepts the stream (`stream.ResponseHeader()` set, then an
+  explicit flush via the underlying `http.Flusher` / `connect` send of the
+  headers before the first frame), so acceptance is observable before the
+  first published view arrives; a refused open is a Connect error before
+  any frame.
+- CLIENT (the shim client): a standing watch is ended by CANCELLING its
+  context, never by `Close` alone — `ServerStreamForClient.Close` drains
+  the body and blocks forever on a stream that never ends. `CallServerStream`
+  returns once headers arrive (before the first frame under early flush);
+  refusals surface at the first `Receive`, so the opening frame is consumed
+  as the open's answer (WatchSession's first `diagnostics` push).
+- IMPLEMENTATION of flush-on-accept in connect-go: response headers are sent
+  lazily (first Send or handler return), so every Watch* handler must act:
+  when a most-recently-published view exists, the subscription invariant's
+  first Send happens immediately; when none exists yet, flush headers via a
+  ResponseWriter wrapper installed on the h2c mux that `accept`s (status 200
+  + the request's streaming content type, flushed) the moment the
+  subscription is registered, swallows connect-go's later WriteHeader
+  (warning if the status disagrees), and implements `Unwrap()` so
+  `http.NewResponseController` still reaches the real writer; unary is
+  untouched; stream-request validation runs BEFORE registration so refusals
+  stay refusals. A proven copy (read-only reference): branch
+  overhaul/elisp-integration, worktree
+  /Users/dodgecoates/.config/doom-overhaul/elisp-agents/integration, file
+  modules/app/agent-repl/lisp/testsupport/fakedaemon/accept.go (+ test).
+  Verify in the integration suite: a Watch* open on a workspace with no
+  published view returns headers before any frame.
+- Live-work items restored from `SessionStarted.live_work` have NO
+  announcing agent: the feed/footer/sidebar sinks receive a nil agent and
+  MUST place such items on the ROOT feed (root-feed fallback), never drop
+  them (ruled by the daemon lead; a shim-side re-announce with the
+  `created` origin is requested upstream).
+
+## Cross-system literals the daemon consumes (pinned)
+
+- METAPROMPT SENTINELS (Emacs `agent-repl--meta-wrap`, lisp/core.el): an
+  injected span is `<!--agent-repl:meta-->` + text + `<!--/agent-repl:meta-->`.
+  `prompts.StripSentinels` removes every such span (and the whitespace it
+  leaves) from the DRAWN prompt text only; the record keeps the full text.
+  The daemon wraps its own injected spans (one-shot decoration, add-support
+  briefs, merge briefs) with the same markers.
+- `.claude.json` (per account root): the daemon READS only
+  `oauthAccount.emailAddress` (absent → logged out; malformed file → error)
+  and NEVER writes the file; the project entry the CLI keeps under
+  `projects.<cwd>` is not read or written by the daemon — transcript porting
+  moves files under `<root>/projects/<encoded cwd>/` only.
+
+## Landing 4 (staged on overhaul/landing-4; lands with the ERROR-ARMS batch)
+
+Rulings already binding; code swaps to the generated arms when it lands:
+- `SessionStarted.live_work` items are ALWAYS `created`-origin on
+  re-adoption (ruled on the shim); the sessionwatcher's ERROR + skip on a
+  `detached`-origin live item is the correct contract-violation handling.
+- `DetachedWorkId.value == the unit's AgentActivityId.value` (same bytes; a
+  subagent's is also its AgentId) — so a `created`-origin MONITOR is retired
+  by the monitor's own `ended`/`failure` frame whose activity id equals the
+  handle. Monitors stay in freeness. (Sessionwatcher remediation at landing
+  4: key the created-monitor reap by that equality.)
+- `SessionUpdate.context_budget_warning` (tag 24) is RETIRED; the arm becomes
+  `AgentUpdate.context_budget_warning = 7 {text}` — a page line, sidecar-
+  produced, arriving via WatchAgent. Route it to the footer from the agent
+  plane (sessionwatcher: new AgentUpdate arm → FooterSink; delete the
+  WatchSession routing; footer: unchanged consumer).
+- Restored live-work items route to the root feed (agreed).
+- The landing-4 batch also carries the ERROR-ARMS.md arms and the four e2e
+  seam answers (arm names; the merge test-gate invocation; the .claude.json
+  key path; the metaprompt sentinels — the last two are pinned above).
+
+## Handover: the web side never redials (project lead ruling)
+
+- On `transferring_away{address}` / `transferred{address}` the WEBAPP does
+  not dial the successor; Emacs reloads the webview at the successor's
+  address and the FRESH page calls `AdoptWebWorkspace` ONCE AT BOOT, before
+  opening any view stream. The host side is unchanged (Emacs calls
+  `AdoptHostWorkspace` on the announcement).
+- Consequences for `rollout.AdoptWeb` and the server handler:
+  `no_transfer_announced{}` is the ORDINARY answer on every non-handover
+  page boot — logged at INFO at most, never WARN/ERROR, never a fault;
+  `not_yet_adopted{}` is answered while adoption is in progress (the page
+  retries with backoff); the successor's expected-participant count for the
+  web side is satisfied by the reloaded page's adopt call, not by a
+  surviving stream (record the web participant as "expected" from the old
+  daemon's snapshot, and mark it satisfied by the first AdoptWebWorkspace
+  from any connection).
+- Vocab merge note: `footer_allowance` also landed on overhaul/integration
+  (8c56dece8) directly; when overhaul/daemon merges into integration the
+  render-colors.json conflict resolves to the daemon's version.
+
+## FooterAllowance sourcing (project lead ruling, supersedes the landing-4 adaptation)
+
+- `SessionUpdate.account_usage` is NOT retired. FIGURES (utilization,
+  resets_at) come from account_usage: five_hour → `session`, seven_day →
+  `weekly`; sampled at a cadence and complete from the first sample.
+- The VERDICT (`FooterAllowance.status` arm) comes from
+  `SessionUpdate.rate_limit_status`, matched by window: five_hour →
+  session; seven_day / seven_day_opus / seven_day_sonnet /
+  seven_day_overage_included → weekly; `overage` → the overage note. It
+  stays UNSET until a rate-limit event for that window has been seen — an
+  unset status oneof is LEGAL ("no vendor verdict observed yet").
+- The allowance line draws as soon as a usage sample exists; the verdict
+  arm joins when it arrives.
+- A rate-limit event carrying a utilization for the same window that is
+  NEWER than the last sample wins for the figure.
+- Footer remediation owed: replace the "both windows from rate_limit_status"
+  rule with the above (tests per bullet).
+
+## Merge orchestrator rulings (project lead, on its report)
+
+- Pause/Resume scope: landing 5 adds `optional RepositoryRef repository` to
+  UpdateMergeQueuePause/Resume (UNSET = every repository); until it lands
+  the daemon-wide switch is correct.
+- `gitclient.Git` gains `Commit(ctx, dir, message string) (sha string, err
+  error)` (`commit --no-edit -m <message>`; the fake-git tests cover argv
+  only) — the merge orchestrator completes a resolved conflict through it.
+- `prompts/merge-conflict-resolve.md` and `merge-test-failure-resolve.md`
+  still describe the retired rebase-worktree/cherry-pick flow: the prompts
+  agent rewrites their BODIES for the no-ff-merge-in-target flow with the
+  placeholder sets unchanged.
+- Recovery re-queues an in-flight merge at the FRONT of its repo queue
+  rather than re-entering a tab: accepted as an override (recorded in
+  docs/overhaul/daemon.md).
+- Terminal ordering post-prompt → terminal → release → worktree removal →
+  displaced turn → rollout trigger: accepted.
+
+## Landing 5 (LANDED at 081dbbba8, merged at 05b460c4b) — remediations owed
+
+- FEED (resume the feed agent): (1) `AgentBashOutput.not_observed` (and an
+  AgentBashInterrupted whose output is not_observed) maps to an UNSET
+  `FeedShell.spool` — never an empty `FeedShellSpool{text:""}` — with the
+  settled arm exactly as the record states it (completed/cancelled/lost);
+  pin with a resolver test; no new frontend element. (2) A vendor-
+  synthesized notice sets `FeedResponse.notice{heading}` instead of
+  prepending a heading to the prose; the prose stays verbatim.
+- MERGE (resume the merge agent): UpdateMergeQueuePause/Resume gained
+  `optional workspace.v1.RepositoryRef repository` — UNSET = every
+  repository (the current daemon-wide switch is the unset case); a set ref
+  scopes the pause/resume to that repo's queue; typed refusal when the ref
+  is unknown.
+
+## The canonical token-figure format (daemon-wide; the webapp copies it)
+
+One formatter, `internal/figures.Tokens(n uint64) string` (extraction from
+the three per-resolver copies is owed in the feed remediation; footer and
+topbar swap imports):
+- n < 1000 → unscaled decimal digits ("0", "999").
+- otherwise scale by the RENDERED unit: k = n/1000, M = n/1,000,000 —
+  rendered with EXACTLY ONE fractional digit (strconv.FormatFloat 'f' 1,
+  round-to-nearest with binary-float ties), then a trailing ".0" trimmed.
+  One fractional digit applies at EVERY scaled magnitude ("1.2k", "12.3k",
+  "182.4k", "1.2M") — the proto's own examples ("18.2k", "142.3k") fix this;
+  there is no drop-the-fraction-from-ten rule.
+- UNIT SELECTION IS BY THE RENDERED VALUE: a count whose k-rendering would
+  reach "1000k" (n ≥ 999,950) renders "1M" instead; same rule at every
+  boundary.
+- Examples: 0→"0", 999→"999", 1000→"1k", 1200→"1.2k", 12340→"12.3k",
+  182000→"182k", 999949→"999.9k", 999950→"1M", 1200000→"1.2M".
+- Suffixes composed by the call site ("18.2k in", "12.4k tok") wrap this
+  value; the formatter emits only the figure.
