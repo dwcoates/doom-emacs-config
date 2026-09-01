@@ -722,5 +722,53 @@ the first-restored-workspace splash-screen bug."
   (should (memq 'agent-repl--magit-insert-merge-base
                 magit-status-sections-hook)))
 
+;;;; ---- Tests: GitHub commit-link commands ----
+;;
+;; Both are interactive commands bound in this file's own `map!' (the magit
+;; transient's "g O" / "g C"), so they are live entry points with no elisp
+;; caller.  These pin them against a dead-code sweep.
+
+(ert-deftest agent-repl-test-magit-open-commit-in-github-browses-the-commit-url ()
+  "The command browses the GitHub URL built from the remote and HEAD."
+  (agent-repl-test--with-clean-state
+    (let ((browsed nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) default-directory))
+                ((symbol-function 'agent-repl--git-string)
+                 (lambda (&rest args)
+                   (if (equal args '("rev-parse" "HEAD"))
+                       "cafebabe"
+                     "https://github.com/ChessCom/repo.git")))
+                ((symbol-function 'browse-url) (lambda (url) (setq browsed url))))
+        (+dwc/magit-open-commit-in-github)
+        (should (equal browsed
+                       "https://github.com/ChessCom/repo/commit/cafebabe"))))))
+
+(ert-deftest agent-repl-test-magit-open-commit-in-github-refuses-a-foreign-remote ()
+  "A remote outside the expected org is an error, never a guessed URL."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) default-directory))
+              ((symbol-function 'agent-repl--git-string)
+               (lambda (&rest args)
+                 (if (equal args '("rev-parse" "HEAD"))
+                     "cafebabe"
+                   "https://example.com/someone/repo.git")))
+              ((symbol-function 'browse-url) (lambda (_url) (error "must not browse"))))
+      (should-error (+dwc/magit-open-commit-in-github)))))
+
+(ert-deftest agent-repl-test-magit-copy-commit-link-kills-the-commit-url ()
+  "The command puts the commit URL for the commit at point on the kill ring."
+  (agent-repl-test--with-clean-state
+    (let ((kill-ring nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) default-directory))
+                ((symbol-function 'magit-commit-at-point) (lambda () "d00dfeed"))
+                ((symbol-function 'agent-repl--git-string)
+                 (lambda (&rest _args) "https://github.com/ChessCom/repo.git")))
+        (+dwc/magit-copy-commit-link)
+        (should (equal (car kill-ring)
+                       "https://github.com/ChessCom/repo/commit/d00dfeed"))))))
+
 (provide 'test-magit)
 ;;; test-magit.el ends here
