@@ -68,6 +68,7 @@ import {
   reclaimScratchProject,
   releaseScratchProject,
   resolveAuthMode,
+  accountRootEnvFor,
   sdkEnvFor,
   wipeSeededCredentials,
 } from "./auth.mjs";
@@ -587,7 +588,9 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   // every vendor file the run writes lands inside the capture rather than in
   // the operator's real ~/.claude.
   const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
-  process.env.CLAUDE_CONFIG_DIR = configDir;
+  const rootEnv = accountRootEnvFor(auth, configDir, process.env);
+  if ("CLAUDE_CONFIG_DIR" in rootEnv) process.env.CLAUDE_CONFIG_DIR = rootEnv.CLAUDE_CONFIG_DIR;
+  else delete process.env.CLAUDE_CONFIG_DIR;
 
   const abort = new AbortController();
   const input = createInputChannel();
@@ -630,8 +633,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
     persistSession: true,
     systemPrompt: { type: "preset", preset: "claude_code" },
     env: {
-      ...process.env,
-      CLAUDE_CONFIG_DIR: configDir,
+      ...accountRootEnvFor(auth, configDir, process.env),
       AGENT_REPL_OWNED: "1",
       ...sdkEnvFor(auth, process.env),
     },
