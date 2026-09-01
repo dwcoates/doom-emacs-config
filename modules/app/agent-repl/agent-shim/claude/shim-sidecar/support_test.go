@@ -33,7 +33,7 @@ type fakeStore struct {
 	cursorsFail  string // non-empty: answer the failure arm
 	cursorsCalls int
 
-	writeFail  string // non-empty: answer the failure arm
+	writeFail string // non-empty: answer the failure arm
 	// writeInvalidField, when set alongside writeFail, answers the
 	// invalid_request arm naming this field — the refusal a retry CANNOT help
 	// with. Left empty the failure carries the storage_failure arm, which is
