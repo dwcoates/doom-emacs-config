@@ -51,8 +51,10 @@ type Opts struct {
 	// Pprof sets the profiling listener address; empty leaves it off.
 	Pprof string
 	// SelfRepo names the daemon's own checkout via AGENT_REPL_SELF_REPO_DIR,
-	// so a merge target can be recognized as the emacs repo. The daemon keeps
-	// the self-reload trigger OFF under this override.
+	// so a merge target can be recognized as the emacs repo. The self-reload
+	// trigger stays ON under this override: test safety comes from
+	// AGENT_REPL_DEPLOY_SCRIPT naming the fake deploy script, so landed range
+	// to rollout trigger to deploy is assertable end to end.
 	SelfRepo string
 	// MultiRepoRoot is the tree whose workspaces use the multi-repo account.
 	MultiRepoRoot string
