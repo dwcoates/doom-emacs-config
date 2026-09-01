@@ -560,3 +560,16 @@ every UX or contract gap you surfaced instead of improvising.
   project lead notified for re-capture. Run #3 on f70941f0c: 101 failed /
   92 passed / 1 todo. A held-turn-gate trigger follow-up is in flight on
   overhaul/shim-harness.
+- LEDGER: held-turn-gate on_control trigger merged at 5554d2d0b. CAPTURE
+  READOUT (read-only Explore over the 67 goldens): no context_tip and no
+  budget-warning attachment anywhere (nearest carrier observed once:
+  attachment `total_tokens_reminder`); no failed subagent; no
+  compact_boundary; no /clear rotation — compaction-directed and
+  identity-rotation-clear recorded only turn 1 (later turns submitted after
+  the query closed; 14 `control_failed` "ProcessTransport is not ready for
+  writing" corpus-wide) → harness fix in flight, re-capture owed. Real
+  subagent files are keyed by the vendor agentId (17-hex task id) with
+  meta.toolUseId the only link to the spawning call; bucket 9 corrected to a
+  reader-side join (mock layout stays vendor-faithful). The spawning tool is
+  `Agent` on the wire, `Task` in init.tools. toolUseResult is polymorphic
+  (object | bare string on denials/StructuredOutput | list for MCP).
