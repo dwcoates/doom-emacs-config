@@ -8,7 +8,14 @@
  * the gate.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,9 +32,13 @@ import {
   answersFor,
   assertCaptureAuthorized,
   createInputChannel,
+  controlMatches,
   createWorld,
   cwdSlug,
+  fireTriggers,
+  lateReclaimSlug,
   loadPrompts,
+  mergeTreeAnonymized,
   messageMatches,
   parseArgv,
   patternMatches,
@@ -604,5 +615,215 @@ describe("createInputChannel", () => {
     const channel = createInputChannel();
     channel.close();
     expect(() => channel.push({})).toThrow(/closed input channel/);
+  });
+});
+
+describe("controlMatches", () => {
+  it("does not match when there is no matcher at all", () => {
+    expect(controlMatches(undefined, { kind: "can_use_tool_parked" })).toBe(false);
+  });
+
+  it("matches a parked gate on kind", () => {
+    expect(controlMatches({ kind: "can_use_tool_parked" }, { kind: "can_use_tool_parked" })).toBe(true);
+  });
+
+  it("rejects a different control kind", () => {
+    expect(controlMatches({ kind: "can_use_tool_parked" }, { kind: "can_use_tool_request" })).toBe(false);
+  });
+
+  it("matches on tool_name", () => {
+    expect(
+      controlMatches({ tool_name: "Bash" }, { kind: "can_use_tool_parked", tool_name: "Bash" }),
+    ).toBe(true);
+  });
+
+  it("rejects a different tool_name", () => {
+    expect(
+      controlMatches({ tool_name: "Bash" }, { kind: "can_use_tool_parked", tool_name: "Read" }),
+    ).toBe(false);
+  });
+
+  it("matches on a substring of the serialized control record", () => {
+    expect(controlMatches({ contains: "park" }, { kind: "can_use_tool_parked" })).toBe(true);
+  });
+});
+
+/** A query stub that records which control verbs were driven against it. */
+function recordingQuery() {
+  const calls = [];
+  return {
+    calls,
+    interrupt: async () => {
+      calls.push("interrupt");
+      return { ok: true };
+    },
+  };
+}
+
+describe("fireTriggers", () => {
+  const parkedControl = {
+    at: "on_control",
+    after: { kind: "can_use_tool_parked" },
+    do: "interrupt",
+  };
+
+  it("fires the interrupt when a parked-gate control record is replayed", async () => {
+    const query = recordingQuery();
+    await fireTriggers(
+      query,
+      [parkedControl],
+      "on_control",
+      { kind: "can_use_tool_parked", tool_name: "Bash", rule: "park" },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual(["interrupt"]);
+  });
+
+  it("reports the driven verb back to the caller", async () => {
+    const results = await fireTriggers(
+      recordingQuery(),
+      [parkedControl],
+      "on_control",
+      { kind: "can_use_tool_parked" },
+      new Set(),
+      () => {},
+    );
+    expect(results).toEqual([{ verb: "interrupt", ok: true }]);
+  });
+
+  it("does not fire an on_control trigger for a plain stream message", async () => {
+    const query = recordingQuery();
+    await fireTriggers(
+      query,
+      [parkedControl],
+      "on_message",
+      { type: "assistant", message: { content: "can_use_tool_parked" } },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual([]);
+  });
+
+  it("does not fire the same control twice", async () => {
+    const query = recordingQuery();
+    const fired = new Set();
+    const payload = { kind: "can_use_tool_parked" };
+    await fireTriggers(query, [parkedControl], "on_control", payload, fired, () => {});
+    await fireTriggers(query, [parkedControl], "on_control", payload, fired, () => {});
+    expect(query.calls).toEqual(["interrupt"]);
+  });
+
+  it("leaves an on_message control alone while dispatching on_control", async () => {
+    const query = recordingQuery();
+    const messageControl = { at: "on_message", after: { type: "assistant" }, do: "interrupt" };
+    await fireTriggers(
+      query,
+      [messageControl],
+      "on_control",
+      { kind: "can_use_tool_parked" },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual([]);
+  });
+});
+
+/** A fake account root and capture directory — no vendor, no real ~/.claude. */
+function fakeRoot(slug) {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-late-reclaim-")));
+  const accountRoot = path.join(base, "root");
+  const captureDir = path.join(base, "capture");
+  mkdirSync(path.join(accountRoot, "projects", slug), { recursive: true });
+  mkdirSync(path.join(captureDir, "files", "projects", slug), { recursive: true });
+  return { base, accountRoot, captureDir };
+}
+
+describe("lateReclaimSlug", () => {
+  const slug = "-private-var-folders-scratch-cwd";
+
+  it("moves a file the vendor wrote after the first reclaim into the capture", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    writeFileSync(
+      path.join(accountRoot, "projects", slug, "late.jsonl"),
+      '{"type":"user"}\n',
+      "utf8",
+    );
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    expect(
+      readFileSync(path.join(captureDir, "files", "projects", slug, "late.jsonl"), "utf8"),
+    ).toContain('"type":"user"');
+  });
+
+  it("leaves the operator's root clean afterwards", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    writeFileSync(path.join(accountRoot, "projects", slug, "late.jsonl"), "{}\n", "utf8");
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    expect(existsSync(path.join(accountRoot, "projects", slug))).toBe(false);
+  });
+
+  it("does not touch an unrelated project directory", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    const other = path.join(accountRoot, "projects", "-Users-someone-real-project");
+    mkdirSync(other, { recursive: true });
+    writeFileSync(path.join(other, "session.jsonl"), "{}\n", "utf8");
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    expect(existsSync(path.join(other, "session.jsonl"))).toBe(true);
+  });
+
+  it("logs the late reclaim", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    writeFileSync(path.join(accountRoot, "projects", slug, "late.jsonl"), "{}\n", "utf8");
+    const lines = [];
+    lateReclaimSlug({
+      accountRoot,
+      slug,
+      captureDir,
+      report: { unparsed: [] },
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join("")).toContain(`late reclaim ${slug}`);
+  });
+
+  it("reports nothing moved when the vendor wrote nothing late", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    expect(lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } })).toEqual({
+      slug,
+      moved: [],
+    });
+  });
+});
+
+describe("mergeTreeAnonymized", () => {
+  it("refuses to overwrite a larger captured file with a smaller late flush", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-merge-")));
+    const from = path.join(base, "from");
+    const to = path.join(base, "to");
+    mkdirSync(from, { recursive: true });
+    mkdirSync(to, { recursive: true });
+    const full = `${'{"a":1}\n'.repeat(20)}`;
+    writeFileSync(path.join(to, "session.jsonl"), full, "utf8");
+    writeFileSync(path.join(from, "session.jsonl"), '{"a":1}\n', "utf8");
+    mergeTreeAnonymized(from, to, { unparsed: [] });
+    expect(readFileSync(path.join(to, "session.jsonl"), "utf8")).toBe(full);
+  });
+
+  it("writes a file the capture does not have yet", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-merge-")));
+    const from = path.join(base, "from");
+    const to = path.join(base, "to");
+    mkdirSync(from, { recursive: true });
+    writeFileSync(path.join(from, "new.txt"), "hello", "utf8");
+    expect(mergeTreeAnonymized(from, to, { unparsed: [] })).toEqual([path.join(to, "new.txt")]);
+  });
+
+  it("merges a nested subagent sidechain directory", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-merge-")));
+    const from = path.join(base, "from");
+    const to = path.join(base, "to");
+    mkdirSync(path.join(from, "sub"), { recursive: true });
+    writeFileSync(path.join(from, "sub", "agent.json"), '{"id":"x"}', "utf8");
+    mergeTreeAnonymized(from, to, { unparsed: [] });
+    expect(existsSync(path.join(to, "sub", "agent.json"))).toBe(true);
   });
 });
