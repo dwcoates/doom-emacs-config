@@ -26,6 +26,7 @@ deleted in the commit that switches the handler onto the landed arm.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
+| SubmitPrompt | `duplicate_submission` | the request's `idempotency_key` already claimed a turn; the retry is refused rather than minting a second turn (`prompthandler.ErrDuplicateSubmission`) | prompthandler |
 
 One thing the batch did NOT land: `CloseWorkspaceError.blocked` exists but
 `CloseWorkspaceBlocked` is still an EMPTY message, so the composed reason the
