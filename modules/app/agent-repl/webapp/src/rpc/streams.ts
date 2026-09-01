@@ -57,6 +57,14 @@ export interface StreamContext {
   readonly client: AgentReplClient;
   readonly failures: FailureSink;
   onClientReplaced(fn: () => void): () => void;
+  /**
+   * The page going quiet, which every standing stream must obey.
+   *
+   * THE HANDLE CANCELS ITSELF rather than waiting to be told: the workspace has
+   * moved to a successor this page will never dial, so reopening would file a
+   * `daemon_unreachable` card every backoff for a link that is correctly gone.
+   */
+  onQuiesced(fn: () => void): () => void;
 }
 
 export interface WatchStreamOptions<Res extends Message> {
@@ -70,6 +78,14 @@ export interface WatchStreamOptions<Res extends Message> {
   onPush: (res: Res) => void;
   /** Observe how a run finished. Never required. */
   onEnd?: (end: StreamEnd) => void;
+  /**
+   * Called on the first push AFTER a run that ended without our cancel.
+   *
+   * The link coming back is a fact only this loop can observe, and the
+   * lifecycle needs it: an announced outage's banner comes down when the
+   * daemon is answering again, not when its own countdown says it should be.
+   */
+  onReconnected?: () => void;
   /** Injected by tests running on fake timers. */
   backoff?: BackoffOptions;
 }
@@ -114,6 +130,20 @@ export function watchStream<Res extends Message>(
     context: { rpc: opts.name },
   });
 
+  /** Filled in below; the quiet subscription cancels through the handle. */
+  let cancelSelf = (): void => undefined;
+  /** Set when the page was ALREADY quiet as this stream was being built. */
+  let quiesceRequested = false;
+  const unsubscribeFromQuiesce = ctx.onQuiesced(() => {
+    if (cancelled) return;
+    quiesceRequested = true;
+    log("info", `${opts.name} is stopping: the workspace moved to another daemon`, {
+      operation: "rpc.stream-quiesced",
+      context: { rpc: opts.name },
+    });
+    cancelSelf();
+  });
+
   const unsubscribeFromClientReplacement = ctx.onClientReplaced(() => {
     if (cancelled) return;
     // The page adopted a new daemon. Abort the run against the old client; the
@@ -150,6 +180,7 @@ export function watchStream<Res extends Message>(
       });
       ctx.failures.retract("daemonUnreachable");
       unreachableFiled = false;
+      opts.onReconnected?.();
     }
     backoffMs = initialMs;
   };
@@ -213,9 +244,7 @@ export function watchStream<Res extends Message>(
     }
   };
 
-  void run();
-
-  return {
+  const handle: StreamHandle = {
     cancel(): void {
       if (cancelled) return;
       cancelled = true;
@@ -224,10 +253,21 @@ export function watchStream<Res extends Message>(
         context: { rpc: opts.name },
       });
       unsubscribeFromClientReplacement();
+      unsubscribeFromQuiesce();
       controller.abort();
       wakeFromBackoff?.();
     },
   };
+  cancelSelf = () => handle.cancel();
+  // A page that went quiet BEFORE this stream was opened must not get a run
+  // loop at all: `onQuiesced` fires immediately in that case, when `cancelSelf`
+  // was still the placeholder, so the flag it set is honored here instead.
+  if (quiesceRequested) {
+    handle.cancel();
+    return handle;
+  }
+  void run();
+  return handle;
 }
 
 /**
