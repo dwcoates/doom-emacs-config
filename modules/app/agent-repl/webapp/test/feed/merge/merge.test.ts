@@ -8,7 +8,7 @@ import {
 import { MalformedView } from "../../../src/rpc/malformed.js";
 import { drawFeedMerge, drawFeedMergeGlyph } from "../../../src/feed/merge/merge.js";
 import { harness, mergeRow, rowContext } from "../harness.js";
-import { armsOf } from "../arms.js";
+import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
 
 beforeEach(() => {
@@ -66,13 +66,13 @@ describe("drawFeedMerge: every result arm", () => {
   });
 
   it("holds to the schema: every result arm of FeedMerge is drawn", () => {
-    expect(armsOf(FeedMergeSchema.oneofs, "result").sort()).toEqual(
+    expect([...oneofArms(FeedMergeSchema, "result")].sort()).toEqual(
       ["error", "success", "update"].sort(),
     );
   });
 
   it("holds to the schema: every reason arm of FeedMergeError is drawn", () => {
-    expect(armsOf(FeedMergeErrorSchema.oneofs, "reason").sort()).toEqual(
+    expect([...oneofArms(FeedMergeErrorSchema, "reason")].sort()).toEqual(
       ["abandoned", "failed"].sort(),
     );
   });
