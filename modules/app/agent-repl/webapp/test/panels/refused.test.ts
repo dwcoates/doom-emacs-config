@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { oneofArms } from "../arms.js";
 import {
+  RequestCommandSupportErrorSchema,
   RequestCommandSupportResponseSchema,
   type RequestCommandSupportRequest,
   type RequestCommandSupportResponse,
@@ -29,8 +31,19 @@ const successResponse = (): RequestCommandSupportResponse =>
   create(RequestCommandSupportResponseSchema, {
     result: { case: "success", value: { workspace: { id: "ws-support", dir: "/s" } } },
   });
-const errorResponse = (): RequestCommandSupportResponse =>
-  create(RequestCommandSupportResponseSchema, { result: { case: "error", value: {} } });
+/** What each fact-carrying arm must carry for its sentence to be complete. */
+const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  workspaceRefMismatch: { registryDir: "/w/registry" },
+  transferringAway: { address: "127.0.0.1:7777" },
+  briefMissing: { name: "ship-the-rail" },
+};
+
+/** A refusal carrying ARM, with the payload that arm's sentence needs. */
+const refusalResponse = (arm: string) => (): RequestCommandSupportResponse =>
+  create(RequestCommandSupportResponseSchema, {
+    result: { case: "error", value: { cause: { case: arm, value: CAUSE_FILL[arm] ?? {} } } },
+  } as never);
+const errorResponse = refusalResponse("blankCommand");
 
 function rowContext(
   answer: () => RequestCommandSupportResponse = successResponse,
@@ -160,7 +173,37 @@ describe("the add-support offer", () => {
     const card = drawFeedCommandRefused(refused(true), rc);
     card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
     await settle();
-    expect(card.querySelector(".command-refused-refusal")?.getAttribute("data-arm")).toBe("error");
+    expect(card.querySelector(".command-refused-refusal")?.getAttribute("data-arm")).toBe(
+      "blankCommand",
+    );
+  });
+
+  it.each(oneofArms(RequestCommandSupportErrorSchema, "cause"))(
+    "labels the %s arm and says something about it",
+    async (arm) => {
+      const { rc } = rowContext(refusalResponse(arm));
+      const card = drawFeedCommandRefused(refused(true), rc);
+      card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+      await settle();
+      const refusal = card.querySelector(".command-refused-refusal");
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+    },
+  );
+
+  it("names the registry's directory on a mismatch, from the one shared wording", async () => {
+    const { rc } = rowContext(refusalResponse("workspaceRefMismatch"));
+    const card = drawFeedCommandRefused(refused(true), rc);
+    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    await settle();
+    expect(card.querySelector(".command-refused-refusal")?.textContent).toContain("/w/registry");
+  });
+
+  it("names the workspace whose brief the daemon went looking for", async () => {
+    const { rc } = rowContext(refusalResponse("briefMissing"));
+    const card = drawFeedCommandRefused(refused(true), rc);
+    card.querySelector<HTMLButtonElement>("[data-add-support]")?.click();
+    await settle();
+    expect(card.querySelector(".command-refused-refusal")?.textContent).toContain("ship-the-rail");
   });
 
   it("re-enables the button after a refusal", async () => {
