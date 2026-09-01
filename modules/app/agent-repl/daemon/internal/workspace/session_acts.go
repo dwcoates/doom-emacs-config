@@ -9,10 +9,13 @@ import (
 	"claude-repld/internal/promptqueue"
 )
 
-// The session-act kinds, as the queue's one delivery path names them.
+// The session-act kinds, as the queue's one delivery path names them. They
+// ALIAS the queue's own constants rather than respelling them: two literals for
+// one act kind is exactly how a verb starts sending something the queue does
+// not carry.
 const (
-	actSetModel          = "set_model"
-	actSetPermissionMode = "set_permission_mode"
+	actSetModel          = promptqueue.ActSetModel
+	actSetPermissionMode = promptqueue.ActSetPermissionMode
 )
 
 // SetModel switches the session's model THROUGH THE QUEUE, so the switch cannot
