@@ -364,6 +364,41 @@ every scenario that pushes after subscribing must pass through here."
   (expand-file-name "emacs.jsonl" (agent-repl-itest-daemon-state-dir daemon)))
 
 (defvar agent-repl--workspaces)
+(defvar agent-repl--workspace-log-targets)
+
+(defvar agent-repl-itest--orphaned-log-targets nil
+  "Durable workspace log targets production has stopped owning this scenario.
+
+A WORKSPACE TEARDOWN ORPHANS THE HISTORY THE CANONICAL LINK USED TO NAME.
+`agent-repl--ws-del\=' forgets the workspace\='s target
+(`agent-repl--ws-forget-emacs-log-target\='), and the very next
+workspace-owned record mints a fresh target and re-points
+`<workspace>/.claude/emacs/emacs.log\=' at it -- deliberately, so a future
+workspace reusing the name gets its own runtime-owned file.  The records
+written BEFORE the teardown are still durable, but the canonical link no
+longer names them, so a reader that followed only the link would conclude
+a verb never logged its success ack.
+
+The fixture therefore remembers each target at the ONE moment it is
+orphaned, and `agent-repl-itest--workspace-log-files\=' reads those too.")
+
+(defun agent-repl-itest--note-orphaned-log-targets (ws)
+  "Remember the durable log targets WS owns, before production forgets them.
+Called from the fixture\='s wrapper around
+`agent-repl--ws-forget-emacs-log-target\='; the registry is swept the same
+way that function sweeps it, by WS\='s registered directory, because a WS
+mid-teardown may no longer resolve to a log identity."
+  (let* ((dir (ignore-errors (agent-repl--ws-get ws :project-dir)))
+         (canonical (and (stringp dir) (agent-repl--path-canonical dir))))
+    (when (and canonical (boundp 'agent-repl--workspace-log-targets))
+      (maphash (lambda (_key entry)
+                 (let ((owned (plist-get entry :project-dir))
+                       (target (plist-get entry :target)))
+                   (when (and (stringp owned) (stringp target)
+                              (equal canonical (agent-repl--path-canonical owned))
+                              (not (member target agent-repl-itest--orphaned-log-targets)))
+                     (push target agent-repl-itest--orphaned-log-targets))))
+               agent-repl--workspace-log-targets))))
 
 (defun agent-repl-itest--workspace-log-files ()
   "Return the workspace `emacs.log' sinks of every registered workspace.
@@ -385,7 +420,12 @@ takes."
                (when (and (file-exists-p path) (not (member path paths)))
                  (push path paths))))))
        agent-repl--workspaces))
-    (nreverse paths)))
+    ;; The targets a teardown orphaned come FIRST, because they carry the
+    ;; older records and `agent-repl-itest--log-records\=' returns its
+    ;; sinks in the order it is given them.
+    (append (seq-filter #'file-exists-p
+                        (reverse agent-repl-itest--orphaned-log-targets))
+            (nreverse paths))))
 
 (defun agent-repl-itest--log-records-in (path)
   "Return the JSONL records in PATH, oldest first.
@@ -546,6 +586,7 @@ signals."
      (unwind-protect
          (let* ((agent-repl-itest-notifications nil)
                 (agent-repl-itest-webview-urls nil)
+                (agent-repl-itest--orphaned-log-targets nil)
                 (process-environment
                  (append (list (concat "AGENT_REPL_STATE_DIR="
                                        (agent-repl-itest-daemon-state-dir ,var))
@@ -556,6 +597,12 @@ signals."
                 (agent-repl--log-write-counter 0))
            (cl-letf (((symbol-function 'agent-repl-connect--spawn-curl)
                       (agent-repl-itest--real-spawn-curl))
+                     ((symbol-function 'agent-repl--ws-forget-emacs-log-target)
+                      (let ((real (symbol-function
+                                   'agent-repl--ws-forget-emacs-log-target)))
+                        (lambda (ws reason)
+                          (agent-repl-itest--note-orphaned-log-targets ws)
+                          (funcall real ws reason))))
                      ((symbol-function 'agent-repl--frontend-make-webview-buffer)
                       (agent-repl-test--fake-webview-factory 'agent-repl-itest-webview-urls))
                      (agent-repl--notification-backend (agent-repl-itest--fake-notifier)))

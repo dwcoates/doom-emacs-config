@@ -384,7 +384,7 @@ ref is echoed, never rebuilt from a path."
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent (list :workspace ref))
+                              :parent ref)
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (should (equal (agent-repl-itest--body-field
@@ -401,7 +401,7 @@ boolean to get backwards."
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent (list :workspace ref :fork t))
+                              :parent ref :fork t)
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert: `{}' — present and empty.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -415,7 +415,7 @@ PRESENCE, NEVER SENTINELS: the absence is the whole statement."
     (agent-repl-itest-verbs--with-workspace daemon ref
       ;; Act.
       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard
-                              :parent (list :workspace ref))
+                              :parent ref)
       (agent-repl-itest--await-call daemon "CreateWorkspace")
       ;; Assert.
       (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
@@ -653,10 +653,14 @@ a session the daemon has already torn down."
       (agent-repl-verb-kill agent-repl-itest-verbs--ws)
       (agent-repl-itest--await-call daemon "KillWorkspace")
       ;; Assert: "Kill/Nuke success -> tear the tab down" (elisp-fanout.md §9).
+      ;; LIVENESS is what a torn-down tab loses, exactly as the Close case
+      ;; pins: `--ws-del' TOMBSTONES the entry so reverse-lookups and the
+      ;; revival picker still resolve it, which leaves `--ws-known-p' true
+      ;; and saying nothing about the tab.
       (agent-repl-itest--wait-until
-       (lambda () (not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))
+       (lambda () (not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))
        nil "the killed workspace's tab to go away")
-      (should-not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+      (should-not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
 
 (ert-deftest agent-repl-itest-verbs-nuke-success-tears-the-tab-down ()
   "A Nuke success removes the tab, exactly like Close and Kill.
@@ -671,10 +675,14 @@ worktree and branch that are already deleted."
       (agent-repl-verb-nuke agent-repl-itest-verbs--ws)
       (agent-repl-itest--await-call daemon "NukeWorkspace")
       ;; Assert: "Kill/Nuke success -> tear the tab down" (elisp-fanout.md §9).
+      ;; LIVENESS is what a torn-down tab loses, exactly as the Close case
+      ;; pins: `--ws-del' TOMBSTONES the entry so reverse-lookups and the
+      ;; revival picker still resolve it, which leaves `--ws-known-p' true
+      ;; and saying nothing about the tab.
       (agent-repl-itest--wait-until
-       (lambda () (not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))
+       (lambda () (not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))
        nil "the nuked workspace's tab to go away")
-      (should-not (agent-repl--ws-known-p agent-repl-itest-verbs--ws)))))
+      (should-not (agent-repl--ws-live-p agent-repl-itest-verbs--ws)))))
 
 ;;;; ---- Success messages (audit finding 70) ----
 
