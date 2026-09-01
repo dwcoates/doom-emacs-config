@@ -259,13 +259,22 @@ func (s *sidecar) attempt() {
 		// A process whose FIRST cycle never began is a suspended process, and
 		// its outage is opened here: nothing else has a transition to report.
 		s.stateSuspension("recover-cursors", err)
-		// Reading no files IS the whole file plane stopped, so each retry is
-		// recorded — at verbose, because the WARNING that opened the suspension
-		// already said the loud part once.
+		// THE LADDER'S LEVELS DESCEND WITH THE OUTAGE. Reading no files IS the
+		// whole file plane stopped, so every attempt is recorded — but the FIRST
+		// refusal of an outage is the one an operator must not miss and is an
+		// ERROR, while the attempts after it are the same known outage still
+		// running and are WARNINGS. Both carry the attempt ordinal and the delay
+		// armed before the next try, so the ladder's progress is filterable
+		// without reading a sentence, and neither is verbose: an outage that
+		// only showed up with verbose emission on is an outage nobody sees.
+		level := "warn"
+		if s.attempts == 1 {
+			level = "error"
+		}
 		s.log.With(logging.Context{
-			Operation: "recover-cursors", Level: "warn",
+			Operation: "recover-cursors", Level: level,
 			Attempt: logging.Attempt(s.attempts), BackoffMs: logging.BackoffMs(delay),
-		}).LogVerbose("recovery attempt %d failed, retrying in %s while reading no files: %v", s.attempts, delay, err)
+		}).Log("recovery attempt %d failed, retrying in %s while reading no files: %v", s.attempts, delay, err)
 		s.nextAttemptAt = s.now().Add(delay)
 		return
 	}
@@ -380,6 +389,7 @@ func (s *sidecar) park(path string, w *watched, result tail.PollResult, field st
 		TaskID:      w.target.TaskID,
 		Offset:      logging.Off(result.Next.GetOffset()),
 		RefusalKind: string(storeclient.RefusalInvalidRequest),
+		RefusalSite: storeclient.WriteBatchSite,
 		Field:       field,
 		WriteIDs:    writeIDsOf(result.Entries),
 	}).Log(
@@ -726,6 +736,7 @@ func (s *sidecar) emit(what string, entries []*storev1.StoreEntry) {
 			s.log.With(logging.Context{
 				Operation: "producer-defect", Level: "error",
 				RefusalKind: string(storeclient.RefusalInvalidRequest),
+				RefusalSite: storeclient.WriteBatchSite,
 				Field:       field, WriteIDs: writeIDsOf(entries),
 			}).Log("the store refused %d inferred %s record(s) as an invalid_request; a retry of the same records cannot help: %v", len(entries), what, err)
 			return
