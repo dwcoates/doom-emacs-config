@@ -6,7 +6,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -207,12 +209,38 @@ func TestShimSinkBorrowsTheOpenShimLog(t *testing.T) {
 	}
 
 	// Assert: the descriptor is real and the canonical link exists.
-	if borrow.File() == 0 {
-		t.Fatalf("File() = 0, want the open descriptor for fd 3")
+	if borrow.File() == nil {
+		t.Fatalf("File() = nil, want the open sink handle for fd 3")
 	}
 	link := filepath.Join(dir, ".claude", "emacs", "shim.log")
 	if _, err := os.Lstat(link); err != nil {
 		t.Fatalf("lstat %s: %v", link, err)
+	}
+}
+
+func TestShimSinkSurvivesAGarbageCollectionAfterTheBorrow(t *testing.T) {
+	// Arrange: borrow the shim sink, then drop the borrower's own reference.
+	// A borrower that wrapped the descriptor in an os.File of its own would
+	// leave a second owner behind whose finalizer closes the sink's fd at an
+	// arbitrary later moment; the freed fd number is then handed to unrelated
+	// opens elsewhere in the process ("bad file descriptor" on a stranger).
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	borrow, err := s.ShimSink(dir)
+	if err != nil {
+		t.Fatalf("ShimSink: %v", err)
+	}
+	fd := int(borrow.File().Fd())
+	borrow = nil
+	_ = borrow
+
+	// Act: give any finalizer every chance to run.
+	runtime.GC()
+	runtime.GC()
+
+	// Assert: the sink's descriptor is still open and writable.
+	if _, err := syscall.Write(fd, []byte("")); err != nil {
+		t.Fatalf("writing the shim sink after a GC = %v, want it still open", err)
 	}
 }
 

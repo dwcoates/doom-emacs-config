@@ -16,8 +16,9 @@ type borrowed struct {
 	name string
 }
 
-// File is the underlying descriptor, suitable for a child's fd 3.
-func (b *borrowed) File() uintptr { return b.f.Fd() }
+// File is the sink's own open file, suitable for a child's fd 3. The handle is
+// the surfaces': the borrower must not wrap or close it (see Borrowed).
+func (b *borrowed) File() *os.File { return b.f }
 
 // Close is a no-op. The surfaces own the sink's lifetime; only Evict or
 // Surfaces.Close release it.
