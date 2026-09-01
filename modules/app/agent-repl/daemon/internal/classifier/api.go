@@ -11,7 +11,6 @@ import (
 	"context"
 
 	"claude-repld/internal/envc"
-	"claude-repld/internal/notimpl"
 )
 
 // ExplicitInterrupts is the fast path: a prompt that is exactly one of these
@@ -40,13 +39,19 @@ type Judge interface {
 }
 
 // New builds the real judge: a headless vendor run, refused by guard when
-// vendor calls are forbidden. vendorBin is the binary it runs.
-func New(guard envc.VendorGuard, vendorBin string) (Judge, error) {
-	return nil, notimpl.Err
+// vendor calls are forbidden. vendorBin is the binary it runs and promptsDir
+// is where the routing brief is read AT USE TIME.
+//
+// SEAM CHANGE (recorded): the skeleton's New took (guard, vendorBin). The
+// routing question is `prompts/queue-routing-classifier.md`, read at use time
+// like every other brief, so the judge needs the prompts directory too; there
+// is no other way for it to reach one.
+func New(guard envc.VendorGuard, vendorBin, promptsDir string) (Judge, error) {
+	return newVendorJudge(guard, vendorBin, promptsDir), nil
 }
 
 // NewFake builds the `-fake` judge: the scripted keyword heuristic, which
 // never invokes anything.
 func NewFake() Judge {
-	return nil
+	return fakeJudge{}
 }
