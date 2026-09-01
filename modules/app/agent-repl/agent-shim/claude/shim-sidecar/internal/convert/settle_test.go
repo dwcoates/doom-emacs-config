@@ -432,3 +432,32 @@ func lastEntryByKey(t *testing.T, entries []*storev1.StoreEntry, key string) *st
 	}
 	return out
 }
+
+// TestTaskStopWithTheVendorsLocalAgentSpellingSettlesTheSpawn pins the spelling
+// the vendor ACTUALLY writes.
+//
+// The captured stop record (testdata/corpus/tool-results/task_stop.jsonl) states
+// `task_type: "local_agent"` for a stopped Agent task. Matching only "agent"
+// routed every real agent stop into the SHELL branch, where it was reported to a
+// spool that does not exist and the spawn unit was never settled — so a
+// deliberately stopped subagent stayed open in every reader downstream.
+func TestTaskStopWithTheVendorsLocalAgentSpellingSettlesTheSpawn(t *testing.T) {
+	// Arrange.
+	c := newTestConverter(t)
+	launch := assistantWith("a0", "msg_0", ts1, toolCall("toolu_spawn", "Agent", `{"description":"d","prompt":"p"}`))
+	launched := toolResultLine("u0", "toolu_spawn", ts1, `[{"type":"text","text":"launched"}]`,
+		`{"isAsync":true,"agentId":"a9","outputFile":"/tmp/a9.output"}`)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_stop", "TaskStop", `{"task_id":"a9"}`))
+	result := toolResultLine("u1", "toolu_stop", ts2, `[{"type":"text","text":"stopped"}]`,
+		`{"command":"stop","task_type":"local_agent","task_id":"a9","message":"stopped"}`)
+
+	// Act.
+	entries := convertLines(t, c, launch, launched, call, result)
+
+	// Assert.
+	terminal := lastEntryByKey(t, entries, ActivityKey("toolu_spawn"))
+	failure := activityOf(terminal).GetSubagent().GetFailure()
+	if failure.GetStoppedByUser() == nil {
+		t.Fatal("a stopped subagent must resolve stopped_by_user, which is not a fault")
+	}
+}
