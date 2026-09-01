@@ -59,20 +59,24 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 		// replaced outright, which is what makes a lost fragment harmless.
 		fold.markdown = state.Success.GetProse().GetMarkdown()
 		fold.settled = true
-		markdown := fold.markdown
 		if notice, ok := state.Success.GetAuthorship().(*conversationv1.AgentResponseSuccess_SynthesizedNotice); ok {
 			// THE VENDOR SYNTHESIZES ERROR NOTICES AS ASSISTANT PROSE. Drawing
 			// one as the agent's answer would present an outage as something
-			// the agent said, so the daemon marks the authorship in the drawn
-			// prose itself — the one place a client reads without knowing the
-			// distinction exists.
-			markdown = noticeHeading(notice.SynthesizedNotice) + "\n\n" + markdown
+			// the agent said, so the daemon states the authorship in the
+			// bubble's OWN NOTICE FIELD, which puts the row in the notice
+			// register. The PROSE STAYS VERBATIM: a heading spliced into the
+			// markdown would be indistinguishable from words the vendor
+			// actually wrote, and nothing downstream could pull them apart
+			// again.
+			bubble.Notice = &frontendv1.FeedResponseNotice{
+				Heading: noticeHeading(notice.SynthesizedNotice),
+			}
 			log.Debug("daemon.feed.response_synthesized_notice",
 				"a vendor-synthesized notice was drawn as a notice rather than as the agent's answer",
 				dlog.Context{"unit": unit, "subject": noticeSubject(notice.SynthesizedNotice)})
 		}
 		bubble.Result = &frontendv1.FeedResponse_Success{Success: &frontendv1.FeedResponseSuccess{
-			Prose: &frontendv1.FeedResponseProse{Markdown: markdown},
+			Prose: &frontendv1.FeedResponseProse{Markdown: fold.markdown},
 		}}
 	case *conversationv1.AgentResponse_Failure:
 		// The prose that landed stays drawn, marked broken. WHY it died is the
@@ -96,17 +100,19 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	}, nil
 }
 
-// noticeHeading composes the line that marks synthesized prose as a notice.
+// noticeHeading composes the notice register's heading. It is a HEADING, not
+// markdown prose: the client draws it above the bubble in its own treatment,
+// so it carries no emphasis markup of its own.
 func noticeHeading(notice *conversationv1.AgentResponseSynthesizedNotice) string {
 	switch notice.GetSubject().(type) {
 	case *conversationv1.AgentResponseSynthesizedNotice_UsageLimit:
-		return "**Notice — your allowance is exhausted.** This is the vendor's own message, not the agent's."
+		return "Notice — your allowance is exhausted. This is the vendor's own message, not the agent's."
 	case *conversationv1.AgentResponseSynthesizedNotice_UsageTransition:
-		return "**Notice — your allowance window changed.** This is the vendor's own message, not the agent's."
+		return "Notice — your allowance window changed. This is the vendor's own message, not the agent's."
 	case *conversationv1.AgentResponseSynthesizedNotice_UsageWarning:
-		return "**Notice — you are approaching an allowance limit.** This is the vendor's own message, not the agent's."
+		return "Notice — you are approaching an allowance limit. This is the vendor's own message, not the agent's."
 	}
-	return "**Notice from the vendor's tooling**, not the agent's answer."
+	return "Notice from the vendor's tooling, not the agent's answer."
 }
 
 // noticeSubject names the notice's subject for a log record.
