@@ -332,6 +332,34 @@ case is arranged by actually closing it.")
   "The deferral drain is wired to the roster's finish edge and nothing else."
   (should (memq #'agent-repl--prompt-queue-on-finish agent-repl-roster-finish-functions)))
 
+(ert-deftest agent-repl-pq-promotion-drains-outage-entries ()
+  "A handover never brings the link down, so the promotion is the other edge."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-link-promote 'old 'new)
+    ;; Assert
+    (should (equal (agent-repl-test-pq--sent-texts) '("a")))))
+
+(ert-deftest agent-repl-pq-promotion-resends-under-the-held-key ()
+  "The re-drive stays a RETRY of the refused submission, not a second turn."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-link-promote 'old 'new)
+    ;; Assert
+    (should (equal (nth 4 (car agent-repl-test-pq--submitted)) "key-9"))))
+
+(ert-deftest agent-repl-pq-registers-on-the-promote-edge ()
+  "The registration IS the release: without it a refused prompt is never sent."
+  ;; Act / Assert
+  (should (memq #'agent-repl--prompt-queue-on-link-promote
+                (default-value 'agent-repl-link-promote-functions))))
+
 (ert-deftest agent-repl-pq-registers-on-link-up ()
   "The outage drain is wired to link-up and nothing else."
   (should (memq #'agent-repl--prompt-queue-on-link-up agent-repl-link-up-functions)))
