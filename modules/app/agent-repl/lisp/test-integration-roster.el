@@ -1183,16 +1183,26 @@ silently."
       (agent-repl-itest--wait-until
        (lambda () (eq (agent-repl-status-tab-state "itest-fin-echo") :thinking))
        nil "the running state")
-      (message nil)
-      ;; Act.
-      (agent-repl-itest-roster--push
-       daemon (agent-repl-itest-roster--roster
-               (list (agent-repl-itest-roster--row "itest-fin-echo" "itest-fin-echo" 'done))))
-      ;; Assert.
-      (agent-repl-itest--wait-until
-       (lambda () (equal (current-message) "Agent finished in workspace: itest-fin-echo"))
-       nil "the cross-workspace echo message")
-      (should (equal (current-message) "Agent finished in workspace: itest-fin-echo"))))))
+      ;; THE ECHO IS OBSERVED AT THE `message' CALL, not in the echo area:
+      ;; `current-message' is unconditionally nil under `-batch', where there
+      ;; is no echo area to hold one, so reading it back could never see this
+      ;; reaction however well it worked.
+      (let ((echoed nil))
+        (cl-letf* ((real (symbol-function 'message))
+                   ((symbol-function 'message)
+                    (lambda (format-string &rest args)
+                      (let ((text (and format-string (apply #'format format-string args))))
+                        (when text (push text echoed))
+                        (apply real format-string args)))))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row "itest-fin-echo" "itest-fin-echo" 'done))))
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (member "Agent finished in workspace: itest-fin-echo" echoed))
+           nil "the cross-workspace echo message")
+          (should (member "Agent finished in workspace: itest-fin-echo" echoed))))))))
 
 (ert-deftest agent-repl-itest-roster-finish-edge-refreshes-magit-for-the-workspaces-dir ()
   "Reaction (3): the finish edge refreshes magit-status for WS's directory.

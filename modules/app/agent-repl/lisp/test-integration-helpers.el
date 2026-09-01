@@ -510,16 +510,22 @@ exists to exercise, against a fake daemon on loopback."
 
 (defvar agent-repl-itest-notifications nil
   "Desktop notifications the fake notifier backend recorded, newest first.
-Each entry is the plist (:workspace WS :title TITLE :message MESSAGE).")
+Each entry is the list (WS TITLE MESSAGE ACTIVATE) — the shape
+`agent-repl-notify-make-fake-backend' records, because that is the seam
+this harness installs.")
 
 (defun agent-repl-itest--fake-notifier ()
   "Return a notifier backend that records instead of notifying.
 Emacs's notification POLICY is the whole reaction to a `notification'
-push, so the suite must observe the call rather than an OS side effect."
-  (lambda (ws title message)
-    (push (list :workspace ws :title title :message message)
-          agent-repl-itest-notifications)
-    t))
+push, so the suite must observe the call rather than an OS side effect.
+
+THE SEAM IS PRODUCTION'S OWN.  `agent-repl--notify' calls its backend
+with FOUR arguments (the per-notification click action is the fourth), so
+a hand-rolled three-argument recorder here signals inside the delayed
+notification timer and records nothing at all.  Using
+`agent-repl-notify-make-fake-backend' keeps the arity and the recorded
+shape defined in ONE place, beside the caller that fixes them."
+  (agent-repl-notify-make-fake-backend 'agent-repl-itest-notifications))
 
 (defvar agent-repl-itest-webview-urls nil
   "URLs the fake webview factory was asked to mount, newest first.")
