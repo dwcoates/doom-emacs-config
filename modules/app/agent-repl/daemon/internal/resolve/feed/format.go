@@ -11,20 +11,6 @@ import (
 // itself would be a second authority on the same number, and two authorities
 // eventually disagree — so every string a row carries is composed here.
 
-// formatTokens renders a token count the way a cost corner draws it: bare
-// under a thousand, "18.2k" into the thousands, "1.4M" beyond a million. One
-// fractional digit, and never a trailing ".0".
-func formatTokens(tokens uint64) string {
-	switch {
-	case tokens < 1_000:
-		return strconv.FormatUint(tokens, 10)
-	case tokens < 1_000_000:
-		return trimZero(float64(tokens)/1_000) + "k"
-	default:
-		return trimZero(float64(tokens)/1_000_000) + "M"
-	}
-}
-
 // trimZero renders one fractional digit and drops it when it is zero, so
 // "18.0k" reads "18k".
 func trimZero(v float64) string {
