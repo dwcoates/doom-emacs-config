@@ -35,10 +35,15 @@ import {
   SubmitPromptRequestSchema,
   SubmitPromptResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
-import type { SubmitPromptRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
+import type {
+  SubmitPromptError,
+  SubmitPromptRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { isMalformedView } from "../rpc/malformed.js";
+import { refusalSentence } from "../rpc/refusal.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../tray/held-prompt.js";
@@ -197,10 +202,15 @@ export function mountComposer(
       );
       const result = requireCase(response.result, "SubmitPromptResponse.result");
       if (result.case === "error") {
-        drawSubmitRefusal(root, result.value.reason.case);
+        // AN UNSET REASON IS A MALFORMED VIEW since landing 4: every refusal is
+        // typed, so "refused, and nothing more" is an answer this end cannot
+        // draw honestly.
+        const reason = requireCase(result.value.reason, "SubmitPromptError.reason");
+        const say = submitPromptRefusal(reason);
+        drawSubmitRefusal(root, reason.case, say);
         log("warn", "SubmitPrompt was refused", {
           operation: "composer.refused",
-          context: { arm: result.value.reason.case ?? "unset" },
+          context: { arm: reason.case, sentence: say },
         });
         return;
       }
@@ -215,7 +225,7 @@ export function mountComposer(
           if (turn === undefined) {
             // The one field the answer exists to carry. Refusing it loudly is
             // right, but the words are the user's — they stay in the box.
-            drawSubmitRefusal(root, "unset");
+            drawSubmitRefusal(root, "unset", MISSING_TURN_TEXT);
             log("error", "SubmitPrompt answered a turn with no TurnId", {
               operation: "composer.turn-missing",
             });
@@ -253,7 +263,10 @@ export function mountComposer(
         }
       }
     } catch (err) {
-      drawSubmitRefusal(root, "transport");
+      // A malformed view is the daemon saying something this build cannot read,
+      // not an unreachable daemon; it travels up rather than being mislabelled.
+      if (isMalformedView(err)) throw err;
+      drawSubmitRefusal(root, "transport", TRANSPORT_TEXT);
       log("error", `SubmitPrompt failed at the transport: ${String(err)}`, {
         operation: "composer.transport-failure",
         context: { cause: err },
@@ -345,38 +358,62 @@ export function buildUserSaid(text: string): UserSaid {
   });
 }
 
+/** What a submission that never reached the daemon says. */
+const TRANSPORT_TEXT = "the daemon could not be reached — your text is kept; try again";
+
+/** What an accepted submission with no TurnId says. */
+const MISSING_TURN_TEXT = "the daemon answered with no turn — your text is kept; try again";
+
+/** `SubmitPromptError`'s reason union, narrowed to a SET arm. */
+type SubmitPromptReason = NonNullable<SubmitPromptError["reason"]> & { case: string };
+
 /**
  * The refusal, drawn INLINE at the composer, per typed arm.
  *
- * The text is never touched: every one of these is a "not now" and the user
- * resubmits the same words once the state it named has resolved.
+ * THE TEXT IS NEVER TOUCHED: every one of these is a "not now", and the user
+ * resubmits the same words once the state it named has resolved. The two
+ * pseudo-arms this component mints itself — a transport failure and an answer
+ * with no turn — keep the same treatment for the same reason.
  */
-export function drawSubmitRefusal(root: HTMLElement, arm: string | undefined): void {
-  const named = arm ?? "unset";
+export function drawSubmitRefusal(root: HTMLElement, arm: string, text: string): void {
   const refusal = document.createElement("div");
   refusal.className = "composer-refusal";
-  refusal.setAttribute("data-arm", named);
-  refusal.textContent = refusalText(named);
+  refusal.setAttribute("data-arm", arm);
+  refusal.textContent = text;
   root.appendChild(refusal);
 }
 
 /**
- * What each refusal says.
+ * What each `SubmitPromptError` arm says.
  *
- * `merging` is the ONE arm the contract declares, and its sentence is this
- * end's: the error message is empty on the wire on purpose (the footer and the
- * merge bubble already say which merge). Anything else — an arm a newer daemon
- * set, an unset reason, a transport failure — gets a sentence that is honest
- * about knowing nothing more, and the words stay in the box either way.
+ * `merging` is the RACE FALLBACK the composer's gate exists to make rare: the
+ * gate closes on the merging state, and this arm answers a submission already
+ * in flight when the state flipped. Its message is empty on the wire on purpose
+ * — the footer and the merge bubble already name which merge — so the sentence
+ * is this end's.
+ *
+ * The four cross-cutting causes are worded once in `rpc/refusal.ts`; the rest
+ * are this endpoint's own, and each says which state made the words unsendable
+ * so the user knows what to wait for before resubmitting.
  */
-function refusalText(arm: string): string {
-  switch (arm) {
+export function submitPromptRefusal(reason: SubmitPromptReason): string {
+  const shared = refusalSentence("SubmitPrompt", reason);
+  if (shared !== undefined) return `${shared} — your text is kept`;
+  switch (reason.case) {
     case "merging":
       return "merge in flight — resubmit after it resolves";
-    case "transport":
-      return "the daemon could not be reached — your text is kept; try again";
-    default:
-      return "the daemon refused this submission — your text is kept; try again";
+    case "feedNotInWorkspace":
+      return "that feed does not belong to this workspace — your text is kept";
+    case "feedUndecodable":
+      return "the daemon could not read that feed's id — your text is kept";
+    case "turnAlreadyOpen":
+      return "a turn is already open — resubmit once it ends";
+    case "noSession":
+      return "this workspace has no session to prompt — your text is kept";
+    default: {
+      const other: { case: string } = reason;
+      return unreachableArm("SubmitPromptError.reason", other.case);
+    }
   }
 }
 
