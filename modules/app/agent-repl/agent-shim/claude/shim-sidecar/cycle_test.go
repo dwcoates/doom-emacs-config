@@ -346,9 +346,11 @@ func TestRecoveryReReadsCursorsThenRescans(t *testing.T) {
 	// Act.
 	h.sc.attempt()
 
-	// Assert.
-	if store.cursorsCalls != 1 {
-		t.Fatalf("cursor reads on recovery = %d, want 1", store.cursorsCalls)
+	// Assert: the cycle's own wholesale recovery, plus ONE per-identity read for
+	// the file the snapshot did not name — this store holds no cursor for it, so
+	// it is a snapshot MISS, and a miss asks the store rather than assuming zero.
+	if store.cursorsCalls != 2 {
+		t.Fatalf("cursor reads on recovery = %d, want 2 (the cycle's, then one for the file the snapshot did not name)", store.cursorsCalls)
 	}
 	if len(h.sc.watchers) != 1 {
 		t.Fatalf("watchers after recovery = %d, want the rescan to have rebuilt them", len(h.sc.watchers))
@@ -978,5 +980,87 @@ func TestAnAgentSpoolWithNoResolvedSpawnStatesTheReaderDefect(t *testing.T) {
 	}
 	if !strings.Contains(h.logText(), "would name no book") {
 		t.Fatalf("the reader defect was not stated; the log read:\n%s", h.logText())
+	}
+}
+
+// TestAFileDiscoveredAfterTheCycleBeganAsksTheStoreForItsCursor pins the
+// in-cycle half of the store-unreachable invariant. The cycle's snapshot is
+// taken once, when the cycle begins, so a file appearing afterwards is absent
+// from it — and absent from a SNAPSHOT is not the fact "the store holds no
+// cursor". A tailer built on that confusion starts at zero and re-converts a
+// whole conversation.
+func TestAFileDiscoveredAfterTheCycleBeganAsksTheStoreForItsCursor(t *testing.T) {
+	// Arrange: a cycle begun with no files at all, so its snapshot is empty.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	turn := promptLine + "\n" + assistantLine + "\n"
+	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+	store.cursors = []*storev1.CursorState{{
+		FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)),
+	}}
+
+	// Act: the file appears mid-cycle.
+	h.sc.rescan()
+
+	// Assert: it resumed from the store's position, not from zero.
+	if got := h.sc.watchers[path].tailer.Offset(); got != int64(len(turn)) {
+		t.Fatalf("resumed offset = %d, want %d; a file the cycle's snapshot did not name must be ASKED about, never assumed cold",
+			got, int64(len(turn)))
+	}
+}
+
+// TestAFileIsNotWatchedWhenTheStoreCannotSayWhereItIs asserts the sad path of
+// the same lookup: a store that cannot answer yields no position, so no tailer
+// is built — never a cold start standing in for an answer.
+func TestAFileIsNotWatchedWhenTheStoreCannotSayWhereItIs(t *testing.T) {
+	// Arrange: a cycle that began cleanly, and a store that then stops
+	// answering cursor reads.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	path := h.transcript(t, "sess-1", promptLine, assistantLine)
+	store.cursorsFail = "database is locked"
+
+	// Act.
+	h.sc.rescan()
+
+	// Assert.
+	if _, watched := h.sc.watchers[path]; watched {
+		t.Fatal("a tailer was built for a file the store could not state a position for")
+	}
+}
+
+// TestTheBootRewindIsOncePerIdentityNotPerPath asserts the rewind's bound is a
+// statement about a FILE: a renamed file is the same file, and re-reading its
+// in-progress turn a second time is the re-conversion the bound exists to stop.
+func TestTheBootRewindIsOncePerIdentityNotPerPath(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	turn := promptLine + "\n" + assistantLine + "\n"
+	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+	store.cursors = []*storev1.CursorState{{
+		FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn)),
+	}}
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Act: the vendor renames the file, and it is discovered at its new path.
+	renamed := filepath.Join(filepath.Dir(path), "sess-2.jsonl")
+	if err := os.Rename(path, renamed); err != nil {
+		t.Fatalf("rename %s: %v", path, err)
+	}
+	delete(h.sc.watchers, path)
+	h.sc.rescan()
+
+	// Assert.
+	if got := strings.Count(h.logText(), "rewound the restored cursor"); got != 1 {
+		t.Fatalf("rewind ran %d times across a rename, want once per file per boot", got)
 	}
 }

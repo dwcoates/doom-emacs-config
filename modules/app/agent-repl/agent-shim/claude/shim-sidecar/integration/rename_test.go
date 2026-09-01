@@ -2,6 +2,7 @@ package integration
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -157,5 +158,113 @@ func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T
 	if int64(offset) > committed {
 		t.Errorf("the renamed file was positioned at %d, past the %d the store had committed for its identity",
 			int64(offset), committed)
+	}
+}
+
+// TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle is the IN-CYCLE half.
+//
+// Cursors are recovered once, when a cycle BEGINS, so a file the vendor renames
+// while that cycle is live is simply absent from the snapshot — and treating
+// "absent from a snapshot" as "the store holds no cursor" built the new path's
+// tailer at zero and re-converted the whole conversation, absorbed only because
+// the write ids are deterministic. A snapshot miss now ASKS the store for that
+// one identity, so the file resumes where it actually stood.
+//
+// IT RUNS AGAINST THE REAL STORE because the question IS what the store holds:
+// the in-process fake answers cursor reads from what a subject seeded, not from
+// what the sidecar wrote, so every file would read as one the store holds
+// nothing for and the subject would pass on the defect.
+func TestARenamedTranscriptIsNotReReadFromZeroWithinOneCycle(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	store := startRealStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	opts := defaultSidecarOptions(t, store.Socket, tree)
+	movedSlug := cwdSlug("/Users/dodgecoates/transcript-rename-incycle-probe")
+	cut := 9
+
+	// Act: no restart — one cycle throughout.
+	startSidecar(t, opts)
+	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
+	for _, line := range captured.Lines[:cut] {
+		g.AppendLine(line)
+	}
+	committed := awaitCursorAtLeast(ctx, t, store.Client, g.Path(), 1).GetOffset()
+
+	movedPath := tree.sessionPath(movedSlug, captured.Session)
+	renameFile(t, g.Path(), movedPath)
+	moved := newGrowingFile(t, movedPath)
+	for _, line := range captured.Lines[cut:] {
+		moved.AppendLine(line)
+	}
+	awaitCursorAtLeast(ctx, t, store.Client, movedPath, moved.Offset())
+
+	// Assert: the new path's tailer was built from a restored position — the
+	// boot rewind is applied to nothing else — and that position is below the
+	// committed cursor only by the rewind's own bounded walk, never at zero.
+	rec := awaitLog(ctx, t, opts.LogPath, "the renamed file's boot rewind", func(r logRecord) bool {
+		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], movedPath)
+	})
+	offset, ok := rec.Context["offset"].(float64)
+	if !ok {
+		t.Fatalf("the boot-rewind record states no offset; its context was %v", rec.Context)
+	}
+	if offset <= 0 {
+		t.Errorf("the renamed file was positioned at %d within one cycle; a snapshot miss must ask the store, never assume zero", int64(offset))
+	}
+	if int64(offset) > committed {
+		t.Errorf("the renamed file was positioned at %d, past the %d already committed", int64(offset), committed)
+	}
+}
+
+// TestARenamedTranscriptIsRewoundOnceForTheWholeFile asserts the bound the
+// rename put pressure on: "once per file per boot" is a statement about a FILE,
+// so the same inode may not buy a second bounded backward scan — and a second
+// scan is a second re-read of an in-progress turn.
+func TestARenamedTranscriptIsRewoundOnceForTheWholeFile(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	store := startRealStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	opts := defaultSidecarOptions(t, store.Socket, tree)
+	firstSlug := cwdSlug("/Users/dodgecoates/transcript-rewind-once-a-probe")
+	secondSlug := cwdSlug("/Users/dodgecoates/transcript-rewind-once-b-probe")
+	cut := 9
+
+	// Act: TWO renames, so a path-keyed bound would spend the rewind twice.
+	startSidecar(t, opts)
+	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
+	for _, line := range captured.Lines[:cut] {
+		g.AppendLine(line)
+	}
+	awaitCursorAtLeast(ctx, t, store.Client, g.Path(), 1)
+
+	firstMove := tree.sessionPath(firstSlug, captured.Session)
+	renameFile(t, g.Path(), firstMove)
+	moved := newGrowingFile(t, firstMove)
+	moved.AppendLine(captured.Lines[cut])
+	awaitCursorAtLeast(ctx, t, store.Client, firstMove, moved.Offset())
+
+	secondMove := tree.sessionPath(secondSlug, captured.Session)
+	renameFile(t, firstMove, secondMove)
+	movedAgain := newGrowingFile(t, secondMove)
+	for _, line := range captured.Lines[cut+1:] {
+		movedAgain.AppendLine(line)
+	}
+	awaitCursorAtLeast(ctx, t, store.Client, secondMove, movedAgain.Offset())
+
+	// Assert.
+	var rewinds int
+	for _, r := range logsForOperation(readLog(t, opts.LogPath), "boot-rewind") {
+		if strings.Contains(r.Message, "rewound the restored cursor") {
+			rewinds++
+		}
+	}
+	if rewinds != 1 {
+		t.Errorf("the file was rewound %d times across two renames; the bound is once per FILE per boot, and the file never changed", rewinds)
 	}
 }
