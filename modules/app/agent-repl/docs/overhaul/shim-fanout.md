@@ -550,3 +550,8 @@ every UX or contract gap you surfaced instead of improvising.
   (scratch `shim-itest-run3.log`). Queued next: captures-rebuild brief
   (scenario scripts + converter goldens from the captures; checklist
   answers read out of them), fable auditor #2, dead-code pass.
+- AMENDMENT (user ruling, TEAMLEAD.md on overhaul/integration @ 25bf69341):
+  the dead-code pass is dispatched to a `sonnet-medium` agent (never opus-low,
+  never the lead) in its own worktree, tool output as its brief; the lead
+  reviews, merges, and carries the deletion + kept-with-reason lists into the
+  final report.
