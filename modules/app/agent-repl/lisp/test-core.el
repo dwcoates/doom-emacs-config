@@ -2442,6 +2442,19 @@ now that vterm is gone: the input composer and the webview."
   (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
     (should-not (agent-repl--current-ws-p ""))))
 
+(ert-deftest agent-repl-test-current-ws-p-no-current-workspace-is-nil-not-an-error ()
+  "No workspace selected answers nil rather than signalling.
+`agent-repl--ws-current-name' documents nil as legal, and the finish-edge
+reactions read this predicate: a signal there would abort the reactions
+still queued behind it for that edge."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil)))
+    (should-not (agent-repl--current-ws-p "my-ws"))))
+
+(ert-deftest agent-repl-test-current-ws-p-nil-ws-is-nil-not-an-error ()
+  "A nil WS is not the current workspace, and asking is not an error."
+  (cl-letf (((symbol-function '+workspace-current-name) (lambda () "my-ws")))
+    (should-not (agent-repl--current-ws-p nil))))
+
 ;;;; ---- Tests: instantiation struct ----
 
 (ert-deftest agent-repl-test-instantiation-create ()
