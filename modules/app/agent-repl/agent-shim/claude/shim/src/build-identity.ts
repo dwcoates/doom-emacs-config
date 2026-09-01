@@ -4,20 +4,23 @@
  *
  * Three values, three different sources, three different failure modes:
  *
- *   - `shim_build_sha`: baked into the bundle at build time.
- *     `bin/build-frontend.sh` computes the source revision once, exports it to
- *     the bundler as SHIM_BUILD_SHA, and writes the SAME value to
- *     `dist/.built-sha`; build.mjs substitutes `process.env.SHIM_BUILD_SHA`, so
- *     bundle and stamp agree by construction rather than by two computations
- *     happening to match. The daemon compares them and bounces a stale
- *     survivor at freeness.
+ *   - `shim_build_sha`: read from the SPAWN ENV at runtime, never baked into
+ *     the bundle. `bin/build-frontend.sh` computes the source revision once and
+ *     writes it to `dist/.built-sha`; the daemon exports that same stamp into
+ *     the shim's environment when it spawns it, so stamp and reported identity
+ *     agree by construction. The daemon compares them and bounces a stale
+ *     survivor at freeness — which only works if the value follows the SPAWN,
+ *     not the bundle: a shim outlives its daemon, and an esbuild `define` would
+ *     make a survivor report the sha of whatever build it was bundled from
+ *     regardless of what the daemon that started it said.
  *
- *     OUTSIDE A BUNDLE — `tsc --noEmit`, vitest, a `node src/...` run — there
- *     is no substitution and the env read yields undefined. That is reported as
- *     "" and NOT papered over: the daemon reads an empty identity as UNKNOWN,
- *     which is never a mismatch and therefore never a bounce. An honest unknown
- *     is correct; a fabricated sha would make the daemon bounce a healthy shim
- *     or refuse to bounce a stale one.
+ *     `src/main.ts` REFUSES TO START when the variable is unset, so production
+ *     never reaches an empty identity. OUTSIDE A SERVING PROCESS — `tsc
+ *     --noEmit`, vitest, a `node src/...` run — the env read yields undefined
+ *     and that is reported as "" and NOT papered over: the daemon reads an
+ *     empty identity as UNKNOWN, which is never a mismatch and therefore never
+ *     a bounce. An honest unknown is correct; a fabricated sha would make the
+ *     daemon bounce a healthy shim or refuse to bounce a stale one.
  *
  *   - `sdk_version`: the installed `@anthropic-ai/claude-agent-sdk` package
  *     version, read off its own package.json. Always knowable.
@@ -40,7 +43,13 @@ import { bindLog } from "./log.js";
 
 const LOGGER = bindLog({ component: "shim-build-identity", operation: "shim.build-identity" });
 
-/** The bundle's build identity, or "" when this is not a bundle. */
+/**
+ * The build identity the process was SPAWNED with, or "" when nothing set it.
+ *
+ * A live read of the environment on every call, deliberately: nothing rewrites
+ * this variable, but reading it at call time is what keeps the value the
+ * daemon exported authoritative rather than anything a build step decided.
+ */
 export function shimBuildSha(): string {
   return process.env.SHIM_BUILD_SHA ?? "";
 }
