@@ -231,7 +231,7 @@ export function loadPrompts(promptsPath) {
  * `-` (observed: `/Users/x/.config/y` -> `-Users-x--config-y`).
  */
 export function cwdSlug(cwd) {
-  return cwd.replace(/[/.]/g, "-");
+  return cwd.replace(/[/._]/g, "-");
 }
 
 /** A pushable async iterable — the SDK's streaming-input prompt channel. */

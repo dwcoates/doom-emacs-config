@@ -391,6 +391,10 @@ describe("cwdSlug", () => {
   it("replaces every slash and dot, matching the observed vendor spelling", () => {
     expect(cwdSlug("/Users/x/.config/y")).toBe("-Users-x--config-y");
   });
+
+  it("replaces an underscore too, as the vendor does for macOS temp paths", () => {
+    expect(cwdSlug("/private/var/folders/_m/T/cwd")).toBe("-private-var-folders--m-T-cwd");
+  });
 });
 
 describe("createWorld", () => {
