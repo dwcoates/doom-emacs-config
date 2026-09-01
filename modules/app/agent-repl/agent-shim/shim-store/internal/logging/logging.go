@@ -70,6 +70,14 @@ type Fields struct {
 	// proto's failure `kind` arms are derived from — so refusals are counted
 	// by site instead of grepped out of a human detail string.
 	RefusalSite string
+	// RefusalKind names the WIRE ARM the refusal became — `invalid_request`,
+	// `stale_pointer`, `storage_failure`, `not_implemented`.
+	//
+	// IT IS NOT THE SITE. The site says which of the store's many checks said
+	// no; the kind says what the caller received, and several sites map to one
+	// arm. A reader triaging refusals needs both: the site to find the check,
+	// the kind to know whether the caller could ever have retried.
+	RefusalKind string
 	// FileID is a CursorState.file_id.
 	FileID string
 	// Path is a filesystem path a record concerns (a cursor's file, a spool).
@@ -210,6 +218,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		"watch_token_hash":  merged.WatchTokenHash,
 		"rpc":               merged.RPC,
 		"refusal_site":      merged.RefusalSite,
+		"refusal_kind":      merged.RefusalKind,
 		"file_id":           merged.FileID,
 		"path":              merged.Path,
 		"task_id":           merged.TaskID,
@@ -332,6 +341,7 @@ func merge(base, extra Fields) Fields {
 		{&base.WatchTokenHash, &extra.WatchTokenHash},
 		{&base.RPC, &extra.RPC},
 		{&base.RefusalSite, &extra.RefusalSite},
+		{&base.RefusalKind, &extra.RefusalKind},
 		{&base.FileID, &extra.FileID},
 		{&base.Path, &extra.Path},
 		{&base.TaskID, &extra.TaskID},
