@@ -51,21 +51,26 @@ func normalizeDir(dir string) (string, error) {
 
 // workspaceColumns is the one select list every workspace read shares, so a
 // column added to the row can never be decoded by only some of them.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, closed, attention, priority, task_id, last_selected_at, merged_at, created_at`
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, merged_at, created_at`
 
 // scanWorkspace decodes one workspace row all-or-nothing: an out-of-range
 // priority is a decode failure, never a silently substituted default.
 func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 	var (
 		ws       Workspace
+		parent   sql.NullString
 		priority sql.NullInt64
 		task     sql.NullString
 		selected sql.NullInt64
 		merged   sql.NullInt64
 		created  int64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &ws.Closed, &ws.Attention, &priority, &task, &selected, &merged, &created); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &merged, &created); err != nil {
 		return Workspace{}, err
+	}
+	if parent.Valid {
+		id := WorkspaceID(parent.String)
+		ws.Parent = &id
 	}
 	if priority.Valid {
 		p := Priority(priority.Int64)
@@ -128,12 +133,13 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			Name:         name,
 			Branch:       facts.Branch,
 			ParentBranch: facts.ParentBranch,
+			Parent:       facts.Parent,
 			CreatedAt:    time.Now().UTC(),
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, ?)`,
-			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nanos(out.CreatedAt))
+			`INSERT INTO workspaces (id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, is_current, last_selected_at, merged_at, serving_instance, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, NULL, 0, NULL, NULL, NULL, ?)`,
+			out.ID, out.Repo, out.Dir, out.Name, out.Branch, out.ParentBranch, nullWorkspace(out.Parent), nanos(out.CreatedAt))
 		if err != nil {
 			return err
 		}

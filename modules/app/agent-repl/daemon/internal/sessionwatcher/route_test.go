@@ -412,7 +412,8 @@ func TestRouteDetachedWorkAnnouncement(t *testing.T) {
 
 	// Assert.
 	assertNames(t, got, []string{
-		"feed.OnDetachedWork", "footer.OnDetachedWork", "sidebar.OnDetachedWork", "lifecycle.OnLiveWorkChanged",
+		"feed.OnDetachedWork", "footer.OnDetachedWork", "sidebar.OnDetachedWork",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
 	})
 }
 
@@ -508,7 +509,7 @@ func TestRouteQueryDied(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"footer.OnSessionUpdate", "feed.OnSessionUpdate", "sidebar.OnSessionUpdate",
-		"lifecycle.OnTurnEnded", "lifecycle.OnLiveWorkChanged",
+		"lifecycle.OnTurnEnded", "lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
 	})
 	if !h.w.Free() {
 		t.Fatal("a dead session is not free; a lease holder would wait forever")

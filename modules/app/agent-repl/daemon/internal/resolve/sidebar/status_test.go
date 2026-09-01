@@ -502,6 +502,38 @@ func TestAnOpenPermissionDominatesTheRunningTurn(t *testing.T) {
 	}
 }
 
+func TestIdleAsyncRetiresOnAnEmptyLiveWorkSet(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.OnDetachedWork(theWS, agent("a1"), detachedWork("work-1"))
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Act: the watcher reaped the last item's watch.
+	r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{})
+
+	// Assert: the row does not wait for the next turn to stop saying idle_async.
+	if got := statusName(onlyRow(t, r)); got != "done" {
+		t.Fatalf("status = %q, want done once the live-work set emptied", got)
+	}
+}
+
+func TestIdleAsyncStandsWhileTheLiveWorkSetIsNotEmpty(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Act: the watcher states a live item the roster never saw announced.
+	r.OnLiveWorkChanged(theWS, sidebar.LiveWorkSet{
+		Shells: []*conversationv1.DetachedWorkId{{Value: "work-1"}}})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got != "idle_async" {
+		t.Fatalf("status = %q, want idle_async", got)
+	}
+}
+
 func TestDetachedWorkDominatesTheTurnsTerminal(t *testing.T) {
 	// Arrange.
 	r := live(t, arrange(t))

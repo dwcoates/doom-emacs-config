@@ -38,6 +38,7 @@ CREATE TABLE workspaces (
   name             TEXT NOT NULL,
   branch           TEXT NOT NULL,
   parent_branch    TEXT NOT NULL,
+  parent_id        TEXT REFERENCES workspaces(id) ON DELETE SET NULL,
   closed           INTEGER NOT NULL,
   attention        INTEGER NOT NULL,
   priority         INTEGER,

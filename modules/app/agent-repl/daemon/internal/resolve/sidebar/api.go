@@ -48,6 +48,11 @@ type Registry struct {
 // first frame of a turn is an activity, by which time `submitting` is over.
 type TurnStarted = footer.TurnStarted
 
+// LiveWorkSet is the watcher's authoritative set of live detached work. It
+// aliases the watcher's spelling so the roster's `idle_async` arm and the
+// freeness answer cannot disagree about what is still running.
+type LiveWorkSet = sessionwatcher.LiveWorkSet
+
 // TurnClose is how a turn ended. It aliases the watcher's spelling, which
 // aliases WSM's, so the durable record and the roster's dot cannot disagree.
 type TurnClose = sessionwatcher.TurnClose
