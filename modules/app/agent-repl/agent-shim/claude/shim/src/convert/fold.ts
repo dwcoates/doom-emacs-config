@@ -51,7 +51,9 @@ import { bindLog } from "../log.js";
 import type { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
+import { convertAttachment, type AttachmentRecord } from "./attachments.js";
 import { convertDetached } from "./detached.js";
+import { attachmentActivityId } from "./ids.js";
 import type { FoldContext } from "./fold-context.js";
 import {
   convertHookResponse,
@@ -187,6 +189,41 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
   if (SILENTLY_IGNORED_TYPES.has(type)) {
     LOGGER.logVerbose({ sdk_message_type: type }, "message carries no conversation fact; ignored");
     return EMPTY_FOLD_OUTPUT;
+  }
+
+  // THE STREAM CARRIES ATTACHMENTS, though the SDK's declared union does not
+  // name them — which is why this is a pre-switch guard on the raw `type`
+  // rather than another `case` the compiler would reject. They are transcript
+  // lines too, so the sidecar converts the SAME record from the file plane;
+  // residue keyed `residue:<vendor record uuid>` (landing 5) is what makes the
+  // two rows ONE row rather than a duplicate. Falling through to `default`
+  // instead landed them under the `unknown` arm — "we did not model this" —
+  // when the ruling says a tool-availability delta or an agent listing is
+  // `vendor_specific`: understood, and deliberately not carried.
+  if ((type as string) === "attachment") {
+    const record = message as unknown as AttachmentRecord & { uuid?: string };
+    const uuid = record.uuid ?? "";
+    if (uuid === "") {
+      // A CHAINED VENDOR RECORD WITHOUT A UUID IS MALFORMED, not merely
+      // unmodelled: it has no identity for either plane to key on, so the two
+      // planes could never collapse it into one row. That is a failure, and
+      // `unparsed` is the arm that says so investigably.
+      LOGGER.log(
+        { level: "error", sdk_message_type: type },
+        "an attachment record carried no uuid; it cannot be keyed and lands unparsed",
+      );
+      return {
+        entries: [
+          residueEntry(
+            context,
+            message,
+            residueForMessage(message, "attachment record names no uuid"),
+            "residue.unparsed",
+          ),
+        ],
+      };
+    }
+    return { entries: convertAttachment(record, context, attachmentActivityId(uuid)) };
   }
 
   switch (type) {

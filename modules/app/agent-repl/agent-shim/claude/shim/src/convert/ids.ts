@@ -90,6 +90,21 @@ export function blockActivityId(
 }
 
 /**
+ * An ATTACHMENT record's unit: the record's own uuid, verbatim.
+ *
+ * An injected memory file or skill document is an activity unit with no tool
+ * call to borrow an id from and no api message id to index into — the vendor's
+ * record uuid is the only identity it has, and it is stable, which is all an
+ * activity id has to be. The residue paths through the attachment converter
+ * never use it; it exists for the injection units, which do.
+ */
+export function attachmentActivityId(recordUuid: string): conversationv1.AgentActivityId {
+  return create(conversationv1.AgentActivityIdSchema, {
+    value: requireVendorValue(recordUuid, "the attachment record uuid"),
+  });
+}
+
+/**
  * A hook firing's unit: the vendor's `hook_id`, verbatim.
  *
  * A hook is an activity unit like any other — it starts and it settles — but it

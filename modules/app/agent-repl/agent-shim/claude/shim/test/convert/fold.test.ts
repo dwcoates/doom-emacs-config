@@ -1004,3 +1004,87 @@ describe("attribution", () => {
     expect(output.entries[0]?.agentId.value).toBe("toolu_spawn");
   });
 });
+
+describe("the fold's attachment arm", () => {
+  /** One attachment record as the STREAM hands it over. */
+  const attachmentMessage = (type: string, uuid: string | undefined): SdkMessage =>
+    ({
+      type: "attachment",
+      ...(uuid === undefined ? {} : { uuid }),
+      attachment: { type },
+    }) as unknown as SdkMessage;
+
+  it("residues a tool-availability delta as VENDOR_SPECIFIC, not unknown", () => {
+    // Arrange.
+    const fold = createFold();
+
+    // Act.
+    const output = fold.onSdkMessage(
+      attachmentMessage("deferred_tools_delta", "att-1"),
+      foldContext(),
+    );
+
+    // Assert.
+    const item = output.entries[0]?.item;
+    expect(item?.kind === "residue" ? item.residue.unservedItem.case : undefined).toBe(
+      "vendorSpecific",
+    );
+  });
+
+  it("spells the residue kind attachment/<type>, the sidecar's own spelling", () => {
+    // Arrange.
+    const fold = createFold();
+
+    // Act.
+    const output = fold.onSdkMessage(
+      attachmentMessage("agent_listing_delta", "att-2"),
+      foldContext(),
+    );
+
+    // Assert.
+    const item = output.entries[0]?.item;
+    const residue = item?.kind === "residue" ? item.residue.unservedItem : undefined;
+    expect(residue?.case === "vendorSpecific" ? residue.value.kind : undefined).toBe(
+      "attachment/agent_listing_delta",
+    );
+  });
+
+  it("keys the residue by the RECORD'S OWN UUID, so both planes collide on one row", () => {
+    // Arrange.
+    const fold = createFold();
+
+    // Act.
+    const output = fold.onSdkMessage(
+      attachmentMessage("deferred_tools_delta", "att-3"),
+      foldContext(),
+    );
+
+    // Assert.
+    expect(output.entries[0]?.upsertKey).toBe("residue:att-3");
+  });
+
+  it("lands a uuid-less attachment UNPARSED, since neither plane could key it", () => {
+    // Arrange.
+    const fold = createFold();
+
+    // Act.
+    const output = fold.onSdkMessage(
+      attachmentMessage("deferred_tools_delta", undefined),
+      foldContext(),
+    );
+
+    // Assert.
+    const item = output.entries[0]?.item;
+    expect(item?.kind === "residue" ? item.residue.unservedItem.case : undefined).toBe("unparsed");
+  });
+
+  it("never throws on an attachment, whatever it carries", () => {
+    // Arrange.
+    const fold = createFold();
+
+    // Act, Assert.
+    expect(() =>
+      fold.onSdkMessage({ type: "attachment", uuid: "att-4" } as unknown as SdkMessage, foldContext()),
+    ).not.toThrow();
+  });
+});

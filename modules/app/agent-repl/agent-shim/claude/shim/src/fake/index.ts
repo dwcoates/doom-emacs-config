@@ -549,12 +549,19 @@ export function createFakeQuery(
   };
 
   const attachment = (payload: Record<string, unknown>): void => {
-    // An attachment is a FILE-PLANE fact only: the vendor records it and never
-    // streams it, so the mock writes it and emits nothing.
+    // BOTH PLANES, ONE UUID. The vendor records an attachment in the transcript
+    // AND puts it on the stream, so the sidecar and the shim each convert the
+    // same record. Sharing the uuid is what makes that safe rather than
+    // duplicating: residue is keyed `residue:<vendor record uuid>` (landing 5),
+    // so the two planes' rows collide on one key and the store absorbs the
+    // second. Writing only the file would leave the shim's whole attachment
+    // converter unreachable and its residue rows unwritten.
+    const uuid = opts.newUuid();
+    emitWithUuid(uuid, { attachment: payload, type: "attachment" });
     files.transcript.append({
       attachment: payload,
       type: "attachment",
-      uuid: opts.newUuid(),
+      uuid,
       timestamp: nowIso(),
     });
   };

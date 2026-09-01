@@ -484,13 +484,14 @@ export const AWAY_SUMMARY = scenario({
   arms: "vendor_specific residue — `system/away_summary`, which no conversation.v1 arm models",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "away-summary" }, "fake away-summary turn");
-    ctx.files.transcript.append({
-      type: "system",
-      subtype: "away_summary",
+    // BOTH PLANES, ONE UUID (`systemRecord`): the vendor's recap is a stream
+    // message AND a transcript line, and residue keyed `residue:<uuid>` is what
+    // collapses the sidecar's row and the shim's into one. Appending only the
+    // file left the shim blind to the record and its `system/away_summary`
+    // residue never written.
+    ctx.systemRecord("away_summary", {
       content: "While you were away: the offline run finished three scenarios and stopped cleanly.",
       isMeta: false,
-      uuid: ctx.newUuid(),
-      timestamp: ctx.nowIso(),
     });
     conclude(ctx, "Recapped what happened while you were away.");
   },
