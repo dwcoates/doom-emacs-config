@@ -15,7 +15,8 @@
  * every ack, because exiting with unacknowledged writes is the loud failure.
  */
 import { create } from "@bufbuild/protobuf";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
@@ -41,6 +42,7 @@ import {
 import {
   awaitFile,
   readSpools,
+  projectDir,
   readSubagentMeta,
   readTranscript,
   sessionTranscriptPath,
@@ -75,6 +77,40 @@ async function runTurn(
     const agentFrame = entryFrame(watchAgentEntry(frame));
     return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
   });
+}
+
+/**
+ * The vendor's own agent id for the subagent a given call spawned.
+ *
+ * TWO IDENTITIES, ONE SUBAGENT, AND THEY ARE NOT THE SAME BYTES. The wire
+ * AgentId of a subagent is its SPAWNING CALL's `tool_use_id` (ruling, landing
+ * 3), while the vendor names its files by an id of its own — a 17-hex agent id
+ * it mints internally and never puts on the stream. Deriving one file path from
+ * the other is what produced the ENOENT: there is no derivation, only a JOIN,
+ * and the vendor states it in the sidecar's own `toolUseId` field.
+ *
+ * So the sidecars are read and the one naming this call is the answer. This
+ * lives here rather than in integration-support/vendor.ts only to stay out of a
+ * concurrently-owned file; it belongs beside the other vendor-file readers.
+ */
+function vendorAgentIdForCall(
+  dirs: Awaited<ReturnType<typeof spawnShim>>["dirs"],
+  vendorSessionId: string,
+  toolUseId: string,
+): string {
+  const dir = join(projectDir(dirs), vendorSessionId, "subagents");
+  const metas = existsSync(dir)
+    ? readdirSync(dir).filter((name) => name.endsWith(".meta.json"))
+    : [];
+  for (const name of metas) {
+    const meta = JSON.parse(readFileSync(join(dir, name), "utf8")) as { toolUseId?: string };
+    if (meta.toolUseId === toolUseId) {
+      return name.replace(/^agent-/, "").replace(/\.meta\.json$/, "");
+    }
+  }
+  throw new Error(
+    `no subagent sidecar under ${dir} names the spawning call ${toolUseId} (saw ${metas.join(", ")})`,
+  );
 }
 
 /** The key prefixes the kickoff ruling allows, and nothing else. */
@@ -498,8 +534,11 @@ describe("the mocked vendor's files, at the ruled paths", () => {
       .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
       .find((book) => book !== undefined && book !== "" && book !== started.vendorSessionId);
     if (created === undefined) throw new Error("no subagent book was written");
+    // `created` is the WIRE identity (the spawning call's id); the file is
+    // named by the vendor's own agent id, joined through the sidecar.
+    const vendorAgent = vendorAgentIdForCall(shim.dirs, started.vendorSessionId, created);
     expect(
-      existsSync(subagentTranscriptPathFor(shim.dirs, started.vendorSessionId, created)),
+      existsSync(subagentTranscriptPathFor(shim.dirs, started.vendorSessionId, vendorAgent)),
     ).toBe(true);
     stream.close();
   });
@@ -518,7 +557,8 @@ describe("the mocked vendor's files, at the ruled paths", () => {
       .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
       .find((book) => book !== undefined && book !== "" && book !== started.vendorSessionId);
     if (created === undefined) throw new Error("no subagent book was written");
-    const meta = readSubagentMeta(shim.dirs, started.vendorSessionId, created);
+    const vendorAgent = vendorAgentIdForCall(shim.dirs, started.vendorSessionId, created);
+    const meta = readSubagentMeta(shim.dirs, started.vendorSessionId, vendorAgent);
     expect(Object.keys(meta).sort()).toEqual(
       ["agentType", "description", "spawnDepth", "toolUseId"].sort(),
     );
