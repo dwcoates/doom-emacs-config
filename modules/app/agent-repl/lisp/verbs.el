@@ -411,6 +411,7 @@ sentinel level, so a nil priority omits it from the request entirely."
 
 (cl-defun agent-repl-verb-create (repository form
                                              &key initial-prompt base-ref name
+                                             merge-actions
                                              prompt finish self-certified add-to-merge-queue
                                              parent fork model priority allow-ungated)
   "Create a workspace in REPOSITORY under FORM.
@@ -419,9 +420,12 @@ FORM is the creation form\'s BARE ARM KEYWORD -- `:standard' or
 it, because a caller at a keybinding writes facts, not nested oneofs.
 
   `:standard\' takes INITIAL-PROMPT (plain text, wrapped as `UserSaid\'),
-    BASE-REF and NAME; every one of them is optional, and each absence is
-    the statement the proto asks for -- an empty workspace, the repo\'s
-    default branch resolution, a daemon-minted name.
+    BASE-REF, NAME and MERGE-ACTIONS; every one of them is optional, and
+    each absence is the statement the proto asks for -- an empty
+    workspace, the repo\'s default branch resolution, a daemon-minted
+    name, no configured merge actions.  MERGE-ACTIONS is spelled in plain
+    text too: `(:before-ws-merge TEXT :postprocessing-prompt TEXT)\',
+    either half optional, each wrapped as a `UserSaid\' here.
   `:one-shot\' takes PROMPT (required -- a one-shot IS its prompt) and
     FINISH, itself a bare arm keyword: `:self-merge\', or `:open-pr\' with
     SELF-CERTIFIED and ADD-TO-MERGE-QUEUE, two plain bools whose false is a
@@ -439,6 +443,7 @@ the new workspace\'s tab arrives through the roster push."
    (list :repository repository
          :form (agent-repl-verbs--create-form
                 form :initial-prompt initial-prompt :base-ref base-ref :name name
+                :merge-actions merge-actions
                 :prompt prompt :finish finish
                 :self-certified self-certified :add-to-merge-queue add-to-merge-queue)
          :parent (when parent
@@ -450,7 +455,7 @@ the new workspace\'s tab arrives through the roster push."
    :on-success (lambda (_) (message "agent-repl: workspace requested"))))
 
 (cl-defun agent-repl-verbs--create-form (form &key initial-prompt base-ref name
-                                              prompt finish
+                                              merge-actions prompt finish
                                               self-certified add-to-merge-queue)
   "Return the creation-form oneof for the bare arm keyword FORM.
 The two forms take disjoint facts, so each arm reads only its own."
@@ -460,13 +465,27 @@ The two forms take disjoint facts, so each arm reads only its own."
            :value (list :initial-prompt (and initial-prompt
                                              (agent-repl-verbs--said initial-prompt))
                         :base-ref base-ref
-                        :name name)))
+                        :name name
+                        :merge-actions (agent-repl-verbs--merge-actions merge-actions))))
     (:one-shot
      (list :arm :one-shot
            :value (list :prompt (and prompt (agent-repl-verbs--said prompt))
                         :finish (agent-repl-verbs--finish-arm
                                  finish self-certified add-to-merge-queue))))
     (_ (user-error "agent-repl: unknown creation form %S" form))))
+
+(defun agent-repl-verbs--merge-actions (actions)
+  "Return the `CreateWorkspaceMergeActions' plist for the plain-text ACTIONS.
+ACTIONS is `(:before-ws-merge TEXT :postprocessing-prompt TEXT)', either
+half optional; each present half is wrapped as a `UserSaid' here, because
+a caller at a keybinding writes prose rather than content blocks.  Nil
+ACTIONS, and ACTIONS with neither half, are the ABSENCE of any configured
+action -- never an empty message."
+  (let ((before (plist-get actions :before-ws-merge))
+        (post (plist-get actions :postprocessing-prompt)))
+    (when (or before post)
+      (list :before-ws-merge (and before (agent-repl-verbs--said before))
+            :postprocessing-prompt (and post (agent-repl-verbs--said post))))))
 
 (defun agent-repl-verbs--finish-arm (finish self-certified add-to-merge-queue)
   "Return the one-shot finish oneof for the bare arm keyword FINISH.
