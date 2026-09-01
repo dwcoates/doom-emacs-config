@@ -464,10 +464,6 @@ not be routed at all.
 ;; Save window state for current workspace before switching away,
 ;; so the panel-visibility paint can inspect the saved config.
 
-(defun agent-repl--non-agent-panel-window-p (w)
-  "Return non-nil if window W does not display a agent panel buffer."
-  (not (agent-repl--agent-panel-buffer-p (window-buffer w))))
-
 (defun agent-repl--save-target-window-p (w)
   "Return non-nil when W is a safe selected-window for persp save.
 

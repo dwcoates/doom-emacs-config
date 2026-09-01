@@ -122,15 +122,6 @@ durable.  See `test-history.el\='s state-file invariant test."
     (agent-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
     nil))
 
-(defun agent-repl--make-instantiation-from-plist (saved)
-  "Create a new `agent-repl-instantiation' from SAVED plist.
-Returns a fresh empty instantiation when SAVED is nil."
-  (when saved
-    (agent-repl--log nil
-                     "make-instantiation-from-plist: ignoring persisted keys=%S — nothing in an instantiation is durable any more"
-                     (cl-loop for (k _v) on saved by #'cddr collect k)))
-  (make-agent-repl-instantiation))
-
 ;;;; State migration
 
 (defun agent-repl--migrate-saved-state (saved)

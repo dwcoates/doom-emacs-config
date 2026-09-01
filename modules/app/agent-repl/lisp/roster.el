@@ -140,10 +140,6 @@ reach-through lives here once instead of at every reader."
   "Return ROW's workspace id — the opaque, byte-wise-compared identity."
   (plist-get (agent-repl-roster-row-ref row) :id))
 
-(defun agent-repl-roster-row-dir (row)
-  "Return ROW's workspace directory — display and file-opening only."
-  (plist-get (agent-repl-roster-row-ref row) :dir))
-
 (defun agent-repl-roster-row-name (row)
   "Return ROW's display name text.  Never an identity."
   (plist-get (plist-get row :name) :text))
@@ -561,15 +557,6 @@ deliver the tabs."
                              (agent-repl-connect-connection-address conn)))))
   (agent-repl--info nil "elisp.roster.subscribe: opened")
   agent-repl-roster--stream)
-
-(defun agent-repl-roster-unsubscribe ()
-  "Cancel the roster stream.  Cancelling IS the graceful close."
-  (if agent-repl-roster--stream
-      (progn
-        (agent-repl-connect-stream-cancel agent-repl-roster--stream)
-        (setq agent-repl-roster--stream nil)
-        (agent-repl--info nil "elisp.roster.unsubscribe: cancelled"))
-    (agent-repl--log nil "elisp.roster.unsubscribe: no stream")))
 
 (defun agent-repl-roster-on-link-up (conn)
   "Subscribe on CONN when the daemon link comes up.
