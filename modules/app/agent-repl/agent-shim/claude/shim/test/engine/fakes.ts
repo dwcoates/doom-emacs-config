@@ -220,6 +220,8 @@ export class RecordingPersistence implements Persistence {
   write(entries: PersistEntry[]): void {
     this.buffered.push(...entries);
   }
+  /** Every pointer a reading session was asked to conclude through. */
+  readonly concludedThrough: string[] = [];
   /** Rows this fake reports as lost, so a stand-down's exit code is testable. */
   lostRows = 0;
   flush(): Promise<FlushOutcome> {
@@ -236,6 +238,9 @@ export class RecordingPersistence implements Persistence {
         async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.HistoryEntryAt> {
           for (const entry of entries) yield entry;
         },
+      },
+      concludeThrough: (through) => {
+        self.concludedThrough.push(through?.value ?? "");
       },
       close: () => {
         self.closedPages++;

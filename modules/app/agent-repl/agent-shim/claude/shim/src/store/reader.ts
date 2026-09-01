@@ -255,6 +255,15 @@ export function createReader(options: ReaderOptions): Reader {
         page.entries[0]?.at ?? knownThrough;
       let token: storev1.AgentSessionToken = opened.watch;
       let stopped = false;
+      /**
+       * The pointer the tail concludes on, once the teardown set one.
+       *
+       * The tail keeps standing until it has SERVED this pointer, which is what
+       * makes the conclusion lossless: the terminal row the teardown just wrote
+       * reaches the consumer, and only then does the stream end.
+       */
+      let concludeAt: conversationv1.HistoryPointer | undefined;
+      let concluding = false;
       // CANCELLING THE CALL IS HOW A STANDING TAIL ENDS. Connect's stream close
       // drains the body, which on a standing stream never completes — so
       // `close()` aborts the call rather than merely leaving the loop.
@@ -279,6 +288,11 @@ export function createReader(options: ReaderOptions): Reader {
                 const entry = toHistoryEntryAt(push.line);
                 servedThrough = entry.at;
                 yield entry;
+                if (concluding && entry.at?.value === concludeAt?.value) {
+                  stopped = true;
+                  abort.abort();
+                  return;
+                }
               }
               // A tail that ends without a refusal is the store closing; a
               // standing stream concludes nothing on its own, so stop.
@@ -326,6 +340,18 @@ export function createReader(options: ReaderOptions): Reader {
       return {
         page,
         tail,
+        concludeThrough: (through) => {
+          if (stopped) return;
+          concluding = true;
+          concludeAt = through;
+          // Nothing left to wait for: either no pointer was named, or the tail
+          // has already served it. Ending now is the honest answer, and holding
+          // the stream open for a row that will never come would wedge the exit.
+          if (through === undefined || through.value === servedThrough?.value) {
+            stopped = true;
+            abort.abort();
+          }
+        },
         close: () => {
           if (stopped) return;
           stopped = true;
