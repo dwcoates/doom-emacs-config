@@ -17,7 +17,7 @@ import (
 // version it opens. The file carries its own version in the layout table; a
 // file stamped with anything else is refused rather than migrated, because the
 // rebuild's store is recreated from scratch, never upgraded in place.
-const LayoutVersion = 1
+const LayoutVersion = 2
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
@@ -278,6 +278,15 @@ func nullNanos(t *time.Time) any {
 		return nil
 	}
 	return nanos(*t)
+}
+
+// nullWorkspace renders an optional workspace reference, NULL when absent, so
+// an unset parent is a NULL column rather than an empty-string sentinel.
+func nullWorkspace(id *WorkspaceID) any {
+	if id == nil {
+		return nil
+	}
+	return string(*id)
 }
 
 // optTime rebuilds an optional instant from a nullable column.
