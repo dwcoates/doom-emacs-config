@@ -103,6 +103,20 @@ simply means the first cycle has not begun yet, which is the same state a store
 that dies mid-run produces, handled by the same code. There is no boot path to
 get wrong.
 
+- THE CYCLE'S CURSOR SNAPSHOT IS NOT THE WHOLE ANSWER. It is taken once, when
+  the cycle begins, so a file that appears afterwards — a spool whose hold
+  expired, a transcript the vendor RENAMED mid-cycle — is absent from it.
+  ABSENT FROM A SNAPSHOT IS NOT "THE STORE HOLDS NO CURSOR": a miss asks
+  `GetSidecarCursors{file_id}` for that one identity before a tailer is built,
+  the answer is remembered for the rest of the cycle, and only a REACHED store's
+  empty answer means offset zero. A store that cannot answer leaves the file
+  unwatched and abandons the rest of the pass, because production is suspended
+  from that moment.
+- THE CURSOR IS FOUND BY `file_id`, NEVER BY PATH. The store keys its cursor row
+  by the file's dev:inode precisely so a rename cannot lose it, and
+  `CursorState.path` is where the file was last SEEN — a thing to display.
+  Keying the recovered-cursor index by path made every renamed file read as one
+  nobody had ever read.
 - NEVER BUILD A TAILER FROM A POSITION THE STORE DID NOT HAND US. The
   predecessor of this design recovered cursors once at boot and, on failure,
   re-read every watched file from offset 0 — a fallback masking a down
@@ -157,8 +171,9 @@ which the proto documents as never switched on.
 
 ## Restart correctness: the boot rewind
 
-Per file per BOOT, exactly once, `tail.RewindToTurnStart` moves the RESTORED
-cursor back to the first record of the in-progress turn — ONE bounded backward
+Per file per BOOT, exactly once — PER FILE MEANING PER `file_id`, so a rename
+does not buy the same file a second scan — `tail.RewindToTurnStart` moves the
+RESTORED cursor back to the first record of the in-progress turn — ONE bounded backward
 scan (`tail.DefaultRewindWindow`) ending at the committed offset, targeting the
 last user-prompt record within it.
 
@@ -271,6 +286,20 @@ is a different thing:
   use its record structure. It is deliberately NOT `unparsed`: the day workflow
   ingestion lands, every one of these rows is findable by that kind, which a
   row saying "no conversion could be selected" would never be.
+
+  RESIDUE-ONLY IS THE WHOLE OUTCOME WHILE WORKFLOW IS KICKED, and which residue
+  ARM a given w* spool lands on is not settled by this wave. Owner resolution is
+  what selects between them: a w* spool with no observed spawn is held and then
+  demoted, so its bytes land as `unparsed` residue rather than as the declared
+  kind above — and nothing attributes one today, because a workflow launch result
+  is keyed by its `run_id` while the spool is named by the harness's `task_id`,
+  and no mechanism reconciles the two. THAT IS A KICKED FEATURE'S CONSEQUENCE,
+  NOT A DEFECT TO PATCH AROUND: both arms are unservable residue holding the same
+  bytes, so nothing is lost, and the day workflow ingestion lands is the day the
+  attribution is designed. Do not add a run_id-to-task_id mapping to make the
+  declared kind reachable sooner. The integration suite asserts what is actually
+  guaranteed — the bytes land, and nothing workflow-shaped is ever converted or
+  paged — and deliberately does not assert the arm.
 - anything else — a TOTAL-INGESTION VIOLATION. Logged at ERROR and ingested
   whole as `unparsed` residue, because a file dropped from discovery is the one
   thing total ingestion forbids.
