@@ -168,6 +168,14 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   successor address is always WatchDaemon's announcement — Transferred is
   empty on the wire), R-ROSTER (elisp-agents/roster). Queued behind them:
   R-COMPOSER, R-POLISH, then adversarial audit 2.
+- R-HANDOVER MERGED (d482b3648): link 26/26; host transferred family
+  green (host 48/51; #38 closed as fall-out — the webview mount called a
+  deleted mode function); bounce indicator names the DrainReason (#11);
+  transferred adopts the recorded successor unconditionally. Harness fix:
+  `agent-repl-itest--start-daemon` waits for daemon.addr to CHANGE, not
+  merely exist (a second daemon in one state root used to return the
+  incumbent's address). R-POLISH dispatched (elisp-agents/polish, off
+  d482b3648): daemon #90, host #33/#30.
 
 ## 1. Module map (final tree of lisp/)
 
