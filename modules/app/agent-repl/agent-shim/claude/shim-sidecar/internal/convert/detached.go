@@ -187,8 +187,15 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "task_stop/unattributed", result)}
 	}
 
+	// BOTH SPELLINGS THE VENDOR USES FOR AN AGENT TASK. The captured stop record
+	// (testdata/corpus/tool-results/task_stop.jsonl) states `task_type:
+	// "local_agent"`, which is what the harness writes for a spawned Agent;
+	// "agent" is kept because it is the spelling the earlier ruling was written
+	// against. Matching only one of them routed a real agent stop into the SHELL
+	// branch below, where it was reported to a spool that does not exist and the
+	// spawn unit was never settled at all.
 	switch taskType {
-	case "agent":
+	case "agent", "local_agent":
 		// THE SPAWN UNIT IS KEYED BY THE CALL THAT SPAWNED IT, never by the
 		// vendor task id: the unit being settled is the Agent CALL in this
 		// stream's book, and the task id names the harness's bookkeeping for it.
