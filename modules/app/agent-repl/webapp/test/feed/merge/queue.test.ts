@@ -25,7 +25,7 @@ import {
   selectQueueEntryWorkspace,
 } from "../../../src/feed/merge/queue.js";
 import { RecordingSink, WORKSPACE, mergeRow, rowContext } from "../harness.js";
-import { armsOf } from "../arms.js";
+import { oneofArms } from "../../arms.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -191,7 +191,7 @@ describe("the entry click is SelectWorkspace and nothing else (R8)", () => {
 
 describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
   const arms: { arm: string; value: unknown; says: RegExp }[] = [
-    { arm: "unknownWorkspace", value: {}, says: /registry/ },
+    { arm: "unknownWorkspace", value: {}, says: /does not know this workspace/ },
     {
       arm: "workspaceRefMismatch",
       value: { registryDir: "/elsewhere" },
@@ -202,7 +202,7 @@ describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
       value: { address: "127.0.0.1:9" },
       says: /127\.0\.0\.1:9/,
     },
-    { arm: "notYetAdopted", value: {}, says: /adopting/ },
+    { arm: "notYetAdopted", value: {}, says: /adopting this workspace/ },
   ];
 
   it.each(arms)("draws $arm at the row that was clicked", async ({ arm, value, says }) => {
@@ -216,7 +216,7 @@ describe("every SelectWorkspaceError arm draws at the clicked entry", () => {
 
   it("holds to the schema: every cause arm of SelectWorkspaceError is covered", () => {
     expect(arms.map((a) => a.arm).sort()).toEqual(
-      armsOf(SelectWorkspaceErrorSchema.oneofs, "cause").sort(),
+      [...oneofArms(SelectWorkspaceErrorSchema, "cause")].sort(),
     );
   });
 

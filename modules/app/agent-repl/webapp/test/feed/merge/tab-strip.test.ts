@@ -18,7 +18,7 @@ import {
   mergeTabsOf,
   readMergeTab,
 } from "../../../src/feed/merge/tab-strip.js";
-import { armsOf } from "../arms.js";
+import { oneofArms } from "../../arms.js";
 import { id, tabRow } from "./fixtures.js";
 
 describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", () => {
@@ -42,17 +42,17 @@ describe("mergeTabsOf: the strip is the sub-feed's tab rows, in served order", (
 describe("readMergeTab: the arms are read from the contract", () => {
   it("holds to the schema: every kind is either resolved or agentic", () => {
     expect([...RESOLVED_KINDS, ...AGENTIC_KINDS].sort()).toEqual(
-      armsOf(FeedMergeTabSchema.oneofs, "kind").sort(),
+      [...oneofArms(FeedMergeTabSchema, "kind")].sort(),
     );
   });
 
   it("holds to the schema: parked is legal only on conflicts and fixes", () => {
-    expect(armsOf(FeedMergeTabConflictsSchema.oneofs, "state")).toContain("parked");
-    expect(armsOf(FeedMergeTabQueueSchema.oneofs, "state")).not.toContain("parked");
+    expect([...oneofArms(FeedMergeTabConflictsSchema, "state")]).toContain("parked");
+    expect([...oneofArms(FeedMergeTabQueueSchema, "state")]).not.toContain("parked");
   });
 
   it("holds to the schema: a settled tab's outcome arms are succeeded and failed", () => {
-    expect(armsOf(FeedMergeTabSettledSchema.oneofs, "outcome").sort()).toEqual([
+    expect([...oneofArms(FeedMergeTabSettledSchema, "outcome")].sort()).toEqual([
       "failed",
       "succeeded",
     ]);
