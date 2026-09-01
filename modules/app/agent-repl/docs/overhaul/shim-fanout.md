@@ -531,3 +531,22 @@ every UX or contract gap you surfaced instead of improvising.
   the shim reports ''), six handler exceptions escape as Code.Internal,
   the fake store lacks the typed refusal arms, !ctrl-b vs DetachForeground
   confirmation mismatch, a cold-seed ENOENT path mismatch.
+- LEDGER (resumption 2026-09-01, recreated fable-low lead): tip f70941f0c
+  (pause tip + four capture-harness fixes by the project lead). Rulings
+  received: R15 wins the fresh-page contradiction (StartTurn's page holds
+  exactly the prompt row); store relays (WatchBashRun CodeNotFound before the
+  first row; post-terminal deltas served then end; re-upsert absorbed); 67
+  real goldens at ~/.config/doom-overhaul/captures (mock scripts rebuilt FROM
+  them; `_failed/` never fixtures); harness defects (parked-gate interrupt
+  trigger; sweep-end second reclaim) to fix and report; dead-code pass
+  (knip/tsc unused/vitest coverage) before the final report; re-check audit
+  reds for stale-payload shape before production fixes. Dispatched opus-low
+  in hand-made worktrees shim-agents/{harness,engine,fakes} (branches
+  overhaul/shim-{harness,engine,fakes}): harness = the two capture defects;
+  engine = buckets 1,2,3-rem,5,8(engine),10,12(engine) + R15 amendment +
+  store relays + audit A2–A5,A7,A11,A13,A15,A22,A23,A25,B4–B6,B11,C7,C12,
+  E1,E5–E8; fakes = buckets 4,6,7,8(mock),9,11,12(rest) + the remaining
+  audit items. Integration run #3 started on f70941f0c for the record
+  (scratch `shim-itest-run3.log`). Queued next: captures-rebuild brief
+  (scenario scripts + converter goldens from the captures; checklist
+  answers read out of them), fable auditor #2, dead-code pass.
