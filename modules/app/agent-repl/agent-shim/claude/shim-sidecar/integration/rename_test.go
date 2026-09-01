@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -98,5 +99,63 @@ func TestARenamedSpoolKeepsItsFileIdCursor(t *testing.T) {
 	}
 	if got := rows[0].GetOffset(); got < moved.Offset() {
 		t.Errorf("the renamed spool's cursor stands at %d, short of the %d bytes the vendor wrote", got, moved.Offset())
+	}
+}
+
+// TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle is the subject
+// the recovered-cursor index exists for, and the one a PATH-keyed index broke.
+//
+// The store's row survives a rename either way — it is keyed by file_id and the
+// next write simply overwrites it — so every assertion about the store's FINAL
+// state passed while a renamed file was being re-read from zero and re-converted
+// whole, absorbed only because the write ids are deterministic. What separates
+// the two is whether the tailer built for the NEW path was RESTORED at all: a
+// resumed one is REWOUND to its in-progress turn — a boot rewind happens only
+// inside "the store handed us a cursor for this file" — and a cold one is not,
+// because there was no restored position to walk back from.
+//
+// The next cycle is where a recovered cursor is consulted at all (cursors are
+// recovered per cycle, and the tailer is rebuilt from what THAT cycle's store
+// handed us), so the rename is followed by a restart — the ordinary case, since
+// a rename the reader is running through is a rotation it will meet again on its
+// next boot.
+func TestARenamedTranscriptResumesFromItsFileIdCursorOnTheNextCycle(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	store := startRealStore(t)
+	tree := newVendorTree(t)
+	captured := loadCapturedSession(t)
+	opts := defaultSidecarOptions(t, store.Socket, tree)
+	movedSlug := cwdSlug("/Users/dodgecoates/transcript-rename-resume-probe")
+	cut := 9
+
+	// Act: read the head, rename the file, and start a fresh reader over it.
+	first := startSidecar(t, opts)
+	g := newGrowingFile(t, tree.sessionPath(captured.Slug, captured.Session))
+	for _, line := range captured.Lines[:cut] {
+		g.AppendLine(line)
+	}
+	committed := awaitCursorAtLeast(ctx, t, store.Client, g.Path(), 1).GetOffset()
+	first.Stop()
+
+	movedPath := tree.sessionPath(movedSlug, captured.Session)
+	renameFile(t, g.Path(), movedPath)
+	restarted := opts
+	restarted.LogPath = filepath.Join(t.TempDir(), "sidecar-restarted.log")
+	startSidecar(t, restarted)
+
+	// Assert: the NEW path's tailer was built from a restored cursor, which the
+	// boot rewind is only ever applied to.
+	rec := awaitLog(ctx, t, restarted.LogPath, "the renamed file's boot rewind", func(r logRecord) bool {
+		return r.Operation == "boot-rewind" && samePathAny(r.Context["path"], movedPath)
+	})
+	offset, ok := rec.Context["offset"].(float64)
+	if !ok {
+		t.Fatalf("the boot-rewind record states no offset; its context was %v", rec.Context)
+	}
+	if int64(offset) > committed {
+		t.Errorf("the renamed file was positioned at %d, past the %d the store had committed for its identity",
+			int64(offset), committed)
 	}
 }
