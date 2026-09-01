@@ -15,6 +15,7 @@ import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origi
 import { FeedIdSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { createTicker } from "../../src/clock.js";
+import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { createAppContext, type AppContext } from "../../src/rpc/context.js";
@@ -27,7 +28,11 @@ import { DROPPED_EVENT } from "../../src/tray/held-prompt.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const FEED = create(FeedIdSchema, { value: "feed-9" });
-const SINK: FailureSink = { report: () => undefined, retract: () => undefined };
+/** A sink that keeps what was filed, so a test can read the arm it carried. */
+function recordingSink(): FailureSink & { reports: FailureKind[] } {
+  const reports: FailureKind[] = [];
+  return { reports, report: (kind) => reports.push(kind), retract: () => undefined };
+}
 
 const turnSuccess = (turn = "turn-1"): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, {
@@ -83,6 +88,7 @@ interface Harness {
   handle: ComposerHandle;
   input: HTMLTextAreaElement;
   send: HTMLButtonElement;
+  reports: FailureKind[];
 }
 
 function mount(
@@ -91,6 +97,7 @@ function mount(
 ): Harness {
   const seen: SubmitPromptRequest[] = [];
   const panels: SubmitPromptCommandPanel[] = [];
+  const sink = recordingSink();
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       submitPrompt: (request) => {
@@ -104,7 +111,7 @@ function mount(
     client: createAgentReplClient(transport),
     workspace: WORKSPACE,
     ticker: createTicker(60_000),
-    failures: SINK,
+    failures: sink,
     composerEnabled: opts.composerEnabled ?? true,
   });
   const host = document.createElement("div");
@@ -124,6 +131,7 @@ function mount(
     handle,
     input: host.querySelector("textarea") as HTMLTextAreaElement,
     send: host.querySelector("button") as HTMLButtonElement,
+    reports: sink.reports,
   };
 }
 
@@ -433,6 +441,26 @@ describe("the refusals", () => {
     const h = mount(unsetError);
     await sendText(h, "hello");
     expect(h.host.querySelector(".composer-refusal")).toBeNull();
+    h.handle.dispose();
+  });
+
+  it("files a frame_undecodable card for a reason it cannot read", async () => {
+    // The refusal is not drawn as a sentence this end invented, but it is not
+    // lost either: the owning layer files the card that says a frame could not
+    // be read, exactly as an unreadable push does.
+    const h = mount(unsetError);
+    await sendText(h, "hello");
+    expect(h.reports[0]?.kind.case).toBe("frameUndecodable");
+    h.handle.dispose();
+  });
+
+  it("names the refusing field in the card it files for an unset reason", async () => {
+    const h = mount(unsetError);
+    await sendText(h, "hello");
+    const kind = h.reports[0]?.kind;
+    expect(kind?.case === "frameUndecodable" ? kind.value.frameHead : undefined).toBe(
+      "SubmitPromptError.reason",
+    );
     h.handle.dispose();
   });
 
