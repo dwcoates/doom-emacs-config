@@ -48,6 +48,11 @@ var (
 	ErrNoSession = errors.New("promptqueue: the workspace has no session to submit to")
 	// ErrTurnAlreadyOpen is a bubble-addressed submit while that agent's turn
 	// runs. One turn in flight per agent is structural.
+	//
+	// NO SITE PRODUCES IT YET: the session watcher answers the MAIN turn's
+	// flight, and nothing in the daemon tracks a subagent's own. The shim
+	// answers UpdateAgent for a busy agent, so the refusal is respelled from
+	// that failure — the arm is kept named here so the mapping has one home.
 	ErrTurnAlreadyOpen = errors.New("promptqueue: a turn is already open on the addressed agent")
 	// ErrNoSuchHold names a turn the queue holds nothing under.
 	ErrNoSuchHold = errors.New("promptqueue: no hold stands under that turn")
