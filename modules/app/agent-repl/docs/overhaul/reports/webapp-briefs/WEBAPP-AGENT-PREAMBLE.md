@@ -124,12 +124,13 @@ src/rpc/streams.ts     type StreamEnd = {kind:"cancelled"} | {kind:"transport_fa
                        // or by onPush is logged at error, reported as frame_undecodable via ctx.failures, and the
                        // frame is skipped; a transport failure reports daemon_unreachable and reopens with backoff
                        // (retracted on the first successful push); every handle is registered so
-                       // ctx.replaceClient(newClient) cancels and reopens all of them on the new client.
+                       // ctx.quiesce() cancels every registered handle, with no reconnect: the webapp
+                       // never redials a successor daemon (a different loopback port is a different origin).
 src/rpc/unary.ts       callUnary<Req,Res>(ctx, name, fn: (client) => Promise<Res>, schema): Promise<Res>
                        // strict-checks the response; logs; rethrows transport errors as ConnectError
 src/rpc/context.ts     interface AppContext { readonly client: AgentReplClient; readonly workspace: WorkspaceRef;
                          readonly ticker: Ticker; readonly failures: FailureSink; readonly composerEnabled: boolean;
-                         replaceClient(next: AgentReplClient): void; onClientReplaced(fn: () => void): () => void }
+                         quiesce(): void; isQuiesced(): boolean; onQuiesced(fn: () => void): () => void }
                        createAppContext(init: {...}): AppContext
 src/rpc/page-address.ts pageAddress(search: string): { workspaceId: string; workspaceDir: string; composer: boolean }  // ?workspace=<id>&dir=<dir> both REQUIRED (ruled); &composer=1 optional
 src/rpc/workspace-ref.ts workspaceRef(id: string, dir: string): WorkspaceRef                    // the ONE place the full ref is built; every request echoes it
@@ -231,7 +232,9 @@ Use exactly these attribute names; values are the generated oneof CASE names
 - Topbar: host `[data-component="topbar"]`; `.topbar-account[data-arm]`,
   `.topbar-connectivity[data-tone]`, `.topbar-title`, `.topbar-model`,
   `.topbar-context`, `.topbar-warnings`, `.topbar-warning-row[data-arm]`,
-  `.topbar-reveal[data-reveal="session|model|context|warnings|warning-detail"]`.
+  `.topbar-reveal[data-reveal="session|model|mode|context|warnings|warning-detail"]`
+  (`mode` is the permission-mode picker's, blessed 2026-09-01 — the picker
+  landed after this list was first written).
 - Sidebar: host `[data-component="sidebar"]`; `[data-grouping="repository|task"]`;
   `[data-roster-row="<WorkspaceRef.id>"][data-arm="<status case>"]`;
   `[data-current="true"]`, `[data-attention]`, `[data-closed="true"]`.

@@ -94,13 +94,6 @@ export function boot(): void {
       failures: overlay,
       composerEnabled: address.composer,
     });
-    // The sink reads `ctx.client` through the closure above, so an adopted
-    // daemon takes the logging with it rather than leaving records aimed at a
-    // client nothing else uses any more.
-    ctx.onClientReplaced(() => {
-      client = ctx.client;
-    });
-
     log("info", "the webapp booted", {
       operation: "main.boot",
       context: {
