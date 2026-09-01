@@ -436,8 +436,17 @@ fact, which lives INSIDE the parent by construction -- a fork without a
 parent is unrepresentable.  MODEL, PRIORITY (a bare level keyword) and
 ALLOW-UNGATED are the remaining creation facts and are omitted when nil.
 
+FORK WITHOUT PARENT IS REFUSED BEFORE THE SEND, with no rpc issued: the
+fork fact lives inside the parent by construction, so there is no request
+that carries it alone -- encoding one would silently drop the fork and
+create a plain workspace the caller never asked for.
+
 Nothing happens on success: THE DAEMON names and creates everything, and
 the new workspace\'s tab arrives through the roster push."
+  (when (and fork (null parent))
+    (agent-repl--error nil "elisp.verbs.create-fork-without-parent repository=%S form=%S"
+                       repository form)
+    (user-error "agent-repl: a fork needs a parent workspace"))
   (agent-repl-verbs--send
    #'agent-repl-rpc-create-workspace (agent-repl-verbs--conn)
    (list :repository repository
