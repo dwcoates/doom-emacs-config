@@ -51,7 +51,7 @@ root varies, and exactly one of these three supplies it:
 
 | Mechanism | What it does | When to use it |
 |---|---|---|
-| `--config-root <dir>` | Uses an existing account root AS `CLAUDE_CONFIG_DIR`. | **Preferred, and production-faithful** — the real shim runs against the real root, so these captures carry the settings, hooks and CLAUDE.md a real session has, and the vendor emits the `permission_denied` messages the gate relies on. |
+| `--config-root <dir>` | Uses an existing account root as the vendor's account root: named through `CLAUDE_CONFIG_DIR` for any other directory, but for the default `~/.claude` the variable is left UNSET, because the CLI keys its Keychain entry on that variable and an explicitly named default root reads as a different, logged-out account. | **Preferred, and production-faithful** — the real shim runs against the real root, so these captures carry the settings, hooks and CLAUDE.md a real session has, and the vendor emits the `permission_denied` messages the gate relies on. |
 | `--seed-credentials` | Keeps a fresh scratch root and copies `.credentials.json` plus the account/onboarding fields of `.claude.json` into it. | Maximum isolation. The captured session has none of the operator's settings, so no policy denials and no CLAUDE.md. |
 | inherited token | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` already exported; passed through to the SDK. A fresh scratch root then needs no credential file. | CI, or an API-key account. |
 

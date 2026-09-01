@@ -275,6 +275,26 @@ export function sdkEnvFor(resolution, env) {
 }
 
 /**
+ * The account-root variables for the SDK child.
+ *
+ * Naming the vendor's DEFAULT root explicitly is not a no-op: the CLI derives
+ * its Keychain identity from `CLAUDE_CONFIG_DIR` whenever the variable is set,
+ * so `CLAUDE_CONFIG_DIR=~/.claude` looks up a different (empty) entry than an
+ * unset variable does and the run fails "Not logged in" against a logged-in
+ * account. A `--config-root` run at the default root therefore hands the child
+ * NO such variable, and every other root is named explicitly.
+ */
+export function accountRootEnvFor(resolution, configDir, env, home = homedir()) {
+  const out = { ...env };
+  if (resolution.mode === AUTH_CONFIG_ROOT && path.resolve(configDir) === defaultAccountRoot(home)) {
+    delete out.CLAUDE_CONFIG_DIR;
+  } else {
+    out.CLAUDE_CONFIG_DIR = configDir;
+  }
+  return out;
+}
+
+/**
  * After a `--config-root` scenario: take the transcripts the vendor wrote into
  * the operator's real root, and DELETE them from it.
  *
