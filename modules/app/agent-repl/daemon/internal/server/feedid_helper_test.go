@@ -44,3 +44,9 @@ func coldGateIDFor(ws ids.WorkspaceID) *frontendv1.FeedId {
 		Row:  feedid.RowKey{Kind: feedid.KindColdGate, ID: "gate"},
 	})
 }
+
+// feedAddressFor encodes a FEED's own address for one workspace, which is what
+// OpenFeed's optional field carries.
+func feedAddressFor(ws ids.WorkspaceID) *frontendv1.FeedId {
+	return feedid.EncodeFeed(ws, feedid.Feed{Root: true})
+}
