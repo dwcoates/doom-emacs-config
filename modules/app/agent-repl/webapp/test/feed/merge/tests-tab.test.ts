@@ -12,7 +12,7 @@ import {
   drawFeedMergeTestSuite,
   drawTestSuites,
 } from "../../../src/feed/merge/tests-tab.js";
-import { armsOf } from "../arms.js";
+import { oneofArms } from "../../arms.js";
 
 /** A suite in STATE, carrying OUTPUT. */
 function suite(
@@ -53,7 +53,7 @@ describe("drawFeedMergeTestSuite: every state arm", () => {
   });
 
   it("holds to the schema: every state arm of FeedMergeTestSuite is drawn", () => {
-    expect(armsOf(FeedMergeTestSuiteSchema.oneofs, "state").sort()).toEqual([
+    expect([...oneofArms(FeedMergeTestSuiteSchema, "state")].sort()).toEqual([
       "failed",
       "passed",
       "running",
