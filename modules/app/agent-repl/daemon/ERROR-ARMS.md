@@ -68,3 +68,21 @@ here as the mapping the server handlers switch on, not as arms still owed:
 | AdoptHostWorkspace / AdoptWebWorkspace | `participant_not_expected` | `rollout.ErrParticipantNotExpected` — the caller's stream was not open at announcement | rollout |
 
 NOTHING NEW IS OWED by drain or rollout: no refusal either makes lacks an arm.
+
+## Landing 6 batch, opened by the server handlers (wave 3a)
+
+Every row below is a refusal the server MAKES and the contract has no arm for.
+Each answers through `server.UnlandedArm`.
+
+| rpc | arm | condition | package |
+| --- | --- | --- | --- |
+| SubmitPrompt | `command_acted` | a session-act command (`/clear`, `/compact`, `/model <arg>`) the handler reports as ACTED. `SubmitPromptSuccess` has `turn`, `command_panel` and `command_refused` and nothing for an act, so the daemon answers the loud sentinel rather than fabricating a turn or a panel (project-lead ruling; accepted for landing 6) | server |
+| WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted, or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
+| WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
+| WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
+| WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace, but a `Watch*` rpc has NO `<Rpc>Error` message — a refused open is a Connect error before any frame — so all four ownership arms are unlanded for the streams | server |
+
+The `turn_already_open` arm on `SubmitPromptError` HAS NO PRODUCER: the sentinel
+`promptqueue.ErrTurnAlreadyOpen` is declared and documented but is never
+returned by any code path in the daemon. The server maps it if it ever appears;
+the arm is a candidate for retirement.
