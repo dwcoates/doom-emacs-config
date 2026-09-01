@@ -34,6 +34,7 @@ import {
   createInputChannel,
   controlMatches,
   createWorld,
+  drainToResult,
   cwdSlug,
   fireTriggers,
   lateReclaimSlug,
@@ -865,5 +866,121 @@ describe("the corpus's control triggers", () => {
       .filter(({ control }) => control.at === "on_control" && control.after === undefined)
       .map(({ scenario }) => scenario);
     expect(unmatched).toEqual([]);
+  });
+});
+
+/**
+ * A fake query: an async generator over scripted per-turn message batches, with
+ * the SDK's own surface (an async iterator plus `close`).
+ *
+ * It records whether `return()` was ever called on its iterator — the exact
+ * thing a `for await ... break` does, and the reason every turn after the first
+ * went unrecorded in the real multi-turn captures.
+ */
+function fakeQuery(turnBatches) {
+  const state = { returned: false, closed: false, pulls: 0 };
+  const batches = turnBatches.map((batch) => [...batch]);
+  const generator = (async function* messages() {
+    try {
+      for (const batch of batches) {
+        for (const msg of batch) {
+          state.pulls += 1;
+          yield msg;
+        }
+      }
+    } finally {
+      state.returned = true;
+    }
+  })();
+  return {
+    state,
+    close: () => {
+      state.closed = true;
+    },
+    [Symbol.asyncIterator]: () => generator,
+  };
+}
+
+const TURN_ONE = [
+  { type: "system", subtype: "init", session_id: "s-1" },
+  { type: "assistant", message: { content: "one" } },
+  { type: "result", subtype: "success" },
+];
+const TURN_TWO = [
+  { type: "system", subtype: "compact_boundary" },
+  { type: "result", subtype: "success" },
+];
+
+describe("drainToResult", () => {
+  it("returns the turn's result message", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const iterator = query[Symbol.asyncIterator]();
+    await expect(drainToResult(iterator, () => {})).resolves.toEqual({
+      type: "result",
+      subtype: "success",
+    });
+  });
+
+  it("hands every message of the turn to the recorder, in order", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.type));
+    expect(seen).toEqual(["system", "assistant", "result"]);
+  });
+
+  it("stops at the result rather than draining the next turn", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.subtype));
+    expect(seen).toEqual(["init", undefined, "success"]);
+  });
+
+  it("does NOT end the iterator when it stops at a result", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    await drainToResult(query[Symbol.asyncIterator](), () => {});
+    expect(query.state.returned).toBe(false);
+  });
+
+  it("records the SECOND turn on the same held iterator", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    const iterator = query[Symbol.asyncIterator]();
+    await drainToResult(iterator, () => {});
+    const seen = [];
+    await drainToResult(iterator, (msg) => seen.push(msg.subtype));
+    expect(seen).toEqual(["compact_boundary", "success"]);
+  });
+
+  it("awaits an async recorder before pulling the next message", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const order = [];
+    await drainToResult(query[Symbol.asyncIterator](), async (msg) => {
+      order.push(`enter:${msg.type}`);
+      await Promise.resolve();
+      order.push(`leave:${msg.type}`);
+    });
+    expect(order.slice(0, 4)).toEqual([
+      "enter:system",
+      "leave:system",
+      "enter:assistant",
+      "leave:assistant",
+    ]);
+  });
+
+  it("returns null when the query ends without a result", async () => {
+    const query = fakeQuery([[{ type: "assistant", message: { content: "orphan" } }]]);
+    await expect(drainToResult(query[Symbol.asyncIterator](), () => {})).resolves.toBeNull();
+  });
+
+  it("still reports the messages seen before a query ended without a result", async () => {
+    const query = fakeQuery([[{ type: "assistant" }]]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.type));
+    expect(seen).toEqual(["assistant"]);
+  });
+
+  it("leaves the query open for a turn_end control to be driven against", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    await drainToResult(query[Symbol.asyncIterator](), () => {});
+    expect(query.state.closed).toBe(false);
   });
 });
