@@ -115,6 +115,21 @@
       ;; Assert
       (should (equal posted 2)))))
 
+(ert-deftest agent-repl-test-session-notify-banner-text-names-the-workspace-after-the-prefix ()
+  "The banner body is exactly \"Agent ready: <name>\".
+The text is contract, not taste: the roster integration suite pins it, and
+a workspace name used as a bare prefix reads as a different notification."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((body nil))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat _fn &rest args) (setq body (nth 2 args)))))
+        ;; Act
+        (agent-repl--maybe-notify-finished "ws1")
+        ;; Assert
+        (should (equal body "Agent ready: ws1"))))))
+
 ;;;; ---- Reaction (3): the magit refresh ----
 
 (defmacro agent-repl-test-session--with-magit (var &rest body)
