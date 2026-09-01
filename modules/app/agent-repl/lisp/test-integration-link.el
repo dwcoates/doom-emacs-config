@@ -48,6 +48,23 @@
 
 ;;;; ---- Fixtures ----
 
+(defun agent-repl-itest-link--await-up (daemon)
+  "Block until DAEMON has the watch AND the CLIENT has accepted it.
+TWO WAITS, because they are two different facts and the second is the one
+every assertion here rests on.  `agent-repl-itest--await-subscriber' reads
+the DAEMON's registry: it goes true the instant the server accepts the
+subscription.  `agent-repl-link-up-p' is the CLIENT's fact, and per the
+standing-stream acceptance rule it flips only when connect.el sees the
+HTTP 200 header block and runs ON-OPEN -- strictly after the server side,
+by a whole network hop.  A fixture that returned on the server fact alone
+handed BODY a link that was not yet up, which is exactly how
+`agent-repl-itest-link-connects-to-the-published-address' failed once at
+0.08s while passing everywhere else."
+  (agent-repl-itest--await-subscriber daemon "daemon")
+  (agent-repl-itest--wait-until
+   (lambda () (agent-repl-link-up-p))
+   nil "the client to accept the WatchDaemon stream (link-up)"))
+
 (defmacro agent-repl-itest-link--with-link (daemon &rest body)
   "Connect the link to DAEMON, run BODY, then tear the link down.
 Every link hook is scratch-bound so a test observes only its own
@@ -65,7 +82,7 @@ loop's own timing is not what a test spends its deadline on."
      (unwind-protect
          (progn
            (agent-repl-link-connect)
-           (agent-repl-itest--await-subscriber ,daemon "daemon")
+           (agent-repl-itest-link--await-up ,daemon)
            ,@body)
        (ignore-errors (agent-repl-link-teardown)))))
 
@@ -83,7 +100,7 @@ the seam, never the test driving it by hand."
      (unwind-protect
          (progn
            (agent-repl-link-connect)
-           (agent-repl-itest--await-subscriber ,daemon "daemon")
+           (agent-repl-itest-link--await-up ,daemon)
            ,@body)
        (ignore-errors (agent-repl-link-teardown)))))
 
