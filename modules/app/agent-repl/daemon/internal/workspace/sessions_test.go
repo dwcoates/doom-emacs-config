@@ -10,6 +10,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/account"
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -137,7 +138,7 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 	t.Helper()
 	f := &fleetFixture{
 		db:         newFakeDB(),
-		accounts:   &fakeAccounts{configDir: "/config", transcript: "/transcripts/vendor-1.jsonl"},
+		accounts:   &fakeAccounts{configDir: "/config", transcript: account.Transcript{Path: "/transcripts/vendor-1.jsonl", ConfigDir: "/config"}},
 		client:     &fakeClient{response: startedResponse("vendor-1"), pid: 4242},
 		feed:       &fakeFeed{},
 		footer:     newFakeFooter(),
