@@ -3,13 +3,14 @@
 //
 // THE CLIENT NEVER PARSES ESCAPES — the daemon does it once and the client
 // paints classes. A span carries exactly one class, so an ANSI run that is
-// both bold and red becomes adjacent spans over the same text. Every emitted
-// class is asserted against the paint-classes.json inventory. See
-// ARCHITECTURE.md "Paint classes".
+// both bold and red is emitted under the strongest class the inventory's
+// ansi_precedence names. Every emitted class is asserted against the
+// paint-classes.json inventory. See ARCHITECTURE.md "Paint classes".
 package paint
 
 import (
-	"claude-repld/internal/notimpl"
+	"fmt"
+
 	"claude-repld/internal/vocab"
 )
 
@@ -26,12 +27,22 @@ type Span struct {
 // exactly: painting never adds, drops or reorders a byte.
 type Spans []Span
 
+// Text concatenates every span's text, which is the input the spans were
+// painted from with its escape sequences removed.
+func (s Spans) Text() string {
+	out := ""
+	for _, span := range s {
+		out += span.Text
+	}
+	return out
+}
+
 // Painter emits spans and asserts them against the loaded inventory.
 type Painter interface {
 	// ParseANSI turns process output carrying SGR escape sequences into spans,
-	// splitting a run that carries several attributes into adjacent spans in
-	// the inventory's declared precedence order. Escapes it does not model are
-	// dropped from the text and produce no class.
+	// splitting the text at every attribute change and painting each run under
+	// the strongest class the inventory's ansi_precedence names. Escapes it
+	// does not model are dropped from the text and produce no class.
 	ParseANSI(text string) (Spans, error)
 	// Highlight turns a code block into spans using the language-neutral
 	// highlight inventory. An unrecognized language yields one plain span
@@ -39,7 +50,48 @@ type Painter interface {
 	Highlight(language, code string) (Spans, error)
 }
 
+// painter is the one Painter. It holds the inventory it asserts against and
+// the ANSI precedence it splits by.
+type painter struct {
+	classes  vocab.PaintClasses
+	ansiRank []string
+}
+
 // New builds a Painter that asserts every class it emits against classes.
 func New(classes vocab.PaintClasses) (Painter, error) {
-	return nil, notimpl.Err
+	if len(classes.ANSI) == 0 || len(classes.Syntax) == 0 {
+		return nil, fmt.Errorf("paint: the paint-classes inventory is empty")
+	}
+	if len(classes.ANSIPrecedence) == 0 {
+		return nil, fmt.Errorf("paint: the paint-classes inventory declares no ansi_precedence")
+	}
+	for _, slot := range classes.ANSIPrecedence {
+		if !knownPrecedenceSlot(slot) {
+			return nil, fmt.Errorf("paint: ansi_precedence names %q, which this parser does not model", slot)
+		}
+	}
+	// Every class the highlighter can emit must exist, so a drifted inventory
+	// fails at construction rather than mid-stream.
+	for _, class := range highlightClasses {
+		if !classes.Contains(class) {
+			return nil, fmt.Errorf("paint: the inventory has no highlight class %q", class)
+		}
+	}
+	return &painter{classes: classes, ansiRank: classes.ANSIPrecedence}, nil
+}
+
+// emit appends a span, asserting its class against the inventory first. A
+// class outside the inventory is a producer bug and is surfaced, never drawn.
+func (p *painter) emit(spans Spans, text, class string) (Spans, error) {
+	if text == "" {
+		return spans, nil
+	}
+	if !p.classes.Contains(class) {
+		return nil, fmt.Errorf("paint: class %q is not in the paint-classes inventory", class)
+	}
+	if n := len(spans); n > 0 && spans[n-1].Class == class {
+		spans[n-1].Text += text
+		return spans, nil
+	}
+	return append(spans, Span{Text: text, Class: class}), nil
 }
