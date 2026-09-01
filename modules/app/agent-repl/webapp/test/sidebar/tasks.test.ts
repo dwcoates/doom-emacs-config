@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { CreateTaskResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
+import {
+  CreateTaskErrorSchema,
+  CreateTaskResponseSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
+import { UpdateTaskErrorSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import { oneofArms } from "../arms.js";
+import { createTaskRefusal, updateTaskRefusal } from "../../src/sidebar/tasks.js";
 import {
   buildCreateTaskRequest,
   buildUpdateTaskRequest,
   drawCreateTaskControl,
 } from "../../src/sidebar/tasks.js";
+import { MalformedView } from "../../src/rpc/malformed.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 /** Click and let the verb's promise chain drain. */
@@ -113,7 +120,10 @@ describe("the new-task control", () => {
   it("keeps the form open, with the words in it, when the daemon refused", async () => {
     const sc = sidebarContext(
       appContext({
-        createTask: () => create(CreateTaskResponseSchema, { result: { case: "error", value: {} } }),
+        createTask: () =>
+          create(CreateTaskResponseSchema, {
+            result: { case: "error", value: { cause: { case: "blankTitle", value: {} } } },
+          }),
       }),
     );
     const host = drawCreateTaskControl(sc);
@@ -126,13 +136,68 @@ describe("the new-task control", () => {
   it("says the refusal at the form's own control", async () => {
     const sc = sidebarContext(
       appContext({
-        createTask: () => create(CreateTaskResponseSchema, { result: { case: "error", value: {} } }),
+        createTask: () =>
+          create(CreateTaskResponseSchema, {
+            result: { case: "error", value: { cause: { case: "blankTitle", value: {} } } },
+          }),
       }),
     );
     const host = drawCreateTaskControl(sc);
     await click(host.querySelector("[data-task-create]") as Element);
     (host.querySelector("[data-task-title]") as HTMLInputElement).value = "ship it";
     await click(host.querySelector(".sb-form-go") as Element);
-    expect(host.querySelector(".refusal")?.textContent).toBe("CreateTask refused");
+    expect(host.querySelector(".refusal")?.textContent).toBe("a task needs a title");
+  });
+
+  it("labels the refusal with the cause's own arm", async () => {
+    const sc = sidebarContext(
+      appContext({
+        createTask: () =>
+          create(CreateTaskResponseSchema, {
+            result: { case: "error", value: { cause: { case: "blankTitle", value: {} } } },
+          }),
+      }),
+    );
+    const host = drawCreateTaskControl(sc);
+    await click(host.querySelector("[data-task-create]") as Element);
+    (host.querySelector("[data-task-title]") as HTMLInputElement).value = "ship it";
+    await click(host.querySelector(".sb-form-go") as Element);
+    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("blankTitle");
+  });
+});
+
+describe("CreateTask's typed refusal", () => {
+  it.each(oneofArms(CreateTaskErrorSchema, "cause"))("words the %s arm", (arm) => {
+    expect(createTaskRefusal({ case: arm, value: {} } as never)).not.toBe("");
+  });
+
+  it("refuses an arm this build does not know", () => {
+    expect(() => createTaskRefusal({ case: "somethingNewer", value: {} } as never)).toThrow(
+      MalformedView,
+    );
+  });
+});
+
+describe("UpdateTask's typed refusal", () => {
+  it.each(oneofArms(UpdateTaskErrorSchema, "cause"))("words the %s arm", (arm) => {
+    expect(updateTaskRefusal({ case: arm, value: {} } as never)).not.toBe("");
+  });
+
+  it("says a no-op change changes nothing", () => {
+    expect(updateTaskRefusal({ case: "noChange", value: {} } as never)).toContain(
+      "exactly as it is",
+    );
+  });
+
+  it("says the daemon does not know an unknown task", () => {
+    expect(updateTaskRefusal({ case: "unknownTask", value: {} } as never)).toContain(
+      "does not know that task",
+    );
+  });
+
+  it("refuses an arm this build does not know", () => {
+    expect(() => updateTaskRefusal({ case: "somethingNewer", value: {} } as never)).toThrow(
+      MalformedView,
+    );
   });
 });

@@ -46,7 +46,7 @@ import {
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
 import { drawRosterRow } from "./row.js";
-import { buildUpdateTaskRequest, drawCreateTaskControl } from "./tasks.js";
+import { buildUpdateTaskRequest, drawCreateTaskControl, updateTaskRefusal } from "./tasks.js";
 import { runVerb } from "./verbs.js";
 
 /**
@@ -370,6 +370,7 @@ function drawTaskDoneCheck(taskId: string, done: boolean, sc: SidebarContext): H
           buildUpdateTaskRequest(taskId, done ? { case: "setOpen" } : { case: "setDone" }),
         ),
       schema: UpdateTaskResponseSchema,
+      refusalText: (cause) => updateTaskRefusal(cause as never),
     });
   });
   return check;
@@ -402,6 +403,7 @@ function openRename(
       call: (client) =>
         client.updateTask(buildUpdateTaskRequest(taskId, { case: "setTitle", title: next })),
       schema: UpdateTaskResponseSchema,
+      refusalText: (cause) => updateTaskRefusal(cause as never),
     });
   };
   submit.addEventListener("click", (event) => {
