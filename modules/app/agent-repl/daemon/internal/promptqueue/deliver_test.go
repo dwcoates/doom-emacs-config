@@ -132,8 +132,11 @@ func TestDeliverSurfacesAShimRefusal(t *testing.T) {
 	if err == nil {
 		t.Fatal("a shim refusal must be surfaced, never swallowed")
 	}
-	if len(h.feed.mirrored()) != 0 {
-		t.Fatal("a refused turn earns no feed row")
+	// The mirror fires the moment the prompt is ACCEPTED FOR DELIVERY, before
+	// the shim answers, so a refused turn still leaves the user's own words
+	// drawn rather than swallowing them.
+	if len(h.feed.mirrored()) != 1 {
+		t.Fatalf("mirrored rows = %d, want the accepted prompt still drawn", len(h.feed.mirrored()))
 	}
 }
 
