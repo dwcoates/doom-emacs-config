@@ -555,3 +555,8 @@ every UX or contract gap you surfaced instead of improvising.
   never the lead) in its own worktree, tool output as its brief; the lead
   reviews, merges, and carries the deletion + kept-with-reason lists into the
   final report.
+- LEDGER: harness fixes merged at f12b754c3 (`on_control` trigger kind;
+  sweep-end late reclaim; capture subset 315 green; `--check` 75 scenarios);
+  project lead notified for re-capture. Run #3 on f70941f0c: 101 failed /
+  92 passed / 1 todo. A held-turn-gate trigger follow-up is in flight on
+  overhaul/shim-harness.
