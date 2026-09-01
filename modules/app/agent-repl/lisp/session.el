@@ -65,16 +65,6 @@ summariser, which has its own model variable."
 ;; wave-2 seam).  It is deliberately NOT a model preference of the
 ;; interactive session, which is what this section otherwise holds.
 
-(defun agent-repl--effective-model (model)
-  "Return MODEL, or `agent-repl-interactive-model' when MODEL is nil.
-The single resolver for which model a creation asks for.  A nil result —
-MODEL and the preference both nil — means Emacs asks for no particular
-model and the daemon picks."
-  (let ((effective (or model agent-repl-interactive-model)))
-    (agent-repl--log-verbose nil "elisp.session.effective-model: asked=%s effective=%s"
-                             model effective)
-    effective))
-
 ;;;; ---- The unfocused banner ---------------------------------------------
 
 (defcustom agent-repl-notify-debounce-seconds 2.0
@@ -147,13 +137,6 @@ nil.  No-op when DIR is nil or nothing is looking at it."
         (agent-repl--log ws "elisp.session.magit-refresh: complete dir=%s refreshed=%d"
                          canonical refreshed))
     (agent-repl--log ws "elisp.session.magit-refresh: skipped dir=%S reason=no-directory" dir)))
-
-(defun agent-repl--refresh-magit-status (ws)
-  "Refresh any magit-status buffer looking at WS's worktree.
-Thin wrapper over `agent-repl--refresh-magit-status-for-dir' for the
-WS-keyed callers, so both keyings share one buffer-matching rule."
-  (agent-repl--refresh-magit-status-for-dir
-   (or (agent-repl--ws-get ws :dir) (agent-repl--ws-get ws :project-dir)) ws))
 
 (provide 'agent-repl-session)
 ;;; session.el ends here
