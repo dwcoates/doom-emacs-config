@@ -86,7 +86,7 @@ func TestTailerResumesFromTheStoresCursor(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
-	h.store.cursors = []*storev1.CursorState{{FileId: "1:2", Path: path, Offset: int64(2 * len(turn))}}
+	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn))}}
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -97,6 +97,71 @@ func TestTailerResumesFromTheStoresCursor(t *testing.T) {
 	// never from zero.
 	if got := h.sc.watchers[path].tailer.Offset(); got != int64(len(turn)) {
 		t.Fatalf("resumed offset = %d, want %d (the last turn start below the store's cursor)", got, int64(len(turn)))
+	}
+}
+
+// identityOf answers a file's own dev:inode — the key the store's cursor row is
+// under, and therefore the key a stored cursor must carry to be found again.
+//
+// A PLACEHOLDER USED TO DO. It worked only while the recovered-cursor index was
+// keyed by PATH, which is precisely the defect a vendor rename exposed: the new
+// path found no cursor and the whole file was re-read from zero.
+func identityOf(t *testing.T, path string) string {
+	t.Helper()
+	id, err := tail.Identity(path)
+	if err != nil {
+		t.Fatalf("reading the identity of %s: %v", path, err)
+	}
+	return id
+}
+
+// TestARenamedFileResumesFromTheStoresCursor pins the rename-proof cursor
+// identity: the store's row names where the file USED TO BE, and the tailer for
+// its new path must still resume from that row rather than from zero.
+func TestARenamedFileResumesFromTheStoresCursor(t *testing.T) {
+	// Arrange: the file is where it is now; the cursor row still says the old
+	// name, which is exactly what the store holds between a rename and the next
+	// successful write.
+	h := newHarness(t, &fakeStore{})
+	turn := promptLine + "\n" + assistantLine + "\n"
+	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
+	h.store.cursors = []*storev1.CursorState{{
+		FileId: identityOf(t, path),
+		Path:   filepath.Join(filepath.Dir(path), "sess-0.jsonl"),
+		Offset: int64(2 * len(turn)),
+	}}
+
+	// Act.
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+
+	// Assert: the stored position was found by the file's identity.
+	if got := h.sc.watchers[path].tailer.Offset(); got != int64(len(turn)) {
+		t.Fatalf("resumed offset = %d, want %d; a renamed file must be found by its file_id, never by the path the cursor row happens to name",
+			got, int64(len(turn)))
+	}
+}
+
+// TestACursorWithNoFileIdIsNotIndexed asserts the index refuses a row that names
+// no identity: it keys nothing, so restoring a tailer from it would be restoring
+// from a position no file can be matched to.
+func TestACursorWithNoFileIdIsNotIndexed(t *testing.T) {
+	// Arrange.
+	rows := []*storev1.CursorState{
+		{FileId: "", Path: "/tmp/nameless.jsonl", Offset: 10},
+		{FileId: "1:2", Path: "/tmp/named.jsonl", Offset: 20},
+	}
+
+	// Act.
+	index := indexCursorsByFileID(rows)
+
+	// Assert.
+	if len(index) != 1 {
+		t.Fatalf("the index holds %d rows, want only the one naming an identity", len(index))
+	}
+	if got := index["1:2"].GetOffset(); got != 20 {
+		t.Fatalf("the indexed row states offset %d, want 20", got)
 	}
 }
 
@@ -122,7 +187,7 @@ func TestTheBootRewindHappensOncePerFile(t *testing.T) {
 	h := newHarness(t, &fakeStore{})
 	turn := promptLine + "\n" + assistantLine + "\n"
 	path := h.transcript(t, "sess-1", promptLine, assistantLine, promptLine, assistantLine)
-	h.store.cursors = []*storev1.CursorState{{FileId: "1:2", Path: path, Offset: int64(2 * len(turn))}}
+	h.store.cursors = []*storev1.CursorState{{FileId: identityOf(t, path), Path: path, Offset: int64(2 * len(turn))}}
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}

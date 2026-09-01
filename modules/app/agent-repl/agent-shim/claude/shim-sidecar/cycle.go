@@ -302,7 +302,7 @@ func (s *sidecar) beginCycle() error {
 		// storeclient owns the causal record with its rpc and refusal detail.
 		return fmt.Errorf("recovering cursors: %w", err)
 	}
-	s.cursors = indexCursorsByPath(cursors)
+	s.cursors = indexCursorsByFileID(cursors)
 	// The outage is over, so the next one gets its own opening WARNING.
 	s.suspensionStated = false
 	s.log.With(logging.Context{Operation: "recover-cursors", StoreSocket: s.options.StoreSocket}).Log(
@@ -435,12 +435,29 @@ func (s *sidecar) rescan() {
 		if !ok {
 			continue
 		}
-		s.watch(resolved, now)
+		identity, err := tail.Identity(resolved.Path)
+		if err != nil {
+			// A FILE WHOSE IDENTITY CANNOT BE READ IS NOT WATCHED. Its cursor is
+			// keyed by that identity, so building a tailer without one would
+			// start it at offset 0 — a silent cold start on a file the store may
+			// well hold a position for, which is the one thing this cycle
+			// exists to prevent. It stays discovered and is retried on the next
+			// rescan.
+			s.log.With(logging.Context{
+				Operation: "watch", Path: resolved.Path, TaskID: resolved.TaskID, Level: "warn",
+			}).Log("not watching this file yet: its identity could not be read, and a tailer may only be built from the cursor that identity keys: %v", err)
+			continue
+		}
+		s.watch(resolved, identity, now)
 	}
 }
 
 // watch builds one tailer for a resolved target and starts reading it.
-func (s *sidecar) watch(target discover.Target, now time.Time) {
+//
+// `identity` is the file's own dev:inode, read by the caller, and it is what the
+// recovered cursor is looked up by — never the path, which the vendor may
+// rename under us at any moment.
+func (s *sidecar) watch(target discover.Target, identity string, now time.Time) {
 	s.requireCursors("watch")
 	bound := s.log.With(logging.Context{
 		Component: "tail", Path: target.Path, TaskID: target.TaskID,
@@ -461,7 +478,7 @@ func (s *sidecar) watch(target discover.Target, now time.Time) {
 		RunActivityID:     s.owners.activityFor(target.TaskID),
 	}
 	tailer := tail.New(target.Path, target.Codec(), s.newHandler(target.Kind, bound), ctx, bound)
-	if cursor := s.cursors[target.Path]; cursor != nil {
+	if cursor := s.cursors[identity]; cursor != nil {
 		tailer.Restore(cursor)
 		s.rewindOnce(target, tailer)
 	}
@@ -745,14 +762,21 @@ func (s *sidecar) storeWrite(what string, batch *storev1.EntryBatch) error {
 	return err
 }
 
-// indexCursorsByPath keys recovered cursors by their file path for tailer
-// restore. The store's own key is the file id; the path is what discovery hands
-// back, and both are carried on every CursorState.
-func indexCursorsByPath(cursors []*storev1.CursorState) map[string]*storev1.CursorState {
+// indexCursorsByFileID keys recovered cursors by the FILE'S OWN IDENTITY for
+// tailer restore.
+//
+// THE IDENTITY IS WHAT SURVIVES THE VENDOR'S RENAMES, and that is the whole
+// reason the store keys its cursor row by file_id rather than by path. Keying
+// this index by path instead made a rename look like a file nobody had ever
+// read: the new path found no cursor, the tailer was built at offset 0, and the
+// entire conversation was re-converted and re-written — absorbed by the store
+// only because the write ids are deterministic. `path` on a CursorState is where
+// the file was last SEEN, which is a thing to display and never a thing to key.
+func indexCursorsByFileID(cursors []*storev1.CursorState) map[string]*storev1.CursorState {
 	out := make(map[string]*storev1.CursorState, len(cursors))
 	for _, cursor := range cursors {
-		if cursor.GetPath() != "" {
-			out[discover.Normalize(cursor.GetPath())] = cursor
+		if cursor.GetFileId() != "" {
+			out[cursor.GetFileId()] = cursor
 		}
 	}
 	return out
