@@ -114,6 +114,9 @@ export function convertUserRecord(
         uuidOf(toolUseId),
         toolUseId,
         structured,
+        // The vendor names the spool path only in the result's PROSE on a
+        // backgrounded Bash; see outputPathFromProse.
+        outcome.content,
       );
       if (detachment !== undefined) entries.push(detachment);
     }
