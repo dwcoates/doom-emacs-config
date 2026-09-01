@@ -2,81 +2,218 @@ package harness
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
+	"sync"
 	"testing"
+
+	"claude-repld/integration/fakegit"
 )
 
-// Repo is a fake git repository: a main worktree on `main` with one commit.
-type Repo struct {
-	// Dir is the main worktree.
-	Dir string
+// GIT IS NEVER CALLED DURING TESTING. A `Repo` here is a FAKE repository: a
+// directory tree with a `.git` marker and a row in the fixture file that the
+// scripted `git` on the daemon's PATH answers from. Nothing runs `git init`,
+// nothing spawns the real binary, and every git fact the daemon reads —
+// default branch, commits, worktree list, conflicts, landed ranges, changed
+// paths, cleanliness — is fixture data this file writes.
 
-	t *testing.T
+// GitWorld is one test's fake git universe: the fixture file every scripted
+// `git` invocation reads, plus the directory the repositories live under.
+type GitWorld struct {
+	// StateFile is the fixture file, named to children by FAKEGIT_STATE.
+	StateFile string
+
+	root string
+	t    *testing.T
+}
+
+// worlds holds one world per test, so a repository can be built before or
+// after the daemon that will read it.
+var (
+	worldsMu sync.Mutex
+	worlds   = map[*testing.T]*GitWorld{}
+)
+
+// World answers this test's git world, minting it on first use.
+func World(t *testing.T) *GitWorld {
+	t.Helper()
+	worldsMu.Lock()
+	defer worldsMu.Unlock()
+	if w, ok := worlds[t]; ok {
+		return w
+	}
+	root := t.TempDir()
+	w := &GitWorld{StateFile: filepath.Join(root, "fakegit.json"), root: filepath.Join(root, "repos"), t: t}
+	if err := os.MkdirAll(w.root, 0o755); err != nil {
+		t.Fatalf("harness: mkdir %s: %v", w.root, err)
+	}
+	worlds[t] = w
+	t.Cleanup(func() {
+		worldsMu.Lock()
+		delete(worlds, t)
+		worldsMu.Unlock()
+	})
+	return w
 }
 
 // DefaultBranch is the branch every fake repository starts on.
 const DefaultBranch = "main"
 
-// NewRepo initializes a repository under the test's temp tree and commits a
-// README on the default branch.
-func NewRepo(t *testing.T) *Repo {
-	t.Helper()
-	return NewRepoAt(t, filepath.Join(t.TempDir(), "repo"))
+// Repo is one fake repository's main worktree.
+type Repo struct {
+	// Dir is the main worktree.
+	Dir string
+
+	w *GitWorld
+	t *testing.T
 }
 
-// NewRepoAt initializes a repository at an exact path, for the tests that care
+// NewRepo mints a fake repository under the test's own tree.
+func NewRepo(t *testing.T) *Repo {
+	t.Helper()
+	w := World(t)
+	return NewRepoAt(t, filepath.Join(w.root, "repo-"+mintName(w)))
+}
+
+// NewRepoAt mints a fake repository at an exact path, for the tests that care
 // where the workspace lives (the multi-repo root, the daemon's self repo).
 func NewRepoAt(t *testing.T, dir string) *Repo {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	w := World(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dir, err)
 	}
-	r := &Repo{Dir: dir, t: t}
-	r.git("init", "--initial-branch="+DefaultBranch)
-	r.git("config", "user.name", "Integration Harness")
-	r.git("config", "user.email", "harness@example.invalid")
-	r.git("config", "commit.gpgsign", "false")
-	r.Commit("README.md", "fake repository\n")
+	r := &Repo{Dir: dir, w: w, t: t}
+	r.edit(func(s *fakegit.State) {
+		if s.Repo(dir) != nil {
+			t.Fatalf("harness: %s is already a fake repository", dir)
+		}
+		repo := &fakegit.Repo{
+			Dir:           dir,
+			CommonDir:     filepath.Join(fakegit.Canon(dir), ".git"),
+			DefaultBranch: DefaultBranch,
+			BranchHeads:   map[string]string{},
+		}
+		repo.Worktrees = []*fakegit.Worktree{{Dir: dir, Branch: DefaultBranch}}
+		repo.AddBranch(DefaultBranch, "")
+		s.Repos = append(s.Repos, repo)
+		c := s.AddCommit(repo, DefaultBranch, "add README.md", nil, []string{"README.md"})
+		repo.Worktrees[0].Head = c.SHA
+	})
+	writeFile(t, filepath.Join(dir, "README.md"), "fake repository\n")
 	return r
 }
 
-// Commit writes a file and commits it, answering the new commit's sha.
+// mintName answers a fresh repository directory name.
+func mintName(w *GitWorld) string {
+	entries, err := os.ReadDir(w.root)
+	if err != nil {
+		return "0"
+	}
+	return string(rune('a' + len(entries)))
+}
+
+// edit mutates the fixture file under the same lock the scripted `git` takes.
+func (r *Repo) edit(fn func(*fakegit.State)) {
+	r.t.Helper()
+	r.w.edit(fn)
+}
+
+func (w *GitWorld) edit(fn func(*fakegit.State)) {
+	w.t.Helper()
+	if err := fakegit.WithLock(w.StateFile, func(s *fakegit.State) error {
+		fn(s)
+		return nil
+	}); err != nil {
+		w.t.Fatalf("harness: fakegit state: %v", err)
+	}
+}
+
+// read answers a copy of the fixture file.
+func (w *GitWorld) read() *fakegit.State {
+	w.t.Helper()
+	s, err := fakegit.Load(w.StateFile)
+	if err != nil {
+		w.t.Fatalf("harness: fakegit state: %v", err)
+	}
+	return s
+}
+
+// Calls lists every git invocation the daemon made, oldest first, so a test
+// can assert on the conversation rather than only on its effects.
+func (w *GitWorld) Calls() []fakegit.Call { return w.read().Calls }
+
+// state answers this repository's fixture row.
+func (r *Repo) state(s *fakegit.State) *fakegit.Repo {
+	repo := s.Repo(r.Dir)
+	if repo == nil {
+		r.t.Fatalf("harness: %s is not a fake repository", r.Dir)
+	}
+	return repo
+}
+
+// Commit records a commit on the repository's current branch and answers its
+// sha. The file is written too, because the daemon reads some of them.
 func (r *Repo) Commit(file, content string) string {
 	r.t.Helper()
 	writeFile(r.t, filepath.Join(r.Dir, file), content)
-	r.git("add", file)
-	r.git("commit", "-m", "add "+file)
-	return strings.TrimSpace(r.gitOut("rev-parse", "HEAD"))
+	return r.CommitIn(r.Dir, file, content)
 }
 
-// Branch creates and checks out a branch off the current head.
+// CommitIn records a commit inside one of the repository's worktrees.
+func (r *Repo) CommitIn(worktree, file, content string) string {
+	r.t.Helper()
+	writeFile(r.t, filepath.Join(worktree, file), content)
+	var sha string
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		wt := repo.Worktree(worktree)
+		if wt == nil {
+			r.t.Fatalf("harness: %s is not a worktree of %s", worktree, r.Dir)
+		}
+		c := s.AddCommit(repo, wt.Branch, "add "+file, []string{wt.Head}, []string{file})
+		sha = c.SHA
+	})
+	return sha
+}
+
+// Branch creates a branch off the current head and checks it out in the main
+// worktree.
 func (r *Repo) Branch(name string) {
 	r.t.Helper()
-	r.git("checkout", "-b", name)
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		wt := repo.Worktree(r.Dir)
+		repo.AddBranch(name, wt.Head)
+		wt.Branch = name
+	})
 }
 
-// Checkout switches to an existing branch.
+// Checkout switches the main worktree to an existing branch.
 func (r *Repo) Checkout(name string) {
 	r.t.Helper()
-	r.git("checkout", name)
+	r.edit(func(s *fakegit.State) {
+		repo := r.state(s)
+		if !repo.HasBranch(name) {
+			r.t.Fatalf("harness: %s has no branch %s", r.Dir, name)
+		}
+		wt := repo.Worktree(r.Dir)
+		wt.Branch = name
+		wt.Head = repo.BranchHeads[name]
+	})
 }
 
-// Head is the current commit sha.
+// Head is the main worktree's current commit sha.
 func (r *Repo) Head() string {
 	r.t.Helper()
-	return strings.TrimSpace(r.gitOut("rev-parse", "HEAD"))
+	return r.state(r.w.read()).Worktree(r.Dir).Head
 }
 
 // Worktrees lists every worktree path the repository knows, main included.
 func (r *Repo) Worktrees() []string {
 	r.t.Helper()
 	var out []string
-	for _, line := range strings.Split(r.gitOut("worktree", "list", "--porcelain"), "\n") {
-		if path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree "); ok {
-			out = append(out, path)
-		}
+	for _, wt := range r.state(r.w.read()).Worktrees {
+		out = append(out, wt.Dir)
 	}
 	return out
 }
@@ -84,107 +221,109 @@ func (r *Repo) Worktrees() []string {
 // Branches lists every local branch.
 func (r *Repo) Branches() []string {
 	r.t.Helper()
-	var out []string
-	for _, line := range strings.Split(r.gitOut("branch", "--format=%(refname:short)"), "\n") {
-		if b := strings.TrimSpace(line); b != "" {
-			out = append(out, b)
-		}
-	}
-	return out
+	return r.state(r.w.read()).Branches
 }
 
 // HasBranch reports whether a local branch exists.
 func (r *Repo) HasBranch(name string) bool {
 	r.t.Helper()
-	for _, b := range r.Branches() {
-		if b == name {
-			return true
-		}
-	}
-	return false
+	return r.state(r.w.read()).HasBranch(name)
 }
 
 // HasWorktree reports whether a worktree path is still registered.
 func (r *Repo) HasWorktree(dir string) bool {
 	r.t.Helper()
-	want := filepath.Clean(dir)
-	for _, w := range r.Worktrees() {
-		if filepath.Clean(w) == want {
-			return true
-		}
-	}
-	return false
+	return r.state(r.w.read()).Worktree(dir) != nil
 }
 
 // LogSubjects lists the subjects reachable from a ref, newest first.
 func (r *Repo) LogSubjects(ref string) []string {
 	r.t.Helper()
+	s := r.w.read()
+	repo := r.state(s)
+	sha := ref
+	if head, ok := repo.BranchHeads[ref]; ok {
+		sha = head
+	}
 	var out []string
-	for _, line := range strings.Split(r.gitOut("log", "--format=%s", ref), "\n") {
-		if s := strings.TrimSpace(line); s != "" {
-			out = append(out, s)
+	seen := map[string]bool{}
+	for sha != "" && !seen[sha] {
+		seen[sha] = true
+		c := s.Commits[sha]
+		if c == nil {
+			break
 		}
+		out = append(out, c.Subject)
+		if len(c.Parents) == 0 {
+			break
+		}
+		sha = c.Parents[0]
 	}
 	return out
 }
 
-func (r *Repo) git(args ...string) {
-	r.t.Helper()
-	r.gitOut(args...)
-}
-
-// gitOut runs git in the repository with the ambient git environment stripped,
-// so a hook-leaked GIT_DIR can never reach it.
-func (r *Repo) gitOut(args ...string) string {
-	r.t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", r.Dir}, args...)...)
-	cmd.Env = cleanGitEnv(os.Environ())
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		r.t.Fatalf("harness: git %s in %s: %v\n%s", strings.Join(args, " "), r.Dir, err, out)
-	}
-	return string(out)
-}
-
-// gitEnvKeys are the variables that must never be inherited by a git child.
-var gitEnvKeys = []string{
-	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-}
-
-func cleanGitEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		key, _, _ := strings.Cut(kv, "=")
-		drop := false
-		for _, bad := range gitEnvKeys {
-			if key == bad {
-				drop = true
-				break
-			}
-		}
-		if !drop {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
-
-// AddWorktree creates a branch off the default branch and checks it out into a
-// sibling worktree directory, answering that directory.
+// AddWorktree cuts a branch off the default branch into a sibling worktree
+// directory, exactly as the scripted `git worktree add` would, and answers it.
 func (r *Repo) AddWorktree(name string) string {
 	r.t.Helper()
 	dir := filepath.Join(filepath.Dir(r.Dir), filepath.Base(r.Dir)+"-"+name)
-	r.git("worktree", "add", "-b", name, dir, DefaultBranch)
+	r.edit(func(s *fakegit.State) {
+		res := fakegit.Run(s, r.Dir, []string{"-C", r.Dir, "worktree", "add", "-b", name, dir, DefaultBranch})
+		if res.Exit != 0 {
+			r.t.Fatalf("harness: fake `worktree add %s`: %s", name, res.Stderr)
+		}
+	})
 	return dir
 }
 
-// CommitIn writes and commits a file inside one of the repository's worktrees.
-func (r *Repo) CommitIn(worktree, file, content string) string {
+// ScriptConflict makes the NEXT `merge --no-ff` of branch inside worktreeDir
+// leave these paths conflicted instead of landing.
+func (r *Repo) ScriptConflict(worktreeDir, branch string, paths ...string) {
 	r.t.Helper()
-	writeFile(r.t, filepath.Join(worktree, file), content)
-	sub := &Repo{Dir: worktree, t: r.t}
-	sub.git("add", file)
-	sub.git("commit", "-m", "add "+file)
-	return strings.TrimSpace(sub.gitOut("rev-parse", "HEAD"))
+	r.edit(func(s *fakegit.State) {
+		s.Conflicts = append(s.Conflicts, &fakegit.Conflict{Dir: worktreeDir, Branch: branch, Paths: paths})
+	})
+}
+
+// ScriptFailure makes the NEXT git command matching this prefix fail.
+func (r *Repo) ScriptFailure(dir string, exit int, stderr string, match ...string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		s.Failures = append(s.Failures, &fakegit.Failure{Dir: dir, Match: match, Stderr: stderr, Exit: exit})
+	})
+}
+
+// SetDirty makes a worktree report uncommitted content.
+func (r *Repo) SetDirty(worktreeDir string, dirty bool) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		wt := r.state(s).Worktree(worktreeDir)
+		if wt == nil {
+			r.t.Fatalf("harness: %s is not a worktree of %s", worktreeDir, r.Dir)
+		}
+		wt.Dirty = dirty
+	})
+}
+
+// SetPaths records the paths a commit touched, which is what the rollout
+// controller classifies subsystems from.
+func (r *Repo) SetPaths(sha string, paths ...string) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		c := s.Commits[sha]
+		if c == nil {
+			r.t.Fatalf("harness: %s is not a commit in the fake world", sha)
+		}
+		c.Paths = paths
+	})
+}
+
+// ConflictedFiles lists the paths a worktree currently has in conflict.
+func (r *Repo) ConflictedFiles(worktreeDir string) []string {
+	r.t.Helper()
+	wt := r.state(r.w.read()).Worktree(worktreeDir)
+	if wt == nil {
+		return nil
+	}
+	return wt.Conflicted
 }

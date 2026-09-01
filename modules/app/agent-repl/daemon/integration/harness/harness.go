@@ -66,6 +66,7 @@ import (
 var (
 	daemonBinary   string
 	fakeshimBinary string
+	gitBinary      string
 	buildErr       error
 )
 
@@ -88,9 +89,14 @@ func Main(m *testing.M) int {
 	}
 	daemonBinary = filepath.Join(dir, "claude-repld")
 	fakeshimBinary = filepath.Join(dir, "fakeshim")
+	// The scripted `git`. It is built under its real name because it is placed
+	// first on the daemon's PATH: nothing in a test ever reaches the real
+	// binary.
+	gitBinary = filepath.Join(dir, "git")
 	for _, b := range []struct{ out, pkg string }{
 		{daemonBinary, "./cmd/claude-repld"},
 		{fakeshimBinary, "./integration/fakeshim"},
+		{gitBinary, "./integration/fakegit/git"},
 	} {
 		cmd := exec.Command("go", "build", "-o", b.out, b.pkg)
 		cmd.Dir = module
@@ -126,6 +132,15 @@ func FakeShimBinary(t *testing.T) string {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
 	}
 	return fakeshimBinary
+}
+
+// FakeGitBinary is the built scripted `git`.
+func FakeGitBinary(t *testing.T) string {
+	t.Helper()
+	if gitBinary == "" {
+		t.Fatal("harness: the suite's TestMain must call harness.Main")
+	}
+	return gitBinary
 }
 
 // moduleRoot walks up from the working directory to the daemon module root
