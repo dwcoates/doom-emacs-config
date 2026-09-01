@@ -118,16 +118,40 @@ helper."
   "Return a HostWorkspace protojson alist: a LIVE, open session with one fault.
 FAULT-DETAIL is that fault's `detail' string.  Every non-optional field of
 the live arm is populated, matching what `agent-repl-host--live' requires
-to resolve at all."
+to resolve at all.
+
+THE FAULT NAMES ITS KIND.  \"`detail' supplements it and never replaces
+it, so a fault with no kind is a contract breach\"
+(`agent-repl-wire-decode-host-fault-kind'), and `opened_at_ms' is
+required beside it -- a fixture missing either is refused while decoding,
+which leaves the push landing NO host state at all."
   `((existing . ((id . ((value . "host-session-verbs")))
                  (live . ((generation . ((value . "gen-1")))
                           (shimAttached . t)
                           (claude . ((sessionId . "vendor-1")
                                      (configDir . "/home/itest/.claude")))
                           (backfill . ((done . ())))
-                          (faults . [((detail . ,fault-detail))])
+                          (faults . [((detail . ,fault-detail)
+                                      (openedAtMs . "1735689600000")
+                                      (linkSevered . ()))])
                           (open . ())))))
     (naming . ())))
+
+(defun agent-repl-itest-verbs--await-health (text)
+  "Block until the health buffer carries TEXT.
+THE BUFFER OUTLIVES THE SCENARIO -- every pull APPENDS into the one
+`*agent-repl-health*\=' -- so waiting on the buffer's mere EXISTENCE is
+satisfied instantly by the previous scenario's render and races the one
+under test.  Waiting on the rendered TEXT is what actually observes this
+pull.  Callers kill the buffer before acting so the text cannot be a
+leftover either."
+  (agent-repl-itest--wait-until
+   (lambda ()
+     (let ((buffer (get-buffer "*agent-repl-health*")))
+       (and buffer
+            (with-current-buffer buffer
+              (string-match-p (regexp-quote text) (buffer-string))))))
+   nil (format "the health buffer to carry %S" text)))
 
 (defun agent-repl-itest-verbs--ack-logged-p (daemon op)
   "Return non-nil when DAEMON's log carries a success ack for OP.
@@ -577,13 +601,12 @@ dynamic detail strings."
       (agent-repl-itest--script daemon "DaemonHealth" response))
     (agent-repl-itest-verbs--with-workspace daemon ref
       (ignore ref)
+      (when (get-buffer "*agent-repl-health*") (kill-buffer "*agent-repl-health*"))
       ;; Act.
       (agent-repl-daemon-health)
       (agent-repl-itest--await-call daemon "DaemonHealth")
       ;; Assert.
-      (agent-repl-itest--wait-until
-       (lambda () (get-buffer "*agent-repl-health*"))
-       nil "the health buffer")
+      (agent-repl-itest-verbs--await-health "merge worker wedged")
       (with-current-buffer "*agent-repl-health*"
         (should (string-match-p "merge worker wedged" (buffer-string)))))))
 
@@ -1057,8 +1080,7 @@ pinned elsewhere, leaving the healthy branch untested without this."
       (agent-repl-daemon-health)
       (agent-repl-itest--await-call daemon "DaemonHealth")
       ;; Assert.
-      (agent-repl-itest--wait-until
-       (lambda () (get-buffer "*agent-repl-health*")) nil "the health buffer")
+      (agent-repl-itest-verbs--await-health "daemon: HEALTHY")
       (with-current-buffer "*agent-repl-health*"
         (should (string-match-p "daemon: HEALTHY" (buffer-string)))))))
 
@@ -1071,7 +1093,11 @@ the workspace)\" (elisp-fanout.md §9)."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script
      daemon "SessionHealth"
-     '((success . ((unhealthy . ((faults . [((detail . "pulled fault"))])))))))
+     ;; THE ARM IS THE FAULT CLASS: a SessionFault with no `kind' is a
+     ;; contract breach the codec refuses while decoding, so the scripted
+     ;; fault names one (`agent-repl-wire-decode-session-fault-kind').
+     '((success . ((unhealthy . ((faults . [((detail . "pulled fault")
+                                             (linkSevered . ()))])))))))
     (agent-repl-itest-verbs--with-workspace daemon ref
       (agent-repl-itest--push
        daemon "host"
@@ -1085,8 +1111,8 @@ the workspace)\" (elisp-fanout.md §9)."
       (agent-repl-session-health agent-repl-itest-verbs--ws)
       (agent-repl-itest--await-call daemon "SessionHealth")
       ;; Assert.
-      (agent-repl-itest--wait-until
-       (lambda () (get-buffer "*agent-repl-health*")) nil "the health buffer")
+      (agent-repl-itest-verbs--await-health "pulled fault")
+      (agent-repl-itest-verbs--await-health "standing fault")
       (with-current-buffer "*agent-repl-health*"
         (should (string-match-p "pulled fault" (buffer-string)))
         (should (string-match-p "standing fault" (buffer-string)))))))

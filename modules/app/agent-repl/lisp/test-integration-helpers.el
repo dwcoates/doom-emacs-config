@@ -142,9 +142,19 @@ almost useless."
 Waits for it to publish `daemon.addr' and returns the
 `agent-repl-itest-daemon' describing it.  The process environment carries
 `AGENT_REPL_STATE_DIR' and `AGENT_REPL_FORBID_VENDOR_CALLS=1'; nothing
-this process can reach is a vendor, and the variable says so anyway."
+this process can reach is a vendor, and the variable says so anyway.
+
+A REUSED STATE DIR ALREADY CARRIES THE INCUMBENT'S ADDRESS, and that is
+the whole difficulty of staging a handover: waiting for `daemon.addr' to
+merely EXIST is satisfied by the file the FIRST daemon wrote, so the
+successor would be described by the primary's address and every call
+\"on the successor\" would land on the primary -- two daemons that look
+like one, and a handover scenario that silently asserts nothing.  So the
+incumbent's value is read BEFORE the spawn and the wait is for a
+DIFFERENT one."
   (let* ((binary (agent-repl-itest--ensure-binary))
          (dir (or state-dir (agent-repl-itest--private-state-dir)))
+         (incumbent (agent-repl-itest--read-addr-file dir))
          (stderr (generate-new-buffer (format " *agent-repl-itest-fakedaemon-log %s*"
                                               (file-name-nondirectory
                                                (directory-file-name dir)))))
@@ -165,10 +175,12 @@ this process can reach is a vendor, and the variable says so anyway."
              :noquery t
              :stderr stderr))))
     (agent-repl-itest--wait-until
-     (lambda () (or (agent-repl-itest--read-addr-file dir)
+     (lambda () (or (let ((published (agent-repl-itest--read-addr-file dir)))
+                      (and published (not (equal published incumbent))))
                     (not (process-live-p process))))
      agent-repl-itest-default-timeout
-     (format "the fake daemon to publish %s" (agent-repl-itest--addr-file dir)))
+     (format "the fake daemon to publish %s%s" (agent-repl-itest--addr-file dir)
+             (if incumbent (format " over the incumbent %s" incumbent) "")))
     (unless (process-live-p process)
       (let ((text (with-current-buffer stderr (buffer-string))))
         (error "agent-repl-itest: the fake daemon exited before publishing daemon.addr:\n%s"
