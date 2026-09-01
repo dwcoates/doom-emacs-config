@@ -79,7 +79,7 @@
 (declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
 (declare-function agent-repl-rpc-submit-prompt "agent-repl-rpc" (conn request &rest keys))
 (declare-function agent-repl-prompt-queue-offer "agent-repl-prompt-queue"
-                  (ws said origin raw))
+                  (ws said origin raw &optional key))
 (declare-function agent-repl--kickoff-prompt-summary "agent-repl-prompt-summary" (ws raw))
 (declare-function evil-insert-state "evil" (&optional arg))
 
@@ -608,34 +608,42 @@ once the merge resolves."
        (agent-repl--error ws "elisp.input.unknown-error-arm ws=%s arm=%S" ws arm)
        (message "agent-repl: submission refused (%S)" arm)))))
 
-(defun agent-repl--input-on-failure (ws said origin raw detail)
+(defun agent-repl--input-on-failure (ws said origin raw detail key)
   "Handle a TRANSPORT failure for WS's submission.
 The daemon never answered, so nothing is known about whether the prompt
 landed.  The composer KEEPS its text and the prompt is offered to the
-hold queue, which sends it for real once the link is back."
-  (agent-repl--error ws "elisp.input.transport-failure ws=%s origin=%S detail=%S"
-                     ws origin detail)
-  (agent-repl-prompt-queue-offer ws said origin raw)
+hold queue, which sends it for real once the link is back.
+
+KEY is THIS attempt\='s idempotency key and rides into the queue: the
+re-drive is a RETRY of this submission, not a second turn, so it goes
+back out under the same key and the daemon can refuse a duplicate."
+  (agent-repl--error ws "elisp.input.transport-failure ws=%s origin=%S key=%s detail=%S"
+                     ws origin key detail)
+  (agent-repl-prompt-queue-offer ws said origin raw key)
   (agent-repl--input-flash ws "send failed -- held until the daemon is back")
   (message "agent-repl: the daemon did not answer; the prompt is held"))
 
-(cl-defun agent-repl--input-submit (ws said origin raw)
+(cl-defun agent-repl--input-submit (ws said origin raw &optional key)
   "Submit SAID to WS with ORIGIN; RAW is the user's own text for the record.
 Resolves the workspace ref and the connection, mints the idempotency key,
 and dispatches the answer arms.  Returns the idempotency key.
+
+KEY re-uses an earlier attempt\='s idempotency key instead of minting a
+fresh one -- the outage queue\='s re-drive passes the failed attempt\='s
+key, because a re-drive is a RETRY and not a second turn.
 
 The ref is REQUIRED on every submit: it names WHICH workspace the
 submission belongs to, and it is the daemon-minted echo token, never a
 value Emacs constructs from a path."
   (let ((ref (agent-repl-host-ref ws))
         (conn (or (agent-repl-host-conn ws) (agent-repl-link-primary)))
-        (key (agent-repl--uuid)))
+        (key (or key (agent-repl--uuid))))
     (unless ref
       (agent-repl--fatal ws "elisp.input.submit-no-ref ws=%s origin=%S" ws origin))
     (unless conn
       (agent-repl--warn ws "elisp.input.submit-no-conn ws=%s origin=%S" ws origin)
       (agent-repl--input-on-failure
-       ws said origin raw (list :kind :transport :message "no daemon connection"))
+       ws said origin raw (list :kind :transport :message "no daemon connection") key)
       (cl-return-from agent-repl--input-submit key))
     (agent-repl--info ws "elisp.input.submit ws=%s origin=%S key=%s blocks=%d"
                       ws origin key (length (plist-get (plist-get said :content) :blocks)))
@@ -648,7 +656,7 @@ value Emacs constructs from a path."
          (:error (agent-repl--input-on-error ws origin (plist-get response :value)))
          (arm (agent-repl--error ws "elisp.input.unknown-response-arm ws=%s arm=%S" ws arm))))
      :on-failure
-     (lambda (detail) (agent-repl--input-on-failure ws said origin raw detail)))
+     (lambda (detail) (agent-repl--input-on-failure ws said origin raw detail key)))
     key))
 
 ;;;; ---- The send pipeline ------------------------------------------------
