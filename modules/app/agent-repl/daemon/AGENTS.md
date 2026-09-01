@@ -31,13 +31,53 @@ environment. Every flag is optional.
 | `--default-config-dir <dir>` | the default account root | the CLI's default (`~/.claude`) |
 | `--multi-repo-config-dir <dir>` | the account root for workspaces under `$MULTI_REPO_ROOT` | unset = the default root |
 | `--idle-cutoff <duration>` | hibernate a session idle this long | the keep-alive idle cutoff |
-| `--pprof <unix path or 127.0.0.1:port>` | opt-in local profiling surface | off |
+| `--pprof <unix path or 127.0.0.1:port>` | opt-in local profiling surface, opened BEFORE any dependency; a wildcard or routable bind is refused, not opened | off |
+| `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
+
+## Run and boot order (binding; `cmd/claude-repld`)
+
+`run` performs exactly this sequence, and every step's failure is fatal:
+
+1. the four environment contracts, with `--fake` and `--state-dir` applied over
+   them;
+2. the state root's layout — every directory created, then the socket path
+   budget checked, so an overlong root is refused here rather than at the first
+   shim spawn;
+3. the log surfaces; the run log's open failure is a BOOT FATAL, because a
+   daemon that cannot write its own narrative cannot report what it then does
+   wrong;
+4. `--pprof`, BEFORE any dependency, so a boot wedged on one is still
+   diagnosable through it;
+5. the ONE loopback listener, bound FIRST as the boot-exclusivity claim (an
+   exclusive kernel lock on `daemon.lock` beside `daemon.addr`); an UNFLAGGED
+   second daemon loses there and exits without touching the incumbent's
+   listener or its advertisement;
+6. `daemon.addr`, written atomically by an incumbent; a `--joining` successor
+   DEFERS it and instead writes `joining.addr` where the incumbent that spawned
+   it is waiting, and `daemon.addr` is written only once every workspace is
+   adopted (the rollout's `WriteDaemonAddr` hook);
+7. the state client — `wsm.Open`, or `wsm.OpenReadOnly` for a joining daemon,
+   which owns no workspace and must not be a second writer;
+8. the component graph, then `boot.Sequence.Run`: adopt the shims whose
+   workspace lock is still held (never kill-and-restart), reconcile the intent
+   manifest (all four dispositions persisted as faults), restore the holds
+   all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
+   transaction each (an adopted workspace's in-flight turns are re-opened by its
+   sessionwatcher instead), recover the in-flight merges, and — for a successor
+   — `rollout.Controller.Join`;
+9. `server.New` behind `server.H2C` on the claimed listener;
+10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn, the
+    streams are closed, and the state client and the log sinks are closed.
+
+A lock probe that could NOT TELL is never read as free: such a workspace is
+neither adopted nor orphan-closed, and the boot report names it.
 
 ## Environment (process contracts and test knobs)
 
 | variable | scope | meaning |
 | --- | --- | --- |
 | `AGENT_REPL_STATE_DIR` | contract | the one state root shared with Emacs, skills and tests |
+| `AGENT_REPL_FAKE` | contract | the whole stack's fake mode: shims spawn with `--fake` and the classifier is scripted. `--fake` overrides it; the flag can only turn it ON |
 | `AGENT_REPL_FORBID_VENDOR_CALLS` | contract | every vendor exec site refuses (classifier, login pty with the default binary, shim spawn without `--fake`) |
 | `AGENT_REPL_OWNED=1` | contract | propagated into every shim so vendor hooks recognize our processes |
 | (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
@@ -69,6 +109,30 @@ with `open + flock(LOCK_EX|LOCK_NB)`, released at once) and
 See ARCHITECTURE.md "State root layout": `daemon.addr`, `wsm.db`,
 `logs/daemon.run.log`, `sock/<workspace-id>.sock`, `intent/manifest.json`,
 `output/workspace_commands_*.json`, `merge-logs/`.
+
+## Not yet wired (wave 3)
+
+`cmd/claude-repld` runs its whole boot spine, but `buildGraph` REFUSES rather
+than substituting: `graph.go`'s `unwired` list names every Deps field with no
+landed source (the rollout's shim fleet and handover halves, an AwaitFree
+freeness answer, `workspace.Deps.Cards` and `Ownership`, a
+`workspace.Deps.EvictLogSink` field that does not exist, the command panels,
+the merge orchestrator's turn waiter / displaced capture / occupancy /
+revival-start hooks, the feed's image resolver, and the checkout-path
+resolution the `--shim-main` / `--webapp-dist` / `--prompts-dir` defaults need).
+The daemon exits naming all of them; nothing here improvises a stand-in,
+because cmd is the composition root and holds no policy.
+
+## Deploy chain
+
+`bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →
+webapp → daemon → store/sidecar; its step 5 evaluates
+`(agent-repl-runtime-restart-await)` in `lisp/services.el` via emacsclient (the
+old `agent-repl-frontend-daemon-restart-await` is dead), and
+`bin/build-frontend.sh` builds `daemon/bin/claude-repld` from
+`./cmd/claude-repld`. The rollout invokes the same chain with `--no-bounce` and
+never a second build path. `agent-shim/wire` is DELETED: nothing in the rebuilt
+daemon imports it, and its `bin/test-all.sh` roster entry is gone.
 
 ## Logging
 
