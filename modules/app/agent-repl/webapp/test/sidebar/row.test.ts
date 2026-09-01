@@ -338,13 +338,37 @@ describe("the row click", () => {
     const sc = sidebarContext(
       appContext({
         selectWorkspace: () =>
-          create(SelectWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+          create(SelectWorkspaceResponseSchema, {
+            result: {
+              case: "error",
+              value: { cause: { case: "unknownWorkspace", value: {} } },
+            },
+          }),
       }),
     );
     const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
     await click(drawn.querySelector("[data-select]") as Element);
     expect(drawn.querySelector(":scope > .sb-refusal")?.textContent).toBe(
-      "SelectWorkspace refused",
+      "the daemon does not know this workspace",
+    );
+  });
+
+  it("labels the row's refusal with the cause's own arm", async () => {
+    const sc = sidebarContext(
+      appContext({
+        selectWorkspace: () =>
+          create(SelectWorkspaceResponseSchema, {
+            result: {
+              case: "error",
+              value: { cause: { case: "notYetAdopted", value: {} } },
+            },
+          }),
+      }),
+    );
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sc, "R");
+    await click(drawn.querySelector("[data-select]") as Element);
+    expect(drawn.querySelector(":scope > .sb-refusal")?.getAttribute("data-arm")).toBe(
+      "notYetAdopted",
     );
   });
 });

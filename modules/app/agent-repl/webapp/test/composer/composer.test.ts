@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
+import { oneofArms } from "../arms.js";
 import {
+  SubmitPromptErrorSchema,
   SubmitPromptResponseSchema,
   type SubmitPromptCommandPanel,
   type SubmitPromptRequest,
@@ -59,6 +61,18 @@ const mergingError = (): SubmitPromptResponse =>
   });
 const unsetError = (): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, { result: { case: "error", value: {} } });
+
+/** What each fact-carrying arm must carry for its sentence to be complete. */
+const REASON_FILL: Readonly<Record<string, Record<string, unknown>>> = {
+  workspaceRefMismatch: { registryDir: "/w/registry" },
+  transferringAway: { address: "127.0.0.1:7777" },
+};
+
+/** A refusal carrying ARM, with the payload that arm's sentence needs. */
+const refusalError = (arm: string) => (): SubmitPromptResponse =>
+  create(SubmitPromptResponseSchema, {
+    result: { case: "error", value: { reason: { case: arm, value: REASON_FILL[arm] ?? {} } } },
+  } as never);
 
 interface Harness {
   host: HTMLElement;
@@ -378,14 +392,51 @@ describe("the refusals", () => {
     h.handle.dispose();
   });
 
-  it("names an unset reason rather than guessing an arm", async () => {
-    const h = mount(unsetError);
+  it.each(oneofArms(SubmitPromptErrorSchema, "reason"))(
+    "labels the %s arm and says something about it",
+    async (arm) => {
+      const h = mount(refusalError(arm));
+      await sendText(h, "hello");
+      const refusal = h.host.querySelector(".composer-refusal");
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([arm, false]);
+      h.handle.dispose();
+    },
+  );
+
+  it.each(oneofArms(SubmitPromptErrorSchema, "reason"))(
+    "keeps the words in the box through a %s refusal",
+    async (arm) => {
+      const h = mount(refusalError(arm));
+      await sendText(h, "hello");
+      expect(h.input.value).toBe("hello");
+      h.handle.dispose();
+    },
+  );
+
+  it("names the successor daemon on a transfer, from the one shared wording", async () => {
+    const h = mount(refusalError("transferringAway"));
     await sendText(h, "hello");
-    expect(h.host.querySelector(".composer-refusal")?.getAttribute("data-arm")).toBe("unset");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain("127.0.0.1:7777");
     h.handle.dispose();
   });
 
-  it("keeps the text through an unset-reason refusal", async () => {
+  it("tells a turn-already-open submitter what to wait for", async () => {
+    const h = mount(refusalError("turnAlreadyOpen"));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain("already open");
+    h.handle.dispose();
+  });
+
+  it("draws nothing for an error whose reason is unset, because every refusal is typed", async () => {
+    // The view refusal travels up out of the submission rather than being drawn
+    // as a sentence this end invented; the box is left exactly as it was.
+    const h = mount(unsetError);
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")).toBeNull();
+    h.handle.dispose();
+  });
+
+  it("keeps the words in the box when the reason is unset", async () => {
     const h = mount(unsetError);
     await sendText(h, "hello");
     expect(h.input.value).toBe("hello");
