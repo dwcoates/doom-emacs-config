@@ -644,6 +644,139 @@ func TestAForegroundShellsMissingTerminationCarriesNoExitChip(t *testing.T) {
 	}
 }
 
+func TestACompletedShellWithNoObservedOutputLeavesItsSpoolUnset(t *testing.T) {
+	// Arrange, Act: the producer states that it does not know what the command
+	// printed, which is a different claim from "it printed nothing".
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run build"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{
+				Form: &conversationv1.AgentBashOutput_NotObserved{
+					NotObserved: &conversationv1.AgentBashOutputNotObserved{},
+				},
+			},
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Exited{
+					Exited: &conversationv1.AgentBashExited{Code: 0},
+				},
+			},
+		}},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+	})
+
+	// Assert: UNSET, never an empty spool — an empty spool would draw as a
+	// command that printed nothing.
+	if spool := h.shellRow().GetSpool(); spool != nil {
+		t.Fatalf("spool = %+v, want unset for unobserved output", spool)
+	}
+}
+
+func TestACompletedShellWithNoObservedOutputStillSettlesAsCompleted(t *testing.T) {
+	// Arrange, Act: not seeing the output says nothing about the outcome.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run build"},
+		Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+			Output: &conversationv1.AgentBashOutput{
+				Form: &conversationv1.AgentBashOutput_NotObserved{
+					NotObserved: &conversationv1.AgentBashOutputNotObserved{},
+				},
+			},
+			Termination: &conversationv1.AgentBashTermination{
+				How: &conversationv1.AgentBashTermination_Exited{
+					Exited: &conversationv1.AgentBashExited{Code: 0},
+				},
+			},
+		}},
+		SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+	})
+
+	// Assert.
+	if h.shellRow().GetSettled().GetCompleted() == nil {
+		t.Fatalf("outcome = %T, want completed", h.shellRow().GetSettled().GetOutcome())
+	}
+}
+
+func TestAnInterruptedShellWithNoObservedOutputLeavesItsSpoolUnset(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Output: &conversationv1.AgentBashOutput{
+				Form: &conversationv1.AgentBashOutput_NotObserved{
+					NotObserved: &conversationv1.AgentBashOutputNotObserved{},
+				},
+			},
+			Cause: &conversationv1.AgentBashInterrupted_ByUser{
+				ByUser: &conversationv1.AgentBashInterruptedByUser{},
+			},
+		}},
+	})
+
+	// Assert.
+	if spool := h.shellRow().GetSpool(); spool != nil {
+		t.Fatalf("spool = %+v, want unset for unobserved output", spool)
+	}
+}
+
+func TestAnInterruptedShellWithNoObservedOutputSettlesAsTheRecordStatesIt(t *testing.T) {
+	// Arrange, Act: the cause is the whole claim, and an unobserved spool does
+	// not soften it into something else.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Output: &conversationv1.AgentBashOutput{
+				Form: &conversationv1.AgentBashOutput_NotObserved{
+					NotObserved: &conversationv1.AgentBashOutputNotObserved{},
+				},
+			},
+			Cause: &conversationv1.AgentBashInterrupted_Lost{Lost: &conversationv1.DetachedLost{
+				How: &conversationv1.DetachedLost_FileVanished{
+					FileVanished: &conversationv1.DetachedLostFileVanished{},
+				},
+			}},
+		}},
+	})
+
+	// Assert.
+	if h.shellRow().GetSettled().GetLost() == nil {
+		t.Fatalf("outcome = %T, want lost", h.shellRow().GetSettled().GetOutcome())
+	}
+}
+
+func TestOutputObservedBeforeAnUnobservedSettleIsStillDrawn(t *testing.T) {
+	// Arrange: the spool the daemon watched arrive.
+	h := newHarness(t)
+	h.bash("work-1", &conversationv1.AgentBashStart{
+		Command:   &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.bash("work-1", &conversationv1.AgentBashUpdate{NewOutput: "compiling\n", FromOffset: 0})
+
+	// Act: the settle states no observed output of its own.
+	h.bash("work-1", &conversationv1.AgentBashSuccess{
+		Command: &conversationv1.AgentBashCommand{Line: "npm run dev"},
+		Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+			Output: &conversationv1.AgentBashOutput{
+				Form: &conversationv1.AgentBashOutput_NotObserved{
+					NotObserved: &conversationv1.AgentBashOutputNotObserved{},
+				},
+			},
+			Cause: &conversationv1.AgentBashInterrupted_ByUser{
+				ByUser: &conversationv1.AgentBashInterruptedByUser{},
+			},
+		}},
+	})
+
+	// Assert: what WAS observed is never discarded by a later "not observed".
+	if got := h.shellRow().GetSpool().GetText(); got != "compiling\n" {
+		t.Fatalf("spool = %q, want the observed output kept", got)
+	}
+}
+
 func TestAShellWeStoppedSeeingIsLostAndNotCancelled(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
