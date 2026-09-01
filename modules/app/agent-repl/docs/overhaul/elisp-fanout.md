@@ -186,6 +186,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   test-integration-helpers.el for other hand-rolled duplicates of
   production seams. R-COMPOSER dispatched (elisp-agents/composer, off
   0a8286ca1). Running: verbs-suite, polish, composer.
+- R-POLISH MERGED (f68700841): daemon 15/15, host 51/51; no production
+  change — all three reds were stale suite payloads relative to the
+  landing-4 codec (unset RegisterWorkspaceError.cause, HostFault without
+  kind, module root read from load-file-name inside an ERT body). Lesson
+  for the remaining board: check payloads against the codec before
+  dispatching production work. Running: verbs-suite, composer.
 
 ## 1. Module map (final tree of lisp/)
 
