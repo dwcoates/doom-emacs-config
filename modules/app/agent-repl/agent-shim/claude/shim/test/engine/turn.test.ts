@@ -78,6 +78,7 @@ async function harness(): Promise<Harness> {
     query: () => query,
     nowMs: () => 1,
     openTurn: () => state.open,
+    watcherOpened: () => () => undefined,
     submit: (said, keepalive) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
       state.submitted.push({ said, keepalive });

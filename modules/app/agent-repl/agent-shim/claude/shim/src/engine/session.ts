@@ -33,7 +33,7 @@ import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
 import { bashUpsertKey, terminalUpsertKey } from "../store/keys.js";
-import type { PersistEntry, Persistence } from "../store/persistence.js";
+import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,
   closingAgentTerminal,
@@ -158,6 +158,25 @@ export interface EngineDeps {
   readonly endProcess?: (exitCode: number) => void;
 }
 
+/**
+ * One open `WatchAgent` tail, held so the teardown can conclude it.
+ */
+interface OpenWatcher {
+  readonly agent: conversationv1.AgentId;
+  readonly page: AgentPageSession;
+  /** Resolves when the handler's stream has finished, however it finished. */
+  readonly ended: Promise<void>;
+}
+
+/**
+ * How long the teardown waits for one concluded tail to actually end.
+ *
+ * A LAST RESORT: the tail ends on its own the moment it has served the book's
+ * head. This only bounds a consumer that stopped pulling, so it cannot keep a
+ * killed shim alive forever.
+ */
+export const WATCHER_CONCLUSION_BUDGET_MS = 5_000;
+
 /** How often the account's rate-limit windows are sampled. */
 export const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -243,6 +262,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let loop: Promise<void> | undefined;
   /** Rows the store never acked by the time the teardown finished. */
   let lostRowsAtStandDown = 0;
+  /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
+  const watchers = new Set<OpenWatcher>();
 
   const gate = new PermissionGate({
     mainAgentId: () => requireIdentity().agentId,
@@ -1611,6 +1632,21 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (turn === undefined) cadence?.resume();
       else cadence?.pause();
     },
+    watcherOpened: (agent, page) => {
+      let settle: () => void = () => undefined;
+      const entry: OpenWatcher = {
+        agent,
+        page,
+        ended: new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      watchers.add(entry);
+      return () => {
+        watchers.delete(entry);
+        settle();
+      };
+    },
   };
   const turns = new TurnEngine(context);
 
@@ -1863,9 +1899,79 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         "stood the session down with rows the store never acked; the record is incomplete",
       );
     }
+    await concludeWatchers();
     pushes.standDown();
     releaseLock?.();
     releaseLock = undefined;
+  }
+
+  /**
+   * End every open `WatchAgent` tail, after it has served what the teardown
+   * wrote.
+   *
+   * The order is the whole point: the terminals are already DURABLE (the flush
+   * above returned), so the book's head names the last row a consumer is owed.
+   * Each tail is concluded through it and then awaited, so the interrupted
+   * terminal reaches the consumer before the stream ends — and before the
+   * process does. Cutting the tails instead would surface to the daemon as a
+   * transport failure exactly where a terminal was expected.
+   */
+  async function concludeWatchers(): Promise<void> {
+    const open = [...watchers];
+    if (open.length === 0) return;
+    await Promise.all(
+      open.map(async (entry) => {
+        try {
+          entry.page.concludeThrough(await bookHead(entry.agent));
+        } catch (err) {
+          // The head could not be read, so there is no pointer to conclude
+          // through; ending the tail now is still better than cutting it later.
+          LOGGER.log(
+            { level: "warn", agent: entry.agent.value, cause: err instanceof Error ? err.message : String(err) },
+            "could not read a book's head while concluding its watcher; ending the tail unbounded",
+          );
+          entry.page.concludeThrough(undefined);
+        }
+        await withBudget(
+          entry.ended,
+          WATCHER_CONCLUSION_BUDGET_MS,
+          `the WatchAgent tail on ${entry.agent.value} did not end within its conclusion budget`,
+        );
+      }),
+    );
+    watchers.clear();
+  }
+
+  /** The newest pointer in one agent's book, or absence when the book is empty. */
+  async function bookHead(
+    agent: conversationv1.AgentId,
+  ): Promise<conversationv1.HistoryPointer | undefined> {
+    const opened = await deps.persistence.openAgentPage(agent, 1);
+    opened.close();
+    return opened.page.entries[0]?.at;
+  }
+
+  /**
+   * Await `work`, giving up loudly after `budgetMs`.
+   *
+   * A LAST RESORT and never the mechanism: the tail's own end settles this in
+   * microseconds. It exists only so a consumer that stopped pulling its stream
+   * cannot keep a killed shim alive forever.
+   */
+  async function withBudget(work: Promise<void>, budgetMs: number, complaint: string): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<"expired">((resolve) => {
+      timer = setTimeout(() => resolve("expired"), budgetMs);
+      timer.unref?.();
+    });
+    try {
+      const outcome = await Promise.race([work.then(() => "ended" as const), expiry]);
+      if (outcome === "expired") {
+        LOGGER.log({ level: "error", budget_ms: budgetMs }, complaint);
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   const engine: SessionEngine = {

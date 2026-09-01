@@ -81,6 +81,18 @@ export interface SessionContext {
   submit(said: conversationv1.UserSaid, keepalive: boolean): Promise<void>;
   /** Adopt (or clear) the open turn. */
   setOpenTurn(turn: OpenTurn | undefined): void;
+  /**
+   * Register an open `WatchAgent` tail so the teardown can conclude it.
+   *
+   * A standing tail must not be CUT at the exit: the consumer is waiting on it
+   * for the interrupted terminal the teardown is about to write, and a cut
+   * stream reaches it as a transport failure instead. The teardown concludes
+   * every registered tail through the book's head and waits for it to end.
+   *
+   * Returns the callback the handler runs when its stream is finished, however
+   * it finished.
+   */
+  watcherOpened(agent: conversationv1.AgentId, page: AgentPageSession): () => void;
 }
 
 /**
@@ -529,6 +541,7 @@ export class TurnEngine {
         ? notFound(`WatchAgent(${target.value}): ${err.message}`)
         : err;
     }
+    const watcherEnded = this.session.watcherOpened(target, opened);
     try {
       yield create(shimv1.WatchAgentResponseSchema, {
         frame: { case: "page", value: opened.page },
@@ -537,6 +550,7 @@ export class TurnEngine {
         yield create(shimv1.WatchAgentResponseSchema, { frame: { case: "entry", value: entry } });
       }
     } finally {
+      watcherEnded();
       opened.close();
     }
   }
