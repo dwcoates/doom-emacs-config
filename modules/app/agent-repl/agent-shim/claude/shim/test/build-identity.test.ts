@@ -100,3 +100,20 @@ describe("requireSessionRuntime", () => {
     });
   });
 });
+
+describe("the bundle never bakes the build identity", () => {
+  it("declares no esbuild substitution for process.env.SHIM_BUILD_SHA", async () => {
+    // Arrange. A `define` would replace the expression at BUNDLE time, so the
+    // value the daemon exported when it spawned the process would be ignored
+    // and a survivor would report the sha of whatever build it came from.
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const buildScript = fileURLToPath(new URL("../build.mjs", import.meta.url));
+
+    // Act.
+    const source = readFileSync(buildScript, "utf8");
+
+    // Assert.
+    expect(source).not.toMatch(/"process\.env\.SHIM_BUILD_SHA"\s*:/);
+  });
+});
