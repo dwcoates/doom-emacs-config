@@ -69,9 +69,29 @@ func launchSidecar(t *testing.T, args []string, env ...string) *launchedSidecar 
 	return p
 }
 
+// requireCommaFreeConfigRoots refuses a root the --config-roots flag cannot
+// carry.
+//
+// THE FLAG IS COMMA-SEPARATED, so a root whose own path contains a comma is
+// split into two roots that both name nothing — and the sidecar then discovers
+// no file at all, which reaches a subject as an opaque timeout on a wait for a
+// cursor that was never going to arrive. Test roots live under t.TempDir(),
+// whose path carries the TEST'S OWN NAME, so a subtest named with a comma in it
+// produces exactly that. It is stated here, once, naming the root and the rule.
+func requireCommaFreeConfigRoots(t *testing.T, roots ...string) {
+	t.Helper()
+	for _, root := range roots {
+		if strings.Contains(root, ",") {
+			t.Fatalf("config root %q contains a comma, which --config-roots reads as a separator: the sidecar would discover nothing. Test roots sit under t.TempDir(), whose path carries the test's name — rename the (sub)test so it has no comma.", root)
+		}
+	}
+}
+
 // sidecarFlags mirrors startSidecar's flag construction for the two flags every
 // launch needs, so a launched sidecar reads the same trees an ordinary one does.
-func sidecarFlags(tree *vendorTree, logPath string) []string {
+func sidecarFlags(t *testing.T, tree *vendorTree, logPath string) []string {
+	t.Helper()
+	requireCommaFreeConfigRoots(t, tree.Root, tree.SpoolRoot)
 	return []string{
 		"--config-roots", tree.Root,
 		"--spool-root", tree.SpoolRoot,

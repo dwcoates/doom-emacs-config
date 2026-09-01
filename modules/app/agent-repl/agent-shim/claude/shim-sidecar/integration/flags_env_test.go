@@ -32,7 +32,7 @@ func TestAMalformedDurationFlagRefusesToStart(t *testing.T) {
 	tree := newVendorTree(t)
 	fake := startFakeStore(t)
 	logPath := filepath.Join(t.TempDir(), "never-created.log")
-	args := append([]string{"--store-socket", fake.Socket}, sidecarFlags(tree, logPath)...)
+	args := append([]string{"--store-socket", fake.Socket}, sidecarFlags(t, tree, logPath)...)
 	args = append(args, "--stale-grace", "30 seconds")
 
 	// Act.
@@ -68,7 +68,7 @@ func TestAMalformedDurationFlagCreatesNoLogFile(t *testing.T) {
 	tree := newVendorTree(t)
 	fake := startFakeStore(t)
 	logPath := filepath.Join(t.TempDir(), "never-created.log")
-	args := append([]string{"--store-socket", fake.Socket}, sidecarFlags(tree, logPath)...)
+	args := append([]string{"--store-socket", fake.Socket}, sidecarFlags(t, tree, logPath)...)
 	args = append(args, "--unowned-spool-window", "not-a-duration")
 
 	// Act.
@@ -92,7 +92,7 @@ func TestANegativeDurationEnvValueRefusesToStart(t *testing.T) {
 	tree := newVendorTree(t)
 	fake := startFakeStore(t)
 	logPath := filepath.Join(t.TempDir(), "never-created.log")
-	args := append([]string{"--store-socket", fake.Socket}, sidecarFlags(tree, logPath)...)
+	args := append([]string{"--store-socket", fake.Socket}, sidecarFlags(t, tree, logPath)...)
 
 	// Act.
 	proc := launchSidecar(t, args, "AGENT_REPL_STALE_SHELL_SILENCE=-5s")
@@ -123,7 +123,7 @@ func TestTheStoreSocketFlagBeatsItsEnvVar(t *testing.T) {
 	flagStore := startFakeStore(t)
 	envStore := startFakeStore(t)
 	logPath := filepath.Join(t.TempDir(), "sidecar.log")
-	args := append([]string{"--store-socket", flagStore.Socket}, sidecarFlags(tree, logPath)...)
+	args := append([]string{"--store-socket", flagStore.Socket}, sidecarFlags(t, tree, logPath)...)
 
 	// Act: the FLAG's store answering an rpc is the signal — no duration is
 	// waited on, and the other store is asked only after that has happened.
@@ -151,7 +151,7 @@ func TestTheStoreSocketEnvVarIsUsedWhenNoFlagIsPassed(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "sidecar.log")
 
 	// Act.
-	launchSidecar(t, sidecarFlags(tree, logPath), "AGENT_REPL_STORE_SOCKET="+envStore.Socket)
+	launchSidecar(t, sidecarFlags(t, tree, logPath), "AGENT_REPL_STORE_SOCKET="+envStore.Socket)
 
 	// Assert: the store the env named is the one that was called.
 	select {
