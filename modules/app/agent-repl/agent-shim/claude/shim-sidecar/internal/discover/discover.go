@@ -117,6 +117,17 @@ type Discoverer struct {
 	// warning, so a rescan every few seconds does not repeat one line forever
 	// while a meta file is being written.
 	warnedMeta map[string]bool
+
+	// statedUnclassifiable remembers which spools have already had their
+	// classification defect stated.
+	//
+	// EVERY SCAN RE-CLASSIFIES EVERY FILE, and a spool whose task id carries no
+	// kind prefix will never grow one — so without this the same defect is
+	// restated at ERROR on every rescan, for as long as the file exists. That is
+	// the identical loop the parking and suspension rulings forbid elsewhere:
+	// one unfixable defect drowning every other reader's records. The fact is
+	// stated ONCE per path, and the re-classifications after it are verbose.
+	statedUnclassifiable map[string]bool
 }
 
 // New builds a Discoverer over the given config roots and spool root. Every
@@ -134,6 +145,8 @@ func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer
 		spoolRoot:   Normalize(spoolRoot),
 		log:         log,
 		warnedMeta:  map[string]bool{},
+
+		statedUnclassifiable: map[string]bool{},
 	}
 }
 
@@ -362,7 +375,13 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 		// is the one thing total ingestion forbids.
 		target.Kind = tail.KindResidueSpool
 		target.Raw = true
-		d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID, Level: "error"}).
+		bound := d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID})
+		if d.statedUnclassifiable[path] {
+			bound.LogVerbose("spool task id still has no a/b/w kind prefix; the defect was already stated for this path")
+			break
+		}
+		d.statedUnclassifiable[path] = true
+		bound.With(logging.Context{Level: "error"}).
 			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so its bytes are ingested as unparsed residue rather than dropped")
 	}
 	return target, true

@@ -95,6 +95,13 @@ type Context struct {
 	// invalid_request). It is what says whether a retry can help, so it rides a
 	// dedicated key rather than the message text a reader would have to parse.
 	RefusalKind string
+	// RefusalSite is WHERE the refusal was received, in the store's own
+	// `refusal_site` vocabulary. It answers a different question from
+	// RefusalKind and the two ride together on every refusal record: the KIND
+	// says whether a retry can help, the SITE says which call was refused, so a
+	// reader joining the sidecar's record against the store's own refusal
+	// matches on the site and reads the verdict off the kind.
+	RefusalSite string
 	// Reason is a LOST conclusion's own vocabulary (file_vanished /
 	// went_silent / swept_up) — the same word the wire's DetachedLost arm
 	// carries, so a terminal and the sweep that concluded it join on it.
@@ -223,6 +230,7 @@ func contextMap(ctx Context) map[string]any {
 		"activity_id":       ctx.ActivityID,
 		"turn_id":           ctx.TurnID,
 		"refusal_kind":      ctx.RefusalKind,
+		"refusal_site":      ctx.RefusalSite,
 		"reason":            ctx.Reason,
 		"field":             ctx.Field,
 	} {
@@ -366,6 +374,7 @@ func mergeContext(base, add Context) Context {
 		{&base.TurnID, &add.TurnID},
 		{&base.StoreSocket, &add.StoreSocket},
 		{&base.RefusalKind, &add.RefusalKind},
+		{&base.RefusalSite, &add.RefusalSite},
 		{&base.Reason, &add.Reason},
 		{&base.Field, &add.Field},
 	} {

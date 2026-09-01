@@ -3,6 +3,9 @@ package integration
 import (
 	"strings"
 	"testing"
+	"time"
+
+	sharedlogging "agentrepl/logging"
 )
 
 // SUBJECT 11 — the sidecar's log is a contract, not a convenience.
@@ -55,8 +58,11 @@ func TestEveryRecordCarriesTheRequiredFields(t *testing.T) {
 		if r.Timestamp == "" {
 			t.Errorf("log record %d carries no timestamp", i)
 		}
-		if r.Runtime == "" {
-			t.Errorf("log record %d carries no runtime", i)
+		// The RUNTIME is what separates these records from the shim's and the
+		// store's when all three are read together, so it is checked for its
+		// VALUE rather than for being non-empty.
+		if r.Runtime != "sidecar" {
+			t.Errorf("log record %d names runtime %q, want the sidecar's own runtime", i, r.Runtime)
 		}
 		if r.PID == 0 {
 			t.Errorf("log record %d carries no pid", i)
@@ -64,11 +70,45 @@ func TestEveryRecordCarriesTheRequiredFields(t *testing.T) {
 		if r.Level == "" {
 			t.Errorf("log record %d carries no level", i)
 		}
+		// VERBOSITY is what says whether a record is lifecycle or per-record
+		// chatter; a record without it cannot be filtered down to the spine.
+		switch r.Verbosity {
+		case "normal", "verbose":
+		default:
+			t.Errorf("log record %d carries verbosity %q, want normal or verbose", i, r.Verbosity)
+		}
 		if r.Operation == "" {
 			t.Errorf("log record %d carries no operation", i)
 		}
 		if r.Message == "" {
 			t.Errorf("log record %d carries no message", i)
+		}
+		// The CONTEXT object is always present, even when a site owns no
+		// correlation fact: a reader joining on keys must be able to look one up
+		// without first testing whether the object exists.
+		if r.Context == nil {
+			t.Errorf("log record %d carries no context object", i)
+		}
+	}
+}
+
+// TestEveryTimestampIsTheContractsRendering asserts the one rendering every
+// agent-repl runtime writes: RFC 3339, local zone, fixed-width microseconds and
+// an explicit numeric offset.
+//
+// Go's own RFC3339Nano drops trailing zeros, which sorts a record landing on a
+// whole second out of order against its neighbors — and these records are read
+// interleaved with the shim's and the store's, so a divergence here is a
+// timeline nobody can merge.
+func TestEveryTimestampIsTheContractsRendering(t *testing.T) {
+	// Arrange + Act.
+	records := ingestGreenPath(t)
+
+	// Assert.
+	for i, r := range records {
+		if _, err := time.Parse(sharedlogging.TimestampLayout, r.Timestamp); err != nil {
+			t.Errorf("log record %d carries timestamp %q, which is not the contract's layout %q: %v",
+				i, r.Timestamp, sharedlogging.TimestampLayout, err)
 		}
 	}
 }

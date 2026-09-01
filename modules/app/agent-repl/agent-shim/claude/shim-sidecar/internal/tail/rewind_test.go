@@ -8,7 +8,6 @@ package tail
 import (
 	"io"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -118,8 +117,17 @@ func TestRewindIsLoggedAtNormalVerbosity(t *testing.T) {
 	tr.RewindToTurnStart(DefaultRewindWindow, IsUserPromptRecord)
 
 	// Assert.
-	if !strings.Contains(strings.Join(*logs, "\n"), "rewound the restored cursor") {
-		t.Fatalf("the rewind was silent; got %v", *logs)
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "boot-rewind", "info")
+	// The subject is the VERBOSITY: a rewind is a lifecycle decision an operator
+	// must see without turning verbose emission on.
+	if rec.Verbosity != "normal" {
+		t.Fatalf("the rewind was recorded at verbosity %q, want normal", rec.Verbosity)
+	}
+	if got := ctxString(t, rec, "file_id"); got != "1:2" {
+		t.Fatalf("boot-rewind/info file_id = %q, want 1:2", got)
+	}
+	if got, ok := rec.Context["offset"].(float64); !ok || int64(got) != 0 {
+		t.Fatalf("boot-rewind/info offset = %v, want 0 (the transcript's only turn start)", rec.Context["offset"])
 	}
 }
 
