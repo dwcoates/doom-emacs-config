@@ -18,9 +18,12 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
 import {
   UpdateTaskRequestSchema,
+  type UpdateTaskError,
   type UpdateTaskRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_task_pb";
+import type { CreateTaskError } from "../../../proto/gen/ts/agentrepl/v1/endpoint_create_task_pb";
 import { log } from "../log.js";
+import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { runVerb } from "./verbs.js";
 
@@ -53,6 +56,53 @@ export function buildUpdateTaskRequest(taskId: string, change: TaskChange): Upda
         task: { id: taskId },
         change: { case: "setOpen", value: {} },
       });
+  }
+}
+
+/**
+ * The cause union of a task error, narrowed to a SET arm.
+ *
+ * Neither task verb is addressed to a workspace, so NONE of the cross-cutting
+ * four can reach them: every arm here is the endpoint's own, and this file
+ * words all of them.
+ */
+type TaskCause<E extends { cause: { case?: string | undefined } }> = NonNullable<E["cause"]> & {
+  case: string;
+};
+
+/**
+ * CreateTask's one arm.
+ *
+ * The rail refuses to SEND a blank title, so this answers a race the form
+ * cannot win rather than the ordinary path — which is exactly why it is drawn
+ * rather than assumed away.
+ */
+export function createTaskRefusal(cause: TaskCause<CreateTaskError>): string {
+  switch (cause.case) {
+    case "blankTitle":
+      return "a task needs a title";
+    default: {
+      // The union is exhausted, so a newer daemon's arm arrives here as the
+      // widened shape rather than as a case this build can name.
+      const other: { case: string } = cause;
+      return unreachableArm("CreateTaskError.cause", other.case);
+    }
+  }
+}
+
+/** UpdateTask's three arms. */
+export function updateTaskRefusal(cause: TaskCause<UpdateTaskError>): string {
+  switch (cause.case) {
+    case "blankTitle":
+      return "a task needs a title";
+    case "noChange":
+      return "that change would leave the task exactly as it is";
+    case "unknownTask":
+      return "the daemon does not know that task";
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("UpdateTaskError.cause", other.case);
+    }
   }
 }
 
@@ -99,6 +149,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
       rpc: "CreateTask",
       call: (client) => client.createTask(buildCreateTaskRequest(title)),
       schema: CreateTaskResponseSchema,
+      refusalText: (cause) => createTaskRefusal(cause as TaskCause<CreateTaskError>),
     }).then((ok) => {
       // The section arrives on the roster push; the form only has to get out
       // of the way, and only when the daemon actually took the task.
