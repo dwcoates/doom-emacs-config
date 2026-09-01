@@ -564,6 +564,77 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
 }
 
 /**
+ * Merge a source tree into an existing capture tree, anonymizing on the way.
+ *
+ * Used only by the SWEEP-END LATE RECLAIM. It differs from
+ * `copyTreeAnonymized` in one rule: a destination file is never overwritten by
+ * a SMALLER one. The vendor's late flush rewrites a transcript it had already
+ * written, and a truncated re-write landing on top of the full capture would
+ * silently destroy the golden.
+ */
+export function mergeTreeAnonymized(sourceDir, destDir, report, moved = []) {
+  if (!existsSync(sourceDir)) return moved;
+  mkdirSync(destDir, { recursive: true });
+  for (const name of readdirSync(sourceDir)) {
+    const from = path.join(sourceDir, name);
+    const to = path.join(destDir, name);
+    const info = statSync(from);
+    if (info.isDirectory()) {
+      mergeTreeAnonymized(from, to, report, moved);
+      continue;
+    }
+    if (!info.isFile()) continue;
+    const raw = readFileSync(from, "utf8");
+    let text;
+    if (name.endsWith(".jsonl")) {
+      text = anonymizeJsonl(raw, (lineNo, err) =>
+        report.unparsed.push({ file: from, line: lineNo, error: String(err) }),
+      );
+    } else if (name.endsWith(".json")) {
+      text = `${JSON.stringify(anonymize(JSON.parse(raw)), null, 2)}\n`;
+    } else {
+      text = anonymizePlainText(raw);
+    }
+    if (existsSync(to) && statSync(to).size >= Buffer.byteLength(text, "utf8")) continue;
+    writeFileSync(to, text, "utf8");
+    moved.push(to);
+  }
+  return moved;
+}
+
+/**
+ * The SECOND reclaim pass, run once at sweep end.
+ *
+ * The vendor re-writes small late transcript flushes into
+ * `<config-root>/projects/<slug>/` AFTER the per-scenario reclaim has already
+ * emptied it — the SDK child is still alive then. Anything that reappeared is
+ * merged into the scenario's capture and the slug directory is deleted from the
+ * operator's root, so the account really is left as found. ONLY the slugs this
+ * run created are ever looked at; no other project directory is read or removed.
+ */
+export function lateReclaimSlug({ accountRoot, slug, captureDir, report, log }) {
+  const projectDir = path.join(accountRoot, "projects", slug);
+  if (!existsSync(projectDir)) return { slug, moved: [] };
+  const moved = mergeTreeAnonymized(
+    projectDir,
+    path.join(captureDir, "files", "projects", slug),
+    report,
+  );
+  rmSync(projectDir, { recursive: true, force: true });
+  log?.(
+    `capture.mjs: late reclaim ${slug} — ${moved.length} file(s) re-copied, ` +
+      `${projectDir} removed\n`,
+  );
+  return { slug, moved };
+}
+
+/** Run the sweep-end late reclaim for every scenario slug this run created. */
+export function lateReclaimAll(auth, reclaims, log) {
+  if (auth.mode !== AUTH_CONFIG_ROOT) return [];
+  return reclaims.map((entry) => lateReclaimSlug({ ...entry, log }));
+}
+
+/**
  * Create the scratch world a group of scenarios shares.
  *
  * The CWD IS ALWAYS SCRATCH, in every authentication mode — a capture must
@@ -869,7 +940,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   renameSync(outDir, finalDir);
 
   process.stderr.write(`${verdictLine(scenario.name, outcome)}\n`);
-  return { report, outcome, dir: finalDir };
+  return { report, outcome, dir: finalDir, slug: cwdSlug(cwd), accountRoot: configDir };
 }
 
 /** Run one control and record both halves of the exchange. */
@@ -925,6 +996,8 @@ async function main(argv, env) {
   mkdirSync(opts.outDir, { recursive: true });
   const skipped = [];
   const poisoned = [];
+  // Every scenario slug this run created, for the sweep-end late reclaim.
+  const reclaims = [];
   // Scenarios sharing a world run against ONE cwd and account root, in corpus
   // order, so a later one sees what the earlier ones did — that is how a
   // /clear has an identity to rotate and a /compact has a conversation.
@@ -947,10 +1020,21 @@ async function main(argv, env) {
     }
     for (const scenario of runnable) {
       process.stderr.write(`capture.mjs: capturing ${scenario.name}\n`);
-      const { outcome } = await runScenario(sdk, scenario, opts, auth, world);
-      if (!outcome.ok) poisoned.push({ scenario: scenario.name, reasons: outcome.reasons });
+      const run = await runScenario(sdk, scenario, opts, auth, world);
+      reclaims.push({
+        accountRoot: run.accountRoot,
+        slug: run.slug,
+        captureDir: run.dir,
+        report: run.report,
+      });
+      if (!run.outcome.ok) poisoned.push({ scenario: scenario.name, reasons: run.outcome.reasons });
     }
   }
+
+  // SWEEP END, after every query is closed and every SDK child has gone: the
+  // vendor flushes late transcript writes into the operator's real root after
+  // the per-scenario reclaim ran, and this pass is what keeps that root clean.
+  lateReclaimAll(auth, reclaims, (line) => process.stderr.write(line));
   writeFileSync(
     path.join(opts.outDir, "SKIPPED.json"),
     `${JSON.stringify({ skipped, reason: "manual scenarios have no prompt-only provocation" }, null, 2)}\n`,
