@@ -226,11 +226,6 @@ ENCODER).  An unset oneof and an unrecognized arm are contract breaches."
                       message field keyword)
     (cons (nth 1 arm) (funcall (nth 2 arm) (plist-get value :value)))))
 
-(defun agent-repl-wire-verbs--encode-empty (_value)
-  "Encode a set EMPTY message: nil, which serializes as `{}'."
-  nil)
-
-
 ;;;; ---- CreateWorkspace: encode ----------------------------------------
 
 (defun agent-repl-wire-encode-create-workspace-fork (_present)
