@@ -162,3 +162,151 @@ func TestWatchBashRunServesTheJSONCodec(t *testing.T) {
 		[]string{"start:make test", "delta:chunk-0", "success"})
 	store.assertNoErrorRecords()
 }
+
+func TestWatchBashRunReplaysADeltaStoredAfterTheTerminal(t *testing.T) {
+	// Arrange: the sidecar reached the last of the spool only once the run was
+	// already closed, so the late delta's row is FIRST INSERTED after the
+	// terminal's. A replay that stopped at the terminal would hand the consumer
+	// a run that produced less output than it did.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	writeBashRun(ctx, t, sidecar, "run-late", 1)
+	sidecar.write(ctx, t, sidecar.agentEntry("w-run-late-term", "bash:run-late:terminal",
+		bashRun(nil, "run-late", bashSuccess("make test", 0))))
+
+	// Act: the late delta lands after the terminal row.
+	sidecar.write(ctx, t, sidecar.agentEntry("w-run-late-d9", "bash:run-late:9",
+		bashRun(nil, "run-late", bashDelta("chunk-late", 9))))
+	stream := watchBashRun(ctx, t, cli, "run-late")
+	defer stream.Close()
+
+	// Assert: every stored row in first-insert order, and the natural end after
+	// the LAST of them rather than at the terminal.
+	assertTexts(t, "the replayed run", drainBashRun(t, stream),
+		[]string{"start:make test", "delta:chunk-0", "success", "delta:chunk-late"})
+	store.assertNoErrorRecords()
+}
+
+func TestATerminalReUpsertAgainstAnEndedStreamIsAbsorbedSilently(t *testing.T) {
+	// Arrange: a producer's retry buffer can re-send the terminal long after
+	// the run's watchers are gone. The stream that already ended must not be
+	// resurrected, and the row must not be doubled.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	writeBashRun(ctx, t, sidecar, "run-reterm", 1)
+	sidecar.write(ctx, t, sidecar.agentEntry("w-run-reterm-term", "bash:run-reterm:terminal",
+		bashRun(nil, "run-reterm", bashSuccess("make test", 0))))
+	ended := watchBashRun(ctx, t, cli, "run-reterm")
+	defer ended.Close()
+	assertTexts(t, "the first watcher", drainBashRun(t, ended),
+		[]string{"start:make test", "delta:chunk-0", "success"})
+
+	// Act: the terminal is written again, under a NEW write_id so the ledger
+	// cannot absorb it as a replay.
+	sidecar.write(ctx, t, sidecar.agentEntry("w-run-reterm-term-again", "bash:run-reterm:terminal",
+		bashRun(nil, "run-reterm", bashSuccess("make test", 0))))
+
+	// Assert: the ended stream delivers nothing more.
+	assertTexts(t, "the ended stream after a terminal re-upsert", drainBashRun(t, ended), nil)
+}
+
+func TestATerminalReUpsertIsServedExactlyOnceInAFreshReplay(t *testing.T) {
+	// Arrange: the other half of the re-upsert — one row, not two, for a
+	// watcher that opens afterwards.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	writeBashRun(ctx, t, sidecar, "run-reterm-2", 1)
+	sidecar.write(ctx, t, sidecar.agentEntry("w-rt2-term", "bash:run-reterm-2:terminal",
+		bashRun(nil, "run-reterm-2", bashSuccess("make test", 0))))
+
+	// Act
+	sidecar.write(ctx, t, sidecar.agentEntry("w-rt2-term-again", "bash:run-reterm-2:terminal",
+		bashRun(nil, "run-reterm-2", bashSuccess("make test", 0))))
+	stream := watchBashRun(ctx, t, cli, "run-reterm-2")
+	defer stream.Close()
+
+	// Assert
+	assertTexts(t, "the fresh replay after a terminal re-upsert", drainBashRun(t, stream),
+		[]string{"start:make test", "delta:chunk-0", "success"})
+	store.assertNoErrorRecords()
+}
+
+func TestInterleavedPlanesReplayInFirstInsertOrder(t *testing.T) {
+	// Arrange: BOTH producers observe one run — the shim watching the SDK and
+	// the sidecar copying the spool — and they interleave. The run's order is
+	// the order its rows were first inserted, whichever plane inserted them.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	sidecar := fileProducer(cli)
+	const run = "run-interleaved"
+
+	// Act
+	shim.write(ctx, t, shim.agentEntry("w-il-start", "bash:"+run+":start",
+		bashRun(nil, run, bashStart("make test", 1000))))
+	sidecar.write(ctx, t, sidecar.agentEntry("w-il-d0", "bash:"+run+":0",
+		bashRun(nil, run, bashDelta("chunk-0", 0))))
+	shim.write(ctx, t, shim.agentEntry("w-il-d1", "bash:"+run+":1",
+		bashRun(nil, run, bashDelta("chunk-1", 1))))
+	// The file plane, authoritative for content, supersedes the shim's first
+	// delta. It must land where that row has always been.
+	sidecar.write(ctx, t, sidecar.agentEntry("w-il-d0-final", "bash:"+run+":0",
+		bashRun(nil, run, bashDelta("chunk-0-final", 0))))
+	sidecar.write(ctx, t, sidecar.agentEntry("w-il-term", "bash:"+run+":terminal",
+		bashRun(nil, run, bashSuccess("make test", 0))))
+	stream := watchBashRun(ctx, t, cli, run)
+	defer stream.Close()
+
+	// Assert
+	assertTexts(t, "the interleaved run", drainBashRun(t, stream),
+		[]string{"start:make test", "delta:chunk-0-final", "delta:chunk-1", "success"})
+	store.assertNoErrorRecords()
+}
+
+func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
+	// Arrange: the two ways a WatchBashRun open is refused. Neither has a
+	// failure arm on the wire, so the log record IS the store's account of it —
+	// and a reader that cannot tell one refusal from two cannot count either.
+	tests := []struct {
+		name     string
+		run      string
+		wantSite string
+		wantKind string
+	}{
+		{name: "a run the store never saw", run: "never-ran-at-all", wantSite: "unknown_bash_run", wantKind: "invalid_request"},
+		{name: "a run named by nothing", run: "", wantSite: "run_empty", wantKind: "invalid_request"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			store := startStore(t, storeOptions{})
+			ctx, cancel := callContext(t)
+			defer cancel()
+			mark := store.logMark()
+
+			// Act.
+			stream := watchBashRun(ctx, t, store.client(), tc.run)
+			defer stream.Close()
+			_ = awaitBashRunEnd(t, stream)
+
+			// Assert.
+			rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a refused bash run open")
+			assertRefusalKeys(t, rec, tc.wantSite, tc.wantKind)
+			if rec.Context["rpc"] == nil {
+				t.Errorf("the refusal record names no rpc: %v", rec.Context)
+			}
+		})
+	}
+}
