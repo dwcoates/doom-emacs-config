@@ -829,10 +829,19 @@ describe("keep-alives", () => {
     await keepaliveSubmitted(shim);
 
     const rewound = shim.log.record((record) => record.context.resume_session_at !== undefined);
+    // What the VENDOR received, not merely what the shim intended: the mock
+    // records the rewind target it was handed, and the shim's own record is no
+    // evidence the value ever reached the query.
+    const atVendor = shim.log.record(
+      (record) => record.context.vendor_resume_session_at !== undefined,
+    );
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "and again" }));
     const record = await rewound;
 
     expect(record.context.discarded_keepalive_turns).toBeDefined();
+    expect((await atVendor).context.vendor_resume_session_at).toBe(
+      record.context.resume_session_at,
+    );
   });
 
   test("a real prompt's transcript record carries NO keep-alive marker", async () => {
