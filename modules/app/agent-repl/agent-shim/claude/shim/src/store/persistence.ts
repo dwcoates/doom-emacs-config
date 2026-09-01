@@ -154,6 +154,11 @@ export class PersistenceError extends Error {
  * a fold that had to await the store per frame would make the shim's throughput
  * the store's latency.
  */
+export interface FlushOutcome {
+  /** How many rows this writer has dropped, loudly, over the whole process. */
+  readonly lostRows: number;
+}
+
 export interface Persistence {
   /**
    * Name this writer, once the vendor has named the conversation.
@@ -187,8 +192,16 @@ export interface Persistence {
    * to disk, ever.
    */
   write(entries: PersistEntry[]): void;
-  /** Resolve once every buffered write has been acked or loudly dropped. */
-  flush(): Promise<void>;
+  /**
+   * Resolve once every buffered write has been acked or loudly dropped.
+   *
+   * The outcome carries the LIFETIME lost-row count, because the graceful
+   * stand-down's exit code is decided by it: a stand-down that flushed with
+   * rows still lost has not stood down cleanly, and reporting 0 there would
+   * tell the daemon the session ended in good order when part of the record
+   * never landed.
+   */
+  flush(): Promise<FlushOutcome>;
   /**
    * Open one agent's book: a page plus the tail pinned after it.
    *
@@ -299,7 +312,7 @@ export function unavailablePersistence(): Persistence {
     write: () => {
       throw refuse("write");
     },
-    flush: () => Promise.resolve(),
+    flush: () => Promise.resolve({ lostRows: 0 }),
     openAgentPage: () => Promise.reject(refuse("openAgentPage")),
     readAgentPage: () => Promise.reject(refuse("readAgentPage")),
     liveWork: () => Promise.reject(refuse("liveWork")),

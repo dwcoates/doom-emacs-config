@@ -121,8 +121,13 @@ export interface Engine {
    * parent. Resolves only once every pending permission callback is resolved
    * (an unresolved `canUseTool` promise wedges the vendor process) and every
    * durable write is acknowledged.
+   *
+   * Resolves with the EXIT CODE the stand-down earned: 0 when everything the
+   * record owed the store was acked, 1 when rows were dropped loudly and never
+   * landed. Reporting 0 in that second case would tell the daemon the session
+   * ended in good order when part of the conversation is gone (audit A23).
    */
-  standDown(reason: string): Promise<void>;
+  standDown(reason: string): Promise<number>;
 }
 
 /**
@@ -196,8 +201,8 @@ export class NotImplementedEngine implements Engine {
    * session was ever started, or a shim spawned and immediately told to stop
    * would look like a crash.
    */
-  standDown(): Promise<void> {
-    return Promise.resolve();
+  standDown(): Promise<number> {
+    return Promise.resolve(0);
   }
 }
 

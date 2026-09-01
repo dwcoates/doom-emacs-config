@@ -32,6 +32,8 @@ interface Harness {
   readonly cwd: string;
   readonly locks: string[];
   readonly released: string[];
+  /** Every exit code the engine asked `main.ts` to end the process with. */
+  readonly exits: number[];
 }
 
 function scratch(): string {
@@ -81,7 +83,9 @@ function harness(
   const queries: { spec: QuerySpec; query: ScriptedQuery }[] = [];
   const locks: string[] = [];
   const released: string[] = [];
+  const exits: number[] = [];
   const engine = createEngine({
+    endProcess: (code) => exits.push(code),
     persistence,
     fold,
     createQuery: (spec) => {
@@ -102,7 +106,19 @@ function harness(
       return () => released.push(sessionId);
     },
   });
-  return { engine, persistence, fold, scheduler, queries, stateDir, configDir, cwd, locks, released };
+  return {
+    engine,
+    persistence,
+    fold,
+    scheduler,
+    queries,
+    stateDir,
+    configDir,
+    cwd,
+    locks,
+    released,
+    exits,
+  };
 }
 
 function freshRequest(): shimv1.StartSessionRequest {
@@ -837,6 +853,38 @@ describe("KillSession", () => {
     expect(response.result.case === "success" ? response.result.value.closed?.how.case : undefined).toBe(
       "idle",
     );
+  });
+
+  it("ends the process with 0 once an idle session is closed", async () => {
+    // KillSession is a PROCESS-level verb: the session it ends is the only one
+    // this shim will serve, so a shim that kept serving would hold its socket
+    // and its workspace lock against the next spawn.
+    const h = harness();
+    await started(h);
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.exits).toEqual([0]);
+  });
+
+  it("ends the process with 1 when the store never acked some rows", async () => {
+    // A23: reporting 0 would tell the daemon the session ended in good order
+    // when part of the conversation never landed.
+    const h = harness();
+    await started(h);
+    h.persistence.lostRows = 3;
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.exits).toEqual([1]);
+  });
+
+  it("does NOT end the process on a refused kill", async () => {
+    const h = harness();
+
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
+
+    expect(h.exits).toEqual([]);
   });
 
   it("REFUSES while a turn is in flight and force was not set", async () => {

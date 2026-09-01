@@ -25,6 +25,7 @@ import type {
 } from "../../src/sdk/types.js";
 import type {
   AgentPageSession,
+  FlushOutcome,
   PersistEntry,
   Persistence,
 } from "../../src/store/persistence.js";
@@ -219,9 +220,11 @@ export class RecordingPersistence implements Persistence {
   write(entries: PersistEntry[]): void {
     this.buffered.push(...entries);
   }
-  flush(): Promise<void> {
+  /** Rows this fake reports as lost, so a stand-down's exit code is testable. */
+  lostRows = 0;
+  flush(): Promise<FlushOutcome> {
     this.flushes++;
-    return Promise.resolve();
+    return Promise.resolve({ lostRows: this.lostRows });
   }
   openAgentPage(): Promise<AgentPageSession> {
     if (this.openError !== undefined) return Promise.reject(this.openError);

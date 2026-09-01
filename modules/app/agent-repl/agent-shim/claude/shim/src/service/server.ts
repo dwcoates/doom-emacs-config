@@ -89,12 +89,47 @@ export function sniffProtocol(seen: Buffer): SniffedProtocol {
   return comparable === PREFACE_DECIDING_PREFIX.length ? "h2" : "need-more";
 }
 
+/**
+ * The server-streaming verbs, by the path Connect routes them on.
+ *
+ * Named rather than derived because the exit path needs the answer BEFORE a
+ * response has any headers to inspect, and a wrong answer here is the
+ * difference between a bounded wait and a five-second one on every kill.
+ */
+const STREAMING_RPCS: readonly string[] = [
+  "WatchSession",
+  "WatchAgent",
+  "WatchBash",
+  "WatchWorkflow",
+];
+
+/** Does this request path name a server-streaming rpc? */
+export function isStreamingPath(url: string): boolean {
+  const rpc = url.split("/").pop() ?? "";
+  return STREAMING_RPCS.includes(rpc);
+}
+
 /** A bound listener, and the way to stop it. */
 export interface ShimServer {
   /** The path the listener is bound to. */
   readonly socketPath: string;
   /** Stop accepting, cut every open connection, and remove the socket file. */
   close(): Promise<void>;
+  /**
+   * Resolve once no response is still being written.
+   *
+   * The exit after `KillSession` needs this: {@link close} DESTROYS every open
+   * socket in the same tick, which would cut the KillSession response itself
+   * off the wire and surface to the daemon as a hang-up rather than as the
+   * answer it asked for. Waiting on the responses themselves — each one's own
+   * `close` event — is the only statement of "the daemon has its answer" that
+   * is not a guess about how many ticks serialization takes.
+   *
+   * `budgetMs` is a LAST RESORT, not the mechanism: a stream that never ends
+   * must not be able to keep a killed shim alive forever, so exceeding it is
+   * logged at ERROR and the exit proceeds.
+   */
+  quiet(budgetMs: number): Promise<void>;
 }
 
 /** What a probe of an existing socket path concluded. */
@@ -160,7 +195,31 @@ export async function serve(
   }
   if (verdict === "stale") unlinkSocketFile(socketPath, "stale predecessor");
 
-  const handler = withEarlyStreamHeaders(connectNodeAdapter({ routes }));
+  const served = withEarlyStreamHeaders(connectNodeAdapter({ routes }));
+  // In-flight UNARY responses, counted so the exit path can wait for the wire
+  // to go quiet. `close` and not `finish`: an aborted response never finishes,
+  // and a counter that only came down on success would wedge the exit.
+  //
+  // The server-streaming verbs are deliberately excluded. A `WatchAgent` tail
+  // never concludes on its own — that is its contract — so counting it would
+  // make every `KillSession` wait out the whole budget before exiting, turning
+  // a bounded last resort into the ordinary path.
+  let inFlight = 0;
+  const quietWaiters = new Set<() => void>();
+  const handler: typeof served = (request, response) => {
+    if (isStreamingPath(request.url ?? "")) {
+      served(request, response);
+      return;
+    }
+    inFlight += 1;
+    response.once("close", () => {
+      inFlight -= 1;
+      if (inFlight > 0) return;
+      for (const waiter of quietWaiters) waiter();
+      quietWaiters.clear();
+    });
+    served(request, response);
+  };
   // Neither of these ever LISTENS. They exist to own a connection's protocol
   // state machine; the net server below feeds them sockets directly.
   const h1 = http.createServer(handler);
@@ -202,6 +261,24 @@ export async function serve(
 
   return {
     socketPath,
+    quiet: async (budgetMs: number): Promise<void> => {
+      if (inFlight === 0) return;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          quietWaiters.delete(settle);
+          LOGGER.log(
+            { level: "error", socket_path: socketPath, in_flight: inFlight, budget_ms: budgetMs },
+            "gave up waiting for the wire to go quiet; ending the process with responses still open",
+          );
+          resolve();
+        }, budgetMs);
+        const settle = (): void => {
+          clearTimeout(timer);
+          resolve();
+        };
+        quietWaiters.add(settle);
+      });
+    },
     close: async (): Promise<void> => {
       // THE ORDER MATTERS. `close()` stops accepting and then waits for every
       // open connection to end, and this shim's connections do not end on their

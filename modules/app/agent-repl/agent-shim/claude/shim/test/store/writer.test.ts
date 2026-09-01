@@ -209,7 +209,7 @@ describe("flush", () => {
   it("resolves at once when nothing is buffered", async () => {
     const { persistence: plane } = await persistence("flush-empty");
 
-    await expect(plane.flush()).resolves.toBeUndefined();
+    await expect(plane.flush()).resolves.toEqual({ lostRows: 0 });
   });
 
   it("awaits every buffered write before resolving", async () => {

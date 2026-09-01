@@ -142,6 +142,20 @@ export interface EngineDeps {
    * beats on {@link KEEPALIVE_INTERVAL_MS}.
    */
   readonly keepaliveIntervalMs?: number;
+  /**
+   * End the process, once the session has been stood down.
+   *
+   * `KillSession` is a PROCESS-LEVEL verb: the session it ends is the only one
+   * this shim will ever serve, so a shim that tore the session down and kept
+   * serving would hold its socket, its workspace lock and its vendor account
+   * against the next spawn. The engine cannot exit by itself, though — the
+   * response has to reach the daemon first — so it hands the decision, and the
+   * exit CODE, to `main.ts`, which ends the process once the wire is quiet.
+   *
+   * Unset in a suite that drives the engine directly, where the process is the
+   * test runner and must survive.
+   */
+  readonly endProcess?: (exitCode: number) => void;
 }
 
 /** How often the account's rate-limit windows are sampled. */
@@ -227,6 +241,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let cadence: KeepaliveCadence | undefined;
   let initResolve: ((message: SdkMessage) => void) | undefined;
   let loop: Promise<void> | undefined;
+  /** Rows the store never acked by the time the teardown finished. */
+  let lostRowsAtStandDown = 0;
 
   const gate = new PermissionGate({
     mainAgentId: () => requireIdentity().agentId,
@@ -1769,7 +1785,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         : { case: "idle", value: create(conversationv1.SessionKilledIdleSchema, {}) },
     });
     LOGGER.log({ forced: busy, stopped: stopped.length }, "killed the session");
+    endProcess();
     return killSessionClosed(killed);
+  }
+
+  /**
+   * Ask `main.ts` to end the process, now that the session is torn down.
+   *
+   * Called AFTER the response message is built and BEFORE it is returned, so
+   * the exit is already requested when the handler resolves; `main.ts` is the
+   * half that waits for the wire to go quiet before actually exiting.
+   */
+  function endProcess(): void {
+    const code = lostRowsAtStandDown > 0 ? 1 : 0;
+    if (deps.endProcess === undefined) {
+      LOGGER.log(
+        { level: "warn", exit_code: code },
+        "the session ended with no process to end; this build drives the engine in-process",
+      );
+      return;
+    }
+    deps.endProcess(code);
   }
 
   /**
@@ -1815,7 +1851,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     active?.close();
     query = undefined;
     await loop?.catch(() => undefined);
-    await deps.persistence.flush();
+    // A23: the stand-down is only clean if the record actually landed. The
+    // lost-row count decides the exit code, and a nonzero one is stated here
+    // as well as in the writer's own drop records, so the reason a stand-down
+    // exited nonzero is readable without correlating two logs.
+    const flushed = await deps.persistence.flush();
+    lostRowsAtStandDown = flushed.lostRows;
+    if (flushed.lostRows > 0) {
+      LOGGER.log(
+        { level: "error", reason, lost_rows: flushed.lostRows },
+        "stood the session down with rows the store never acked; the record is incomplete",
+      );
+    }
     pushes.standDown();
     releaseLock?.();
     releaseLock = undefined;
@@ -1844,6 +1891,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     readHistory: (request) => turns.readHistory(request),
     standDown: async (reason: string) => {
       await teardown(reason);
+      return lostRowsAtStandDown > 0 ? 1 : 0;
     },
   };
   return engine;
