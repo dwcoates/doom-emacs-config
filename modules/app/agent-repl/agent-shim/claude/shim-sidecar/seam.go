@@ -168,6 +168,13 @@ func (s *sidecar) plumbObserver(kind tail.Kind, built tail.Handler, log *logging
 // AgentBashInterrupted.cause.lost, so HOW we stopped seeing a run is a fact a
 // consumer can draw. The `reason` key on the record below is what joins that
 // terminal back to the sweep that concluded it.
+//
+// EACH OUTCOME IS ITS OWN OPERATION. A conclusion that MINTED a terminal and one
+// that refused because the file names no run are different branches, and a
+// reader that can only tell them apart by the sentence they wrote cannot filter
+// for "LOST runs left open" at all. `lost-terminal` is the minted one;
+// `lost-terminal-unwatched`, `lost-terminal-residue` and
+// `lost-terminal-unsupported` are the three that mint nothing.
 func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 	var out []*storev1.StoreEntry
 	for _, lost := range conclusions {
@@ -189,13 +196,13 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 		if lost.Reason == stale.ReasonFileVanished {
 			defer func(path string) {
 				delete(s.watchers, path)
-				s.log.With(logging.Context{Operation: "lost-terminal", Path: path}).
+				s.log.With(logging.Context{Operation: "lost-terminal-tailer-dropped", Path: path}).
 					LogVerbose("the vanished file's tailer is dropped now that its terminal has been stated")
 			}(lost.Path)
 		}
 		w, watched := s.watchers[lost.Path]
 		if !watched {
-			bound.With(logging.Context{Level: "warn"}).Log(
+			bound.With(logging.Context{Operation: "lost-terminal-unwatched", Level: "warn"}).Log(
 				"no terminal for the LOST run: its file is no longer watched, so no converter is left to spell one (reason=%s)", lost.Reason)
 			continue
 		}
@@ -207,12 +214,12 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 			// could settle. The conclusion is still worth stating (the reader
 			// did stop seeing the file); minting a terminal for it would invent
 			// a run that never existed.
-			bound.Log("the LOST file was residue and named no run, so there is no unit to settle (reason=%s)", lost.Reason)
+			bound.With(logging.Context{Operation: "lost-terminal-residue"}).Log("the LOST file was residue and named no run, so there is no unit to settle (reason=%s)", lost.Reason)
 			continue
 		}
 		sink, ok := w.tailer.Handler().(lostTerminalSink)
 		if !ok {
-			bound.With(logging.Context{Level: "error"}).Log(
+			bound.With(logging.Context{Operation: "lost-terminal-unsupported", Level: "error"}).Log(
 				"no terminal for the LOST run: the %s converter implements no LostTerminal, so the run stays open in every reader downstream (reason=%s)",
 				lost.Kind, lost.Reason)
 			continue

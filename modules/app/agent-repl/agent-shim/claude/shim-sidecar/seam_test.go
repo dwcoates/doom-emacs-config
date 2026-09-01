@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -74,12 +73,17 @@ func TestLostWithoutAConverterIsStatedLoudly(t *testing.T) {
 		Reason: stale.ReasonWentSilent,
 	}})
 
-	// Assert: the run stays open downstream, and the log says exactly that.
+	// Assert: the run stays open downstream, and the log says exactly that —
+	// as its own operation at error, carrying the reason it was concluded on.
 	if len(got) != 0 {
 		t.Fatalf("entries = %d, want none", len(got))
 	}
-	if !strings.Contains(h.logText(), "implements no LostTerminal") {
-		t.Fatalf("the missing terminal was silent; got %s", h.logText())
+	rec := h.requireOnce(t, "lost-terminal-unsupported", "error")
+	if got := ctxString(t, rec, "reason"); got != string(stale.ReasonWentSilent) {
+		t.Fatalf("reason = %q, want the conclusion the sweep reached", got)
+	}
+	if got := ctxString(t, rec, "task_id"); got != "b1" {
+		t.Fatalf("task_id = %q, want the run left open", got)
 	}
 }
 
@@ -97,8 +101,9 @@ func TestLostForAnUnwatchedFileIsStated(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("entries = %d, want none", len(got))
 	}
-	if !strings.Contains(h.logText(), "no longer watched") {
-		t.Fatalf("the missing terminal was silent; got %s", h.logText())
+	rec := h.requireOnce(t, "lost-terminal-unwatched", "warn")
+	if got := ctxString(t, rec, "reason"); got != string(stale.ReasonFileVanished) {
+		t.Fatalf("reason = %q, want the conclusion the sweep reached", got)
 	}
 }
 
@@ -141,9 +146,7 @@ func TestAConverterReportingNoSpawnsIsStatedLoudly(t *testing.T) {
 	h.sc.plumbObserver(tail.KindSessionTranscript, &lostCapable{}, h.sc.log)
 
 	// Assert.
-	if !strings.Contains(h.logText(), "implements no SetTaskObserver") {
-		t.Fatalf("the missing plumbing was silent; got %s", h.logText())
-	}
+	h.requireOnce(t, "plumb-observer", "error")
 }
 
 func TestLostSweepArmsFromSilence(t *testing.T) {
@@ -230,9 +233,7 @@ func TestASpoolConverterReportingNoLaunchesIsNotADefect(t *testing.T) {
 	h.sc.newHandler(tail.KindShellSpool, h.sc.log)
 
 	// Assert.
-	if strings.Contains(h.logText(), "reports no spawn observations (it implements no SetTaskObserver)") {
-		t.Fatalf("a spool converter's silence was recorded as a defect: %s", h.logText())
-	}
+	h.requireNone(t, "plumb-observer", "error")
 }
 
 func TestAResidueSpoolConcludedLostNeedsNoTerminal(t *testing.T) {
@@ -258,10 +259,9 @@ func TestAResidueSpoolConcludedLostNeedsNoTerminal(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("entries = %d, want 0: a residue spool names no run to settle", len(entries))
 	}
-	if strings.Contains(h.logText(), "the run stays open in every reader downstream") {
-		t.Fatalf("a residue spool was reported as leaving a run open: %s", h.logText())
-	}
-	if !strings.Contains(h.logText(), "named no run, so there is no unit to settle") {
-		t.Fatalf("the conclusion about the residue spool was not stated: %s", h.logText())
+	h.requireNone(t, "lost-terminal-unsupported", "error")
+	rec := h.requireOnce(t, "lost-terminal-residue", "info")
+	if got := ctxString(t, rec, "reason"); got != string(stale.ReasonSweptUp) {
+		t.Fatalf("reason = %q, want the conclusion the sweep reached", got)
 	}
 }
