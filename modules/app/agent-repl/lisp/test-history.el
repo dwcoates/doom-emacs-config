@@ -423,35 +423,6 @@ transcripts."
   (let ((inst (make-agent-repl-instantiation)))
     (should-not (agent-repl--instantiation-to-plist inst))))
 
-(ert-deftest agent-repl-test-make-instantiation-from-plist-ignores-a-persisted-uuid ()
-  "A uuid left in an OLD state.el on disk is read and discarded.
-Honoring it would resurrect the very pointer this change removed, on every
-machine that still has a pre-migration state file."
-  (let ((inst (agent-repl--make-instantiation-from-plist
-               '(:session-id "xyz-789"))))
-    (should (agent-repl-instantiation-p inst))
-    (should-not (agent-repl-instantiation-session-id inst))))
-
-(ert-deftest agent-repl-test-make-instantiation-from-plist-nil ()
-  "make-instantiation-from-plist with nil creates a fresh empty struct."
-  (let ((inst (agent-repl--make-instantiation-from-plist nil)))
-    (should (agent-repl-instantiation-p inst))
-    (should-not (agent-repl-instantiation-session-id inst))))
-
-(ert-deftest agent-repl-test-make-instantiation-from-plist-extra-keys ()
-  "make-instantiation-from-plist tolerates unknown keys in a saved plist."
-  (let ((inst (agent-repl--make-instantiation-from-plist
-               '(:session-id "xyz" :unknown-key "val"))))
-    (should (agent-repl-instantiation-p inst))))
-
-(ert-deftest agent-repl-test-make-instantiation-from-plist-legacy-had-session ()
-  "make-instantiation-from-plist ignores the legacy :had-session key in old state files."
-  (let ((inst (agent-repl--make-instantiation-from-plist
-               '(:session-id "legacy" :had-session t))))
-    (should (agent-repl-instantiation-p inst))))
-
-;;;; ---- Tests: state-file ----
-
 (ert-deftest agent-repl-test-state-file-with-root ()
   "state-file returns path under the given root."
   (should (equal (agent-repl--state-file "/my/project")

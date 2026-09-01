@@ -210,6 +210,35 @@
   (should-not (agent-repl--prompt-summary-skip-p
                "please refactor the roster reconciliation to walk children")))
 
+;;;; ---- Tests: attach-all manual recovery command ----
+;;
+;; `agent-repl-prompt-summary-attach-all' is deliberately not run at load (see
+;; the note at the end of prompt-summary.el); it survives as the interactive
+;; recovery command, so it has no elisp caller.  These pin it.
+
+(ert-deftest agent-repl-ps-attach-all-attaches-to-a-live-vterm-buffer ()
+  "A workspace with a live vterm buffer gets the segment attached."
+  (agent-repl-test--with-clean-state
+    (let ((attached nil))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws1")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (_ws _key) (current-buffer)))
+                ((symbol-function 'agent-repl--prompt-summary-attach-to-mode-line)
+                 (lambda (buf) (setq attached buf))))
+        (agent-repl-prompt-summary-attach-all)
+        (should (eq attached (current-buffer)))))))
+
+(ert-deftest agent-repl-ps-attach-all-skips-a-workspace-without-a-vterm-buffer ()
+  "No live vterm buffer means nothing is attached for that workspace."
+  (agent-repl-test--with-clean-state
+    (let ((attached nil))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws1")))
+                ((symbol-function 'agent-repl--ws-get) (lambda (_ws _key) nil))
+                ((symbol-function 'agent-repl--prompt-summary-attach-to-mode-line)
+                 (lambda (buf) (setq attached buf))))
+        (agent-repl-prompt-summary-attach-all)
+        (should-not attached)))))
+
 (provide 'test-prompt-summary)
 
 ;;; test-prompt-summary.el ends here
