@@ -827,3 +827,43 @@ describe("mergeTreeAnonymized", () => {
     expect(existsSync(path.join(to, "sub", "agent.json"))).toBe(true);
   });
 });
+
+describe("the corpus's control triggers", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const controls = doc.scenarios.flatMap((scenario) =>
+    (scenario.controls ?? []).map((control) => ({ scenario: scenario.name, control })),
+  );
+
+  // THE DEFECT SHAPE, PINNED SHUT. A permission gate is recorded on the control
+  // plane (can_use_tool_request / _response / _parked), never as a stream
+  // message, so an `on_message` trigger naming one of those spellings can never
+  // fire — which is exactly how permission-undecidable-parked wedged forever.
+  it("carries no on_message trigger whose contains names a can_use_tool spelling", () => {
+    const offenders = controls
+      .filter(({ control }) => control.at === "on_message")
+      .filter(({ control }) => (control.after?.contains ?? "").includes("can_use_tool"))
+      .map(({ scenario }) => scenario);
+    expect(offenders).toEqual([]);
+  });
+
+  it("triggers held-turn-gate off the gate's own control record", () => {
+    const scenario = doc.scenarios.find((entry) => entry.name === "held-turn-gate");
+    expect(scenario.controls).toEqual([
+      { at: "on_control", after: { kind: "can_use_tool_request" }, do: "getContextUsage" },
+    ]);
+  });
+
+  it("uses only trigger points the harness dispatches", () => {
+    const unknown = controls
+      .filter(({ control }) => !["session_start", "on_message", "on_control", "turn_end"].includes(control.at))
+      .map(({ scenario, control }) => `${scenario}:${control.at}`);
+    expect(unknown).toEqual([]);
+  });
+
+  it("gives every on_control trigger a matcher, since an absent one never fires", () => {
+    const unmatched = controls
+      .filter(({ control }) => control.at === "on_control" && control.after === undefined)
+      .map(({ scenario }) => scenario);
+    expect(unmatched).toEqual([]);
+  });
+});
