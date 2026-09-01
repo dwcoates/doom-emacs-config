@@ -269,3 +269,18 @@ func (t *Tailer) Offset() int64 { return t.offset }
 // It is the reader's own statement of whose work this file is, exposed so the
 // seam's callers can assert what was resolved rather than re-deriving it.
 func (t *Tailer) Context() *Context { return t.ctx }
+
+// Identity answers a path's stable file identity — the same "dev:inode"
+// spelling a tailer stamps onto CursorState.file_id.
+//
+// IT IS EXPORTED SO THERE IS ONE SPELLING. The cursor's identity is what
+// survives the vendor's renames, so the reader has to be able to ask a path for
+// it before it has a tailer — and a second, privately-computed spelling of the
+// same thing is exactly how a cursor stops matching the file it belongs to.
+func Identity(path string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("tail: reading the identity of %s: %w", path, err)
+	}
+	return statID(fi), nil
+}
