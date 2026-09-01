@@ -175,7 +175,7 @@ system_stamp() {
     esac
 }
 
-# proto_paths — the proto tree as a BUILD input: the wire schemas minus the
+# proto_paths — the proto tree as a BUILD input: the schemas minus the
 # review artifacts that live beside them. figma-idl-draft/ and the sketch are
 # design documents no build reads, so a commit touching only them must not
 # make any system read as behind — that state is undeployable by rebuilding,
@@ -192,11 +192,11 @@ proto_paths() {
 # (still /bin/bash on macOS, no associative arrays) carry a per-system table.
 system_paths() {
     case "$1" in
-        daemon)              printf '%s %s %s %s' "$(prefix daemon)" "$(proto_paths)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" ;;
+        daemon)              printf '%s %s %s' "$(prefix daemon)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
         shim)                printf '%s %s %s' "$(prefix agent-shim/claude/shim)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
         webapp)              printf '%s %s %s' "$(prefix webapp)" "$(proto_paths)" "$(prefix agent-shim/logging)" ;;
-        shim-store)          printf '%s %s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
-        shim-claude-sidecar) printf '%s %s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/wire)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
+        shim-store)          printf '%s %s %s' "$(prefix agent-shim/shim-store)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
+        shim-claude-sidecar) printf '%s %s %s' "$(prefix agent-shim/claude/shim-sidecar)" "$(prefix agent-shim/logging)" "$(proto_paths)" ;;
         *) return 1 ;;
     esac
 }
