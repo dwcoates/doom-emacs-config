@@ -145,3 +145,54 @@ func TestOverrunWatcherRecoversByReopening(t *testing.T) {
 	assertTexts(t, "the recovered tail", receivedTexts(receiveLines(t, recovered, 1)), []string{"after the overrun"})
 	assertTexts(t, "the re-opened page", pageTexts(reopened.GetPage()), []string{fmt.Sprintf("burst-%d", overrun-1)})
 }
+
+// TestASlowBashWatcherIsEndedWithResourceExhausted is the same backpressure
+// contract on the run stream, which has its own registry and its own buffer.
+//
+// A run's rows are a spool being concatenated, so silently dropping frames into
+// a stream the caller believes is complete would hand it output with a hole in
+// it and no way to notice. The store ends the subscriber loudly instead, and
+// the recovery is the same re-open the book's watcher makes.
+func TestASlowBashWatcherIsEndedWithResourceExhausted(t *testing.T) {
+	// Arrange: a run that is still open, and a watcher that never reads past
+	// its replay.
+	store := startStore(t, storeOptions{watchBuffer: smallWatchBuffer})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	sidecar := fileProducer(cli)
+	sidecar.write(ctx, t, sidecar.agentEntry("w-slow-start", "bash:run-slow:start",
+		bashRun(nil, "run-slow", bashStart("make test", 1000))))
+	stream := watchBashRun(ctx, t, cli, "run-slow")
+	defer stream.Close()
+	assertTexts(t, "the replay", receiveBashRows(t, stream, 1), []string{"start:make test"})
+	mark := store.logMark()
+
+	// Act: far more deltas than the subscriber buffers.
+	overrun := smallWatchBuffer * 40
+	entries := make([]*storev1.StoreEntry, 0, overrun)
+	for i := 0; i < overrun; i++ {
+		entries = append(entries, sidecar.agentEntry(
+			fmt.Sprintf("w-slow-d%d", i), fmt.Sprintf("bash:run-slow:%d", i),
+			bashRun(nil, "run-slow", bashDelta(fmt.Sprintf("chunk-%d", i), uint64(i))),
+		))
+	}
+	sidecar.write(ctx, t, entries...)
+
+	// Assert: the stream ends loudly, and the store recorded exactly why.
+	assertWatchExhausted(t, awaitBashRunEnd(t, stream))
+	overflows := recordsAtOperation(store.logRecordsAfter(mark), "store.fanout.overflow")
+	if len(overflows) != 1 {
+		t.Fatalf("store.fanout.overflow records = %d, want exactly 1: %v", len(overflows), overflows)
+	}
+	rec := overflows[0]
+	if rec.Level != "warn" {
+		t.Errorf("the overflow record is level %q, want warn", rec.Level)
+	}
+	if rec.Context["task_id"] != "run-slow" {
+		t.Errorf("the overflow record names run %v, want run-slow", rec.Context["task_id"])
+	}
+	if !strings.Contains(rec.Message, "dropped=") {
+		t.Errorf("the overflow record does not say how much was dropped: %q", rec.Message)
+	}
+}

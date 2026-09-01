@@ -198,3 +198,58 @@ func TestReplayingBothPlanesWritesDeliversNothingToAWatcher(t *testing.T) {
 	// Assert: the very next frame is the new line, so neither replay published.
 	assertTexts(t, "the tail after two absorbed replays", receivedTexts(receiveLines(t, stream, 1)), []string{"after"})
 }
+
+// TestConcurrentUpsertsOfOneKeyLeaveOneRow is contention on ONE row rather than
+// on the table: every writer names the same upsert_key, so the store's
+// serialization is what decides whether a row exists once or several times.
+//
+// A key that raced into two rows would give one unit two pointers, and a caller
+// walking the book would read the same unit twice — which is exactly what the
+// page model promises cannot happen.
+func TestConcurrentUpsertsOfOneKeyLeaveOneRow(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+
+	// Act: every writer supersedes the same row, under its own write_id.
+	var wg sync.WaitGroup
+	errs := make(chan error, concurrentWriters)
+	for w := 0; w < concurrentWriters; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			ctx, cancel := callContext(t)
+			defer cancel()
+			cli := store.client()
+			p := streamProducer(cli)
+			if w%2 == 1 {
+				p = fileProducer(cli)
+			}
+			label := fmt.Sprintf("settled-by-%d", w)
+			resp, err := p.attempt(ctx, &storev1.EntryBatch{Entries: []*storev1.StoreEntry{
+				p.agentEntry("write-"+label, "u-one-key",
+					frameLine(agentID("main"), responseFrame("main", "act-one-key", label))),
+			}})
+			if err != nil {
+				errs <- fmt.Errorf("writer %d: transport error: %w", w, err)
+				return
+			}
+			if failure := resp.GetFailure(); failure != nil {
+				errs <- fmt.Errorf("writer %d refused: %s", w, failure.GetDetail())
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+
+	// Assert: one row, at one pointer.
+	ctx, cancel := callContext(t)
+	defer cancel()
+	page := openSession(ctx, t, store.client(), "main", uint32(concurrentWriters*2), nil)
+	if got := len(page.GetPage().GetLines()); got != 1 {
+		t.Fatalf("the book holds %d lines for one upsert_key, want 1 (%v)", got, pageTexts(page.GetPage()))
+	}
+	store.assertNoErrorRecords()
+}
