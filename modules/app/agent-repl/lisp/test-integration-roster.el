@@ -45,6 +45,10 @@
 (declare-function agent-repl-host-ref "host" (ws))
 (declare-function agent-repl-host--on-workspace-activated "host" (&rest _))
 (declare-function agent-repl--prompt-queue-enqueue "prompt-queue" (ws kind said origin raw))
+(declare-function agent-repl--prompt-queue-on-finish "prompt-queue" (ws))
+(declare-function agent-repl-roster-notify-finished "roster" (ws))
+(declare-function agent-repl-roster-echo-finished "roster" (ws))
+(declare-function agent-repl-roster-refresh-magit "roster" (ws))
 (declare-function agent-repl--input-said "input" (text attachments))
 (defvar agent-repl-roster-view)
 (defvar agent-repl-roster-update-functions)
@@ -138,12 +142,19 @@ order apart from declaration order."
   "Return a RosterRow like `--row', but with field OMIT entirely absent.
 Findings 48 pin the validation invariant against each non-optional field
 in turn — the field must be MISSING, not merely empty, so this deletes
-the key rather than nulling its value."
-  (assq-delete-all omit (agent-repl-itest-roster--row id name status)))
+the key rather than nulling its value.
+
+THE SPINE IS COPIED FIRST.  `assq-delete-all' deletes by `setcdr', and
+the builders above return backquoted structure whose constant tail is a
+SHARED LITERAL — deleting through it would strip the field from every
+later call in the same Emacs process, silently poisoning the rest of the
+suite."
+  (assq-delete-all omit (copy-sequence (agent-repl-itest-roster--row id name status))))
 
 (defun agent-repl-itest-roster--roster-missing (rows omit)
-  "Return a WorkspaceRoster like `--roster', but with field OMIT absent."
-  (assq-delete-all omit (agent-repl-itest-roster--roster rows)))
+  "Return a WorkspaceRoster like `--roster', but with field OMIT absent.
+The spine is copied for the reason `--row-missing' documents."
+  (assq-delete-all omit (copy-sequence (agent-repl-itest-roster--roster rows))))
 
 (defun agent-repl-itest-roster--push-invalid-carries-raw (daemon needle)
   "Return non-nil when a push-invalid ERROR log entry's context mentions NEEDLE.
@@ -897,8 +908,12 @@ never a silently-empty view."
       ;; Assert.
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      ;; The raw-context needle is the recently-merged header, NOT the row's
+      ;; marker: the rows live inside `repository', so deleting that field
+      ;; deletes them with it and no row text is on the wire at all.  What is
+      ;; left of the roster is what the raw context must still carry.
       (should (agent-repl-itest-roster--push-invalid-carries-raw
-               daemon "ws-no-repository-marker")))))
+               daemon "recently merged")))))
 
 (ert-deftest agent-repl-itest-roster-roster-missing-recently-merged-is-refused ()
   "A `WorkspaceRoster' with no `recentlyMerged' field at all: ERROR, dropped."
@@ -1124,6 +1139,11 @@ user would never be told their turn finished while looking away."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
+      ;; The fixture blanks the finish hook so scenarios do not see each
+      ;; other's reactions; THIS scenario's subject IS that reaction, so it
+      ;; puts the production consumer back and nothing else.
+      (let ((agent-repl-roster-finish-functions
+             (list #'agent-repl-roster-notify-finished)))
       (agent-repl--ws-put "itest-fin-banner" :project-dir "/tmp/itest-fin-banner")
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
@@ -1141,7 +1161,7 @@ user would never be told their turn finished while looking away."
       (agent-repl-itest--wait-until
        (lambda () agent-repl-itest-notifications) nil "the desktop banner")
       (should (equal (nth 2 (car agent-repl-itest-notifications))
-                     "Agent ready: itest-fin-banner")))))
+                     "Agent ready: itest-fin-banner"))))))
 
 (ert-deftest agent-repl-itest-roster-finish-edge-echoes-a-message-when-not-selected ()
   "Reaction (2): the cross-workspace echo message fires when WS is not selected.
@@ -1152,6 +1172,10 @@ silently."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
+      ;; The fixture blanks the finish hook; this scenario's subject IS the
+      ;; production consumer's reaction, so it puts that one consumer back.
+      (let ((agent-repl-roster-finish-functions
+             (list #'agent-repl-roster-echo-finished)))
       (agent-repl--ws-put "itest-fin-echo" :project-dir "/tmp/itest-fin-echo")
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
@@ -1168,7 +1192,7 @@ silently."
       (agent-repl-itest--wait-until
        (lambda () (equal (current-message) "Agent finished in workspace: itest-fin-echo"))
        nil "the cross-workspace echo message")
-      (should (equal (current-message) "Agent finished in workspace: itest-fin-echo")))))
+      (should (equal (current-message) "Agent finished in workspace: itest-fin-echo"))))))
 
 (ert-deftest agent-repl-itest-roster-finish-edge-refreshes-magit-for-the-workspaces-dir ()
   "Reaction (3): the finish edge refreshes magit-status for WS's directory.
@@ -1178,7 +1202,11 @@ stale or global one."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
-      (let ((refreshed nil))
+      ;; The fixture blanks the finish hook; the magit refresh IS this
+      ;; scenario's subject, so the production consumer goes back on alone.
+      (let ((refreshed nil)
+            (agent-repl-roster-finish-functions
+             (list #'agent-repl-roster-refresh-magit)))
         (cl-letf (((symbol-function 'agent-repl--refresh-magit-status-for-dir)
                    (lambda (dir &optional _ws) (push dir refreshed))))
           (agent-repl-itest-roster--push
@@ -1206,7 +1234,11 @@ the instant the turn settles, carrying PROMPT_ORIGIN_DEFERRED_PROMPT."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
-      (let ((agent-repl-link--primary conn))
+      ;; The fixture blanks the finish hook; the drain IS this scenario's
+      ;; subject, so prompt-queue.el's own consumer goes back on alone.
+      (let ((agent-repl-link--primary conn)
+            (agent-repl-roster-finish-functions
+             (list #'agent-repl--prompt-queue-on-finish)))
         (agent-repl-itest-roster--push
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row "itest-defer" "itest-defer" 'thinking))))
