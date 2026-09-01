@@ -375,6 +375,12 @@ every scenario that pushes after subscribing must pass through here."
 
 (defvar agent-repl--workspaces)
 (defvar agent-repl--workspace-log-targets)
+;; Declared here so `agent-repl-itest--with-fake-daemon''s per-scenario
+;; scratch bindings are DYNAMIC ones over the production tables rather than
+;; lexical shadows this file alone would see.
+(defvar agent-repl-host--by-name)
+(defvar agent-repl--prompt-queue)
+(defvar agent-repl--prompt-queue-draining)
 
 (defvar agent-repl-itest--orphaned-log-targets nil
   "Durable workspace log targets production has stopped owning this scenario.
@@ -603,6 +609,22 @@ signals."
          (let* ((agent-repl-itest-notifications nil)
                 (agent-repl-itest-webview-urls nil)
                 (agent-repl-itest--orphaned-log-targets nil)
+                ;; SCRATCH REGISTRIES, one set per scenario.  Each of these is
+                ;; a process-global production table, and a scenario that
+                ;; leaves an entry in one does not merely litter it: on the
+                ;; NEXT scenario's link-up edge production WALKS them.  A
+                ;; leftover prompt-queue entry whose workspace still carried a
+                ;; dead connection made `agent-repl--prompt-queue-on-link-up'
+                ;; signal `agent-repl-connect-error' straight out of
+                ;; `run-hook-with-args', so the up hooks behind it --
+                ;; roster.el's and host.el's -- never ran, and the next
+                ;; scenario waited out its whole deadline for a register
+                ;; nothing was ever going to issue.  Binding the tables here
+                ;; means a scenario cannot leak one, however it exits.
+                (agent-repl--workspaces (make-hash-table :test 'equal))
+                (agent-repl-host--by-name (make-hash-table :test 'equal))
+                (agent-repl--prompt-queue (make-hash-table :test 'equal))
+                (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
                 (process-environment
                  (append (list (concat "AGENT_REPL_STATE_DIR="
                                        (agent-repl-itest-daemon-state-dir ,var))
