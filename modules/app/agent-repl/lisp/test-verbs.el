@@ -852,6 +852,39 @@ repository instead would exceed what the caller asked for."
       (should (equal (plist-get finish :value)
                      (list :self-certified nil :add-to-merge-queue nil))))))
 
+(ert-deftest agent-repl-verbs-create-standard-wraps-a-merge-action-as-user-said ()
+  "A standard form's pre-merge action rides as `UserSaid', not as bare text."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :merge-actions (list :before-ws-merge "run the linter"))
+    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
+           (blocks (plist-get (plist-get (plist-get (plist-get (plist-get form :value)
+                                                              :merge-actions)
+                                                    :before-ws-merge)
+                                         :content)
+                              :blocks)))
+      (should (equal (plist-get (plist-get (car blocks) :value) :text) "run the linter")))))
+
+(ert-deftest agent-repl-verbs-create-standard-wraps-a-postprocessing-prompt-as-user-said ()
+  "A standard form's postprocessing prompt rides as `UserSaid' too."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard
+                            :merge-actions (list :postprocessing-prompt "tidy up"))
+    (let* ((form (plist-get (agent-repl-test-verbs--request :create) :form))
+           (blocks (plist-get (plist-get (plist-get (plist-get (plist-get form :value)
+                                                              :merge-actions)
+                                                    :postprocessing-prompt)
+                                         :content)
+                              :blocks)))
+      (should (equal (plist-get (plist-get (car blocks) :value) :text) "tidy up")))))
+
+(ert-deftest agent-repl-verbs-create-standard-without-merge-actions-omits-them ()
+  "No merge actions is the ABSENCE of the message, never an empty one."
+  (agent-repl-test-verbs--with nil
+    (agent-repl-verb-create (agent-repl-test-verbs--repo-ref) :standard)
+    (let ((form (plist-get (agent-repl-test-verbs--request :create) :form)))
+      (should-not (plist-get (plist-get form :value) :merge-actions)))))
+
 (ert-deftest agent-repl-verbs-create-fork-rides-inside-the-parent ()
   "FORK lives INSIDE the parent: a fork without a parent is unrepresentable."
   (agent-repl-test-verbs--with nil
