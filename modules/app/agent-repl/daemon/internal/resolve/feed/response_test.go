@@ -190,17 +190,52 @@ func TestASynthesizedNoticeIsDrawnAsANoticeAndNotAsTheAgentsAnswer(t *testing.T)
 			},
 		}, nil), noAddress())
 
-	// Assert: the authorship is stated in the drawn prose, and the vendor's own
-	// words are kept.
-	markdown := h.response().GetSuccess().GetProse().GetMarkdown()
-	if want := "**Notice — your allowance is exhausted.**"; !contains(markdown, want) {
-		t.Fatalf("prose = %q, want it to lead with %q", markdown, want)
-	}
-	if !contains(markdown, "monthly spend limit") {
-		t.Fatalf("prose = %q, want the vendor's own words kept", markdown)
+	// Assert: the authorship is stated in the bubble's notice field.
+	heading := h.response().GetNotice().GetHeading()
+	if want := "Notice — your allowance is exhausted."; !contains(heading, want) {
+		t.Fatalf("heading = %q, want it to state %q", heading, want)
 	}
 	if !h.hasRecord("debug", "daemon.feed.response_synthesized_notice") {
 		t.Fatalf("records = %+v, want the synthesized-notice branch recorded", h.records())
+	}
+}
+
+func TestASynthesizedNoticesProseIsKeptVerbatimWithNoHeadingSplicedIn(t *testing.T) {
+	// Arrange, Act: a heading spliced into the markdown would be
+	// indistinguishable from words the vendor actually wrote.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "you have hit your monthly spend limit"},
+			Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{
+				SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
+					Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageLimit{
+						UsageLimit: &conversationv1.AgentNoticeUsageLimit{},
+					},
+				},
+			},
+		}, nil), noAddress())
+
+	// Assert.
+	if got := h.response().GetSuccess().GetProse().GetMarkdown(); got != "you have hit your monthly spend limit" {
+		t.Fatalf("prose = %q, want the vendor's own words byte for byte", got)
+	}
+}
+
+func TestAModelAuthoredResponseCarriesNoNotice(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(),
+		responseFrame("unit-1", &conversationv1.AgentResponseSuccess{
+			Prose: &conversationv1.AgentResponseProse{Markdown: "here is the answer"},
+			Authorship: &conversationv1.AgentResponseSuccess_FromModel{
+				FromModel: &conversationv1.AgentResponseFromModel{},
+			},
+		}, nil), noAddress())
+
+	// Assert: unset notice is what says "these are the agent's own words".
+	if h.response().GetNotice() != nil {
+		t.Fatalf("notice = %+v, want unset for model-authored prose", h.response().GetNotice())
 	}
 }
 
