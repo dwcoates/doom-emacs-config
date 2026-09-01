@@ -1,0 +1,263 @@
+package server
+
+import (
+	"context"
+
+	"connectrpc.com/connect"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/publish"
+)
+
+// THE SUBSCRIPTION INVARIANT, served once here for every standing stream:
+//
+//   - the LATEST published view is sent first when one exists;
+//   - every later view follows in publication order, skipping none;
+//   - a message is never partial and never empty — absence is the legal
+//     not-yet state, and a stream with nothing published yet simply stays
+//     quiet;
+//   - the response headers are FLUSHED the moment the subscription is
+//     registered, so acceptance is observable before the first view;
+//   - the stream ends when the CLIENT cancels, or when the daemon closes.
+//
+// publish.Topic supplies the first two; acceptStream supplies the flush; the
+// pump below supplies the last two.
+
+// The view types the four resolver topics carry, aliased so the pump's wrap
+// functions read as the view they send rather than as a package path.
+type (
+	frontendRoster = frontendv1.WorkspaceRoster
+	frontendFooter = frontendv1.FooterView
+	frontendTopbar = frontendv1.TopbarView
+	frontendTray   = frontendv1.DaemonHoldTray
+)
+
+// streamContext ties a stream's lifetime to BOTH the client's cancellation and
+// the daemon's Close, so nothing outlives the surface that serves it.
+func (s *server) streamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		select {
+		case <-s.life.Done():
+			cancel()
+		case <-streamCtx.Done():
+		}
+	}()
+	return streamCtx, cancel
+}
+
+// serveTopic pumps one topic onto one server stream under the subscription
+// invariant. It is a free function because Go methods take no type parameters.
+func serveTopic[T comparable, R any](
+	s *server,
+	ctx context.Context,
+	rpc string,
+	log dlog.Logger,
+	topic *publish.Topic[T],
+	out *connect.ServerStream[R],
+	wrap func(T) *R,
+) error {
+	streamCtx, cancel := s.streamContext(ctx)
+	defer cancel()
+
+	views := topic.Subscribe(streamCtx)
+	s.acceptStream(ctx, rpc)
+	log.Debug(rpc, "accepted a standing stream", nil)
+
+	var zero T
+	for {
+		select {
+		case <-streamCtx.Done():
+			log.Debug(rpc, "the standing stream ended on cancellation", nil)
+			return nil
+		case view, ok := <-views:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if view == zero {
+				// A resolver that published nothing at all would be publishing
+				// a PARTIAL view, which the invariant forbids. It is raised
+				// rather than forwarded.
+				log.Error(rpc, "a publisher raised an empty view; it was not sent", nil)
+				continue
+			}
+			if err := out.Send(wrap(view)); err != nil {
+				log.Debug(rpc, "the standing stream's client went away",
+					dlog.Context{"cause": err.Error()})
+				return nil
+			}
+		}
+	}
+}
+
+// refuseStream answers a refused stream open. A Watch* rpc has NO `<Rpc>Error`
+// message — a refused open is a Connect error BEFORE any frame — so every
+// stream refusal goes through the unlanded-arm spelling and carries a row in
+// daemon/ERROR-ARMS.md.
+func refuseStream(log dlog.Logger, rpc string, r refusal) *connect.Error {
+	return UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
+}
+
+// WatchWorkspaceRoster serves the ONE editor-global stream: the roster, whole,
+// for Emacs and every webview alike.
+func (s *server) WatchWorkspaceRoster(
+	ctx context.Context,
+	_ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest],
+	out *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse],
+) error {
+	return serveTopic(s, ctx, "WatchWorkspaceRoster", s.log, s.deps.Sidebar.Topic(), out,
+		func(roster *frontendRoster) *agentreplv1.WatchWorkspaceRosterResponse {
+			return &agentreplv1.WatchWorkspaceRosterResponse{Roster: roster}
+		})
+}
+
+// WatchFooter serves one workspace's footer view.
+func (s *server) WatchFooter(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchFooterRequest],
+	out *connect.ServerStream[agentreplv1.WatchFooterResponse],
+) error {
+	const rpc = "WatchFooter"
+	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+		return err
+	}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return refuseStream(s.log, rpc, *r)
+	}
+	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Footer.Topic(subject.Record.ID), out,
+		func(view *frontendFooter) *agentreplv1.WatchFooterResponse {
+			return &agentreplv1.WatchFooterResponse{Footer: view}
+		})
+}
+
+// WatchTopbar serves one workspace's topbar view.
+func (s *server) WatchTopbar(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchTopbarRequest],
+	out *connect.ServerStream[agentreplv1.WatchTopbarResponse],
+) error {
+	const rpc = "WatchTopbar"
+	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+		return err
+	}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return refuseStream(s.log, rpc, *r)
+	}
+	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Topbar.Topic(subject.Record.ID), out,
+		func(view *frontendTopbar) *agentreplv1.WatchTopbarResponse {
+			return &agentreplv1.WatchTopbarResponse{Topbar: view}
+		})
+}
+
+// WatchDaemonHolds serves one workspace's daemon-hold tray.
+func (s *server) WatchDaemonHolds(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchDaemonHoldsRequest],
+	out *connect.ServerStream[agentreplv1.WatchDaemonHoldsResponse],
+) error {
+	const rpc = "WatchDaemonHolds"
+	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+		return err
+	}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return refuseStream(s.log, rpc, *r)
+	}
+	return serveTopic(s, ctx, rpc, subject.Log, s.deps.Holds.Topic(subject.Record.ID), out,
+		func(tray *frontendTray) *agentreplv1.WatchDaemonHoldsResponse {
+			return &agentreplv1.WatchDaemonHoldsResponse{Tray: tray}
+		})
+}
+
+// WatchHostWorkspace serves one workspace's HOST stream: the notifications,
+// the transfer notice, the reload request and the editor link relay.
+func (s *server) WatchHostWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchHostWorkspaceRequest],
+	out *connect.ServerStream[agentreplv1.WatchHostWorkspaceResponse],
+) error {
+	const rpc = "WatchHostWorkspace"
+	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+		return err
+	}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return refuseStream(s.log, rpc, *r)
+	}
+	s.holdParticipant(subject.Record.ID, true, +1)
+	defer s.holdParticipant(subject.Record.ID, true, -1)
+	return serveTopic(s, ctx, rpc, subject.Log, s.hostTopic(subject.Record.ID), out,
+		func(push *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
+			return push
+		})
+}
+
+// WatchWebWorkspace serves one workspace's WEB link stream. The web side never
+// redials: the only push it carries is `transferred{address}`, and the reloaded
+// page adopts through AdoptWebWorkspace rather than through this stream.
+func (s *server) WatchWebWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.WatchWebWorkspaceRequest],
+	out *connect.ServerStream[agentreplv1.WatchWebWorkspaceResponse],
+) error {
+	const rpc = "WatchWebWorkspace"
+	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
+		return err
+	}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return fail(s.log, rpc, err)
+	}
+	if r != nil {
+		return refuseStream(s.log, rpc, *r)
+	}
+	s.holdParticipant(subject.Record.ID, false, +1)
+	defer s.holdParticipant(subject.Record.ID, false, -1)
+	return serveTopic(s, ctx, rpc, subject.Log, s.webTopic(subject.Record.ID), out,
+		func(push *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.WatchWebWorkspaceResponse {
+			return push
+		})
+}
+
+// WatchDaemon serves the DAEMON-LEVEL stream — daemon-scoped facts only. It is
+// held by Emacs AND by every webview alike (ruling R3): the drain banner and
+// the stand-down announcement are drawn by both.
+func (s *server) WatchDaemon(
+	ctx context.Context,
+	_ *connect.Request[agentreplv1.WatchDaemonRequest],
+	out *connect.ServerStream[agentreplv1.WatchDaemonResponse],
+) error {
+	return serveTopic(s, ctx, "WatchDaemon", s.log, &s.daemonTopic, out,
+		func(push *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return push })
+}
+
+// holdParticipant records that one of a workspace's two per-workspace streams
+// is held, which is the fact rollout's adoption rendezvous terminates on.
+func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if host {
+		s.hostHeld[ws] += delta
+		return
+	}
+	s.webHeld[ws] += delta
+}
