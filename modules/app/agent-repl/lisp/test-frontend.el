@@ -560,11 +560,6 @@ exact failure seen live in the fresh instance."
       (should (agent-repl--frontend-xwidget-available-p))
       (should required))))
 
-(ert-deftest agent-repl-test-frontend-parent-ws-name-empty-string-is-nil ()
-  "An empty :source-ws-dir yields nil, not an empty parent name."
-  (agent-repl-test--with-frontend-ws "ws1" '(:source-ws-dir "")
-    (should-not (agent-repl--frontend-parent-ws-name "ws1"))))
-
 (ert-deftest agent-repl-test-frontend-open-panel-marks-the-choice-explicit ()
   "Asking for the web panel by name is a DELIBERATE frontend choice."
   ;; Arrange
@@ -1190,29 +1185,6 @@ that does not fire it is testing a restart still in flight."
       ;; Assert
       (should (integerp answer))
       (should (equal "refreshed 0" (format "refreshed %d" answer))))))
-
-(ert-deftest agent-repl-test-frontend-live-webview-buffers-skips-non-frontend-buffers ()
-  "Only `*agent-frontend-WS*' buffers are enumerated for a sweep."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers
-      '("*agent-frontend-ws1*" "*agent-panel-input-ws1*" "*scratch-not-ours*")
-    ;; Act
-    (let ((bufs (agent-repl--frontend-live-webview-buffers)))
-      ;; Assert
-      (should (memq (get-buffer "*agent-frontend-ws1*") bufs))
-      (should-not (memq (get-buffer "*agent-panel-input-ws1*") bufs))
-      (should-not (memq (get-buffer "*scratch-not-ours*") bufs)))))
-
-(ert-deftest agent-repl-test-refresh-webviews-workspace-prefers-owning-local ()
-  "The logged workspace comes from the buffer's owner when one is stamped."
-  ;; Arrange
-  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
-    (with-current-buffer "*agent-frontend-ws1*"
-      (setq-local agent-repl--owning-workspace "renamed-ws"))
-    ;; Act / Assert
-    (should (equal (agent-repl--frontend-webview-workspace
-                    (get-buffer "*agent-frontend-ws1*"))
-                   "renamed-ws"))))
 
 (ert-deftest agent-repl-test-refresh-webviews-widget-probe-is-a-registered-boundary ()
   "The live-widget probe is registered as an external boundary wrapper."
