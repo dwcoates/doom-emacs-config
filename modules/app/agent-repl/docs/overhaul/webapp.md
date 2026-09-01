@@ -425,3 +425,14 @@ One file per drawn component; each file's header comment is its spec.
   webapp and Emacs; Go modules pin connectrpc.com/connect v1.17.0 and
   golang.org/x/net v0.43.0 (Go 1.24 on this machine; every module stays
   `go 1.23`).
+
+## Landing 3 relay (2026-08-29, project lead)
+
+- A per-bubble prompt to a subagent may come back as a refusal (`not_deliverable`) this wave; render the refusal honestly, no client-side disabling until the user rules.
+- The detach (Ctrl-B) control may be refused `unsupported` on the pinned SDK; same policy.
+
+## Landing 4 relay (2026-08-29, project lead)
+
+- Every agentrepl.v1 refusal is typed; refusal rendering and arm-coverage guards cover the new arms (cross-cutting four on every per-workspace rpc; per-rpc arms).
+- DaemonFault/SessionFault/HostFault kinds are typed; the failure overlay and footer fault rows draw by arm.
+- FooterAllowance.status is a typed oneof; color by arm from render-colors.json.

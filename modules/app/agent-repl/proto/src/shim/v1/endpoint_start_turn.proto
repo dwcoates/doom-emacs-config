@@ -45,12 +45,18 @@ message StartTurnResponse {
   }
 }
 
-// The prompt was accepted and the turn is open. Empty: the id was the
-// daemon's, and everything the turn produces is WatchAgent's.
+// The prompt was accepted and the turn is open. The turn's frames are
+// WatchAgent's; what returns here is the prompt as delivered and the OPENING
+// PAGE the request's `page_size` / `known_through` asked for.
 message StartTurnSuccess {
   // The prompt as delivered: the daemon's id adopted, the recipient resolved,
   // the text as accepted. `prompt.agent` is the address for WatchAgent. The same message history replays.
   conversation.v1.AgentPrompt prompt = 1;
+  // The opening page: a full first page of `page_size` entries when
+  // `known_through` was UNSET, else only the entries newer than it. Always
+  // set on success; an empty page is a page with no entries, never an
+  // absent one.
+  conversation.v1.HistoryPage page = 2;
 }
 
 // Not accepted. THE ARM IS WHY.

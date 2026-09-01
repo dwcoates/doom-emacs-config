@@ -40,14 +40,16 @@ environment. Every flag is optional.
 | `AGENT_REPL_STATE_DIR` | contract | the one state root shared with Emacs, skills and tests |
 | `AGENT_REPL_FORBID_VENDOR_CALLS` | contract | every vendor exec site refuses (classifier, login pty with the default binary, shim spawn without `--fake`) |
 | `AGENT_REPL_OWNED=1` | contract | propagated into every shim so vendor hooks recognize our processes |
+| (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
 | `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
 | `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
-| `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; the self-reload trigger stays OFF under it |
+| `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; the self-reload trigger stays ON (test safety comes from `AGENT_REPL_DEPLOY_SCRIPT` naming a fake deploy script, so landed range → rollout trigger → deploy is assertable end to end) |
 | `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
 | `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
 | `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
 | `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary for the login pty and the real classifier (a fake script in tests) |
 | `AGENT_REPL_DEPLOY_SCRIPT` | test only | overrides `bin/deploy-all.sh` for the self-reload trigger |
+| `AGENT_REPL_TEST_ALL_SCRIPT` | test only | overrides `bin/test-all.sh` for the merge test gate (invoked as `bash <script> --suites <a,b>` in the merge TARGET worktree; exit 0 = pass; per-suite state parsed from the script's own `<suite>: passed in <N>s` / `<suite> failed after <N>s with exit code <rc>` lines; output archived under `<state>/merge-logs/`) |
 | `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory |
 
 ## The `-fake` classifier (deterministic)
@@ -79,7 +81,26 @@ workspace is an invariant violation, never a global write.
 ## Conventions
 
 Table-driven tests, Arrange/Act/Assert, one test file per source file, one
-edge case per test, no `time.Sleep` for synchronization. Unlanded refusal
+edge case per test, no `time.Sleep` for synchronization. GIT IS NEVER CALLED
+DURING TESTING (user directive): every package above the git client tests
+against a fake `gitclient.Git`; the integration harness scripts every git
+fact (commits, conflicts, landed ranges, worktree lists) as fixture data;
+the git-client leaf's own tests exercise its one spawn point against a
+scripted fake `git` executable placed first on PATH (recording argv/env,
+answering from a fixture table); the merge test gate is a scripted fake
+script in tests. No `git init`, no temp repositories, anywhere in tests. Unlanded refusal
 arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
 logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
 `ERROR-ARMS.md`.
+
+## Coverage deliberately not attainable under the no-git-in-tests directive
+
+The git client's tests pin argv, env scrubbing, `-C` selection and output
+parsing against a scripted fake `git`; they can no longer prove git's OWN
+behavior: that a `--no-ff` merge yields a two-parent commit, that the
+landed range equals the source branch, that a conflicted merge leaves
+unmerged index entries and MERGE_HEAD, that a revert removes the content
+in one commit, that `worktree prune` clears a stale registration, the
+exact `status --porcelain` markers, that git honors GIT_DIR over `-C`, and
+real-git version compatibility (`rev-list --no-commit-header` needs
+git >= 2.33). Those are e2e facts now (the project lead's suite).

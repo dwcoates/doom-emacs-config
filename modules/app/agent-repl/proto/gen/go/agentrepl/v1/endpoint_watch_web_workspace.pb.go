@@ -136,12 +136,14 @@ type isWatchWebWorkspaceResponse_Push interface {
 
 type WatchWebWorkspaceResponse_Transferred struct {
 	// DAEMON HANDOVER: this workspace has been released by this (old)
-	// daemon at freeness. The webview's obligation, IN ORDER: connect to
-	// `address`, call AdoptWebWorkspace there, and only then cancel this
-	// connection's streams — the old connection outlives the new one's
-	// creation, so no gap is observable and nothing races the switch. The
-	// address rides HERE because a webview has no daemon-level stream to
-	// have learned it from.
+	// daemon at freeness. The webview's obligation (ruled 2026-08-29): draw
+	// "moved to `address`", cancel this connection's streams and go quiet —
+	// it NEVER dials the successor itself (a different loopback port is a
+	// different origin). The HOST reloads the webview at the successor's
+	// address, and the FRESH page calls AdoptWebWorkspace once at boot before
+	// opening any view stream (`no_transfer_announced` is the ordinary
+	// answer for a non-handover boot; `not_yet_adopted` is retried with
+	// backoff). The address rides HERE so the notice can name it.
 	Transferred *WebWorkspaceTransferred `protobuf:"bytes,1,opt,name=transferred,proto3,oneof"`
 }
 

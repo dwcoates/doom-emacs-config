@@ -11,11 +11,14 @@ package merge
 
 import (
 	"context"
+	"time"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/gitclient"
 	"claude-repld/internal/ids"
-	"claude-repld/internal/notimpl"
+	"claude-repld/internal/paint"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/resolve/feed"
@@ -39,6 +42,18 @@ const (
 	BriefTestFailureResolve = "merge-test-failure-resolve"
 )
 
+// EscalationFile is the file the test-fix agent writes in the merge target to
+// end the fixes loop without a passing suite, and EscalationMarker is the
+// exact first line that makes it one. THE DAEMON SUBSTITUTES BOTH INTO THE
+// BRIEF: a user-edited brief must not be able to drift into instructing the
+// agent to write a record nothing reads.
+const (
+	// EscalationFile is the marker file's target-relative path.
+	EscalationFile = ".agent-repl-merge-escalation"
+	// EscalationMarker is the marker file's required first line.
+	EscalationMarker = "MERGE ESCALATION: ARCHITECTURAL CHANGE REQUIRED"
+)
+
 // Orchestrator is the merge queue's whole surface.
 type Orchestrator interface {
 	// Enqueue queues a workspace's merge. It REFUSES pre-state: no layout
@@ -46,10 +61,11 @@ type Orchestrator interface {
 	// queued or merging.
 	Enqueue(ctx context.Context, ws ids.WorkspaceID) error
 	// Pause stops the queue from starting new merges; an in-flight merge runs
-	// on.
-	Pause(ctx context.Context) error
-	// Unpause resumes starting merges.
-	Unpause(ctx context.Context) error
+	// on. A nil scope is the daemon-wide switch (UpdateMergeQueuePause with an
+	// UNSET repository); a scope names ONE repository's queue.
+	Pause(ctx context.Context, scope *RepositoryScope) error
+	// Unpause resumes starting merges, with the same scoping as Pause.
+	Unpause(ctx context.Context, scope *RepositoryScope) error
 	// Evict removes a queued workspace from the queue.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
 	// AnswerDequeue answers the tray's dequeue offer: keep the merge queued,
@@ -58,17 +74,41 @@ type Orchestrator interface {
 	// OnInterrupt raises the dequeue offer when the user interrupts a
 	// workspace that is queued.
 	OnInterrupt(ctx context.Context, ws ids.WorkspaceID)
+	// RouteParked delivers a submission that arrived while this workspace's
+	// merge lease stands PARKED. It is the queue's one ingress into the
+	// orchestrator: the queue recognizes the parked lease policy, never merge
+	// as a concept, and hands the submission here rather than starting a turn
+	// of the session's own. THE LEASE STATE IS THE RECOGNITION — no classifier
+	// and no content inspection happens on this path.
+	RouteParked(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) error
 	// Facts reports a workspace's merge facts for the footer and the roster;
 	// the bool is false when the workspace has no merge.
 	Facts(ws ids.WorkspaceID) (MergeFacts, bool)
-	// Recover resumes or LOUDLY FAILS every in-flight merge at boot. It never
-	// silently abandons one.
+	// Recover resumes or LOUDLY FAILS every in-flight merge at boot, and
+	// re-enqueues every merge that was queued but not started, in the order it
+	// was waiting in. It never silently abandons one.
 	Recover(ctx context.Context) error
+}
+
+// RepositoryScope names WHICH repository's merge queue a pause or a resume
+// addresses. It is the daemon-side spelling of the optional
+// workspace.v1.RepositoryRef the request carries, so merge never imports the
+// wire types: nil means every repository (the unset ref), and a value is
+// resolved against the registry, which is what makes an unknown ref a refusal
+// rather than a pause of a queue nobody has.
+type RepositoryScope struct {
+	// ID is the daemon-minted repository id the ref carried, empty when the
+	// ref named only a dir.
+	ID ids.RepoID
+	// Dir is the repository's common dir the ref carried, empty when the ref
+	// named only an id.
+	Dir string
 }
 
 // Deps are the orchestrator's collaborators.
 type Deps struct {
-	// DB holds the creation job's layout facts, the lease and the ledger.
+	// DB holds the creation job's layout facts, the lease, the durable per-repo
+	// queue and the ledger.
 	DB wsm.DB
 	// Git is the merge itself.
 	Git gitclient.Git
@@ -84,17 +124,103 @@ type Deps struct {
 	// Prompts reads the briefs at use time. The field holds the directory,
 	// not a cached brief, because a brief is never cached across a use.
 	PromptsDir string
+	// Briefs loads and splices one brief by name at USE time. It is injected
+	// rather than called directly so the orchestrator's tests fake a brief
+	// without a prompts directory on disk; the production value is BriefsFrom.
+	Briefs BriefLoader
 	// SelfRepoDir is the daemon's OWN checkout. SameRepo against it is what
-	// selects the Emacs-repo method; `-self-repo` overrides it in tests.
+	// selects the Emacs-repo method; AGENT_REPL_SELF_REPO_DIR overrides it in
+	// tests, and the self-reload trigger STAYS ON under that override.
 	SelfRepoDir string
+	// StateDir is the state root, whose merge-logs/ subdirectory archives every
+	// test-gate run's output.
+	StateDir string
 	// TestCommand is the Emacs-repo method's test gate, run with the selected
-	// suites, no flake re-run, output archived.
+	// suites, no flake re-run, output archived. The first element is the script
+	// (AGENT_REPL_TEST_ALL_SCRIPT overrides it); `--suites <a,b>` is appended.
 	TestCommand []string
+	// TestRunner runs the test gate. Injected so the gate is exercised against
+	// a scripted script rather than the repository's real suite: GIT IS NEVER
+	// CALLED DURING TESTING and neither is the real roster.
+	TestRunner ScriptRunner
+	// Painter turns the gate's ANSI output into paint spans. The client never
+	// parses an escape.
+	Painter paint.Painter
+	// StartSession starts a session for a workspace that has none, under the
+	// lease, because a configured prompt needs one (revival-is-implicit).
+	StartSession StartSessionFunc
+	// Occupy takes the shim client's in-memory occupancy guard that backs the
+	// WSM lease row. The lock arbitrates; the row describes.
+	Occupy OccupancyFunc
+	// AwaitTurnEnd blocks until one submitted turn ends, reporting how. The
+	// orchestrator continues a phase only on a real turn end, never a timer.
+	AwaitTurnEnd TurnWaiter
+	// CaptureDisplaced durably captures the user turn a merge displaces, at
+	// admission, so it is resubmitted EXACTLY ONCE at lease release even across
+	// a daemon bounce. It reports false when nothing was in flight.
+	CaptureDisplaced DisplacedCapture
+	// ParkedRoute delivers a parked submission to the resolution agent as
+	// guidance, landing it in the parked tab.
+	ParkedRoute ParkedRouter
 	// Rollout is triggered ONLY after lease release and terminal publication.
 	Rollout Trigger
+	// Now is the clock. Injected so a ledger interval and a terminal stamp are
+	// assertable without a real one.
+	Now func() time.Time
 	// Log is the orchestrator's logger.
 	Log dlog.Surfaces
 }
+
+// BriefLoader loads one brief by name and splices its values, at use time. It
+// composes rather than returning the parsed brief because a brief is never
+// worth having half-composed: the two steps fail for the same reason and the
+// caller reacts the same way to either.
+type BriefLoader func(name string, values map[string]string) (string, error)
+
+// BriefsFrom is the production BriefLoader: it reads dir at EVERY use, so
+// editing a brief takes effect without a daemon bounce, and a missing file or a
+// placeholder the values do not cover is LOUD rather than a hole in a prompt.
+func BriefsFrom(dir string) BriefLoader {
+	return func(name string, values map[string]string) (string, error) {
+		brief, err := LoadBrief(dir, name)
+		if err != nil {
+			return "", err
+		}
+		return brief.Splice(values)
+	}
+}
+
+// ScriptRunner runs one command in a directory and reports its combined output
+// and exit code. An error means the run could not be CLASSIFIED (the script
+// could not be spawned); a suite that ran and failed is a non-zero code and a
+// nil error, because a failing suite is an answer.
+type ScriptRunner interface {
+	// Run executes argv in dir and returns the combined stdout and stderr with
+	// the process's exit code.
+	Run(ctx context.Context, dir string, argv []string) (output string, exitCode int, err error)
+}
+
+// StartSessionFunc starts a workspace's session under the merge lease, for a
+// workspace that has none but has a configured prompt to run.
+type StartSessionFunc func(ctx context.Context, ws ids.WorkspaceID) error
+
+// OccupancyFunc takes the shim client's occupancy guard for a workspace,
+// returning the release. It reports false when the workspace has no live shim,
+// which is the sessionless merge's legal answer rather than a failure.
+type OccupancyFunc func(ws ids.WorkspaceID, holder string) (release func(), ok bool, err error)
+
+// TurnWaiter blocks until one turn ends and reports how it ended.
+type TurnWaiter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error)
+
+// DisplacedCapture durably records the turn a merge displaced. The bool is
+// false when no turn was in flight, which is not a failure.
+type DisplacedCapture func(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error)
+
+// ParkedRouter delivers one parked submission to the resolution agent as
+// guidance, addressed at the parked tab. It answers with the turn the guidance
+// runs as, so the orchestrator resumes on that turn's real end rather than a
+// timer.
+type ParkedRouter func(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error)
 
 // Trigger is the slice of the rollout controller merge uses: the self-reload
 // trigger, invoked with what landed. It is a narrow interface so merge does
@@ -105,14 +231,9 @@ type Trigger interface {
 	Trigger(ctx context.Context, landed []gitclient.Commit) error
 }
 
-// New builds the orchestrator.
-func New(deps Deps) (Orchestrator, error) {
-	return nil, notimpl.Err
-}
-
 // LoadBrief reads one brief by name from dir at use time. It exists so every
 // call site loads a brief the same way and fails the same way when one is
 // missing.
 func LoadBrief(dir, name string) (prompts.Prompt, error) {
-	return prompts.Prompt{}, notimpl.Err
+	return prompts.Load(dir, name)
 }

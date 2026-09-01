@@ -6,10 +6,6 @@
 // See daemon/AGENTS.md "Logging" and docs/overhaul/daemon.md.
 package dlog
 
-import (
-	"claude-repld/internal/notimpl"
-)
-
 // Context is one record's structured context: the resolved inputs, the branch
 // taken, and the cause. Values are JSON-encodable scalars, slices or maps.
 type Context map[string]any
@@ -61,6 +57,10 @@ type Surfaces interface {
 	// ClientLog persists a console-less client's diagnostic record into that
 	// workspace's durable sink (the ClientLog rpc's landing place).
 	ClientLog(dir string, record ClientRecord) error
+	// Evict releases one workspace's sinks when the workspace closes. The
+	// canonical links and their targets stay on disk; only the descriptors go.
+	// Evicting a workspace with no open sinks is success.
+	Evict(dir string) error
 	// Close flushes and closes every sink the daemon opened.
 	Close() error
 }
@@ -89,11 +89,10 @@ type ClientRecord struct {
 	Message string
 	// Context is the record's structured context.
 	Context Context
-}
-
-// OpenSurfaces opens the daemon's log surfaces under the state root's logs
-// directory. runLog is the restart-scoped run log path; verbose gates the
-// terminal mirror for verbose records.
-func OpenSurfaces(runLog string, verbose bool) (Surfaces, error) {
-	return nil, notimpl.Err
+	// Timestamp is the instant the CLIENT observed, in RFC 3339. It may carry
+	// any offset, including a UTC "Z": the daemon parses it and renders it in
+	// the local zone before persisting, so a forwarded record interleaves with
+	// the daemon records around it. Empty means the client sent none and the
+	// daemon stamps its arrival instead, saying so in the record's context.
+	Timestamp string
 }
