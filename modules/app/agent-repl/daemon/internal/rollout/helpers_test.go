@@ -1,0 +1,777 @@
+package rollout
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitclient"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionlock"
+	"claude-repld/internal/shimclient"
+	"claude-repld/internal/wsm"
+)
+
+// instant is the fixed instant every test's arithmetic starts from: no test in
+// this package reads the wall clock.
+var instant = time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+
+// errFake is the failure a fake returns when a test asks one to fail.
+var errFake = errors.New("the fake refused")
+
+// selfInstance is the daemon instance every test's controller runs as.
+const selfInstance = ids.InstanceID("daemon-outgoing")
+
+// fakeClock is a Clock the test drives. Every After registers a channel under
+// the duration it was asked for, so a test releases exactly the window it means
+// to — the holdout cadence or the adoption window — and never waits one out.
+type fakeClock struct {
+	mu    sync.Mutex
+	now   time.Time
+	waits []time.Duration
+	armed map[time.Duration][]chan time.Time
+	// asked announces every After call, so a test synchronizes on a window
+	// having been armed rather than polling for it.
+	asked chan time.Duration
+}
+
+func newFakeClock(now time.Time) *fakeClock {
+	return &fakeClock{
+		now:   now,
+		armed: make(map[time.Duration][]chan time.Time),
+		asked: make(chan time.Duration, 256),
+	}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) After(d time.Duration) <-chan time.Time {
+	ch := make(chan time.Time, 1)
+	c.mu.Lock()
+	c.waits = append(c.waits, d)
+	c.armed[d] = append(c.armed[d], ch)
+	c.mu.Unlock()
+	select {
+	case c.asked <- d:
+	default:
+	}
+	return ch
+}
+
+// Waits returns every duration After was asked for.
+func (c *fakeClock) Waits() []time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]time.Duration(nil), c.waits...)
+}
+
+// Fire releases every window armed for exactly d.
+func (c *fakeClock) Fire(d time.Duration) {
+	c.mu.Lock()
+	waiting := c.armed[d]
+	delete(c.armed, d)
+	now := c.now
+	c.mu.Unlock()
+	for _, ch := range waiting {
+		ch <- now
+	}
+}
+
+// FireAll releases every window armed so far, whatever its duration.
+func (c *fakeClock) FireAll() {
+	c.mu.Lock()
+	all := c.armed
+	c.armed = make(map[time.Duration][]chan time.Time)
+	now := c.now
+	c.mu.Unlock()
+	for _, waiting := range all {
+		for _, ch := range waiting {
+			ch <- now
+		}
+	}
+}
+
+// awaitArmed blocks until a window of exactly d has been armed, which is how a
+// test knows the flow reached that window without polling or sleeping.
+func (c *fakeClock) awaitArmed(t *testing.T, d time.Duration) {
+	t.Helper()
+	for {
+		select {
+		case got := <-c.asked:
+			if got == d {
+				return
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no window of %s was ever armed", d)
+			return
+		}
+	}
+}
+
+// fakeSpawner is the successor spawner.
+type fakeSpawner struct {
+	address string
+	err     error
+	mu      sync.Mutex
+	told    []string
+}
+
+func (s *fakeSpawner) Spawn(_ context.Context, incumbent string) (string, error) {
+	s.mu.Lock()
+	s.told = append(s.told, incumbent)
+	s.mu.Unlock()
+	return s.address, s.err
+}
+
+func (s *fakeSpawner) Told() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.told...)
+}
+
+// fakeAnnouncer captures the WatchDaemon shutdown announcement.
+type fakeAnnouncer struct {
+	mu   sync.Mutex
+	sent []*agentreplv1.DaemonShutdownAnnounced
+}
+
+func (a *fakeAnnouncer) ShutdownAnnounced(push *agentreplv1.DaemonShutdownAnnounced) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sent = append(a.sent, push)
+}
+
+func (a *fakeAnnouncer) Sent() []*agentreplv1.DaemonShutdownAnnounced {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]*agentreplv1.DaemonShutdownAnnounced(nil), a.sent...)
+}
+
+// pushCall is one recorded per-workspace push.
+type pushCall struct {
+	WS      ids.WorkspaceID
+	Kind    string
+	Address string
+}
+
+// fakePusher captures the transferred and reload_webapp pushes.
+type fakePusher struct {
+	mu    sync.Mutex
+	calls []pushCall
+}
+
+func (p *fakePusher) PushTransferred(ws ids.WorkspaceID, address string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, pushCall{WS: ws, Kind: "transferred", Address: address})
+}
+
+func (p *fakePusher) PushReloadWebapp(ws ids.WorkspaceID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls = append(p.calls, pushCall{WS: ws, Kind: "reload_webapp"})
+}
+
+func (p *fakePusher) Calls() []pushCall {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]pushCall(nil), p.calls...)
+}
+
+// fakeParticipants is the expected-participant snapshot.
+type fakeParticipants struct {
+	mu sync.Mutex
+	by map[ids.WorkspaceID]Participants
+}
+
+func newFakeParticipants() *fakeParticipants {
+	return &fakeParticipants{by: make(map[ids.WorkspaceID]Participants)}
+}
+
+func (p *fakeParticipants) Participants(ws ids.WorkspaceID) Participants {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.by[ws]
+}
+
+func (p *fakeParticipants) Set(ws ids.WorkspaceID, participants Participants) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.by[ws] = participants
+}
+
+// fakeFreeness answers freeness and lets a test release a pending wait through
+// a channel rather than a sleep.
+type fakeFreeness struct {
+	mu      sync.Mutex
+	free    map[ids.WorkspaceID]bool
+	release map[ids.WorkspaceID]chan struct{}
+	calls   chan ids.WorkspaceID
+}
+
+func newFakeFreeness() *fakeFreeness {
+	return &fakeFreeness{
+		free:    make(map[ids.WorkspaceID]bool),
+		release: make(map[ids.WorkspaceID]chan struct{}),
+		calls:   make(chan ids.WorkspaceID, 32),
+	}
+}
+
+func (f *fakeFreeness) Free(ws ids.WorkspaceID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.free[ws]
+}
+
+func (f *fakeFreeness) SetFree(ws ids.WorkspaceID, free bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.free[ws] = free
+}
+
+// Gate installs a channel a pending AwaitFree for ws blocks on.
+func (f *fakeFreeness) Gate(ws ids.WorkspaceID) chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	gate := make(chan struct{})
+	f.release[ws] = gate
+	return gate
+}
+
+func (f *fakeFreeness) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	gate := f.release[ws]
+	f.mu.Unlock()
+	select {
+	case f.calls <- ws:
+	default:
+	}
+	if gate == nil {
+		return nil
+	}
+	select {
+	case <-gate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// fakeShim is a shimclient.Client the test drives. Everything the relaunch
+// engine touches is here; the embedded interface makes the rest panic loudly if
+// anything reaches for it.
+type fakeShim struct {
+	shimclient.Client
+
+	pid int
+
+	mu       sync.Mutex
+	detached bool
+	killReq  []*shimv1.KillSessionRequest
+	killed   []shimclient.KillAttribution
+	// killAnswer is what KillSession answers; the zero value is success.
+	killAnswer *shimv1.KillSessionResponse
+	killErr    error
+	// exited carries the one ExitInfo the test reaps it with.
+	exited chan shimclient.ExitInfo
+	// forced announces every force-kill, so a test synchronizes on one having
+	// happened rather than spinning on a counter.
+	forced chan shimclient.KillAttribution
+	// order records the engine's steps against this shim, so a test asserts the
+	// SEQUENCE and not merely that each happened.
+	order *steps
+}
+
+func newFakeShim(pid int, order *steps) *fakeShim {
+	return &fakeShim{
+		pid:    pid,
+		exited: make(chan shimclient.ExitInfo, 1),
+		forced: make(chan shimclient.KillAttribution, 4),
+		order:  order,
+	}
+}
+
+func (s *fakeShim) PID() int { return s.pid }
+
+func (s *fakeShim) Detach() {
+	s.mu.Lock()
+	s.detached = true
+	s.mu.Unlock()
+	s.order.record("detach")
+}
+
+func (s *fakeShim) Detached() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.detached
+}
+
+func (s *fakeShim) KillSession(_ context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
+	s.mu.Lock()
+	s.killReq = append(s.killReq, req)
+	answer, err := s.killAnswer, s.killErr
+	s.mu.Unlock()
+	s.order.record("kill_session")
+	if err != nil {
+		return nil, err
+	}
+	if answer != nil {
+		return answer, nil
+	}
+	return &shimv1.KillSessionResponse{
+		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{}},
+	}, nil
+}
+
+func (s *fakeShim) KillRequests() []*shimv1.KillSessionRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*shimv1.KillSessionRequest(nil), s.killReq...)
+}
+
+func (s *fakeShim) Kill(attr shimclient.KillAttribution) error {
+	s.mu.Lock()
+	s.killed = append(s.killed, attr)
+	s.mu.Unlock()
+	s.order.record("force_kill")
+	s.forced <- attr
+	return nil
+}
+
+func (s *fakeShim) ForceKills() []shimclient.KillAttribution {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]shimclient.KillAttribution(nil), s.killed...)
+}
+
+func (s *fakeShim) Exited() <-chan shimclient.ExitInfo { return s.exited }
+
+// Reap makes the process observably gone, which is what the engine's gate
+// waits for.
+func (s *fakeShim) Reap() { s.exited <- shimclient.ExitInfo{PID: s.pid, Code: 0} }
+
+// steps records the engine's ordered steps.
+type steps struct {
+	mu sync.Mutex
+	in []string
+}
+
+func (s *steps) record(step string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.in = append(s.in, step)
+}
+
+func (s *steps) Taken() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.in...)
+}
+
+// fakeFleet is the shim fleet.
+type fakeFleet struct {
+	mu sync.Mutex
+	// live is the workspace's current client.
+	live map[ids.WorkspaceID]*fakeShim
+	// prelaunched is what Prelaunch answers, per workspace.
+	prelaunched map[ids.WorkspaceID]*fakeShim
+	// adopted is what Adopt answers.
+	adopted map[ids.WorkspaceID]*fakeShim
+
+	prelaunchErr map[ids.WorkspaceID]error
+	adoptErr     map[ids.WorkspaceID]error
+	installErr   map[ids.WorkspaceID]error
+	resumeErr    map[ids.WorkspaceID]error
+	resumeCold   map[ids.WorkspaceID]*conversationv1.SessionCold
+
+	installs  []ids.WorkspaceID
+	adoptions []ids.WorkspaceID
+	resumes   []ids.WorkspaceID
+	order     *steps
+}
+
+func newFakeFleet(order *steps) *fakeFleet {
+	return &fakeFleet{
+		live:         make(map[ids.WorkspaceID]*fakeShim),
+		prelaunched:  make(map[ids.WorkspaceID]*fakeShim),
+		adopted:      make(map[ids.WorkspaceID]*fakeShim),
+		prelaunchErr: make(map[ids.WorkspaceID]error),
+		adoptErr:     make(map[ids.WorkspaceID]error),
+		installErr:   make(map[ids.WorkspaceID]error),
+		resumeErr:    make(map[ids.WorkspaceID]error),
+		resumeCold:   make(map[ids.WorkspaceID]*conversationv1.SessionCold),
+		order:        order,
+	}
+}
+
+func (f *fakeFleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.live[ws]
+	if !ok {
+		return nil, false
+	}
+	return c, true
+}
+
+func (f *fakeFleet) Prelaunch(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
+	f.order.record("prelaunch")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.prelaunchErr[ws]; err != nil {
+		return nil, err
+	}
+	c, ok := f.prelaunched[ws]
+	if !ok {
+		c = newFakeShim(9999, f.order)
+		f.prelaunched[ws] = c
+	}
+	return c, nil
+}
+
+func (f *fakeFleet) Install(_ context.Context, ws ids.WorkspaceID, c shimclient.Client) error {
+	f.order.record("install")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.installErr[ws]; err != nil {
+		return err
+	}
+	f.installs = append(f.installs, ws)
+	if shim, ok := c.(*fakeShim); ok {
+		f.live[ws] = shim
+	}
+	return nil
+}
+
+func (f *fakeFleet) Adopt(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
+	f.order.record("adopt")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.adoptErr[ws]; err != nil {
+		return nil, err
+	}
+	f.adoptions = append(f.adoptions, ws)
+	c, ok := f.adopted[ws]
+	if !ok {
+		c = newFakeShim(4242, f.order)
+		f.adopted[ws] = c
+	}
+	return c, nil
+}
+
+func (f *fakeFleet) Resume(_ context.Context, ws ids.WorkspaceID, _ shimclient.Client) (Resumed, error) {
+	f.order.record("resume")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err := f.resumeErr[ws]; err != nil {
+		return Resumed{}, err
+	}
+	f.resumes = append(f.resumes, ws)
+	return Resumed{Cold: f.resumeCold[ws]}, nil
+}
+
+func (f *fakeFleet) Adoptions() []ids.WorkspaceID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), f.adoptions...)
+}
+
+// fakeRunner is the deploy script runner.
+type fakeRunner struct {
+	mu   sync.Mutex
+	runs [][]string
+	dirs []string
+	code int
+	err  error
+}
+
+func (r *fakeRunner) Run(_ context.Context, dir string, argv []string) (string, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.runs = append(r.runs, append([]string(nil), argv...))
+	r.dirs = append(r.dirs, dir)
+	return "the deploy chain's output", r.code, r.err
+}
+
+func (r *fakeRunner) Runs() [][]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([][]string(nil), r.runs...)
+}
+
+// fakeGit answers ChangedPaths from a fixture. GIT IS NEVER CALLED DURING
+// TESTING: this is the whole of the git contact this package's tests make.
+type fakeGit struct {
+	gitclient.Git
+	mu     sync.Mutex
+	paths  []string
+	err    error
+	ranges []string
+}
+
+func (g *fakeGit) ChangedPaths(_ context.Context, _ string, rangeSpec string) ([]string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ranges = append(g.ranges, rangeSpec)
+	return g.paths, g.err
+}
+
+func (g *fakeGit) Ranges() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.ranges...)
+}
+
+// harness is one controller under test with every fake reachable.
+type harness struct {
+	c            *controller
+	db           wsm.DB
+	clock        *fakeClock
+	spawner      *fakeSpawner
+	announcer    *fakeAnnouncer
+	pusher       *fakePusher
+	participants *fakeParticipants
+	freeness     *fakeFreeness
+	fleet        *fakeFleet
+	runner       *fakeRunner
+	git          *fakeGit
+	order        *steps
+	log          *dlog.TestSurfaces
+	state        string
+
+	mu           sync.Mutex
+	quiesced     []ids.WorkspaceID
+	drained      []ids.WorkspaceID
+	published    []ids.WorkspaceID
+	addrWrites   int
+	exits        chan struct{}
+	lockStates   map[string]sessionlock.State
+	lockErr      map[string]error
+	deployedSHA  string
+	deployErr    error
+	sessionSHA   map[ids.WorkspaceID]string
+	coldGateCall []ids.WorkspaceID
+}
+
+// newHarness builds a controller over a real WSM store in the test's temp dir:
+// the state client is the one collaborator worth exercising for real, because
+// the lease, serving ownership and the fault records are what the rollout's
+// behavior is made of.
+func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
+	t.Helper()
+	t.Setenv(DeployScriptEnv, "")
+	log := dlog.NewTestSurfaces()
+	state := t.TempDir()
+	db, err := wsm.Open(context.Background(), filepath.Join(state, "wsm.db"), wsm.WithLogger(log.Global()))
+	if err != nil {
+		t.Fatalf("wsm.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	order := &steps{}
+	h := &harness{
+		db:           db,
+		clock:        newFakeClock(instant),
+		spawner:      &fakeSpawner{address: "127.0.0.1:7788"},
+		announcer:    &fakeAnnouncer{},
+		pusher:       &fakePusher{},
+		participants: newFakeParticipants(),
+		freeness:     newFakeFreeness(),
+		fleet:        newFakeFleet(order),
+		runner:       &fakeRunner{},
+		git:          &fakeGit{},
+		order:        order,
+		log:          log,
+		state:        state,
+		exits:        make(chan struct{}, 4),
+		lockStates:   make(map[string]sessionlock.State),
+		lockErr:      make(map[string]error),
+		sessionSHA:   make(map[ids.WorkspaceID]string),
+		deployedSHA:  "deadbeef",
+	}
+	deps := Deps{
+		DeployScript:   "bin/deploy-all.sh",
+		Deploy:         h.runner,
+		SelfExe:        filepath.Join(state, "claude-repld"),
+		SelfRepoDir:    state,
+		SelfAddress:    "127.0.0.1:7777",
+		Instance:       selfInstance,
+		StateDir:       state,
+		IntentManifest: filepath.Join(state, "intent", "manifest.json"),
+		Git:            h.git,
+		DB:             db,
+		Spawner:        h.spawner,
+		Announcer:      h.announcer,
+		Pusher:         h.pusher,
+		Participants:   h.participants,
+		Quiesce: func(_ context.Context, ws ids.WorkspaceID) error {
+			order.record("quiesce")
+			h.mu.Lock()
+			h.quiesced = append(h.quiesced, ws)
+			h.mu.Unlock()
+			return nil
+		},
+		DrainIntake: func(_ context.Context, ws ids.WorkspaceID) error {
+			order.record("drain_intake")
+			h.mu.Lock()
+			h.drained = append(h.drained, ws)
+			h.mu.Unlock()
+			return nil
+		},
+		Freeness: h.freeness,
+		Shims:    h.fleet,
+		LockProbe: func(dir string) (sessionlock.State, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.lockStates[dir], h.lockErr[dir]
+		},
+		PublishViews: func(_ context.Context, ws ids.WorkspaceID) error {
+			order.record("publish_views")
+			h.mu.Lock()
+			h.published = append(h.published, ws)
+			h.mu.Unlock()
+			return nil
+		},
+		WriteDaemonAddr: func(context.Context) error {
+			h.mu.Lock()
+			h.addrWrites++
+			h.mu.Unlock()
+			return nil
+		},
+		DeployStamp: func() (string, error) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.deployedSHA, h.deployErr
+		},
+		SessionBuildSHA: func(ws ids.WorkspaceID) (string, bool) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			sha, ok := h.sessionSHA[ws]
+			return sha, ok
+		},
+		ColdGate: func(_ context.Context, ws ids.WorkspaceID, _ *conversationv1.SessionCold) error {
+			order.record("cold_gate")
+			h.mu.Lock()
+			h.coldGateCall = append(h.coldGateCall, ws)
+			h.mu.Unlock()
+			return nil
+		},
+		Exit: func(context.Context) error {
+			order.record("exit")
+			h.exits <- struct{}{}
+			return nil
+		},
+		ExpectedOutage:   5 * time.Second,
+		AdoptionWindow:   30 * time.Second,
+		HoldoutWarnEvery: 10 * time.Minute,
+		StandDownWindow:  30 * time.Second,
+		Clock:            h.clock,
+		Log:              log,
+	}
+	for _, a := range adjust {
+		a(&deps)
+	}
+	controllerAny, err := New(deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c, ok := controllerAny.(*controller)
+	if !ok {
+		t.Fatalf("New returned %T, want *controller", controllerAny)
+	}
+	h.c = c
+	return h
+}
+
+// workspace registers one workspace served by this daemon, with a live shim.
+func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
+	t.Helper()
+	dir := t.TempDir()
+	ws, _, err := h.db.RegisterWorkspace(context.Background(), dir, wsm.RegisterFacts{
+		Name: filepath.Base(dir), Branch: "feature", ParentBranch: "master", RepoDir: dir,
+	})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	pid := 4242
+	if err := h.db.PutSession(context.Background(), wsm.Session{
+		Workspace: ws.ID, VendorSessionID: "vendor-" + string(ws.ID), ConfigDir: dir,
+		Model: "opus", PermissionMode: "default", StartedAt: instant, LastEngagementAt: instant,
+		ShimPID: &pid,
+	}); err != nil {
+		t.Fatalf("PutSession: %v", err)
+	}
+	if err := h.db.ClaimServing(context.Background(), ws.ID, selfInstance); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+	h.freeness.SetFree(ws.ID, true)
+	h.fleet.live[ws.ID] = newFakeShim(pid, h.order)
+	// The registry NORMALIZES the dir (macOS resolves /var to /private/var), and
+	// the lock probe is called with the registry's spelling: keying the fake
+	// probe by anything else would silently answer "could not tell".
+	h.mu.Lock()
+	h.lockStates[ws.Dir] = sessionlock.StateHeld
+	h.mu.Unlock()
+	return ws.ID, ws.Dir
+}
+
+// records returns every captured record whose operation matches.
+func records(log *dlog.TestSurfaces, operation string) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range log.Records() {
+		if rec.Operation == operation {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// levelRecords narrows captured records to one level, in order.
+func levelRecords(in []dlog.Record, level string) []dlog.Record {
+	var out []dlog.Record
+	for _, rec := range in {
+		if rec.Level == level {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// indexOf is the position of one step in a recorded sequence, or -1.
+func indexOf(taken []string, step string) int {
+	for i, s := range taken {
+		if s == step {
+			return i
+		}
+	}
+	return -1
+}
+
+// writeFile replaces a file's whole content, for the tests that corrupt one.
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+// waitForForceKill blocks until the engine has force-killed a shim, which is
+// how a test knows the stand-down window's expiry was acted on.
+func waitForForceKill(t *testing.T, shim *fakeShim) {
+	t.Helper()
+	select {
+	case <-shim.forced:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("the shim was never force-killed")
+	}
+}
