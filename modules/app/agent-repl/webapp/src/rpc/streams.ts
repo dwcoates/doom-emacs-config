@@ -27,11 +27,14 @@
  * first push is the current truth; there are no fences, no epochs and no gap
  * to close.
  *
- * EVERY HANDLE RE-REGISTERS ON A NEW CLIENT. The graceful-rollout path hands
- * the page a new daemon to adopt, so each handle subscribes to
- * `ctx.onClientReplaced` and restarts itself on whatever `ctx.client` is by
- * then. The context's listener set IS the registry — a second one beside it
- * could disagree with it.
+ * A QUIESCED PAGE CANCELS EVERY HANDLE, and that is the ONLY thing besides an
+ * explicit `cancel()` that stops one. The graceful-rollout path does not hand
+ * this page a new daemon to move to — a successor on another loopback port is
+ * a different origin, so the host reloads the view instead — which means there
+ * is no "reopen on the adopted client" path here and deliberately no registry
+ * for one. What a handle does subscribe to is `ctx.onQuiesced`: the workspace
+ * has moved, so reopening would file a `daemon_unreachable` card every backoff
+ * for a link that is correctly gone.
  */
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
@@ -56,7 +59,6 @@ export interface StreamHandle {
 export interface StreamContext {
   readonly client: AgentReplClient;
   readonly failures: FailureSink;
-  onClientReplaced(fn: () => void): () => void;
   /**
    * The page going quiet, which every standing stream must obey.
    *
@@ -142,19 +144,6 @@ export function watchStream<Res extends Message>(
       context: { rpc: opts.name },
     });
     cancelSelf();
-  });
-
-  const unsubscribeFromClientReplacement = ctx.onClientReplaced(() => {
-    if (cancelled) return;
-    // The page adopted a new daemon. Abort the run against the old client; the
-    // loop reopens on `ctx.client`, which is already the new one.
-    log("info", `${opts.name} is reopening on the adopted daemon`, {
-      operation: "rpc.stream-client-replaced",
-      context: { rpc: opts.name },
-    });
-    backoffMs = initialMs;
-    controller.abort();
-    wakeFromBackoff?.();
   });
 
   /**
@@ -252,7 +241,6 @@ export function watchStream<Res extends Message>(
         operation: "rpc.stream-cancel",
         context: { rpc: opts.name },
       });
-      unsubscribeFromClientReplacement();
       unsubscribeFromQuiesce();
       controller.abort();
       wakeFromBackoff?.();
