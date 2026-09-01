@@ -34,78 +34,14 @@ describe("createAppContext", () => {
   });
 });
 
-describe("replaceClient", () => {
-  it("makes ctx.client the adopted one", () => {
-    // ARRANGE
-    const context = ctx();
-    const next = client();
-    // ACT
-    context.replaceClient(next);
-    // ASSERT
-    expect(context.client).toBe(next);
-  });
-
-  it("notifies a listener so it can re-derive what it built from the old client", () => {
-    const context = ctx();
-    const fn = vi.fn();
-    context.onClientReplaced(fn);
-    context.replaceClient(client());
-    expect(fn).toHaveBeenCalledOnce();
-  });
-
-  it("notifies every listener, not merely the first", () => {
-    const context = ctx();
-    const a = vi.fn();
-    const b = vi.fn();
-    context.onClientReplaced(a);
-    context.onClientReplaced(b);
-    context.replaceClient(client());
-    expect([a.mock.calls.length, b.mock.calls.length]).toEqual([1, 1]);
-  });
-
-  it("hands the listener the NEW client, not the one being replaced", () => {
-    const context = ctx();
-    const next = client();
-    let seen: unknown = null;
-    context.onClientReplaced(() => {
-      seen = context.client;
-    });
-    context.replaceClient(next);
-    expect(seen).toBe(next);
-  });
-
-  it("survives a listener that unsubscribes itself mid-notification", () => {
-    // ARRANGE: a stream handle does exactly this when it cancels on adoption.
-    const context = ctx();
-    const b = vi.fn();
-    const unsubscribeA = context.onClientReplaced(() => unsubscribeA());
-    context.onClientReplaced(b);
-    // ACT / ASSERT
-    expect(() => context.replaceClient(client())).not.toThrow();
-    expect(b).toHaveBeenCalledOnce();
-  });
-});
-
-describe("onClientReplaced", () => {
-  it("returns an unsubscriber that stops later notifications", () => {
-    const context = ctx();
-    const fn = vi.fn();
-    context.onClientReplaced(fn)();
-    context.replaceClient(client());
-    expect(fn).not.toHaveBeenCalled();
-  });
-
-  it("notifies once per replacement, so two adoptions notify twice", () => {
-    const context = ctx();
-    const fn = vi.fn();
-    context.onClientReplaced(fn);
-    context.replaceClient(client());
-    context.replaceClient(client());
-    expect(fn).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe("quiesce", () => {
+  it("is the ONE thing that changes what a page may send; the client itself never moves", () => {
+    // The no-redial ruling: a successor daemon on another loopback port is a
+    // different origin, so there is no client to swap to and no verb for it.
+    const context = ctx();
+    expect("replaceClient" in context).toBe(false);
+  });
+
   it("reports the page as quiet", () => {
     const context = ctx();
     context.quiesce();
@@ -147,14 +83,5 @@ describe("quiesce", () => {
     context.onQuiesced(fn)();
     context.quiesce();
     expect(fn).not.toHaveBeenCalled();
-  });
-});
-
-describe("replaceClient after a quiesce", () => {
-  it("clears the flag, because adopting a daemon is somewhere to send again", () => {
-    const context = ctx();
-    context.quiesce();
-    context.replaceClient(client());
-    expect(context.isQuiesced()).toBe(false);
   });
 });
