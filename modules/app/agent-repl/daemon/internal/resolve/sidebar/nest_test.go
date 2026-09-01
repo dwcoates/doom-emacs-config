@@ -27,6 +27,43 @@ func TestRosterNestsAWorkspaceUnderTheBranchItWasCutFrom(t *testing.T) {
 	}
 }
 
+func TestRosterNestsAWorkspaceUnderItsRecordedParent(t *testing.T) {
+	// Arrange: created through the daemon, so the parent is a recorded fact
+	// and the branches say nothing about the family.
+	r, _ := newResolver(t)
+	parent := workspace("w-parent", "parent")
+	child := workspace("w-child", "child")
+	child.Parent = &parent.ID
+
+	// Act.
+	r.SetRegistry(registry(parent, child))
+
+	// Assert.
+	rows := repoRows(t, latest(t, r))
+	if len(rows) != 1 {
+		t.Fatalf("the section drew %d top-level rows, want only the parent", len(rows))
+	}
+	if got := rowNames(rows[0].GetChildren()); !equal(got, []string{"child"}) {
+		t.Fatalf("children = %v, want the workspace its parent spawned", got)
+	}
+}
+
+func TestRosterDrawsAWorkspaceWhoseRecordedParentIsNotInTheSectionAtTheTopLevel(t *testing.T) {
+	// Arrange: a row can only nest under a row drawn beside it.
+	r, _ := newResolver(t)
+	absent := ids.WorkspaceID("w-elsewhere")
+	child := workspace("w-child", "child")
+	child.Parent = &absent
+
+	// Act.
+	r.SetRegistry(registry(child))
+
+	// Assert.
+	if got := len(repoRows(t, latest(t, r))); got != 1 {
+		t.Fatalf("the section drew %d rows, want the child at the top level", got)
+	}
+}
+
 func TestRosterNestsAGrandchild(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
