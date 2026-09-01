@@ -234,7 +234,10 @@ describe("vendor bookkeeping attachments", () => {
 });
 
 describe("the away summary", () => {
-  it("is a system record with no stream message beside it", async () => {
+  it("lands on BOTH planes, since either producer may convert it", async () => {
+    // The recap is a transcript line AND a stream message. It was file-plane
+    // only, which left the shim blind to it and its `system/away_summary`
+    // residue never written — while the store expects exactly that row.
     // Arrange + Act
     const driven = await driveScenario(["!away-summary"]);
     const record = recordsOfType(driven.transcript(), "system").find(
@@ -242,9 +245,25 @@ describe("the away summary", () => {
     );
 
     // Assert
-    expect({ recorded: record !== undefined, streamed: ofType(driven, "system", "away_summary").length }).toEqual(
-      { recorded: true, streamed: 0 },
+    expect({
+      recorded: record !== undefined,
+      streamed: ofType(driven, "system", "away_summary").length,
+    }).toEqual({ recorded: true, streamed: 1 });
+  });
+
+  it("gives the two planes ONE uuid, so their residue rows collapse into one", async () => {
+    // Residue is keyed `residue:<vendor record uuid>` (landing 5) precisely so
+    // the sidecar's row and the shim's row are the same row. Two uuids would
+    // make the same recap appear twice.
+    // Arrange + Act
+    const driven = await driveScenario(["!away-summary"]);
+    const record = recordsOfType(driven.transcript(), "system").find(
+      (l) => l.subtype === "away_summary",
     );
+    const streamed = ofType(driven, "system", "away_summary")[0] as { uuid?: string } | undefined;
+
+    // Assert
+    expect(streamed?.uuid).toBe(record?.uuid);
   });
 });
 

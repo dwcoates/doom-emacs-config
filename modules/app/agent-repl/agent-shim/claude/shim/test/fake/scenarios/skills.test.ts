@@ -67,12 +67,26 @@ describe("a skill invocation", () => {
 });
 
 describe("injected memory", () => {
-  it("streams nothing but prose", async () => {
+  it("puts the attachment on the STREAM as well as in the transcript", async () => {
+    // Attachments were modelled as a file-plane fact only, which left the
+    // shim's whole attachment converter unreachable from production and its
+    // residue rows unwritten. Both planes see the record; one uuid keeps the
+    // two producers' rows collapsing into one.
     // Arrange + Act
     const driven = await driveScenario(["!memory"]);
 
-    // Assert. Attachments are a file-plane fact; the vendor never streams them.
-    expect(ofType(driven, "attachment")).toHaveLength(0);
+    // Assert. `!memory` writes two: the nested memory and the file attachment.
+    expect(ofType(driven, "attachment")).toHaveLength(2);
+  });
+
+  it("gives the streamed attachment the SAME uuid as its transcript line", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!memory"]);
+    const streamed = ofType(driven, "attachment")[0] as { uuid?: string } | undefined;
+    const recorded = recordsOfType(driven.transcript(), "attachment")[0];
+
+    // Assert
+    expect(streamed?.uuid).toBe(recorded?.uuid);
   });
 
   it("writes a nested_memory and a file attachment", async () => {
