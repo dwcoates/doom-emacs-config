@@ -2799,8 +2799,16 @@ the span was injected rather than typed by the user."
 ;;; Workspace helpers
 
 (defun agent-repl--current-ws-p (ws)
-  "Return non-nil when WS is the currently active workspace name."
-  (string= ws (agent-repl--ws-current-name)))
+  "Return non-nil when WS is the currently active workspace name.
+
+NO WORKSPACE SELECTED IS AN ANSWER, NOT AN ERROR.
+`agent-repl--ws-current-name' documents nil as a legal return — persp-mode
+unloaded, or startup before the workspace system is ready — and nil is
+simply not WS.  `string=' would signal `wrong-type-argument' on it, and
+this predicate is read from the finish-edge reactions, where a signal
+would abort the remaining reactions for that edge."
+  (let ((current (agent-repl--ws-current-name)))
+    (and (stringp ws) (stringp current) (string= ws current))))
 
 ;;;; ---- Heartbeat assertion ----
 ;;
