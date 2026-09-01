@@ -19,7 +19,7 @@
  * Only a TRANSPORT failure throws, as a ConnectError the caller may report
  * through `ctx.failures`.
  */
-import { ConnectError } from "@connectrpc/connect";
+import { Code, ConnectError } from "@connectrpc/connect";
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { log } from "../log.js";
 import { MalformedView } from "./malformed.js";
@@ -29,7 +29,19 @@ import type { AgentReplClient } from "./client.js";
 /** The slice of the context a unary call needs; the whole AppContext fits. */
 export interface UnaryContext {
   readonly client: AgentReplClient;
+  /** Whether the page has gone quiet (the workspace moved to a successor). */
+  isQuiesced(): boolean;
 }
+
+/**
+ * What a call refused during the quiet window says.
+ *
+ * An `Unavailable` ConnectError rather than a new exception type, because every
+ * call site already has a transport-failure branch that renders its ordinary
+ * refusal at the clicked control — and that IS the honest account of what
+ * happened: the daemon this page can reach is no longer serving this workspace.
+ */
+export const QUIESCED_MESSAGE = "transferring to the new daemon";
 
 /**
  * Issue one verb. NAME is the rpc's own name ("SubmitPrompt") and rides every
@@ -41,6 +53,17 @@ export async function callUnary<Res extends Message>(
   fn: (client: AgentReplClient) => Promise<Res>,
   schema: DescMessage,
 ): Promise<Res> {
+  if (ctx.isQuiesced()) {
+    // REFUSED LOCALLY, and loudly. The workspace has moved; sending anyway
+    // would spend a round trip to be told the same thing by a daemon that has
+    // already released it.
+    const refused = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable);
+    log("warn", `${name} was not sent: ${QUIESCED_MESSAGE}`, {
+      operation: "rpc.unary-quiesced",
+      context: { rpc: name },
+    });
+    throw refused;
+  }
   log("debug", `calling ${name}`, { operation: "rpc.unary-call", context: { rpc: name } });
   let response: Res;
   try {
