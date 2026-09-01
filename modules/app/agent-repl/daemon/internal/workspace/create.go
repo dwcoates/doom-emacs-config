@@ -89,7 +89,8 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		baseRef = defaultBranch
 	}
 
-	targetDir, err := v.mergeTargetDir(ctx, repoDir, spec.ForkFrom)
+	parent := spec.parentWorkspace()
+	targetDir, err := v.mergeTargetDir(ctx, repoDir, parent)
 	if err != nil {
 		global.Error(opCreate, "could not resolve the merge target directory", dlog.Context{"cause": err.Error()})
 		return wsm.Workspace{}, fmt.Errorf("create %q: merge target: %w", branch, err)
@@ -126,6 +127,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	global.Debug(opCreate, "recorded the creation job before materialization", dlog.Context{
 		"branch": branch, "worktree_dir": worktreeDir, "target_dir": targetDir,
 		"base_ref": baseRef, "finish": finishOrigin(spec.Finish),
+		"parent": parentID(parent),
 	})
 
 	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, baseRef, worktreeDir); err != nil {
@@ -139,6 +141,7 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		Name:          branch,
 		Branch:        branch,
 		ParentBranch:  baseRef,
+		Parent:        (*wsm.WorkspaceID)(parent),
 		RepoDir:       repoDir,
 		DefaultBranch: defaultBranch,
 	})
@@ -266,6 +269,25 @@ func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.
 		return "", fmt.Errorf("parent workspace %q: %w", *parent, err)
 	}
 	return record.Dir, nil
+}
+
+// parentID spells a parent for the record, empty when the create was spawned
+// from no workspace.
+func parentID(parent *ids.WorkspaceID) string {
+	if parent == nil {
+		return ""
+	}
+	return string(*parent)
+}
+
+// parentWorkspace answers the workspace this create was spawned from, nil when
+// it was spawned from none. A fork names its parent by construction, so a spec
+// carrying only ForkFrom still has one.
+func (s CreateSpec) parentWorkspace() *ids.WorkspaceID {
+	if s.Parent != nil {
+		return s.Parent
+	}
+	return s.ForkFrom
 }
 
 // forkTranscript ports the parent's conversation into the CHILD's config root
