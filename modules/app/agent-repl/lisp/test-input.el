@@ -29,6 +29,9 @@
 (defvar agent-repl-test-input--submitted nil
   "SubmitPrompt requests received, oldest first.")
 
+(defvar agent-repl-test-input--refusals nil
+  "Handover refusals handed to host.el, as (WS ARM-PLIST).")
+
 (defvar agent-repl-test-input--queued nil
   "Prompts offered to the hold queue, as (WS SAID ORIGIN RAW KEY).")
 
@@ -61,6 +64,7 @@ fake would not exercise them."
   (declare (indent 0))
   `(let ((agent-repl-test-input--submitted nil)
          (agent-repl-test-input--queued nil)
+         (agent-repl-test-input--refusals nil)
          (agent-repl-test-input--messages nil)
          (agent-repl-test-input--answer (agent-repl-test-input--turn-answer))
          (agent-repl-test-input--gate :open)
@@ -89,6 +93,9 @@ fake would not exercise them."
                       ((symbol-function 'agent-repl--history-save) (lambda (_ws) nil))
                       ((symbol-function 'agent-repl--kickoff-prompt-summary)
                        (lambda (_ws _raw) nil))
+                      ((symbol-function 'agent-repl-host-handle-refusal)
+                       (lambda (ws arm)
+                         (push (list ws arm) agent-repl-test-input--refusals)))
                       ((symbol-function 'agent-repl-prompt-queue-offer)
                        (lambda (ws said origin raw &optional key)
                          (push (list ws said origin raw key)
@@ -501,6 +508,173 @@ fake would not exercise them."
     (agent-repl-test-input--type "hello")
     (agent-repl--send :user-sent)
     (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-transferring-away-routes-to-the-host ()
+  "The handover ordering is enforced BY REFUSAL on every per-workspace rpc."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :transferring-away
+                                                   :value (:address "127.0.0.1:9100"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (nth 1 (car agent-repl-test-input--refusals))
+                   '(:arm :transferring-away :value (:address "127.0.0.1:9100"))))))
+
+(ert-deftest agent-repl-input-transferring-away-keeps-the-text ()
+  "Nothing says the prompt landed, so the user keeps seeing what they wrote."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :transferring-away
+                                                   :value (:address "127.0.0.1:9100"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+
+(ert-deftest agent-repl-input-transferring-away-draws-no-refusal-message ()
+  "The one rollout that is supposed to be invisible must stay invisible."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :transferring-away
+                                                   :value (:address "127.0.0.1:9100"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not (seq-some (lambda (text) (string-match-p "refused" text))
+                          agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-transferring-away-holds-the-prompt ()
+  "The prompt was refused, not consumed: it is held for the retry."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :transferring-away
+                                                   :value (:address "127.0.0.1:9100"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (length agent-repl-test-input--queued) 1))))
+
+(ert-deftest agent-repl-input-transferring-away-holds-under-the-same-key ()
+  "A re-drive is a RETRY of THIS submission, so the idempotency key rides."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :transferring-away
+                                                   :value (:address "127.0.0.1:9100"))))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (nth 4 (car agent-repl-test-input--queued))
+                   (plist-get (agent-repl-test-input--request) :idempotency-key)))))
+
+(ert-deftest agent-repl-input-not-yet-adopted-routes-to-the-host ()
+  "The successor has not taken the workspace over yet: host.el retries the adopt."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :not-yet-adopted :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (nth 1 (car agent-repl-test-input--refusals))
+                   '(:arm :not-yet-adopted :value nil)))))
+
+(ert-deftest agent-repl-input-not-yet-adopted-keeps-the-text ()
+  "Nothing is wrong and nothing landed: the text stays in the composer."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :not-yet-adopted :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+
+(ert-deftest agent-repl-input-not-yet-adopted-holds-the-prompt ()
+  "Held until the successor owns the workspace, then re-driven."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :not-yet-adopted :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (length agent-repl-test-input--queued) 1))))
+
+(ert-deftest agent-repl-input-not-yet-adopted-draws-no-refusal-message ()
+  "INFO, not a report: the user is not told a rollout refused their prompt."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :not-yet-adopted :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not (seq-some (lambda (text) (string-match-p "refused" text))
+                          agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-no-session-error-keeps-the-text ()
+  "A non-handover refusal keeps its current treatment: the text is kept."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :no-session :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+
+(ert-deftest agent-repl-input-no-session-error-routes-to-no-handover ()
+  "Only the two handover arms reach host.el; every other arm is a refusal."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :no-session :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not agent-repl-test-input--refusals)))
+
+(ert-deftest agent-repl-input-turn-already-open-error-holds-nothing ()
+  "A refusal is an ANSWER, so a non-handover arm is not an outage to hold for."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :turn-already-open :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-turn-already-open-error-names-the-arm ()
+  "An arm this composer has no treatment for is drawn naming the arm."
+  (agent-repl-test-input--with
+    ;; Arrange
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :turn-already-open :value nil)))))
+    (agent-repl-test-input--type "hello")
+    ;; Act
+    (agent-repl--send :user-sent)
+    ;; Assert
+    (should (seq-some (lambda (text) (string-match-p "turn-already-open" text))
+                      agent-repl-test-input--messages))))
 
 (ert-deftest agent-repl-input-transport-failure-keeps-the-text ()
   "Nobody answered, so nothing is known: the composer keeps its text."
