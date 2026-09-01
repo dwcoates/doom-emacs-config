@@ -25,7 +25,7 @@ everything needed, so re-derive nothing.
 | System | Branch @ tip | STOP file (on that branch) | Left in place |
 |---|---|---|---|
 | Daemon | overhaul/daemon @ e2694b20f | docs/overhaul/reports/STOP-daemon.md | worktrees daemon-agents/{hostside 87e3ca5f1, integration-tests 438c81e12} unmerged; stale paintvocab/promptflow to delete |
-| Shim | overhaul/shim @ 98f23d9c7 (6669d9f37 + three capture-harness fixes, project lead, 2026-09-01) | docs/overhaul/reports/STOP-shim.md | none |
+| Shim | overhaul/shim @ f70941f0c (6669d9f37 + four capture-harness fixes, project lead, 2026-09-01) | docs/overhaul/reports/STOP-shim.md | none |
 | Webapp | overhaul/webapp @ b8aeaabaa | docs/overhaul/reports/STOP-webapp.md (+ reports/webapp-briefs/ incl. UX-LIST.md) | worktrees webapp-agents/{topbar-login, merge-bubble} |
 | Elisp | overhaul/elisp @ 3d3ea3a2c | docs/overhaul/reports/STOP-elisp.md | none |
 | Store+sidecar | overhaul/store @ 00edf4d4c | docs/overhaul/reports/STOP-store.md | none (carries a merge of overhaul/shim 731aa5f00 — expected) |
@@ -52,8 +52,9 @@ has NOT reached overhaul/integration yet.
    resumption rules above, and their recorded dispatch queues. The old
    subagent ids are in the project ledger but treat them as unreachable.
    2026-09-01: daemon, webapp, elisp, store leads RECREATED and running;
-   shim lead waits on the capture sweep (its brief carries the captures
-   directory + the ruling above).
+   shim lead recreated later the same day once the sweep finished (68
+   goldens; its brief carries the captures directory, the ruling above,
+   the store relays, and two harness defects to fix).
 3. Landing 6 when the daemon's wave 3 lands: six pending ERROR-ARMS rows +
    wave-3 server arms; retire landed-but-unused arms; FeedPermissionArguments'
    wire source; consider FeedFindingsRow identity (position-keyed folds).
