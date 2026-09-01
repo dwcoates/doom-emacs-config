@@ -563,7 +563,8 @@ gate is the point, so it is exercised here rather than bypassed."
       (should (= agent-repl-link--quiet-until-ms 1700000007500)))))
 
 (ert-deftest agent-repl-test-link-plain-bounce-draws-the-restarting-indicator ()
-  "The indicator names the cause the daemon announced."
+  "The indicator names the cause the daemon announced.
+`self_merge_rollout' carries nothing, so the arm IS the whole phrase."
   (agent-repl-test-link--with-harness
     ;; Arrange
     (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
@@ -571,11 +572,87 @@ gate is the point, so it is exercised here rather than bypassed."
       (agent-repl-test-link--push
        conn (list :arm :shutdown-announced
                   :value (agent-repl-test-link--announcement
-                          :cause (list :arm :immediate :value nil)
+                          :cause (list :arm :self-merge-rollout :value nil)
                           :minted-at-ms (agent-repl-link--now-ms)
                           :expected-outage-ms 60000)))
       ;; Assert
-      (should (equal agent-repl-link-drain-segment "daemon restarting (immediate)")))))
+      (should (equal agent-repl-link-drain-segment
+                     "daemon restarting (self-merge rollout)")))))
+
+(ert-deftest agent-repl-test-link-bounce-indicator-names-the-scheduled-drains-reason ()
+  "A `scheduled_drain' bounce names the `DrainReason' it carries.
+The arm alone would read alike for every drain; the reason is the fact
+the user is owed (audit finding 11)."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement
+                          :cause (list :arm :scheduled-drain
+                                       :value (list :reason (list :arm :deploy
+                                                                  :value nil)))
+                          :minted-at-ms (agent-repl-link--now-ms)
+                          :expected-outage-ms 60000)))
+      ;; Assert
+      (should (equal agent-repl-link-drain-segment
+                     "daemon restarting (scheduled drain: deploy)")))))
+
+(ert-deftest agent-repl-test-link-bounce-indicator-names-the-immediates-reason ()
+  "An `immediate' bounce names the `DrainReason' it carries."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement
+                          :cause (list :arm :immediate
+                                       :value (list :reason (list :arm :maintenance
+                                                                  :value nil)))
+                          :minted-at-ms (agent-repl-link--now-ms)
+                          :expected-outage-ms 60000)))
+      ;; Assert
+      (should (equal agent-repl-link-drain-segment
+                     "daemon restarting (immediate: maintenance)")))))
+
+(ert-deftest agent-repl-test-link-bounce-indicator-carries-the-operators-note ()
+  "The `operator' reason\='s own NOTE reaches the indicator verbatim.
+`drain_reason.proto': the note is REQUIRED non-blank, so it is the only
+text an operator-caused bounce can be described by."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement
+                          :cause (list :arm :immediate
+                                       :value (list :reason
+                                                    (list :arm :operator
+                                                          :value (list :note "cable work"))))
+                          :minted-at-ms (agent-repl-link--now-ms)
+                          :expected-outage-ms 60000)))
+      ;; Assert
+      (should (equal agent-repl-link-drain-segment
+                     "daemon restarting (immediate: cable work)")))))
+
+(ert-deftest agent-repl-test-link-bounce-indicator-refuses-an-unknown-cause-arm ()
+  "An unrecognized `DaemonShutdownCause' arm is logged ERROR, never drawn
+as if it were understood."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement
+                          :cause (list :arm :no-such-arm :value nil)
+                          :minted-at-ms (agent-repl-link--now-ms)
+                          :expected-outage-ms 60000)))
+      ;; Assert
+      (should (equal agent-repl-link-drain-segment "daemon restarting (unknown)")))))
 
 ;;;; ---- The drain schedule ----
 
