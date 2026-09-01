@@ -291,9 +291,11 @@ classes, with different freedom to depart from it:
 - The old-tree removals you were already ruled (dead surfaces, deleted
   features) are part of this pass: a ruled-dead file still on disk at
   your final tip is a defect.
-- Dispatch the pass as an opus-low task with the tool output as its
-  brief; the implementer reports the deletion list and the kept-with-
-  reason list, and you carry both into your final report.
+- You ORCHESTRATE this pass, you never perform it: dispatch it to a
+  `sonnet-medium` agent (user ruling, 2026-09-01) in its own worktree,
+  with the tool output as its brief; the agent runs the tools, deletes,
+  pins, and reports the deletion list and the kept-with-reason list; you
+  review, merge, and carry both lists into your final report.
 
 ## Building messages piecemeal under the non-optional rule
 
