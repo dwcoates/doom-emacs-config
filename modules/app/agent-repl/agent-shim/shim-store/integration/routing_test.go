@@ -241,7 +241,7 @@ func TestDetachedWorkLeavesLiveWorkAtItsTerminal(t *testing.T) {
 	cli := store.client()
 	shim := streamProducer(cli)
 	shim.write(ctx, t,
-		shim.agentEntry("w-detach-run-1", "u-detach-run-1",
+		shim.agentEntry("w-detach-run-1", "detached:work-bash-2",
 			frameLine(agentID("main"), detachedBashFrame("main", "work-bash-2", "make test", 4000))),
 	)
 
