@@ -22,7 +22,7 @@ import (
 func newHandler(s *fakeServer, exit func()) http.Handler {
 	mux := http.NewServeMux()
 	path, handler := agentreplv1connect.NewAgentReplHandler(s, strictJSONOptions()...)
-	mux.Handle(path, withRawBodyCapture(handler))
+	mux.Handle(path, withHeaderCapture(withRawBodyCapture(handler)))
 	s.registerControlPlane(mux, exit)
 	return h2c.NewHandler(withAcceptWriter(mux), &http2.Server{})
 }
