@@ -13,6 +13,7 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
+	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -902,5 +903,130 @@ func TestAnAgentSpoolWithNoResolvedSpawnStatesTheReaderDefect(t *testing.T) {
 	rec := h.requireOnce(t, "spool-book", "error")
 	if got := ctxString(t, rec, "task_id"); got != "a9" {
 		t.Fatalf("task_id = %q, want the spool with no resolved spawn", got)
+	}
+}
+
+// ---- the outage ladder's levels ------------------------------------------
+
+// TestTheFirstFailedAttemptOfAnOutageIsAnError asserts the loudest record of an
+// outage is its first refusal: the moment the file plane stopped.
+func TestTheFirstFailedAttemptOfAnOutageIsAnError(t *testing.T) {
+	// Arrange: no store is listening at all.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+
+	// Assert.
+	rec := h.requireOnce(t, "recover-cursors", "error")
+	if got, ok := rec.Context["attempt"].(float64); !ok || int(got) != 1 {
+		t.Fatalf("attempt = %v, want the outage's first attempt", rec.Context["attempt"])
+	}
+}
+
+// TestLaterAttemptsOfTheSameOutageAreWarnings asserts the ladder descends: the
+// attempts after the first are the same known outage still running.
+func TestLaterAttemptsOfTheSameOutageAreWarnings(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+
+	// Act: three attempts down the ladder.
+	h.sc.attempt()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+
+	// Assert.
+	if got := h.opsAt(t, "recover-cursors", "error"); len(got) != 1 {
+		t.Errorf("the ladder wrote %d error records, want only the outage's first refusal", len(got))
+	}
+	if got := h.opsAt(t, "recover-cursors", "warn"); len(got) != 2 {
+		t.Errorf("the ladder wrote %d warning records for its later attempts, want two", len(got))
+	}
+}
+
+// TestEveryLadderRecordNamesItsAttemptAndBackoff asserts the ladder's progress
+// is filterable: the ordinal and the armed delay ride dedicated keys.
+func TestEveryLadderRecordNamesItsAttemptAndBackoff(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+
+	// Assert.
+	for _, r := range h.ops(t, "recover-cursors") {
+		for _, key := range []string{"attempt", "backoff_ms"} {
+			if _, ok := r.Context[key]; !ok {
+				t.Errorf("ladder record at %s carries no %q; its context was %v", r.Level, key, r.Context)
+			}
+		}
+	}
+}
+
+// TestNoLadderRecordIsVerbose asserts an outage is visible without turning
+// verbose emission on. An outage nobody sees is an outage nobody fixes.
+func TestNoLadderRecordIsVerbose(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, nil)
+
+	// Act.
+	h.sc.attempt()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+
+	// Assert.
+	for _, r := range h.ops(t, "recover-cursors") {
+		if r.Verbosity != "normal" {
+			t.Errorf("a ladder record was written at verbosity %q: %q", r.Verbosity, r.Message)
+		}
+	}
+}
+
+// TestRecoveryStatesExactlyOneRecord asserts the outage closes with ONE info
+// record, however many attempts it took to get there.
+func TestRecoveryStatesExactlyOneRecord(t *testing.T) {
+	// Arrange: a store that is unreachable, then reachable.
+	h := newHarness(t, nil)
+	h.sc.attempt()
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+	h.serve(t, &fakeStore{})
+
+	// Act.
+	h.advance(time.Minute)
+	h.sc.attemptDue()
+
+	// Assert.
+	h.requireOnce(t, "production-resumed", "info")
+}
+
+// TestAParkedFilesDefectNamesTheRefusalSite asserts the refusal's SITE rides
+// beside its KIND. The kind says whether a retry can help; the site says which
+// call was refused, which is what joins this record to the store's own.
+func TestAParkedFilesDefectNamesTheRefusalSite(t *testing.T) {
+	// Arrange.
+	store := &fakeStore{}
+	h := newHarness(t, store)
+	h.transcript(t, "sess-1", promptLine)
+	if err := h.sc.beginCycle(); err != nil {
+		t.Fatalf("beginCycle: %v", err)
+	}
+	store.writeFail = "entry 0 carries no upsert_key"
+	store.writeInvalidField = "batch.entries[0].upsert_key"
+
+	// Act.
+	h.sc.pollAll()
+
+	// Assert.
+	rec := h.requireOnce(t, "producer-defect", "error")
+	if got := ctxString(t, rec, "refusal_kind"); got != "invalid_request" {
+		t.Errorf("refusal_kind = %q, want the arm that says a retry cannot help", got)
+	}
+	if got := ctxString(t, rec, "refusal_site"); got != storeclient.WriteBatchSite {
+		t.Errorf("refusal_site = %q, want the write call the store refused", got)
 	}
 }

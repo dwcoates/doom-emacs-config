@@ -201,9 +201,15 @@ func TestAnInvalidRequestRefusalIsStatedExactlyOnce(t *testing.T) {
 	defects := awaitOperationCount(ctx, t, opts.LogPath, "producer-defect", "error", 1)
 
 	// Assert: the record carries the whole refusal vocabulary.
-	requireContextKeys(t, defects[0], "refusal_kind", "field", "write_ids", "path", "file_id", "offset")
+	requireContextKeys(t, defects[0], "refusal_kind", "refusal_site", "field", "write_ids", "path", "file_id", "offset")
 	if got := defects[0].Context["refusal_kind"]; got != "invalid_request" {
 		t.Errorf("refusal_kind = %v, want the arm that says a retry cannot help", got)
+	}
+	// The SITE rides beside the KIND and answers a different question: the kind
+	// says whether a retry can help, the site says which call was refused, which
+	// is what joins this record to the store's own refusal record.
+	if got := defects[0].Context["refusal_site"]; got != "/store.v1.ShimStore/WriteBatch" {
+		t.Errorf("refusal_site = %v, want the write call the store refused", got)
 	}
 	if got := defects[0].Context["field"]; got != "batch.entries[0].upsert_key" {
 		t.Errorf("field = %v, want the offending field the store named", got)
@@ -249,10 +255,11 @@ func TestAStoreOutageStatesOneSuspensionHoweverManyAttemptsFail(t *testing.T) {
 	for _, line := range captured.Lines {
 		g.AppendLine(line)
 	}
-	attempts := awaitOperationCount(ctx, t, opts.LogPath, "recover-cursors", "warn", 3)
+	awaitOperationCount(ctx, t, opts.LogPath, "recover-cursors", "warn", 2)
 
 	// Assert: one suspension, naming the store the file plane stopped for.
 	records := readLog(t, opts.LogPath)
+	attempts := recordsFor(records, "recover-cursors")
 	suspensions := recordsAt(records, "production-suspended", "warn")
 	if len(suspensions) != 1 {
 		t.Fatalf("the outage was stated %d times across %d failed attempts, want exactly once",
@@ -260,12 +267,24 @@ func TestAStoreOutageStatesOneSuspensionHoweverManyAttemptsFail(t *testing.T) {
 	}
 	requireContextKeys(t, suspensions[0], "store_socket", "attempt")
 
-	// Assert: the retries themselves stay filterable by ordinal and by the delay
-	// they armed, rather than being merged into the one warning.
+	// Assert: the ladder's own levels. The FIRST refusal is the error an
+	// operator must not miss; every attempt after it is the same known outage
+	// still running, and is a warning.
+	if got := recordsAt(records, "recover-cursors", "error"); len(got) != 1 {
+		t.Errorf("the ladder wrote %d error records, want only the outage's first refusal", len(got))
+	}
+	if got := recordsAt(records, "recover-cursors", "warn"); len(got) != len(attempts)-1 {
+		t.Errorf("the ladder wrote %d warning records for %d attempts, want one for every attempt after the first",
+			len(got), len(attempts))
+	}
+
+	// Assert: every attempt stays filterable by ordinal and by the delay it
+	// armed, and none of them is verbose — an outage that only shows up with
+	// verbose emission on is an outage nobody sees.
 	for _, r := range attempts {
 		requireContextKeys(t, r, "attempt", "backoff_ms")
-		if r.Verbosity != "verbose" {
-			t.Errorf("a per-attempt retry record reached normal verbosity: %q", r.Message)
+		if r.Verbosity != "normal" {
+			t.Errorf("a ladder record was written at verbosity %q: %q", r.Verbosity, r.Message)
 		}
 	}
 }
@@ -303,12 +322,12 @@ func TestARefusedCursorReadConvergesOnOneRecordPerLayer(t *testing.T) {
 	for _, line := range captured.Lines {
 		g.AppendLine(line)
 	}
-	awaitOperationCount(ctx, t, opts.LogPath, "recover-cursors", "warn", 3)
+	awaitOperationCount(ctx, t, opts.LogPath, "recover-cursors", "warn", 2)
 
 	// Assert. Both counts come from ONE snapshot of the log: reading it twice
 	// would compare a retry ladder against itself at two different instants.
 	records := readLog(t, opts.LogPath)
-	attempts := recordsAt(records, "recover-cursors", "warn")
+	attempts := recordsFor(records, "recover-cursors")
 	if got := recordsAt(records, "production-suspended", "warn"); len(got) != 1 {
 		t.Errorf("the cycle stated the suspension %d times across %d attempts, want once", len(got), len(attempts))
 	}
@@ -321,10 +340,14 @@ func TestARefusedCursorReadConvergesOnOneRecordPerLayer(t *testing.T) {
 		t.Errorf("the store client wrote %d refusal records for %d refused attempts, want exactly one each",
 			len(refusals), len(attempts))
 	}
-	// And no OTHER layer joined in: a third record about the same failure would
-	// be the double-counting the exactly-once rule exists to prevent.
+	// And no OTHER layer joined in. Exactly two layers own a fact about this
+	// failure: the client (this rpc was refused) and the cycle's ladder (the
+	// outage's first refusal). A third would be the double-counting the
+	// exactly-once rule exists to prevent.
 	for _, r := range logsAtLevel(records, "error") {
-		if r.Operation != "storeclient-cursors" {
+		switch r.Operation {
+		case "storeclient-cursors", "recover-cursors":
+		default:
 			t.Errorf("a third layer restated the refused cursor read: op=%q message=%q", r.Operation, r.Message)
 		}
 	}

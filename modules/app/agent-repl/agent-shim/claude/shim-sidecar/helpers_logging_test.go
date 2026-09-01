@@ -119,6 +119,16 @@ func (h *harness) records(t *testing.T) []logRecord {
 	return parseLogLines(t, *h.logs)
 }
 
+func (h *harness) ops(t *testing.T, operation string) []logRecord {
+	t.Helper()
+	return opsAt(h.records(t), operation, "")
+}
+
+func (h *harness) opsAt(t *testing.T, operation, level string) []logRecord {
+	t.Helper()
+	return opsAt(h.records(t), operation, level)
+}
+
 func (h *harness) requireOnce(t *testing.T, operation, level string) logRecord {
 	t.Helper()
 	return requireOnceIn(t, h.records(t), operation, level)
