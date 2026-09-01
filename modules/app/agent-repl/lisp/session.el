@@ -112,8 +112,12 @@ agent."
                        ws (- now last)))
      (t
       (agent-repl--ws-put ws :last-notify-time now)
+      ;; THE BANNER TEXT IS "Agent ready: <name>", frozen: the workspace name
+      ;; is the fact the user is scanning for in a stack of notifications, and
+      ;; it reads there under one fixed prefix rather than as a bare prefix of
+      ;; its own.
       (run-at-time agent-repl-notify-delay nil #'agent-repl--notify ws "Agent REPL"
-                   (format "%s: Agent ready" ws))
+                   (format "Agent ready: %s" ws))
       (agent-repl--info ws "elisp.session.notify-finished: scheduled ws=%s delay=%.2f"
                         ws agent-repl-notify-delay)))))
 
