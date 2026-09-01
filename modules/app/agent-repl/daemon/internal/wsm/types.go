@@ -178,6 +178,12 @@ type Session struct {
 	StartedAt time.Time
 	// LastEngagementAt is the idle sweep's input.
 	LastEngagementAt time.Time
+	// ShimPID is the pid of the shim process serving this session, nil when no
+	// shim is up. It exists because the ROLLOUT's stand-down INTENT MANIFEST
+	// names a pid per session, and the incoming daemon reconciles that pid
+	// against the kernel lock the shim holds; nothing else in the daemon reads
+	// it, and it is cleared whenever a session stands down.
+	ShimPID *int
 	// Terminal is the session's death, nil while it lives. A deleted session
 	// REFUSES resurrection.
 	Terminal *SessionTerminal

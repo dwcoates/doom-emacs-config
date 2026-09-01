@@ -64,6 +64,9 @@ type DB interface {
 	SetSessionTerminal(ctx context.Context, id WorkspaceID, t SessionTerminal) error
 	// TouchEngagement records last engagement — the idle sweep's input.
 	TouchEngagement(ctx context.Context, id WorkspaceID, at time.Time) error
+	// SetShimPID records, or clears with nil, the pid of the shim process
+	// serving a workspace's session. The rollout's intent manifest names it.
+	SetShimPID(ctx context.Context, id WorkspaceID, pid *int) error
 
 	// AcquireLease takes the workspace's occupancy lease for holder under
 	// policy, refusing when it is already held.

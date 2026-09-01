@@ -1,0 +1,144 @@
+package rollout
+
+import (
+	"os"
+	"sync"
+	"time"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+)
+
+// The controller's operation names. Every logical branch records under one of
+// them, per the logging contract.
+const (
+	opNew         = "daemon.rollout.new"
+	opTrigger     = "daemon.rollout.trigger"
+	opClassify    = "daemon.rollout.classify"
+	opDeploy      = "daemon.rollout.deploy"
+	opHandover    = "daemon.rollout.handover"
+	opTransfer    = "daemon.rollout.transfer"
+	opAdoption    = "daemon.rollout.adoption_window"
+	opJoin        = "daemon.rollout.join"
+	opAdoptHost   = "daemon.rollout.adopt_host"
+	opAdoptWeb    = "daemon.rollout.adopt_web"
+	opAdopt       = "daemon.rollout.adopt"
+	opManifest    = "daemon.rollout.manifest"
+	opReconcile   = "daemon.rollout.reconcile"
+	opRelaunch    = "daemon.rollout.relaunch"
+	opStaleness   = "daemon.rollout.staleness"
+	opReloadWebap = "daemon.rollout.reload_webapp"
+)
+
+// DeployScriptEnv overrides bin/deploy-all.sh for the self-reload trigger. It
+// is how a test asserts the trigger reached the deploy chain without running
+// the real one.
+const DeployScriptEnv = "AGENT_REPL_DEPLOY_SCRIPT"
+
+// DefaultDeployScript is the ONE deploy chain, relative to the module root.
+const DefaultDeployScript = "bin/deploy-all.sh"
+
+// The rollout's default windows.
+const (
+	// DefaultExpectedOutage is the bounded outage the announcement states.
+	DefaultExpectedOutage = 5 * time.Second
+	// DefaultAdoptionWindow is how long the outgoing daemon gives an adoption.
+	DefaultAdoptionWindow = 30 * time.Second
+	// DefaultHoldoutWarnEvery is the never-free warning cadence, per the
+	// ruling: wait forever, name the holdout every ten minutes.
+	DefaultHoldoutWarnEvery = 10 * time.Minute
+	// DefaultStandDownWindow is how long a gracefully killed shim has before
+	// the force-kill.
+	DefaultStandDownWindow = 30 * time.Second
+)
+
+// ResolveDeployScript answers the deploy script in force: DeployScriptEnv when
+// it is set, else the wired value, else DefaultDeployScript.
+func ResolveDeployScript(wired string) string {
+	if fromEnv := os.Getenv(DeployScriptEnv); fromEnv != "" {
+		return fromEnv
+	}
+	if wired != "" {
+		return wired
+	}
+	return DefaultDeployScript
+}
+
+// controller is the Controller implementation.
+type controller struct {
+	deps Deps
+	log  dlog.Logger
+
+	mu sync.Mutex
+	// rendezvous is the per-workspace adopt ledger, armed either by this
+	// daemon's own announcement (the outgoing side, so ExpectedParticipants can
+	// answer) or by the intent manifest read at Join (the incoming side).
+	rendezvous map[ids.WorkspaceID]*entry
+	// owned is every workspace this joining daemon has finished adopting.
+	owned map[ids.WorkspaceID]bool
+	// joining is the set of workspaces the manifest named, so the daemon.addr
+	// write happens exactly when the last one is owned.
+	joining map[ids.WorkspaceID]bool
+}
+
+// entry is one workspace's rendezvous state.
+type entry struct {
+	// expected is who owed an adoption call at announcement.
+	expected Participants
+	// hostCalled and webCalled record who has since called. The web slot is
+	// satisfied by the FIRST AdoptWebWorkspace from any connection, because the
+	// reloaded page — not a surviving stream — is the web participant.
+	hostCalled bool
+	webCalled  bool
+	// adopted records that the workspace is owned, so a later call succeeds
+	// immediately rather than re-adopting.
+	adopted bool
+}
+
+// satisfied reports whether every expected participant has called.
+func (e *entry) satisfied() bool {
+	if e.expected.Host && !e.hostCalled {
+		return false
+	}
+	if e.expected.Web && !e.webCalled {
+		return false
+	}
+	return true
+}
+
+// ExpectedParticipants reports how many adoption calls a workspace's transfer
+// owes. A headless workspace owes zero and transfers via WSM facts and the
+// kernel lock alone.
+func (c *controller) ExpectedParticipants(ws ids.WorkspaceID) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.rendezvous[ws]
+	if !ok {
+		return 0
+	}
+	return e.expected.Count()
+}
+
+// withCause stamps an error onto a record's context without mutating the
+// caller's map.
+func withCause(fields dlog.Context, err error) dlog.Context {
+	out := merge(fields, nil)
+	out["cause"] = err.Error()
+	return out
+}
+
+// merge copies base and overlays extra, so no record shares a map with another.
+func merge(base, extra dlog.Context) dlog.Context {
+	out := make(dlog.Context, len(base)+len(extra)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
+// milliseconds renders an instant as the epoch milliseconds the contract's
+// *_ms fields carry.
+func milliseconds(at time.Time) int64 { return at.UnixNano() / int64(time.Millisecond) }
