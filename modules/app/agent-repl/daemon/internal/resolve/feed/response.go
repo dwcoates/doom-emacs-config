@@ -6,6 +6,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
 )
 
 // THE PROSE FOLD. The shim forwards each fragment as the vendor emits it and
@@ -25,7 +26,7 @@ func (r *resolver) drawResponse(s *wsState, at placement, agent *conversationv1.
 	// any single counter would understate the bill.
 	if usage := act.GetUsage(); usage != nil {
 		misses := usage.GetInputMisses()
-		fold.usage = formatTokens(misses.GetWritten() + misses.GetUnwritten())
+		fold.usage = figures.Tokens(misses.GetWritten() + misses.GetUnwritten())
 	}
 
 	bubble := &frontendv1.FeedResponse{}

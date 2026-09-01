@@ -6,6 +6,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
 )
 
 // THE SUBAGENT BUBBLE — sync or detached, ONE component. The bubble IS a feed:
@@ -44,7 +45,7 @@ func (r *resolver) drawSubagent(s *wsState, at placement, act *conversationv1.Ag
 		applyPrompt(bubble, frame.Update.GetPrompt())
 		progress := frame.Update.GetProgress()
 		if progress.GetTotalTokens() > 0 {
-			bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: formatTokens(progress.GetTotalTokens()) + " tok"}
+			bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(progress.GetTotalTokens()) + " tok"}
 		}
 		bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{
 			LastProgress: &frontendv1.FeedSubagentLastProgress{AtMs: r.deps.Now().UnixMilli()},
@@ -122,13 +123,13 @@ func applyTotals(bubble *frontendv1.FeedSubagent, totals *conversationv1.AgentSu
 	case *conversationv1.AgentSubagentTotals_Full:
 		misses := usage.Full.GetInputMisses()
 		sum := misses.GetWritten() + misses.GetUnwritten() + usage.Full.GetOutputTokens()
-		bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: formatTokens(sum) + " tok"}
+		bubble.Tokens = &frontendv1.FeedSubagentTokens{Text: figures.Tokens(sum) + " tok"}
 	case *conversationv1.AgentSubagentTotals_TotalOnly:
 		if usage.TotalOnly.TotalTokens == nil {
 			return
 		}
 		bubble.Tokens = &frontendv1.FeedSubagentTokens{
-			Text: formatTokens(usage.TotalOnly.GetTotalTokens()) + " tok",
+			Text: figures.Tokens(usage.TotalOnly.GetTotalTokens()) + " tok",
 		}
 	}
 }

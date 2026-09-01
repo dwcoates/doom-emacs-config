@@ -4,34 +4,8 @@ import "testing"
 
 // Every figure a client draws is composed here, so every rule these helpers
 // encode gets its own case: a second authority on a number eventually
-// disagrees with the first.
-
-func TestFormatTokens(t *testing.T) {
-	tests := []struct {
-		name   string
-		tokens uint64
-		want   string
-	}{
-		{name: "bare under a thousand", tokens: 940, want: "940"},
-		{name: "zero is a figure, not an absence", tokens: 0, want: "0"},
-		{name: "thousands carry one digit", tokens: 18_240, want: "18.2k"},
-		{name: "a whole thousand drops the digit", tokens: 18_000, want: "18k"},
-		{name: "the boundary enters thousands", tokens: 1_000, want: "1k"},
-		{name: "millions carry one digit", tokens: 1_430_000, want: "1.4M"},
-		{name: "a whole million drops the digit", tokens: 2_000_000, want: "2M"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange, Act.
-			got := formatTokens(tc.tokens)
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("formatTokens(%d) = %q, want %q", tc.tokens, got, tc.want)
-			}
-		})
-	}
-}
+// disagrees with the first. The TOKEN figure itself is daemon-wide and is
+// pinned once, in internal/figures.
 
 func TestFormatRuntime(t *testing.T) {
 	tests := []struct {
