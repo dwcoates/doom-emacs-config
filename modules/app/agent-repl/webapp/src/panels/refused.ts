@@ -17,7 +17,10 @@
  * SYNTHESIZED AND NON-DURABLE, like the panel rows: the card is minted when
  * the command was refused and never comes back in a paged history.
  */
-import { RequestCommandSupportResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_command_support_pb";
+import {
+  RequestCommandSupportResponseSchema,
+  type RequestCommandSupportError,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_command_support_pb";
 import type {
   FeedCommandAddSupportOffer,
   FeedCommandRefused,
@@ -27,7 +30,9 @@ import type {
 import type { RowContext } from "../feed/cards/context.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
-import { requireCase, requireMessage } from "../rpc/strict.js";
+import { isMalformedView } from "../rpc/malformed.js";
+import { refusalSentence } from "../rpc/refusal.js";
+import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 
 /** The refusal card. */
@@ -159,19 +164,51 @@ async function requestSupport(
       // a second workspace for the same gap.
       return;
     }
-    drawRefusal(row, result.case, "the daemon could not open a support workspace");
+    const cause = requireCase(
+      (result.value as RequestCommandSupportError).cause,
+      "RequestCommandSupportError.cause",
+    );
+    const say = refusalSentence("RequestCommandSupport", cause) ?? requestCommandSupportRefusal(cause);
+    drawRefusal(row, cause.case, say);
     log("warn", `RequestCommandSupport refused ${command}`, {
       operation: "panels.command-refused.support-refused",
-      context: { command, arm: result.case },
+      context: { command, arm: cause.case, sentence: say },
     });
     button.disabled = false;
   } catch (err) {
+    // A malformed view is the daemon's answer being unreadable, not the daemon
+    // being unreachable; it travels up rather than being mislabelled.
+    if (isMalformedView(err)) throw err;
     drawRefusal(row, "error", "the daemon could not be reached");
     log("error", `RequestCommandSupport failed for ${command}: ${String(err)}`, {
       operation: "panels.command-refused.support-failed",
       context: { command, cause: err },
     });
     button.disabled = false;
+  }
+}
+
+/** `RequestCommandSupportError`'s cause union, narrowed to a SET arm. */
+type SupportCause = NonNullable<RequestCommandSupportError["cause"]> & { case: string };
+
+/**
+ * This endpoint's OWN two arms.
+ *
+ * A blank command cannot come from this card — the command text is the row's —
+ * so it reads as the contract violation it would be; a missing brief names the
+ * workspace whose brief the daemon went looking for, because that is the file
+ * the user has to go and write.
+ */
+export function requestCommandSupportRefusal(cause: SupportCause): string {
+  switch (cause.case) {
+    case "blankCommand":
+      return "the daemon received no command to support";
+    case "briefMissing":
+      return `the brief for ${cause.value.name} was not found`;
+    default: {
+      const other: { case: string } = cause;
+      return unreachableArm("RequestCommandSupportError.cause", other.case);
+    }
   }
 }
 

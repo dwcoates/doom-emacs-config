@@ -23,11 +23,13 @@ import { create, type Message, type MessageInitShape } from "@bufbuild/protobuf"
 import {
   AssignWorkspaceTaskRequestSchema,
   AssignWorkspaceTaskResponseSchema,
+  type AssignWorkspaceTaskError,
   type AssignWorkspaceTaskRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_assign_workspace_task_pb";
 import {
   CloseWorkspaceRequestSchema,
   CloseWorkspaceResponseSchema,
+  type CloseWorkspaceError,
   type CloseWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import {
@@ -38,21 +40,25 @@ import {
 import {
   MergeWorkspaceRequestSchema,
   MergeWorkspaceResponseSchema,
+  type MergeWorkspaceError,
   type MergeWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_merge_workspace_pb";
 import {
   NukeWorkspaceRequestSchema,
   NukeWorkspaceResponseSchema,
+  type NukeWorkspaceError,
   type NukeWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_nuke_workspace_pb";
 import {
   OpenWorkspaceRequestSchema,
   OpenWorkspaceResponseSchema,
+  type OpenWorkspaceError,
   type OpenWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
 import {
   RestartWorkspaceRequestSchema,
   RestartWorkspaceResponseSchema,
+  type RestartWorkspaceError,
   type RestartWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import {
@@ -69,7 +75,8 @@ import { WorkspacePrioritySchema } from "../../../proto/gen/ts/agentrepl/v1/work
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { log } from "../log.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { requireCase } from "../rpc/strict.js";
+import { refusalSentence, type RefusalCause } from "../rpc/refusal.js";
+import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
 
@@ -173,6 +180,7 @@ async function runSimpleVerb(
         rpc: "OpenWorkspace",
         call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(target.workspace)),
         schema: OpenWorkspaceResponseSchema,
+        refusalText: (cause) => openWorkspaceRefusal(cause as CauseOf<OpenWorkspaceError>),
       });
       return;
     case "close":
@@ -181,13 +189,7 @@ async function runSimpleVerb(
         rpc: "CloseWorkspace",
         call: (client) => client.closeWorkspace(buildCloseWorkspaceRequest(target.workspace)),
         schema: CloseWorkspaceResponseSchema,
-        // The ONE typed refusal in this menu, and the reasons are deliberately
-        // not restated here: the footer carries them, pushed beside this
-        // answer, so the row points at the footer rather than guessing.
-        refusalText: (arm) =>
-          arm === "blocked"
-            ? "close refused: work in flight (see the footer)"
-            : "CloseWorkspace refused",
+        refusalText: (cause) => closeWorkspaceRefusal(cause as CauseOf<CloseWorkspaceError>),
       });
       return;
     case "merge":
@@ -196,6 +198,7 @@ async function runSimpleVerb(
         rpc: "MergeWorkspace",
         call: (client) => client.mergeWorkspace(buildMergeWorkspaceRequest(target.workspace)),
         schema: MergeWorkspaceResponseSchema,
+        refusalText: (cause) => mergeWorkspaceRefusal(cause as CauseOf<MergeWorkspaceError>),
       });
       return;
     case "restart":
@@ -208,6 +211,7 @@ async function runSimpleVerb(
             buildRestartWorkspaceRequest(target.workspace, verb === "restartForce"),
           ),
         schema: RestartWorkspaceResponseSchema,
+        refusalText: (cause) => restartWorkspaceRefusal(cause as CauseOf<RestartWorkspaceError>),
       });
       return;
   }
@@ -305,6 +309,7 @@ export function drawNukeConfirm(target: VerbTarget): HTMLElement {
       rpc: "NukeWorkspace",
       call: (client) => client.nukeWorkspace(buildNukeWorkspaceRequest(target.workspace)),
       schema: NukeWorkspaceResponseSchema,
+      refusalText: (cause) => nukeWorkspaceRefusal(cause as CauseOf<NukeWorkspaceError>),
     });
   });
   confirm.appendChild(go);
@@ -404,6 +409,8 @@ export function fillAssignSubmenu(submenu: HTMLElement, target: VerbTarget): voi
             ),
           ),
         schema: AssignWorkspaceTaskResponseSchema,
+        refusalText: (cause) =>
+          assignWorkspaceTaskRefusal(cause as CauseOf<AssignWorkspaceTaskError>),
       });
     });
     submenu.appendChild(entry);
@@ -434,8 +441,14 @@ interface VerbCall<Res extends VerbResponse> {
   rpc: string;
   call: (client: SidebarContext["ctx"]["client"]) => Promise<Res>;
   schema: Parameters<typeof callUnary>[3];
-  /** The sentence a refusal says; the default names the rpc and no more. */
-  refusalText?: (arm: string) => string;
+  /**
+   * The sentence for an arm THIS endpoint owns.
+   *
+   * The four cross-cutting causes are worded once in `rpc/refusal.ts` and never
+   * repeated here; a verb whose error carries nothing beyond those four omits
+   * this hook entirely, and an arm neither knows is a malformed view.
+   */
+  refusalText?: (cause: RefusalCause) => string;
 }
 
 /**
@@ -465,13 +478,16 @@ export async function runVerb<Res extends VerbResponse>(
     );
     const result = requireCase(response.result, `${spec.rpc}Response.result`);
     if (result.case === "success") return true;
-    const arm = refusalArm(result.value);
-    const say = spec.refusalText?.(arm) ?? `${spec.rpc} refused`;
+    const cause = refusalCause(spec.rpc, result.value);
+    const say =
+      refusalSentence(spec.rpc, cause) ??
+      spec.refusalText?.(cause) ??
+      unreachableArm(`${spec.rpc}Error.cause`, cause.case);
     log("warn", `${spec.rpc} was refused`, {
       operation: "sidebar.verbs.refused",
-      context: { rpc: spec.rpc, arm },
+      context: { rpc: spec.rpc, arm: cause.case, sentence: say },
     });
-    drawRefusal(control, arm, say);
+    drawRefusal(control, cause.case, say);
     setDisabled(control, false);
     return false;
   } catch (err) {
@@ -504,16 +520,102 @@ function setDisabled(control: HTMLElement, disabled: boolean): void {
 }
 
 /**
- * The arm a refusal is labelled with.
+ * The cause a refusal names, or a refusal of the view.
  *
- * Most `<Method>Error` messages in this section are EMPTY ON PURPOSE — their
- * arms are derived later — so there is nothing to name but the error itself.
- * `CloseWorkspaceError` does carry a cause, and when it is set it is the more
- * specific thing to say.
+ * SINCE LANDING 4 EVERY `<Rpc>Error` CARRIES A TYPED CAUSE, so an error whose
+ * oneof is unset is a daemon saying "refused" and nothing else — which this
+ * renderer cannot draw honestly, and therefore refuses as a malformed view
+ * rather than labelling with a made-up "error" arm.
  */
-export function refusalArm(error: unknown): string {
-  const cause = (error as { cause?: { case?: string } } | undefined)?.cause;
-  return cause?.case ?? "error";
+export function refusalCause(rpc: string, error: unknown): RefusalCause & { case: string } {
+  const cause = (error as { cause?: RefusalCause } | undefined)?.cause;
+  return requireCase(cause ?? {}, `${rpc}Error.cause`);
+}
+
+/**
+ * The cause union of one endpoint's error, narrowed to a SET arm.
+ *
+ * Each endpoint declares its own arm messages, so there is no shared union to
+ * type `refusalText` against; the hook takes the shape they all have and each
+ * site casts to its own once, which is what makes the switch below exhaustive.
+ */
+type CauseOf<E extends { cause: { case?: string | undefined } }> = NonNullable<E["cause"]> & {
+  case: string;
+};
+
+/** OpenWorkspace's own arms: the three ways bringing one back up can fail. */
+export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string {
+  switch (cause.case) {
+    case "sessionDeleted":
+      return "this workspace's session has been deleted";
+    case "transcriptMissing":
+      return `the transcript for session ${cause.value.vendorSessionId} was not found in ${cause.value.searchedPaths.length} searched path(s)`;
+    case "spawnFailed":
+      return `the session could not be started: ${cause.value.detail}`;
+    default:
+      return unreachableArm("OpenWorkspaceError.cause", cause.case);
+  }
+}
+
+/**
+ * CloseWorkspace's own arm.
+ *
+ * The reasons are deliberately not restated: the footer carries them, pushed
+ * beside this answer, so the row points at the footer rather than guessing.
+ */
+export function closeWorkspaceRefusal(cause: CauseOf<CloseWorkspaceError>): string {
+  switch (cause.case) {
+    case "blocked":
+      return "close refused: work in flight (see the footer)";
+    default:
+      return unreachableArm("CloseWorkspaceError.cause", cause.case);
+  }
+}
+
+/** NukeWorkspace's own arm: the git operation that destroys the worktree. */
+export function nukeWorkspaceRefusal(cause: CauseOf<NukeWorkspaceError>): string {
+  switch (cause.case) {
+    case "gitFailed":
+      return `git refused to remove the worktree: ${cause.value.detail}`;
+    default:
+      return unreachableArm("NukeWorkspaceError.cause", cause.case);
+  }
+}
+
+/** MergeWorkspace's own arms, including the two that mean "already going". */
+export function mergeWorkspaceRefusal(cause: CauseOf<MergeWorkspaceError>): string {
+  switch (cause.case) {
+    case "noLayoutFacts":
+      return "the daemon has no layout facts for this workspace to merge from";
+    case "sessionDeleted":
+      return "this workspace's session has been deleted";
+    case "alreadyQueued":
+      return "this workspace is already in the merge queue";
+    case "alreadyMerging":
+      return "this workspace is already merging";
+    default:
+      return unreachableArm("MergeWorkspaceError.cause", cause.case);
+  }
+}
+
+/** RestartWorkspace's own arm. */
+export function restartWorkspaceRefusal(cause: CauseOf<RestartWorkspaceError>): string {
+  switch (cause.case) {
+    case "noSession":
+      return "this workspace has no session to restart";
+    default:
+      return unreachableArm("RestartWorkspaceError.cause", cause.case);
+  }
+}
+
+/** AssignWorkspaceTask's own arm. */
+export function assignWorkspaceTaskRefusal(cause: CauseOf<AssignWorkspaceTaskError>): string {
+  switch (cause.case) {
+    case "unknownTask":
+      return "the daemon does not know that task";
+    default:
+      return unreachableArm("AssignWorkspaceTaskError.cause", cause.case);
+  }
 }
 
 /** The refusal, drawn as the NEXT SIBLING of the control that made the call. */
