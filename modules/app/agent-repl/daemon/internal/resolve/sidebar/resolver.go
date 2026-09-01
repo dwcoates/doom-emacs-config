@@ -341,6 +341,20 @@ func (r *resolver) OnDetachedWork(ws ids.WorkspaceID, agent *conversationv1.Agen
 		})
 }
 
+// OnLiveWorkChanged takes the watcher's authoritative live-work set, which is
+// what RETIRES `idle_async`. An announcement can only raise the arm: nothing on
+// the agent's stream states that a detached item ended, and the watcher — which
+// reaps each item's watch at its terminal — is the one party that knows.
+func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
+	r.mutateWorkspace(ws, "daemon.sidebar.on_live_work_changed", "the roster took the live-work set",
+		dlog.Context{
+			"agents": len(live.Agents), "shells": len(live.Shells), "monitors": len(live.Monitors),
+		}, func(s *wsState) {
+			s.liveWork = live
+			s.liveWorkSeen = true
+		})
+}
+
 // OnAgentTerminal retires the row's thinking state.
 //
 // It retires the AGENT, not the turn: a turn's own close is SetTurnEnded's, and

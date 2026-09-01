@@ -298,6 +298,24 @@ func TestACreatedMonitorIsRetiredByItsFailureFrame(t *testing.T) {
 	}
 }
 
+// TestTheRosterHearsTheEmptiedLiveWorkSet covers the roster's half of the
+// live-work seam: the set the watcher republishes when the last detached item
+// is reaped reaches the sidebar, which is what retires `idle_async`.
+func TestTheRosterHearsTheEmptiedLiveWorkSet(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("", createdWork("act-1", monitorWork()))})
+	h.quiet()
+
+	// Act.
+	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(monitorFailedActivity("act-1")))))
+
+	// Assert.
+	e := requireEvent(t, got, "sidebar.OnLiveWorkChanged")
+	if e.live == nil || !e.live.Empty() {
+		t.Fatalf("the roster was told %+v, want an empty live-work set", e.live)
+	}
+}
+
 // TestATerminalForUnannouncedWorkChangesNothing covers the levels rule: the
 // live set is the announcements and the terminals of what was announced, and
 // an unpaired terminal edge must not invent or retire membership.
@@ -372,7 +390,7 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	assertNames(t, got, []string{
 		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
 		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink",
-		"lifecycle.OnLiveWorkChanged",
+		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {
 		t.Fatal("a started session is not connected")
