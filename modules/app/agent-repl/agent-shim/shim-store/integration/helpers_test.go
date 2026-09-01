@@ -119,6 +119,13 @@ type storeOptions struct {
 	// noWait starts the process without waiting for the socket, for the
 	// bootstrap-failure subjects.
 	noWait bool
+	// envSocketPath, when non-empty, is the value of AGENT_REPL_STORE_SOCKET in
+	// the child's environment. Empty means "the socket the harness serves on",
+	// which is what every ordinary subject wants.
+	envSocketPath string
+	// noSocketFlag starts the store WITHOUT --socket, so the environment
+	// variable is the only thing that can name its socket.
+	noSocketFlag bool
 	// verbose runs the store with AGENT_REPL_LOG_VERBOSE=1, which is what makes
 	// its per-statement traces durable — the only way a test can assert that a
 	// refused request never reached storage.
@@ -180,9 +187,11 @@ func (s *storeProcess) launch() {
 	s.t.Helper()
 
 	args := []string{
-		"--socket", s.socket,
 		"--db", s.dbPath,
 		"--log", s.logPath,
+	}
+	if !s.opts.noSocketFlag {
+		args = append(args, "--socket", s.socket)
 	}
 	if s.opts.watchBuffer > 0 {
 		args = append(args, "--watch-buffer", strconv.Itoa(s.opts.watchBuffer))
@@ -196,8 +205,12 @@ func (s *storeProcess) launch() {
 		s.t.Fatalf("opening the store's stderr capture %q: %v", s.stderrPath, err)
 	}
 
+	envSocket := s.opts.envSocketPath
+	if envSocket == "" {
+		envSocket = s.socket
+	}
 	cmd := exec.Command(storeBinary, args...)
-	cmd.Env = storeEnv(s.socket, s.opts.verbose)
+	cmd.Env = storeEnv(envSocket, s.opts.verbose)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 
@@ -616,18 +629,39 @@ func assertNoDatabaseTouch(t *testing.T, records []logRecord, requestID string) 
 	if requestID == "" {
 		t.Fatal("assertNoDatabaseTouch needs the refused request's id; without it the assertion is vacuous")
 	}
-	sawAnyStatement := false
+	// THERE IS NO PER-WINDOW POSITIVE CONTROL HERE, DELIBERATELY. A refused
+	// request is often the only call in its window, so "some statement record
+	// exists in this window" is not a property a refusal subject can have; the
+	// control that keeps these assertions honest is the global one,
+	// TestAnAcceptedRequestDoesLeaveAStatementRecordCarryingItsId in
+	// validation_test.go, which fails the moment the store stops leaving the
+	// mark this scan looks for.
 	for _, rec := range records {
 		if _, ok := rec.Context["statement"]; !ok {
 			continue
 		}
-		sawAnyStatement = true
 		if rec.RequestID == requestID {
 			t.Errorf("a refused request reached the database: operation=%q statement=%v request_id=%q",
 				rec.Operation, rec.Context["statement"], rec.RequestID)
 		}
 	}
-	_ = sawAnyStatement
+}
+
+// assertRefusalKeys asserts the two keys every refusal record carries: the SITE
+// that said no and the wire ARM the caller received.
+//
+// THEY ARE NOT THE SAME FACT. Several sites map to one arm, so a record naming
+// only the site leaves a reader unable to tell whether the caller could ever
+// have retried, and a record naming only the arm leaves it unable to find the
+// check that fired.
+func assertRefusalKeys(t *testing.T, rec logRecord, wantSite, wantKind string) {
+	t.Helper()
+	if rec.Context["refusal_site"] != wantSite {
+		t.Errorf("the refusal record's refusal_site is %v, want %q", rec.Context["refusal_site"], wantSite)
+	}
+	if rec.Context["refusal_kind"] != wantKind {
+		t.Errorf("the refusal record's refusal_kind is %v, want %q", rec.Context["refusal_kind"], wantKind)
+	}
 }
 
 // requestIDHeader is the header the store reads a caller's correlation id from.
