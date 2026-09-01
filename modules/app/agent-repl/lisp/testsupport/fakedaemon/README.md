@@ -97,7 +97,7 @@ than a silently ignored instruction.
 | `POST /_fake/push` | `{stream, workspace_id?, message, snapshot?}` | Deliver `message` (protojson of the stream's response type) to every matching open subscriber. `snapshot: true` also stores it, so later subscribers receive it on subscribe. |
 | `POST /_fake/end` | `{stream, workspace_id?, error?: {code, message}, abort?}` | End matching streams. With `error`, the end frame carries that Connect error. With `abort`, the TCP connection is dropped and **no end frame is written at all**. |
 | `POST /_fake/gate` | `{method, release?}` | Withhold one unary method's ANSWER until released. The request is still recorded and validated; only the response waits. `release: true` lets every held call answer and disarms the gate. Unknown method → 400; releasing a gate nobody armed → 400. |
-| `GET /_fake/calls` | — | The recorded requests in order: `[{method, body, raw?}]`. `body` is the request's protojson re-marshalled from the decoded message; `raw` is the request EXACTLY as the client wrote it. `[]` when nothing has been called. |
+| `GET /_fake/calls` | — | The recorded requests in order: `[{method, body, raw?, headers?}]`. `body` is the request's protojson re-marshalled from the decoded message; `raw` is the request EXACTLY as the client wrote it; `headers` are its request headers, canonically named. `[]` when nothing has been called. |
 | `GET /_fake/subscribers` | — | Open streams: `[{id, stream, workspace_id?}]`. |
 | `POST /_fake/exit` | — | Answer, then exit orderly (removing `daemon.addr`). |
 
@@ -122,6 +122,18 @@ verbatim, captured by a mux middleware before the codec sees them, so an
 assertion about explicit encoding reads the wire rather than a lossy echo. A
 body over 1 MiB is passed through untouched and recorded with no `raw`, and
 the skip is logged.
+
+### `headers`: the protocol, not only the body
+
+The Connect protocol fixes headers as well as bodies: a unary call carries
+`Content-Type: application/json` plus `Connect-Protocol-Version: 1`, and a
+stream carries `Content-Type: application/connect+json`. Nothing in `body` or
+`raw` can see them, so a client that sent the wrong content type — or dropped
+the protocol-version header — used to pass every assertion. A mux middleware
+(`headers.go`, alongside the raw-body one) copies each request's headers onto
+its recorded call, canonically named, with repeated values folded the way HTTP
+folds them. Streams are recorded too, so each request's own content type is
+asserted separately rather than against one global set.
 
 ### `POST /_fake/gate`: pinning ORDER
 
