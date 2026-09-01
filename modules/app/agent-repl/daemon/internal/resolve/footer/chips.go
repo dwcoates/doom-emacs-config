@@ -9,6 +9,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
 	"claude-repld/internal/ids"
 )
 
@@ -582,7 +583,7 @@ func (r *resolver) agentsPanel(ws ids.WorkspaceID, s *wsState) *frontendv1.Foote
 				},
 			}),
 			Label:   &frontendv1.FooterAgentRowLabel{Text: row.label},
-			Tokens:  &frontendv1.FooterAgentRowTokens{Text: formatTokens(row.tokens) + " tok"},
+			Tokens:  &frontendv1.FooterAgentRowTokens{Text: figures.Tokens(row.tokens) + " tok"},
 			Runtime: &frontendv1.FooterAgentRowRuntime{StartedAtMs: epochMs(row.startedAt)},
 		}
 		if row.description != "" {

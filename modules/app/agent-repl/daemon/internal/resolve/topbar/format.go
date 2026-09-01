@@ -5,23 +5,20 @@ import (
 	"sort"
 	"strings"
 
+	"claude-repld/internal/figures"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// formatTokens renders a token count the way the topbar draws it. The daemon
-// does every unit rounding: the client draws the string verbatim.
+// formatTokens renders a token count the topbar carries as a SIGNED figure.
+// The rendering itself is figures.Tokens — the one daemon-wide token format —
+// and this adapter only settles what a negative count means: the topbar's
+// sources subtract, and a negative remainder draws as nothing left rather than
+// as a figure no reader could act on.
 func formatTokens(n int64) string {
 	if n < 0 {
 		n = 0
 	}
-	switch {
-	case n >= 1_000_000:
-		return trimZero(fmt.Sprintf("%.1f", float64(n)/1_000_000)) + "M"
-	case n >= 1_000:
-		return trimZero(fmt.Sprintf("%.1f", float64(n)/1_000)) + "k"
-	default:
-		return fmt.Sprintf("%d", n)
-	}
+	return figures.Tokens(uint64(n))
 }
 
 // trimZero drops a trailing ".0" so "18.0k" draws as "18k".

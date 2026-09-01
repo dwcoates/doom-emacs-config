@@ -8,6 +8,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"claude-repld/internal/figures"
 )
 
 // tokenState is ONE TURN's token accounting. It is reset at every turn start,
@@ -167,18 +168,18 @@ func (t *tokenState) evaluateAlarm(threshold uint64) {
 	if t.coldKeepalive {
 		t.alarmLine = fmt.Sprintf(
 			"expensive keep-alive — %s over %s, a cache keep-alive that came back cold",
-			formatTokens(over), formatTokens(threshold))
+			figures.Tokens(over), figures.Tokens(threshold))
 		return
 	}
 	t.alarmLine = fmt.Sprintf("expensive turn — %s over %s",
-		formatTokens(over), formatTokens(threshold))
+		figures.Tokens(over), figures.Tokens(threshold))
 }
 
 // cell renders the strip's tokens cell.
 func (t *tokenState) cell() *frontendv1.FooterTokensCell {
 	out := &frontendv1.FooterTokensCell{
 		Input: &frontendv1.FooterTokensCellInput{
-			Text: formatTokens(t.sum().misses) + " in",
+			Text: figures.Tokens(t.sum().misses) + " in",
 		},
 	}
 	if t.alarmTripped {
@@ -256,6 +257,6 @@ func figure(known bool, n uint64) *string {
 	if !known {
 		return nil
 	}
-	v := formatTokens(n)
+	v := figures.Tokens(n)
 	return &v
 }
