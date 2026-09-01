@@ -104,7 +104,7 @@ func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
 
 	// Assert: the arm names WHICH entry and which field, so the producer's own
 	// logs can say what it sent wrong without parsing prose.
-	assertWriteInvalidRequest(t, failure, "entries[1].agent_frame.agent_id")
+	assertWriteInvalidRequest(t, failure, "entries[1].agent_update.serveable_frame.agent_item.agent_frame.agent_id")
 	if !strings.Contains(failure.GetDetail(), "entries[1]") {
 		t.Errorf("the detail %q does not name the offending entry index", failure.GetDetail())
 	}
