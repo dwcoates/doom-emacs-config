@@ -222,6 +222,15 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   canonical <ws>/.claude/emacs/emacs.log link and detaching the
   pre-teardown history → R-LOGFORGET (defer the forget until the
   teardown's own records are written). No agent worktrees remain.
+- FULL RUN at 0677708d1: connect 21, host 51, roster 47, daemon 15,
+  verbs 61, composer 42 all green; link 25/26 standalone (test 9 asserts
+  link-up before acceptance) and a different link test times out only in
+  the all-suite run (host.el's link-up hook never fires after other suites
+  — leaked state); unit 3303/3304 (that same itest). Dispatched
+  (`opus-low`, off db67a1467): R-STABILITY (elisp-agents/stability: the
+  two link flakes + R-LOGFORGET), R-DEADCODE (elisp-agents/deadcode: the
+  programmatic dead-code rule); audit 2 (fable, fresh context, read-only
+  against the teamlead worktree) runs alongside.
 
 ## 1. Module map (final tree of lisp/)
 
