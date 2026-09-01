@@ -78,35 +78,29 @@ func (o *orchestrator) Enqueue(ctx context.Context, ws ids.WorkspaceID) error {
 
 // Pause stops the queue from admitting new merges; an in-flight merge runs on.
 //
-// It pauses EVERY repository, because the operator control it answers has no
-// repository in it: the queue the user means is the daemon's.
-func (o *orchestrator) Pause(ctx context.Context) error { return o.setPaused(ctx, true) }
+// A nil scope pauses EVERY repository, which is the daemon-wide switch an
+// UNSET request ref means. A scope names one repository, whose queue is the
+// only one touched.
+func (o *orchestrator) Pause(ctx context.Context, scope *RepositoryScope) error {
+	return o.setPaused(ctx, scope, true)
+}
 
-// Unpause resumes admitting merges.
-func (o *orchestrator) Unpause(ctx context.Context) error { return o.setPaused(ctx, false) }
+// Unpause resumes admitting merges, scoped exactly as Pause is.
+func (o *orchestrator) Unpause(ctx context.Context, scope *RepositoryScope) error {
+	return o.setPaused(ctx, scope, false)
+}
 
 // setPaused is the one pause-write path, so both verbs refuse a no-op the same
 // way: pausing a paused queue is a refusal rather than a quiet success, because
 // the operator asked for a change that did not happen.
-func (o *orchestrator) setPaused(ctx context.Context, paused bool) error {
+func (o *orchestrator) setPaused(ctx context.Context, scope *RepositoryScope, paused bool) error {
 	op := "daemon.merge.pause"
 	if !paused {
 		op = "daemon.merge.unpause"
 	}
-	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	repos, err := o.pauseScope(ctx, op, scope, paused)
 	if err != nil {
 		return err
-	}
-	repos := make([]wsm.RepoKey, 0, len(queues))
-	for repo := range queues {
-		repos = append(repos, repo)
-	}
-	if len(repos) == 0 {
-		arm, reason := ArmNotPaused, "no repository has a merge queue to resume"
-		if paused {
-			arm, reason = ArmAlreadyPaused, "no repository has a merge queue to pause"
-		}
-		return &RefusalError{Arm: arm, Reason: reason}
 	}
 	changed := 0
 	for _, repo := range repos {
@@ -130,13 +124,58 @@ func (o *orchestrator) setPaused(ctx context.Context, paused bool) error {
 		o.deps.Log.Global().Warn(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
-	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": changed})
+	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": changed, "scoped": scope != nil})
 	if !paused {
 		for _, repo := range repos {
 			o.kick(repo)
 		}
 	}
 	return nil
+}
+
+// pauseScope resolves WHICH queues one pause or resume addresses: every
+// repository that has a queue for a nil scope, and exactly the named
+// repository's queue for a set one. A scope naming a repository the registry
+// does not hold is REFUSED rather than silently pausing a key nobody owns.
+func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *RepositoryScope, paused bool) ([]wsm.RepoKey, error) {
+	if scope != nil {
+		if scope.ID == "" && scope.Dir == "" {
+			o.deps.Log.Global().Warn(op, "refused a pause change scoped by an empty repository ref", dlog.Context{"arm": ArmUnknownRepository})
+			return nil, &RefusalError{Arm: ArmUnknownRepository, Reason: "the request's repository ref names neither an id nor a dir"}
+		}
+		repos, err := o.deps.DB.ListRepositories(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, repo := range repos {
+			if scope.ID != "" && repo.ID != scope.ID {
+				continue
+			}
+			if scope.Dir != "" && repo.Dir != scope.Dir {
+				continue
+			}
+			return []wsm.RepoKey{wsm.RepoKey(repo.Dir)}, nil
+		}
+		o.deps.Log.Global().Warn(op, "refused a pause change for a repository the registry does not hold", dlog.Context{"arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
+		return nil, &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
+	}
+	queues, err := o.deps.DB.AllMergeQueues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]wsm.RepoKey, 0, len(queues))
+	for repo := range queues {
+		keys = append(keys, repo)
+	}
+	if len(keys) == 0 {
+		arm, reason := ArmNotPaused, "no repository has a merge queue to resume"
+		if paused {
+			arm, reason = ArmAlreadyPaused, "no repository has a merge queue to pause"
+		}
+		o.deps.Log.Global().Warn(op, "refused a pause change with no queue to change", dlog.Context{"arm": arm})
+		return nil, &RefusalError{Arm: arm, Reason: reason}
+	}
+	return keys, nil
 }
 
 // Evict removes a queued workspace from the queue. It is one of the THREE
