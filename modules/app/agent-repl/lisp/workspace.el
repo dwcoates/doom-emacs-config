@@ -555,7 +555,6 @@ log line preserves the pre-existing diagnostic shape."
                  (agent-repl--ws-put peer :source-ws-name nil)))
              agent-repl--workspaces)
     (when had-entry
-      (agent-repl--ws-forget-emacs-log-target ws "workspace deletion")
       ;; Pre-tombstone hook: runs while the runtime keys are still
       ;; readable, so a handler can act on them before the clear below.
       (run-hook-with-args 'agent-repl-ws-del-hook ws)
@@ -566,7 +565,18 @@ log line preserves the pre-existing diagnostic shape."
     ;; Keep this as the operation's final normal log.  Consumers use it as
     ;; the canonical completed-tombstone record after setter advice settles.
     (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
-                     ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))))
+                     ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))
+    ;; FORGETTING IS THE LAST ACT OF THE TEARDOWN, after every record this
+    ;; teardown writes.  Forgetting first left the hook's records, the
+    ;; runtime-key clears and the closing `ws-del' line above with no owned
+    ;; target, so the very next one minted a FRESH target and re-pointed the
+    ;; canonical `<ws>/.claude/emacs/emacs.log' symlink at it -- detaching
+    ;; this workspace's entire pre-teardown history from the path a reader
+    ;; follows.  Done here, the link still resolves to the target that holds
+    ;; the history, and only a record logged for the name AFTER the teardown
+    ;; mints a new one.
+    (when had-entry
+      (agent-repl--ws-forget-emacs-log-target ws "workspace deletion"))))
 
 (defun agent-repl--ws-forget (ws)
   "Hard-remove tombstoned WS from `agent-repl--workspaces'.
