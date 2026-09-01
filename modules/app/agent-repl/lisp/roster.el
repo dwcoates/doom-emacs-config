@@ -72,6 +72,7 @@
 (declare-function agent-repl-link-primary "daemon-link" ())
 (defvar agent-repl-host-last-selected-id)
 (defvar agent-repl-link-up-functions)
+(defvar agent-repl-link-promote-functions)
 (defvar agent-repl-link-down-functions)
 
 ;;;; ---- The view ---------------------------------------------------------
@@ -573,7 +574,20 @@ the tab bar on a reconnect would be a worse lie than a stale paint."
   (agent-repl--info nil "elisp.roster.link-down: stream forgotten view-kept=%s"
                     (if agent-repl-roster-view "t" "nil")))
 
+(defun agent-repl-roster-on-link-promote (_old new)
+  "Re-subscribe the roster on NEW when the successor is PROMOTED to primary.
+A promotion fires no up hooks -- by design, because every workspace was
+already adopted onto the successor and re-registering the fleet would be
+a lie.  The ROSTER is not adopted, though: its stream rode the OLD
+connection and dies with it, so without this re-subscription Emacs comes
+out of every blue-green rollout with no roster stream at all and the tabs
+stop reconciling."
+  (agent-repl--info nil "elisp.roster.resubscribed-on-promotion address=%S"
+                    (agent-repl-connect-connection-address new))
+  (agent-repl-roster-subscribe new))
+
 (add-hook 'agent-repl-link-up-functions #'agent-repl-roster-on-link-up)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl-roster-on-link-promote)
 (add-hook 'agent-repl-link-down-functions #'agent-repl-roster-on-link-down)
 
 (provide 'agent-repl-roster)

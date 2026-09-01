@@ -100,7 +100,8 @@
          (agent-repl-link-up-functions nil)
          (agent-repl-link-down-functions nil)
          (agent-repl-link-handover-functions nil)
-         (agent-repl-link-drain-functions nil))
+         (agent-repl-link-drain-functions nil)
+         (agent-repl-link-promote-functions nil))
      (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
                 (lambda ()
                   (setq agent-repl-test-link--addr-reads
@@ -622,6 +623,76 @@ gate is the point, so it is exercised here rather than bypassed."
       (agent-repl-link--run-hook 'agent-repl-link-up-functions nil)
       ;; Assert
       (should agent-repl-test-link--containment-ran))))
+
+(ert-deftest agent-repl-test-link-promotion-runs-the-promote-hook ()
+  "Every stream that rode the OLD connection dies with it: consumers are told."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      (add-hook 'agent-repl-link-promote-functions
+                (agent-repl-test-link--record-hook :promote))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (assq :promote agent-repl-test-link--hooks)))))
+
+(ert-deftest agent-repl-test-link-promote-hook-receives-old-and-new ()
+  "The hook is handed both connections: OLD is dying, NEW is the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      (add-hook 'agent-repl-link-promote-functions
+                (agent-repl-test-link--record-hook :promote))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (equal (cdr (assq :promote agent-repl-test-link--hooks))
+                     (list conn successor))))))
+
+(ert-deftest agent-repl-test-link-promote-hook-runs-before-the-old-close ()
+  "A consumer must never be handed a NEW that is already closed underneath it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+          (alive nil))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      (add-hook 'agent-repl-link-promote-functions
+                (lambda (_old new)
+                  (setq alive (agent-repl-connect-connection-alive-p new))))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should alive))))
+
+(ert-deftest agent-repl-test-link-promote-hook-failure-is-contained ()
+  "The promote run gets the same containment as every other hook run."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((agent-repl-test-link--containment-ran nil)
+          (conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")
+      (add-hook 'agent-repl-link-promote-functions
+                #'agent-repl-test-link--failing-consumer)
+      (add-hook 'agent-repl-link-promote-functions
+                #'agent-repl-test-link--second-consumer t)
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should agent-repl-test-link--containment-ran))))
+
+(ert-deftest agent-repl-test-link-a-plain-link-down-runs-no-promote-hook ()
+  "Without a successor there is no promotion: the down path is a different fact."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-promote-functions
+                (agent-repl-test-link--record-hook :promote))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (null (assq :promote agent-repl-test-link--hooks))))))
 
 (ert-deftest agent-repl-test-link-successor-stream-loss-drops-the-successor ()
   "host.el must never adopt onto a successor that is already gone."
