@@ -523,3 +523,105 @@ describe("watchStream: logging", () => {
     expect(lines.some(([, line]) => line.includes("rpc.stream-recovered"))).toBe(true);
   });
 });
+
+/**
+ * A client whose WatchFooter yields one push and then STANDS — the shape a
+ * component stream actually has, so nothing but a cancel can end it.
+ */
+function standingClient() {
+  const state = { openCount: 0 };
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      watchFooter: async function* () {
+        state.openCount += 1;
+        yield push();
+        await new Promise<never>(() => undefined);
+      },
+    });
+  });
+  return { client: createAgentReplClient(transport), state };
+}
+
+describe("watchStream: the page going quiet", () => {
+  it("stops the stream, since the workspace moved to a daemon this page never dials", async () => {
+    // ARRANGE
+    const { client, state } = standingClient();
+    const ctx = contextFor(client, new RecordingSink());
+    open(ctx, () => undefined);
+    await settle();
+    // ACT
+    ctx.quiesce();
+    await advance(10_000);
+    // ASSERT: one open only — no reopen, no backoff.
+    expect(state.openCount).toBe(1);
+  });
+
+  it("files no unreachable card for the run the quiesce ended", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = standingClient();
+    const ctx = contextFor(client, sink);
+    open(ctx, () => undefined);
+    await settle();
+    // ACT
+    ctx.quiesce();
+    await advance(10_000);
+    // ASSERT
+    expect(sink.reported).not.toContain("daemonUnreachable");
+  });
+
+  it("never opens at all when the page was already quiet", async () => {
+    // ARRANGE
+    const { client, state } = standingClient();
+    const ctx = contextFor(client, new RecordingSink());
+    ctx.quiesce();
+    // ACT
+    open(ctx, () => undefined);
+    await advance(10_000);
+    // ASSERT
+    expect(state.openCount).toBe(0);
+  });
+});
+
+describe("watchStream: onReconnected", () => {
+  it("fires on the first push after a run that ended without our cancel", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[], [push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const reconnected = vi.fn();
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (c, signal) => c.watchFooter({ workspace: WORKSPACE }, { signal }),
+      onPush: () => undefined,
+      onReconnected: reconnected,
+      backoff: BACKOFF,
+    });
+    // ACT
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(reconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire on a first run that never dropped", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const reconnected = vi.fn();
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (c, signal) => c.watchFooter({ workspace: WORKSPACE }, { signal }),
+      onPush: () => undefined,
+      onReconnected: reconnected,
+      backoff: BACKOFF,
+    });
+    // ACT
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(reconnected).not.toHaveBeenCalled();
+  });
+});

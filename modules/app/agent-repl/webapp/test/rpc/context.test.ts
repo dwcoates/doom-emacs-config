@@ -104,3 +104,57 @@ describe("onClientReplaced", () => {
     expect(fn).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("quiesce", () => {
+  it("reports the page as quiet", () => {
+    const context = ctx();
+    context.quiesce();
+    expect(context.isQuiesced()).toBe(true);
+  });
+
+  it("starts talkative, since a fresh page has a daemon to talk to", () => {
+    expect(ctx().isQuiesced()).toBe(false);
+  });
+
+  it("notifies every quiet subscriber, which is how streams cancel themselves", () => {
+    const context = ctx();
+    const fn = vi.fn();
+    context.onQuiesced(fn);
+    context.quiesce();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("is idempotent, so a second transferred push renotifies nobody", () => {
+    const context = ctx();
+    const fn = vi.fn();
+    context.onQuiesced(fn);
+    context.quiesce();
+    context.quiesce();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells a subscriber that arrives after the fact at once", () => {
+    const context = ctx();
+    context.quiesce();
+    const fn = vi.fn();
+    context.onQuiesced(fn);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns an unsubscriber that stops the notification", () => {
+    const context = ctx();
+    const fn = vi.fn();
+    context.onQuiesced(fn)();
+    context.quiesce();
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe("replaceClient after a quiesce", () => {
+  it("clears the flag, because adopting a daemon is somewhere to send again", () => {
+    const context = ctx();
+    context.quiesce();
+    context.replaceClient(client());
+    expect(context.isQuiesced()).toBe(false);
+  });
+});

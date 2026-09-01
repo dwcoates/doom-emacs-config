@@ -50,6 +50,19 @@ export interface FailureSink {
   report(kind: FailureKind): void;
   /** Remove ARM's card, if one stands. */
   retract(arm: ClientFailureArm): void;
+  /**
+   * Hold ARM's card back until UNTILMS, because the failure is EXPECTED.
+   *
+   * The one caller is the lifecycle's shutdown announcement: the daemon has
+   * said it is going away and for how long, so the streams dying inside that
+   * window is the announced event rather than news. Suppression hides the
+   * CARD and nothing else — the report is still logged, so a suppressed window
+   * is visible to whoever reads the log rather than erased.
+   *
+   * OPTIONAL on the interface because a sink that only collects (a test's, a
+   * headless one) has no card to hold back; the overlay implements it.
+   */
+  suppress?(arm: ClientFailureArm, untilMs: number): void;
 }
 
 // ---------------------------------------------------------------------------
