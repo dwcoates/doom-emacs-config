@@ -124,6 +124,7 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	ws := wsm.Workspace{
 		ID: ids.WorkspaceID("ws-" + filepath.Base(dir)), Dir: dir, Repo: "repo-1",
 		Name: facts.Name, Branch: facts.Branch, ParentBranch: facts.ParentBranch,
+		Parent: facts.Parent,
 	}
 	d.with(ws)
 	d.createdNew = true
