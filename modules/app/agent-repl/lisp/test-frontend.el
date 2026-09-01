@@ -1448,3 +1448,50 @@ pre-creation that ever reaches it is the defect these tests cover."
         ;; Assert
         (should (null agent-repl-test--precreate-urls))))))
 
+
+;;;; ---- Adopting a mounted webview ----
+
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-completes ()
+  "Adoption runs to completion and hands the buffer back.
+Every mount site funnels through `agent-repl--frontend-adopt-webview-buffer',
+so a single stale call inside it to a command deleted with its feature
+takes down EVERY webview mount with a void-function — the mount is the
+one place where a decoration failing may not cost the user a page."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt*")))
+    (unwind-protect
+        ;; Act
+        (let ((adopted (agent-repl--frontend-adopt-webview-buffer
+                        buf "*agent-repl-test-adopted*" "ws-1")))
+          ;; Assert
+          (should (eq adopted buf)))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-stamps-the-owner ()
+  "Adoption records the OWNER every owner-keyed predicate reads."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-owner*")))
+    (unwind-protect
+        (progn
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-owner*" "ws-1")
+          ;; Assert
+          (should (equal (buffer-local-value 'agent-repl--owning-workspace buf)
+                         "ws-1")))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-frontend-adopt-webview-buffer-clears-the-header-line ()
+  "Adoption clears `xwidget-webkit-mode's header line: a webview is a
+panel, not a browser."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-adopt-header*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buf (setq-local header-line-format "WebKit: x"))
+          ;; Act
+          (agent-repl--frontend-adopt-webview-buffer
+           buf "*agent-repl-test-adopted-header*" "ws-1")
+          ;; Assert
+          (should (null (buffer-local-value 'header-line-format buf))))
+      (kill-buffer buf))))
