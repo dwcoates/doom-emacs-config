@@ -49,8 +49,16 @@ type CreateSpec struct {
 	// BaseRef is the base to cut from, empty for the repository's default
 	// branch.
 	BaseRef string
+	// Parent, when set, is the workspace this create was SPAWNED FROM: the
+	// child's merge target is the parent's worktree, and the roster nests the
+	// child under it. It is recorded on the workspace at creation, so the
+	// nesting is a stated fact rather than one derived from the branch
+	// lineage.
+	Parent *ids.WorkspaceID
 	// ForkFrom, when set, is the parent workspace whose transcript the daemon
-	// PORTS into the child's config root before StartSession(resume).
+	// PORTS into the child's config root before StartSession(resume). A fork
+	// is always FROM the spawning parent, so a spec that sets it and leaves
+	// Parent unset names the same workspace for both.
 	ForkFrom *ids.WorkspaceID
 	// ConsentedUngatedMode is the permission mode the user consented to at
 	// creation. An ungated mode with no consent recorded is REFUSED.

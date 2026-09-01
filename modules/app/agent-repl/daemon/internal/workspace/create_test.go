@@ -221,6 +221,42 @@ func TestCreateTargetsTheParentWorktreeWhenCutFromOne(t *testing.T) {
 	}
 }
 
+func TestCreateRecordsTheSpawningParentOnTheWorkspace(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	parent := f.workspace("parent", t.TempDir())
+	spec := standardSpec(t)
+	id := parent.ID
+	spec.Parent = &id
+
+	// Act.
+	record, err := f.verbs.Create(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if record.Parent == nil || *record.Parent != parent.ID {
+		t.Fatalf("parent = %v, want %q recorded at creation", record.Parent, parent.ID)
+	}
+}
+
+func TestCreateRecordsNoParentWhenSpawnedFromNone(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+
+	// Act.
+	record, err := f.verbs.Create(context.Background(), standardSpec(t))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if record.Parent != nil {
+		t.Fatalf("parent = %q, want none for a top-level create", *record.Parent)
+	}
+}
+
 func TestCreateRegistersOnlyAfterTheWorktreeExists(t *testing.T) {
 	// Arrange: materialization fails, so nothing may be registered.
 	f := newFixture(t)

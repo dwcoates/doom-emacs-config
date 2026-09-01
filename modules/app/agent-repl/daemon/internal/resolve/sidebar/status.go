@@ -127,7 +127,7 @@ func sessionArm(s *wsState, log dlog.Logger) string {
 		return "submitting"
 	case s.turn != nil:
 		return "thinking"
-	case len(s.detached) > 0:
+	case s.asyncLive():
 		return "idle_async"
 	case s.turnEverRan && s.lastClose == wsm.CloseKilled:
 		return "interrupted"

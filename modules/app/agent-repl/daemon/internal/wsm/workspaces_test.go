@@ -129,6 +129,54 @@ func TestRegisterWorkspaceMintsIdentitiesOnFirstSight(t *testing.T) {
 	}
 }
 
+func TestRegisterWorkspaceRecordsTheParentWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	parentDir := t.TempDir()
+	parent, _, err := s.RegisterWorkspace(context.Background(), parentDir, RegisterFacts{Branch: "parent", RepoDir: parentDir})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(parent): %v", err)
+	}
+	childDir := t.TempDir()
+
+	// Act
+	child, _, err := s.RegisterWorkspace(context.Background(), childDir, RegisterFacts{
+		Branch: "child", RepoDir: parentDir, Parent: &parent.ID})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(child): %v", err)
+	}
+	loaded, err := s.Workspace(context.Background(), child.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert
+	if loaded.Parent == nil || *loaded.Parent != parent.ID {
+		t.Fatalf("parent = %v, want %q", loaded.Parent, parent.ID)
+	}
+}
+
+func TestRegisterWorkspaceLeavesTheParentUnsetWhenNoneIsNamed(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	dir := t.TempDir()
+
+	// Act
+	ws, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{Branch: "b", RepoDir: dir})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	loaded, err := s.Workspace(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert
+	if loaded.Parent != nil {
+		t.Fatalf("parent = %q, want none for a workspace spawned from nothing", *loaded.Parent)
+	}
+}
+
 func TestRegisterWorkspaceIsIdempotentAcrossDirSpellings(t *testing.T) {
 	base := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(base, "sub"), 0o755); err != nil {
