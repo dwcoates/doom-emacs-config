@@ -130,8 +130,19 @@ type fakeVerbs struct {
 	selectErr error
 	closeErr  error
 
-	answerPermissionErr error
-	answerQuestionErr   error
+	answerPermissionErr  error
+	answerQuestionErr    error
+	answerColdGateErr    error
+	setPermissionModeErr error
+	assignTaskErr        error
+}
+
+func (f *fakeVerbs) SetPermissionMode(context.Context, ids.WorkspaceID, string) error {
+	return f.setPermissionModeErr
+}
+
+func (f *fakeVerbs) AssignTask(context.Context, ids.WorkspaceID, *ids.TaskID) error {
+	return f.assignTaskErr
 }
 
 func (f *fakeVerbs) Interrupt(_ context.Context, _ ids.WorkspaceID, target workspace.InterruptTarget, _ bool) (workspace.InterruptOutcome, error) {
@@ -187,12 +198,20 @@ func (f *fakeQueue) Accept(context.Context, ids.WorkspaceID, ids.TurnID) error {
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
 	merge.Orchestrator
-	enqueueErr error
-	pauseErr   error
-	pauseScope *merge.RepositoryScope
+	enqueueErr       error
+	pauseErr         error
+	pauseScope       *merge.RepositoryScope
+	answerDequeueErr error
+	evictErr         error
 }
 
 func (f *fakeMerge) Enqueue(context.Context, ids.WorkspaceID) error { return f.enqueueErr }
+
+func (f *fakeMerge) AnswerDequeue(context.Context, ids.WorkspaceID, bool) error {
+	return f.answerDequeueErr
+}
+
+func (f *fakeMerge) Evict(context.Context, ids.WorkspaceID) error { return f.evictErr }
 
 func (f *fakeMerge) Pause(_ context.Context, scope *merge.RepositoryScope) error {
 	f.pauseScope = scope
