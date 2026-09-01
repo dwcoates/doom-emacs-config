@@ -282,9 +282,10 @@ func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
 		name     string
 		run      string
 		wantSite string
+		wantKind string
 	}{
-		{name: "a run the store never saw", run: "never-ran-at-all", wantSite: "unknown_bash_run"},
-		{name: "a run named by nothing", run: "", wantSite: "run_empty"},
+		{name: "a run the store never saw", run: "never-ran-at-all", wantSite: "unknown_bash_run", wantKind: "invalid_request"},
+		{name: "a run named by nothing", run: "", wantSite: "run_empty", wantKind: "invalid_request"},
 	}
 
 	for _, tc := range tests {
@@ -302,9 +303,7 @@ func TestARefusedBashRunOpenIsRecordedExactlyOnce(t *testing.T) {
 
 			// Assert.
 			rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "a refused bash run open")
-			if rec.Context["refusal_site"] != tc.wantSite {
-				t.Errorf("the refusal record's refusal_site is %v, want %s", rec.Context["refusal_site"], tc.wantSite)
-			}
+			assertRefusalKeys(t, rec, tc.wantSite, tc.wantKind)
 			if rec.Context["rpc"] == nil {
 				t.Errorf("the refusal record names no rpc: %v", rec.Context)
 			}
