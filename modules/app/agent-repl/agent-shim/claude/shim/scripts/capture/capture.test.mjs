@@ -34,6 +34,7 @@ import {
   createInputChannel,
   controlMatches,
   createWorld,
+  drainToResult,
   cwdSlug,
   fireTriggers,
   lateReclaimSlug,
@@ -865,5 +866,183 @@ describe("the corpus's control triggers", () => {
       .filter(({ control }) => control.at === "on_control" && control.after === undefined)
       .map(({ scenario }) => scenario);
     expect(unmatched).toEqual([]);
+  });
+});
+
+/**
+ * A fake query: an async generator over scripted per-turn message batches, with
+ * the SDK's own surface (an async iterator plus `close`).
+ *
+ * It records whether `return()` was ever called on its iterator — the exact
+ * thing a `for await ... break` does, and the reason every turn after the first
+ * went unrecorded in the real multi-turn captures.
+ */
+function fakeQuery(turnBatches) {
+  const state = { returned: false, closed: false, pulls: 0 };
+  const batches = turnBatches.map((batch) => [...batch]);
+  const generator = (async function* messages() {
+    try {
+      for (const batch of batches) {
+        for (const msg of batch) {
+          state.pulls += 1;
+          yield msg;
+        }
+      }
+    } finally {
+      state.returned = true;
+    }
+  })();
+  return {
+    state,
+    close: () => {
+      state.closed = true;
+    },
+    [Symbol.asyncIterator]: () => generator,
+  };
+}
+
+const TURN_ONE = [
+  { type: "system", subtype: "init", session_id: "s-1" },
+  { type: "assistant", message: { content: "one" } },
+  { type: "result", subtype: "success" },
+];
+const TURN_TWO = [
+  { type: "system", subtype: "compact_boundary" },
+  { type: "result", subtype: "success" },
+];
+
+describe("drainToResult", () => {
+  it("returns the turn's result message", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const iterator = query[Symbol.asyncIterator]();
+    await expect(drainToResult(iterator, () => {})).resolves.toEqual({
+      type: "result",
+      subtype: "success",
+    });
+  });
+
+  it("hands every message of the turn to the recorder, in order", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.type));
+    expect(seen).toEqual(["system", "assistant", "result"]);
+  });
+
+  it("stops at the result rather than draining the next turn", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.subtype));
+    expect(seen).toEqual(["init", undefined, "success"]);
+  });
+
+  it("does NOT end the iterator when it stops at a result", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    await drainToResult(query[Symbol.asyncIterator](), () => {});
+    expect(query.state.returned).toBe(false);
+  });
+
+  it("records the SECOND turn on the same held iterator", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    const iterator = query[Symbol.asyncIterator]();
+    await drainToResult(iterator, () => {});
+    const seen = [];
+    await drainToResult(iterator, (msg) => seen.push(msg.subtype));
+    expect(seen).toEqual(["compact_boundary", "success"]);
+  });
+
+  it("awaits an async recorder before pulling the next message", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const order = [];
+    await drainToResult(query[Symbol.asyncIterator](), async (msg) => {
+      order.push(`enter:${msg.type}`);
+      await Promise.resolve();
+      order.push(`leave:${msg.type}`);
+    });
+    expect(order.slice(0, 4)).toEqual([
+      "enter:system",
+      "leave:system",
+      "enter:assistant",
+      "leave:assistant",
+    ]);
+  });
+
+  it("returns null when the query ends without a result", async () => {
+    const query = fakeQuery([[{ type: "assistant", message: { content: "orphan" } }]]);
+    await expect(drainToResult(query[Symbol.asyncIterator](), () => {})).resolves.toBeNull();
+  });
+
+  it("still reports the messages seen before a query ended without a result", async () => {
+    const query = fakeQuery([[{ type: "assistant" }]]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.type));
+    expect(seen).toEqual(["assistant"]);
+  });
+
+  it("leaves the query open for a turn_end control to be driven against", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    await drainToResult(query[Symbol.asyncIterator](), () => {});
+    expect(query.state.closed).toBe(false);
+  });
+});
+
+describe("the corpus's declared error terminals", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const scenarioNamed = (name) => doc.scenarios.find((entry) => entry.name === name);
+
+  // The parked gate's golden IS an aborted terminal: the interrupt fires while
+  // a permission callback is pending, and the vendor ends the turn with
+  // subtype "error_during_execution" / terminal_reason "aborted_tools"
+  // (observed in captures/_failed/permission-undecidable-parked). Without the
+  // declaration the quarantine rule condemns the capture the scenario exists
+  // for, exactly as it did on the first real run.
+  it("declares the aborted terminal permission-undecidable-parked exists to capture", () => {
+    expect(scenarioNamed("permission-undecidable-parked").expects_error_subtypes).toEqual([
+      "error_during_execution",
+    ]);
+  });
+
+  it("keeps that scenario's interrupt scripted off the parked control record", () => {
+    expect(scenarioNamed("permission-undecidable-parked").controls).toEqual([
+      { at: "on_control", after: { kind: "can_use_tool_parked" }, do: "interrupt" },
+    ]);
+  });
+
+  // NOT every interrupt-driven scenario: hook-cancelled's real capture ended
+  // `success` / `completed`, so declaring an error terminal for it would
+  // whitelist a failure it is not supposed to have.
+  it("declares an error terminal only as a non-empty list of subtypes", () => {
+    const malformed = doc.scenarios
+      .filter((entry) => entry.expects_error_subtypes !== undefined)
+      .filter((entry) => {
+        const declared = entry.expects_error_subtypes;
+        return (
+          !Array.isArray(declared) ||
+          declared.length === 0 ||
+          declared.some((subtype) => typeof subtype !== "string" || subtype === "")
+        );
+      })
+      .map((entry) => entry.name);
+    expect(malformed).toEqual([]);
+  });
+
+  // A provocation the model declines on its own judgement never reaches the
+  // gate: `rm -rf .` recorded no can_use_tool at all, so the scenario captured
+  // nothing about denial.
+  it("provokes permission-denied-by-user with a command the model will attempt", () => {
+    expect(scenarioNamed("permission-denied-by-user").prompt).not.toContain("rm -rf");
+  });
+
+  it("materializes the file that scenario's command acts on", () => {
+    expect(scenarioNamed("permission-denied-by-user").cwd_setup).toEqual([
+      { path: "stale.log", content: "stale\n" },
+    ]);
+  });
+
+  it("keeps that scenario's expectations about the denial", () => {
+    expect(scenarioNamed("permission-denied-by-user").expect).toEqual([
+      "can_use_tool request",
+      "PermissionResult deny",
+      "no activity frames for the denied call",
+    ]);
   });
 });

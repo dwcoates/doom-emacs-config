@@ -110,6 +110,25 @@ export function expectedErrorSubtypes(scenario) {
   return new Set(declared);
 }
 
+/**
+ * The transport error a control gets when it is driven against a query that is
+ * already closed.
+ *
+ * The first real run recorded 14 of these corpus-wide (stopTask x4,
+ * setPermissionMode x3, getContextUsage x2, backgroundTasks x2,
+ * usage_EXPERIMENTAL, mcpServerStatus, setModel) and every one of those
+ * captures still passed the gate — a golden for a verb that was never actually
+ * exercised is worse than no golden, because the converter is then graded
+ * against silence. A control that could not reach the vendor now condemns the
+ * capture.
+ */
+export const TRANSPORT_CLOSED_ERROR = "is not ready for writing";
+
+/** Whether a driven control failed because the query had already closed. */
+export function isTransportClosedFailure(control) {
+  return control?.ok === false && String(control?.error ?? "").includes(TRANSPORT_CLOSED_ERROR);
+}
+
 export function classifyCapture(entries, scenario, report = { errors: [] }) {
   const reasons = [];
   const messages = sdkMessages(entries);
@@ -146,6 +165,14 @@ export function classifyCapture(entries, scenario, report = { errors: [] }) {
 
   if (!allowApiError && messages.some((msg) => hasTruthyKeyAtAnyDepth(msg, "is_api_error_message"))) {
     reasons.push("a message carries is_api_error_message: true");
+  }
+
+  for (const control of report.controls ?? []) {
+    if (!isTransportClosedFailure(control)) continue;
+    reasons.push(
+      `control ${control.verb} was driven against an already-closed query ` +
+        `(${control.error}), so its golden was never captured`,
+    );
   }
 
   for (const error of report.errors ?? []) {
