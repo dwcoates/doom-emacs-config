@@ -28,7 +28,6 @@ make_tree() {
         daemon \
         agent-shim/claude/shim-sidecar \
         agent-shim/shim-store \
-        agent-shim/wire \
         agent-shim/logging/go; do
         mkdir -p "$tree/modules/app/agent-repl/$component"
         printf 'module fixture\n' \
@@ -131,8 +130,8 @@ test_default_runs_every_component() {
     run_report "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(grep -c '|go test ' "$tree/stub.log")" -eq 5 ] &&
-        [ "$(grep -c '|go tool cover ' "$tree/stub.log")" -eq 5 ] &&
+        [ "$(grep -c '|go test ' "$tree/stub.log")" -eq 4 ] &&
+        [ "$(grep -c '|go tool cover ' "$tree/stub.log")" -eq 4 ] &&
         [ "$(grep -c '|npm run typecheck' "$tree/stub.log")" -eq 2 ] &&
         [ "$(grep -c '|npm run coverage' "$tree/stub.log")" -eq 2 ] &&
         grep -q '|make -C .*proto validate' "$tree/stub.log"; then
@@ -146,7 +145,7 @@ test_selection_runs_only_requested_components() {
     local tree="$TMP/selection"
     make_tree "$tree"
     make_stubs "$tree/stubs"
-    run_report "$tree" wire webapp
+    run_report "$tree" store webapp
 
     if [ "$RUN_RC" -eq 0 ] &&
         [ "$(grep -c '|go test ' "$tree/stub.log")" -eq 1 ] &&

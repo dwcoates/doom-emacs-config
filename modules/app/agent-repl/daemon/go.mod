@@ -31,6 +31,4 @@ require (
 
 replace agentrepl/proto => ../proto/gen/go
 
-replace agentrepl/wire => ../agent-shim/wire
-
 replace agentrepl/logging => ../agent-shim/logging/go

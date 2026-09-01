@@ -40,7 +40,6 @@ var AllSuites = []string{
 	"daemon",
 	"sidecar",
 	"store",
-	"wire",
 	"logging",
 	"webapp",
 	"shim",
@@ -106,7 +105,6 @@ var suiteRules = []suiteRule{
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim/", Suites: []string{"shim"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/claude/shim-sidecar/", Suites: []string{"sidecar"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-store/", Suites: []string{"store"}},
-	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/wire/", Suites: []string{"wire", "daemon", "store", "sidecar"}},
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{"logging", "logging-density", "daemon", "store", "sidecar"}},
 
 	// The wire contract every producer and consumer is generated from.
