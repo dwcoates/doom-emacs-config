@@ -1304,6 +1304,344 @@ log by that op."
        nil "the create success ack log line")
       (should (agent-repl-itest-verbs--ack-logged-p daemon "create")))))
 
+;;;; ---- Audit-2 additions (R-SUITE-2) ----
+;;
+;; Findings 24-31 of docs/overhaul/reports/elisp-suite-audit-2.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+(declare-function agent-repl-link-connect "daemon-link")
+(declare-function agent-repl-link-teardown "daemon-link")
+(declare-function agent-repl-nuke-workspace "verbs")
+(declare-function agent-repl-restart-workspace "verbs")
+(declare-function agent-repl--ws-current-name "workspace")
+(defvar agent-repl-link-up-functions)
+(defvar agent-repl-link-down-functions)
+(defvar agent-repl-link-handover-functions)
+(defvar agent-repl-link-drain-functions)
+(defvar agent-repl-link-no-daemon-functions)
+(defvar agent-repl-link-drain)
+(defvar agent-repl-link-drain-segment)
+
+(defun agent-repl-itest-verbs--announce (daemon address)
+  "Push `shutdown_announced' on DAEMON's daemon stream naming ADDRESS.
+The handover arms on a verb ack are relayed into host.el's ONE adopt
+walk, and that walk adopts only onto a successor daemon-link has
+ACCEPTED, so the scenario has to stand a real dual attach."
+  (agent-repl-itest--push
+   daemon "daemon"
+   `((shutdownAnnounced
+      . ((address . ,address)
+         (cause . ((selfMergeRollout . ())))
+         (expectedOutageMs . "1500")
+         (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time))))))))))
+
+(defmacro agent-repl-itest-verbs--with-link (daemon &rest body)
+  "Stand a real link on DAEMON around BODY, with every link hook scratched."
+  (declare (indent 1) (debug (form body)))
+  `(let ((agent-repl-link-up-functions nil)
+         (agent-repl-link-down-functions nil)
+         (agent-repl-link-handover-functions nil)
+         (agent-repl-link-drain-functions nil)
+         (agent-repl-link-no-daemon-functions nil)
+         (agent-repl-link-drain nil)
+         (agent-repl-link-drain-segment nil))
+     (unwind-protect
+         (progn
+           (agent-repl-link-connect)
+           (agent-repl-itest--await-subscriber ,daemon "daemon")
+           ,@body)
+       (agent-repl-link-teardown))))
+
+(defun agent-repl-itest-verbs--log-arguments (daemon operation level)
+  "Return every logged format ARGUMENT string for OPERATION at LEVEL on DAEMON.
+`agent-repl--log-record' records each format argument as
+`prin1-to-string' under `context.arguments', which is where fanout §0
+puts dynamic values."
+  (apply #'append
+         (mapcar (lambda (record)
+                   (alist-get 'arguments (alist-get 'context record)))
+                 (agent-repl-itest--log-entries daemon operation level))))
+
+;; audit-2 #24
+(ert-deftest agent-repl-itest-verbs-merge-transferring-away-routes-to-the-handover ()
+  "`transferring_away' on a verb ack is HANDOVER NEWS, not a refusal to report.
+verbs.el `agent-repl-verbs--handover-arms' + fanout §7 HANDOVER REDIAL.
+Reporting it would be telling the user something went wrong during the
+one rollout that is supposed to be invisible — so it is INFO, nothing is
+drawn, and the workspace is adopted onto the successor instead."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-verbs--with-link primary
+      (agent-repl-itest-verbs--with-workspace primary ref
+        (agent-repl-itest--with-second-daemon primary successor
+          (let ((messages nil))
+            (agent-repl-itest--script
+             primary "MergeWorkspace"
+             `((error . ((transferringAway
+                          . ((address . ,(agent-repl-itest-daemon-address successor))))))))
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+              ;; Act.
+              (agent-repl-verb-merge agent-repl-itest-verbs--ws)
+              (agent-repl-itest--await-call primary "MergeWorkspace"))
+            ;; Assert.
+            (agent-repl-itest--await-log
+             primary "elisp.verbs.merge-handover-refusal" "info")
+            (should (null (agent-repl-itest--log-entries
+                           primary "elisp.verbs.merge-refused" "warn")))
+            (should-not (seq-some (lambda (m) (string-match-p "merge refused" m)) messages))
+            (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+            (should (equal (agent-repl-itest--body-field
+                            (car (agent-repl-itest--call-bodies
+                                  successor "AdoptHostWorkspace"))
+                            'workspace 'id)
+                           (plist-get ref :id)))))))))
+
+;; audit-2 #24
+(ert-deftest agent-repl-itest-verbs-merge-not-yet-adopted-routes-to-the-handover ()
+  "`not_yet_adopted' on a verb ack is the OTHER silent handover arm.
+fanout §7: the successor has not finished adopting the workspace yet, so
+the adopt is retried once its `WatchDaemon' is accepted.  Nothing is
+drawn here either."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-verbs--with-link primary
+      (agent-repl-itest-verbs--with-workspace primary ref
+        (agent-repl-itest--with-second-daemon primary successor
+          (let ((messages nil))
+            (agent-repl-itest--script primary "MergeWorkspace"
+                                      '((error . ((notYetAdopted . ())))))
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+              ;; Act: the refusal arrives before any successor stands.
+              (agent-repl-verb-merge agent-repl-itest-verbs--ws)
+              (agent-repl-itest--await-call primary "MergeWorkspace")
+              (agent-repl-itest--await-log
+               primary "elisp.verbs.merge-handover-refusal" "info")
+              ;; The successor is announced and accepted only now.
+              (agent-repl-itest-verbs--announce
+               primary (agent-repl-itest-daemon-address successor)))
+            ;; Assert.
+            (should (null (agent-repl-itest--log-entries
+                           primary "elisp.verbs.merge-refused" "warn")))
+            (should-not (seq-some (lambda (m) (string-match-p "merge refused" m)) messages))
+            (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+            (should (equal (agent-repl-itest--body-field
+                            (car (agent-repl-itest--call-bodies
+                                  successor "AdoptHostWorkspace"))
+                            'workspace 'id)
+                           (plist-get ref :id)))))))))
+
+;; audit-2 #25
+(ert-deftest agent-repl-itest-verbs-refusal-context-names-the-arm-keyword ()
+  "A generic refusal's log CONTEXT carries the arm keyword itself.
+fanout §0: \"Dynamic values go in the context\"; verbs.el logs `arm=%S
+fields=%S'.  Asserting only the operation slug would pass with the arm
+never recorded, which is exactly the fact a refusal reader needs."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "MergeWorkspace"
+                              '((error . ((alreadyQueued . ())))))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      ;; Act.
+      (agent-repl-verb-merge agent-repl-itest-verbs--ws)
+      (agent-repl-itest--await-log daemon "elisp.verbs.merge-refused" "warn")
+      ;; Assert.
+      (should (seq-some
+               (lambda (s) (string-match-p ":already-queued" s))
+               (agent-repl-itest-verbs--log-arguments
+                daemon "elisp.verbs.merge-refused" "warn"))))))
+
+;; audit-2 #25
+(ert-deftest agent-repl-itest-verbs-refusal-fields-reach-the-context-and-the-message ()
+  "A PAYLOAD-BEARING refusal arm's own fields reach both surfaces.
+`CloseWorkspaceWorkspaceRefMismatch{registry_dir}' is useless without the
+dir: verbs.el renders \"close refused: workspace-ref-mismatch <fields>\"
+and logs the same fields in the context, so both are asserted."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script
+     daemon "CloseWorkspace"
+     '((error . ((workspaceRefMismatch . ((registryDir . "/x")))))))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let ((messages nil))
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-verb-close agent-repl-itest-verbs--ws)
+          (agent-repl-itest--await-log daemon "elisp.verbs.close-refused" "warn"))
+        ;; Assert.
+        (should (seq-some (lambda (s) (string-match-p "/x" s))
+                          (agent-repl-itest-verbs--log-arguments
+                           daemon "elisp.verbs.close-refused" "warn")))
+        (should (seq-some
+                 (lambda (m) (string-match-p "close refused: workspace-ref-mismatch" m))
+                 messages))
+        (should (seq-some (lambda (m) (string-match-p "/x" m)) messages))))))
+
+;; audit-2 #26
+(ert-deftest agent-repl-itest-verbs-fork-without-a-parent-refuses-before-send ()
+  "A fork with NO parent is refused before send, with ZERO daemon calls.
+`endpoint_create_workspace.proto': \"a fork without a parent is
+unrepresentable\" — the fact lives INSIDE the parent by construction.
+Silently dropping the fork would create an ordinary workspace where the
+caller asked for a forked conversation, which is worse than a refusal."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act / Assert.
+      (should-error
+       (agent-repl-verb-create agent-repl-itest-verbs--repo :standard :fork t)
+       :type 'agent-repl-wire-error)
+      (should (null (agent-repl-itest--calls daemon "CreateWorkspace"))))))
+
+;; audit-2 #27
+(ert-deftest agent-repl-itest-verbs-shutdown-now-without-a-reason-refuses-before-send ()
+  "An immediate shutdown with NO reason is refused before send.
+`endpoint_update_shutdown_schedule.proto' `UpdateShutdownScheduleNow':
+\"Why — REQUIRED\".  Every client draws the standing banner from the
+reason, so a `now' without one would leave the fleet announcing nothing."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act / Assert.
+      (should-error
+       (agent-repl-verb-shutdown-schedule (list :arm :now))
+       :type 'agent-repl-wire-error)
+      (should (null (agent-repl-itest--calls daemon "UpdateShutdownSchedule"))))))
+
+;; audit-2 #28
+(ert-deftest agent-repl-itest-verbs-evict-without-a-workspace-refuses-before-send ()
+  "An eviction naming NO workspace is refused before send.
+`UpdateMergeQueueEvict.workspace' is a non-optional message; §0: \"an
+incomplete request errors before send\".  An evict with no target is not a
+daemon-wide act — unlike pause, which says so by omitting `repository'."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act / Assert.
+      (should-error
+       (agent-repl-verb-merge-queue (list :arm :evict))
+       :type 'agent-repl-wire-error)
+      (should (null (agent-repl-itest--calls daemon "UpdateMergeQueue"))))))
+
+;; audit-2 #29
+(ert-deftest agent-repl-itest-verbs-every-priority-level-arm-rides-the-wire ()
+  "All FOUR `WorkspacePriority' level arms encode as their own arm.
+`workspace_priority.proto' declares p05, p1, p2 and p3; only p05 and p1
+have ever ridden this suite, so an encoder that mapped the two lower
+levels onto each other would pass.  THE ARM IS THE PRIORITY LEVEL."
+  ;; Arrange.
+  (let ((arms '((:p05 . p05) (:p1 . p1) (:p2 . p2) (:p3 . p3))))
+    (agent-repl-itest--with-fake-daemon daemon
+      (agent-repl-itest-verbs--with-workspace daemon ref
+        (ignore ref)
+        (let ((sent 0))
+          (dolist (case arms)
+            ;; Act.
+            (agent-repl-verb-set-priority agent-repl-itest-verbs--ws (car case))
+            (setq sent (1+ sent))
+            (agent-repl-itest--await-call daemon "SetWorkspacePriority" sent)
+            ;; Assert.
+            (let ((body (nth (1- sent) (agent-repl-itest--call-bodies
+                                        daemon "SetWorkspacePriority"))))
+              (should (assq (cdr case)
+                            (agent-repl-itest--body-field body 'priority))))))))))
+
+;; audit-2 #30
+(ert-deftest agent-repl-itest-verbs-nuke-declined-at-the-confirm-sends-nothing ()
+  "Declining the nuke confirm sends NOTHING and keeps the tab.
+fanout §9: \"`agent-repl-nuke-workspace' (y/n confirm: data
+destruction)\".  This is the ONE verb that destroys data unrecoverably, so
+the confirm is part of the contract rather than a courtesy."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) nil))
+                ((symbol-function 'y-or-n-p) (lambda (&rest _) nil)))
+        ;; Act.
+        (agent-repl-nuke-workspace agent-repl-itest-verbs--ws)
+        ;; Assert.
+        (should (null (agent-repl-itest--calls daemon "NukeWorkspace")))
+        (should (agent-repl--ws-known-p agent-repl-itest-verbs--ws))))))
+
+;; audit-2 #30
+(ert-deftest agent-repl-itest-verbs-nuke-confirmed-sends-the-verb ()
+  "CONFIRMING the nuke sends exactly one NukeWorkspace.
+The other half of the confirm: a guard that refused both answers would
+pass the declining test on its own."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+        ;; Act.
+        (agent-repl-nuke-workspace agent-repl-itest-verbs--ws)
+        (agent-repl-itest--await-call daemon "NukeWorkspace")
+        ;; Assert.
+        (should (equal 1 (length (agent-repl-itest--calls daemon "NukeWorkspace"))))
+        (should (equal (agent-repl-itest--body-field
+                        (agent-repl-itest-verbs--body daemon "NukeWorkspace")
+                        'workspace 'id)
+                       (plist-get ref :id)))))))
+
+;; audit-2 #30
+(ert-deftest agent-repl-itest-verbs-interactive-restart-with-a-prefix-forces ()
+  "`SPC o C-c' with a PREFIX ARGUMENT is a FORCED restart on the raw wire.
+verbs.el: \"A prefix argument makes it a FORCED restart\".  The
+interactive layer is what a keybinding actually reaches, and `force' is
+\"always encoded explicitly, false included\" — so the raw request is
+where `true' is read."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () agent-repl-itest-verbs--ws)))
+        ;; Act.
+        (let ((current-prefix-arg '(4)))
+          (call-interactively #'agent-repl-restart-workspace))
+        (agent-repl-itest--await-call daemon "RestartWorkspace")
+        ;; Assert.
+        (should (string-match-p
+                 "\"force\"[[:space:]]*:[[:space:]]*true"
+                 (car (agent-repl-itest--call-raw-bodies daemon "RestartWorkspace"))))))))
+
+;; audit-2 #31
+(ert-deftest agent-repl-itest-verbs-session-health-error-arm-renders-no-verdict ()
+  "A SessionHealth `error' arm is the question NOT BEING ANSWERED.
+`endpoint_session_health.proto': \"error = the question could not be
+ANSWERED (unknown workspace)\".  It is not an unhealthy verdict, so no
+verdict may be rendered — a surface that drew \"healthy\" here would
+report a workspace the daemon has never heard of as fine."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "SessionHealth"
+                              '((error . ((unknownWorkspace . ())))))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (when (get-buffer "*agent-repl-health*") (kill-buffer "*agent-repl-health*"))
+      (let ((messages nil))
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-session-health agent-repl-itest-verbs--ws)
+          (agent-repl-itest--await-log daemon "elisp.verbs.session-health-refused" "warn"))
+        ;; Assert: the arm is named, and NO verdict was drawn.
+        (should (seq-some (lambda (s) (string-match-p ":unknown-workspace" s))
+                          (agent-repl-itest-verbs--log-arguments
+                           daemon "elisp.verbs.session-health-refused" "warn")))
+        (should (seq-some
+                 (lambda (m) (string-match-p "session-health refused: unknown-workspace" m))
+                 messages))
+        (should (null (get-buffer "*agent-repl-health*")))))))
+
 (provide 'test-integration-verbs)
 
 ;;; test-integration-verbs.el ends here
