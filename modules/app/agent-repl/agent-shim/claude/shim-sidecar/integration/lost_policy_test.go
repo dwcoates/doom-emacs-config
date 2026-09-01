@@ -94,11 +94,14 @@ func lostConclusions(t *testing.T, logPath, path string) []logRecord {
 		if !samePathAny(r.Context["path"], path) {
 			continue
 		}
-		// The policy's own statement, and the reader's attempt to spell it as a
-		// terminal. Nothing else in either operation is a conclusion: a settled
-		// run says it can no longer BE concluded, which is the opposite.
-		concluded := r.Operation == "lost-terminal" ||
-			(r.Operation == "lost-policy" && strings.Contains(r.Message, "concluded LOST reason="))
+		// The policy's own statement, and every outcome of the reader's attempt
+		// to spell it as a terminal. Nothing else in `lost-policy` is a
+		// conclusion: a settled run says it can no longer BE concluded, which is
+		// the opposite — and the policy states its conclusions at WARN while its
+		// ordinary bookkeeping is verbose, so the LEVEL separates them without
+		// reading a sentence.
+		concluded := (r.Operation == "lost-policy" && r.Level == "warn") ||
+			lostTerminalOperations[r.Operation]
 		if concluded {
 			out = append(out, r)
 		}
