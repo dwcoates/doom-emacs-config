@@ -241,6 +241,13 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   elisp-agents/suite2 off f193fb0e8; writes tests, never runs the suite).
   R-AUDIT2-PROD (the three defects) queued behind R-STABILITY + R-DEADCODE.
   Running: stability, deadcode, suite2.
+- DEAD-CODE RULE AMENDED (user ruling, TEAMLEAD.md on integration @
+  25bf69341): the pass is orchestrated, never performed by the teamlead,
+  and dispatches to `sonnet-medium`. R-DEADCODE was already running as
+  `opus-low` when the amendment arrived; it finishes as is (no churn) — a
+  DEVIATION to carry into the final report. Any follow-up dead-code pass
+  (e.g. the candidates deferred from the R-STABILITY files) goes to
+  `sonnet-medium`.
 
 ## 1. Module map (final tree of lisp/)
 
