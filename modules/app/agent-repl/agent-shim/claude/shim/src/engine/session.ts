@@ -653,12 +653,27 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       });
     }
     if (usage.rate_limits === null || usage.rate_limits === undefined) {
+      // The service said it had limits and then produced none: still the
+      // service failing to answer, not a shape with a window missing from it.
+      return unavailable({
+        case: "serviceUnavailable",
+        value: create(conversationv1.SessionUsageServiceUnavailableSchema, {}),
+      });
+    }
+    // THE TWO REASONS ARE DIFFERENT FACTS ABOUT THE FIVE-HOUR WINDOW, and the
+    // consumer acts on them differently. `window_unavailable` means the service
+    // answered WITHOUT a five-hour window at all; `utilization_unavailable`
+    // means the window is there and its utilization is not. Collapsing the
+    // first onto the second left `window_unavailable` unproducible while
+    // looking as though it were covered.
+    const rawFiveHour = usage.rate_limits.five_hour;
+    if (rawFiveHour === null || rawFiveHour === undefined) {
       return unavailable({
         case: "windowUnavailable",
         value: create(conversationv1.SessionUsageWindowUnavailableSchema, {}),
       });
     }
-    const fiveHour = usageWindow(usage.rate_limits.five_hour);
+    const fiveHour = usageWindow(rawFiveHour);
     if (fiveHour === undefined) {
       return unavailable({
         case: "utilizationUnavailable",
@@ -702,6 +717,37 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         }),
       },
     });
+  }
+
+  /**
+   * Re-read the pulled session facts, after something that could have changed
+   * them.
+   *
+   * Failures here are the probes' own business: each already turns its
+   * exception into a stated arm or a `SessionFault`, so nothing is swallowed
+   * and a probe that cannot answer does not take the turn end down with it.
+   */
+  async function reprobeSessionFacts(): Promise<void> {
+    if (standingDown) return;
+    await pushAccountUsage();
+    await pushMcpServerStatus();
+  }
+
+  /** Probe every declared mcp server's health and state each one. */
+  async function pushMcpServerStatus(): Promise<void> {
+    const active = query;
+    if (active === undefined) return;
+    try {
+      for (const status of await active.mcpServerStatus()) pushes.push(mcpUpdate(status));
+    } catch (err) {
+      pushes.fault(
+        sessionFault(
+          { kind: "vendorQueryFailed" },
+          "shim-engine-session",
+          `mcpServerStatus failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    }
   }
 
   async function pushAccountUsage(): Promise<void> {
@@ -972,6 +1018,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         atMs: deps.nowMs(),
       });
     }
+    // A TURN CAN CHANGE WHAT THE PROBES ANSWER. Account usage and mcp health
+    // are PULLED from the vendor rather than folded out of the stream, so a
+    // session that probed once at StartSession would report the account's
+    // windows and its servers' health as they stood before any work happened,
+    // and would never notice a server going down or a limit being approached.
+    // Awaited, not fired and forgotten: an unawaited probe would race the next
+    // turn's own close.
+    await reprobeSessionFacts();
     LOGGER.log({ turn_id: ended.id.value, keepalive: ended.keepalive }, "closed a turn");
   }
 
@@ -1248,17 +1302,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           ),
         );
       }
-      try {
-        for (const status of await active.mcpServerStatus()) pushes.push(mcpUpdate(status));
-      } catch (err) {
-        pushes.fault(
-          sessionFault(
-            { kind: "vendorQueryFailed" },
-            "shim-engine-session",
-            `mcpServerStatus failed: ${err instanceof Error ? err.message : String(err)}`,
-          ),
-        );
-      }
+      await pushMcpServerStatus();
     }
     const liveWork = await reconcile();
     // THE CADENCE BEGINS BEFORE SUCCESS RETURNS: a session that is never
