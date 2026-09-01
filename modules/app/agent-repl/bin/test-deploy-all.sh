@@ -144,28 +144,17 @@ if [ "${EC_STUB_PROBE_ERROR:-0}" = "1" ]; then
             ;;
     esac
 fi
-# The webview refresh is `fboundp'-guarded inside the eval, so the stub answers
-# for BOTH shapes: a current Emacs returns the sweep's count, an older one
-# (EC_STUB_REFRESH_ABSENT=1) returns the absent branch's string.
 case "$*" in
     *artifact-root-same*|*artifact-root-changed*)
         echo \"\"${EC_STUB_ARTIFACT_ROOT_RESULT:-artifact-root-same}\"\"
         exit 0
         ;;
-    *frontend-daemon-restart-await*)
+    *runtime-restart-await*)
         if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
             echo "*ERROR*: agent-repl: refusing daemon stop — turn in flight"
             exit 1
         fi
         echo \"\"${EC_STUB_RESTART_RESULT:-runtime-restart-complete}\"\"
-        exit 0
-        ;;
-    *refresh-webviews*)
-        if [ "${EC_STUB_REFRESH_ABSENT:-0}" = "1" ]; then
-            echo '"absent"'
-        else
-            echo "\"refreshed ${EC_STUB_REFRESH_COUNT:-3}\""
-        fi
         exit 0
         ;;
     *assert-heartbeat-armed*)
@@ -244,10 +233,10 @@ if [ "$RC" -eq 0 ] \
    && log_before "build-frontend" "go build -o .*claude-repld" \
    && log_before "go build -o .*claude-repld" "pwd=shim-store" \
    && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar" \
-   && log_before "load .*daemon.el" "daemon-restart" \
-   && log_before "load .*frontend-client.el" "daemon-restart" \
-   && log_before "load .*services.el" "daemon-restart" \
-   && log_before "kickstart -k gui/.*shim-claude-sidecar" "daemon-restart" \
+   && log_before "load .*daemon.el" "runtime-restart" \
+   && log_before "load .*frontend-client.el" "runtime-restart" \
+   && log_before "load .*services.el" "runtime-restart" \
+   && log_before "kickstart -k gui/.*shim-claude-sidecar" "runtime-restart" \
    && log_has "readiness-report --require-ready webapp"; then
     pass "fresh tree runs the full chain in dependency order"
 else
@@ -268,18 +257,18 @@ else
 fi
 
 # --- 1b. a linked-worktree deploy binds its artifact root before restart ----
-# The running Emacs may have loaded daemon.el from another checkout. The deploy
-# must move the runtime root before restarting; the surviving shims are then
-# rolled onto the new bundle by the replacement daemon, not stopped here.
+# The running Emacs may have loaded the control plane from another checkout.
+# The deploy must move the runtime root before restarting; what happens to
+# surviving shims is then the incoming daemon's decision, not this script's.
 d="$TMP/t1b"; mkdir -p "$d"
 RUN_ENV="EC_STUB_ARTIFACT_ROOT_RESULT=artifact-root-changed" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_before "load .*daemon.el" "daemon-restart-await)" \
-   && ! log_has "daemon-restart-await t" \
-   && grep -q "artifact root changed — surviving shims will be rolled at their turn boundaries" "$d/stdout"; then
-    pass "a moved runtime artifact root is bound before restart and still preserves surviving shims"
+   && log_before "load .*daemon.el" "runtime-restart-await)" \
+   && ! log_has "runtime-restart-await t" \
+   && grep -q "artifact root changed" "$d/stdout"; then
+    pass "a moved runtime artifact root is bound before the runtime restart"
 else
-    fail "a moved runtime artifact root is bound before restart and still preserves surviving shims" \
+    fail "a moved runtime artifact root is bound before the runtime restart" \
          "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
 fi
 
@@ -298,7 +287,7 @@ d="$TMP/t2"
 seed_deployed "$d" shim-store bin-v1
 seed_deployed "$d" shim-claude-sidecar bin-v1
 RUN_ENV="" run_deploy "$d"
-if [ "$RC" -eq 0 ] && ! log_has "launchctl" && log_has "daemon-restart"; then
+if [ "$RC" -eq 0 ] && ! log_has "launchctl" && log_has "runtime-restart"; then
     pass "services already on the installed binary skip both kickstarts"
 else
     fail "services already on the installed binary skip both kickstarts" "rc=$RC log: $(cat "$STUB_LOG")"
@@ -421,11 +410,10 @@ fi
 d="$TMP/t6b"; mkdir -p "$d"; RUN_ENV="EC_STUB_RESTART_RESULT=runtime-restart-pending" run_deploy "$d"
 if [ "$RC" -eq 3 ] \
    && grep -q "no terminal completion" "$d/stderr" \
-   && ! log_has "refresh-webviews" \
    && ! log_has "readiness-report"; then
-    pass "a non-terminal restart result aborts before refresh and revision readiness"
+    pass "a non-terminal restart result aborts before revision readiness"
 else
-    fail "a non-terminal restart result aborts before refresh and revision readiness" \
+    fail "a non-terminal restart result aborts before revision readiness" \
          "rc=$RC stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
@@ -489,7 +477,7 @@ fi
 d="$TMP/t9"; mkdir -p "$d"; RUN_ENV="EC_STUB_UNAVAILABLE=1" run_deploy "$d" --elisp "abc..def"
 if [ "$RC" -eq 0 ] \
    && log_has 'emacsclient --eval t' \
-   && ! log_has 'daemon-restart' \
+   && ! log_has 'runtime-restart' \
    && ! log_has 'emacsclient --eval (load' \
    && grep -q "Emacs is not running; restart deferred until Emacs starts" "$d/stdout" \
    && ! grep -q "can't find socket" "$d/stdout" \
@@ -503,7 +491,7 @@ fi
 # --- 10. a non-connectivity probe error remains fatal -----------------------
 d="$TMP/t10"; mkdir -p "$d"; RUN_ENV="EC_STUB_PROBE_ERROR=1" run_deploy "$d"
 if [ "$RC" -eq 3 ] \
-   && ! log_has 'daemon-restart' \
+   && ! log_has 'runtime-restart' \
    && grep -q "Emacs server probe failed: emacsclient: permission denied" "$d/stderr"; then
     pass "a non-connectivity Emacs probe error fails the deploy loudly"
 else
@@ -543,34 +531,33 @@ else
          "rc=$RC stamp=$(cat "$d/h/.cache/agent-repl/bin/.shim-store.built-sha" 2>/dev/null)"
 fi
 
-# --- 13. a moved shim bundle STILL preserves surviving shims ----------------
-# A survivor keeps running the previous bundle's code only until the NEW daemon
-# rolls it at that session's own turn boundary. Stopping them all at shutdown
-# killed every turn in flight to buy a refresh that arrives moments later
-# anyway, so the deploy never asks for it.
+# --- 13. a moved shim bundle is reported, and stops nothing here ------------
+# A survivor keeps running the previous bundle's code until the INCOMING
+# daemon's rollout-controller staleness check bounces it. The deploy reports
+# the move and passes no argument that would stop a shim.
 d="$TMP/t13"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
-   && log_has "daemon-restart-await)" \
-   && ! log_has "daemon-restart-await t" \
-   && grep -q "rolls each stale shim at its turn boundary" "$d/stdout"; then
-    pass "a changed shim bundle bounces the daemon WITHOUT stopping the surviving shims"
+   && log_has "runtime-restart-await)" \
+   && ! log_has "runtime-restart-await t" \
+   && grep -q "the incoming daemon bounces each stale shim itself" "$d/stdout"; then
+    pass "a changed shim bundle is reported and the deploy stops no shim itself"
 else
-    fail "a changed shim bundle bounces the daemon WITHOUT stopping the surviving shims" \
-         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+    fail "a changed shim bundle is reported and the deploy stops no shim itself" \
+         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'runtime-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
-# --- 14. an unchanged shim bundle PRESERVES surviving shims -----------------
+# --- 14. an unchanged shim bundle stops nothing either ----------------------
 # The second deploy rebuilds the identical bundle, which is the ordinary case:
-# preserving is what makes the bounce a reattach rather than a rebuild.
+# the restart form is argument-free whatever the bundle did.
 d="$TMP/t14"; mkdir -p "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
-if [ "$RC" -eq 0 ] && log_has "daemon-restart-await)" && ! log_has "daemon-restart-await t"; then
-    pass "an unchanged shim bundle leaves the daemon bounce preserving shims"
+if [ "$RC" -eq 0 ] && log_has "runtime-restart-await)" && ! log_has "runtime-restart-await t"; then
+    pass "an unchanged shim bundle still uses the argument-free restart form"
 else
-    fail "an unchanged shim bundle leaves the daemon bounce preserving shims" \
-         "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+    fail "an unchanged shim bundle still uses the argument-free restart form" \
+         "rc=$RC restart=$(grep -o 'runtime-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
 # --- 15. a bundle changed WITHIN one revision is still DETECTED -------------
@@ -582,60 +569,25 @@ RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1 GIT_STUB_DIRTY=M__x" run_deploy "$d"
 RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2 GIT_STUB_DIRTY=M__x" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && grep -q "shim: bundle moved since the last deploy" "$d/stdout" \
-   && ! log_has "daemon-restart-await t"; then
+   && ! log_has "runtime-restart-await t"; then
     pass "a bundle that moved within one revision is detected without stopping the shims"
 else
     fail "a bundle that moved within one revision is detected without stopping the shims" \
-         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+         "rc=$RC stdout: $(cat "$d/stdout") restart=$(grep -o 'runtime-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
-# --- 16. the webview refresh runs after a successful daemon restart ---------
-# A page mounted before the bounce talks to a listener that no longer exists,
-# so the refresh must follow the restart, never precede it.
+# --- 16. the deploy never re-navigates a webview itself ---------------------
+# The webview reload is the daemon's own `reload_webapp` push. A deploy-side
+# sweep would be a second, competing path, so the chain must not call one.
 d="$TMP/t16"; mkdir -p "$d"
-RUN_ENV="EC_STUB_REFRESH_COUNT=2" run_deploy "$d"
-if [ "$RC" -eq 0 ] \
-   && log_before "daemon-restart" "refresh-webviews" \
-   && grep -q "webviews: refreshed 2" "$d/stdout"; then
-    pass "the webview refresh follows the daemon restart and reports its count"
-else
-    fail "the webview refresh follows the daemon restart and reports its count" \
-         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
-fi
-
-# --- 17. an Emacs without the command skips, and the deploy still succeeds --
-# The running Emacs may predate `agent-repl-refresh-webviews' (step 6's elisp
-# hot-load is what defines it, and it runs after), so an absent symbol is a
-# reported skip rather than a deploy failure.
-d="$TMP/t17"; mkdir -p "$d"
-RUN_ENV="EC_STUB_REFRESH_ABSENT=1" run_deploy "$d"
-if [ "$RC" -eq 0 ] && grep -q "webviews: skipped — function absent" "$d/stdout"; then
-    pass "an Emacs lacking the refresh command skips it without failing the deploy"
-else
-    fail "an Emacs lacking the refresh command skips it without failing the deploy" \
-         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr")"
-fi
-
-# --- 18. no Emacs server means nothing to refresh --------------------------
-d="$TMP/t18"; mkdir -p "$d"; RUN_ENV="EC_STUB_UNAVAILABLE=1" run_deploy "$d"
+run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && ! log_has "refresh-webviews" \
-   && grep -q "webviews: no Emacs running, so no live page to refresh" "$d/stdout"; then
-    pass "an unavailable Emacs server reports there is no live page to refresh"
+   && ! grep -q "webviews" "$d/stdout"; then
+    pass "the deploy leaves the webview reload to the daemon"
 else
-    fail "an unavailable Emacs server reports there is no live page to refresh" \
+    fail "the deploy leaves the webview reload to the daemon" \
          "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
-fi
-
-# --- 19. a refused daemon restart never reaches the refresh ----------------
-# The refresh is only meaningful once the new daemon is up; a refused bounce
-# leaves the OLD daemon serving, and reloading pages against it is noise.
-d="$TMP/t19"; mkdir -p "$d"; RUN_ENV="EC_STUB_REFUSE=1" run_deploy "$d"
-if [ "$RC" -eq 3 ] && ! log_has "refresh-webviews"; then
-    pass "a refused daemon restart aborts before the webview refresh"
-else
-    fail "a refused daemon restart aborts before the webview refresh" \
-         "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
 # --- 20. core.el in the change set expands to the full module set ----------
