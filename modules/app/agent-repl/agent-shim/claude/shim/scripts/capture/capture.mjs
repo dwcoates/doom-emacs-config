@@ -367,6 +367,36 @@ export function messageMatches(matcher, msg) {
 }
 
 /**
+ * Pull messages off ONE query's iterator until that turn's result.
+ *
+ * WHY AN EXPLICIT ITERATOR AND NOT `for await (const msg of query)`: breaking
+ * out of a for-await loop calls the iterator's `return()`, which ENDS the
+ * async generator the SDK query is. On a multi-turn scenario that silently
+ * destroyed every turn after the first — the loop broke on turn 1's result,
+ * the query was finished, and turn 2's `for await` completed immediately
+ * without yielding anything. The recorded evidence is exactly that: in
+ * `compaction-directed` and `identity-rotation-clear` the stream holds one
+ * result, then `turn_submitted` lines for later turns with no SDK message
+ * after them, no second `system:init`, no `compact_boundary`, no
+ * `conversation_reset` — and every later control failed with
+ * "ProcessTransport is not ready for writing", because the transport had been
+ * closed by that first `break`.
+ *
+ * Holding the iterator across turns is the fix: it is pulled with `next()` and
+ * never returned, so the query stays open until the scenario closes it.
+ *
+ * Returns the result message, or `null` if the query ended without one.
+ */
+export async function drainToResult(iterator, onMessage) {
+  for (;;) {
+    const { value, done } = await iterator.next();
+    if (done === true) return null;
+    await onMessage(value);
+    if (value?.type === "result") return value;
+  }
+}
+
+/**
  * Whether a CONTROL record satisfies a control's `after` matcher.
  *
  * A parked permission gate is recorded as a control entry (`can_use_tool_parked`),
@@ -788,8 +818,13 @@ async function runScenario(sdk, scenario, opts, auth, world) {
 
   const turns = promptTurnsOf(scenario);
 
+  // The query's iterator, held across turns. NEVER re-derived per turn and
+  // never `return()`ed by a for-await break: see drainToResult.
+  let iterator = null;
+
   const openQuery = (extraOptions) => {
     query = sdk.query({ prompt: input, options: { ...options, ...extraOptions } });
+    iterator = query[Symbol.asyncIterator]();
     record("control", {
       kind: "query_started",
       options: {
@@ -838,7 +873,11 @@ async function runScenario(sdk, scenario, opts, auth, world) {
         session_id: "",
       });
 
-      for await (const msg of query) {
+      // WAIT FOR THIS TURN'S RESULT before the next turn is submitted. Without
+      // it the loop races ahead and every later turn is submitted into a query
+      // that is no longer reading — which is what the recorded t_ms ordering of
+      // the multi-turn captures shows.
+      const result = await drainToResult(iterator, async (msg) => {
         record("sdk", msg);
         if (msg?.type === "system" && msg?.subtype === "init" && typeof msg.session_id === "string") {
           vendorSessionId = msg.session_id;
@@ -846,7 +885,14 @@ async function runScenario(sdk, scenario, opts, auth, world) {
         report.controls.push(
           ...(await fireTriggers(query, scenario.controls, "on_message", msg, firedControls, record)),
         );
-        if (msg.type === "result") break;
+      });
+      if (result === null) {
+        // The query ended without a terminal. Submitting the remaining turns
+        // into a dead query would record turn_submitted lines that never
+        // happened, so the scenario stops here and the gate quarantines it for
+        // the missing result.
+        record("control", { kind: "query_ended_without_result", turn: turnIndex });
+        break;
       }
     }
 
