@@ -23,8 +23,17 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   codec by default; one test uses JSON). Capture the daemon's stderr and
   expose the run log + per-workspace daemon.log for assertions. `Stop()`
   sends SIGTERM and waits; `Kill()` for crash simulation.
-- `NewRepo(t) *Repo`: `git init` a main worktree with an initial commit on
-  `main`, helpers `Commit(file, content)`, `Branch(name)`, `Worktrees()`.
+- `NewRepo(t) *Repo`: a FAKE repository — a directory with a `.git` marker and
+  a row in the test's fixture file, carrying one commit on `main`. GIT IS NEVER
+  CALLED: a scripted `git` (`integration/fakegit`) is placed first on the
+  daemon's PATH and answers every command the git leaf issues out of that
+  fixture file, so commits, branches, worktree lists, conflicts, landed ranges,
+  changed paths and cleanliness are all fixture data. No `git init` and no real
+  git binary anywhere. Helpers: `Commit(file, content)`, `Branch(name)`,
+  `Checkout(name)`, `Head()`, `Worktrees()`, `Branches()`, `HasBranch`,
+  `HasWorktree`, `LogSubjects(ref)`, `AddWorktree(name)`, `CommitIn`, and the
+  scripting verbs `ScriptConflict(worktreeDir, branch, paths...)`,
+  `ScriptFailure(dir, exit, stderr, match...)`, `SetDirty`, `SetPaths`.
 - `Register(t, d, repo) WorkspaceRef` via RegisterWorkspace.
 - Fake shim (`daemon/integration/fakeshim`, a Go `main`): accepts the real
   argv (`<main.js> --listen <uds> --store-socket <p> --log-fd 3 [--fake]`),
