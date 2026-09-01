@@ -248,6 +248,31 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   DEVIATION to carry into the final report. Any follow-up dead-code pass
   (e.g. the candidates deferred from the R-STABILITY files) goes to
   `sonnet-medium`.
+- R-DEADCODE MERGED (c74bf7534; ran as `opus-low` — deviation from the
+  amended rule, noted). Deleted 13 uncalled defuns (wire-common int64/
+  uint32/bool encoders, wire-verbs encode-empty, roster row-dir/
+  unsubscribe, three frontend helpers, panels non-agent-panel-window-p,
+  history make-instantiation-from-plist, session effective-model/
+  refresh-magit-status) + 15 orphaned tests; kept-with-reason list pinned
+  (magit github commands, commit-emoji hook installer, prompt-summary
+  attach-all, runtime-eval entry points, interactive commands). Whole-
+  module byte-compile clean for unused lexicals. Ruled-dead files: none on
+  disk. TEAMLEAD RULINGS: (a) `agent-repl-install-commit-emoji-hook`
+  stays — the 2026-08-29 removal targets the AUTO-installer at load;
+  an interactive, autoloaded install command is the blessed
+  "commit-emoji + hook" feature's provisioning path (no install.sh exists
+  in the module); (b) frontend.el's `:send-fn`/`:interrupt-fn` registry
+  points at functions of the deleted frontend-client.el — the dispatchers
+  and registry entries are dead (the composer is host-native; Emacs
+  calls no interrupt rpc) → delete in R-DEADCODE-2; (c) magit GitHub URL
+  builder bug (ssh prefix regexp eats the colon, no slash) → fix with
+  tests in R-DEADCODE-2. R-DEADCODE-2 (`sonnet-medium`, after
+  R-STABILITY merges): the deferred core.el/workspace.el/host.el
+  candidates (definitely-dead: `--reset-warn-once-state`,
+  `--ws-advise-kill-before`, `--ws-materialize-daemon-workspace`,
+  `--ws-registered-dir-owner`, `--ws-repo-folded-p`; test-only helpers
+  reviewed one by one), (b), (c), and the stale explain-config comment
+  mentions in frontend.el.
 
 ## 1. Module map (final tree of lisp/)
 
