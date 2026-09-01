@@ -6,6 +6,8 @@
 // See daemon/AGENTS.md "Logging" and docs/overhaul/daemon.md.
 package dlog
 
+import "os"
+
 // Context is one record's structured context: the resolved inputs, the branch
 // taken, and the cause. Values are JSON-encodable scalars, slices or maps.
 type Context map[string]any
@@ -68,8 +70,12 @@ type Surfaces interface {
 // Borrowed is a non-closeable handle on a sink the surfaces own. Close is a
 // no-op so a borrower's defer cannot take the sink down under its owner.
 type Borrowed interface {
-	// File is the underlying descriptor, suitable for a child's fd 3.
-	File() uintptr
+	// File is the sink's own open file, suitable for a child's fd 3 via
+	// exec.Cmd.ExtraFiles. It is the surfaces' file, NOT a copy: a borrower
+	// must never wrap the descriptor in an os.File of its own, because that
+	// second owner's finalizer would close the sink's fd out from under
+	// everybody (and the freed fd number is then handed to unrelated opens).
+	File() *os.File
 	// Close is a no-op; the surfaces own the sink's lifetime.
 	Close() error
 }
