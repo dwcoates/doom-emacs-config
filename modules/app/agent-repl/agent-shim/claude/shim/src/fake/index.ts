@@ -687,6 +687,9 @@ export function createFakeQuery(
     return next;
   };
 
+  /** Scenarios parked on `awaitBackgrounded`, keyed by the call they own. */
+  const backgroundWaiters = new Map<string, (ack: () => void) => void>();
+
   const startTask = (task: Omit<LiveTask, "backgrounded">): LiveTask => {
     const live: LiveTask = { ...task, backgrounded: false };
     liveTasks.set(task.taskId, live);
@@ -752,6 +755,10 @@ export function createFakeQuery(
         : new Promise<void>((resolve) => {
             releaseInterrupt = resolve;
           }),
+    awaitBackgrounded: (toolUseId) =>
+      new Promise<() => void>((resolve) => {
+        backgroundWaiters.set(toolUseId, resolve);
+      }),
     tick: () => new Promise<void>((resolve) => setImmediate(resolve)),
     rotate,
     mintToolUseId,
@@ -1023,9 +1030,24 @@ export function createFakeQuery(
         );
         return liveTasks.size > 0;
       }
+      // STATE FIRST, THEN THE ANNOUNCEMENTS. Every emit below must describe a
+      // world that is already true: a consumer that read the level while the
+      // flag was still unset would see the task listed as foreground in the
+      // very message that announces it left.
       live.backgrounded = true;
       systemMessage("task_updated", { task_id: live.taskId, patch: { is_backgrounded: true } });
       announceLiveTasks();
+      // THEN THE VENDOR'S OWN DETACHMENT RECORD, BEFORE THIS VERB ANSWERS. A
+      // real Ctrl-B has already put the backgrounded foreground result on the
+      // stream by the time the binary reports the detach; answering first would
+      // let a caller observe DetachForeground succeeding against a conversation
+      // that still shows the work in the foreground. The parked scenario
+      // acknowledges once it has emitted, so this is a happens-before.
+      const waiter = backgroundWaiters.get(toolUseId);
+      if (waiter !== undefined) {
+        backgroundWaiters.delete(toolUseId);
+        await new Promise<void>((resolve) => waiter(resolve));
+      }
       LOGGER.log(
         { claude_session_id: sessionUuid, task_id: live.taskId, tool_use_id: toolUseId },
         "fake vendor moved a foreground task to the background",

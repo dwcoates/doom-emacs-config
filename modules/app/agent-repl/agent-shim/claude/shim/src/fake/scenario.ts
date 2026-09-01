@@ -224,6 +224,22 @@ export interface ScenarioContext {
   interrupted(): boolean;
   /** Park until the turn is interrupted. */
   awaitInterrupt(): Promise<void>;
+  /**
+   * Park until `backgroundTasks` moves this call to the background, then let
+   * the caller emit the vendor's detachment record before that verb answers.
+   *
+   * ORDER IS THE WHOLE POINT. A real Ctrl-B is a vendor-side event: by the time
+   * the binary reports the detach, the record that PROVES it — the foreground
+   * result carrying `backgroundedByUser` — is already on the stream. A mock
+   * that answered first and emitted afterwards would let a consumer observe
+   * DetachForeground succeeding against a conversation that still shows the
+   * work in the foreground, which is a race no production ordering has.
+   *
+   * The returned function is the acknowledgement: `backgroundTasks` stays
+   * parked until the scenario calls it, so 'the detachment is published' is a
+   * happens-before rather than a hope about scheduling.
+   */
+  awaitBackgrounded(toolUseId: string): Promise<() => void>;
   /** Park for one scheduler turn, so incremental writes are observable. */
   tick(): Promise<void>;
   /** Retire the vendor session identity and mint a new one; answers the new id. */
