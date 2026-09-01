@@ -11,16 +11,27 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
+
+	"claude-repld/internal/daemonaddr"
 )
 
-// exitNotWired is the exit status this skeleton returns. The graph is not
-// wired yet; a wave-2 agent replaces the body of run, not the flag set.
-const exitNotWired = 2
+// exitFailure is the status a daemon that could not start returns.
+const exitFailure = 2
+
+// exitClaimLost is the status an UNFLAGGED second daemon returns: it lost the
+// boot-exclusivity claim to the incumbent and exited without disturbing it. It
+// is distinct from a failure because nothing went wrong — a daemon was already
+// serving, which is what the claim exists to establish.
+const exitClaimLost = 3
 
 // options is the parsed command line. Every field is an override of an
 // environment contract or of a path the daemon would otherwise derive.
@@ -75,11 +86,18 @@ func main() {
 	opts, err := parseFlags(os.Args[0], os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(exitNotWired)
+		os.Exit(exitFailure)
 	}
-	if err := run(opts); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	switch err := run(ctx, opts, productionHooks()); {
+	case err == nil:
+	case errors.Is(err, daemonaddr.ErrClaimed):
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(exitNotWired)
+		os.Exit(exitClaimLost)
+	default:
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(exitFailure)
 	}
 }
 
@@ -92,8 +110,8 @@ func parseFlags(program string, args []string) (options, error) {
 	fs.BoolVar(&opts.fake, "fake", false, "run without a real vendor: shims spawn with --fake and the classifier is scripted")
 	fs.StringVar(&opts.joining, "joining", "", "address of the incumbent daemon to take over from")
 	fs.StringVar(&opts.pprof, "pprof", "", "opt-in profiling surface: a unix socket path or a loopback host:port (empty is off)")
-	fs.StringVar(&opts.webapp, "webapp", "", "webapp dist directory to serve")
-	fs.StringVar(&opts.shim, "shim", "", "path to the shim's dist/main.js")
+	fs.StringVar(&opts.webapp, "webapp-dist", "", "webapp dist directory to serve")
+	fs.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
 	fs.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
 	fs.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
 	fs.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
@@ -122,9 +140,4 @@ func resolveStoreSocket(flagValue, envValue string) string {
 		return defaultStoreSocket
 	}
 	return filepath.Join(home, defaultStoreSocket)
-}
-
-// run is the boot sequence. The graph is not wired yet.
-func run(opts options) error {
-	return fmt.Errorf("not wired yet")
 }
