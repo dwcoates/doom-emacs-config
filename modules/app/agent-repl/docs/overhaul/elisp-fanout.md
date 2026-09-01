@@ -289,6 +289,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   R-AUDIT2-PROD (`opus-low`, elisp-agents/audit2-prod: audit-2 #1, #32,
   #26 + the hook-containment ruling) and R-DEADCODE-2 (`sonnet-medium`,
   elisp-agents/deadcode2). Running: suite2, audit2-prod, deadcode2.
+- SLOW-DOWN DIRECTIVE (user, 2026-09-01 evening): usage limits near. No
+  new agent of any kind dispatches until the project lead's explicit
+  resume. Already running and allowed to finish + merge: R-SUITE-2
+  (elisp-agents/suite2), R-AUDIT2-PROD (elisp-agents/audit2-prod),
+  R-DEADCODE-2 (elisp-agents/deadcode2). RESUME QUEUE after those merge:
+  (1) run the seven integration suites + all-suite at the merged tip and
+  remediate R-SUITE-2's expected-red tests that R-AUDIT2-PROD did not
+  close; (2) adversarial audit 3 (fable, fresh context) → loop per
+  TEAMLEAD.md until no critiques; (3) final report with the dead-code
+  deletion / kept-with-reason lists, rulings, deviations (R-DEADCODE ran
+  opus-low), UX gaps filled, toss-ups for the user.
 
 ## 1. Module map (final tree of lisp/)
 
