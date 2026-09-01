@@ -36,7 +36,7 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			Id:   r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindPrompt, ID: turn.GetValue()}),
 			Turn: turn,
 			Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
-				Author: &frontendv1.FeedUserPromptAuthor{Label: authorLabel(prompt.GetOrigin())},
+				Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(prompt.GetOrigin())},
 				Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
 					Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
 				}},
@@ -103,11 +103,15 @@ func feedLabel(s *wsState, key string) string {
 	return "the main agent"
 }
 
-// authorLabel names WHO a prompt row is drawn as being from. The origin is the
+// AuthorLabel names WHO a prompt row is drawn as being from. The origin is the
 // closed attribution vocabulary the record carries precisely so a replayed
 // merge-born row routes and a restart re-drive labels, rather than both being
 // drawn as fresh user turns.
-func authorLabel(origin conversationv1.PromptOrigin) string {
+//
+// It is EXPORTED because the prompt queue's mirror of an accepted prompt draws
+// the same row under the same FeedId; two copies of this table would let the
+// mirror and the resolver's own re-draw disagree about who spoke.
+func AuthorLabel(origin conversationv1.PromptOrigin) string {
 	switch origin {
 	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
