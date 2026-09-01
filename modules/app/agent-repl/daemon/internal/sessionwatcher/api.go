@@ -194,6 +194,14 @@ type SidebarSink interface {
 	OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate)
 	// OnLink drives the severed and dead arms.
 	OnLink(ws ids.WorkspaceID, link LinkState)
+	// OnLiveWorkChanged republishes the AUTHORITATIVE live-work set. The
+	// roster's `idle_async` arm is what detached work makes a row say, and an
+	// announcement alone can only ever raise it: nothing on the agent's stream
+	// states that a detached item has ENDED. The watcher owns that fact — it
+	// reaps each item's watch at its terminal — so the set is routed to the
+	// roster too, and the arm retires the moment the last item ends rather
+	// than at the next turn.
+	OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet)
 }
 
 // HoldsSink is deliberately empty of watch-driven methods: the hold tray is
