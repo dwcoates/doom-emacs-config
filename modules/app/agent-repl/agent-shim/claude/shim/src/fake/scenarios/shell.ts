@@ -23,6 +23,26 @@
  */
 import { bashResult, conclude, scenario } from "./support.js";
 
+/**
+ * The sentence the vendor puts in a backgrounded Bash's tool_result content.
+ *
+ * VERBATIM FROM THE CAPTURE (testdata/corpus/tool-results/bash-background.jsonl):
+ * `toolUseResult` on a backgrounded shell carries `backgroundTaskId` and
+ * nothing else, and this prose is the vendor's ONLY statement of where the
+ * output accumulates — the shim reads the path back out of it
+ * (src/convert/detached.ts, outputPathFromProse) to announce the detachment
+ * with an output a surface can open. An empty content string, which is what the
+ * mock used to send, left the announcement with no output and its readability
+ * unset.
+ */
+function backgroundingProse(taskId: string, outputPath: string): string {
+  return (
+    `Command running in background with ID: ${taskId}. ` +
+    `Output is being written to: ${outputPath}. ` +
+    "You will be notified when it completes. To check interim output, use Read on that file path."
+  );
+}
+
 export const BASH = scenario({
   name: "bash",
   prompt: "!bash [command]",
@@ -154,7 +174,11 @@ export const BASH_DETACH = scenario({
     const spool = ctx.files.spool(taskId);
     // The result lands while the run is STILL GOING, which is the whole point:
     // a detached run's output outlives the turn that started it.
-    ctx.toolResult(call, "", bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }));
+    ctx.toolResult(
+      call,
+      backgroundingProse(taskId, ctx.files.spoolPathFor(taskId)),
+      bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }),
+    );
     conclude(ctx, "Backgrounded the command.");
     // Separate appends, each a growth event a tailer can observe. A single
     // whole-file write would leave the delta path unexercised.
@@ -190,7 +214,11 @@ export const BASH_DETACH_FAIL = scenario({
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "echo error and exit 3" });
     ctx.announceLiveTasks();
     const spool = ctx.files.spool(taskId);
-    ctx.toolResult(call, "", bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }));
+    ctx.toolResult(
+      call,
+      backgroundingProse(taskId, ctx.files.spoolPathFor(taskId)),
+      bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }),
+    );
     conclude(ctx, "Backgrounded a command that will fail.");
     await ctx.tick();
     spool.appendLine("error");
@@ -220,7 +248,11 @@ export const BASH_DETACH_LIVE = scenario({
     const taskId = ctx.mintShellTaskId();
     ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: "sleep 100000" });
     ctx.announceLiveTasks();
-    ctx.toolResult(call, "", bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }));
+    ctx.toolResult(
+      call,
+      backgroundingProse(taskId, ctx.files.spoolPathFor(taskId)),
+      bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }),
+    );
     conclude(ctx, "The command will run until something stops it.");
     await ctx.tick();
     ctx.files.spool(taskId).appendLine("partial output with no terminator");

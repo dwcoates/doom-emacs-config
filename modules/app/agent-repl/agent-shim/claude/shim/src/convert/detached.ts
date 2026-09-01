@@ -163,6 +163,7 @@ export function bashDetachmentEntry(
   vendorUuid: string,
   toolUseId: string,
   structured: unknown,
+  resultContent?: conversationv1.ToolResultContent,
 ): PersistEntry | undefined {
   const output = structured as Record<string, unknown> | undefined;
   // THE VENDOR'S TASK ID IS ONLY EVIDENCE THAT IT BACKGROUNDED, not the handle:
@@ -185,8 +186,57 @@ export function bashDetachmentEntry(
     detachedFromToolUseId: toolUseId,
     cause,
     timeoutMs: typeof timedOut === "number" ? timedOut : undefined,
-    outputPath: typeof output?.persistedOutputPath === "string" ? output.persistedOutputPath : undefined,
+    // WHERE THE OUTPUT PATH ACTUALLY COMES FROM. `toolUseResult` on a
+    // backgrounded Bash carries `backgroundTaskId` and NOTHING ELSE — the
+    // corpus capture (testdata/corpus/tool-results/bash-background.jsonl) has
+    // no `persistedOutputPath` — and the vendor states the path only in the
+    // result's PROSE. Reading `persistedOutputPath` alone therefore left every
+    // detached shell announced with no output at all, so `readability` was
+    // unset and a surface had no file to offer once the stream was gone.
+    //
+    // `persistedOutputPath` is still preferred where the vendor sets it (a
+    // SPILLED foreground result does): a declared field outranks a sentence.
+    outputPath:
+      typeof output?.persistedOutputPath === "string"
+        ? output.persistedOutputPath
+        : outputPathFromProse(resultContent),
+    // READABLE: the vendor's own sentence tells the model to Read that path,
+    // so the file it names is one this reader may open.
+    outputReadable: true,
   });
+}
+
+/**
+ * The spool path the vendor's backgrounding sentence names, if it named one.
+ *
+ * PROSE IS NOT A PREFERENCE, IT IS THE ONLY STATEMENT. The captured sentence is
+ * "Command running in background with ID: <id>. Output is being written to:
+ * <path>. ..." and the path is the vendor's sole account of where a detached
+ * shell's output accumulates at announcement time — `task_notification` repeats
+ * it, but only once the run has ENDED, which is far too late for the
+ * announcement that tells a consumer to open a stream.
+ *
+ * A sentence the vendor rewords yields no path rather than a wrong one: the
+ * announcement then carries no output, exactly as it did before, and the
+ * `task_notification` still supplies it at the end.
+ */
+export function outputPathFromProse(
+  content: conversationv1.ToolResultContent | undefined,
+): string | undefined {
+  if (content === undefined) return undefined;
+  const prose = content.blocks
+    .map((block) => (block.block.case === "text" ? block.block.value.text : ""))
+    .join("\n");
+  const match = /Output is being written to:\s*(\S+?)\.?(?:\s|$)/.exec(prose);
+  const path = match?.[1];
+  if (path === undefined || path === "") {
+    LOGGER.logVerbose(
+      {},
+      "the backgrounding result stated no output path; the announcement carries none",
+    );
+    return undefined;
+  }
+  return path;
 }
 
 /** The vendor's task-stream messages, read loosely for their optional fields. */
