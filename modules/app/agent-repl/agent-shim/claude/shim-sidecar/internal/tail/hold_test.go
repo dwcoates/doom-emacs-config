@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
@@ -184,8 +183,9 @@ func TestTailerLogsARejectedOutOfBatchHold(t *testing.T) {
 	}
 
 	// Assert.
-	if !strings.Contains(strings.Join(*logs, "\n"), "outside this batch") {
-		t.Fatalf("missing the loud log for the rejected hold; got %v", *logs)
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "hold-out-of-batch", "error")
+	if got, ok := rec.Context["offset"].(float64); !ok || int64(got) != 1<<20 {
+		t.Fatalf("hold-out-of-batch/error offset = %v, want %d", rec.Context["offset"], int64(1<<20))
 	}
 }
 
@@ -255,7 +255,8 @@ func TestTailerAdvancesPastAHoldThatSurvivesItsRedelivery(t *testing.T) {
 
 func TestTailerLogsAnExhaustedHold(t *testing.T) {
 	// Arrange.
-	tr, _, logs, _ := newHoldTailer(t, `{"a":1}`+"\n"+`{"b":2}`+"\n", holdLast)
+	first := `{"a":1}` + "\n"
+	tr, _, logs, _ := newHoldTailer(t, first+`{"b":2}`+"\n", holdLast)
 	r1, err := tr.Poll()
 	if err != nil {
 		t.Fatalf("poll1: %v", err)
@@ -267,9 +268,11 @@ func TestTailerLogsAnExhaustedHold(t *testing.T) {
 		t.Fatalf("poll2: %v", err)
 	}
 
-	// Assert.
-	if !strings.Contains(strings.Join(*logs, "\n"), "forced redelivery") {
-		t.Fatalf("an exhausted hold was released without saying so; got %v", *logs)
+	// Assert: the exhausted hold names the SECOND frame's offset, the one it
+	// held on both the original delivery and its forced redelivery.
+	rec := requireOnceIn(t, parseLogLines(t, *logs), "hold-exhausted", "warn")
+	if got, ok := rec.Context["offset"].(float64); !ok || int64(got) != int64(len(first)) {
+		t.Fatalf("hold-exhausted/warn offset = %v, want %d", rec.Context["offset"], int64(len(first)))
 	}
 }
 
