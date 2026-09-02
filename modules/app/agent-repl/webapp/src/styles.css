@@ -2129,6 +2129,12 @@ pre {
 .queued-reason { margin-top: 0.3rem; font-size: 0.8rem; font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .queued-actions button { cursor: pointer; font: inherit; }
+/* A release the holding arm is likely to refuse: offered, because the daemon
+   is the one that answers, but drawn back so it does not read as the ordinary
+   next step. Its title says which arm stands in the way. */
+.queued-action-unlikely { opacity: 0.6; }
+/* The command a context cut is running, as a token rather than as prose. */
+.queued-command { font-family: var(--mono, monospace); }
 
 /* --- the drain-lease bubble (render.ts LeaseHeldCard) ---------------------
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
