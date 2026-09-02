@@ -101,6 +101,11 @@ type Daemon struct {
 	// DefaultConfigDir and MultiRepoConfigDir are the two account roots.
 	DefaultConfigDir   string
 	MultiRepoConfigDir string
+	// MultiRepoRoot is the tree the daemon was given as $MULTI_REPO_ROOT: a
+	// workspace UNDER it routes to MultiRepoConfigDir, anything else to
+	// DefaultConfigDir. A test that cares about the routing puts its repository
+	// here with NewRepoAt.
+	MultiRepoRoot string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
 	// Git is the fake git world every scripted `git` answers from.
@@ -239,6 +244,8 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 			t.Fatalf("harness: mkdir multi root: %v", err)
 		}
 	}
+
+	d.MultiRepoRoot = multiRoot
 
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	t.Cleanup(cancel)

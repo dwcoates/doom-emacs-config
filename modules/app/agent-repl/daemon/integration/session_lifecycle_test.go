@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -177,44 +178,33 @@ func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.
 }
 
 func TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn(t *testing.T) {
-	// Arrange: kill the workspace so its session record carries a vendor id,
-	// then delete the fake's per-workspace profile isn't possible from here —
-	// instead the transcript-missing refusal is a daemon-side fact about
-	// on-disk transcripts under the config root, which this suite has no
-	// harness hook to seed or withhold independent of the shim itself. What IS
-	// assertable: a resume of an id the daemon never actually wrote a
-	// transcript for (this workspace has none, since AGENT_REPL_FORBID_VENDOR_CALLS
-	// means no real transcript is ever written) is refused before the shim
-	// spawns at all.
+	// Arrange: a session with a conversation to resume, killed and REAPED, and
+	// then its transcript removed from under both account roots. A vanished
+	// transcript yields no death evidence, so the guard refuses the resume
+	// before any process spawns rather than letting the redial ladder loop
+	// forever on an unchangeable fact.
 	f := newOpened(t, harness.Opts{})
 	f.shim.ExpectStartSession()
 	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("KillWorkspace = error %v, want a success", err)
 	}
 	f.shim.AwaitGone()
-	host := f.d.WatchHost(f.ws)
+	f.d.RemoveTranscripts(f.repo.Dir)
+	spawnsBefore := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn")
 
 	// Act
-	_, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
 
-	// Assert: the fault surfaces without a fresh spawn — no new control
-	// socket appears (probed with a bounded window: a spawn would already
-	// have opened it well within the probe).
-	if err == nil {
-		t.Log("OpenWorkspace on a missing transcript answered success; the transcript_missing arm may be surfaced asynchronously via the host stream instead of the RPC — asserting the host fault instead")
-		harness.AwaitView(t, f.d.Ctx(), host, "a transcript_missing fault or refusal on the host stream",
-			func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-				for _, flt := range r.GetHost().GetExisting().GetLive().GetFaults() {
-					if flt.GetShimStartFailed() != nil || flt.GetResumeFailed() != nil {
-						return true
-					}
-				}
-				return false
-			})
-		return
+	// Assert: the landed transcript_missing arm, and nothing spawned to be
+	// refused BY.
+	if err != nil {
+		t.Fatalf("OpenWorkspace on a missing transcript = transport error %v, want the transcript_missing arm", err)
 	}
-	if !namesIntendedArm(err, "OpenWorkspaceError.transcript_missing") && connectCode(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("OpenWorkspace refusal = %v, want it to name transcript_missing", err)
+	if resp.Msg.GetError().GetTranscriptMissing() == nil {
+		t.Fatalf("OpenWorkspace on a missing transcript = %v, want OpenWorkspaceError.transcript_missing", resp.Msg)
+	}
+	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawnsBefore {
+		t.Fatalf("shim spawn records = %d after the refusal, want the %d before it: the guard refuses BEFORE the spawn", got, spawnsBefore)
 	}
 	f.d.ExpectWarnings(harness.AllowAllWarnings)
 }
@@ -384,22 +374,10 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 }
 
 func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
-	// Arrange
+	// Arrange: a repository OUTSIDE the multi-repo root.
 	d := newDaemon(t, harness.Opts{})
 	defaultRepo := harness.NewRepo(t)
 	defaultWS := harness.Register(t, d, defaultRepo.Dir)
-
-	multiRoot := d.SocketPath // placeholder to keep gofmt import grouping; unused
-	_ = multiRoot
-
-	// A workspace under MULTI_REPO_ROOT: its repo lives inside the tree the
-	// harness already wired via the daemon's MULTI_REPO_ROOT env.
-	// harness.NewRepoAt lets a test place a repository at an exact path.
-	multiDir := d.MultiRepoConfigDir // not the repo location; kept only to
-	_ = multiDir
-
-	fMulti := newRegistered(t, harness.Opts{})
-	_ = fMulti
 
 	// Act
 	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: defaultWS})); err != nil {
@@ -407,22 +385,28 @@ func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
 	}
 	defaultShim := d.Shim(defaultWS)
 
-	// Assert: the default-account workspace spawns with the default root.
+	// Assert
 	if got := defaultShim.Info().Env["CLAUDE_CONFIG_DIR"]; got != d.DefaultConfigDir {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q for a workspace outside MULTI_REPO_ROOT, want the default account root %q", got, d.DefaultConfigDir)
 	}
 }
 
 func TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount(t *testing.T) {
-	// Arrange: place the repository directly under MULTI_REPO_ROOT.
+	// Arrange: the repository lives directly UNDER $MULTI_REPO_ROOT, which is
+	// the only input the account routing takes.
 	d := newDaemon(t, harness.Opts{})
-	root := harness.World(t)
-	_ = root
-	multiDir := d.SocketPath // placeholder
-	_ = multiDir
-	repo := harness.NewRepoAt(t, d.StateDir+"-unused")
-	_ = repo
-	t.Skip("harness has no MULTI_REPO_ROOT-relative repo constructor exposed to this suite; see report")
+	repo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "under-the-multi-root"))
+	ws := harness.Register(t, d, repo.Dir)
+
+	// Act
+	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	}
+
+	// Assert
+	if got := d.Shim(ws).Info().Env["CLAUDE_CONFIG_DIR"]; got != d.MultiRepoConfigDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q for a workspace under MULTI_REPO_ROOT, want the multi-repo account root %q", got, d.MultiRepoConfigDir)
+	}
 }
 
 func TestALoggedOutAccountRootDrawsLoggedOut(t *testing.T) {
