@@ -352,11 +352,22 @@ export function createFakeQuery(
   };
   const emit = (message: Record<string, unknown>): void => emitWithUuid(opts.newUuid(), message);
 
+  /**
+   * The call a subagent's stream events belong to, while one is being emitted.
+   *
+   * A SUBAGENT'S STREAM DELTAS CARRY THE SAME ATTRIBUTION AS ITS MESSAGE. The
+   * fold books a frame by `parent_tool_use_id`, and emitting the deltas with a
+   * null one put a subagent's OPEN block on the main agent's book and its
+   * SETTLED block on the subagent's — the same upsert key landing in two books,
+   * which is what a page then served back to the wrong reader.
+   */
+  let streamParentToolUseId: string | null = null;
+
   const emitStream = (event: Record<string, unknown>): void =>
     emit({
       type: "stream_event",
       event,
-      parent_tool_use_id: null,
+      parent_tool_use_id: streamParentToolUseId,
       // A fake message_start models the same SDK timing contract as a live one,
       // so the real ephemeral-correlation path stays exercised.
       ...(event.type === "message_start" ? { ttft_ms: 1 } : {}),
@@ -518,6 +529,7 @@ export function createFakeQuery(
     options: AssistantOptions = {},
   ): AssistantEmission => {
     const messageId = options.messageId ?? mintMessageId();
+    streamParentToolUseId = options.agent?.parentToolUseId ?? null;
     const reportedModel = options.model ?? model;
     const usage = fakeUsage();
     const requestId = `req_fake_${spawnTag}_${messageCounter}`;
@@ -597,6 +609,7 @@ export function createFakeQuery(
       context_management: { applied_edits: [] },
     });
     emitStream({ type: "message_stop" });
+    streamParentToolUseId = null;
     return { messageId, uuids };
   };
 
@@ -744,7 +757,15 @@ export function createFakeQuery(
       // prompt_too_long, hook_stopped, tool_deferred and the rest — is a
       // `TerminalReason`. A mock that only varied the subtype could reach four
       // of the sixteen conversation.v1 failure arms.
-      terminal_reason: spec.terminalReason ?? (spec.subtype === "success" ? "completed" : "api_error"),
+      // AN ERROR RESULT WITH NO REASON HAS NO REASON. Defaulting one to
+      // `api_error` made every unclassified stop claim the API had failed, and
+      // `execution_error` -- the arm that exists precisely for a stop the
+      // producer did not classify -- became unreachable.
+      ...(spec.terminalReason === undefined
+        ? spec.subtype === "success"
+          ? { terminal_reason: "completed" }
+          : {}
+        : { terminal_reason: spec.terminalReason }),
       // THE SESSION'S STATE IS THE DEFAULT, not a constant: fast mode is a
       // session fact the vendor restates on every result, so a turn that says
       // nothing about it reports what the session is actually in.
@@ -756,10 +777,14 @@ export function createFakeQuery(
             : spec.fastModeDisabledReason;
         return reason === undefined ? {} : { fast_mode_disabled_reason: reason };
       })(),
+      // `api_error_status` RIDES THE ERROR RESULT TOO. It is the only field
+      // that says WHICH api failure a `terminal_reason: "api_error"` was, and
+      // emitting it on success results alone left every `!api-*` row reaching
+      // the `unmodeled` kind -- the twelve statuses were indistinguishable.
+      api_error_status: spec.apiErrorStatus ?? null,
       ...(spec.subtype === "success"
         ? {
             result: spec.result ?? "",
-            api_error_status: spec.apiErrorStatus ?? null,
             ...(spec.structuredOutput === undefined ? {} : { structured_output: spec.structuredOutput }),
           }
         : { errors: spec.errors ?? [] }),
