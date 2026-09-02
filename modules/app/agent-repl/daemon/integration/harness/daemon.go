@@ -52,8 +52,8 @@ type Opts struct {
 	Joining string
 	// IdleCutoff sets the hibernation idle cutoff via --idle-cutoff.
 	IdleCutoff time.Duration
-	// IdleCutoffMS compresses the same cutoff via
-	// AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS, the spelling the hibernation tests
+	// IdleCutoffMS compresses the same cutoff in milliseconds, for the
+	// hibernation tests
 	// use so the cutoff can be a handful of milliseconds.
 	IdleCutoffMS int
 	// Pprof sets the profiling listener address; empty leaves it off.
@@ -265,8 +265,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if opts.Joining != "" {
 		args = append(args, "--joining", opts.Joining)
 	}
-	if opts.IdleCutoff > 0 {
+	// THE CUTOFF HAS ONE KNOB. The daemon reads `--idle-cutoff` and nothing
+	// else, so the millisecond spelling is the same flag with a smaller value.
+	switch {
+	case opts.IdleCutoff > 0:
 		args = append(args, "--idle-cutoff", opts.IdleCutoff.String())
+	case opts.IdleCutoffMS > 0:
+		args = append(args, "--idle-cutoff", (time.Duration(opts.IdleCutoffMS) * time.Millisecond).String())
 	}
 	if opts.Pprof != "" {
 		args = append(args, "--pprof", opts.Pprof)
@@ -305,9 +310,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		selfRepo = NewRepoAt(t, filepath.Join(root, "self-repo")).Dir
 	}
 	env = append(env, "AGENT_REPL_SELF_REPO_DIR="+selfRepo)
-	if opts.IdleCutoffMS > 0 {
-		env = append(env, "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS="+strconv.Itoa(opts.IdleCutoffMS))
-	}
 	env = append(env, opts.ExtraEnv...)
 
 	// A NON-JOINING START OWNS daemon.addr. A crash-restart test reuses a state

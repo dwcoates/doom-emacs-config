@@ -37,6 +37,16 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 
 	sender, ok := q.deps.Client(sub.WS)
 	if !ok {
+		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The prompt is its revival,
+		// exactly as mounting the frontend is; only a workspace that will not
+		// come back refuses.
+		if revived, err := q.revive(ctx, sub.WS, log); err != nil {
+			return Disposition{}, err
+		} else if revived {
+			sender, ok = q.deps.Client(sub.WS)
+		}
+	}
+	if !ok {
 		log.Warn(opSubmit, "the workspace has no session to submit to", nil)
 		return Disposition{}, ErrNoSession
 	}
@@ -209,4 +219,21 @@ func holderName(h wsm.LeaseHolder) string {
 	default:
 		return fmt.Sprintf("holder(%d)", h)
 	}
+}
+
+// revive brings a parked session back up for a submission that found none.
+// It reports whether a revival was attempted AND succeeded; a revival that
+// fails is the submission's failure, never a silent refusal.
+func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) (bool, error) {
+	if q.deps.Revive == nil {
+		return false, nil
+	}
+	log.Debug(opSubmit, "no session is live; reviving the workspace for the submission", nil)
+	if err := q.deps.Revive(ctx, ws); err != nil {
+		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
+			dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("submit to %q: revive the session: %w", ws, err)
+	}
+	log.Info(opSubmit, "revived the workspace's session for the submission", nil)
+	return true, nil
 }

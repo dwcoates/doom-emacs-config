@@ -184,6 +184,11 @@ type Deps struct {
 	// Client resolves a workspace's shim client; the queue never dials one
 	// itself.
 	Client ClientFunc
+	// Revive brings a parked workspace's session back up so a submission to it
+	// is DELIVERED rather than refused. A hibernated session is idle, not
+	// dead: the prompt is the revival, exactly as mounting the frontend is.
+	// Nil means a workspace with no live session simply refuses.
+	Revive ReviveFunc
 	// Watcher resolves a workspace's session watcher, which is what answers
 	// the in-flight turn and what an accepted turn is handed over to.
 	Watcher WatcherFunc
@@ -211,6 +216,10 @@ type Deps struct {
 // ClientFunc resolves a workspace's live shim client, reporting false when the
 // workspace has none. It is injected so the queue does not own the fleet.
 type ClientFunc func(ws ids.WorkspaceID) (Sender, bool)
+
+// ReviveFunc brings one workspace's session up. workspace.Fleet.Start
+// satisfies it, and it is idempotent for a session that is already live.
+type ReviveFunc func(ctx context.Context, ws ids.WorkspaceID) error
 
 // Sender is the slice of the shim client the queue uses. Keeping it narrow is
 // what lets the queue be tested against a fake without a whole shim.

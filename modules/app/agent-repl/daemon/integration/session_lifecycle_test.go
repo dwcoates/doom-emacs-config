@@ -704,9 +704,13 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 	f.shim.ExpectStartSession()
 	roster := f.d.WatchRoster()
 
-	// Assert: Hibernate then KillSession fire once the session goes idle.
-	f.shim.ExpectHibernate()
-	killed := f.shim.ExpectKillSession()
+	// Assert: Hibernate then KillSession fire once the session goes idle. Both
+	// are read from the shim's LOG rather than its control socket: the fake
+	// exits on the accepted KillSession, so the socket is gone before a second
+	// control round trip can complete.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
 	if killed.GetForce() {
 		t.Fatalf("hibernation's KillSession.force = true, want a quiet close (the session is already compacted and idle)")
 	}

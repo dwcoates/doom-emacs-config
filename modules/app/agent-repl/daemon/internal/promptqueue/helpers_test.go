@@ -531,7 +531,10 @@ type harness struct {
 	parkedErr error
 
 	// noSession, when set, makes the client resolver report no session.
-	noSession bool
+	revivals   int
+	reviveErr  error
+	reviveHook func()
+	noSession  bool
 }
 
 func newHarness(t *testing.T) *harness {
@@ -547,12 +550,22 @@ func newHarness(t *testing.T) *harness {
 		drain:   &noteRecorder{},
 	}
 	q, err := newQueue(Deps{
-		DB:      h.db,
-		Judge:   h.judge,
-		Feed:    h.feed,
-		Footer:  h.footer,
-		Holds:   h.holds,
-		Client:  func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
+		DB:     h.db,
+		Judge:  h.judge,
+		Feed:   h.feed,
+		Footer: h.footer,
+		Holds:  h.holds,
+		Client: func(ids.WorkspaceID) (Sender, bool) { return h.sender, !h.noSession },
+		Revive: func(context.Context, ids.WorkspaceID) error {
+			h.revivals++
+			if h.reviveErr != nil {
+				return h.reviveErr
+			}
+			if h.reviveHook != nil {
+				h.reviveHook()
+			}
+			return nil
+		},
 		Watcher: func(ids.WorkspaceID) (Watcher, bool) { return h.watcher, !h.noSession },
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
 			h.parked = append(h.parked, said)
