@@ -596,3 +596,11 @@ every UX or contract gap you surfaced instead of improvising.
   compact_boundary under the cheap model. Goldens agent told to include all
   69 and to report the compaction and /clear shapes; the scenario-script
   rebuild waits on the fakes merge.
+- LEDGER: goldens agent interim: 69 goldens folded; compaction-directed
+  holds NO compaction record ("Not enough messages to compact" local_command)
+  → gap stays open; /clear rotates to the post-clear init's session_id (three
+  ids, three files, no closing record) → rule written into shim.md R9 and
+  sent to the engine agent; two converter defects fixed (task_notification
+  kind, per-block assistant line before content_block_stop). The scenario
+  rebuild brief must emit assistant lines per block BEFORE content_block_stop
+  and the observed /clear shape.
