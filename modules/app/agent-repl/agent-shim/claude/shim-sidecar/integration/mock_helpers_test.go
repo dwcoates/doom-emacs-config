@@ -363,10 +363,6 @@ func generateMock(t *testing.T, prompt string, wait mockWait) *mockTree {
 	return tree
 }
 
-func phase(t *testing.T, name string) {
-	t.Logf("PHASE %s at %s", name, time.Now().Format(time.StampMilli))
-}
-
 func awaitSocket(ctx context.Context, t *testing.T, socket string, tree *mockTree) {
 	t.Helper()
 	tick := time.NewTicker(pollTick)

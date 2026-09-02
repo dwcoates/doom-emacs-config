@@ -38,10 +38,6 @@ func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 	return &SessionTranscriptHandler{conv: conv, log: log, obs: obs}
 }
 
-// SetObserver installs the owner-resolution listener on this handler's converter,
-// so launches read out of tool results reach the root package.
-func (h *SessionTranscriptHandler) SetObserver(o convert.Observer) { h.conv.SetObserver(o) }
-
 // Handle implements tail.Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(handleCtx("transcript-handle", ctx)).

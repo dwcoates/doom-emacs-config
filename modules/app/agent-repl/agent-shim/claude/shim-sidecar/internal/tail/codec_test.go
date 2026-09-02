@@ -104,6 +104,11 @@ func TestJSONLCodecOversizeCarryResyncs(t *testing.T) {
 	if carry != nil {
 		t.Fatalf("carry = %q, want dropped after oversize", carry)
 	}
+	// The handler logs this error with %v (never a type-specific check), so its
+	// Error() string is what an operator actually reads.
+	if got := frames[0].ParseErr.Error(); got != "tail: partial line exceeds bounded carry" {
+		t.Fatalf("ParseErr.Error() = %q, want the bounded-carry message", got)
+	}
 }
 
 func TestRawTextCodecSingleChunk(t *testing.T) {
