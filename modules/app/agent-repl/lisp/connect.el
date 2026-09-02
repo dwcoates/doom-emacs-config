@@ -355,6 +355,28 @@ caller deletes the file when its process exits."
       (insert bytes))
     file))
 
+(defun agent-repl-connect--detach-sentinel (process)
+  "Detach PROCESS's sentinel so a teardown cannot re-deliver into it.
+
+CALLED FIRST BY EVERY TERMINAL SENTINEL BRANCH HERE, and that ordering is
+the whole point.  A curl exchange's teardown kills STDERR-BUFFER, and
+`kill-buffer' runs `kill_buffer_processes': it deletes the stderr pipe
+process, closing curl's stderr, which makes `status_notify' run the
+sentinels of every process whose status just moved — including the curl
+process whose sentinel is running RIGHT NOW.  That sentinel then sees a
+dead process again, tears down again against a buffer that is still live
+mid-kill, and recurses: an unbounded
+Fkill_buffer -> Fdelete_process -> exec_sentinel -> Fkill_buffer stack
+with no Lisp error and no log record, because the recursion happens
+before the branch reaches any logging.  That is the `SPC .' hang.
+
+Detaching before the teardown makes the re-entry UNREPRESENTABLE rather
+than merely unlikely: the re-delivered status reaches `ignore'.  It is
+also correct on its own terms — a terminal branch has, by definition,
+nothing left to hear from its process."
+  (when (processp process)
+    (set-process-sentinel process #'ignore)))
+
 (defun agent-repl-connect--cleanup (body-file stderr-buffer)
   "Delete BODY-FILE and kill STDERR-BUFFER, tolerating either being gone."
   (when (and body-file (file-exists-p body-file))
@@ -363,7 +385,14 @@ caller deletes the file when its process exits."
       (error (agent-repl--warn nil "elisp.connect.body-file-cleanup-failed file=%S error=%S"
                                body-file err))))
   (when (buffer-live-p stderr-buffer)
-    (kill-buffer stderr-buffer)))
+    ;; The stderr PIPE process owns this buffer; detach it too, so the
+    ;; deletion `kill-buffer' performs has no sentinel of its own to run.
+    (when-let ((pipe (get-buffer-process stderr-buffer)))
+      (set-process-query-on-exit-flag pipe nil)
+      (set-process-sentinel pipe #'ignore)
+      (set-process-filter pipe #'ignore))
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer stderr-buffer))))
 
 (defun agent-repl-connect--stderr-text (stderr-buffer)
   "Return the trimmed contents of STDERR-BUFFER, or the empty string."
@@ -472,6 +501,7 @@ idempotent.  Returns the curl process."
                (setq body (concat body (agent-repl-connect--reader-feed reader chunk))))
              (lambda (proc _event)
                (unless (process-live-p proc)
+                 (agent-repl-connect--detach-sentinel proc)
                  (let ((status (agent-repl-connect--reader-status reader))
                        (stderr (agent-repl-connect--stderr-text stderr-buffer)))
                    (agent-repl-connect--cleanup body-file stderr-buffer)
@@ -713,6 +743,7 @@ nothing.  Returns the stream object."
                      (agent-repl-connect--dispatch-push stream (cdr frame)))))))))
            (lambda (proc _event)
              (unless (process-live-p proc)
+               (agent-repl-connect--detach-sentinel proc)
                (let ((status (agent-repl-connect--reader-status reader))
                      (stderr (agent-repl-connect--stderr-text stderr-buffer))
                      (reason (agent-repl-connect-stream-close-reason stream)))
