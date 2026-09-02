@@ -191,3 +191,59 @@ func TestUnsetClientLogLevelIsInvalidArgument(t *testing.T) {
 		t.Fatalf("code = %v, want InvalidArgument", code)
 	}
 }
+
+// TestBlankOperatorDrainNoteIsInvalidArgument pins drain_reason.proto's own
+// rule: the operator arm's note is REQUIRED NON-BLANK. An operator reason with
+// nothing to say is `maintenance`, and the daemon does not accept one dressed
+// as the other.
+func TestBlankOperatorDrainNoteIsInvalidArgument(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.UpdateShutdownSchedule(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+			Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{
+				Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+					AtMs: 1,
+					Reason: &agentreplv1.DrainReason{
+						Kind: &agentreplv1.DrainReason_Operator{
+							Operator: &agentreplv1.DrainReasonOperator{Note: "   "},
+						},
+					},
+				},
+			},
+		}))
+
+	// Assert.
+	if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", code)
+	}
+}
+
+// TestOperatorDrainNoteIsAccepted pins that a real note passes: the presence
+// check must not refuse the arm it exists to protect.
+func TestOperatorDrainNoteIsAccepted(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.UpdateShutdownSchedule(context.Background(),
+		connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+			Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{
+				Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+					AtMs: 1,
+					Reason: &agentreplv1.DrainReason{
+						Kind: &agentreplv1.DrainReason_Operator{
+							Operator: &agentreplv1.DrainReasonOperator{Note: "rebooting the host"},
+						},
+					},
+				},
+			},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("UpdateShutdownSchedule with a real operator note = %v, want a success", err)
+	}
+}
