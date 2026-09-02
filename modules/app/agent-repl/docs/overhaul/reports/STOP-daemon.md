@@ -287,6 +287,40 @@ The dead-code pass's live-code/dead-code pairs, resolved:
   built with `-cover` and `GOCOVERDIR` is collected (see the methodology
   finding above).
 
+## The integration warning sweep is unconditional (2026-09-02)
+
+The zero-WARN-on-green-paths ruling was enforced only for tests that opted in:
+the sweep was installed by the FIRST `ExpectWarnings` call, so a test that
+never called it got no warning assertion at all and could emit any number of
+WARN records and stay green. Two tests were doing exactly that.
+
+`StartDaemon` now registers the sweep for EVERY harness daemon with an empty
+declared set, and `ExpectWarnings` only widens an already-armed sweep. It is
+registered before the daemon's own kill and cancel cleanups so it runs last
+and reads a complete log, and it reports through `t.Errorf`, so it still runs
+after a test has already failed for another reason — one run reports every
+problem rather than hiding the warnings behind the first failure. There is no
+escape hatch; `AllowAllWarnings` stays deleted.
+
+Arming it turned 73 tests red in one run. Every one was triaged: the records
+that are evidence on a failure path the test deliberately drives (shim death,
+link sever, staged merge conflict, an abandoned queued merge, deliberately
+corrupted state rows, provoked refusals, fed anomalies, restart consequences)
+are DECLARED, 135 declarations across the suite, each with its reason. One was
+a real defect and was fixed in production rather than declared away:
+`daemon.merge.answer_dequeue` moved from WARN to DEBUG, because both arms of
+`AnswerDequeue` are the user working an offer the daemon itself raised and the
+keep arm was already DEBUG — the work actually abandoned still gets
+`dropQueued`'s own WARN, so no coverage was lost. No other record was moved,
+weakened, or deleted.
+
+Also fixed: `drain_rollout_test.go` compared a millisecond-truncated wire
+stamp against a nanosecond-precision deadline, so a drain that fired inside
+the deadline's own millisecond read as strictly before it. Both bounds are now
+compared in milliseconds, the wire's own precision. That closed
+`TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause`, which
+runs 5/5 green.
+
 ## Tests over 1 s (re-profiled at 971145abf)
 
 Unit: none over 1 s.
