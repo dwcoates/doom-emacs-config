@@ -210,7 +210,7 @@ func assertNoResponseTextEver(t *testing.T, stream *harness.Stream[*frontendv1.F
 func TestSubagentSyncNestedActivity(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act.
@@ -283,7 +283,7 @@ func TestSubagentSyncNestedActivity(t *testing.T) {
 func TestSubagentDetached(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act: the main turn ends on the async-launch ack, well before the
@@ -342,7 +342,7 @@ func TestSubagentDetached(t *testing.T) {
 func TestSubagentDetachedUtteranceStaysOffTopLevel(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act: the main turn ends before the agent's mid-flight utterance is
@@ -413,7 +413,7 @@ func TestSubagentDetachedUtteranceStaysOffTopLevel(t *testing.T) {
 func TestNestedSubagentHistoricalUsage(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act.
