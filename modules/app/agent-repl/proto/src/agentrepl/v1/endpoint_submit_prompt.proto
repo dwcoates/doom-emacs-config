@@ -73,8 +73,17 @@ message SubmitPromptSuccess {
     // the feed's `command_refused` row; the caller learns only that no turn
     // was minted.
     SubmitPromptCommandRefused command_refused = 3;
+    // It is a session-acting command the daemon RECOGNIZED and queued as an
+    // act that mints no turn (/model <arg>; the topbar picker's path meets it
+    // here too). Empty: the set arm is the whole assertion — the visible
+    // effect (the model change, restated authoritatively) arrives on the
+    // component streams, never in this answer. (Landing 6, 2026-09-01.)
+    SubmitPromptCommandActed command_acted = 4;
   }
 }
+
+// The acted-without-a-turn answer. Empty on purpose (see the arm).
+message SubmitPromptCommandActed {}
 
 // The recognized-but-unsupported answer.
 message SubmitPromptCommandRefused {
@@ -118,6 +127,9 @@ message SubmitPromptCommandPanel {
 // The submission was refused. Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).
 // Validation failures (unset field, UNSPECIFIED enum, blank string) are Connect InvalidArgument, never an arm.
 message SubmitPromptError {
+  // Tag 8 / `turn_already_open` retired at landing 6 (see the oneof comment).
+  reserved 8;
+  reserved "turn_already_open";
   // WHY the submission was refused.
   oneof reason {
     // A merge is in flight for this workspace, and the prompt arrived
@@ -139,12 +151,22 @@ message SubmitPromptError {
     SubmitPromptFeedNotInWorkspace feed_not_in_workspace = 6;
     // The FeedId does not decode.
     SubmitPromptFeedUndecodable feed_undecodable = 7;
-    // A bubble-addressed submit while that agent's turn runs.
-    SubmitPromptTurnAlreadyOpen turn_already_open = 8;
+    // Tag 8 is RETIRED (landing 6, 2026-09-01): `turn_already_open` had no
+    // producer — a bubble-addressed submit while that agent runs is refused
+    // by the SHIM (UpdateAgentFailure), and the daemon relays that, so the
+    // daemon never judges a subagent's turn itself.
     // The workspace has no session to submit to.
     SubmitPromptNoSession no_session = 9;
+    // The client-minted `idempotency_key` was already accepted for this
+    // workspace: the earlier submission stands (its turn, hold or panel is
+    // already visible); nothing is submitted twice. Empty: the key the
+    // client sent is the only identity involved. (Landing 6, 2026-09-01.)
+    SubmitPromptDuplicateSubmission duplicate_submission = 10;
   }
 }
+
+// The duplicate-key refusal. Empty on purpose (see the arm).
+message SubmitPromptDuplicateSubmission {}
 // The merge-in-flight refusal. Empty: the set arm is the whole assertion —
 // the footer's merging status and the feed's merge bubble already show
 // which merge, so the refusal carries no duplicate account of it.
@@ -161,5 +183,4 @@ message SubmitPromptTransferringAway {
 message SubmitPromptNotYetAdopted {}
 message SubmitPromptFeedNotInWorkspace {}
 message SubmitPromptFeedUndecodable {}
-message SubmitPromptTurnAlreadyOpen {}
 message SubmitPromptNoSession {}

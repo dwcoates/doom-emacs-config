@@ -494,3 +494,9 @@ These are not host-natured; elisp is the plumbing that reaches them.
 ## Landing 4 relay (2026-08-29, project lead)
 
 - The host decoder accepts every new `<Rpc>Error` arm on the rpcs Emacs calls and HostFault.kind's eight arms; `transferring_away{address}` is the handover redial signal.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- SubmitPromptSuccess.command_acted is a third non-turn success arm ("answered, nothing to await"); the composer clears. SubmitPromptError.duplicate_submission is a refusal that keeps the text and states the key was already accepted.
+- SubmitPromptError.turn_already_open is retired; the decoder's arm table drops it.
+- UpdateMergeQueueError.unknown_repository for the operator merge-queue verbs.
