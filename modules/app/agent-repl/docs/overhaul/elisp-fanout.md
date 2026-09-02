@@ -329,6 +329,15 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   suites call it for teardown. Whole-suite green, byte-compile clean, no
   removal-list files present. Full lists in the agent's report (carried
   into the final report). Worktrees left: red-host, red-misc.
+- REGRESSION at 567bcf8fd (all-suite 3302/3318): five NEW reds beyond the
+  eleven assigned — composer no-session-refusal / turn-already-open (log
+  `elisp.input.unknown-error-arm` not found), submit-log-carries-the-origin,
+  unknown-gate-sends-and-logs-info, verbs close-blocked-messages (the
+  `message` capture received a log line instead of the user message). All
+  are log-routing symptoms first seen after R-DEADCODE-2's core.el
+  deletions merged onto R-SUITE-2's tests (that agent branched before
+  suite2 landed). R-REGRESS dispatched (`opus-low`, elisp-agents/regress
+  off eb2d55238). Running: red-host, red-misc, regress.
 
 ## 1. Module map (final tree of lisp/)
 
