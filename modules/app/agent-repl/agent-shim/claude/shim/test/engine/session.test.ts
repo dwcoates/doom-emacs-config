@@ -31,6 +31,8 @@ interface Harness {
   readonly configDir: string;
   readonly cwd: string;
   readonly locks: string[];
+  /** Every workspace directory the engine claimed a kernel lock on. */
+  readonly workspaceLocks: string[];
   readonly released: string[];
   /** Every exit code the engine asked `main.ts` to end the process with. */
   readonly exits: number[];
@@ -75,6 +77,8 @@ function harness(
   options: {
     nowMs?: number;
     lockThrows?: boolean;
+    /** Make the WORKSPACE claim refuse, so its own conversation_owned arm shows. */
+    workspaceLockThrows?: boolean;
     keepaliveIntervalMs?: number;
     /** What every scripted query answers `backgroundTasks` with. */
     backgroundTasks?: boolean;
@@ -91,6 +95,7 @@ function harness(
   const queries: { spec: QuerySpec; query: ScriptedQuery }[] = [];
   const locks: string[] = [];
   const released: string[] = [];
+  const workspaceLocks: string[] = [];
   const exits: number[] = [];
   const engine = createEngine({
     endProcess: (code) => exits.push(code),
@@ -117,6 +122,14 @@ function harness(
       locks.push(sessionId);
       return () => released.push(sessionId);
     },
+    // STUBBED LIKE THE SESSION CLAIM. The workspace lock moved into
+    // StartSession, so a unit test that left it real would take a kernel lock
+    // on whatever directory the harness names.
+    acquireWorkspaceLock: (dir) => {
+      if (options.workspaceLockThrows === true) throw new Error("locked by another shim");
+      workspaceLocks.push(dir);
+      return () => released.push(`workspace:${dir}`);
+    },
   });
   return {
     engine,
@@ -128,6 +141,7 @@ function harness(
     configDir,
     cwd,
     locks,
+    workspaceLocks,
     released,
     exits,
   };
@@ -318,6 +332,7 @@ describe("StartSession, fresh", () => {
       nowMs: () => 1,
       scheduler: h.scheduler,
       acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
     });
 
     expect(failureCause(await engine.startSession(freshRequest()))).toBe("vendorStartFailed");
@@ -337,10 +352,42 @@ describe("StartSession, fresh", () => {
         h.locks.push(id);
         return () => h.released.push(id);
       },
+      acquireWorkspaceLock: (dir) => {
+        h.workspaceLocks.push(dir);
+        return () => h.released.push(`workspace:${dir}`);
+      },
     });
     await engine.startSession(freshRequest());
 
-    expect(h.released).toHaveLength(1);
+    expect(h.released).toEqual(expect.arrayContaining([expect.stringMatching(/^workspace:/)]));
+  });
+
+  it("refuses conversation_owned when another shim holds the WORKSPACE lock", async () => {
+    // Both claims answer the SAME arm: from the daemon's side "someone else
+    // owns this conversation" is one fact, whichever kernel lock proved it.
+    const h = harness({ workspaceLockThrows: true });
+
+    expect(failureCause(await h.engine.startSession(freshRequest()))).toBe("conversationOwned");
+  });
+
+  it("a refused WORKSPACE claim releases the session lock it had already taken", async () => {
+    // The session claim is taken first, so a workspace refusal must hand it
+    // back; a shim that kept it would own a conversation it refused to serve.
+    const h = harness({ workspaceLockThrows: true });
+
+    await h.engine.startSession(freshRequest());
+
+    expect(h.released).toEqual(h.locks);
+  });
+
+  it("no lock of either kind is taken before StartSession", async () => {
+    // AN INERT SHIM HOLDS NOTHING. A prelaunched shim must be able to sit
+    // beside the live one it will replace, which it cannot do while holding
+    // the live shim's workspace lock.
+    const h = harness();
+
+    expect(h.locks).toEqual([]);
+    expect(h.workspaceLocks).toEqual([]);
   });
 });
 
@@ -1192,13 +1239,16 @@ describe("KillSession", () => {
     expect(h.persistence.flushes).toBe(1);
   });
 
-  it("releases the session lock", async () => {
+  it("releases BOTH kernel claims", async () => {
+    // The session claim and the workspace claim are both taken by StartSession
+    // and both belong to the session, so a kill that kept either would leave a
+    // dead conversation owning a lock the next shim probes.
     const h = harness();
     await started(h);
 
     await h.engine.killSession(create(shimv1.KillSessionRequestSchema, {}));
 
-    expect(h.released).toHaveLength(1);
+    expect(h.released).toEqual([...h.locks, `workspace:${h.cwd}`]);
   });
 });
 
@@ -1253,14 +1303,14 @@ describe("standing down", () => {
     throw new Error("the WatchSession stream did not terminate after the stand-down");
   });
 
-  it("is idempotent, so a second SIGTERM cannot double-release the lock", async () => {
+  it("is idempotent, so a second SIGTERM cannot double-release either lock", async () => {
     const h = harness();
     await started(h);
 
     await h.engine.standDown("SIGTERM");
     await h.engine.standDown("SIGTERM");
 
-    expect(h.released).toHaveLength(1);
+    expect(h.released).toEqual([...h.locks, `workspace:${h.cwd}`]);
   });
 });
 

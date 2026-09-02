@@ -279,6 +279,36 @@ describe("a stream closed by the client ends nothing", () => {
     reopened.close();
   });
 
+  test("cancelling WatchAgent CANCELS the shim's own tail on the store", async () => {
+    // ATTACH ONLY CUTS BOTH WAYS. A daemon that stops reading an agent must not
+    // leave the shim holding a `WatchAgentSession` open against the store: a
+    // subscription per abandoned watch leaks, and the store has no way to tell
+    // a reader that will never return from one that is merely slow. Nothing on
+    // the client says whether the tail was cancelled, so the fake store's
+    // open-tail ledger is the only place the fact is observable.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    // Drive a turn so a row has actually travelled THROUGH the tail: an open
+    // that had not yet reached the store would make the ledger empty for a
+    // reason that has nothing to do with cancellation.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await watch.until((frame) => frame.frame.case === "entry");
+    const tails = shim.store?.openTails() ?? [];
+    expect(tails).toHaveLength(1);
+    const token = tails[0]!;
+
+    watch.close();
+
+    // The cancellation crosses a real socket, so the client returning and the
+    // server's generator unwinding are two instants; this awaits the second.
+    await shim.store?.tailClosed(token);
+    expect(shim.store?.openTails()).toEqual([]);
+  });
+
   test("cancelling WatchAgent mid-turn leaves the turn running", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());

@@ -15,14 +15,19 @@
  * every ack, because exiting with unacknowledged writes is the loud failure.
  */
 import { create } from "@bufbuild/protobuf";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { workspaceLockKey } from "../../src/locks.js";
+import { BACKUP_KEEP, backupDir } from "../../src/engine/backup.js";
+import { agentIdPath, vendorLinkPath } from "../../src/engine/identity.js";
 import {
   freshSession,
   openStream,
+  remediationPay,
+  resumeSession,
   startTurnRequest,
   watchAgentRequest,
 } from "../integration-support/client.js";
@@ -41,13 +46,16 @@ import {
 } from "../integration-support/store.js";
 import {
   awaitFile,
+  readJsonl,
   readSpools,
   projectDir,
   readSubagentMeta,
   readTranscript,
   sessionTranscriptPath,
   subagentTranscriptPathFor,
+  workspaceRealPath,
 } from "../integration-support/vendor.js";
+import type { TranscriptRecord } from "../../src/fake/vendor-files.js";
 
 afterEach(cleanupShims);
 
@@ -111,6 +119,40 @@ function vendorAgentIdForCall(
   throw new Error(
     `no subagent sidecar under ${dir} names the spawning call ${toolUseId} (saw ${metas.join(", ")})`,
   );
+}
+
+/**
+ * Every content block of a transcript record's message, whatever its shape.
+ *
+ * THE FILE PLANE IS THE ORACLE. A key's suffix is only proved by the value the
+ * VENDOR wrote — comparing two shim-minted strings proves the shim agrees with
+ * itself and nothing more.
+ */
+function messageBlocks(record: TranscriptRecord): Array<Record<string, unknown>> {
+  const message = record.message as { content?: unknown } | undefined;
+  const content = message?.content;
+  return Array.isArray(content) ? (content as Array<Record<string, unknown>>) : [];
+}
+
+/** Every `tool_use` block id the vendor wrote into a transcript, in order. */
+function toolUseIds(records: readonly TranscriptRecord[]): string[] {
+  return records.flatMap((record) =>
+    messageBlocks(record)
+      .filter((block) => block.type === "tool_use" && typeof block.id === "string")
+      .map((block) => block.id as string),
+  );
+}
+
+/** Every chained record's own uuid, in file order. */
+function recordUuids(records: readonly TranscriptRecord[]): string[] {
+  return records
+    .map((record) => record.uuid)
+    .filter((uuid): uuid is string => typeof uuid === "string");
+}
+
+/** This spawn's workspace key — the directory both state trees are rooted at. */
+function keyOf(shim: Awaited<ReturnType<typeof spawnShim>>): string {
+  return workspaceLockKey(workspaceRealPath(shim.dirs));
 }
 
 /** The key prefixes the kickoff ruling allows, and nothing else. */
@@ -206,6 +248,38 @@ describe("every entry's envelope", () => {
     stream.close();
   });
 
+  test("the activity key's SUFFIX is the vendor's own tool_use_id from the transcript", async () => {
+    // The key is only right if it names the id the VENDOR minted. Asserting the
+    // `activity:` prefix alone would pass on a key whose suffix the shim
+    // invented, and the sidecar keying the same unit from the file would then
+    // write a second row for one call.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!read");
+    await awaitFile(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+
+    const vendorIds = toolUseIds(readTranscript(shim.dirs, started.vendorSessionId));
+    const suffixes = new Set(
+      entriesKeyed(shim.store?.writes() ?? [], "activity:").map((entry) =>
+        entry.upsertKey.slice("activity:".length),
+      ),
+    );
+    expect(vendorIds.length).toBeGreaterThan(0);
+    // EVERY TOOL CALL THE VENDOR WROTE HAS ITS ROW UNDER THE VENDOR'S OWN ID.
+    for (const id of vendorIds) expect([...suffixes]).toContain(id);
+    // And the only OTHER activity keys are the prose/thinking units, whose
+    // suffix is the vendor's message id plus the block index (`<msg>:<n>`) —
+    // a block has no id of its own, so the message's is the only vendor value
+    // there is to key by.
+    const unaccounted = [...suffixes].filter(
+      (suffix) => !vendorIds.includes(suffix) && !/^msg_[^:]+:\d+$/.test(suffix),
+    );
+    expect(unaccounted).toEqual([]);
+    stream.close();
+  });
+
   test("a question's rows are keyed question:<the ask's tool_use_id>", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
@@ -222,6 +296,32 @@ describe("every entry's envelope", () => {
     expect(
       writtenKeys(shim.store?.writes() ?? []).some((key) => key.startsWith("question:")),
     ).toBe(true);
+    stream.close();
+  });
+
+  test("the question key's SUFFIX is the ASK's own tool_use_id from the transcript", async () => {
+    // An ask IS a tool call, so its id is the vendor's, and a question row
+    // keyed by anything else could never collide with the sidecar's row for the
+    // same line.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!ask-unanswered" }));
+    await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      return agentFrame.result.value.update.case === "question";
+    });
+    await awaitFile(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+
+    const vendorIds = toolUseIds(readTranscript(shim.dirs, started.vendorSessionId));
+    const questionSuffixes = writtenKeys(shim.store?.writes() ?? [])
+      .filter((key) => key.startsWith("question:"))
+      .map((key) => key.slice("question:".length));
+    expect(questionSuffixes.length).toBeGreaterThan(0);
+    for (const suffix of questionSuffixes) expect(vendorIds).toContain(suffix);
     stream.close();
   });
 
@@ -269,6 +369,14 @@ describe("every entry's envelope", () => {
       key.startsWith(`terminal:${started.vendorSessionId}:`),
     );
     expect(new Set(terminals).size).toBe(2);
+    // AND THE SUFFIX IS THE VENDOR'S RECORD UUID, not a counter: two distinct
+    // suffixes could be minted by a shim that numbered its own terminals, and
+    // the sidecar reading the same two lines would key them differently.
+    const uuids = recordUuids(readTranscript(shim.dirs, started.vendorSessionId));
+    expect(uuids.length).toBeGreaterThan(0);
+    for (const key of new Set(terminals)) {
+      expect(uuids).toContain(key.slice(`terminal:${started.vendorSessionId}:`.length));
+    }
     stream.close();
   });
 
@@ -362,6 +470,7 @@ describe("write ids and absorption", () => {
       return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
     });
 
+    const batches = shim.store?.writeBatches() ?? [];
     const entries = writtenEntries(shim.store?.writes() ?? []);
     const byKey = new Map<string, Set<string>>();
     for (const entry of entries) {
@@ -369,15 +478,36 @@ describe("write ids and absorption", () => {
       ids.add(entry.writeId);
       byKey.set(entry.upsertKey, ids);
     }
-    // A resent frame carries the id it carried the first time.
-    const resent = entries.filter(
-      (entry) =>
-        entries.filter((other) => other.writeId === entry.writeId).length > 1,
+    // EVERY id is a 64-hex digest of its provenance. A shorter or non-hex id
+    // would mean the writer minted something other than the ruled hash, and a
+    // resend would then be a new row rather than an absorbed one.
+    for (const entry of entries) expect(entry.writeId).toMatch(/^[0-9a-f]{64}$/);
+    // A resent frame carries the id it carried the first time, and it repeats
+    // for exactly ONE reason: it rode a REFUSED batch and was sent again.
+    const counts = new Map<string, number>();
+    for (const entry of entries) counts.set(entry.writeId, (counts.get(entry.writeId) ?? 0) + 1);
+    const duplicated = [...counts].filter(([, count]) => count > 1).map(([id]) => id);
+    expect(duplicated.length).toBeGreaterThan(0);
+    const refusedIds = new Set(
+      batches
+        .filter((batch) => !batch.accepted)
+        .flatMap((batch) => batch.request.batch?.entries ?? [])
+        .map((entry) => entry.writeId),
     );
-    expect(resent.length).toBeGreaterThan(0);
-    // And the book holds ONE row per key despite the resend.
+    expect(duplicated.filter((id) => !refusedIds.has(id))).toEqual([]);
+    // And the book holds EXACTLY one row per key: ABSORPTION, not merely "no
+    // more rows than keys", which a store that silently dropped writes would
+    // also satisfy. Counted over the rows that were actually ACCEPTED and that
+    // name this book, since those are the only ones the book can hold.
     const book = shim.store?.book(started.vendorSessionId) ?? [];
-    expect(book.length).toBeLessThanOrEqual(byKey.size);
+    const bookKeys = new Set(
+      batches
+        .filter((batch) => batch.accepted)
+        .flatMap((batch) => batch.request.batch?.entries ?? [])
+        .filter((entry) => pageLineOf(entry)?.pageAgentId?.value === started.vendorSessionId)
+        .map((entry) => entry.upsertKey),
+    );
+    expect(book.length).toBe(bookKeys.size);
     stream.close();
   });
 
@@ -486,23 +616,34 @@ describe("graceful stand-down", () => {
   test("SIGTERM exits only AFTER the buffered writes are acked", async () => {
     // Exiting with unacknowledged writes is the loud failure: the record is the
     // one thing the shim cannot reconstruct after it is gone.
+    //
+    // THE REFUSAL IS HELD ACROSS THE SIGNAL. An earlier version let the store
+    // accept again BEFORE raising SIGTERM, so a shim that exited without
+    // waiting would still have found its buffer empty and passed. Here the
+    // stand-down begins with the store still refusing, the process is observed
+    // ALIVE at that moment, and only then does the store start accepting — so
+    // the exit cannot precede the acks.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
     shim.store?.failWrites("briefly down");
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
 
-    // The store accepts again in the same tick the signal is raised, so the
-    // stand-down must wait for the buffer to drain rather than racing it.
+    shim.signal("SIGTERM");
+    // The stand-down's own record, awaited rather than scanned.
+    await shim.log.record((record) => record.context.outcome === "graceful_stand_down_started");
+    // STILL RUNNING, with the buffer still unacked.
+    expect(shim.child.exitCode).toBeNull();
+
     shim.store?.failWrites(null);
-    const exit = await shim.standDown();
+    const exit = await shim.exited;
 
     expect(exit.code).toBe(0);
-    const keys = writtenKeys(shim.store?.writes() ?? []);
-    expect(keys).toContain("prompt:t1");
-    // The last batch the store saw was accepted, not refused.
-    const accepted = (shim.store?.writes() ?? []).length;
-    expect(accepted).toBeGreaterThan(0);
+    // The rows the buffer was holding did land, and they landed on an ACCEPTED
+    // batch — the last verdict the store gave is the proof the exit waited.
+    const batches = shim.store?.writeBatches() ?? [];
+    expect(writtenKeys(shim.store?.writes() ?? [])).toContain("prompt:t1");
+    expect(batches.at(-1)?.accepted).toBe(true);
     stream.close();
   });
 });
@@ -659,5 +800,256 @@ describe("residue", () => {
     );
     expect(kinds).toContain("system/away_summary");
     stream.close();
+  });
+});
+
+describe("R9: the identity the files carry", () => {
+  test("agent-id.json exists BEFORE the first record, with the three ruled fields", async () => {
+    // R9 CASE 1. The file is written before the query is created, so a crash
+    // between the mint and the first record still leaves the identity
+    // recoverable — which is only true if it is on disk while the store's
+    // inbox is still empty.
+    const shim = await spawnShim();
+
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    const file = agentIdPath(shim.dirs.stateDir, keyOf(shim));
+    expect(existsSync(file)).toBe(true);
+    const record = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    expect(Object.keys(record).sort()).toEqual(
+      ["minted_at_ms", "original_vendor_session_id", "workspace_key"].sort(),
+    );
+    expect(record.original_vendor_session_id).toBe(started.vendorSessionId);
+    expect(record.workspace_key).toBe(keyOf(shim));
+    expect(typeof record.minted_at_ms).toBe("number");
+    // NOTHING THE VENDOR WOULD WRITE EXISTS YET: the identity is on disk while
+    // the transcript — the vendor's first record — has not been created.
+    expect(existsSync(sessionTranscriptPath(shim.dirs, started.vendorSessionId))).toBe(false);
+  });
+
+  test("a resume with the file ABSENT adopts the resume id and logs the derivation", async () => {
+    // R9 CASE 2. Every real transcript's `sessionId` equals its filename, so
+    // the resume id IS the original id and adopting it is a DERIVATION. It is
+    // logged as one, because a silent adoption and a guess look identical
+    // afterwards.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(first);
+    await runTurn(first, stream, "t1", "!md");
+    stream.close();
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    // The state a file-only reader would face: the transcript, and no identity.
+    rmSync(agentIdPath(first.dirs.stateDir, keyOf(first)));
+
+    const second = await spawnShim({ reuse: first.dirs });
+    const resumed = sessionStarted(
+      await second.clients.h1.startSession(
+        resumeSession(started.vendorSessionId, remediationPay()),
+      ),
+    );
+
+    expect(resumed.vendorSessionId).toBe(started.vendorSessionId);
+    const derived = await second.log.record(
+      (record) => record.context.rule === "absent_file_adopts_resume_id",
+    );
+    expect(derived.level).toBe("warn");
+    expect(derived.context.vendor_session_id).toBe(started.vendorSessionId);
+    // And the derivation was PERSISTED, so the next reader does not derive again.
+    const record = JSON.parse(
+      readFileSync(agentIdPath(second.dirs.stateDir, keyOf(second)), "utf8"),
+    ) as Record<string, unknown>;
+    expect(record.original_vendor_session_id).toBe(started.vendorSessionId);
+  });
+});
+
+describe("rotation, on the FILE plane", () => {
+  test("a new transcript appears under the POST-CLEAR init id and the old file just stops", async () => {
+    // ROTATION AS OBSERVED (capture identity-rotation-clear): the id the
+    // session rotates to is the second `system:init`'s session_id, a new file
+    // appears under it, and the old file ends with NO closing record of any
+    // kind — the "closing system record" was declared and never observed.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await runTurn(shim, stream, "t1", "!md");
+    const before = readTranscript(shim.dirs, started.vendorSessionId);
+
+    await runTurn(shim, stream, "t2", "!rotate");
+
+    const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
+    expect(links).toHaveLength(1);
+    const newId = links[0]!.replace(/\.json$/, "");
+    expect(newId).not.toBe(started.vendorSessionId);
+    // The NEW file exists under the post-clear init id...
+    expect(existsSync(sessionTranscriptPath(shim.dirs, newId))).toBe(true);
+    expect(readTranscript(shim.dirs, newId).length).toBeGreaterThan(0);
+    // ...and the OLD one simply STOPPED. Everything it gained is the part of
+    // the rotating turn that happened BEFORE the reset (its prompt and the
+    // assistant lines that preceded the reset); nothing CLOSES it. The mock's
+    // declared "closing system record" was dropped when the capture showed the
+    // real file ends mid-conversation, so a trailing system record here would
+    // be a shape no real transcript has.
+    const after = readTranscript(shim.dirs, started.vendorSessionId);
+    expect(after.length).toBeGreaterThan(before.length);
+    expect(after.at(-1)?.type).not.toBe("system");
+    stream.close();
+  });
+
+  test("vendor-id/<new>.json holds the three ruled link fields", async () => {
+    // The link is the smallest thing that closes the gap the files leave: the
+    // reset message is the only place the old and new ids ever appear together,
+    // so nobody can recover the link afterwards unless it was written down.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!rotate");
+
+    const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
+    expect(links).toHaveLength(1);
+    const newId = links[0]!.replace(/\.json$/, "");
+    const link = JSON.parse(
+      readFileSync(vendorLinkPath(shim.dirs.stateDir, keyOf(shim), newId), "utf8"),
+    ) as Record<string, unknown>;
+    expect(Object.keys(link).sort()).toEqual(
+      ["linked_at_ms", "original_vendor_session_id", "vendor_session_id"].sort(),
+    );
+    expect(link.vendor_session_id).toBe(newId);
+    expect(link.original_vendor_session_id).toBe(started.vendorSessionId);
+    expect(typeof link.linked_at_ms).toBe("number");
+    stream.close();
+  });
+
+  test("the rotation's SessionUpdate row is keyed session:identity_rotated:<vendor uuid>", async () => {
+    // The ruled spelling, and the suffix is the VENDOR's record uuid so the
+    // sidecar's row for the same reset line collides with this one.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!rotate");
+
+    const rotatedKeys = writtenKeys(shim.store?.writes() ?? []).filter((key) =>
+      key.startsWith("session:identity_rotated:"),
+    );
+    expect(rotatedKeys.length).toBeGreaterThan(0);
+    // THE SUFFIX CANNOT BE JOINED TO THE FILE PLANE, AND THAT IS THE FINDING.
+    // `conversation_reset` exists ONLY on the stream — the observed capture
+    // shows the old transcript simply stopping with no record of the reset at
+    // all — so this arm's uuid is a stream uuid with no transcript line behind
+    // it. What IS assertable is that it is the vendor's uuid rather than a
+    // shim-minted counter, and that it names no line either file holds.
+    const links = readdirSync(join(shim.dirs.stateDir, "shim", keyOf(shim), "vendor-id"));
+    const newId = links[0]!.replace(/\.json$/, "");
+    const fileUuids = new Set([
+      ...recordUuids(readTranscript(shim.dirs, started.vendorSessionId)),
+      ...recordUuids(readTranscript(shim.dirs, newId)),
+    ]);
+    for (const key of rotatedKeys) {
+      const suffix = key.slice("session:identity_rotated:".length);
+      expect(suffix).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(fileUuids.has(suffix)).toBe(false);
+    }
+    stream.close();
+  });
+});
+
+describe("the transcript backup", () => {
+  test("a turn leaves a BYTE-EQUAL copy under the state dir", async () => {
+    // The transcript is the one artifact nobody can regenerate, so the copy is
+    // asserted byte for byte: a truncated or re-serialized copy would restore
+    // a conversation that is not the one that was lost.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!md");
+
+    const directory = backupDir(shim.dirs.stateDir, keyOf(shim));
+    const copies = readdirSync(directory).filter((name) => name.endsWith(".jsonl"));
+    expect(copies.length).toBeGreaterThan(0);
+    const original = readFileSync(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+    expect(
+      copies.some((name) => readFileSync(join(directory, name)).equals(original)),
+    ).toBe(true);
+    stream.close();
+  });
+
+  test("a rotation takes a SECOND copy", async () => {
+    // A copy is taken at every turn end AND at every rotation, because the
+    // rotation is exactly the moment the old transcript stops growing and
+    // becomes the thing there is no other copy of.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await runTurn(shim, stream, "t1", "!md");
+    const directory = backupDir(shim.dirs.stateDir, keyOf(shim));
+    const afterTurn = readdirSync(directory).length;
+
+    await runTurn(shim, stream, "t2", "!rotate");
+
+    expect(readdirSync(directory).length).toBeGreaterThan(afterTurn);
+    stream.close();
+  });
+
+  test("the copies are BOUNDED by the keep constant", async () => {
+    // An unbounded backup of a growing file eventually costs more than it
+    // protects. The bound is read from the producer's own constant rather than
+    // spelled again here.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    for (let turn = 0; turn <= BACKUP_KEEP + 2; turn += 1) {
+      await runTurn(shim, stream, `t${String(turn)}`, "!md");
+    }
+
+    const directory = backupDir(shim.dirs.stateDir, keyOf(shim));
+    expect(readdirSync(directory).length).toBeLessThanOrEqual(BACKUP_KEEP);
+    stream.close();
+  });
+});
+
+describe("a detached shell run's key spellings", () => {
+  test("the shim's bash rows are keyed bash:<run> and bash:<run>:terminal, with the VENDOR's run id", async () => {
+    // THE RUN ID IS THE BASH CALL'S OWN tool_use_id, which the vendor wrote
+    // into the transcript. The sidecar keys the same run off the same id from
+    // the file, so a shim that keyed by anything else would write a second
+    // lifecycle for one run instead of upserting onto the sidecar's.
+    //
+    // The `bash:<run>:<offset>` delta spelling has NO shim producer: every
+    // output delta comes from the sidecar tailing the spool, so it is asserted
+    // where it is minted (`src/store/keys.ts`'s own suite) and stated here
+    // rather than faked into existence.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    stream.close();
+
+    // The forced kill is what makes the shim — rather than an absent sidecar —
+    // write the run's terminal.
+    await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await shim.exited;
+
+    const bashKeys = writtenKeys(shim.store?.writes() ?? []).filter((key) =>
+      key.startsWith("bash:"),
+    );
+    expect(bashKeys.length).toBeGreaterThan(0);
+    const vendorIds = toolUseIds(readTranscript(shim.dirs, started.vendorSessionId));
+    expect(vendorIds.length).toBeGreaterThan(0);
+    for (const key of bashKeys) {
+      const rest = key.slice("bash:".length);
+      const run = rest.endsWith(":terminal") ? rest.slice(0, -":terminal".length) : rest;
+      // Not an offset row: the shim writes none.
+      expect(rest === run || rest === `${run}:terminal`).toBe(true);
+      expect(vendorIds).toContain(run);
+    }
+    expect(bashKeys.some((key) => key.endsWith(":terminal"))).toBe(true);
   });
 });

@@ -133,6 +133,14 @@ export interface FakeStore {
   tailClosed(token: string): Promise<void>;
   /** Every WriteBatch request the store received, in order, failures included. */
   writes(): storev1.WriteBatchRequest[];
+  /**
+   * The same batches with the store's VERDICT on each, in order.
+   *
+   * `writes()` cannot tell a refused batch from an accepted one, so "a write id
+   * repeats only because a refused batch was resent" was unassertable: every
+   * duplicate looked alike. The verdict is the discriminator.
+   */
+  writeBatches(): readonly FakeStoreWrite[];
   /** One book's rows, oldest first — the store's own order, for assertions. */
   book(agentId: string): storev1.StoreLineAt[];
   /** Every session-update row written, in order. */
@@ -168,6 +176,12 @@ export type StoreReadFailureArm = "invalid_request" | "stale_pointer" | "storage
 /** The typed refusal arms `WriteBatch` declares. */
 export type StoreWriteFailureArm = "invalid_request" | "storage_failure";
 
+/** One batch the fake received, and whether it took it. */
+export interface FakeStoreWrite {
+  readonly request: storev1.WriteBatchRequest;
+  readonly accepted: boolean;
+}
+
 /** One read the fake served: which verb, and what was asked. */
 export interface FakeStoreRead {
   readonly rpc:
@@ -185,6 +199,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const rowsByKey = new Map<string, StoredRow>();
   const watches = new Map<string, WatchSessionState>();
   const receivedWrites: storev1.WriteBatchRequest[] = [];
+  /** The same batches with the verdict — see {@link FakeStore.writeBatches}. */
+  const writeVerdicts: FakeStoreWrite[] = [];
   const sessionUpdateRows: conversationv1.SessionUpdate[] = [];
   const unservedRows: storev1.StoreUnservedItem[] = [];
   /** Who is waiting for an unserved item of a given arm to land. */
@@ -639,6 +655,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
 
       async writeBatch(request) {
         receivedWrites.push(request);
+        writeVerdicts.push({ request, accepted: writeFailure === null });
         if (writeFailure !== null) {
           // DURABLE OR NOTHING: a failed batch lands no entry at all, which is
           // what makes a whole-batch retry correct rather than duplicating.
@@ -708,6 +725,7 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       }
       readFailures.set(verb, { arm, detail: detail ?? `fake store refuses ${verb}` });
     },
+    writeBatches: () => [...writeVerdicts],
     openTails: () => [...openTailTokens],
     tailClosed: async (token) => {
       if (!openTailTokens.has(token)) return;
