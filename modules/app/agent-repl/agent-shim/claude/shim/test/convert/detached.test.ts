@@ -19,8 +19,10 @@ import {
   lostAgentEntry,
   lostBashEntry,
   lostSubagentEntry,
+  outputPathFromProse,
   wentSilent,
 } from "../../src/convert/detached.js";
+import { toolResultText } from "../../src/convert/entries.js";
 import { foldContext, MAIN_AGENT } from "./fold-harness.js";
 
 const RUN = create(conversationv1.AgentActivityIdSchema, { value: "run-1" });
@@ -110,6 +112,51 @@ describe("lostAgentEntry", () => {
     const entry = lostAgentEntry(foldContext({ keepalive: true }), MAIN_AGENT, wentSilent());
 
     expect(entry.keepalive).toBe(true);
+  });
+});
+
+describe("outputPathFromProse", () => {
+  // `toolUseResult` on a backgrounded Bash carries `backgroundTaskId` and
+  // NOTHING else (testdata/corpus/tool-results/bash-background.jsonl), so this
+  // sentence is the vendor's only statement of where the output accumulates at
+  // announcement time. Reading it wrong leaves every detached shell announced
+  // with no output and its readability unset.
+
+  it("reads the spool path out of the vendor's captured sentence", () => {
+    // Arrange. Byte-for-byte the shape the corpus capture carries.
+    const content = toolResultText(
+      "Command running in background with ID: bvif9m46l. Output is being written to: " +
+        "/private/tmp/claude-501/x/f2c3c473/tasks/bvif9m46l.output. You will be notified when it " +
+        "completes. To check interim output, use Read on that file path.",
+    );
+
+    // Act, Assert.
+    expect(outputPathFromProse(content)).toBe(
+      "/private/tmp/claude-501/x/f2c3c473/tasks/bvif9m46l.output",
+    );
+  });
+
+  it("stops at the sentence's period rather than swallowing it into the path", () => {
+    // Arrange.
+    const content = toolResultText("Output is being written to: /tmp/a.output. Then more prose.");
+
+    // Act, Assert.
+    expect(outputPathFromProse(content)).toBe("/tmp/a.output");
+  });
+
+  it("yields NO path when the vendor said something else, rather than a wrong one", () => {
+    // A reworded sentence must degrade to an announcement with no output — the
+    // task_notification still supplies the path at the end — never to a guess.
+    // Arrange.
+    const content = toolResultText("Command running in background with ID: b1.");
+
+    // Act, Assert.
+    expect(outputPathFromProse(content)).toBeUndefined();
+  });
+
+  it("yields no path when there is no content at all", () => {
+    // Arrange, Act, Assert.
+    expect(outputPathFromProse(undefined)).toBeUndefined();
   });
 });
 
