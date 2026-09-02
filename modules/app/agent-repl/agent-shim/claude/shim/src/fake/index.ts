@@ -141,7 +141,19 @@ export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
 export const REFUSE_ENV = "AGENT_REPL_FAKE_REFUSE";
 
 /** The control verbs {@link REFUSE_ENV} may name. */
-const REFUSABLE = new Set(["start", "set_model", "set_permission_mode"]);
+const REFUSABLE = new Set(["start", "start-once", "set_model", "set_permission_mode"]);
+
+/**
+ * How many starts `start-once` has already refused.
+ *
+ * `start` refuses forever, which proves the arm but can never show what happens
+ * AFTER the condition clears — and "a failed start leaves the engine as it
+ * found it" is only observable when the retry actually succeeds. `start-once`
+ * refuses the first query this process is asked for and allows every later one,
+ * which is exactly the daemon's story: something was wrong, it was fixed, the
+ * same warm shim serves the conversation.
+ */
+let startOnceRefusals = 0;
 
 /** Which control verbs this process was told to refuse. */
 export function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
@@ -276,6 +288,10 @@ export function createFakeQuery(
     // The vendor could not be started at all. StartSession turns this into
     // `vendor_start_failed`, which is otherwise unreachable behind `--fake`.
     throw new Error("the mocked vendor was told to refuse to start");
+  }
+  if (refuse.has("start-once") && startOnceRefusals === 0) {
+    startOnceRefusals += 1;
+    throw new Error("the mocked vendor was told to refuse the FIRST start only");
   }
   const cwd = opts.cwd ?? process.cwd();
   const configDir =
