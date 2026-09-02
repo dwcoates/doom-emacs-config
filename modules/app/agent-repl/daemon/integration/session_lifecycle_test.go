@@ -8,6 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/integration/harness"
 
@@ -446,8 +447,11 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 		t.Fatalf("KillWorkspace = %v, want a success", resp.Msg)
 	}
 
-	// Assert: KillSession{force:true} was sent.
-	killed := f.shim.ExpectKillSession()
+	// Assert: KillSession{force:true} was sent. It is read from the shim's own
+	// LOG, not its control socket: KillWorkspace reaps the process before it
+	// answers, and the fake's in-memory recorder dies with it.
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
 	if !killed.GetForce() {
 		t.Fatalf("KillSession.force = false, want true (KillWorkspace is the forced tear-down)")
 	}

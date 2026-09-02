@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // LogRecord is one JSONL record from a daemon log sink, per
@@ -191,6 +194,53 @@ func (d *Daemon) watchedWorkspaceDirs() []string {
 	out := make([]string, len(d.workspaceDirs))
 	copy(out, d.workspaceDirs)
 	return out
+}
+
+// ShimLoggedRequest recovers the LAST request the fake shim recorded for a verb
+// from its durable log sink, and reports whether one was found.
+//
+// It exists for the verbs that END the shim: the fake's in-memory recorder dies
+// with the process, so a forced KillSession can only be asserted from something
+// that outlived it.
+func ShimLoggedRequest(t *testing.T, workspaceDir, rpc string, into proto.Message) bool {
+	t.Helper()
+	found := false
+	for _, r := range readLog(t, WorkspaceLogPath(workspaceDir, "shim")) {
+		if r.Operation != "shim.fake."+rpc {
+			continue
+		}
+		encoded, ok := r.Context["request"].(string)
+		if !ok {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			t.Fatalf("harness: the shim log's %s request is not base64: %v", rpc, err)
+		}
+		if err := proto.Unmarshal(raw, into); err != nil {
+			t.Fatalf("harness: the shim log's %s request does not decode: %v", rpc, err)
+		}
+		found = true
+	}
+	return found
+}
+
+// AwaitShimLoggedRequest waits for the fake shim to have logged one request for
+// a verb, and decodes the last one.
+func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Message) {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if ShimLoggedRequest(d.t, workspaceDir, rpc, into) {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, d.ctx.Err())
+		}
+	}
 }
 
 // ClientLogPath is the sink ClientLog persists a webview's records to.
