@@ -28,6 +28,7 @@
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
 import { formatAge } from "../../duration.js";
+import { formatTokens } from "../../format.js";
 import { log } from "../../log.js";
 import {
   AnswerColdGateResponseSchema,
@@ -518,25 +519,6 @@ export function scopeLabel(scope: SessionCompactScope, path: string): string {
     );
   }
   return COLD_GATE_COPY.scopes[name];
-}
-
-/**
- * A raw token count as the figure a reader can weigh: `999`, `1.0k`, `12k`,
- * `182k`, `1.2M`.
- *
- * ONE FRACTION DIGIT UNDER TEN of a unit and none above it, because the reader
- * is deciding whether to pay for a re-read: the difference between 1.2M and 1.3M
- * matters and the difference between 182k and 183k does not.
- */
-export function formatTokens(tokens: number): string {
-  if (tokens < 1000) return String(tokens);
-  if (tokens < 1_000_000) return `${scaled(tokens / 1000)}k`;
-  return `${scaled(tokens / 1_000_000)}M`;
-}
-
-/** One unit's magnitude: a fraction digit only while it is worth a digit. */
-function scaled(value: number): string {
-  return value < 10 ? value.toFixed(1) : String(Math.round(value));
 }
 
 /**
