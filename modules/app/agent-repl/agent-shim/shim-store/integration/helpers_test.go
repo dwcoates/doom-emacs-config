@@ -1060,28 +1060,6 @@ func subagentSpawnFrame(spawner, actID, createdAgent, promptText string, at int6
 	}
 }
 
-// detachedSubagentFrame announces that a subagent left its spawner's stream.
-// It rides the serveable_frame arm as a real producer's does, and is still
-// routed to the lifecycle table alone.
-func detachedSubagentFrame(owner, workID, originActID, createdAgent, promptText string, at int64) *conversationv1.AgentFrame {
-	return &conversationv1.AgentFrame{
-		AgentId: agentID(owner),
-		Result: &conversationv1.AgentFrame_DetachedWork{
-			DetachedWork: &conversationv1.AgentDetachedWork{
-				Work: detachedWorkID(workID),
-				Origin: &conversationv1.AgentDetachedWork_Detached{
-					Detached: &conversationv1.DetachedWorkDetached{
-						DetachedFromId: activityID(originActID),
-						Cause: &conversationv1.DetachedWorkDetached_Requested{
-							Requested: &conversationv1.DetachedCauseRequested{},
-						},
-					},
-				},
-			},
-		},
-	}
-}
-
 // detachedBashFrame announces a detached shell run created on this stream.
 func detachedBashFrame(owner, workID, commandLine string, at int64) *conversationv1.AgentFrame {
 	return &conversationv1.AgentFrame{
