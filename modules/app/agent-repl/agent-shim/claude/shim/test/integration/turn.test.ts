@@ -98,9 +98,13 @@ describe("StartTurn", () => {
     expect(prompt.agent?.value).toBe(started.vendorSessionId);
   });
 
-  test("a fresh session's opening page is EMPTY with a floor boundary", async () => {
-    // An empty page is a page: `floor` says there is no older history, which is
-    // a different statement from "no page was served".
+  test("a fresh session's opening page carries EXACTLY the prompt just delivered", async () => {
+    // R15 (RULED): the AgentPrompt row is DURABLE before the page is read, and
+    // ONE CALL SUBMITS AND PAINTS -- so the page a fresh session's first
+    // StartTurn answers with already contains the prompt that opened the turn,
+    // and nothing else. An empty page here would mean the consumer's first
+    // paint was missing the turn it had just started. `floor` still says there
+    // is no older history, which is a different statement from "no page".
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
@@ -110,7 +114,8 @@ describe("StartTurn", () => {
 
     if (response.result.case !== "success") throw new Error("StartTurn refused");
     const page = response.result.value.page;
-    expect(page?.entries).toEqual([]);
+    expect(page?.entries.length).toBe(1);
+    expect(page?.entries[0]?.entry?.entry.case).toBe("userPrompt");
     expect(page?.boundary.case).toBe("floor");
   });
 
@@ -264,6 +269,24 @@ describe("StartTurn", () => {
 });
 
 describe("WatchAgent", () => {
+  test("opened before any turn, it opens with an EMPTY page and a floor boundary", async () => {
+    // The counterpart to R15's StartTurn page: nothing has been written yet, so
+    // this is the one open that legitimately paints nothing. An empty page is
+    // still a page -- `floor` says there is no older history, which is a
+    // different statement from "no page was served".
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    const page = watchAgentPage(await watch.next());
+
+    expect(page.entries).toEqual([]);
+    expect(page.boundary.case).toBe("floor");
+    watch.close();
+  });
+
   test("it opens with a page and then tails one POINTERED entry per write", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());

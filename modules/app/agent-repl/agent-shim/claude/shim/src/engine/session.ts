@@ -78,6 +78,7 @@ import {
   readAmbient,
 } from "./compaction.js";
 import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, type TranscriptFacts } from "./cold.js";
+import { ForegroundUnitTable } from "./foreground.js";
 import { LiveWorkTable } from "./detached.js";
 import {
   createAgentIdentityStore,
@@ -242,6 +243,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
   const pushes = new SessionPushes(deps.nowMs);
   const live = new LiveWorkTable();
+  const foreground = new ForegroundUnitTable();
   const rewind = new KeepaliveRewind();
 
   let identity: SessionIdentity | undefined;
@@ -888,6 +890,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       noteConverterHealthy();
     }
     const entries = [...output.entries];
+    noteForegroundUnits(entries);
     if (entries.length > 0) deps.persistence.write(entries);
     for (const entry of entries) {
       if (entry.item.kind !== "session_update") continue;
@@ -987,6 +990,30 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       vendorSessionId: previous,
       atMs: deps.nowMs(),
     });
+  }
+
+  /**
+   * Track the units in flight, so `DetachForeground` can tell its four refusals
+   * apart.
+   *
+   * Read off the FOLD's own frames and not off the raw SDK blocks: a consumer
+   * addresses a unit by the `AgentActivityId` it was shown, so the table has to
+   * be keyed by exactly that, and the `item` arm carries the kind in the same
+   * vocabulary the refusals speak.
+   */
+  function noteForegroundUnits(entries: readonly PersistEntry[]): void {
+    for (const entry of entries) {
+      if (entry.item.kind !== "frame") continue;
+      const frame = entry.item.frame;
+      if (frame.result.case !== "update") continue;
+      const update = frame.result.value.update;
+      if (update.case !== "activity") continue;
+      const activity = update.value;
+      const item = activity.item;
+      const inner = item.value as { result?: { case?: string } } | undefined;
+      const settled = inner?.result?.case !== undefined && inner.result.case !== "start";
+      foreground.note(activity.activityId?.value ?? "", item.case ?? "", settled);
+    }
   }
 
   function noteDetachedWork(message: SdkMessage): void {
@@ -1678,6 +1705,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     persistence: deps.persistence,
     gate,
     live,
+    foreground,
     identity: () => identity,
     query: () => query,
     nowMs: deps.nowMs,
@@ -1687,6 +1715,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       open = turn;
       if (turn === undefined) cadence?.resume();
       else cadence?.pause();
+    },
+    reportStoreUnreachable: (detail) => {
+      pushes.fault(sessionFault({ kind: "storeUnreachable" }, "shim-store-reader", detail));
     },
     watcherOpened: (agent, page) => {
       let settle: () => void = () => undefined;
