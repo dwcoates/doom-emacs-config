@@ -718,11 +718,19 @@ fresh build would ever happen."
                (agent-repl-daemon-boot-timeout-seconds 2.0)
                (agent-repl-link-up-functions nil)
                (agent-repl-link-no-daemon-functions nil))
+          ;; The link must be standing: the stop goes out on the primary,
+          ;; and the restart sequences everything else on its ack.
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                        nil "the link to come up")
           ;; Act.
           (agent-repl-frontend-daemon-restart)
           (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
           ;; The daemon does what it was asked: it exits and removes
           ;; `daemon.addr', which is the state a fresh ensure must see.
+          ;; The fake honours the ask on its own control endpoint -- it has
+          ;; no shutdown scheduler of its own to run down.
+          (agent-repl-itest--exit daemon)
           (agent-repl-itest--wait-until
            (lambda () (null (agent-repl-itest--read-addr-file
                              (agent-repl-itest-daemon-state-dir daemon))))
