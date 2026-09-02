@@ -204,6 +204,67 @@ describe("scripted answers", () => {
   });
 });
 
+describe("unset-field injection", () => {
+  it("pushes a feed row with no row arm", async () => {
+    // Arrange
+    fake.injectUnsetField("watchFeed");
+    const open = await client.openFeed({ workspace: workspaceRef() });
+    const watch = open.result.case === "success" ? open.result.value.watch : undefined;
+    // Act
+    const reader = take(client.watchFeed({ watch }), 1);
+    await fake.awaitStream("watchFeed");
+    fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("poisoned"));
+    const [push] = await reader;
+    // Assert
+    expect(push.row?.row.case).toBeUndefined();
+  });
+
+  it("pushes a footer strip with no status", async () => {
+    // Arrange
+    fake.injectUnsetField("watchFooter");
+    fake.setFooter(WORKSPACE_ID, footerView());
+    // Act
+    const [push] = await take(client.watchFooter({ workspace: workspaceRef() }), 1);
+    // Assert
+    expect(push.footer?.strip?.status).toBeUndefined();
+  });
+
+  it("pushes a roster row with no status", async () => {
+    // Arrange
+    fake.injectUnsetField("watchWorkspaceRoster");
+    fake.setRoster(roster({ rows: [rosterRow()] }));
+    // Act
+    const [push] = await take(client.watchWorkspaceRoster({}), 1);
+    // Assert
+    const row = push.roster?.repository?.sections[0]?.rows?.rows[0];
+    expect(row?.status.case).toBeUndefined();
+  });
+
+  it("leaves the stored view intact for the following push", async () => {
+    // Arrange: the strip copies rather than mutates, so the SECOND push of the
+    // same view is the healthy original.
+    fake.injectUnsetField("watchFooter");
+    fake.setFooter(WORKSPACE_ID, footerView());
+    // Act
+    const [push] = await take(client.watchFooter({ workspace: workspaceRef() }), 1);
+    // Assert
+    expect(push.footer?.strip?.status).toBeUndefined();
+    const [again] = await take(client.watchFooter({ workspace: workspaceRef() }), 1);
+    expect(again.footer?.strip?.status?.status.case).toBe("thinking");
+  });
+
+  it("names the path it strips", () => {
+    // Arrange / Act / Assert
+    expect(fake.unsetFieldPath("watchFeed")).toBe("FeedRow.row");
+  });
+
+  it("refuses an rpc it has no stripper for", () => {
+    // Arrange / Act / Assert: a silent healthy frame would pass a test that
+    // asserted the client refused a broken one.
+    expect(() => fake.injectUnsetField("daemonHealth")).toThrow(/no stripper/);
+  });
+});
+
 describe("unknown-field injection", () => {
   it("serializes an injected unknown field on a unary response", async () => {
     // Arrange
