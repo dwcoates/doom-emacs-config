@@ -558,3 +558,47 @@ func TestTheDwellRetiresTheMomentaryLoadingStatus(t *testing.T) {
 		t.Fatalf("status = %q, want the successor once the dwell elapsed", got)
 	}
 }
+
+func TestTheTurnOpenEdgeRaisesSubmittingBeforeAnyFrame(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.OnTurnOpened(testWS, "turn-1")
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetThinking()
+	if got.GetSubmitting() == nil {
+		t.Fatalf("status = %v, want thinking.submitting on the turn-open edge", got)
+	}
+}
+
+func TestTheTurnOpenEdgeStartsTheStripsClock(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.r.OnTurnOpened(testWS, "turn-1")
+
+	// Assert
+	clock := h.view(t).GetStrip().GetClock()
+	if clock.TurnStartedAtMs == nil || *clock.TurnStartedAtMs != h.clock.Now().UnixMilli() {
+		t.Fatalf("clock = %+v, want the turn-open instant", clock)
+	}
+}
+
+func TestTheTurnOpenEdgeKeepsAnAlreadyInstalledAct(t *testing.T) {
+	// Arrange: the daemon named the act (a compaction) before the shim
+	// answered StartTurn.
+	h := newHarness(t)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant, Act: ActCompact})
+
+	// Act
+	h.r.OnTurnOpened(testWS, "turn-1")
+
+	// Assert
+	got := h.view(t).GetStrip().GetStatus().GetThinking()
+	if got.GetCompacting() == nil {
+		t.Fatalf("status = %v, want thinking.compacting: the edge must not demote a named act", got)
+	}
+}

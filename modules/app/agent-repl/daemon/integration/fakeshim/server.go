@@ -90,8 +90,13 @@ type server struct {
 
 	mu      sync.Mutex
 	answers map[string][]scriptedAnswer
-	hung    bool
-	unhang  chan struct{}
+	// bashStarts is the ORIGINAL start of each shell the fake has been told
+	// about, keyed by the detached-work handle and by the in-turn activity id
+	// the work detached from. WatchBash opens with it, exactly as the contract
+	// says the stream opens ("`start` — the command, the ORIGINAL instant").
+	bashStarts map[string]*conversationv1.AgentBash
+	hung       bool
+	unhang     chan struct{}
 	// sessionKilled records an accepted KillSession: the process exits once
 	// its answer has been written.
 	sessionKilled bool
@@ -115,14 +120,15 @@ type scriptedAnswer struct {
 
 func newServer(rec *Recorder, p Profile, log *logSink) *server {
 	return &server{
-		rec:      rec,
-		profile:  p,
-		log:      log,
-		sessions: newHub[*conversationv1.SessionUpdate](),
-		agents:   newHub[agentFrame](),
-		bashes:   newHub[bashFrame](),
-		answers:  map[string][]scriptedAnswer{},
-		unhang:   make(chan struct{}),
+		rec:        rec,
+		profile:    p,
+		log:        log,
+		sessions:   newHub[*conversationv1.SessionUpdate](),
+		agents:     newHub[agentFrame](),
+		bashes:     newHub[bashFrame](),
+		answers:    map[string][]scriptedAnswer{},
+		bashStarts: map[string]*conversationv1.AgentBash{},
+		unhang:     make(chan struct{}),
 	}
 }
 
@@ -386,6 +392,14 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 	work := req.Msg.GetWork().GetValue()
 	id, ch := s.bashes.subscribe()
 	defer s.bashes.unsubscribe(id)
+
+	// THE OPENING FRAME IS THE CONTRACT'S: a WatchBash stream opens with the
+	// shell's `start`. It is also what makes the open observable — the daemon's
+	// client takes the first frame as the open's answer — so a stream that
+	// sent nothing until the next delta would stall every caller.
+	if err := stream.Send(&shimv1.WatchBashResponse{Bash: s.bashStart(work)}); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -590,4 +604,73 @@ const NotImplementedMessage = "intended arm: %sError.not_implemented: workflow i
 
 func notImplemented(rpc string) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New(sprintf(NotImplementedMessage, rpc)))
+}
+
+// rememberBashStart files a shell's start under a key (its detached-work
+// handle, or the in-turn activity id it detached from).
+func (s *server) rememberBashStart(key string, bash *conversationv1.AgentBash) {
+	if key == "" || bash.GetStart() == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bashStarts[key] = bash
+}
+
+// aliasBashStart files an existing start under a second key, which is how a
+// `detached`-origin announcement carries an in-turn shell's start onto the
+// work handle its stream is addressed by.
+func (s *server) aliasBashStart(work, unit string) {
+	if work == "" || unit == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if bash, ok := s.bashStarts[unit]; ok {
+		s.bashStarts[work] = bash
+	}
+}
+
+// bashStart answers the opening frame for a work handle: the start the fake
+// was told about, or a bare one when the script never stated it.
+func (s *server) bashStart(work string) *conversationv1.AgentBash {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if bash, ok := s.bashStarts[work]; ok {
+		return bash
+	}
+	s.log.write("watch_bash_bare_start", map[string]any{"work": work})
+	return &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{},
+			StartedAt: &conversationv1.AgentActivityStartedAt{},
+		}},
+	}
+}
+
+// rememberPushedBash files whatever a pushed agent frame teaches the fake
+// about a shell's start: an in-turn bash unit's own start (keyed by its
+// activity id), a `created`-origin announcement's start (keyed by the work
+// handle), and a `detached`-origin announcement's alias from the unit it
+// detached from onto the work handle.
+func (s *server) rememberPushedBash(frame *conversationv1.AgentFrame) {
+	if act := frame.GetUpdate().GetActivity(); act != nil {
+		if bash := act.GetBash(); bash != nil {
+			s.rememberBashStart(act.GetActivityId().GetValue(), bash)
+		}
+	}
+	work := frame.GetDetachedWork()
+	if work == nil {
+		return
+	}
+	handle := work.GetWork().GetValue()
+	if created := work.GetCreated(); created != nil {
+		if bash := created.GetWorkCreated().GetBash(); bash != nil {
+			s.rememberBashStart(handle, bash)
+		}
+		return
+	}
+	if detached := work.GetDetached(); detached != nil {
+		s.aliasBashStart(handle, detached.GetDetachedFromId().GetValue())
+	}
 }
