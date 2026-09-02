@@ -142,3 +142,89 @@ func TestSettlePermissionRefusesAnAskItWasNeverToldAbout(t *testing.T) {
 		t.Fatal("settlePermission = true for an ask the fake never opened, want false")
 	}
 }
+
+// TestSubscribeBashReplaysAFramePushedBeforeTheStreamOpened covers the
+// lost-frame race the backlog exists for: a test pushes as soon as the daemon
+// has drawn the shell's head row, which is before the daemon's own WatchBash
+// goroutine has subscribed.
+func TestSubscribeBashReplaysAFramePushedBeforeTheStreamOpened(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	early := &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
+		Update: &conversationv1.AgentBashUpdate{NewOutput: "building...\n"},
+	}}
+	srv.publishBash("work-1", early)
+
+	// Act
+	_, _, backlog := srv.subscribeBash("work-1")
+
+	// Assert
+	if len(backlog) != 1 || backlog[0] != early {
+		t.Fatalf("the backlog = %v, want the one frame pushed before the subscription", backlog)
+	}
+}
+
+// TestSubscribeBashLeavesAnotherWorkHandlesFramesOutOfTheBacklog covers the
+// keying: the hub fans every frame out to every stream and the stream filters
+// by work handle, so the replay has to filter the same way.
+func TestSubscribeBashLeavesAnotherWorkHandlesFramesOutOfTheBacklog(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.publishBash("work-other", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
+		Update: &conversationv1.AgentBashUpdate{NewOutput: "elsewhere\n"},
+	}})
+
+	// Act
+	_, _, backlog := srv.subscribeBash("work-1")
+
+	// Assert
+	if len(backlog) != 0 {
+		t.Fatalf("the backlog = %v, want nothing from another shell's stream", backlog)
+	}
+}
+
+// TestPublishBashAfterASubscriptionStaysOffTheBacklog covers the
+// exactly-once half: a frame delivered on the channel must not ALSO be
+// replayed, or the daemon reads the same delta twice as a spool gap.
+func TestPublishBashAfterASubscriptionStaysOffTheBacklog(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	_, ch, backlog := srv.subscribeBash("work-1")
+	if len(backlog) != 0 {
+		t.Fatalf("the backlog at open = %v, want nothing published yet", backlog)
+	}
+	late := &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
+		Update: &conversationv1.AgentBashUpdate{NewOutput: "later\n"},
+	}}
+
+	// Act
+	srv.publishBash("work-1", late)
+
+	// Assert
+	got := <-ch
+	if got.bash != late {
+		t.Fatalf("the delivered frame = %v, want the one published after the subscription", got.bash)
+	}
+	if _, _, replay := srv.subscribeBash("work-1"); len(replay) != 1 {
+		t.Fatalf("a LATER stream's backlog = %v, want the one frame the shell has produced", replay)
+	}
+}
+
+// TestDropBashStreamsForgetsTheBacklog covers a severed family's redial: a
+// fresh observer of a shell that kept running, not a replay of the frames the
+// severed stream already carried.
+func TestDropBashStreamsForgetsTheBacklog(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.publishBash("work-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Update{
+		Update: &conversationv1.AgentBashUpdate{NewOutput: "before the drop\n"},
+	}})
+
+	// Act
+	srv.dropBashStreams()
+
+	// Assert
+	if _, _, backlog := srv.subscribeBash("work-1"); len(backlog) != 0 {
+		t.Fatalf("the backlog after a drop = %v, want nothing replayed onto a redial", backlog)
+	}
+}

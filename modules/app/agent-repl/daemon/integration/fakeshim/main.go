@@ -359,8 +359,7 @@ func (p *process) apply(line []byte) Reply {
 			return Reply{Error: fmt.Sprintf("fakeshim: decode bash frame: %v", err)}
 		}
 		p.srv.rememberBashStart(cmd.Work, b)
-		p.srv.bashes.publish(bashFrame{work: cmd.Work, bash: b})
-		return Reply{OK: true, Count: p.srv.bashes.count()}
+		return Reply{OK: true, Count: p.srv.publishBash(cmd.Work, b)}
 
 	case OpDropStream:
 		switch cmd.Stream {
@@ -369,7 +368,7 @@ func (p *process) apply(line []byte) Reply {
 		case StreamAgent:
 			p.srv.agents.dropAll()
 		case StreamBash:
-			p.srv.bashes.dropAll()
+			p.srv.dropBashStreams()
 		}
 		return Reply{OK: true}
 
