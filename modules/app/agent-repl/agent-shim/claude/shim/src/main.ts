@@ -52,7 +52,7 @@ import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { bindLog, configureLog, emergencyStderr } from "./log.js";
-import { acquireWorkspaceLock, lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
+import { lockDir, workspaceLockKey, LOCK_DIR_ENV } from "./locks.js";
 import { runtimeIdentity } from "./build-identity.js";
 import { type Engine } from "./engine/engine.js";
 import { createEngine, type CreateQuery, type QuerySpec } from "./engine/session.js";
@@ -566,15 +566,14 @@ export async function main(): Promise<void> {
     "validated the spawn contract and configured durable logging",
   );
 
-  // THE WORKSPACE CLAIM, before the socket. Two shims over one workspace means
-  // two writers on one transcript; binding first would leave a window in which
-  // a duplicate is reachable and already writing.
-  const releaseWorkspaceLock = acquireWorkspaceLock(cwd);
-  process.on("exit", releaseWorkspaceLock);
-  logMainLifecycle(
-    { workspace_dir: cwd, workspace_id: workspaceLockKey(cwd), outcome: "workspace_lock_acquired" },
-    "exclusive workspace lock acquired",
-  );
+  // NO LOCK IS TAKEN HERE. Startup is parse argv -> configure the log -> bind
+  // the socket -> serve, and a shim that has served but has no session is
+  // INERT: it holds neither kernel lock. Both claims are made inside
+  // StartSession, before the SDK is touched, and held for the process lifetime
+  // — so a prelaunched inert shim can sit beside the live shim it is about to
+  // replace instead of blocking forever on the live shim's workspace lock,
+  // while the daemon's probe still reads a held lock as "a live shim owns this
+  // conversation".
 
   const keepaliveIntervalMs = resolveKeepaliveIntervalMs(process.env, args.fake);
 
