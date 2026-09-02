@@ -690,3 +690,16 @@ every UX or contract gap you surfaced instead of improvising.
   Remediation #4 = two opus-low agents (S: session/process/record/transport;
   T: turn/gate/detached + goldens) dispatched after remediation #3 merges
   (shared session/detached tests and engine files).
+- LEDGER (2026-09-02): remediation #3 merged at 5721237ec (worktree/branch
+  retired): INTEGRATION GREEN 196 / 0 / 1; routes.ts boundary maps every
+  handler (ConnectError through, else logged Internal with detail);
+  stoppedBashTerminal written by StopBash/KillTurn/teardown; interim
+  unknown-target refusal; held context cuts written once identity settles;
+  teardown snapshots the live set before stopping; knowsAgent records every
+  announced created_agent_id. Override accepted (implementation detail):
+  LiveWorkTable keeps a fixed 64-entry ring of retired handles so
+  StopBashFailure.already_ended is answerable; beyond it `unknown_work`.
+  Mock now models a vendor process surviving its shim (survivingShellRuns)
+  for the re-adopt path — invented, not capture-grounded; marked. Dispatched
+  remediation #4 (audit #2): agents S (shim-agents/audit-s) and T
+  (shim-agents/audit-t) per shim-audit-2.md's split.
