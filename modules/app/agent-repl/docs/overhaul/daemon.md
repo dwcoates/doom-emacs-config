@@ -1360,4 +1360,7 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
 - CloseWorkspaceBlocked: fill the five fields from the quiet check; the
   footer's activity line and `summary` are the same composed sentence.
 - FeedMergeAbandoned.summary: compose from the abandon cause (user drop,
-  workspace closed, daemon shutdown).
+  workspace closed, daemon shutdown). LANDED: `merge.AbandonCause` declares
+  each cause beside its one resolved sentence; the producers are Evict, the
+  dequeue release, `OnWorkspaceClosed` (Kill and Nuke) and `recoverWaiting`
+  (a merge the restart cannot re-queue).
