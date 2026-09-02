@@ -386,6 +386,16 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - AUDIT 3 dispatched (fable, fresh context, read-only at 44476838d; told
   the landing-6 adaptations and the composer `--await-log` flake are in
   flight). Running: regress, landing6, audit 3 (cap).
+- R-REGRESS MERGED: the "regression" was load-correlated, not a
+  deletion. Production: the per-workspace log link is verified and
+  re-installed on the REUSE path too (it used to be installed only at
+  mint, so a stolen link sent readers to another file);
+  `agent-repl--install-workspace-log-link` shared by mint and repair; four
+  test-core pins. Harness: `agent-repl--workspace-log-targets` bound per
+  scenario (was the one process-wide registry). Suite: the close-blocked
+  test waits for the message under test, not any message. Follow-up:
+  `verbs-merge-success-messages-merge-enqueued` has the same racy wait
+  predicate — fix at the next remediation touching that suite.
 
 ## 1. Module map (final tree of lisp/)
 
