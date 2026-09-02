@@ -337,13 +337,3 @@ func (s *server) answerRefusal(
 	}
 	return s.refuse(log, rpc, resp, refused)
 }
-
-// refusalIsNotFound reports whether err is a refusal of an UNKNOWN ID, which is
-// how the two conditions a verb spells with one arm name are told apart.
-func refusalIsNotFound(err error) bool {
-	var wsRefusal *workspace.Refusal
-	if errors.As(err, &wsRefusal) {
-		return wsRefusal.NotFound
-	}
-	return false
-}

@@ -98,11 +98,11 @@ func (v *verbs) AnswerQuestion(ctx context.Context, ws ids.WorkspaceID, answer *
 	}
 	ask := given.GetAsk()
 	if ask.GetValue() == "" {
-		return refuse(log, "AnswerQuestion", ArmUnservedAnswer, "the question answer names no ask", true)
+		return refuse(log, "AnswerQuestion", ArmAskNotStanding, "the question answer names no ask", true)
 	}
 	served, ok := v.deps.Cards.Question(ws, ask)
 	if !ok {
-		return refuse(log, "AnswerQuestion", ArmUnservedAnswer,
+		return refuse(log, "AnswerQuestion", ArmAskNotStanding,
 			fmt.Sprintf("no question batch %q is standing", ask.GetValue()), true)
 	}
 	if err := validateQuestionEcho(log, served.Batch, given.GetAnswers()); err != nil {
