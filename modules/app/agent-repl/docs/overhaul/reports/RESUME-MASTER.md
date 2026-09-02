@@ -69,6 +69,16 @@ Original list (all landed, none deferred beyond the two noted):
 - Webapp: no pull-driven health surface; session faults via pushed topbar warnings; UpdateMergeQueue has no webapp surface.
 - Compaction summary line still ungrounded (cheap-model capture never compacted); needs a user-approved longer-history capture.
 
+## USER RULING 2026-09-02: e2e runs a REAL sidecar; no test writes the store
+
+daemon/e2e tests that hand-write sidecar events into the store are wrong.
+They write vendor JSONL and a real shim-sidecar ingests it. Plan and steps:
+reports/E2E-SIDECAR-PLAN.md. Done by sonnet-medium agents after the five-way
+merge, before coverage hardening. Also settled: daemon/integration = real
+daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
+suite (real shim + store + sidecar, hosted daemon, no frontends). Both
+survive the merge.
+
 ## USER RULING 2026-09-02: no playtests; e2e coverage hardening instead
 
 The final playtest step is DROPPED. After the cross-system e2e suite passes
