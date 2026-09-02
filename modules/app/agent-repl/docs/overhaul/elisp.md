@@ -512,11 +512,10 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
 - FeedMergeAbandoned.summary: render on the collapsed merge line as the
   failed summary is rendered.
 
-## Landing 8 relay (2026-09-02, project lead; user-approved)
+## Landing 8 relay (2026-09-02, project lead; corrected)
 
-Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
-- Decode FeedSessionSeparation.kind.compaction_failed{error}; render the
-  divider with the daemon's label (the host draws separations where it already
-  draws cleared/compacted).
-- Decode the five new FeedTurnEndedErrored.error arms; the host draws the
-  daemon-composed headline as for every other arm; pinned-arm lists extended.
+- NO elisp change. Landing 8 is frontend.v1 feed-only (a separation arm and
+  five turn-error arms); the Emacs host decodes the host stream and the
+  verbs, never feed rows — the webapp is the sole feed renderer. The earlier
+  relay text here was a mis-copy of the webapp item (project lead's error,
+  caught by the implementer).
