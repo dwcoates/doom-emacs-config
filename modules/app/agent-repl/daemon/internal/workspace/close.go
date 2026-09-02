@@ -37,7 +37,21 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
 		log.Info(opClose, "refused a close that is not quiet", dlog.Context{
 			"reason": blocked.Reason, "detail": blocked.Detail,
 		})
-		return &Refusal{Rpc: "CloseWorkspace", Arm: "blocked", Reason: blocked.Detail}
+		// THE EVIDENCE RIDES THE ARM (landing 7): a caller with no footer
+		// reads why, and `summary` is the SAME composed sentence the footer's
+		// activity line draws — one composer, never two.
+		return &Refusal{
+			Rpc:    "CloseWorkspace",
+			Arm:    "blocked",
+			Reason: blocked.Detail,
+			Fields: map[string]any{
+				"turn_in_flight": blocked.TurnInFlight,
+				"live_work":      blocked.LiveWork,
+				"held_prompts":   blocked.HeldPrompts,
+				"merge_queued":   blocked.MergeQueued,
+				"summary":        blocked.Detail,
+			},
+		}
 	}
 
 	if err := v.deps.DB.SetClosed(ctx, ws, true); err != nil {

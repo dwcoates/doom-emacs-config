@@ -7,6 +7,7 @@ import (
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/shimclient"
@@ -835,4 +836,82 @@ func TestTheLinkComingBackRaisesNoFault(t *testing.T) {
 		}
 	default:
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The landing-7 re-announcement: WatchSessionResponse.session_started
+// ---------------------------------------------------------------------------
+
+// TestAPureAttachTakesTheSessionFactsFromTheReannouncement is the adoption
+// case: a watcher opened with NO facts (crash boot, handover) learns the
+// session's identity and its turn in flight from the shim's own re-announcement
+// rather than from a durable record.
+func TestAPureAttachTakesTheSessionFactsFromTheReannouncement(t *testing.T) {
+	// Arrange: a pure attach — Session carries nothing.
+	h := newHarness(t, Session{})
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted("turn-7"))
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert: the facts reached the surfaces, and the open turn is held.
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+	if !hasEvent(seen, "topbar.OnSessionStarted") {
+		t.Fatalf("the re-announcement routed %v, want topbar.OnSessionStarted", names(seen))
+	}
+	turn := h.w.TurnInFlight()
+	if turn == nil || *turn != ids.TurnID("turn-7") {
+		t.Fatalf("TurnInFlight() = %v, want the re-announced turn-7", turn)
+	}
+}
+
+// TestAReannouncementOnAWatchThatAlreadyHoldsTheFactsIsIgnored is the
+// idempotence half: the re-announcement rides EVERY new watch, including each
+// re-open after a link break, so a watcher that already holds the facts must
+// not republish them.
+func TestAReannouncementOnAWatchThatAlreadyHoldsTheFactsIsIgnored(t *testing.T) {
+	// Arrange: a watcher that opened WITH the facts.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.sendSessionStarted(t, sessionStarted(""))
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert: nothing was republished, and the ordinary case is not warned.
+	seen := h.rec.until(t, "footer.OnSessionUpdate")
+	if hasEvent(seen, "topbar.OnSessionStarted") {
+		t.Fatalf("a repeat re-announcement routed %v, want no re-publication", names(seen))
+	}
+	if h.hasRecord("warn", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("a repeat re-announcement was warned; it is the ordinary case")
+	}
+}
+
+// TestASessionFrameWithNoArmIsRecordedAsAnError is the validation half: the
+// frame oneof is never guessed at, and an unset one is surfaced.
+func TestASessionFrameWithNoArmIsRecordedAsAnError(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.session.send(t, &shimv1.WatchSessionResponse{})
+	h.sendSessionUpdate(t, compactingUpdate())
+
+	// Assert.
+	h.rec.until(t, "footer.OnSessionUpdate")
+	if !h.hasRecord("error", "daemon.sessionwatcher.watch_session") {
+		t.Fatal("an armless session frame was not recorded as an error")
+	}
+}
+
+// hasEvent reports whether a run of recorded sink calls contains one by name.
+func hasEvent(seen []event, name string) bool {
+	for _, e := range seen {
+		if e.name() == name {
+			return true
+		}
+	}
+	return false
 }
