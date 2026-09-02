@@ -22,11 +22,25 @@
 ;; live one is strictly worse than running the one that is there.  Only a
 ;; TRANSPORT failure proves no daemon is listening.
 ;;
-;; NO ARGV.  The daemon takes no required flags: the state root travels in
-;; `AGENT_REPL_STATE_DIR', which is exported EXPLICITLY on the spawn so
-;; the child cannot inherit a different root than the one Emacs resolved.
-;; The listen address is the daemon's own choice, published by writing
-;; `daemon.addr' — which is also the readiness signal this file waits on.
+;; THE ARGV CARRIES THE ACCOUNT ROOTS, AND NOTHING ELSE.  The daemon
+;; DETERMINES a workspace's vendor config dir from its path — the main
+;; repo under `$MULTI_REPO_ROOT' gets the multi-repo root, everything else
+;; the default — and its account resolver REFUSES TO BUILD without both
+;; roots, so a daemon spawned without `--default-config-dir' and
+;; `--multi-repo-config-dir' exits 2 before it ever serves.  Emacs states
+;; both on the spawn, and refuses the launch loudly when either is empty
+;; rather than letting the child die with only a log line.  `MULTI_REPO_ROOT'
+;; is read by the daemon from the ENVIRONMENT, not from a flag, so it is
+;; exported the same explicit way the state root is.  Every other path the
+;; daemon needs (shim, webapp dist, prompts, vocab) it derives from its own
+;; checkout, so none of them belongs here.
+;;
+;; The state root travels in `AGENT_REPL_STATE_DIR', which is exported
+;; EXPLICITLY on the spawn so the child cannot inherit a different root than
+;; the one Emacs resolved.  The listen address is the daemon's own choice,
+;; published by writing `daemon.addr' — which is also the readiness signal
+;; this file waits on, and a daemon that EXITS before publishing it ends the
+;; wait immediately with the tail of its own run log.
 ;;
 ;; NO SLEEPS AND NO BLOCKING.  The boot wait is a timer poll whose tick is
 ;; a named function, and the build is an ASYNCHRONOUS `make-process' whose
@@ -123,10 +137,46 @@ point — the frame paints before the stack build is even considered."
 
 (defcustom agent-repl-daemon-command
   (list (expand-file-name "daemon/bin/claude-repld" agent-repl--frontend-root))
-  "The argv used to start the daemon.
-NO REQUIRED FLAGS: the state root travels in `AGENT_REPL_STATE_DIR' and
-the daemon picks and publishes its own listen address."
+  "The BASE argv used to start the daemon: the binary and any overrides.
+The two account-root flags the daemon requires are appended by
+`agent-repl-daemon--argv\='; the state root travels in
+`AGENT_REPL_STATE_DIR\=' and the daemon picks and publishes its own listen
+address."
   :type '(repeat string)
+  :group 'agent-repl)
+
+(defcustom agent-repl-daemon-default-config-dir
+  (expand-file-name (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude"))
+  "Vendor config root for every workspace OUTSIDE the multi-repo root.
+Passed as `--default-config-dir\='.  REQUIRED BY THE DAEMON: its account
+resolver refuses to build without it (\"Roots.Default is required\") and the
+process exits 2 before it serves, so an empty value is refused HERE.
+`CLAUDE_CONFIG_DIR\=' seeds the default because that is where this Emacs\='
+own vendor config lives; the DAEMON never reads that variable — the flag is
+the only channel."
+  :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-daemon-multi-repo-config-dir
+  (expand-file-name "~/.claude-chesscom")
+  "Vendor config root for workspaces UNDER `agent-repl-daemon-multi-repo-root\='.
+Passed as `--multi-repo-config-dir\='.  REQUIRED BY THE DAEMON for the same
+reason as `agent-repl-daemon-default-config-dir\=': the account is
+DETERMINED by the workspace path, so both roots must have an answer."
+  :type 'string
+  :group 'agent-repl)
+
+(defcustom agent-repl-daemon-multi-repo-root
+  (let ((root (getenv "MULTI_REPO_ROOT")))
+    (and (stringp root) (not (string-empty-p root)) (expand-file-name root)))
+  "The tree whose workspaces route to the multi-repo account, or nil.
+Exported as `MULTI_REPO_ROOT\=' on the spawn, because the daemon reads it
+from the ENVIRONMENT rather than from a flag.  Nil leaves the variable to
+whatever the environment already carries, which the daemon reads as \"no
+multi-repo root\": every workspace then routes to the default config dir.
+It is NOT required — path-under-the-root is the only account rule, and a
+root that was never named can contain nothing."
+  :type '(choice (const :tag "None" nil) string)
   :group 'agent-repl)
 
 (defcustom agent-repl-daemon-boot-timeout-seconds 30.0
@@ -155,6 +205,19 @@ address file left behind by a dead one."
   "The daemon process THIS Emacs spawned, or nil.
 Nil is the ordinary state when the daemon was adopted: Emacs supervises
 only what it started, and never kills what it did not.")
+
+(defvar agent-repl-daemon--boot-process nil
+  "The process whose boot the address wait is currently watching, or nil.
+Kept apart from `agent-repl--frontend-daemon-process\=', which the sentinel
+clears the moment the child dies: the boot wait needs the DEAD process in
+hand to report why it never published an address.")
+
+(defvar agent-repl-daemon-launch-failure nil
+  "Detail of a refused or failed daemon LAUNCH, or nil.
+Set when a required account root is empty, and when a spawned daemon exits
+before it publishes `daemon.addr\='.  Drawn as
+`agent-repl-daemon-mode-line-segment\=' and cleared by the next launch that
+gets as far as a spawn.")
 
 (defvar agent-repl-daemon-build-failure nil
   "The last build failure's detail string, or nil.
@@ -286,6 +349,24 @@ ENVIRONMENT is a complete `process-environment' value, which is how
   "External-boundary wrapper: return non-nil when artifact PATH exists."
   (file-exists-p path)) ; ALLOW-EXTERNAL-BOUNDARY
 
+(defun agent-repl--frontend-run-log-tail ()
+  "External-boundary wrapper: the last non-blank line of `daemon.run.log\='.
+Returns a DESCRIPTION when there is no line to return — an unreadable or
+empty run log is itself the diagnosis, and answering nil would hand the
+caller a blank where the reason belongs."
+  (let ((path (agent-repl--global-state-file "logs/daemon.run.log")))
+    (if (not (file-readable-p path)) ;; ALLOW-EXTERNAL-BOUNDARY
+        (format "<no readable %s>" path)
+      (with-temp-buffer
+        (insert-file-contents path) ;; ALLOW-EXTERNAL-BOUNDARY
+        (goto-char (point-max))
+        (skip-chars-backward " \t\n\r")
+        (let ((end (point)))
+          (forward-line 0)
+          (if (= (point) end)
+              (format "<%s is empty>" path)
+            (buffer-substring-no-properties (point) end)))))))
+
 ;;;; ---- The mode-line segment ----
 
 (defun agent-repl-daemon--refresh-segment ()
@@ -294,6 +375,7 @@ Precedence: a standing failure outranks a running build, which outranks
 the short-lived \"just built\" note."
   (setq agent-repl-daemon-mode-line-segment
         (cond
+         (agent-repl-daemon-launch-failure "daemon: launch failed")
          (agent-repl-daemon-build-failure "daemon: build failed")
          ((eq agent-repl-daemon--build-state 'building)
           "building agent-repl stack\u2026")
@@ -532,6 +614,24 @@ mode-line segment is raised, and the interactive ensure is the retry."
   (message "agent-repl: %s" detail)
   (agent-repl-daemon--refresh-segment))
 
+(defun agent-repl-daemon--report-launch-failure (detail)
+  "Surface launch failure DETAIL: an error line, an echo, the segment.
+LOUD BY CONTRACT.  The failures this reports — a missing account root, a
+daemon that exits before it publishes its address — used to show up only as
+a status-2 log line followed by a thirty-second boot timeout, with every
+verb afterwards failing on a nil connection."
+  (setq agent-repl-daemon-launch-failure detail)
+  (agent-repl--error nil "elisp.daemon.launch-failed detail=%s" detail)
+  (message "agent-repl: %s" detail)
+  (agent-repl-daemon--refresh-segment))
+
+(defun agent-repl-daemon--clear-launch-failure ()
+  "Clear a recorded launch failure and take its mode-line segment down."
+  (when agent-repl-daemon-launch-failure
+    (agent-repl--info nil "elisp.daemon.launch-failure-cleared")
+    (setq agent-repl-daemon-launch-failure nil)
+    (agent-repl-daemon--refresh-segment)))
+
 (defun agent-repl-daemon--clear-build-failure ()
   "Clear a recorded build failure and take its mode-line segment down."
   (when agent-repl-daemon-build-failure
@@ -621,17 +721,24 @@ rather than inferred from the absence of a start line."
     (cancel-timer agent-repl-daemon--boot-timer))
   (setq agent-repl-daemon--boot-timer nil
         agent-repl-daemon--boot-deadline nil
+        agent-repl-daemon--boot-process nil
         agent-repl-daemon--boot-continuation nil))
 
-(defun agent-repl-daemon--await-address (on-ready)
-  "Poll `daemon.addr' until it appears, then call ON-READY with the address.
+(defun agent-repl-daemon--await-address (on-ready &optional process)
+  "Poll `daemon.addr\=' until it appears, then call ON-READY with the address.
 ON-READY receives nil when the boot timeout elapses first.  A TIMER poll,
 never a sleep: the daemon writes its address atomically when it is ready
-to serve, so the file's appearance IS readiness and nothing else has to
-be probed."
+to serve, so the file\='s appearance IS readiness and nothing else has to
+be probed.
+
+PROCESS is the daemon THIS Emacs spawned, when there is one.  A process
+that EXITS ends the wait at once, with the tail of its run log: a daemon
+that died is never going to publish an address, and waiting out the full
+timeout to say so buries the reason it died."
   (agent-repl-daemon--cancel-boot-wait)
   (setq agent-repl-daemon--boot-deadline
         (+ (float-time) agent-repl-daemon-boot-timeout-seconds)
+        agent-repl-daemon--boot-process process
         agent-repl-daemon--boot-continuation on-ready)
   (agent-repl-daemon--boot-tick))
 
@@ -652,6 +759,16 @@ dependence on the scheduler and no sleep anywhere."
       (agent-repl--info nil "elisp.daemon.booted address=%S" address)
       (agent-repl-daemon--cancel-boot-wait)
       (when on-ready (funcall on-ready address)))
+     ((agent-repl-daemon--exited-p agent-repl-daemon--boot-process)
+      (let ((status (process-exit-status agent-repl-daemon--boot-process))
+            (tail (agent-repl--frontend-run-log-tail)))
+        (agent-repl--error nil "elisp.daemon.boot-exited status=%S run-log=%s"
+                           status tail)
+        (agent-repl-daemon--cancel-boot-wait)
+        (agent-repl-daemon--report-launch-failure
+         (format "the daemon exited (status %s) before it published its address: %s"
+                 status tail)))
+      (when on-ready (funcall on-ready nil)))
      ((>= (float-time) deadline)
       (agent-repl--error nil "elisp.daemon.boot-timeout seconds=%.1f file=%S"
                          agent-repl-daemon-boot-timeout-seconds
@@ -729,31 +846,95 @@ notices and recovers."
     (when (eq proc agent-repl--frontend-daemon-process)
       (setq agent-repl--frontend-daemon-process nil))))
 
+(defun agent-repl-daemon--exited-p (proc)
+  "Return non-nil when PROC is a real process that is no longer live.
+A NON-PROCESS IS NOT AN EXIT: the spawn wrapper is stubbable, so anything
+that is not a process object is a stand-in that has said nothing about
+whether a daemon died."
+  (and (processp proc) (not (process-live-p proc))))
+
+(defconst agent-repl-daemon--required-config-flags
+  '(("--default-config-dir" . agent-repl-daemon-default-config-dir)
+    ("--multi-repo-config-dir" . agent-repl-daemon-multi-repo-config-dir))
+  "The account-root flags the daemon REQUIRES, as (FLAG . VARIABLE).
+Both are non-negotiable: the daemon\='s account resolver refuses to build
+without either, and the process exits 2 before it serves.")
+
+(defun agent-repl-daemon--config-value (symbol)
+  "SYMBOL\='s config-root value, expanded, or nil when it is empty."
+  (let ((value (symbol-value symbol)))
+    (and (stringp value)
+         (not (string-empty-p (string-trim value)))
+         (expand-file-name (string-trim value)))))
+
+(defun agent-repl-daemon--missing-config-flags ()
+  "The required account-root flags whose value is empty, as strings."
+  (delq nil
+        (mapcar (lambda (entry)
+                  (unless (agent-repl-daemon--config-value (cdr entry))
+                    (format "%s (%s)" (car entry) (cdr entry))))
+                agent-repl-daemon--required-config-flags)))
+
+(defun agent-repl-daemon--argv ()
+  "The full spawn argv: `agent-repl-daemon-command\=' plus the account roots.
+Every path is expanded, because the daemon compares config roots against
+resolved workspace paths and a `~\=' the shell never saw would never match."
+  (append agent-repl-daemon-command
+          (mapcan (lambda (entry)
+                    (list (car entry) (agent-repl-daemon--config-value (cdr entry))))
+                  agent-repl-daemon--required-config-flags)))
+
 (defun agent-repl-daemon--environment ()
   "Return the spawn environment, with `AGENT_REPL_STATE_DIR' set EXPLICITLY.
 ONE state root is the cross-system contract; a child that inherited a
 different one would be a silent split-brain, so the value Emacs resolved
 is stated on the spawn rather than assumed."
-  (cons (format "AGENT_REPL_STATE_DIR=%s"
-                (directory-file-name (agent-repl--global-state-dir)))
-        (cl-remove-if (lambda (entry) (string-prefix-p "AGENT_REPL_STATE_DIR=" entry))
-                      process-environment)))
+  (let* ((root (and (stringp agent-repl-daemon-multi-repo-root)
+                    (not (string-empty-p agent-repl-daemon-multi-repo-root))
+                    (expand-file-name agent-repl-daemon-multi-repo-root)))
+         (base (cl-remove-if
+                (lambda (entry)
+                  (or (string-prefix-p "AGENT_REPL_STATE_DIR=" entry)
+                      (and root (string-prefix-p "MULTI_REPO_ROOT=" entry))))
+                process-environment))
+         (env (cons (format "AGENT_REPL_STATE_DIR=%s"
+                            (directory-file-name (agent-repl--global-state-dir)))
+                    base)))
+    ;; THE DAEMON READS THE ROOT FROM THE ENVIRONMENT, not from a flag, so
+    ;; a configured root is STATED here the same way the state root is.  An
+    ;; unconfigured one leaves the inherited value alone: nil is "Emacs has
+    ;; no opinion", not "unset whatever the session had".
+    (if root
+        (cons (format "MULTI_REPO_ROOT=%s" (directory-file-name root)) env)
+      env)))
 
 (defun agent-repl-daemon--start ()
   "Spawn the daemon and return its process, or nil when the binary is absent."
-  (let ((binary (car agent-repl-daemon-command)))
-    (if (not (agent-repl--frontend-artifact-exists-p binary))
-        (progn
-          (agent-repl--error nil "elisp.daemon.binary-missing binary=%S" binary)
-          nil)
+  (let ((binary (car agent-repl-daemon-command))
+        (missing (agent-repl-daemon--missing-config-flags)))
+    (cond
+     ((not (agent-repl--frontend-artifact-exists-p binary))
+      (agent-repl--error nil "elisp.daemon.binary-missing binary=%S" binary)
+      nil)
+     ;; REFUSED HERE, LOUDLY.  Spawning without an account root buys a
+     ;; status-2 exit, a thirty-second boot timeout, and every verb after it
+     ;; failing on a nil connection — the launcher knows the value is missing
+     ;; before it spends any of that.
+     (missing
+      (agent-repl-daemon--report-launch-failure
+       (format "the daemon needs %s: set it before starting"
+               (string-join missing ", ")))
+      nil)
+     (t
+      (agent-repl-daemon--clear-launch-failure)
       (agent-repl--backend-phase nil "starting the daemon...")
-      (let ((proc (agent-repl--frontend-spawn-daemon
-                   agent-repl-daemon-command
-                   (agent-repl-daemon--environment))))
+      (let* ((argv (agent-repl-daemon--argv))
+             (proc (agent-repl--frontend-spawn-daemon
+                    argv (agent-repl-daemon--environment))))
         (setq agent-repl--frontend-daemon-process proc)
         (agent-repl--info nil "elisp.daemon.started argv=%S state-dir=%S"
-                          agent-repl-daemon-command (agent-repl--global-state-dir))
-        proc))))
+                          argv (agent-repl--global-state-dir))
+        proc)))))
 
 ;;;; ---- The entry point ----
 
@@ -777,7 +958,8 @@ everything after it lives in the continuation."
            (agent-repl-daemon--report-build-failure failure)
            (agent-repl-daemon--settle on-ready nil))
        (agent-repl-daemon--clear-build-failure)
-       (if (null (agent-repl-daemon--start))
+       (let ((proc (agent-repl-daemon--start)))
+        (if (null proc)
            (agent-repl-daemon--settle on-ready nil)
          (agent-repl-daemon--await-address
           (lambda (address)
@@ -790,7 +972,8 @@ everything after it lives in the continuation."
              ;; else's daemon every single time it started its own.
              (agent-repl-daemon--report-provenance address)
               (agent-repl--info nil "elisp.daemon.linking address=%S" address)
-              (agent-repl-daemon--settle on-ready (agent-repl-link-connect))))))))))
+              (agent-repl-daemon--settle on-ready (agent-repl-link-connect))))
+          proc)))))))
 
 (defun agent-repl-daemon--begin (on-ready)
   "Take the cold-start decision for `agent-repl-daemon-ensure'.
