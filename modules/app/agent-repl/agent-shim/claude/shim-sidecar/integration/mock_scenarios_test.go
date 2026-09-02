@@ -48,6 +48,13 @@ type mockScenario struct {
 	// KeepAlive — the prompt carries the keep-alive marker, so every record of
 	// the turn lands on `unserved_item.keepalive` and NO page line appears.
 	KeepAlive bool
+	// HeldTurn — the scenario's turn is STOPPED rather than finished, and the
+	// stop is reached with no permission question in the way. The TERMINAL
+	// itself (`AgentSuccess.interrupted.by_user`) is the STREAM plane's to
+	// produce and the sidecar never mints one, so what the file plane owes is
+	// the other half of the row's column: the turn's content reached the main
+	// agent's book, and nothing on the way to the stop was a question.
+	HeldTurn bool
 
 	// BlockedExpectation names a CONCERN that stops this row's OWN expectation
 	// from being asserted while the universal invariants still run. Only the
@@ -110,6 +117,9 @@ func TestMockScenarios(t *testing.T) {
 			if tc.KeepAlive {
 				requireKeepAliveNeverReachesAPage(t, tc.Prompt, entries)
 			}
+			if tc.HeldTurn {
+				requireHeldTurnLandsWithoutAQuestion(t, tc.Prompt, tree, entries)
+			}
 		})
 	}
 }
@@ -138,7 +148,7 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!bash-image", Wait: waitTerminal},
 	{Prompt: "!bash-detach", Wait: waitTerminal, BashRun: true, ExitCode: true},
 	{Prompt: "!bash-detach-fail", Wait: waitTerminal, BashRun: true, ExitCode: true},
-	{Prompt: "!bash-detach-live", Wait: waitTerminal},
+	{Prompt: "!bash-detach-live", Wait: waitTerminal, BashRun: true},
 	{Prompt: "!ctrl-b", Wait: waitEntries},
 	{Prompt: "!web-fetch", Wait: waitTerminal},
 	{Prompt: "!web-fetch-redirect", Wait: waitTerminal},
@@ -254,11 +264,22 @@ var mockScenarios = []mockScenario{
 	{Prompt: "!context-window", Wait: waitTerminal},
 	{Prompt: "!fault-converter", Wait: waitTerminal},
 	{Prompt: "!fault-recover", Wait: waitTerminal},
-	{Prompt: "!hold", Wait: waitEntries},
+	{Prompt: "!hold", Wait: waitEntries, HeldTurn: true},
 	{Prompt: "!interrupt", Wait: waitEntries},
 	{Prompt: "!query-eof", Wait: waitEntries},
 	{Prompt: "!query-fail", Wait: waitEntries},
-	{Prompt: "!keepalive", Wait: waitTerminal},
+	{
+		// KeepAlive is NOT set here, and cannot be. The `!keepalive` scenario is
+		// an ORDINARY short turn: the marker is the SHIM's, the mocked vendor
+		// neither adds nor removes it, and the scenario selector needs the
+		// `!name` at position 0 — so no `!scenario` prompt can carry the marker.
+		// A row asserting the keep-alive expectation here would be asserting it
+		// against a turn that is not keep-alive, and it fails exactly that way.
+		// The edge is covered instead by TestMockKeepAliveTurnsNeverReachAPage,
+		// which drives the marker on an ordinary prose prompt — the production
+		// shape.
+		Prompt: "!keepalive", Wait: waitTerminal,
+	},
 }
 
 // mockBlockedContextBudget records the one cross-plane disagreement this suite
