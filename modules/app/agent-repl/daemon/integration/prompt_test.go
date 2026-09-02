@@ -83,6 +83,31 @@ func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T)
 	}
 }
 
+func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+
+	// Act: internal/server/validate.go refuses PROMPT_ORIGIN_UNSPECIFIED
+	// before the request ever resolves a workspace, so this is a pure
+	// InvalidArgument -- never an SubmitPromptError arm.
+	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
+		Workspace:      f.ws,
+		Said:           said("no origin"),
+		IdempotencyKey: "k-no-origin",
+		Origin:         conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
+	})
+
+	// Assert
+	if connectCode(err) != connect.CodeInvalidArgument {
+		t.Fatalf("SubmitPrompt with origin UNSPECIFIED = %v (code %v), want CodeInvalidArgument", err, connectCode(err))
+	}
+	if !containsField(err, "origin") {
+		t.Fatalf("SubmitPrompt refusal = %v, want it to name the unset field \"origin\"", err)
+	}
+	// Validation refuses before any component ever logs.
+	f.d.ExpectWarnings()
+}
+
 // ---------------------------------------------------------------------------
 // SubmitPrompt while a turn is in flight: HELD
 // ---------------------------------------------------------------------------
@@ -103,6 +128,16 @@ func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	holds := f.d.WatchHolds(f.ws)
+	// Drain the fresh subscriber's initial (empty) tray push, so the two
+	// reads below land on the classifying push and the verdict push in
+	// order. `harness.Stream` delivers EVERY distinct push in order, never
+	// coalesced, and the classifying record is written into the hold
+	// (internal/promptqueue/classify.go's `hold`) and pushed SYNCHRONOUSLY,
+	// before the classifier's goroutine is even started -- so it is on the
+	// channel before SubmitPrompt's own response returns, deterministically.
+	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.DaemonHoldTray) bool {
+		return len(tray.GetItems()) == 0
+	})
 
 	// Act: an ordinary follow-up prompt, no explicit-interrupt keyword.
 	resp := f.submit("please also check the other file", "k-held", origin)
@@ -111,22 +146,18 @@ func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.
 		t.Fatalf("SubmitPrompt while a turn runs = %v, want a minted TurnId (it is HELD, not refused)", resp)
 	}
 
-	// Assert: the entry eventually carries a real verdict from the classifier
-	// (the transient `classifying` phase is not independently bounded here —
-	// the fake heuristic may resolve before the first observable push).
-	awaitRoster(t, f.d, mustRosterOf(t, f), "held-prompt bookkeeping settles", func(*frontendv1.WorkspaceRoster) bool { return true })
-	got := awaitView(t, f, holds, "the held entry's verdict", func(tray *frontendv1.DaemonHoldTray) bool {
-		p := promptHeldEntry(tray, turn)
-		return p != nil && p.GetClassification() != nil
-	})
-	p := promptHeldEntry(got, turn)
-	switch p.GetClassification().(type) {
-	case *frontendv1.HeldPrompt_Classifying, *frontendv1.HeldPrompt_Interject, *frontendv1.HeldPrompt_HoldForTurnEnd,
-		*frontendv1.HeldPrompt_UninterruptibleTurn, *frontendv1.HeldPrompt_ClassificationError:
-		// any of these is a legal classification arm; the transient
-		// `classifying` push above is the one this bullet also names.
-	default:
-		t.Fatalf("held entry classification = %T, want one of the classifier's verdict arms", p.GetClassification())
+	// Assert: the classifying push comes FIRST.
+	classifying := harness.AwaitNext(t, f.d.Ctx(), holds, "the classifying push")
+	if p := promptHeldEntry(classifying, turn); p == nil || p.GetClassifying() == nil {
+		t.Fatalf("the first tray push for the held prompt = %v, want the transient classifying arm", p)
+	}
+
+	// Assert: the -fake heuristic's real verdict for an ordinary follow-up
+	// (no "stop" prefix, no `[interject]` marker) is hold_for_turn_end
+	// (internal/classifier/fake.go).
+	verdict := harness.AwaitNext(t, f.d.Ctx(), holds, "the verdict push")
+	if p := promptHeldEntry(verdict, turn); p == nil || p.GetHoldForTurnEnd() == nil {
+		t.Fatalf("the verdict for the held prompt = %v, want hold_for_turn_end from the -fake heuristic", p)
 	}
 }
 
@@ -298,10 +329,235 @@ func TestAHeldPromptSurvivesADaemonRestart(t *testing.T) {
 	}
 }
 
-// A corrupted held_prompts row is UNEXPRESSIBLE with the harness surface: the
-// harness gives no way to reach into `wsm.db` and corrupt a specific row (no
-// SQL/store helper is exposed, and the binding rules forbid touching daemon
-// internals directly). See the report for the exact gap.
+// TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError is the
+// all-or-nothing hold restore: two held prompts stand on one workspace, one
+// held_prompts row is corrupted directly in wsm.db (harness.CorruptRow), and
+// the daemon is restarted.
+//
+// internal/promptqueue/lifecycle.go's RestoreHolds reads EVERY held prompt in
+// ONE all-or-nothing decode (internal/wsm/heldprompts.go's scanHeldPrompt): a
+// single corrupt row fails the WHOLE read, so ZERO holds are loaded rather
+// than the one good entry surviving. And internal/boot/sequence.go's Run is
+// documented "EVERY STEP FAILS THE BOOT" -- restoreHolds failing fails the
+// boot outright, so there is no live daemon left to show an "empty tray": the
+// all-or-nothing loss is total, not partial. This test asserts the actual,
+// deliberately documented contract (a loud non-zero refusal, matching
+// TestBootRefusesAnUnwritableStateRoot's pattern) rather than the softer
+// "daemon boots with an empty tray" some report of this critique assumed; see
+// the report for that divergence.
+func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *testing.T) {
+	// Arrange: two held prompts on one workspace.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	resp2 := f.submit("first held prompt", "k-corrupt-1", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+	f.submit("second held prompt", "k-corrupt-2", origin)
+	holds := f.d.WatchHolds(f.ws)
+	awaitView(t, f, holds, "both held entries standing", func(tray *frontendv1.DaemonHoldTray) bool {
+		return len(tray.GetItems()) == 2
+	})
+	if got := f.d.CountRows("held_prompts"); got != 2 {
+		t.Fatalf("held_prompts row count before corruption = %d, want 2", got)
+	}
+	f.d.Stop()
+
+	// Act: corrupt ONE row's `said` column with bytes that cannot decode as a
+	// UserSaid, and restart on the same state root.
+	f.d.CorruptRow("held_prompts", "said", "turn_id", turn2.GetValue(), []byte("not a protobuf blob"))
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
+	code := nd.AwaitExit()
+
+	// Assert: the boot refuses loudly.
+	if code == 0 {
+		t.Fatalf("boot with a corrupted held_prompts row exited 0, want a loud non-zero refusal")
+	}
+	stderr := nd.Stderr()
+	if got := strings.Count(stderr, "daemon.promptqueue.restore_holds"); got != 1 {
+		t.Fatalf("daemon.promptqueue.restore_holds records in stderr = %d, want exactly 1\nstderr:\n%s", got, stderr)
+	}
+	if !strings.Contains(stderr, `"level":"error"`) {
+		t.Fatalf("stderr = %q, want an ERROR-level record for the failed restore", stderr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A held prompt mirrors to the TRAY ONLY
+// ---------------------------------------------------------------------------
+
+func TestAHeldPromptMirrorsToTheTrayOnlyUntilDelivery(t *testing.T) {
+	// Arrange: a turn in flight, then an ordinary follow-up that is held.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	holds := f.d.WatchHolds(f.ws)
+	resp2 := f.submit("a held prompt", "k-held-mirror", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+	awaitView(t, f, holds, "the held entry standing", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, turn2) != nil
+	})
+
+	// Assert: NO user_prompt row anywhere on the feed carries the held turn --
+	// neither in the page a fresh open serves...
+	feed := f.watchRootFeed()
+	page, _ := f.openFeed(nil)
+	for _, row := range page.GetSuccess().GetRows() {
+		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == turn2.GetValue() {
+			t.Fatalf("a held prompt's user_prompt row was already on the feed's page before delivery")
+		}
+	}
+	// ...nor on the tail while it stays held.
+	harness.ExpectNoPush(t, feed, harness.ProbeWindow, "a held prompt must not push a user_prompt row before delivery")
+
+	// Act: the running turn ends, delivering the held prompt.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	f.shim.ExpectStartTurn()
+
+	// Assert: EXACTLY one user_prompt row now carries the delivered turn.
+	awaitRow(t, f, feed, "the delivered prompt's mirrored row", func(r *frontendv1.FeedRow) bool {
+		return r.GetUserPrompt() != nil && r.GetTurn().GetValue() == turn2.GetValue()
+	})
+	page2, _ := f.openFeed(nil)
+	count := 0
+	for _, row := range page2.GetSuccess().GetRows() {
+		if row.GetUserPrompt() != nil && row.GetTurn().GetValue() == turn2.GetValue() {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("user_prompt rows carrying the delivered turn = %d, want exactly 1", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpdateHeldPrompt.accept
+// ---------------------------------------------------------------------------
+
+func TestAcceptOnAHoldForTurnEndVerdictFlipsAcceptedAndRePushesTheTray(t *testing.T) {
+	// Arrange: an ordinary follow-up prompt classifies hold_for_turn_end.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	resp2 := f.submit("please also check the other file", "k-accept", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+	holds := f.d.WatchHolds(f.ws)
+	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+		p := promptHeldEntry(tray, turn2)
+		return p != nil && p.GetHoldForTurnEnd() != nil
+	})
+
+	// Act
+	resp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws,
+		Turn:      turn2,
+		Action:    &agentreplv1.UpdateHeldPromptRequest_Accept{Accept: &agentreplv1.UpdateHeldPromptAccept{}},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateHeldPrompt{accept} on a hold_for_turn_end verdict = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateHeldPrompt{accept} = %v, want a success", resp.Msg)
+	}
+
+	// Assert: the entry flips to accepted and the tray is re-pushed
+	// (internal/promptqueue/holdactions.go's Accept).
+	got := awaitView(t, f, holds, "the accepted flag on the re-pushed tray", func(tray *frontendv1.DaemonHoldTray) bool {
+		p := promptHeldEntry(tray, turn2)
+		return p != nil && p.GetHoldForTurnEnd().GetAccepted().GetAccepted()
+	})
+	if p := promptHeldEntry(got, turn2); !p.GetHoldForTurnEnd().GetAccepted().GetAccepted() {
+		t.Fatalf("held entry after accept = %v, want hold_for_turn_end.accepted.accepted = true", p)
+	}
+}
+
+func TestAcceptOnAnInterjectVerdictAnswersAcceptNotApplicable(t *testing.T) {
+	// Arrange: the "stop" fast path classifies interject.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the long task", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	resp2 := f.submit("stop and rebase instead", "k-interject-accept", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+	holds := f.d.WatchHolds(f.ws)
+	awaitView(t, f, holds, "the interject verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+		p := promptHeldEntry(tray, turn2)
+		return p != nil && p.GetInterject() != nil
+	})
+	f.shim.ExpectKillTurn()
+
+	// Act: accept is legal only on hold_for_turn_end
+	// (internal/promptqueue/holdactions.go's Accept).
+	resp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws,
+		Turn:      turn2,
+		Action:    &agentreplv1.UpdateHeldPromptRequest_Accept{Accept: &agentreplv1.UpdateHeldPromptAccept{}},
+	}))
+
+	// Assert: `accept_not_applicable` is a LANDED arm, so the refusal is
+	// typed.
+	if err != nil {
+		t.Fatalf("UpdateHeldPrompt{accept} on an interject verdict = error %v, want the typed accept_not_applicable answer", err)
+	}
+	if resp.Msg.GetError().GetAcceptNotApplicable() == nil {
+		t.Fatalf("UpdateHeldPrompt{accept} on an interject verdict = %v, want error.accept_not_applicable", resp.Msg)
+	}
+	// The queue's own Accept logs this refusal at WARNING regardless of the
+	// arm being landed at the wire (internal/promptqueue/holdactions.go).
+	f.d.ExpectWarnings("daemon.promptqueue.accept")
+}
+
+// ---------------------------------------------------------------------------
+// A failed interject reverts to classification_error and FIFO order
+// ---------------------------------------------------------------------------
+
+func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the long task", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	footer := f.d.WatchFooter(f.ws)
+	holds := f.d.WatchHolds(f.ws)
+	// internal/promptqueue/classify.go's stripJump logs the failed-interject
+	// ERROR under opInterject; nothing else warns on this path.
+	f.d.ExpectWarnings("daemon.promptqueue.interject")
+
+	// Act: the interjecting prompt's KillTurn is refused by the shim.
+	f.shim.AnswerFailure(harness.RPCKillTurn, "the vendor refused the kill")
+	resp2 := f.submit("stop and rebase instead", "k-stop-fail", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+
+	// Assert: the entry reverts to classification_error and the footer's
+	// interrupting status clears.
+	tray := awaitView(t, f, holds, "the classification_error verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+		p := promptHeldEntry(tray, turn2)
+		return p != nil && p.GetClassificationError() != nil
+	})
+	if p := promptHeldEntry(tray, turn2); p == nil || p.GetClassificationError() == nil {
+		t.Fatalf("held entry for the failed interject = %v, want classification_error", p)
+	}
+	awaitFooter(t, f, footer, "the footer clears waiting.interrupting after the failed interject", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetWaiting().GetInterrupting() == nil
+	})
+
+	// Act: submit a second, ordinary follow-up AFTER the failed interject, so
+	// FIFO order (by queued_at) puts turn2 ahead of it -- the queue jump the
+	// interject would have taken is stripped, and turn2 goes back into the
+	// ordinary FIFO pool it was already the head of by submission order.
+	resp3 := f.submit("second follow-up", "k-fifo-2", origin)
+	turn3 := resp3.GetSuccess().GetTurn().GetTurn()
+
+	// Assert: the original turn ends naturally (never interrupted, since the
+	// interject failed), and delivery is FIFO: turn2 first, turn3 next.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	st2 := f.shim.ExpectStartTurn()
+	if st2.GetTurn().GetValue() != turn2.GetValue() {
+		t.Fatalf("first delivered turn after the failed interject = %q, want the FIFO head %q", st2.GetTurn().GetValue(), turn2.GetValue())
+	}
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+	st3 := f.shim.ExpectStartTurn()
+	if st3.GetTurn().GetValue() != turn3.GetValue() {
+		t.Fatalf("second delivered turn = %q, want the FIFO tail %q", st3.GetTurn().GetValue(), turn3.GetValue())
+	}
+}
 
 // ---------------------------------------------------------------------------
 // A merge lease's effect on SubmitPrompt
@@ -361,8 +617,11 @@ func TestSubmitPromptDuringAMergeLeaseAnswersMergingRefusal(t *testing.T) {
 	if resp.GetError().GetMerging() == nil {
 		t.Fatalf("SubmitPrompt during a merge lease = %v, want error.merging", resp)
 	}
-	// The refusal IS the subject, and the queue records it at WARNING.
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm", "daemon.promptqueue.submit")
+	// The refusal IS the subject, and the queue records it at WARNING
+	// (internal/promptqueue/submit.go). `merging` is a LANDED arm (refuse.go
+	// maps promptqueue.ErrMerging to it), so the server's own refusal path
+	// answers it at DEBUG, not WARN -- only the queue's own warning fires.
+	f.d.ExpectWarnings("daemon.promptqueue.submit")
 }
 
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
@@ -471,11 +730,38 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	resp := f.submit("/status", "k-status", origin)
 
 	// Assert: answered inline, no StartTurn.
-	if resp.GetSuccess().GetCommandPanel().GetStatus() == nil {
+	status := resp.GetSuccess().GetCommandPanel().GetStatus()
+	if status == nil {
 		t.Fatalf("SubmitPrompt(/status) = %v, want a command_panel.status", resp)
 	}
 	if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
 		t.Fatalf("StartTurn count after /status = %d, want 0", got)
+	}
+	// The rows are asserted BY CONTENT (internal/server/panels.go's statusPanel
+	// splices Account/Model/Permission mode from the topbar resolver's facts,
+	// ahead of Version), not merely checked non-empty: the fake's default
+	// config root states account "a@x" (SPEC.md's fake .claude.json), the fake
+	// shim's StartSession answers effective_model "opus"
+	// (integration/fakeshim/defaults.go's DefaultModel), and permission mode
+	// "default" (integration/fakeshim/server.go's default StartSession
+	// answer).
+	wantLabels := []string{"Version", "Account", "Model", "Permission mode"}
+	if len(status.GetRows()) != len(wantLabels) {
+		t.Fatalf("status panel rows = %v, want exactly the %d rows %v", status.GetRows(), len(wantLabels), wantLabels)
+	}
+	for i, label := range wantLabels {
+		if got := status.GetRows()[i].GetLabel(); got != label {
+			t.Fatalf("status panel row %d label = %q, want %q (row order matters: Version first, then the spliced session facts)", i, got, label)
+		}
+	}
+	if got := status.GetRows()[0].GetValue(); got == "" {
+		t.Fatalf("status panel Version row value is empty, want the daemon's build stamp")
+	}
+	wantValues := map[string]string{"Account": "a@x", "Model": "opus", "Permission mode": "default"}
+	for _, row := range status.GetRows()[1:] {
+		if want := wantValues[row.GetLabel()]; row.GetValue() != want {
+			t.Fatalf("status panel row %q value = %q, want %q", row.GetLabel(), row.GetValue(), want)
+		}
 	}
 	awaitRow(t, f, feed, "the mirrored command_panel row", func(r *frontendv1.FeedRow) bool {
 		return r.GetCommandPanel().GetStatus() != nil
@@ -584,9 +870,14 @@ func TestModelWithAnArgumentSubmitsTheModelChange(t *testing.T) {
 	// Act
 	resp := f.submit("/model sonnet", "k-model", origin)
 
-	// Assert
+	// Assert: a session-acting command that mints no turn answers
+	// command_acted -- never a turn, and never command_panel or
+	// command_refused (endpoint_submit_prompt.proto's own distinction).
 	if resp.GetError() != nil {
 		t.Fatalf("SubmitPrompt(/model sonnet) = %v, want a success", resp)
+	}
+	if resp.GetSuccess().GetCommandActed() == nil {
+		t.Fatalf("SubmitPrompt(/model sonnet) = %v, want success.command_acted", resp)
 	}
 	req := f.shim.ExpectSetSessionModel()
 	if req.GetModel().GetName() != "sonnet" {
@@ -608,6 +899,40 @@ func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
 	}
 	if got := f.shim.Count(harness.RPCSetSessionModel); got != 0 {
 		t.Fatalf("SetSessionModel count after bare /model = %d, want 0", got)
+	}
+}
+
+func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing.T) {
+	// Arrange: a turn in flight.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+
+	// Act: SetModel goes through the ONE delivery path
+	// (internal/workspace/session_acts.go), so it cannot overtake the running
+	// turn.
+	resp, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
+		Workspace: f.ws,
+		Model:     &conversationv1.AgentModel{Name: "sonnet"},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SetModel while a turn runs = (%v, %v), want a success (the change is HELD, not refused)", resp, err)
+	}
+
+	// Assert: HELD, not sent mid-turn.
+	if got := f.shim.Count(harness.RPCSetSessionModel); got != 0 {
+		t.Fatalf("SetSessionModel count while the turn runs = %d, want 0 (queued for the turn boundary)", got)
+	}
+
+	// Act: the running turn ends.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: the queued act is drained AT the boundary
+	// (internal/promptqueue/lifecycle.go's OnTurnEnded calls drainActs before
+	// popping the next prompt).
+	req := f.shim.ExpectSetSessionModel()
+	if req.GetModel().GetName() != "sonnet" {
+		t.Fatalf("SetSessionModel.model = %q, want %q", req.GetModel().GetName(), "sonnet")
 	}
 }
 
@@ -674,23 +999,27 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 }
 
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
-	// Arrange
+	// Arrange: the served set is topbar.SwitchableModes, a FIXED six-mode set
+	// the resolver installs regardless of what the fake session states, so
+	// there is always an alternate to switch to -- the earlier t.Skip here
+	// was dead code that could never fire.
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
 	first := awaitTopbar(t, f, topbar, "the initial permission-mode picker", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetPermissionModePicker().GetOptions()) > 0
 	})
-	current := first.GetPermissionModePicker().GetCurrent().GetMode()
-	var target string
+	wantModes := []string{"default", "accept_edits", "plan", "bypass", "dont_ask", "auto"}
+	var gotModes []string
 	for _, opt := range first.GetPermissionModePicker().GetOptions() {
-		if opt.GetMode() != current {
-			target = opt.GetMode()
-			break
-		}
+		gotModes = append(gotModes, opt.GetMode())
 	}
-	if target == "" {
-		t.Skip("the fake session serves only one switchable permission mode; no alternate to switch to")
+	if !sameOrder(gotModes, wantModes) {
+		t.Fatalf("permission_mode_picker.options = %v, want exactly the six switchable modes in order %v", gotModes, wantModes)
 	}
+	if got := first.GetPermissionModePicker().GetCurrent().GetMode(); got != "default" {
+		t.Fatalf("permission_mode_picker.current = %q, want the fake session's default mode %q", got, "default")
+	}
+	target := "accept_edits"
 
 	// Act
 	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
@@ -754,12 +1083,15 @@ func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
 		Mode:      "bypass",
 	}))
 
-	// Assert: both arms are LANDED, so the refusal is a typed answer.
+	// Assert: `ungated_without_consent` is a LANDED arm, so the refusal is a
+	// typed answer. `bypass` IS in the served set (topbar.SwitchableModes), so
+	// `mode_not_served` is impossible here -- it is asserted EXACTLY, not as
+	// an OR with mode_not_served.
 	if err != nil {
 		t.Fatalf("SetPermissionMode(bypass) = error %v, want a typed refusal", err)
 	}
-	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil && resp.Msg.GetError().GetModeNotServed() == nil {
-		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want ungated_without_consent", resp.Msg)
+	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil {
+		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want exactly error.ungated_without_consent", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -797,7 +1129,11 @@ func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t
 	if challenge.GetLiveAgentCount() != 1 {
 		t.Fatalf("confirm_required.live_agent_count = %d, want 1", challenge.GetLiveAgentCount())
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// `confirm_required` is a LANDED arm (server/refuse.go's asRefusal special-
+	// cases *workspace.ConfirmRequired), so the server's own answer is DEBUG;
+	// the WARN comes from internal/workspace/interrupt.go's own
+	// log.Warn(opInterrupt, ...) before it constructs the challenge.
+	f.d.ExpectWarnings("daemon.workspace.interrupt")
 }
 
 func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
@@ -818,7 +1154,7 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	if err != nil || first.Msg.GetError().GetConfirmRequired() == nil {
 		t.Fatalf("the first Interrupt{turn} = (%v, %v), want confirm_required to set up the challenge", first.Msg, err)
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	f.d.ExpectWarnings("daemon.workspace.interrupt")
 
 	// Act
 	_, err = f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -851,6 +1187,85 @@ func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
 	}
 	if resp.Msg.GetSuccess().GetNothingRunning() == nil {
 		t.Fatalf("Interrupt with nothing running = %v, want the nothing_running answer", resp.Msg)
+	}
+}
+
+func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedWork(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
+	row := awaitRow(t, f, feed, "the detached shell bubble row", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedShell() != nil
+	})
+	// Neither branch below logs a WARN: the success path is Info
+	// (internal/workspace/interrupt.go's interruptDetached), and
+	// not_detached_work is answered directly at the server layer
+	// (internal/server/answers.go's askIDFrom caller), a LANDED arm logged
+	// at DEBUG.
+	f.d.ExpectWarnings()
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_Detached{Detached: row.GetId()},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Interrupt{detached} on a live shell = error %v, want a success", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedDetached().GetCount(); got != 1 {
+		t.Fatalf("InterruptedDetached.count = %d, want 1", got)
+	}
+	f.shim.ExpectStopBash()
+
+	// Act: an unknown FeedId names no detached work.
+	resp2, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_Detached{Detached: &frontendv1.FeedId{Value: "not-a-real-feed-id"}},
+	}))
+
+	// Assert: `not_detached_work` is a LANDED arm, so the refusal is typed.
+	if err != nil {
+		t.Fatalf("Interrupt{detached} on an unknown feed id = error %v, want the typed not_detached_work answer", err)
+	}
+	if resp2.Msg.GetError().GetNotDetachedWork() == nil {
+		t.Fatalf("Interrupt{detached} on an unknown feed id = %v, want error.not_detached_work", resp2.Msg)
+	}
+}
+
+func TestInterruptAllAgentsStopsEveryLiveDetachedAgent(t *testing.T) {
+	// Arrange: interruptAllAgents sweeps AGENTS only, so a lone detached
+	// subagent is the fixture (internal/workspace/interrupt.go).
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
+	awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedSubagent() != nil
+	})
+	awaitLiveWork(t, f, 1)
+	f.d.ExpectWarnings()
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Interrupt{all_agents} = error %v, want a success", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedDetached().GetCount(); got != 1 {
+		t.Fatalf("InterruptedDetached.count = %d, want 1 (the one live detached agent)", got)
+	}
+	req := f.shim.ExpectUpdateAgent()
+	if req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("UpdateAgent.target = %q, want the live subagent %q", req.GetTarget().GetValue(), "sub-1")
+	}
+	if req.GetInput().GetStop() == nil {
+		t.Fatalf("UpdateAgent.input = %v, want a stop", req.GetInput())
 	}
 }
 
@@ -1067,6 +1482,57 @@ func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
+func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
+	// Arrange: no question was ever posed, so the named feed row addresses
+	// nothing standing.
+	f := newOpened(t, harness.Opts{})
+
+	// Act: an undecodable FeedId takes the server's own askIDFrom path
+	// (internal/server/answers.go), never reaching workspace.refuse -- no
+	// component here logs a WARN.
+	f.d.ExpectWarnings()
+	resp, err := f.d.Client().AnswerQuestion(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerQuestionRequest{
+		Workspace: f.ws,
+		Question:  &frontendv1.FeedId{Value: "not-a-real-feed-id"},
+		Answers:   []*agentreplv1.AnswerQuestionAnswer{{QuestionText: "Pick one", Chosen: []string{"A"}}},
+	}))
+
+	// Assert: `ask_not_standing` is a LANDED arm, so the refusal is typed.
+	if err != nil {
+		t.Fatalf("AnswerQuestion on a card that never stood = error %v, want the typed ask_not_standing answer", err)
+	}
+	if resp.Msg.GetError().GetAskNotStanding() == nil {
+		t.Fatalf("AnswerQuestion on a card that never stood = %v, want error.ask_not_standing", resp.Msg)
+	}
+}
+
+func TestAQuestionThatExpiresIsDrawnExpired(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-expire", "Pick one", "A", "B")},
+	}))
+	awaitRow(t, f, feed, "the open question card", func(r *frontendv1.FeedRow) bool { return r.GetQuestion() != nil })
+
+	// Act: the ask goes unanswered and the producer's idle timeout closes it
+	// (conversation.v1.AgentQuestionSuccess_Unanswered).
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Question{Question: &conversationv1.AgentQuestion{
+			Id: &conversationv1.AgentQuestionId{Value: "q-expire"},
+			Result: &conversationv1.AgentQuestion_Success{Success: &conversationv1.AgentQuestionSuccess{
+				Outcome: &conversationv1.AgentQuestionSuccess_Unanswered{Unanswered: &conversationv1.AgentQuestionUnanswered{}},
+			}},
+		}},
+	}))
+
+	// Assert: drawn as expired (internal/resolve/feed/question.go's
+	// drawQuestion), never as pending forever.
+	awaitRow(t, f, feed, "the expired question card", func(r *frontendv1.FeedRow) bool {
+		return r.GetQuestion().GetExpired() != nil
+	})
+}
+
 // ---------------------------------------------------------------------------
 // prompt_test.go helpers
 // ---------------------------------------------------------------------------
@@ -1101,11 +1567,4 @@ func (f *fixture) openFeedOn(d *harness.Daemon) (*frontendv1.FeedPage, *agentrep
 func awaitView[T any](t *testing.T, f *fixture, s *harness.Stream[T], what string, pred func(T) bool) T {
 	t.Helper()
 	return harness.AwaitView(t, f.d.Ctx(), s, what, pred)
-}
-
-// mustRosterOf opens a roster watch, used only to give an async settle point
-// a channel to select on without a fixed sleep.
-func mustRosterOf(t *testing.T, f *fixture) *harness.Stream[*frontendv1.WorkspaceRoster] {
-	t.Helper()
-	return f.d.WatchRoster()
 }
