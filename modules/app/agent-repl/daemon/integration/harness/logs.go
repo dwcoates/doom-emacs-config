@@ -295,3 +295,68 @@ func (d *Daemon) WorkspaceLogOperationCount(workspaceDir, operation string) int 
 // OpTurnOpened is the record the session watcher writes once a turn is OPEN on
 // it — the point after which that turn's terminal frame will be attributed.
 const OpTurnOpened = "daemon.sessionwatcher.turn_opened"
+
+// ShimVerbOrder answers the shim.v1 verbs one workspace's fake shim received,
+// in arrival order.
+//
+// It is the suite's ORDERING PROOF. The fake's in-memory recorder answers per
+// verb, so a test asking "did Hibernate arrive before KillSession" has nothing
+// to compare; the durable shim sink records every verb on one timeline, and
+// this reads that timeline back.
+func ShimVerbOrder(t *testing.T, workspaceDir string) []string {
+	t.Helper()
+	var out []string
+	for _, r := range readLog(t, WorkspaceLogPath(workspaceDir, "shim")) {
+		if verb, ok := strings.CutPrefix(r.Operation, "shim.fake."); ok {
+			out = append(out, verb)
+		}
+	}
+	return out
+}
+
+// AwaitShimVerbOrder waits until a workspace's shim sink holds both verbs and
+// answers their order, failing if the second never arrives.
+func (d *Daemon) AwaitShimVerbOrder(workspaceDir string, verbs ...string) []string {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		order := ShimVerbOrder(d.t, workspaceDir)
+		if containsAll(order, verbs) {
+			return order
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, d.ctx.Err())
+		}
+	}
+}
+
+// containsAll reports whether every verb appears at least once in the order.
+func containsAll(order []string, verbs []string) bool {
+	for _, want := range verbs {
+		found := false
+		for _, got := range order {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// IndexOfVerb answers the position of a verb's FIRST arrival in an order, or
+// -1 when it never arrived.
+func IndexOfVerb(order []string, verb string) int {
+	for i, got := range order {
+		if got == verb {
+			return i
+		}
+	}
+	return -1
+}
