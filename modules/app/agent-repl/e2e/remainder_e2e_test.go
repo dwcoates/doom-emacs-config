@@ -25,21 +25,61 @@
 //     every other tool-kind here renders through — cron, push notification,
 //     task acts, send-message, web-fetch, web-search all have no dedicated
 //     bubble of their own).
-//   - proto/src/frontend/v1/footer.proto: FooterStatus.loading
-//     (FooterStatusLoading) — "MOMENTARY: context is being injected (memory,
-//     skills)" — the observable surface for AgentContextInjected, which
-//     daemon.md §"..." states is a FILE-PLANE-ONLY fact absent from the
-//     shim's live WatchSession; the footer's momentary loading push is the
-//     nearest daemon-resolved surface this suite can dial directly (no
-//     frontend Watch*Agent* rpc exists — see this file's own note on
-//     TestContextInjectedMemory).
 //   - proto/src/frontend/v1/topbar.proto: TopbarWarningStrip.warnings — used
 //     by TestDiagnostics to assert a HEALTHY diagnostics push by absence,
 //     mirroring world_test.go's KeepAliveNeverAppearsOnWire-style
 //     assert-by-absence precedent named in SPEC.md §C #45.
+//   - proto/src/store/v1/endpoint_open_agent_session.proto,
+//     proto/src/store/v1/store.proto (StoreAgentItem/AgentFrame/AgentUpdate/
+//     AgentActivity), proto/src/conversation/v1/agent_activity.proto
+//     (AgentContextInjected) — the STORE-level surface TestContextInjectedMemory
+//     and TestContextInjectedSkills read, per the project-lead ruling below.
+//   - daemon/internal/sessionwatcher/watcher.go's adoptMainAgentLocked,
+//     operation "daemon.sessionwatcher.main_agent" — the daemon's own
+//     structured-log record naming a workspace's main-agent identity, which
+//     is how this file obtains a conversation.v1.AgentId at all (see the
+//     ruling below: the value "never crosses the wire" to any frontend rpc).
+//
+// PROJECT-LEAD RULINGS (2026-09-02, on this file's four originally-open
+// questions — superseding the wording below that used to present them as
+// open):
+//
+//  1. diagnostics — CONFIRMED. A healthy shim's diagnostics push produces no
+//     topbar warning, so asserting the healthy state BY ABSENCE (no
+//     TopbarWarningStrip entries) is correct. Strengthened per the ruling to
+//     also assert the topbar stream delivered at least one view, so "no
+//     warning" cannot silently pass as "no stream ever arrived".
+//  2. context-injected-memory / context-injected-skills — CHANGED. The
+//     footer's momentary FooterStatusLoading arm is NOT used: nothing in the
+//     contract ties that push to AgentContextInjected specifically, so that
+//     assertion would have been coincidental. These are FILE-PLANE facts
+//     (daemon.md's own list) whose only end-to-end observable is the STORE.
+//     Both tests now open the main agent's book via the store's
+//     OpenAgentSession (a read-only verb, like the GetSidecarCursors read
+//     path driveScenarioToCompletion already relies on for durability) and
+//     assert the injected attachment landed as a page line carrying
+//     AgentActivity.context_injected with the right kind. The main agent's
+//     conversation.v1.AgentId is obtained from the daemon's own structured
+//     log (see CONTRACT GROUNDING above) since AgentId itself "never crosses
+//     the wire" to any frontend rpc (subagents_e2e_test.go's own header
+//     comment, independently confirmed by grep of every frontend .proto
+//     under proto/src/frontend and proto/src/agentrepl).
+//  3. push-notification-not-sent — ACCEPTABLE AS WRITTEN. The generic
+//     FeedSimpleToolCall shell exposes no per-reason (config_off/
+//     user_present/no_transport) field BY CONTRACT (feed.proto declares no
+//     such arm), so per-arm reachability — driving all three registered
+//     scenarios and asserting each settles — is the strongest available
+//     assertion at this surface; kept as three sub-tests.
+//  4. send-message-resumed — SAME RULING. The `resumedAgentId` discriminator
+//     is not exposed on the generic tool-card surface BY CONTRACT either;
+//     reachability (the resumed scenario settles and its composed text
+//     output carries the vendor's resumed-from-transcript wording) is the
+//     strongest available assertion, kept as written.
 //
 // SCENARIO-NAME MISMATCHES FOUND (per the sibling-writer precedent SPEC.md's
-// dispatch note describes — golden manifest name vs. registered `!name`):
+// dispatch note describes — golden manifest name vs. registered `!name`).
+// Recorded by the project lead in E2E-SCENARIO-COVERAGE.md as a naming-drift
+// section for a later shim-side cleanup; not a blocker for this file:
 //   - "context-injected-memory" golden -> registered name "memory" (`!memory`).
 //   - "context-injected-skills" golden -> registered name "skills-injected"
 //     (`!skills-injected`).
@@ -64,9 +104,8 @@
 //     that directory). The MANIFEST's own row for it names no tool at all
 //     (`hook, thinking, response -> success.completed`), which is exactly
 //     the DEFAULT prose scenario's shape (fake/scenarios/prose.ts's PROSE,
-//     `name: ""`) — an ordinary prompt with no `!scenario` prefix. This is
-//     an OPEN QUESTION, not a guess dressed as fact: see TestDiagnostics's
-//     own comment.
+//     `name: ""`) — an ordinary prompt with no `!scenario` prefix. CONFIRMED
+//     by project-lead ruling 1 above.
 //
 // This suite mocks every external dependency (user ruling): the vendor is
 // the fake SDK riding the real shim's --fake mode, and git is the SCRIPTED
@@ -74,7 +113,10 @@
 // never harness.NewRealRepo/RealRepo (being deleted from the harness) and
 // this file never sets Opts.SkipFakeGit. Every transcript fact asserted here
 // comes from a named fake-SDK scenario driven through the real shim, per
-// this package's own grep gate.
+// this package's own grep gate. The two store reads this file makes
+// (OpenAgentSession) are read-only verbs, not the forbidden WriteBatch, and
+// read facts the real shim itself wrote via --fake — never a hand-authored
+// row.
 package e2e
 
 import (
@@ -84,6 +126,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	storev1 "agentrepl/proto/store/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
@@ -176,6 +219,63 @@ func rmRequireFailed(t *testing.T, row *frontendv1.FeedRow, toolName string) *fr
 	return returned
 }
 
+// rmMainAgentID answers ws's main-agent conversation.v1.AgentId, per
+// project-lead ruling 2 (this file's header comment): AgentId "never
+// crosses the wire" to any frontend rpc, so the ONLY way this suite obtains
+// one is the daemon's own structured log — operation
+// "daemon.sessionwatcher.main_agent" (daemon/internal/sessionwatcher/
+// watcher.go's adoptMainAgentLocked), logged the first time the session's
+// main agent is learned, carrying "agent_id" in its Context. This waits on
+// a LogRecord, one of SPEC.md §B's three named synchronization sources
+// (a watch-stream frame, a LogRecord, or a bounded store read) — never a
+// sleep.
+func rmMainAgentID(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *conversationv1.AgentId {
+	t.Helper()
+	rec := w.AwaitWorkspaceLogOperation(ws.GetDir(), "daemon.sessionwatcher.main_agent")
+	id, _ := rec.Context["agent_id"].(string)
+	if id == "" {
+		t.Fatalf("daemon.sessionwatcher.main_agent log record carries no non-empty agent_id: %+v", rec)
+	}
+	return &conversationv1.AgentId{Value: id}
+}
+
+// rmOpenAgentBook opens the given agent's book at the store directly (a
+// read-only verb, OpenAgentSession — never the forbidden WriteBatch) and
+// answers its first page. Used only by TestContextInjectedMemory and
+// TestContextInjectedSkills, per project-lead ruling 2: AgentContextInjected
+// is a FILE-PLANE-ONLY fact with no frontend-observable surface, so this is
+// the suite's one legitimate direct store read outside the harness's own
+// GetSidecarCursors durability wait.
+func rmOpenAgentBook(t *testing.T, w *World, agent *conversationv1.AgentId) *storev1.AgentSessionPage {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
+	defer cancel()
+	resp, err := w.Store.Client.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent:    agent,
+		PageSize: 200,
+	}))
+	if err != nil {
+		t.Fatalf("OpenAgentSession(%s): %v", agent.GetValue(), err)
+	}
+	success := resp.Msg.GetSuccess()
+	if success == nil {
+		t.Fatalf("OpenAgentSession(%s) = %v, want success", agent.GetValue(), resp.Msg)
+	}
+	return success.GetPage()
+}
+
+// rmFindContextInjected scans an agent book's page for a line carrying
+// AgentActivity.context_injected, and answers the first one found (or nil).
+func rmFindContextInjected(page *storev1.AgentSessionPage) *conversationv1.AgentContextInjected {
+	for _, line := range page.GetLines() {
+		injected := line.GetLine().GetAgentItem().GetAgentFrame().GetUpdate().GetActivity().GetContextInjected()
+		if injected != nil {
+			return injected
+		}
+	}
+	return nil
+}
+
 // ===========================================================================
 // #72 ArtifactPublishAndList — golden "artifact-publish-and-list".
 //
@@ -217,76 +317,78 @@ func TestArtifactPublishAndList(t *testing.T) {
 // #73 ContextInjectedMemory — golden "context-injected-memory", registered
 // scenario name "memory" (`!memory`, skills.ts MEMORY_INJECTED).
 //
-// skills.ts's own file doc comment: "Injected context is a FILE-PLANE fact
-// ... the vendor writes them and streams nothing." daemon.md's own list of
-// FILE-PLANE-ONLY facts names AgentContextInjected explicitly as absent from
-// the shim's live WatchSession stream. There is no frontend Watch*Agent* rpc
-// this suite can dial for it (service.proto's rpc list has none), so the
-// nearest daemon-resolved, directly-dialable surface is the footer's
-// MOMENTARY FooterStatusLoading arm (footer.proto: "MOMENTARY: context is
-// being injected (memory, skills); falls back on the next frame") — the
-// footer watch is opened BEFORE the prompt is submitted so no push in the
-// sequence can be missed, even though the state itself is momentary.
-//
-// OPEN QUESTION for the project lead: whether FooterStatusLoading is in fact
-// driven from the same store-tail replay daemon.md calls FILE-PLANE-ONLY, or
-// is a separate live-turn signal the daemon composes independently. Either
-// way this is the only frontend-dialable surface found for this golden; if
-// it turns out not to fire for this scenario, that is a contract-vs-surface
-// gap to report, not a reason to fabricate a different assertion.
+// PROJECT-LEAD RULING 2 (this file's header comment): the footer's momentary
+// FooterStatusLoading arm is NOT the observable here — nothing in the
+// contract ties that push to AgentContextInjected, so it would have been
+// coincidental. This is a FILE-PLANE-ONLY fact (skills.ts's own file doc
+// comment: "the vendor writes them and streams nothing"; daemon.md lists
+// AgentContextInjected as absent from the shim's live WatchSession) whose
+// only end-to-end observable is the STORE. This test drives the scenario to
+// completion (which already waits, via driveScenarioToCompletion, for the
+// sidecar to durably advance a cursor under the project directory — the
+// same read-only-verb durability wait every other test in this suite
+// relies on), then opens the main agent's book directly at the store
+// (OpenAgentSession, itself a read-only verb) and asserts a page line
+// carries AgentActivity.context_injected with the memory arm set.
 // ===========================================================================
 
 func TestContextInjectedMemory(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
 
 	// Act
-	turn := SubmitPrompt(t, w, ws, "!memory")
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "memory")
 
-	// Assert: the momentary loading push, memory substatus.
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	harness.AwaitView(t, ctx, footer, "the memory-injection loading push", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetLoading().GetMemory() != nil
-	})
-
-	// Cleanup: let the turn conclude before the test ends.
-	AwaitTurnEnded(t, w, ws, turn)
+	// Assert: a page line in the main agent's book carries the injected
+	// memory fact.
+	agent := rmMainAgentID(t, w, ws)
+	page := rmOpenAgentBook(t, w, agent)
+	injected := rmFindContextInjected(page)
+	if injected == nil {
+		t.Fatalf("agent %s's book carries no AgentContextInjected line", agent.GetValue())
+	}
+	memory := injected.GetMemory()
+	if memory == nil {
+		t.Fatalf("AgentContextInjected = %v, want the memory arm set", injected)
+	}
+	if memory.GetPath() == "" {
+		t.Fatal("AgentInjectedMemory carries no path")
+	}
+	if memory.GetContent() == "" {
+		t.Fatal("AgentInjectedMemory carries no content")
+	}
 }
 
 // ===========================================================================
 // #74 ContextInjectedSkills — golden "context-injected-skills", registered
 // scenario name "skills-injected" (`!skills-injected`, skills.ts
-// SKILLS_INJECTED). Emits THREE attachment kinds (invoked_skills,
-// dynamic_skill, skill_listing) — footer.proto's FooterStatusLoading
-// substatus vocabulary has one arm per corresponding kind (invoked,
-// discovered, listing); this test accepts ANY of the three rather than
-// pinning one, since the scenario does not document which attachment the
-// daemon resolves into the loading push first. See TestContextInjectedMemory
-// for the same footer-surface open question.
+// SKILLS_INJECTED). Emits an `invoked_skills` attachment among others; per
+// project-lead ruling 2 (see TestContextInjectedMemory), asserted the same
+// way: through the store's AgentContextInjected line, never the footer.
 // ===========================================================================
 
 func TestContextInjectedSkills(t *testing.T) {
 	// Arrange
 	w, ws := rmNewWorkspace(t)
-	footer := w.WatchFooter(ws)
-	defer footer.Close()
 
 	// Act
-	turn := SubmitPrompt(t, w, ws, "!skills-injected")
+	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "skills-injected")
 
-	// Assert: any of the three skills-injection loading substates.
-	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
-	defer cancel()
-	harness.AwaitView(t, ctx, footer, "the skills-injection loading push", func(v *frontendv1.FooterView) bool {
-		loading := v.GetStrip().GetStatus().GetLoading()
-		return loading.GetInvoked() != nil || loading.GetDiscovered() != nil || loading.GetListing() != nil
-	})
-
-	// Cleanup: let the turn conclude before the test ends.
-	AwaitTurnEnded(t, w, ws, turn)
+	// Assert: a page line in the main agent's book carries the injected
+	// skills fact.
+	agent := rmMainAgentID(t, w, ws)
+	page := rmOpenAgentBook(t, w, agent)
+	injected := rmFindContextInjected(page)
+	if injected == nil {
+		t.Fatalf("agent %s's book carries no AgentContextInjected line", agent.GetValue())
+	}
+	skills := injected.GetSkills()
+	if skills == nil {
+		t.Fatalf("AgentContextInjected = %v, want the skills arm set", injected)
+	}
+	if len(skills.GetSkills()) == 0 {
+		t.Fatal("AgentInjectedSkills carries no entries, want at least the fake-skill fixture")
+	}
 }
 
 // ===========================================================================
@@ -343,13 +445,18 @@ func TestDiagnostics(t *testing.T) {
 	turn := SubmitPrompt(t, w, ws, "plain diagnostics smoke check, no tool involved")
 	AwaitTurnEnded(t, w, ws, turn)
 
-	// Assert: the topbar carries no warning — the healthy diagnostics push,
-	// by absence.
+	// Assert: the topbar stream actually delivered a view (per project-lead
+	// ruling 1: "no warning" must not silently pass as "no stream ever
+	// arrived") AND that view carries no warning — the healthy diagnostics
+	// push, by absence.
 	topbar := w.WatchTopbar(ws)
 	defer topbar.Close()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
 	view := harness.AwaitNext(t, ctx, topbar, "the topbar view after an ordinary turn")
+	if view == nil {
+		t.Fatal("the topbar stream delivered no view at all, want at least one")
+	}
 	if got := view.GetWarnings().GetWarnings(); len(got) != 0 {
 		t.Fatalf("topbar warnings = %v, want none for a healthy session", got)
 	}
