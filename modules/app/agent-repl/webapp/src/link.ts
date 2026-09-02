@@ -37,7 +37,7 @@ import {
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import type { AppContext } from "./rpc/context.js";
 import { isMalformedView } from "./rpc/malformed.js";
-import { refusalSentence } from "./rpc/refusal.js";
+import { crossCuttingSentence } from "./rpc/refuse.js";
 import { requireCase, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 
@@ -155,7 +155,7 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
       (result.value as OpenExternalError).cause,
       "OpenExternalError.cause",
     );
-    const say = refusalSentence("OpenExternal", cause) ?? openExternalRefusal(cause);
+    const say = crossCuttingSentence("OpenExternal", cause) ?? openExternalRefusal(cause);
     drawRefusal(anchor, cause.case, say);
     log("warn", `OpenExternal refused ${url}`, {
       operation: "link.open-external-refused",
@@ -193,7 +193,7 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, spec: EditorLi
       (result.value as OpenInEditorError).cause,
       "OpenInEditorError.cause",
     );
-    const say = refusalSentence("OpenInEditor", cause) ?? openInEditorRefusal(cause);
+    const say = crossCuttingSentence("OpenInEditor", cause) ?? openInEditorRefusal(cause);
     drawRefusal(anchor, cause.case, say);
     log("warn", `OpenInEditor refused ${spec.path}`, {
       operation: "link.open-in-editor-refused",

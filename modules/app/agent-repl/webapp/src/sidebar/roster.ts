@@ -47,7 +47,7 @@ import {
 import { drawCreateWorkspaceControl } from "./create.js";
 import { drawRosterRow } from "./row.js";
 import { buildUpdateTaskRequest, drawCreateTaskControl, updateTaskRefusal } from "./tasks.js";
-import { runVerb } from "./verbs.js";
+import { fireVerb } from "./verbs.js";
 
 /**
  * The whole roster.
@@ -362,7 +362,7 @@ function drawTaskDoneCheck(taskId: string, done: boolean, sc: SidebarContext): H
   check.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void runVerb(check, {
+    void fireVerb(check, {
       sc,
       rpc: "UpdateTask",
       call: (client) =>
@@ -397,7 +397,7 @@ function openRename(
   const send = (): void => {
     const next = input.value.trim();
     if (next === "") return;
-    void runVerb(submit, {
+    void fireVerb(submit, {
       sc,
       rpc: "UpdateTask",
       call: (client) =>

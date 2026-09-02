@@ -42,6 +42,7 @@ import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
 import { armBreathes, armSpins, rosterArmMark, type RosterStatusCase } from "./tones.js";
+import { guardMalformed } from "../rpc/guard.js";
 import { buildSelectWorkspaceRequest, drawRowMenu, runVerb, type VerbTarget } from "./verbs.js";
 
 /**
@@ -93,7 +94,7 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   line.setAttribute("data-select", "");
   line.addEventListener("click", (event) => {
     event.preventDefault();
-    void selectWorkspace(line, sc, workspace);
+    void guardMalformed(sc.ctx, "sidebar.row.select", selectWorkspace(line, sc, workspace));
   });
   line.addEventListener("contextmenu", (event) => {
     event.preventDefault();

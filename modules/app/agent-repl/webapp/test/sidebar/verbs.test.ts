@@ -59,6 +59,7 @@ import {
   nukeWorkspaceRefusal,
   openWorkspaceRefusal,
   restartWorkspaceRefusal,
+  fireVerb,
   runVerb,
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
@@ -533,6 +534,40 @@ describe("an error with no cause", () => {
         refusalText: () => undefined as unknown as string,
       }),
     ).rejects.toThrow(MalformedView);
+  });
+});
+
+describe("fireVerb", () => {
+  it("answers true when the verb succeeded", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } }),
+    });
+    const button = document.createElement("button");
+    await expect(
+      fireVerb(button, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("absorbs a malformed answer rather than letting a click's rejection escape", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const button = document.createElement("button");
+    await expect(
+      fireVerb(button, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+      }),
+    ).resolves.toBe(false);
   });
 });
 
