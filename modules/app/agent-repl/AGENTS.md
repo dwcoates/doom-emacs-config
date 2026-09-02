@@ -49,6 +49,31 @@ every other guard stays armed. This is the sanctioned way to write an
 integration scenario, not a bypass of the guard: an unregistered boundary
 cannot be restored at all, and a scenario that reaches for one fails loudly.
 
+### ONE fake daemon serves a whole suite run
+
+`agent-repl-itest--with-fake-daemon` hands every scenario the SAME fake-daemon
+process — started lazily on the first scenario, reaped on `kill-emacs-hook`.
+A process boot costs seconds and the integration suites run hundreds of
+scenarios, so a per-test spawn is the single largest cost in the run.
+
+The saving is only allowed to exist because the cleaning is TOTAL, and it
+happens on the way IN (`agent-repl-itest--begin-scenario`), never on the way
+out, so a scenario that dies mid-way cannot poison its successor:
+`/_fake/reset` clears the recording, the scripted table, the snapshots and
+every armed gate and ends every standing stream; the shared state root is
+swept back to nothing but `daemon.addr`; that address is re-published so a
+scenario which pointed it at a stub daemon cannot misdirect the next one; and
+a second reset after the subscribers drain closes the window in which the
+previous scenario's dying transport children can still land a request.
+
+A scenario may still stop the shared daemon — cold start's absent-address
+cases must — and the accessor respawns into the same state root next time.
+A scenario that needs TWO live daemons (a handover) still spawns its own
+successor through `agent-repl-itest--with-second-daemon`, which re-publishes
+the primary's address once the successor is reaped. Those two are the only
+sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
+isolation guarantee that makes the sharing safe.
+
 ## Runtime investigations go through one skill
 
 For any current or historical agent-repl behavior, use the complete controller
