@@ -785,8 +785,7 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 		t.Fatalf("pre-prompt StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_BEFORE_ACTION", req.GetOrigin())
 	}
 
-	root := f.watchRootFeed()
-	mergeRow := awaitRow(t, f, root, "the merge bubble's head", func(row *frontendv1.FeedRow) bool {
+	mergeRow := f.awaitRowInFeed(nil, "the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
 	preTab := f.awaitRowInFeed(mergeRow.GetId(), "the pre_prompt tab, live", func(row *frontendv1.FeedRow) bool {
@@ -798,12 +797,24 @@ func TestPrePromptTabRunsUnderTheLeaseAndParentsItsRowsToItsTabNotTheRoot(t *tes
 
 	// Assert: the turn's own concluded row is parented to the pre_prompt tab —
 	// the OUTPUT ADDRESS the lease's session was stamped with — never to root.
-	f.awaitRowInFeed(preTab.GetId(), "the pre-prompt turn's concluded row", func(row *frontendv1.FeedRow) bool {
+	// The tab's content is the merge sub-feed's rows PARENTED to the tab row
+	// (feed.proto: "Content: sub-feed rows parented to this row") — a tab row
+	// is not itself a feed, so the concluded row is looked up on the bubble's
+	// sub-feed and its parent is what places it on the tab.
+	concluded := f.awaitRowInFeed(mergeRow.GetId(), "the pre-prompt turn's concluded row", func(row *frontendv1.FeedRow) bool {
 		return row.GetTurnEnded().GetConcluded() != nil
 	})
+	if concluded.GetParent().GetRow().GetValue() != preTab.GetId().GetValue() {
+		t.Fatalf("the pre-prompt turn's concluded row parent = %v, want the pre_prompt tab %v",
+			concluded.GetParent().GetRow(), preTab.GetId())
+	}
+	// Assert: THAT turn's terminal never rode the root feed. The workspace's
+	// own creation turn ended on root before the merge was ever enqueued, so
+	// the check is scoped to the pre-prompt turn's id rather than to every
+	// turn_ended row.
 	page, _ := f.openFeed(nil)
 	for _, row := range page.GetSuccess().GetRows() {
-		if row.GetTurnEnded() != nil {
+		if row.GetTurnEnded() != nil && row.GetTurn().GetValue() == concluded.GetTurn().GetValue() {
 			t.Fatalf("the pre-prompt turn's concluded row rode the ROOT feed: %v, want it parented to the pre_prompt tab only", row)
 		}
 	}
@@ -954,8 +965,7 @@ func TestParkedGuidanceLandsAsAUserPromptRowOnTheConflictsTabNeverOnTheRootFeed(
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
 	})
-	root := f.watchRootFeed()
-	rootMergeRow := awaitRow(t, f, root, "the merge bubble's head", func(row *frontendv1.FeedRow) bool {
+	rootMergeRow := f.awaitRowInFeed(nil, "the merge bubble's head", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
 	conflictsTab := f.awaitRowInFeed(rootMergeRow.GetId(), "the conflicts tab, parked", func(row *frontendv1.FeedRow) bool {
@@ -977,11 +987,15 @@ func TestParkedGuidanceLandsAsAUserPromptRowOnTheConflictsTabNeverOnTheRootFeed(
 	}
 
 	// Assert: the guidance's user_prompt row is parented to the conflicts tab.
-	guidanceRow := f.awaitRowInFeed(conflictsTab.GetId(), "the guidance's user_prompt row on the conflicts tab", func(row *frontendv1.FeedRow) bool {
+	// The tab's content is the merge sub-feed's rows PARENTED to the tab row
+	// (feed.proto: "Content: sub-feed rows parented to this row") — a tab row
+	// is not itself a feed.
+	guidanceRow := f.awaitRowInFeed(rootMergeRow.GetId(), "the guidance's user_prompt row on the conflicts tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetUserPrompt() != nil && promptText(row) == guidanceText
 	})
-	if guidanceRow == nil {
-		t.Fatalf("no user_prompt row for %q landed on the conflicts tab", guidanceText)
+	if guidanceRow.GetParent().GetRow().GetValue() != conflictsTab.GetId().GetValue() {
+		t.Fatalf("the guidance's user_prompt row parent = %v, want the conflicts tab %v",
+			guidanceRow.GetParent().GetRow(), conflictsTab.GetId())
 	}
 
 	// Assert: NO row for that guidance ever rode the ROOT feed.
