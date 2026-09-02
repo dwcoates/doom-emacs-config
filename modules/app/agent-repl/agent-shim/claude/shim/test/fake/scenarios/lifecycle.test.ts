@@ -90,3 +90,23 @@ describe("the keep-alive-shaped turn", () => {
     expect(String((prompt?.message as { content: { text: string }[] }).content[0]?.text)).toContain(marker);
   });
 });
+
+describe("query death with a permission ask left open", () => {
+  it("opens the ask, then ends the iterable without resolving it itself", async () => {
+    // Arrange + Act. The scenario never awaits the ask; only the shim's own
+    // stand-down resolves it, so driving it bare is expected to leave the
+    // callback pending -- this pins that the STREAM still ends cleanly.
+    const driven = await driveScenario(["!query-eof-mid-ask"]);
+
+    // Assert. No result: the query died before a turn could conclude.
+    expect(ofType(driven, "result")).toHaveLength(0);
+  });
+
+  it("still recorded the tool_use before the death", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!query-eof-mid-ask"]);
+
+    // Assert
+    expect(driven.messages.some((m) => (m as { type: string }).type === "assistant")).toBe(true);
+  });
+});
