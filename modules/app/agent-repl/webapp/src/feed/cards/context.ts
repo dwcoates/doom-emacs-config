@@ -40,9 +40,3 @@ export interface RowContext {
    */
   previous?: HTMLElement;
 }
-
-/**
- * One unit's renderer: a pure function of the drawn message and its row
- * context, answering the body element. Every card module exports one.
- */
-export type RowBodyRenderer<T> = (unit: T, rc: RowContext) => HTMLElement;

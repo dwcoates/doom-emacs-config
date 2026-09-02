@@ -63,7 +63,6 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_restart_workspace_pb";
 import {
   SelectWorkspaceRequestSchema,
-  SelectWorkspaceResponseSchema,
   type SelectWorkspaceRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import {
