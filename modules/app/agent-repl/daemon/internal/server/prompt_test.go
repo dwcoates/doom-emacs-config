@@ -221,7 +221,7 @@ func TestSubmitPromptMapsTheDuplicateSubmissionRefusal(t *testing.T) {
 }
 
 // TestBubbleRefusedFoldsNotDeliverable pins the shim's not_deliverable onto the
-// landing-7 candidate arm with its kind in the reason.
+// LANDED bubble_refused arm under its own kind (landing 7).
 func TestBubbleRefusedFoldsNotDeliverable(t *testing.T) {
 	// Arrange.
 	in := refusal{Arm: "not_deliverable", Reason: "the SDK has no route to agent \"a1\""}
@@ -230,24 +230,37 @@ func TestBubbleRefusedFoldsNotDeliverable(t *testing.T) {
 	out := bubbleRefused(in)
 
 	// Assert.
-	if out.Arm != "bubble_refused" ||
-		out.Reason != "kind not_deliverable: the SDK has no route to agent \"a1\"" {
+	if out.Arm != "bubble_refused" || out.Fields["kind"] != nestedArm("not_deliverable") {
 		t.Fatalf("refusal = %+v, want bubble_refused with kind not_deliverable", out)
 	}
 }
 
-// TestBubbleRefusedFoldsTurnAlreadyOpenOntoAgentBusy pins the shim's
-// turn_already_open onto the same arm under the agent_busy kind.
-func TestBubbleRefusedFoldsTurnAlreadyOpenOntoAgentBusy(t *testing.T) {
+// TestBubbleRefusedKeepsTheShimsSentenceAsTheReason pins that the shim's own
+// words survive the fold, because they become the arm's `detail`.
+func TestBubbleRefusedKeepsTheShimsSentenceAsTheReason(t *testing.T) {
 	// Arrange.
-	in := refusal{Arm: "turn_already_open", Reason: "the subagent's turn is running"}
+	in := refusal{Arm: "not_deliverable", Reason: "the SDK has no route to agent \"a1\""}
 
 	// Act.
 	out := bubbleRefused(in)
 
 	// Assert.
-	if out.Arm != "bubble_refused" ||
-		out.Reason != "kind agent_busy: the subagent's turn is running" {
+	if out.Reason != "the SDK has no route to agent \"a1\"" {
+		t.Fatalf("refusal reason = %q, want the shim's own sentence", out.Reason)
+	}
+}
+
+// TestBubbleRefusedFoldsAgentBusy pins the shim's agent_busy onto the same arm
+// under the agent_busy kind.
+func TestBubbleRefusedFoldsAgentBusy(t *testing.T) {
+	// Arrange.
+	in := refusal{Arm: "agent_busy", Reason: "the subagent's turn is running"}
+
+	// Act.
+	out := bubbleRefused(in)
+
+	// Assert.
+	if out.Arm != "bubble_refused" || out.Fields["kind"] != nestedArm("agent_busy") {
 		t.Fatalf("refusal = %+v, want bubble_refused with kind agent_busy", out)
 	}
 }

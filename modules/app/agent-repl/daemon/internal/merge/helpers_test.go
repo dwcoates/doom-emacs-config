@@ -677,6 +677,19 @@ func (f *fakeFeed) lastMergeErrorArm() string {
 	return arm
 }
 
+// lastAbandonedSummary answers the summary the abandoned terminal carries.
+func (f *fakeFeed) lastAbandonedSummary() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	summary := ""
+	for _, row := range f.rows {
+		if abandoned := row.Row.GetActivity().GetMerge().GetError().GetAbandoned(); abandoned != nil {
+			summary = abandoned.GetSummary()
+		}
+	}
+	return summary
+}
+
 // tabKindOf names a tab row's kind arm.
 func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 	switch tab.GetKind().(type) {

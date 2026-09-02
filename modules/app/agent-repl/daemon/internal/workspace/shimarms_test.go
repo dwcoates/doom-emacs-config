@@ -45,6 +45,11 @@ func TestUpdateAgentArmNamesEveryLandedKind(t *testing.T) {
 			failure: &shimv1.UpdateAgentFailure{Kind: &shimv1.UpdateAgentFailure_NotDeliverable{NotDeliverable: &shimv1.UpdateAgentNotDeliverable{}}},
 			want:    ArmShimNotDeliverable,
 		},
+		{
+			name:    "agent busy",
+			failure: &shimv1.UpdateAgentFailure{Kind: &shimv1.UpdateAgentFailure_AgentBusy{AgentBusy: &shimv1.UpdateAgentAgentBusy{}}},
+			want:    ArmShimAgentBusy,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

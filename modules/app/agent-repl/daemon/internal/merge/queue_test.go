@@ -625,6 +625,27 @@ func TestEvictEndsTheQueuedBubbleWithTheAbandonedTerminal(t *testing.T) {
 	}
 }
 
+// TestEvictsAbandonedTerminalCarriesTheOperatorsCause is landing 7's half: the
+// arm does not distinguish the three ends, so the CAUSE reaches a reader as
+// FeedMergeAbandoned.summary.
+func TestEvictsAbandonedTerminalCarriesTheOperatorsCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict failed: %v", err)
+	}
+
+	// Assert.
+	if got := h.feed.lastAbandonedSummary(); got != "the operator evicted this merge from the queue" {
+		t.Fatalf("the evicted merge's summary = %q, want the operator's cause", got)
+	}
+}
+
 // TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding covers the surface half
 // of the same drop: a merge that never ran leaves no merge state behind.
 func TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding(t *testing.T) {

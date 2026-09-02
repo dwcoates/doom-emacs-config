@@ -757,6 +757,29 @@ func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
 	f.d.ExpectWarnings("daemon.workspace.close")
 }
 
+// TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence is landing 7: the
+// blocked arm states WHY, so a caller with no footer can say it — and
+// `summary` is the same composed sentence the footer's activity line draws.
+func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.submit("do the thing", "k-close-evidence", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CloseWorkspace with a turn in flight = transport error %v, want the blocked arm", err)
+	}
+	blocked := resp.Msg.GetError().GetBlocked()
+	if blocked == nil || !blocked.GetTurnInFlight() || blocked.GetSummary() == "" {
+		t.Fatalf("CloseWorkspaceBlocked = %v, want turn_in_flight true with a composed summary", blocked)
+	}
+	f.d.ExpectWarnings("daemon.workspace.close")
+}
+
 func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	// Arrange: a workspace the daemon CREATED, so it carries the merge layout
 	// facts an enqueue needs, with a second one ahead of it in its repo's queue
