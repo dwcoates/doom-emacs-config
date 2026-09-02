@@ -8,6 +8,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
 
@@ -116,7 +117,7 @@ func (v *verbs) submitFollowup(ctx context.Context, log dlog.Logger, record wsm.
 		log.Error(opOneShotFinish, "could not record the follow-up turn", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("one-shot finish on %q: record the follow-up turn: %w", record.ID, err)
 	}
-	if _, err := v.deps.Queue.Submit(ctx, daemonSubmission(record.ID, turn, SaidText(metaWrap(text)), origin)); err != nil {
+	if _, err := v.deps.Queue.Submit(ctx, daemonSubmission(record.ID, turn, SaidText(prompts.Wrap(text)), origin)); err != nil {
 		log.Error(opOneShotFinish, "the follow-up prompt was not accepted", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("one-shot finish on %q: submit the follow-up: %w", record.ID, err)
 	}
