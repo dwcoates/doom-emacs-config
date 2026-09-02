@@ -154,8 +154,12 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	// Enrichment (critique 15): minted_at_ms is this announcement's own mint
 	// instant (internal/drain/controller.go ShutdownNow: deps.Clock.Now()), so
 	// it falls inside the wall-clock window the rpc call bracketed.
+	// The comparison is in MILLISECONDS on both sides: minted_at_ms is
+	// truncated to the millisecond, and comparing it against a wall-clock
+	// instant carrying sub-millisecond precision fails whenever the bracket's
+	// own remainder happens to be non-zero.
 	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
-	if mintedAt.Before(before) || mintedAt.After(after) {
+	if mintedAt.UnixMilli() < before.UnixMilli() || mintedAt.UnixMilli() > after.UnixMilli() {
 		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between %d and %d", announced.GetMintedAtMs(), before.UnixMilli(), after.UnixMilli())
 	}
 	// An immediate operator shutdown states no bounded outage: unlike the
@@ -734,8 +738,11 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 		t.Fatalf("AdoptWebWorkspace on a plain boot = %v, want error.no_transfer_announced", resp.Msg)
 	}
 
-	// Assert: logged at INFO, naming the arm, never WARN.
-	rec := f.d.AwaitRunLogOperation("AdoptWebWorkspace")
+	// Assert: logged at INFO, naming the arm, never WARN. AdoptWebWorkspace is
+	// a PER-WORKSPACE rpc, so its refusal record goes to that workspace's own
+	// sink — a record about one workspace in the global run log is the
+	// invariant violation the logging contract names.
+	rec := f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "AdoptWebWorkspace")
 	if strings.ToLower(rec.Level) != "info" {
 		t.Fatalf("AdoptWebWorkspace's no_transfer_announced refusal logged at %q, want info", rec.Level)
 	}

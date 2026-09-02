@@ -376,6 +376,10 @@ type Cards interface {
 	// ColdGate answers the standing cold gate's served menu, false when no
 	// gate stands.
 	ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool)
+	// ClearColdGate retires a gate that has been answered, so a second answer
+	// against the same id finds nothing standing. A gate left behind would
+	// re-open the session again on every replayed click.
+	ClearColdGate(ws ids.WorkspaceID)
 	// PermissionModes answers EXACTLY the switchable set the topbar's picker
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.

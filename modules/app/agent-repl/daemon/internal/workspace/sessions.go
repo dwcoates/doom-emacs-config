@@ -266,6 +266,15 @@ func (f *Fleet) ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool) {
 	return gate, ok
 }
 
+// ClearColdGate retires an answered gate. It is the resolve path's own step:
+// Stop clears the gate along with the session, but a gate that was ANSWERED
+// leaves no session behind to clear it.
+func (f *Fleet) ClearColdGate(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.coldGates, ws)
+}
+
 // source is the decided way a session comes up: fresh, or a resume of one named
 // conversation.
 type source struct {
@@ -814,6 +823,14 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 	session, ok := f.sessions[ws]
 	f.mu.RUnlock()
 	if !ok {
+		return nil, false
+	}
+	// A REAPED CLIENT IS NO SESSION. The map entry outlives the process — a
+	// shim killed out from under the daemon leaves its row behind until
+	// something tears it down — and reading liveness from map presence alone
+	// would send the verb over a dead connection, which answers a raw transport
+	// error where the contract spells no_session.
+	if _, reaped := session.client.Reaped(); reaped {
 		return nil, false
 	}
 	return &shimAdapter{client: session.client}, true

@@ -599,53 +599,41 @@ a spec edit and never a rationalization in the suite.
   three distinct ways -- evicted by another merge, dequeued by its own release,
   or abandoned by the run giving up -- and `FeedMergeError` carries only
   `failed` and `abandoned`, so the three causes are NOT distinguishable on the
-  wire. The suite asserts exactly what IS expressible (the `abandoned`
-  terminal, the footer leaving its merging state, and the roster shedding every
-  merge arm) and names the limitation in the tests rather than inventing an
-  arm. The third cause has no reachable producer at all: `dropQueued`'s only
-  callers are Evict and the dequeue release, and `FeedMergeAbandoned` is
-  constructed nowhere under `internal/`, so the feed-bubble half of those tests
-  is RED and the abandon case is skipped naming that trace. A landing-7 arm per
-  cause is the change owed.
+  wire. `dropQueued` now PRODUCES the `abandoned` terminal (remediated): the
+  head row is drawn against the bubble's ledger identity before that identity
+  is dropped, and the footer and roster shed their merge arms behind it.
+  `FeedMergeAbandoned` is an EMPTY message, so the cause rides only in the log.
+  The third cause still has no reachable producer — `dropQueued`'s only callers
+  are Evict and the dequeue release — so that case stays skipped. A landing-7
+  arm per cause, and a field on `FeedMergeAbandoned`, are the changes owed.
 
 - TWO FURTHER CONTRACT CLAIMS HAVE NO PRODUCTION HOOK, recorded with the three
   above rather than silently dropped:
-  - A DRAIN SCHEDULE DOES NOT SURVIVE A RESTART. `wsm.DB` persists it and
-    `internal/drain/sweep.go`'s `Run` reads it every pass, but it ACTS only on
-    a deadline already passed; a schedule still in the future is absorbed into
-    the wait and never handed to `Announcer.DrainScheduled`, so a fresh
-    process's daemon topic is empty and a reconnecting client loses a schedule
-    still in force. The hook owed: a boot-time read of `DrainSchedule()` after
-    `drain.New` in `cmd/claude-repld/graph.go` that republishes a standing
-    schedule before the server serves. The test asserting the contract is RED.
-  - A FEED WATCH TOKEN CANNOT BE EXPIRED ON PURPOSE. `token_expired`
-    (`feed.ErrTokenExpired`) fires only when a token's pinned start falls out
-    of the retained publication log, and `feed.Deps.TailRetention` -- the knob
-    that would make that reachable -- is never set: `cmd/claude-repld/graph.go`
-    builds `feed.Deps` without it, so retention is fixed at
-    `DefaultTailRetention` (4096) and no flag or environment variable reaches
-    it. The hook owed: a `--feed-tail-retention` flag (or the equivalent
-    environment knob) wired into that one `feed.New` call. Until it exists the
-    arm is untestable at this level and no test pretends otherwise.
+  - A DRAIN SCHEDULE NOW SURVIVES A RESTART (remediated).
+    `drain.Controller.Republish` re-announces and re-arms the persisted
+    schedule, and the boot's `Prime` step calls it once the push surface is
+    bound and before anything is served.
+  - A FEED WATCH TOKEN CAN NOW BE EXPIRED ON PURPOSE. `token_expired`
+    (`feed.ErrTokenExpired`) fires when a token's pinned start falls out of the
+    retained publication log, and `feed.Deps.TailRetention` is now set from
+    `--feed-tail-retention` / `$AGENT_REPL_FEED_TAIL_RETENTION` in
+    `cmd/claude-repld/graph.go`. The suite compresses the retention to one row
+    and asserts the refusal.
 
-- A CORRUPT `creation_jobs` ROW IS SWALLOWED. `internal/merge/recover.go`'s
-  `recoverAdmitted` folds ANY `layoutFor` error -- a genuine
-  `*wsm.DecodeError` included -- into "the workspace's merge geometry is gone",
-  which fails that one merge and lets the boot serve on. Data corruption is
-  thereby downgraded to an ordinary unmergeable outcome. The suite asserts the
-  contract (a loud non-zero refusal, as for every other table) and is RED.
+- A CORRUPT `creation_jobs` ROW REFUSES THE BOOT (remediated).
+  `recoverAdmitted` matches `*wsm.DecodeError` and fails the recovery loudly,
+  on the workspace sink and in the run log, rather than folding corruption into
+  "the workspace's merge geometry is gone" and serving on.
 
-- `InterruptError.shim_refused` HAS NO PRODUCER. A transport-level failure of
-  `KillTurn` is never a `*ShimRefusal`, so `AsShimRefusal` cannot match it, and
-  where a real refusal does arrive `server/refuse.go` switches onto the
-  CONCRETE arm the shim named. Nothing anywhere sets the arm string
-  `shim_refused`. The test asserting it is RED.
+- `InterruptError.shim_refused` HAS A PRODUCER (remediated). A KillTurn
+  failure that names no landed arm — a transport failure, or a typed failure
+  whose kind oneof is unset — relays as `shim_refused` carrying the shim's own
+  words (`shimclient.Detail` strips the transport's code prefix). A refusal the
+  shim DID name still propagates by name.
 
-- `Fleet.Shim` READS LIVENESS FROM MAP PRESENCE. A workspace whose shim process
-  is gone but whose `sessions` entry remains is treated as live, so a verb
-  proceeds over a dead connection and returns a raw transport error instead of
-  the typed `no_session` refusal. The `AnswerColdGate` test for that split is
-  RED.
+- `Fleet.Shim` READS LIVENESS FROM THE CLIENT (remediated). A reaped client is
+  no session, so a verb against a workspace whose shim process is gone answers
+  the typed `no_session` refusal instead of a raw transport error.
 
 ## Log discipline
 Every test runs with the daemon at ≥WARNING terminal mirror; the harness

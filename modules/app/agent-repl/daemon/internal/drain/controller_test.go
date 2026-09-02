@@ -459,3 +459,92 @@ func TestCancellingAScheduleReleasesItsDrainHolds(t *testing.T) {
 		t.Fatalf("Lease after the cancel = (held %v, %v), want no lease", held, err)
 	}
 }
+
+func TestRepublishAnnouncesAScheduleThatOutlivedTheProcessThatArmedIt(t *testing.T) {
+	// Arrange: a schedule persisted by an earlier process, so the topic this
+	// process owns has never carried its banner.
+	h := newHarness(t)
+	deadline := instant.Add(time.Hour)
+	if err := h.db.PutDrainSchedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: deadline, SetAt: instant,
+	}); err != nil {
+		t.Fatalf("PutDrainSchedule: %v", err)
+	}
+
+	// Act
+	err := h.c.Republish(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Republish: %v", err)
+	}
+	pushed := h.announcer.Scheduled()
+	if len(pushed) != 1 {
+		t.Fatalf("drain_scheduled pushes = %d, want exactly the republished banner", len(pushed))
+	}
+	if pushed[0].GetAtMs() != deadline.UnixMilli() {
+		t.Fatalf("drain_scheduled.at_ms = %d, want the persisted deadline %d", pushed[0].GetAtMs(), deadline.UnixMilli())
+	}
+}
+
+func TestRepublishAnnouncesNothingWhenNoScheduleSurvivedTheRestart(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	err := h.c.Republish(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Republish with nothing scheduled = %v, want no error", err)
+	}
+	if pushed := h.announcer.Scheduled(); len(pushed) != 0 {
+		t.Fatalf("drain_scheduled pushes = %d, want none", len(pushed))
+	}
+}
+
+func TestRepublishRetakesTheIntakeHoldTheStandingScheduleOwns(t *testing.T) {
+	// Arrange: a workspace and a schedule the previous process left behind.
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	if err := h.db.PutDrainSchedule(context.Background(), wsm.DrainSchedule{
+		Reason: deployReason(t), Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("PutDrainSchedule: %v", err)
+	}
+
+	// Act
+	if err := h.c.Republish(context.Background()); err != nil {
+		t.Fatalf("Republish: %v", err)
+	}
+
+	// Assert: the workspace's lease is held by the drain again.
+	lease, held, err := h.db.Lease(context.Background(), ws)
+	if err != nil {
+		t.Fatalf("Lease: %v", err)
+	}
+	if !held || lease.Holder != wsm.HolderDrain {
+		t.Fatalf("lease = %+v held=%v, want the drain holding it after the republish", lease, held)
+	}
+}
+
+func TestRepublishRefusesAPersistedScheduleWhoseReasonWillNotDecode(t *testing.T) {
+	// Arrange: a row whose reason is not a decodable DrainReason.
+	h := newHarness(t)
+	if err := h.db.PutDrainSchedule(context.Background(), wsm.DrainSchedule{
+		Reason: "{not json", Deadline: instant.Add(time.Hour), SetAt: instant,
+	}); err != nil {
+		t.Fatalf("PutDrainSchedule: %v", err)
+	}
+
+	// Act
+	err := h.c.Republish(context.Background())
+
+	// Assert
+	if err == nil {
+		t.Fatal("Republish over an undecodable reason = nil, want a loud refusal")
+	}
+	if pushed := h.announcer.Scheduled(); len(pushed) != 0 {
+		t.Fatalf("drain_scheduled pushes = %d, want none from a corrupt row", len(pushed))
+	}
+}

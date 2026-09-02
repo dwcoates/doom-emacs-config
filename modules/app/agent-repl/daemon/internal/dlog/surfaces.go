@@ -18,7 +18,10 @@ const scanInterval = 30 * time.Second
 // mirror, and the per-workspace sink map that is this runtime's memory of
 // which target each canonical link names.
 type surfaces struct {
-	runLog  *runLog
+	runLog *runLog
+	// logsDir is the state root's logs directory — the run log's own — and is
+	// where every workspace sink's daemon-owned target is minted.
+	logsDir string
 	mirror  *mirror
 	verbose bool
 	pid     int
@@ -67,6 +70,7 @@ func openSurfaces(runLogPath string, verbose bool, terminal interface{ Write([]b
 	}
 	s := &surfaces{
 		runLog:     rl,
+		logsDir:    filepath.Dir(runLogPath),
 		mirror:     newMirror(terminal, mirrorDepth),
 		verbose:    verbose,
 		pid:        os.Getpid(),
@@ -246,7 +250,7 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		return ws, sk, nil
 	}
 	key := ws.id + "/" + name
-	sk, err := openSink(ws.dir, ws.id, name, s.targets[key])
+	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key])
 	if err != nil {
 		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
 	}

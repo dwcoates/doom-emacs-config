@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
+	"claude-repld/internal/shimclient"
 )
 
 // InterruptOutcome is what an interrupt did, which is an ANSWER in every case —
@@ -132,14 +133,26 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 				})
 				return InterruptOutcome{NothingRunning: true}, nil
 			}
+			if refusal.Arm == ArmShimUnspecified {
+				// A failure whose kind oneof is unset names no landed arm. The
+				// contract has a home for exactly that — shim_refused, "a typed
+				// shim refusal relayed" — so the refusal is answered rather
+				// than guessed at or dropped into an unlanded-arm error.
+				return InterruptOutcome{}, refuse(log, "Interrupt", ArmShimRefused, refusal.Detail, false)
+			}
 			// The shim's own arm is propagated verbatim: the caller learns
 			// WHICH refusal it was, not just that something refused.
 			return InterruptOutcome{}, refuse(log, "Interrupt", refusal.Arm, refusal.Detail, false)
 		}
+		// THE FALLTHROUGH IS shim_refused, NOT A RAW TRANSPORT ERROR. The shim
+		// would not perform the kill, and which layer said so — a typed failure
+		// or the transport under it — is not something the caller can act on.
+		// The record is still made at ERROR, so nothing is quietly downgraded.
+		detail := shimclient.Detail(err)
 		log.Error(opInterrupt, "the turn kill failed", dlog.Context{
 			"turn": string(*running.Turn), "force": confirm, "cause": err.Error(),
 		})
-		return InterruptOutcome{}, fmt.Errorf("interrupt %q: kill turn %q: %w", ws, *running.Turn, err)
+		return InterruptOutcome{}, refuse(log, "Interrupt", ArmShimRefused, detail, false)
 	}
 
 	log.Info(opInterrupt, "interrupted the running turn", dlog.Context{

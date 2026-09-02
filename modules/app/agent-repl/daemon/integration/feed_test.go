@@ -2098,3 +2098,66 @@ func findRow(page *frontendv1.FeedPage, pred func(*frontendv1.FeedRow) bool) *fr
 	}
 	return nil
 }
+
+// TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport covers
+// the OTHER Watch* refusal a feed token can meet: the token was minted by this
+// daemon, but so many rows have been published since that its pinned start has
+// fallen out of the retained log, and replaying the tail from it would silently
+// skip everything in between. The reader is told to re-open the feed instead.
+//
+// The retention is compressed to one row through the daemon's own knob, which
+// is what makes the refusal reachable at all: at the built-in 4096 no test
+// could publish its way past the pin.
+func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *testing.T) {
+	// Arrange: a daemon retaining exactly one published row per feed, and a
+	// token minted against a page opened before anything else lands.
+	f := newOpened(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_FEED_TAIL_RETENTION=1"}})
+	f.submit("go", "k-expire", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[0])
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[1])
+	_, token := f.openFeedOnceCarrying("resp-1's settled prose", func(p *frontendv1.FeedPage) bool {
+		for _, r := range p.GetSuccess().GetRows() {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+				return true
+			}
+		}
+		return false
+	})
+
+	// Act: publish past the pin, then open the tail on the stale token. The
+	// second page open is the synchronization: it answers only once the daemon
+	// has routed the frames that pushed the pin out of the retained log.
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-2", "second")[0])
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-2", "second")[1])
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-3", "third")[0])
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-3", "third")[1])
+	f.openFeedOnceCarrying("resp-3's settled prose", func(p *frontendv1.FeedPage) bool {
+		for _, r := range p.GetSuccess().GetRows() {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "third" {
+				return true
+			}
+		}
+		return false
+	})
+	stream, err := f.d.Client().WatchFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.WatchFeedRequest{Watch: token}))
+
+	// Assert: the stream never opens.
+	if err == nil {
+		if stream.Receive() {
+			t.Fatalf("WatchFeed(expired token) delivered a row %v, want a transport refusal", stream.Msg())
+		}
+		err = stream.Err()
+	}
+	if err == nil {
+		t.Fatal("WatchFeed(expired token) = success, want a transport-level refusal")
+	}
+	rec := f.d.AwaitWorkspaceLogRecord(f.ws.GetDir(), "the token_expired transport close", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.refusal.transport_closed" && r.Context["cause"] == "token_expired"
+	})
+	if !strings.EqualFold(rec.Level, "info") {
+		t.Fatalf("the transport-closed record = level %q, want INFO", rec.Level)
+	}
+	if rec.Context["rpc"] != "WatchFeed" {
+		t.Fatalf("the transport-closed record's context = %v, want rpc WatchFeed", rec.Context)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
@@ -20,11 +21,13 @@ import (
 // gave up; MERGED is a run that landed. Only the last two have a teardown.
 //
 // THE ORDER OF TEARDOWN IS LOAD-BEARING. The terminal is published FIRST, then
-// the lease is released, then the worktree is removed, then the displaced turn
-// is resubmitted, and only then does the self-reload fire. Removing the worktree
-// before the terminal would delete the tree a reader is still looking at, and
-// firing the self-reload before the release would bounce the daemon while it
-// still held a lease it would then have to recover.
+// the lease is released, then the displaced turn is resubmitted, then the
+// worktree is removed, and only then does the self-reload fire. Removing the
+// worktree before the terminal would delete the tree a reader is still looking
+// at; removing it before the resubmission would delete the tree that
+// resubmission writes into, losing the turn the user typed; and firing the
+// self-reload before the release would bounce the daemon while it still held a
+// lease it would then have to recover.
 
 // finish lands a completed run on its terminal and tears it down.
 func (r *run) finish(ctx context.Context, out outcome) error {
@@ -117,6 +120,13 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
 
+	// THE DISPLACED TURN GOES BACK BEFORE THE TREE GOES AWAY. The resubmission
+	// is a workspace-bound act — it records a turn and writes to that
+	// workspace's own log sink, which is a symlink INSIDE the worktree — so a
+	// removal ahead of it makes the "exactly once" guarantee unreachable: the
+	// sink will not resolve and the turn the user typed is lost.
+	r.resubmitDisplaced(ctx)
+
 	// The worktree goes only after the terminal was published, and only for a
 	// merge that landed: a failed merge's branch still holds work.
 	if out.failed == "" && out.landed != "" {
@@ -125,7 +135,6 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 				"workspace": string(r.ws), "worktree": r.job.Layout.SourceDir, "error": err.Error()})
 		}
 	}
-	r.resubmitDisplaced(ctx)
 	if err := r.lock.Release(); err != nil {
 		log.Error(op, "could not release the repository's queue lock", dlog.Context{
 			"repo": string(r.repo), "error": err.Error()})
@@ -147,40 +156,47 @@ func terminalCause(out outcome) string {
 }
 
 // resubmitDisplaced puts back the user turn the merge displaced, EXACTLY ONCE.
-// The capture is durable, so the resubmission survives a bounce; the record is
-// cleared by the submission itself, so a second teardown cannot double it.
+// The capture is durable, so the resubmission survives a bounce; the run's own
+// record is cleared by the submission itself, so a second teardown cannot
+// double it.
+//
+// The text comes from the CAPTURE, not from a re-read of the open turns: the
+// displaced turn was ended when the merge took the session away from it, so its
+// record is no longer open by the time the lease is released.
 func (r *run) resubmitDisplaced(ctx context.Context) {
 	if r.displaced == nil {
 		return
 	}
-	turn := *r.displaced
+	displaced := *r.displaced
 	r.displaced = nil
-	open, err := r.o.deps.DB.OpenTurns(ctx, r.ws)
-	if err != nil {
-		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not read the displaced turn",
-			dlog.Context{"workspace": string(r.ws), "turn": string(turn), "error": err.Error()})
+	fields := dlog.Context{"workspace": string(r.ws), "turn": string(displaced.Turn)}
+	if _, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{
+		WS: r.ws, Turn: wsm.NewTurnID(), Said: saidText(displaced.Text),
+		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+	}); err != nil {
+		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not resubmit the displaced turn",
+			withField(fields, "error", err.Error()))
 		return
 	}
-	for _, t := range open {
-		if t.ID != turn || !t.Displaced {
-			continue
-		}
-		if _, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{
-			WS: r.ws, Turn: wsm.NewTurnID(), Said: saidText(t.Text),
-			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
-		}); err != nil {
-			r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not resubmit the displaced turn",
-				dlog.Context{"workspace": string(r.ws), "turn": string(turn), "error": err.Error()})
-			return
-		}
-		if err := r.o.deps.DB.CloseTurn(ctx, turn, r.o.deps.Now(), wsm.CloseCompleted); err != nil {
-			r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not retire the displaced turn's record",
-				dlog.Context{"workspace": string(r.ws), "turn": string(turn), "error": err.Error()})
-		}
-		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "resubmitted the displaced turn",
-			dlog.Context{"workspace": string(r.ws), "turn": string(turn)})
-		return
+	// The captured record is retired whether or not it was still open: the
+	// displaced turn is spent, and a record left marked displaced would be
+	// resubmitted again by a boot recovery.
+	if err := r.o.deps.DB.CloseTurn(ctx, displaced.Turn, r.o.deps.Now(), wsm.CloseCompleted); err != nil {
+		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn's record was already retired",
+			withField(fields, "cause", err.Error()))
 	}
+	r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "resubmitted the displaced turn", fields)
+}
+
+// withField copies a record's fields with one more on it, so two records built
+// from the same base cannot scribble on each other.
+func withField(fields dlog.Context, name string, value any) dlog.Context {
+	out := make(dlog.Context, len(fields)+1)
+	for k, v := range fields {
+		out[k] = v
+	}
+	out[name] = value
+	return out
 }
 
 // selfReload fires the daemon's own redeploy, and ONLY for a merge that landed
@@ -203,10 +219,46 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // publishAbandoned draws the ABANDONED terminal: a merge taken off the queue
 // before it ever reached the front. It has no commit, no failure and no
 // teardown, because nothing of it ever ran.
-func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, summary string) {
+// ledger is the bubble's ledger identity, captured before the caller dropped
+// it: an empty one means no bubble was ever drawn and there is nothing to end.
+//
+// THE ABANDONED ARM IS THE ONLY EXPRESSIBLE CAUSE. `FeedMergeError` carries
+// `failed` and `abandoned` and nothing else, so an evict, a dequeue release and
+// a run's own give-up all end here with the same arm; distinguishing them is a
+// landing-7 shape, and the daemon states what it CAN state rather than
+// inventing an arm or leaving the bubble unterminated.
+func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, summary string) {
 	o.deps.Log.Global().Debug("daemon.merge.abandoned", "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "summary": summary})
+	if ledger != "" {
+		label := o.abandonedLabel(ctx, ws)
+		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
+			&frontendv1.FeedMergeError{
+				EndedAtMs: o.nowMS(),
+				// FeedMergeAbandoned is an EMPTY message: the cause has
+				// nowhere to ride on the wire, so the summary stays in the
+				// log record above and the arm carries only itself.
+				Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}},
+			}))
+	}
+	// The surfaces come AFTER the terminal, in the teardown's own order: the
+	// footer leaves its merging state and the roster sheds every merge arm
+	// only once the bubble a reader is looking at has ended.
 	o.forget(ws)
+}
+
+// abandonedLabel is the head's branch line for a merge that never ran. The
+// geometry is read where it is available and the workspace's own name stands in
+// where it is not: an unreadable label must not stop the bubble from ending.
+func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID) string {
+	job, err := o.layoutFor(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Debug("daemon.merge.abandoned",
+			"the abandoned merge's geometry could not be read for its label",
+			dlog.Context{"workspace": string(ws), "error": err.Error()})
+		return string(ws)
+	}
+	return branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir)
 }
 
 // OnInterrupt raises the dequeue offer for a workspace whose merge is queued.

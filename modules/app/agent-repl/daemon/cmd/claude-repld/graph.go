@@ -238,6 +238,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// servable source; the resolver refuses loudly and names what is
 		// missing rather than drawing a broken image.
 		ResolveImage: feed.UnproducedImageResolver(log),
+		// Zero leaves the resolver's own DefaultTailRetention in force; the
+		// flag and its environment knob are what make token_expired reachable.
+		TailRetention: p.Opts.feedTailRetention,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
@@ -291,7 +294,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MainJS:       paths.ShimMain,
 		ShimBuildSHA: paths.ShimBuildSHA,
 		DefaultModel: os.Getenv(workspace.DefaultModelEnv),
-		Fake:         p.Contracts.Fake(),
+		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		Log:          p.Surfaces,
 	})
@@ -429,27 +432,30 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			}
 			return verbs.PublishRegistry(ctx)
 		},
-		DB:               p.DB,
-		Git:              git,
-		Queue:            queue,
-		Feed:             feedResolver,
-		Footer:           footerResolver,
-		Sidebar:          sidebarResolver,
-		Holds:            holdsResolver,
-		PromptsDir:       paths.PromptsDir,
-		Briefs:           merge.BriefsFrom(paths.PromptsDir),
-		SelfRepoDir:      paths.SelfRepo,
-		StateDir:         p.Layout.Dir(),
-		TestCommand:      merge.TestCommandFor(paths.SelfRepo),
-		TestRunner:       scripts,
-		Painter:          painter,
-		StartSession:     fleet.Start,
-		Occupy:           fleet.Occupy,
-		AwaitTurnEnd:     fleet.AwaitTurnEnd,
-		CaptureDisplaced: fleet.CaptureDisplaced,
-		ParkedRoute:      guidanceRoute(fleet, mergeRef),
-		Rollout:          rolloutController,
-		Log:              p.Surfaces,
+		DB:           p.DB,
+		Git:          git,
+		Queue:        queue,
+		Feed:         feedResolver,
+		Footer:       footerResolver,
+		Sidebar:      sidebarResolver,
+		Holds:        holdsResolver,
+		PromptsDir:   paths.PromptsDir,
+		Briefs:       merge.BriefsFrom(paths.PromptsDir),
+		SelfRepoDir:  paths.SelfRepo,
+		StateDir:     p.Layout.Dir(),
+		TestCommand:  merge.TestCommandFor(paths.SelfRepo),
+		TestRunner:   scripts,
+		Painter:      painter,
+		StartSession: fleet.Start,
+		Occupy:       fleet.Occupy,
+		AwaitTurnEnd: fleet.AwaitTurnEnd,
+		CaptureDisplaced: func(ctx context.Context, ws ids.WorkspaceID) (merge.Displaced, bool, error) {
+			d, ok, err := fleet.CaptureDisplaced(ctx, ws)
+			return merge.Displaced{Turn: d.Turn, Text: d.Text}, ok, err
+		},
+		ParkedRoute: guidanceRoute(fleet, mergeRef),
+		Rollout:     rolloutController,
+		Log:         p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the merge orchestrator: %w", err)
@@ -580,7 +586,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Adopted:        fleet.Install,
 			Log:            p.Surfaces,
 		},
-		Prime: verbs.PublishRegistry,
+		// PRIME IS WHERE A STANDING DRAIN COMES BACK. The daemon topic replays
+		// only this process's own latest value, so a schedule that outlived a
+		// bounce has to be announced again by the process that inherited it —
+		// after the push surface is bound and before anything is served.
+		Prime: func(ctx context.Context) error {
+			if err := verbs.PublishRegistry(ctx); err != nil {
+				return err
+			}
+			return drainController.Republish(ctx)
+		},
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)
 			relay.bind(srv.Relay())
@@ -833,6 +848,23 @@ func guidanceOrigin(tab string) (conversationv1.PromptOrigin, error) {
 		return conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
 			fmt.Errorf("claude-repld: a parked merge on the %q tab has no prompt origin to route guidance under", tab)
 	}
+}
+
+// FakeShimsEnv forces every shim spawn into the shim's offline scripted SDK
+// WITHOUT putting the whole stack in fake mode. It is a TEST HOOK, and the one
+// seam that lets a suite exercise a REAL vendor call site — the classifier's
+// headless run — against a live session: whole-stack fake mode makes the
+// classifier scripted too, and turning it off makes the shim spawn a vendor
+// call the guard refuses before any session exists.
+//
+// It can only turn fake ON. Nothing about it can make a production spawn less
+// fake than the contract already says it is.
+const FakeShimsEnv = "AGENT_REPL_FAKE_SHIMS"
+
+// fakeShims reports whether the shim-only fake hook is set.
+func fakeShims() bool {
+	value := os.Getenv(FakeShimsEnv)
+	return value != "" && value != "0" && !strings.EqualFold(value, "false")
 }
 
 // buildJudge builds the interjection classifier: the scripted one under the

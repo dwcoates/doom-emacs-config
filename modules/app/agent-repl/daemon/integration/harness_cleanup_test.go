@@ -3,6 +3,8 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -35,6 +37,33 @@ func TestAKilledDaemonLeavesNoProcessNamingItsStateDir(t *testing.T) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("StrayPIDs() = %v after the sweep, want none: a killed test left processes behind", stray)
+		}
+	}
+}
+
+// TestAKilledDaemonLeavesNoLogTargetOutsideItsStateDir proves the harness bounds
+// its own FILES the way the test above bounds its processes. The per-workspace
+// durable sinks are symlinks whose targets the daemon mints itself, and a target
+// minted outside the run's state directory survives every cleanup the harness
+// has: a killed test would leave one behind per sink, per run, forever.
+func TestAKilledDaemonLeavesNoLogTargetOutsideItsStateDir(t *testing.T) {
+	// Arrange: an opened workspace, so both the daemon and the shim sinks exist.
+	f := newOpened(t, harness.Opts{})
+	logsDir := filepath.Join(f.d.StateDir, "logs")
+
+	// Act: the daemon dies the way a killed test kills it.
+	f.d.Kill()
+
+	// Assert: every canonical link points inside this run's own state dir, so
+	// removing the state dir removes the targets with it.
+	for _, name := range []string{"daemon", "shim"} {
+		link := harness.WorkspaceLogPath(f.ws.GetDir(), name)
+		target, err := os.Readlink(link)
+		if err != nil {
+			t.Fatalf("readlink %s: %v", link, err)
+		}
+		if filepath.Dir(target) != logsDir {
+			t.Fatalf("%s.log target = %q, want it under this run's %q: a killed test would leak it", name, target, logsDir)
 		}
 	}
 }

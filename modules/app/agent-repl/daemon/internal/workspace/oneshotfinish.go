@@ -82,7 +82,10 @@ func (v *verbs) OnOneShotTurnConcluded(ctx context.Context, ws ids.WorkspaceID, 
 	case finish.OpenPr != nil:
 		text, err := v.openPrFollowup(finish.OpenPr)
 		if err != nil {
-			log.Error(opOneShotFinish, "could not compose the pull-request follow-up", dlog.Context{"cause": err.Error()})
+			// ONE RECORD, NOT TWO: the refusal below carries this very
+			// reason, and a second record of the same fact at ERROR would
+			// double-count a refusal in every warning sweep.
+			log.Debug(opOneShotFinish, "the pull-request follow-up brief would not compose", dlog.Context{"cause": err.Error()})
 			return refuse(log, "SubmitPrompt", ArmBriefMissing, err.Error(), false)
 		}
 		if err := v.submitFollowup(ctx, log, record, text); err != nil {

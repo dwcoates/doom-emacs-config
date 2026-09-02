@@ -358,6 +358,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// NoFake therefore withholds it deliberately.
 	if !opts.NoFake {
 		env = append(env, "AGENT_REPL_CLAUDE_BIN="+fakeClaude)
+	} else {
+		// The SHIMS stay fake even with the whole stack's fake mode off:
+		// --node names the fake shim, but the daemon cannot know that and its
+		// vendor guard refuses a non-fake spawn before any session exists.
+		// Without this, NoFake could never reach a REAL vendor call site that
+		// needs a live session — which is the only thing NoFake is for.
+		env = append(env, "AGENT_REPL_FAKE_SHIMS=1")
 	}
 	env = append(env, opts.ExtraEnv...)
 
@@ -410,8 +417,22 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	if opts.Joining == "" {
 		d.Addr = d.AwaitAddrFile()
 		d.dial(opts.JSONCodec)
+		d.awaitServing()
 	}
 	return d
+}
+
+// awaitServing blocks until the daemon is actually SERVING, not merely
+// advertising. `daemon.addr` is written at boot step 6 and the state client is
+// opened at step 7, so a test that acts the instant the address appears can
+// reach a daemon whose wsm.db has no schema yet — which is how
+// `no such table: layout` surfaces from a WithDB read after an immediate Stop.
+// The run log's own serving record is the first moment every boot step is done.
+func (d *Daemon) awaitServing() {
+	d.t.Helper()
+	d.AwaitLogRecord(d.RunLogPath(), "the daemon's serving record", func(r LogRecord) bool {
+		return r.Operation == "daemon.cmd.serve" && strings.Contains(r.Message, "serving")
+	})
 }
 
 // shortTempDir mints a directory directly under /tmp, short enough that a

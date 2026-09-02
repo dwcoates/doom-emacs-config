@@ -135,3 +135,27 @@ func TestANonPositiveHoldoutWarnCadenceIsRefused(t *testing.T) {
 		t.Fatal("resolveHoldoutWarnEvery() accepted a non-positive cadence")
 	}
 }
+
+// TestTheShimOnlyFakeHookCanOnlyTurnFakeOn pins the hook's one-way nature: a
+// production spawn is never made LESS fake than the contract says it is.
+func TestTheShimOnlyFakeHookCanOnlyTurnFakeOn(t *testing.T) {
+	// Arrange, Act, Assert.
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "unset", value: "", want: false},
+		{name: "zero", value: "0", want: false},
+		{name: "false", value: "false", want: false},
+		{name: "one", value: "1", want: true},
+		{name: "anything else", value: "yes", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(FakeShimsEnv, tc.value)
+			if got := fakeShims(); got != tc.want {
+				t.Fatalf("fakeShims() with %s=%q = %v, want %v", FakeShimsEnv, tc.value, got, tc.want)
+			}
+		})
+	}
+}

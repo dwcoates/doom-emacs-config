@@ -536,10 +536,12 @@ func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("boot over a corrupt creation_jobs row exited 0, want a loud non-zero refusal\nstderr:\n%s", nd.Stderr())
 	}
-	rec := nd.AwaitRunLogOperation("daemon.merge.recover")
-	if lvl := strings.ToLower(rec.Level); lvl != "error" {
-		t.Fatalf("daemon.merge.recover record level = %q, want ERROR", rec.Level)
-	}
+	// The recovery OPENS with an INFO record under the same operation ("this
+	// boot reconciled the merge queues"), so the refusal is awaited by level
+	// rather than by first match on the operation alone.
+	nd.AwaitLogRecord(nd.RunLogPath(), "the merge recovery's ERROR refusal", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.merge.recover" && strings.EqualFold(r.Level, "error")
+	})
 }
 
 // ---- audit-3 critique 10: socket-path budget boot refusal ----

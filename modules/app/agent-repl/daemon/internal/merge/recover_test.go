@@ -259,3 +259,32 @@ func interruptMerge(t *testing.T, h *harness) {
 		t.Fatalf("taking the lease: %v", err)
 	}
 }
+
+// TestRecoverRefusesACorruptCreationJobRatherThanFailingTheMerge covers the
+// corrupt-refuses-load ruling: a creation_jobs row that will not decode is
+// state corruption, so the recovery FAILS THE BOOT instead of downgrading it
+// into the ordinary "the geometry is gone" outcome and serving on.
+func TestRecoverRefusesACorruptCreationJobRatherThanFailingTheMerge(t *testing.T) {
+	// Arrange: an interrupted merge whose creation_jobs row will not decode.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.db.mu.Lock()
+	h.db.jobDecodeErrs[theWorkspace] = &wsm.DecodeError{
+		Table: "creation_jobs", Row: string(theWorkspace), Field: "actions_before",
+		Err: errors.New("not valid json"),
+	}
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Recover(context.Background())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Recover over a corrupt creation_jobs row = nil, want a loud refusal")
+	}
+	var decodeErr *wsm.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("Recover error = %v, want it to carry the *wsm.DecodeError", err)
+	}
+}

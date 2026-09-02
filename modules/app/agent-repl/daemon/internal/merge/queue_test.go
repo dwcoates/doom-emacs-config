@@ -603,3 +603,67 @@ func TestUnpauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 		t.Fatalf("the resume answered %v, want the %s refusal", err, ArmUnknownRepository)
 	}
 }
+
+// TestEvictEndsTheQueuedBubbleWithTheAbandonedTerminal covers the bubble half of
+// a merge dropped before it ran: the queue tab simply stopping would leave a
+// reader with no ending at all, so the head row gets FeedMergeError.abandoned.
+func TestEvictEndsTheQueuedBubbleWithTheAbandonedTerminal(t *testing.T) {
+	// Arrange: one queued merge, whose bubble is showing its queue tab.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict failed: %v", err)
+	}
+
+	// Assert.
+	if got := h.feed.lastMergeErrorArm(); got != "abandoned" {
+		t.Fatalf("the evicted merge's terminal arm = %q, want abandoned", got)
+	}
+}
+
+// TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding covers the surface half
+// of the same drop: a merge that never ran leaves no merge state behind.
+func TestEvictLeavesTheFooterAndSidebarWithNoMergeStanding(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+
+	// Act.
+	if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("Evict failed: %v", err)
+	}
+
+	// Assert.
+	if got := h.footer.last().State; got != "none" {
+		t.Fatalf("footer merge state after the evict = %q, want none", got)
+	}
+}
+
+// TestOneMergesFailureDoesNotStopTheQueueBehindIt covers the pump's own
+// invariant: a run that ended on its own terminal has already reported itself,
+// so the next queued merge still gets admitted.
+func TestOneMergesFailureDoesNotStopTheQueueBehindIt(t *testing.T) {
+	// Arrange: a merge whose conclusion git refuses.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
+	h.git.conflicted = [][]string{{}}
+	h.git.commitErr = errors.New("nothing to commit")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	err := h.admit(context.Background())
+
+	// Assert: the pump reports no queue-level failure, so its loop goes on.
+	if err != nil {
+		t.Fatalf("pumpOnce after a merge that ended on its own terminal = %v, want no queue-level error", err)
+	}
+}
