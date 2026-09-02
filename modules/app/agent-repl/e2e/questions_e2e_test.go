@@ -82,13 +82,15 @@ import (
 // which this area writer does not touch.
 // ---------------------------------------------------------------------------
 
-// newQuestionWorkspace registers a fresh real git repository (ruling 4 — this
-// suite uses real git, never the scripted fake) as a workspace on a fresh
-// World, and answers both.
+// newQuestionWorkspace registers a fresh scripted-fake-git repository (the
+// e2e suite mocks every external dependency — git included, via
+// harness.NewRepo's scripted fixture; the AskUserQuestion gate this file
+// exercises lives entirely in the shim/daemon/store, never in git) as a
+// workspace on a fresh World, and answers both.
 func newQuestionWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	return w, ws
 }
