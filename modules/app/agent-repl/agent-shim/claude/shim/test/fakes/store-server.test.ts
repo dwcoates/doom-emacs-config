@@ -903,6 +903,33 @@ describe("typed read refusals", () => {
     ).toBe("storageFailure");
   });
 
+  it("serves OpenAgentSession the unknown_agent arm", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    fake.failReads("OpenAgentSession", "unknown_agent", "no book under that id");
+
+    // Act.
+    const response = await client.openAgentSession(
+      create(storev1.OpenAgentSessionRequestSchema, { agent: agentId("a"), pageSize: 10 }),
+    );
+
+    // Assert.
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("unknownAgent");
+  });
+
+  it("REFUSES to serve unknown_agent on a verb whose failure does not declare it", async () => {
+    // Only OpenAgentSessionFailure declares the arm (landing 7).
+    // Arrange.
+    const { store: fake } = await store();
+
+    // Act, Assert.
+    expect(() => fake.failReads("ReadAgentPage", "unknown_agent")).toThrow(
+      /ReadAgentPage declares no unknown_agent arm/,
+    );
+  });
+
   it("REFUSES to serve GetLiveWork an arm the proto does not declare", async () => {
     // Fabricating one would put a shape on the wire the proto forbids and test
     // a consumer against a store that cannot exist.
