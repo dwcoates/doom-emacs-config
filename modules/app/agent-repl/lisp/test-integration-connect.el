@@ -494,6 +494,116 @@ one, so `:code' is asserted here instead."
                            "invalid_argument")))
         (agent-repl-connect-close conn)))))
 
+;;;; ---- Audit-2 additions (R-SUITE-2) ----
+;;
+;; Findings 43-45 of docs/overhaul/reports/elisp-suite-audit-2.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+;; audit-2 #43
+(ert-deftest agent-repl-itest-connect-unary-request-carries-the-connect-headers ()
+  "A unary request carries `Content-Type: application/json' and the version.
+fanout §3 fixes the headers, not only the body: a client that sent the
+wrong content type — or dropped `Connect-Protocol-Version: 1' — spoke a
+protocol the daemon is not obliged to answer, and neither the parsed body
+nor the verbatim raw body can see the difference."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act.
+            (agent-repl-connect-unary-sync
+             conn "RegisterWorkspace" (json-serialize '((dir . "/tmp/itest-ws"))))
+            ;; Assert.
+            (should (equal (agent-repl-itest--call-header
+                            daemon "RegisterWorkspace" "Content-Type")
+                           "application/json"))
+            (should (equal (agent-repl-itest--call-header
+                            daemon "RegisterWorkspace" "Connect-Protocol-Version")
+                           "1")))
+        (agent-repl-connect-close conn)))))
+
+;; audit-2 #43
+(ert-deftest agent-repl-itest-connect-stream-request-carries-the-streaming-content-type ()
+  "A stream request carries `Content-Type: application/connect+json'.
+fanout §3: the streaming content type is a DIFFERENT one from the unary
+call's, because the body is a framed envelope sequence rather than a bare
+JSON object.  Sending the unary type on a stream is a protocol error the
+body alone cannot reveal."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act.
+            (agent-repl-itest-connect--watch-daemon conn (lambda (_outcome) nil))
+            (agent-repl-itest--await-call daemon "WatchDaemon")
+            ;; Assert.
+            (should (equal (agent-repl-itest--call-header
+                            daemon "WatchDaemon" "Content-Type")
+                           "application/connect+json"))
+            (should (equal (agent-repl-itest--call-header
+                            daemon "WatchDaemon" "Connect-Protocol-Version")
+                           "1")))
+        (agent-repl-connect-close conn)))))
+
+;; audit-2 #44
+(ert-deftest agent-repl-itest-connect-webapp-only-stream-is-never-accepted ()
+  "A stream this fake does not mock is refused, never accepted as a subscriber.
+fakedaemon's README: \"Every other `agentrepl.v1' stream belongs to the
+webapp; the fake answers those `unimplemented' so a wrong caller fails
+loudly instead of hanging.\"  A wrong caller must therefore see a CLOSE
+carrying that code and leave no subscription behind.
+
+NOTE on ON-OPEN, for the same reason the unset-ref test records: the
+pinned connect-go reports an in-handler refusal through the terminal
+`EndStreamResponse' frame at HTTP 200, so the header block does parse as
+200 on this path and the acceptance callback is not what distinguishes
+it.  The Connect error CODE and the absent subscriber are."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((outcomes nil)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act: a webapp stream, opened from Emacs's transport.
+            (agent-repl-connect-stream
+             conn "WatchFeed" (json-serialize '())
+             (lambda (_push) nil)
+             (lambda (outcome) (push outcome outcomes)))
+            (agent-repl-itest--wait-until (lambda () outcomes) nil
+                                          "the stream's close outcome")
+            ;; Assert.
+            (should (eq (car (car outcomes)) :error))
+            (should (equal (plist-get (cadr (car outcomes)) :code) "unimplemented"))
+            (should (null (agent-repl-itest--subscribers daemon))))
+        (agent-repl-connect-close conn)))))
+
+;; audit-2 #45
+(ert-deftest agent-repl-itest-connect-timed-out-unary-is-never-retried ()
+  "A unary call that timed out is NOT retried when the daemon answers late.
+fanout §3: \"Never retried here.\"  A retry at the transport would turn
+one submission into two turns on a daemon whose answer was merely slow —
+which is exactly why every retry decision lives above this layer, with
+the idempotency key that makes it safe."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--gate daemon "RegisterWorkspace")
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act: the answer is withheld past the call's own timeout.
+            (should-error
+             (agent-repl-connect-unary-sync
+              conn "RegisterWorkspace" (json-serialize '((dir . "/tmp/itest-ws"))) 0.2)
+             :type 'agent-repl-connect-error)
+            ;; The daemon finally answers every held call.
+            (agent-repl-itest--release-gate daemon "RegisterWorkspace")
+            ;; Assert: exactly ONE request ever reached the daemon.
+            (should (equal 1 (length (agent-repl-itest--calls
+                                      daemon "RegisterWorkspace")))))
+        (agent-repl-connect-close conn)))))
+
 (provide 'test-integration-connect)
 
 ;;; test-integration-connect.el ends here

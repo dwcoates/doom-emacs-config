@@ -747,6 +747,151 @@ these runs through exactly these lines."
       (agent-repl-itest--await-log daemon "elisp.rpc.stream-open" "info")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.stream-open" "info")))))
 
+;;;; ---- Audit-2 additions (R-SUITE-2) ----
+;;
+;; Findings 1-5 of docs/overhaul/reports/elisp-suite-audit-2.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits to the
+;; sections above.
+
+;; audit-2 #1
+(ert-deftest agent-repl-itest-link-promotion-re-subscribes-the-roster ()
+  "A PROMOTED successor carries the roster stream with it.
+elisp.md FINAL HANDOVER SEQUENCE: \"Roster and daemon-link then follow the
+successor's address as the current daemon (promotion)\"; fanout §6
+\"PROMOTE the successor to primary silently (no down/up hooks)\".
+Promotion closes the old connection, which cancels the roster stream
+riding it, so unless the promotion itself re-subscribes, Emacs is left
+with NO roster stream at all and tabs stop reconciling until the next
+link bounce.  Nothing here calls `agent-repl-roster-subscribe'."
+  ;; Arrange: the production hooks are live, so roster.el subscribes itself.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-real-hooks primary
+      (agent-repl-itest--await-subscriber primary "roster")
+      (agent-repl-itest--with-second-daemon primary successor
+        (agent-repl-itest-link--announce
+         primary (agent-repl-itest-daemon-address successor))
+        (agent-repl-itest--await-subscriber successor "daemon")
+        (agent-repl-itest--wait-until
+         #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+        ;; Act: the old daemon finishes and drops its stream — promotion.
+        (agent-repl-itest--end primary "daemon" nil nil t)
+        (agent-repl-itest--wait-until
+         (lambda () (null (agent-repl-link-successor)))
+         nil "the successor to be promoted to primary")
+        ;; Assert: the roster follows the promotion.
+        (agent-repl-itest--await-subscriber successor "roster")
+        (should (equal 1 (length (agent-repl-itest--subscribers
+                                  successor "roster"))))))))
+
+;; audit-2 #2
+(ert-deftest agent-repl-itest-link-clean-end-frame-is-link-down ()
+  "A CLEAN end frame on the standing WatchDaemon is a failure, not a close.
+fanout §3: `(:ended)' \"for a standing stream the caller treats it as a
+failure\".  Only the abort path was pinned; an end frame carrying no
+error at all must take the link down exactly the same way, run the down
+hooks, and leave the reconnect loop able to stand a stream on the
+restarted daemon."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let ((downs nil)
+            (state-dir (agent-repl-itest-daemon-state-dir primary)))
+        (add-hook 'agent-repl-link-down-functions (lambda (&rest _) (push t downs)))
+        ;; Act: a clean end frame, NO error.
+        (agent-repl-itest--end primary "daemon")
+        ;; Assert: WARN, down hooks, link down.
+        (agent-repl-itest--await-log primary "elisp.link.down" "warn")
+        (should (agent-repl-itest--logged-p primary "elisp.link.down" "warn"))
+        (agent-repl-itest--wait-until (lambda () downs) nil "the down hooks")
+        (should downs)
+        (should-not (agent-repl-link-up-p))
+        ;; Assert: and the reconnect stands a stream on a restarted daemon.
+        (agent-repl-itest--stop-daemon primary t)
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                (agent-repl-itest--await-subscriber successor "daemon")
+                (should (equal 1 (length (agent-repl-itest--subscribers
+                                          successor "daemon")))))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
+;; audit-2 #3
+(ert-deftest agent-repl-itest-link-drain-cancelled-clears-the-segment ()
+  "`drain_cancelled' takes the INDICATOR down, not merely the schedule.
+fanout §14 scenario 8: \"drain_cancelled → removed\" names the indicator
+as the removed thing, so the segment is asserted in its own right —
+clearing `agent-repl-link-drain' while leaving a stale banner drawn would
+otherwise pass."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      (agent-repl-itest--push
+       daemon "daemon"
+       '((drainScheduled . ((atMs . "1735689600000") (reason . ((deploy . ())))))))
+      (agent-repl-itest--wait-until (lambda () agent-repl-link-drain-segment) nil
+                                    "the drain indicator to be drawn")
+      ;; Act.
+      (agent-repl-itest--push daemon "daemon" '((drainCancelled . ())))
+      ;; Assert.
+      (agent-repl-itest--wait-until (lambda () (null agent-repl-link-drain-segment))
+                                    nil "the drain indicator to be removed")
+      (should (null agent-repl-link-drain-segment)))))
+
+;; audit-2 #4
+(ert-deftest agent-repl-itest-link-successor-death-keeps-the-old-link-up ()
+  "A successor that dies BEFORE promotion is forgotten; the old link stands.
+fanout §6 dual attach; daemon-link.el: \"the old daemon still owns
+whatever it has not transferred, so the link is not down\".  Nothing was
+adopted onto the successor by construction, so the only loss is the
+handover: `elisp.link.successor-stream-lost' at ERROR, the successor
+forgotten, and NO down hook — a link that went down here would blank the
+editor over a daemon that is still perfectly alive."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((downs nil)
+              (primary-conn nil))
+          (agent-repl-itest-link--announce
+           primary (agent-repl-itest-daemon-address successor))
+          (agent-repl-itest--await-subscriber successor "daemon")
+          (agent-repl-itest--wait-until
+           #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+          (setq primary-conn (agent-repl-link-primary))
+          (add-hook 'agent-repl-link-down-functions (lambda (&rest _) (push t downs)))
+          ;; Act: the successor dies before taking anything over.
+          (agent-repl-itest--end successor "daemon" nil nil t)
+          ;; Assert.
+          (agent-repl-itest--await-log primary "elisp.link.successor-stream-lost" "error")
+          (agent-repl-itest--wait-until
+           (lambda () (null (agent-repl-link-successor)))
+           nil "the dead successor to be forgotten")
+          (should (null (agent-repl-link-successor)))
+          (should (agent-repl-link-up-p))
+          (should (eq (agent-repl-link-primary) primary-conn))
+          (should (null downs)))))))
+
+;; audit-2 #5
+(ert-deftest agent-repl-itest-link-scheduled-drain-maintenance-cause-is-announced ()
+  "`shutdown_announced{scheduled_drain{maintenance}}' names maintenance.
+`endpoint_watch_daemon.proto' `DaemonShutdownScheduledDrain' carries a
+`DrainReason' with three arms; the cause table drives `deploy' (scheduled)
+and `operator' (immediate) only, so the third arm on the scheduled path
+has never decoded here."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act.
+      (agent-repl-itest-link--announce
+       daemon nil '((scheduledDrain . ((reason . ((maintenance . ())))))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (equal agent-repl-link-drain-segment
+                         "daemon restarting (scheduled drain: maintenance)"))
+       nil "the bounce indicator to name the maintenance drain")
+      (should (equal agent-repl-link-drain-segment
+                     "daemon restarting (scheduled drain: maintenance)")))))
+
 (provide 'test-integration-link)
 
 ;;; test-integration-link.el ends here

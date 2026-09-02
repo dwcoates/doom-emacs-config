@@ -750,6 +750,32 @@ as the wire spells them — which is itself part of what the suite pins."
     (dolist (key path value)
       (setq value (and (consp value) (alist-get key value))))))
 
+;;;; ---- Audit-2 additions (R-SUITE-2) ----
+;;
+;; Helpers findings 43-46 of docs/overhaul/reports/elisp-suite-audit-2.md
+;; need.  Kept in their own section so they merge cleanly beside concurrent
+;; edits to the sections above.
+
+(defun agent-repl-itest--call-headers (daemon method &optional index)
+  "Return the request HEADERS METHOD's INDEXth call carried to DAEMON.
+INDEX defaults to 0.  The Connect protocol fixes headers as well as
+bodies (fanout §3: `Content-Type' plus `Connect-Protocol-Version: 1' on a
+unary call, `application/connect+json' on a stream), and neither the
+parsed `body\=' nor the verbatim `raw\=' can see them — so the fake\='s mux
+records them beside both, exactly the way it records `raw\=', and this
+reads them.  Header names are CANONICAL (`Content-Type\='), which is how
+Go\='s `http.Header\=' keys them.
+
+Answers nil when the call was recorded by a fake too old to carry
+headers, which a caller must not paper over."
+  (let ((call (nth (or index 0) (agent-repl-itest--calls daemon method))))
+    (alist-get 'headers call)))
+
+(defun agent-repl-itest--call-header (daemon method name &optional index)
+  "Return the value of request header NAME on METHOD's INDEXth call to DAEMON.
+NAME is the canonical spelling, e.g. \"Content-Type\"."
+  (alist-get (intern name) (agent-repl-itest--call-headers daemon method index)))
+
 (provide 'test-integration-helpers)
 
 ;;; test-integration-helpers.el ends here
