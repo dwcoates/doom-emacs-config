@@ -79,10 +79,12 @@ import (
 // place and end the turn `success.interrupted` — not a fabricated
 // AgentInterrupted the test invents by racing a sleep.
 func TestInterruptAfterTextDelta(t *testing.T) {
-	// Arrange: a world with a real workspace, and a feed watch opened BEFORE
-	// the prompt is submitted, so no push in between can be missed.
+	// Arrange: a world with a scripted-fake-git workspace (a later user
+	// ruling reversed real git: only claude-repld, the shim, shim-store, and
+	// shim-sidecar run for real), and a feed watch opened BEFORE the prompt
+	// is submitted, so no push in between can be missed.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
@@ -151,7 +153,7 @@ func TestInterruptAfterTextDelta(t *testing.T) {
 func TestBashInterruptedByTimeout(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act: drive the scenario to its own natural completion — no Interrupt
