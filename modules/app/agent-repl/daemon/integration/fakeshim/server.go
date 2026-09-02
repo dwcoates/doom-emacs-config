@@ -100,8 +100,15 @@ type server struct {
 	// the work detached from. WatchBash opens with it, exactly as the contract
 	// says the stream opens ("`start` — the command, the ORIGINAL instant").
 	bashStarts map[string]*conversationv1.AgentBash
-	hung       bool
-	unhang     chan struct{}
+	// openPermissions is the agent and the gated call of each permission ask
+	// the fake has been told to open, keyed by the ask's id. UpdateAgent
+	// settles the ask off it: the daemon learns a permission was decided from
+	// the SETTLE FRAME on the agent's stream and from nothing else, exactly as
+	// it learns a killed turn ended from the terminal frame, so a fake that
+	// only answered the rpc would leave the card open forever.
+	openPermissions map[string]openPermission
+	hung            bool
+	unhang          chan struct{}
 	// sessionKilled records an accepted KillSession: the process exits once
 	// its answer has been written.
 	sessionKilled bool
@@ -125,15 +132,16 @@ type scriptedAnswer struct {
 
 func newServer(rec *Recorder, p Profile, log *logSink) *server {
 	return &server{
-		rec:        rec,
-		profile:    p,
-		log:        log,
-		sessions:   newHub[*conversationv1.SessionUpdate](),
-		agents:     newHub[agentFrame](),
-		bashes:     newHub[bashFrame](),
-		answers:    map[string][]scriptedAnswer{},
-		bashStarts: map[string]*conversationv1.AgentBash{},
-		unhang:     make(chan struct{}),
+		rec:             rec,
+		profile:         p,
+		log:             log,
+		sessions:        newHub[*conversationv1.SessionUpdate](),
+		agents:          newHub[agentFrame](),
+		bashes:          newHub[bashFrame](),
+		answers:         map[string][]scriptedAnswer{},
+		bashStarts:      map[string]*conversationv1.AgentBash{},
+		openPermissions: map[string]openPermission{},
+		unhang:          make(chan struct{}),
 	}
 }
 
@@ -511,6 +519,13 @@ func (s *server) UpdateAgent(ctx context.Context, req *connect.Request[shimv1.Up
 	if resp, done, err := scripted[shimv1.UpdateAgentResponse, *shimv1.UpdateAgentResponse](s, RPCUpdateAgent); done {
 		return resp, err
 	}
+	// A PERMISSION DECISION SETTLES ON THE STREAM, as the real shim's does:
+	// the daemon draws the answered card from the ask's own settle frame and
+	// from nothing else, so a fake that only ANSWERED would leave every card
+	// the user decided drawn as open forever.
+	if decision := req.Msg.GetInput().GetAnswer().GetPermissionDecision(); decision != nil {
+		s.settlePermission(decision)
+	}
 	return connect.NewResponse(&shimv1.UpdateAgentResponse{
 		Result: &shimv1.UpdateAgentResponse_Success{Success: &shimv1.UpdateAgentSuccess{}},
 	}), nil
@@ -713,6 +728,75 @@ func (s *server) bashStart(work string) *conversationv1.AgentBash {
 			StartedAt: &conversationv1.AgentActivityStartedAt{},
 		}},
 	}
+}
+
+// openPermission is what the fake remembers about one open ask, so it can
+// compose the settle frame the decision produces.
+type openPermission struct {
+	agent string
+	gated *conversationv1.AgentActivityId
+}
+
+// rememberPushedPermission files an ask the fake was told to open, and forgets
+// one whose settle frame was pushed by the test itself.
+func (s *server) rememberPushedPermission(agent string, frame *conversationv1.AgentFrame) {
+	p := frame.GetUpdate().GetPermission()
+	if p == nil || p.GetId().GetValue() == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p.GetStart() == nil {
+		delete(s.openPermissions, p.GetId().GetValue())
+		return
+	}
+	s.openPermissions[p.GetId().GetValue()] = openPermission{agent: agent, gated: p.GetGatedCall()}
+}
+
+// settlePermission composes and publishes the settle frame for one decision,
+// and reports whether there was an open ask to settle.
+func (s *server) settlePermission(decision *conversationv1.AgentPermissionDecision) bool {
+	ask := decision.GetAsk().GetValue()
+	if ask == "" {
+		return false
+	}
+	s.mu.Lock()
+	open, known := s.openPermissions[ask]
+	if known {
+		delete(s.openPermissions, ask)
+	}
+	s.mu.Unlock()
+	if !known {
+		return false
+	}
+
+	success := &conversationv1.AgentPermissionSuccess{}
+	switch d := decision.GetDecision().(type) {
+	case *conversationv1.AgentPermissionDecision_Allowed:
+		success.Decision = &conversationv1.AgentPermissionSuccess_Allowed{Allowed: d.Allowed}
+	case *conversationv1.AgentPermissionDecision_Denied:
+		success.Decision = &conversationv1.AgentPermissionSuccess_Denied{
+			Denied: &conversationv1.AgentPermissionDenied{
+				By: &conversationv1.AgentPermissionDenied_User{User: d.Denied},
+			}}
+	default:
+		return false
+	}
+	agent := open.agent
+	if agent == "" {
+		agent = MainAgentID
+	}
+	s.agents.publish(agentFrame{agent: agent, frame: &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: agent},
+		Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Permission{Permission: &conversationv1.AgentPermission{
+				Id:        decision.GetAsk(),
+				GatedCall: open.gated,
+				Result:    &conversationv1.AgentPermission_Success{Success: success},
+			}},
+		}},
+	}})
+	return true
 }
 
 // rememberPushedBash files whatever a pushed agent frame teaches the fake
