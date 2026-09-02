@@ -360,6 +360,46 @@ Idempotent: a workspace with no standing stream is already unsubscribed."
       (agent-repl-host--put ws :stream nil)
       (agent-repl-connect-stream-cancel stream))))
 
+(defun agent-repl-host-rename (old new)
+  "Re-key OLD's host bookkeeping onto NEW and return non-nil when it moved.
+Host state is keyed on the WORKSPACE NAME (fanout §7), and §8 makes a
+roster row's changed name a RENAME of the tab -- so a rename that moved
+only `agent-repl--workspaces' would strand every fact this file holds
+under a name nothing asks about again: `agent-repl-host-ref' for NEW
+would answer nil (the composer and every verb refuse), the standing
+stream's pushes would update a dead name's gate, and a teardown by NEW
+would unsubscribe nothing and leak the stream.
+
+The whole entry moves -- `:ref' `:conn' `:stream' `:host' -- because it is
+the SAME workspace under a new name and none of those facts changed.
+Nothing to move is not a failure: a workspace whose host stream was never
+started has no entry, and a rename before the first subscribe is
+ordinary.  A NEW that already carries an entry is refused loudly and
+nothing moves: two workspaces would otherwise share one stream."
+  (let ((entry (gethash old agent-repl-host--by-name)))
+    (cond
+     ((null entry)
+      (agent-repl--log new "elisp.host.rename-noop old=%s new=%s reason=no-entry"
+                       old new)
+      nil)
+     ((gethash new agent-repl-host--by-name)
+      (agent-repl--error new
+                         "elisp.host.rename-target-occupied old=%s new=%s ref=%S"
+                         old new (plist-get entry :ref))
+      nil)
+     (t
+      ;; Primitive hash mutations with no Lisp call between them, so no
+      ;; observer can run against a half-moved entry.
+      (puthash new entry agent-repl-host--by-name)
+      (remhash old agent-repl-host--by-name)
+      (agent-repl--info new
+                        "elisp.host.renamed old=%s new=%s id=%s stream=%s conn=%s host-push=%s"
+                        old new (plist-get (plist-get entry :ref) :id)
+                        (and (plist-get entry :stream) t)
+                        (and (plist-get entry :conn) t)
+                        (and (plist-get entry :host) t))
+      t))))
+
 (defun agent-repl-host-forget (ws)
   "Drop every trace of WS from this file, cancelling its stream first.
 Called when a workspace's tab is torn down; the daemon-side session is
