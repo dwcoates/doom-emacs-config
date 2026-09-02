@@ -49,6 +49,41 @@ func TestRegisterWorkspaceIsIdempotentAcrossSpellings(t *testing.T) {
 	}
 }
 
+// TestRegisterWorkspaceAfterARestartIsIdempotent pins registration across a
+// daemon restart: re-registering the same directory on a fresh daemon
+// process over the SAME state root (so wsm.db persists) answers the id the
+// first daemon minted, and the roster carries no second row for it.
+func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
+	// Arrange: register once, then restart the daemon on the same state root.
+	f := newRegistered(t, harness.Opts{})
+	firstID := f.ws.GetId()
+	f.d.Stop()
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir})
+
+	// Act: register the SAME directory again, post-restart.
+	again := harness.Register(t, d2, f.repo.Dir)
+
+	// Assert: the same id, minted once by the first boot.
+	if again.GetId() != firstID {
+		t.Fatalf("RegisterWorkspace(%s) after a restart = id %q, want the same id %q the first boot minted", f.repo.Dir, again.GetId(), firstID)
+	}
+
+	// Assert: no second roster row for it.
+	roster := d2.WatchRoster()
+	got := awaitRoster(t, d2, roster, "the roster after a post-restart re-registration", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterRow(r, firstID) != nil
+	})
+	count := 0
+	for _, id := range repoRowIDs(got) {
+		if id == firstID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("the roster carries %d rows for workspace %q after a post-restart re-registration, want exactly 1", count, firstID)
+	}
+}
+
 func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
@@ -190,4 +225,74 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 	// Validation refusals are plain connect.NewError(InvalidArgument, ...)
 	// (internal/server/validate.go's `invalid`), with no logging at all.
 	f.d.ExpectWarnings()
+}
+
+// TestSelectWorkspaceRefusesABogusWorkspaceRef pins the IN-BAND
+// unknown_workspace arm on SelectWorkspace itself (endpoint_select_workspace.proto:
+// SelectWorkspaceError.unknown_workspace), mirroring the same arm already
+// pinned on CloseWorkspace above.
+func TestSelectWorkspaceRefusesABogusWorkspaceRef(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	// unknown_workspace is answered in band at DEBUG through server.refuse,
+	// never the daemon.refusal.unlanded_arm WARN.
+	d.ExpectWarnings()
+	bogus := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
+
+	// Act
+	resp, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: bogus}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SelectWorkspace on a bogus workspace ref = transport error %v, want the in-band unknown_workspace arm", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("SelectWorkspace on a bogus workspace ref = %v, want SelectWorkspaceError.unknown_workspace", resp.Msg)
+	}
+}
+
+// TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet pins the
+// attention-marker clearing rule precisely: SelectWorkspace clears the
+// marker ONLY on the workspace it names. Selecting workspace B must leave
+// workspace A's own marker standing.
+func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T) {
+	// Arrange: two workspaces in separate repos, A carrying a notification.
+	d := newDaemon(t, harness.Opts{})
+	repoA := harness.NewRepo(t)
+	repoB := harness.NewRepo(t)
+	a := harness.Register(t, d, repoA.Dir)
+	b := harness.Register(t, d, repoB.Dir)
+	d.WatchWorkspaceLogs(repoA.Dir)
+	d.WatchWorkspaceLogs(repoB.Dir)
+	roster := d.WatchRoster()
+
+	fa := &fixture{d: d, repo: repoA, ws: a, t: t}
+	fa.open()
+	fa.host = d.WatchHost(a)
+	fa.web = d.WatchWeb(a)
+	fa.submit("go", "k-attn-a", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	fa.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-attn-a", "act-attn-a")},
+	}))
+	awaitRoster(t, d, roster, "workspace A's attention marker set", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, a.GetId())
+		return row != nil && row.GetAttention() != nil
+	})
+
+	// Act: select B, never A.
+	if _, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: b})); err != nil {
+		t.Fatalf("SelectWorkspace(B) = error %v, want a success", err)
+	}
+
+	// Assert: B is now current, and A's marker is UNTOUCHED.
+	got := awaitRoster(t, d, roster, "B stamped current", func(r *frontendv1.WorkspaceRoster) bool {
+		return r.GetCurrent().GetWorkspace().GetId() == b.GetId()
+	})
+	rowA := rosterRow(got, a.GetId())
+	if rowA == nil {
+		t.Fatalf("the roster has no row for workspace A %s after selecting B", a.GetId())
+	}
+	if rowA.GetAttention() == nil {
+		t.Fatalf("workspace A's attention marker was cleared by selecting B, want it left set: only A's own SelectWorkspace clears it")
+	}
 }
