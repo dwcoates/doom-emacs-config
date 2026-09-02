@@ -1786,9 +1786,18 @@ must equal that section's own key."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; The row must carry the fixture's workspace NAME.  `--roster-row'
+      ;; defaults the display name to the ref ID, and a roster row whose name
+      ;; differs from the tab already holding that id is a RENAME (fanout §8):
+      ;; reconcile would rename `itest-verbs-ws' to the opaque id and
+      ;; `agent-repl-host-rename' would move the host entry with it, after
+      ;; which `agent-repl-host-ref' for the fixture name answers nil and the
+      ;; verb refuses for want of a daemon identity.  Naming the row is what
+      ;; makes the roster describe the SAME workspace this fixture registered.
       (agent-repl-itest-verbs--with-roster
        daemon (list (agent-repl-itest-verbs--roster-row
-                     (plist-get ref :id) (plist-get ref :dir)))
+                     (plist-get ref :id) (plist-get ref :dir)
+                     :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws)))
           ;; Act.
@@ -1842,9 +1851,18 @@ for pause would leave resume silently daemon-wide."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-workspace daemon ref
+      ;; The row must carry the fixture's workspace NAME.  `--roster-row'
+      ;; defaults the display name to the ref ID, and a roster row whose name
+      ;; differs from the tab already holding that id is a RENAME (fanout §8):
+      ;; reconcile would rename `itest-verbs-ws' to the opaque id and
+      ;; `agent-repl-host-rename' would move the host entry with it, after
+      ;; which `agent-repl-host-ref' for the fixture name answers nil and the
+      ;; verb refuses for want of a daemon identity.  Naming the row is what
+      ;; makes the roster describe the SAME workspace this fixture registered.
       (agent-repl-itest-verbs--with-roster
        daemon (list (agent-repl-itest-verbs--roster-row
-                     (plist-get ref :id) (plist-get ref :dir)))
+                     (plist-get ref :id) (plist-get ref :dir)
+                     :name agent-repl-itest-verbs--ws))
         (cl-letf (((symbol-function 'agent-repl--ws-current-name)
                    (lambda () agent-repl-itest-verbs--ws)))
           ;; Act.
