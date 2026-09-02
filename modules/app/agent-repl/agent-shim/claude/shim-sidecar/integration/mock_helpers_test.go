@@ -1221,3 +1221,26 @@ func requireExitCodeInTheTerminal(t *testing.T, scenario string, in *mockIngest)
 		}
 	}
 }
+
+// requireHeldTurnLandsWithoutAQuestion: a turn that is STOPPED rather than
+// finished still had its content read off disk, and nothing on the way to the
+// stop was a permission question.
+//
+// THE TERMINAL IS NOT ASSERTED HERE, deliberately. `AgentSuccess.interrupted`
+// is a LIFECYCLE fact and the stream plane is its only producer — the sidecar's
+// converters mint no AgentSuccess at all — so a file-plane subject demanding one
+// would be asserting another system's duty against this one.
+func requireHeldTurnLandsWithoutAQuestion(t *testing.T, scenario string, tree *mockTree, entries []*storev1.StoreEntry) {
+	t.Helper()
+	main := tree.LastMainAgentID()
+	if len(linesForBook(entries, main)) == 0 {
+		t.Errorf("%s: the held turn's records reached no page line of the main agent's book %q; a turn that is stopped is still read",
+			scenario, main)
+	}
+	for _, line := range pageLinesOf(entries) {
+		if q := frameOf(line).GetUpdate().GetQuestion(); q != nil {
+			t.Errorf("%s: the held turn produced a question page line; this scenario reaches its stop with no permission question in the way: %v",
+				scenario, q)
+		}
+	}
+}
