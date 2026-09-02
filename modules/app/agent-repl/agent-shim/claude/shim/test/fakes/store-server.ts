@@ -140,6 +140,16 @@ export interface FakeStore {
   /** Every unserved item written, in order. */
   unserved(): storev1.StoreUnservedItem[];
   /**
+   * Resolves once an unserved item of `arm` has been written, or at once if one
+   * already has been.
+   *
+   * A WRITE IS NOT SYNCHRONOUS WITH THE ACT THAT CAUSED IT. The shim enqueues
+   * and batches, so the record it logs and the row this store holds are two
+   * different instants — sampling `unserved()` at the first is asserting on a
+   * schedule. This is the second instant, awaitable.
+   */
+  unservedArrived(arm: string): Promise<storev1.StoreUnservedItem>;
+  /**
    * Every READ verb the store served, in order.
    *
    * `writes()` made the write plane observable and the read plane had no
@@ -177,6 +187,8 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
   const receivedWrites: storev1.WriteBatchRequest[] = [];
   const sessionUpdateRows: conversationv1.SessionUpdate[] = [];
   const unservedRows: storev1.StoreUnservedItem[] = [];
+  /** Who is waiting for an unserved item of a given arm to land. */
+  const unservedWaiters = new Set<(item: storev1.StoreUnservedItem) => void>();
   /** Every read verb served, in order — see {@link FakeStore.reads}. */
   const servedReads: FakeStoreRead[] = [];
   const noteRead = (rpc: FakeStoreRead["rpc"], request: unknown): void => {
@@ -294,9 +306,11 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
         recordLiveness(info.value);
         upsertPageLine(entry.upsertKey, info.value);
         return;
-      case "unservedItem":
+      case "unservedItem": {
         unservedRows.push(info.value);
+        for (const wake of [...unservedWaiters]) wake(info.value);
         return;
+      }
       case "bash": {
         const run = info.value.run?.value;
         if (run === undefined || run === "" || info.value.frame === undefined) return;
@@ -707,6 +721,18 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
     book: (agentId) => rowsOf(agentId).map(lineAt),
     sessionUpdates: () => [...sessionUpdateRows],
     unserved: () => [...unservedRows],
+    unservedArrived: (arm) => {
+      const already = unservedRows.find((item) => item.unservedItem.case === arm);
+      if (already !== undefined) return Promise.resolve(already);
+      return new Promise<storev1.StoreUnservedItem>((resolve) => {
+        const wake = (item: storev1.StoreUnservedItem): void => {
+          if (item.unservedItem.case !== arm) return;
+          unservedWaiters.delete(wake);
+          resolve(item);
+        };
+        unservedWaiters.add(wake);
+      });
+    },
     reads: () => [...servedReads],
     close: async () => {
       // End every parked tail first: a watcher blocked on its promise would

@@ -116,6 +116,17 @@ export interface SessionContext {
    */
   concludeStoppedRuns(entries: readonly LiveWorkEntry[]): void;
   /**
+   * Whether this shim has ever ANNOUNCED the named agent.
+   *
+   * The main agent, anything the live table holds or watched retire, and the
+   * subagents the record named at reconciliation. It is the shim's side of the
+   * unknown-target refusal: the STORE cannot refuse a book it has no rows for
+   * (`OpenAgentSessionFailure` has no `unknown_agent` arm), so a book that
+   * comes back EMPTY is either a real agent nothing has been written for yet or
+   * an id nobody ever minted, and only the producer can tell those apart.
+   */
+  knowsAgent(agent: conversationv1.AgentId): boolean;
+  /**
    * Report that the record plane could not be reached.
    *
    * A REFUSAL IS NOT A REPORT. The caller of the verb learns its own call was
@@ -689,6 +700,25 @@ export class TurnEngine {
       throw err instanceof PersistenceError
         ? notFound(`WatchAgent(${target.value}): ${err.message}`)
         : err;
+    }
+    // THE STORE ANSWERS FIRST, and a book with rows is known BY DEFINITION —
+    // something wrote them under this id. Only an EMPTY book is ambiguous, and
+    // there the producer decides: an id this shim never announced names no
+    // agent, and standing a tail on it would leave a consumer watching forever
+    // for frames that can never come.
+    //
+    // A stream has no arm to say "refused" — its response type is the frame it
+    // carries — so the refusal closes the stream at the transport.
+    if (opened.page.entries.length === 0 && !this.session.knowsAgent(target)) {
+      opened.close();
+      LOGGER.log(
+        { level: "warn", agent_id: target.value },
+        "REFUSED WatchAgent: the record holds no rows for this target and this shim never announced it",
+      );
+      throw notFound(
+        `WatchAgent(${target.value}): no agent by that id has been announced by this session, and the ` +
+          "record holds no rows under it",
+      );
     }
     const watcherEnded = this.session.watcherOpened(target, opened);
     try {
