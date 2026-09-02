@@ -548,3 +548,51 @@ describe("watchStream: onReconnected", () => {
     expect(reconnected).not.toHaveBeenCalled();
   });
 });
+
+describe("watchStream: the link's health, published page-wide", () => {
+  it("notes a readable frame on the context", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const ctx = contextFor(client, sink);
+    const noted = vi.fn();
+    ctx.onPush(noted);
+    // ACT
+    const handle = open(ctx, () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(noted).toHaveBeenCalled();
+  });
+
+  it("notes the frame BEFORE it is drawn", async () => {
+    // ARRANGE: a push that itself raises a notice (the shutdown announcement)
+    // must not be taken back down by its own arrival, so the order is fixed.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[push()]]);
+    const ctx = contextFor(client, sink);
+    const order: string[] = [];
+    ctx.onPush(() => order.push("noted"));
+    // ACT
+    const handle = open(ctx, () => order.push("drawn"));
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(order.slice(0, 2)).toEqual(["noted", "drawn"]);
+  });
+
+  it("notes nothing for a frame it could not read", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[undecodablePush()]]);
+    const ctx = contextFor(client, sink);
+    const noted = vi.fn();
+    ctx.onPush(noted);
+    // ACT
+    const handle = open(ctx, () => {});
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(noted).not.toHaveBeenCalled();
+  });
+});
