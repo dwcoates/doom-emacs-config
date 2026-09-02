@@ -86,3 +86,40 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 	v.republishRegistry(ctx, log, opRegister)
 	return record, nil
 }
+
+// PublishRegistry publishes the roster's durable half once, from what the
+// registry holds right now.
+//
+// It exists because the roster is EDITOR-GLOBAL and is otherwise published
+// only as a side effect of a verb: a daemon that has just booted and has been
+// asked for nothing yet would leave `WatchWorkspaceRoster` with no value to
+// deliver, and the first client would wait for a workspace to change before it
+// saw the roster at all — including the EMPTY roster, which is a roster.
+func (v *verbs) PublishRegistry(ctx context.Context) error {
+	log := v.deps.Log.Global()
+	workspaces, err := v.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not list the workspaces for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: list the workspaces: %w", err)
+	}
+	repositories, err := v.deps.DB.ListRepositories(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not list the repositories for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: list the repositories: %w", err)
+	}
+	tasks, err := v.deps.DB.Tasks(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not list the tasks for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: list the tasks: %w", err)
+	}
+	current, err := v.deps.DB.Current(ctx)
+	if err != nil {
+		log.Error(opRegister, "could not read the current workspace for the opening roster", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("publish the opening roster: read the current workspace: %w", err)
+	}
+	v.deps.Sidebar.SetRegistry(sidebarRegistry(workspaces, repositories, tasks, current))
+	log.Debug(opRegister, "published the opening roster", dlog.Context{
+		"workspaces": len(workspaces), "repositories": len(repositories), "tasks": len(tasks),
+	})
+	return nil
+}
