@@ -353,6 +353,81 @@ unary rpc can produce, which the contract never collapses into one."
     ;; Assert
     (should (agent-repl-test-host--logged-p :error "elisp.host.select-refused"))))
 
+(ert-deftest agent-repl-test-host-select-refusal-does-not-record-the-id ()
+  "A refusal is the daemon saying it stamped nothing as `current'."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :response (list :arm :error
+                                :value (list :cause (list :arm :unknown-workspace
+                                                          :value nil)))))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (null agent-repl-host-last-selected-id))))
+
+(ert-deftest agent-repl-test-host-select-transport-failure-does-not-record-the-id ()
+  "Nobody answering is not the daemon stamping the workspace either."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :failure (list :kind :transport :message "no route")))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (null agent-repl-host-last-selected-id))))
+
+(ert-deftest agent-repl-test-host-select-transferring-away-goes-to-the-handover ()
+  "The refusal is where a lagging client learns the workspace moved."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :transferring-away
+                                                :value (list :address "127.0.0.1:9100"))))))
+    (let ((seen nil))
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (_ws arm) (setq seen arm))))
+        ;; Act
+        (agent-repl-host-select "ws-1")
+        ;; Assert
+        (should (eq (plist-get seen :arm) :transferring-away))))))
+
+(ert-deftest agent-repl-test-host-select-transferring-away-is-not-an-error ()
+  "A handover is news about where the workspace went, not a failed verb."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :transferring-away
+                                                :value (list :address "127.0.0.1:9100"))))))
+    (cl-letf (((symbol-function 'agent-repl-host-handle-refusal) #'ignore))
+      ;; Act
+      (agent-repl-host-select "ws-1")
+      ;; Assert
+      (should-not (agent-repl-test-host--logged-p :error "elisp.host.select-refused")))))
+
+(ert-deftest agent-repl-test-host-select-non-handover-refusal-stays-an-error ()
+  "Every arm that is not a handover is still a refusal of the verb."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--select-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :workspace-ref-mismatch
+                                                :value (list :registry-dir "/x"))))))
+    ;; Act
+    (agent-repl-host-select "ws-1")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.select-refused"))))
+
 ;;;; ---- Subscribe ----
 
 (ert-deftest agent-repl-test-host-subscribe-echoes-the-ref-on-the-stream ()
@@ -604,6 +679,98 @@ unary rpc can produce, which the contract never collapses into one."
       (agent-repl-test-host--push "ws-1" (list :arm :host :value host))
       ;; Assert
       (should (equal seen (list "ws-1" host))))))
+
+(ert-deftest agent-repl-test-host-naming-title-renames-the-input-buffer ()
+  "Titles NAME THE BUFFERS: the composer's own name carries the title."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug "slug-1"
+                                                          :title "Refactor the codec"))))
+            ;; Assert
+            (should (string-match-p (regexp-quote "Refactor the codec")
+                                    (buffer-name buffer))))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-naming-slug-names-the-input-buffer ()
+  "With no vendor title the daemon-derived slug is what the buffer shows."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug "slug-1" :title nil))))
+            ;; Assert
+            (should (string-match-p (regexp-quote "slug-1") (buffer-name buffer))))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-renamed-input-buffer-is-still-an-agent-panel ()
+  "A titled composer must stay an agent panel to every name predicate."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug nil
+                                                          :title "Refactor the codec"))))
+            ;; Assert
+            (should (agent-repl--agent-panel-buffer-p buffer)))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-renamed-input-buffer-keeps-its-identity-segment ()
+  "The workspace is still recoverable from the titled name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug nil
+                                                          :title "Refactor the codec"))))
+            ;; Assert
+            (should (equal (agent-repl--extract-panel-id (buffer-name buffer)) "ws-1")))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-naming-without-a-title-or-slug-leaves-the-name-bare ()
+  "Un-derived naming is the ordinary early state, not a title to write down."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+            ;; Assert
+            (should (equal (buffer-name buffer) "*agent-panel-input-ws-1*")))
+        (kill-buffer buffer)))))
 
 ;;;; ---- The notification policy ----
 
@@ -1161,6 +1328,80 @@ unary rpc can produce, which the contract never collapses into one."
     ;; Assert
     (should (agent-repl-test-host--logged-p
              :error "elisp.host.transferring-away-without-address"))))
+
+(ert-deftest agent-repl-test-host-transferring-away-with-a-blank-address-is-an-error ()
+  "`address' is a plain string, so the daemon's zero value is the empty one."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :transferring-away :value (:address "")))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :error "elisp.host.transferring-away-without-address"))))
+
+(ert-deftest agent-repl-test-host-transferring-away-with-a-blank-address-dials-nothing ()
+  "Dialing the empty address would be inventing a daemon."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-handle-refusal "ws-1" '(:arm :transferring-away :value (:address "")))
+    ;; Assert
+    (should (null agent-repl-test-host--dialled))))
+
+(ert-deftest agent-repl-test-host-adopt-transferring-away-goes-to-the-handover ()
+  "AdoptHostWorkspace is a per-workspace rpc and carries the handover arms too."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :transferring-away
+                                                :value (list :address "127.0.0.1:9200"))))))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((seen nil))
+      (cl-letf (((symbol-function 'agent-repl-host-handle-refusal)
+                 (lambda (_ws arm) (setq seen arm))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should (equal (plist-get seen :value) (list :address "127.0.0.1:9200")))))))
+
+(ert-deftest agent-repl-test-host-adopt-not-yet-adopted-is-not-an-error ()
+  "The successor is still finishing its takeover; nothing has failed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :not-yet-adopted :value nil)))))
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+    ;; Assert
+    (should-not (agent-repl-test-host--logged-p :error "elisp.host.adopt-refused"))))
+
+(ert-deftest agent-repl-test-host-adopt-not-yet-adopted-retries-off-a-timer ()
+  "The retry is SCHEDULED: re-adopting from inside the answer would spin."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
+          agent-repl-test-host--adopt-answer
+          (list :response
+                (list :arm :error
+                      :value (list :cause (list :arm :not-yet-adopted :value nil)))))
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((scheduled nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (delay _repeat fn &rest args)
+                   (setq scheduled (cons delay (cons fn args))))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (should (eq (nth 1 scheduled) #'agent-repl-host-handle-refusal))))))
 
 (ert-deftest agent-repl-test-host-not-yet-adopted-is-info-not-an-error ()
   "The successor simply has not taken the workspace over yet."

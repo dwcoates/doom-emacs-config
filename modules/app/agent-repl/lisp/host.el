@@ -232,6 +232,42 @@ come."
      (agent-repl--error nil "elisp.host.register-failed dir=%S detail=%S" dir detail)
      (funcall on-done nil))))
 
+(defconst agent-repl-host--handover-arms '(:transferring-away :not-yet-adopted)
+  "Refusal arms that are HANDOVER NEWS rather than user-facing failures.
+Both are declared on every per-workspace rpc's error type, so one list
+serves them all; they are handed to `agent-repl-host-handle-refusal' and
+nothing is drawn for either.")
+
+(defcustom agent-repl-host-handover-retry-delay 0.2
+  "Seconds before a `not_yet_adopted' refusal re-walks the adopt.
+The refusing daemon is the very one still finishing its takeover, so the
+retry is SCHEDULED rather than issued from inside the answer: a straight
+re-adopt from the response handler would retry as fast as the round trip
+allows for as long as the takeover lasts."
+  :type 'number
+  :group 'agent-repl)
+
+(defun agent-repl-host--on-refused (ws op value)
+  "Report a daemon-authored refusal VALUE of OP for WS, or route the handover.
+THE SLUG NAMES THE RPC (`elisp.host.<op>-refused'), so a reader can ask
+for every refusal of one verb.  The two handover arms are not refusals of
+the verb at all — they are the daemon telling Emacs where the workspace
+went — so they are INFO and go to `agent-repl-host-handle-refusal', the
+one place the handover walk lives."
+  (let* ((arm (plist-get value :cause))
+         (keyword (plist-get arm :arm)))
+    (cond
+     ((memq keyword agent-repl-host--handover-arms)
+      (agent-repl--info ws (format "elisp.host.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
+                        ws keyword (plist-get arm :value))
+      (if (eq keyword :not-yet-adopted)
+          (run-at-time agent-repl-host-handover-retry-delay nil
+                       #'agent-repl-host-handle-refusal ws arm)
+        (agent-repl-host-handle-refusal ws arm)))
+     (t
+      (agent-repl--error ws (format "elisp.host.%s-refused ws=%%s error=%%S" op)
+                         ws value)))))
+
 ;;;; ---- Select ----
 
 (defun agent-repl-host-select (ws)
@@ -251,16 +287,22 @@ workspace has no identity to select."
       (agent-repl--warn ws "elisp.host.select-skipped ws=%s reason=no-connection" ws)
       nil)
      (t
-      (setq agent-repl-host-last-selected-id (plist-get ref :id))
       (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws (plist-get ref :id))
       (agent-repl-rpc-select-workspace
        conn (list :workspace ref)
        :on-response
        (lambda (response)
          (pcase (plist-get response :arm)
-           (:success (agent-repl--log ws "elisp.host.selected ws=%s" ws))
-           (:error (agent-repl--error ws "elisp.host.select-refused ws=%s error=%S"
-                                      ws (plist-get response :value)))
+           (:success
+            ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
+            ;; what Emacs believes the daemon stamped as `current'; a refusal is
+            ;; the daemon saying it stamped nothing, and recording the id anyway
+            ;; would leave Emacs disagreeing with the daemon about which
+            ;; workspace is current.
+            (setq agent-repl-host-last-selected-id (plist-get ref :id))
+            (agent-repl--log ws "elisp.host.selected ws=%s id=%S"
+                             ws (plist-get ref :id)))
+           (:error (agent-repl-host--on-refused ws "select" (plist-get response :value)))
            (arm (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm))))
        :on-failure
        (lambda (detail)
@@ -353,12 +395,42 @@ only records the fact and drops the dead stream."
       (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S push=%S"
                             ws arm push)))))
 
+(defun agent-repl-host--apply-naming (ws)
+  "Rename WS's input buffer so its name carries WS's display title.
+fanout §7: buffer titles use `naming.title', else `naming.slug', else the
+row name — TITLES NAME THE BUFFERS, so a display-title accessor that
+answers the right string while every buffer keeps its old name is not the
+contract.  `agent-repl--input-buffer-name' keeps the name matching
+`agent-repl--input-buffer-re', so a titled composer is still an agent
+panel to every predicate and its identity segment is still recoverable.
+
+The WEBVIEW buffer is deliberately left alone: its name is a lookup key
+(`agent-repl--frontend-webview-buffer-name') that callers derive from the
+workspace name without ever seeing the title.
+
+Silent and inert when WS has no live input buffer — a workspace whose
+composer has not been created yet has no name to write the title into,
+and the name is built at creation from the title the daemon has by then."
+  (let ((buffer (agent-repl--ws-get ws :input-buffer)))
+    (when (buffer-live-p buffer)
+      (let ((want (agent-repl--input-buffer-name ws (agent-repl-host-display-title ws))))
+        (unless (equal (buffer-name buffer) want)
+          (with-current-buffer buffer
+            ;; UNIQUE-OK: two workspaces may be handed the same vendor title,
+            ;; and a rename that ERRORED on the collision would strand the
+            ;; second composer under the old name with no way back.
+            (rename-buffer want t))
+          (agent-repl--info ws "elisp.host.buffer-renamed ws=%s buffer=%S title=%S"
+                            ws (buffer-name buffer)
+                            (agent-repl-host-display-title ws)))))))
+
 (defun agent-repl-host--apply-state (ws host)
   "Whole-replace WS's host state with HOST and run the update hooks.
 `shim_attached' false gets NO treatment: a parked workspace presents as
 live and unwired, and the frontend cannot tell parked from idle, on
 purpose."
   (agent-repl-host--put ws :host host)
+  (agent-repl-host--apply-naming ws)
   (agent-repl--log ws "elisp.host.state ws=%s gate=%S backfill=%S faults=%d"
                    ws (agent-repl-host-composer-gate ws)
                    (agent-repl-host-backfill ws)
@@ -450,8 +522,7 @@ be served by nobody."
             (agent-repl-host-unsubscribe ws)
             (agent-repl-host-subscribe new ws ref))
            (:error
-            (agent-repl--error ws "elisp.host.adopt-refused ws=%s error=%S"
-                               ws (plist-get response :value)))
+            (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
            (arm
             (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))
        :on-failure
@@ -533,8 +604,12 @@ through here, so a repeated refusal cannot recurse into a loop."
     (pcase arm
       (:transferring-away
        (let ((address (plist-get value :address)))
-         (if (null address)
-             (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s" ws)
+         ;; `address' is a PLAIN string on the wire, so the daemon's zero value
+         ;; decodes to the empty string rather than to an absence: both mean
+         ;; "no address rode the arm" and both are the same breach.
+         (if (or (null address) (string-empty-p address))
+             (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s address=%S"
+                                ws address)
            (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
            (let ((new (agent-repl-host--redial-successor ws address)))
              (if new
