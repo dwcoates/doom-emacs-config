@@ -277,4 +277,27 @@ describe("the fan-wide cancel setup", () => {
     // Assert
     expect((announcements.at(-1)?.tasks as unknown[])).toEqual([]);
   });
+
+
+  it("leaves the subagent live after the turn concludes, then raises its OWN gated call", async () => {
+    // The main turn concludes normally (Dispatched a long-running agent to the
+    // background); what is untested is that a SECOND, unawaited canUseTool
+    // ask (the subagent's own) still lands after that, carrying the
+    // subagent's agentID.
+    const seen: unknown[] = [];
+    const driven = await driveScenario(["!subagent-detached-live"], {
+      canUseTool: async (name, input, options) => {
+        seen.push(options.agentID);
+        return { behavior: "allow", updatedInput: input };
+      },
+      during: async (_query, _prompts, messages) => {
+        for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
+        void messages;
+      },
+    });
+
+    expect(ofType(driven, "result")).toHaveLength(1);
+    const started = ofType(driven, "system", "task_started")[0];
+    expect(seen).toEqual([started?.task_id]);
+  });
 });

@@ -242,3 +242,24 @@ describe("an ask that offers no standing at all", () => {
     expect(theResult(driven).result).toBe("The user declined the command.");
   });
 });
+
+describe("a permission ask that PARKS until an interrupt", () => {
+  it("opens the ask and never concludes on its own", async () => {
+    // !perm-hold's run() never awaits its own askPermission call and parks on
+    // ctx.awaitInterrupt() -- a bare driveScenario() would hang the suite
+    // forever, which is exactly why it had never been driven at the fake
+    // level. Driving the interrupt through `during` releases it in-process.
+    const driven = await driveScenario(["!perm-hold"], {
+      canUseTool: allowOnce,
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        expect(messages.some((m) => (m as { type: string }).type === "assistant")).toBe(true);
+        await query.interrupt();
+      },
+    });
+
+    const results = ofType(driven, "result");
+    expect(results).toHaveLength(1);
+    expect(results[0]?.terminal_reason).toBe("aborted_streaming");
+  });
+});
