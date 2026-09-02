@@ -8,6 +8,8 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
+import { forgetOwnTurns, rememberOwnTurn } from "../../src/composer/own-turns.js";
 import {
   createFeedController,
   isBubbleRow,
@@ -146,6 +148,22 @@ describe("createFeedController: painting a page", () => {
     expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-turn")).toBe("turn-7");
   });
 
+  it("marks a row whose turn this page submitted", () => {
+    const { controller, host } = fixture();
+    rememberOwnTurn(create(TurnIdSchema, { value: "turn-7" }));
+    controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
+    expect(host.querySelector('[data-feed-row="a"]')?.getAttribute("data-mine")).toBe("true");
+    forgetOwnTurns();
+  });
+
+  it("makes no claim on a row from another submitter's turn", () => {
+    const { controller, host } = fixture();
+    rememberOwnTurn(create(TurnIdSchema, { value: "turn-mine" }));
+    controller.applyPage(page([userPromptRow("a", "1", "turn-7")]), "replace");
+    expect(host.querySelector('[data-feed-row="a"]')?.hasAttribute("data-mine")).toBe(false);
+    forgetOwnTurns();
+  });
+
   it("stamps no turn on a row that belongs to none", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([userPromptRow("a", "1")]), "replace");
@@ -231,10 +249,13 @@ describe("createFeedController: the walk", () => {
     expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(false);
   });
 
-  it("hides it once the walk reaches the start", () => {
+  it("takes it away once the walk reaches the start", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([responseRow("a")]), "replace");
-    expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(true);
+    // A feed at its start offers no way further back, and an inert control the
+    // reader can see is a promise the feed cannot keep: it is detached, not
+    // merely hidden.
+    expect(host.querySelector("[data-load-more]")).toBeNull();
   });
 
   it("asks for the NEXT page, continuing the daemon's own walk", async () => {
@@ -382,12 +403,15 @@ describe("createFeedController: a malformed row", () => {
     expect(h.sink.reported).toEqual(["frameUndecodable"]);
   });
 
-  it("refuses a merge tab that arrived on a feed that is not a merge bubble", () => {
+  it("draws a merge tab that arrived on a feed that is not a merge bubble", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([mergeTabRow("t")]), "replace");
-    // The tab is not drawn as a row of its own, so nothing is placed for it.
-    expect(drawnIds(host)).toEqual([]);
+    // INSIDE a merge bubble the strip consumes the tab and this path is never
+    // reached; anywhere else the tab is still a row the daemon served, and
+    // dropping it would hide a phase of a real run (src/feed/merge/tab-row.ts).
+    expect(drawnIds(host)).toEqual(["t"]);
   });
+
 });
 
 describe("createFeedController: bubbles", () => {

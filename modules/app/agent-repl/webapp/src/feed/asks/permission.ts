@@ -124,10 +124,15 @@ export function drawFeedPermission(u: FeedPermission, rc: RowContext): HTMLEleme
       card.append(waitingClock(card, rc));
       card.append(drawOpenActions(u, rc));
       return card;
-    case "answered":
+    case "answered": {
       card.className = "permission resolved";
+      // An answered card's STATE is the answer given: "answered" alone says
+      // only that the ask is over, never whether it was allowed or refused.
+      const answer = requireCase(state.value.answer, `${PATH}.answered.answer`);
+      card.setAttribute("data-state", answer.case);
       card.append(drawFeedPermissionAnswered(state.value, rc, `${PATH}.answered`));
       return card;
+    }
     case "abandoned":
       card.className = "permission resolved";
       card.append(drawFeedPermissionAbandoned(state.value, rc, `${PATH}.abandoned`));

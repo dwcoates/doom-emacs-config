@@ -357,9 +357,10 @@ describe("a refused gate answer", () => {
     const el = drawFeedColdGate(gate(standing()), h.rc);
     el.querySelector<HTMLButtonElement>('[data-cold-gate="pay"]')?.click();
     await settle();
-    expect(el.querySelector(".hibernation-actions .refusal")?.getAttribute("data-arm")).toBe(
-      "malformed",
-    );
+    // An error with no cause set is a frame this build cannot read, not a
+    // refusal with no words: it is reported through the failure sink, and no
+    // sentence is invented at the control (src/rpc/refuse.ts).
+    expect(el.querySelector(".hibernation-actions .refusal")).toBeNull();
   });
 });
 

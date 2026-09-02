@@ -150,22 +150,28 @@ export function drawTransportRefusal(host: HTMLElement): void {
 }
 
 /**
- * Draw a REFUSAL THIS BUILD COULD NOT READ, and report it once.
+ * REPORT a refusal this build could not read, exactly once.
  *
  * A `<Rpc>Error` whose cause oneof is unset — or whose arm a newer daemon added
  * — is a malformed view arriving on a CLICK rather than on a draw, so the feed
  * core's own malformed path never sees it. Left to propagate it would become an
- * unhandled rejection inside a click handler: the failure would be real, logged
- * nowhere the user can see, and the button would sit there looking as if
- * nothing had happened. So it is logged at error, reported through the failure
- * sink exactly once by this layer, and stated at the control.
+ * unhandled rejection inside a click handler: the failure would be real and
+ * logged nowhere the user can see. So it is logged at error and reported
+ * through the failure sink, which is where an unreadable frame is told.
+ *
+ * NO REFUSAL IS DRAWN AT THE CONTROL. Since landing 4 every error carries a
+ * typed cause, so an unset one is not "a refusal with no words" — it is a frame
+ * this build cannot read, and inventing a sentence for it at the control would
+ * state a refusal the daemon never made. The failure overlay is the surface for
+ * a frame nobody could read, and it names this one.
  *
  * Answers whether ERR was a malformed view; anything else is not this
  * function's to interpret and the caller must rethrow it.
  */
 export function drawMalformedRefusal(
   ctx: Pick<AppContext, "failures">,
-  host: HTMLElement,
+  /** The control that was clicked. Kept for the call sites' one shape. */
+  _host: HTMLElement,
   operation: string,
   err: unknown,
 ): boolean {
@@ -175,7 +181,6 @@ export function drawMalformedRefusal(
     context: { path: err.path, detail: err.detail },
   });
   ctx.failures.report(frameUndecodable(err.detail, err.path));
-  host.append(refusal("malformed", `unreadable refusal at ${err.path}`));
   return true;
 }
 
