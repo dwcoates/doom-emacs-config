@@ -122,7 +122,13 @@ func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
 		ch <- turnEnd{how: how}
 	}
 	delete(w.turnWaiters, turn)
-	w.signalFreenessLocked()
+	// FREENESS IS NOT SIGNALLED HERE. A workspace is free once the daemon has
+	// FINISHED reacting to the turn's end, and the lifecycle sink -- the prompt
+	// queue -- is told off the lock, after this returns: it can deliver the next
+	// held prompt, which opens a turn straight back on this watcher. A waiter
+	// released before that (the drain, whose release is the daemon's orderly
+	// EXIT) tears the state client down under the queue's own turn-end work.
+	// flushTurnEnds signals it, once the sink has been told.
 }
 
 // rememberClosedTurnLocked records a turn's close, evicting the oldest once
