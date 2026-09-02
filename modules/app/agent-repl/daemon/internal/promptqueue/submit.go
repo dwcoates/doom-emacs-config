@@ -112,6 +112,11 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 				merged(fields, dlog.Context{"cause": err.Error()}))
 			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: %w", sub.WS, err)
 		}
+		// THE GUIDANCE IS STILL SOMETHING THE USER TYPED, so it is drawn like
+		// every other accepted prompt -- at the session's standing output
+		// address, which the parked lease holder has pointed at its own tab, so
+		// the guidance lands there and never on the root feed.
+		q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 		log.Info(opSubmit, "routed the submission to the resolution agent as guidance",
 			merged(fields, dlog.Context{"guidance_turn": string(turn)}))
 		return Disposition{Delivered: true}, true, nil

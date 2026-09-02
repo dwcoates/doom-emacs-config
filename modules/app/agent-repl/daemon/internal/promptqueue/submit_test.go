@@ -8,6 +8,9 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -119,6 +122,28 @@ func TestSubmitRoutesAParkedLeaseToTheResolutionAgent(t *testing.T) {
 	}
 	if len(h.sender.started()) != 0 {
 		t.Fatal("a parked submission never opens a turn of its own")
+	}
+}
+
+func TestSubmitMirrorsAParkedLeasesGuidanceAsAUserPromptRow(t *testing.T) {
+	// Arrange: a parked merge lease has addressed the session at its own tab.
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyParked)
+	lease := ids.LeaseID("lease-1")
+	h.feed.SetOutputAddress("ws-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert: the guidance is drawn at the ADDRESSED feed, never on the root.
+	rows := h.feed.mirrored()
+	if len(rows) != 1 {
+		t.Fatalf("mirrored rows = %d, want the guidance drawn once", len(rows))
+	}
+	want := feedid.Encode(feedid.Ref{WS: "ws-1", Feed: feedid.Feed{Merge: &lease},
+		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "t1"}})
+	if got := rows[0].GetId().GetValue(); got != want.GetValue() {
+		t.Fatalf("guidance mirror id = %q, want the addressed feed's %q", got, want.GetValue())
 	}
 }
 

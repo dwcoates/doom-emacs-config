@@ -335,6 +335,55 @@ func TestOutputAddressPlacesEveryRowOnTheAddressedFeed(t *testing.T) {
 	}
 }
 
+func TestUpsertAtOutputAddressLandsOnTheAddressedFeedAndParent(t *testing.T) {
+	// Arrange: a merge lease has addressed the session at one of its tabs.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-9")
+	parent := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
+		Row: feedid.RowKey{Kind: feedid.KindMergeTab, ID: "conflicts", Sub: "1"}}
+	h.resolver.SetOutputAddress(testWorkspace, &sessionwatcher.OutputAddress{
+		Feed: feedid.Feed{Merge: &lease}, Parent: &parent,
+	})
+
+	// Act.
+	h.resolver.UpsertAtOutputAddress(testWorkspace,
+		feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"},
+		&frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}})
+
+	// Assert: the row's identity is the ADDRESSED feed's, and it is parented to
+	// the addressed row, so the resolver's own later draw upserts it in place.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("root rows = %d, want 0 while an output address is in force", len(rows))
+	}
+	row := h.only(feedid.Feed{Merge: &lease})
+	want := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Merge: &lease},
+		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}
+	if row.GetId().GetValue() != testEncode(want).GetValue() {
+		t.Fatalf("row id = %q, want the addressed feed's %q", row.GetId().GetValue(), testEncode(want).GetValue())
+	}
+	if row.GetParent().GetRow().GetValue() != testEncode(parent).GetValue() {
+		t.Fatalf("parent = %q, want the addressed row", row.GetParent().GetRow().GetValue())
+	}
+}
+
+func TestUpsertAtOutputAddressLandsOnTheRootWhenNoAddressStands(t *testing.T) {
+	// Arrange: no lease holder has addressed the session.
+	h := newHarness(t)
+
+	// Act.
+	h.resolver.UpsertAtOutputAddress(testWorkspace,
+		feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"},
+		&frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{}}})
+
+	// Assert.
+	row := h.only(rootFeed())
+	want := feedid.Ref{WS: testWorkspace, Feed: feedid.Feed{Root: true},
+		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "turn-1"}}
+	if row.GetId().GetValue() != testEncode(want).GetValue() {
+		t.Fatalf("row id = %q, want the root feed's %q", row.GetId().GetValue(), testEncode(want).GetValue())
+	}
+}
+
 func TestClearedOutputAddressRestoresTheRootFeed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
