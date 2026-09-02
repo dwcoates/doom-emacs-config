@@ -28,7 +28,7 @@ func (s *store) Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error
 	var out *InstanceID
 	err := s.read(ctx, "daemon.wsm.serving", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
 		var instance sql.NullString
-		err := s.db.QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&instance)
+		err := s.db().QueryRowContext(ctx, `SELECT serving_instance FROM workspaces WHERE id = ?`, id).Scan(&instance)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 		}

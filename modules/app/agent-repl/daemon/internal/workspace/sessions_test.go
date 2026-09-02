@@ -745,3 +745,27 @@ func TestModelOrDefaultFallsBackWhenTheCreateNamedNoModel(t *testing.T) {
 		t.Fatalf("modelOrDefault(\"\") = %q, want the daemon's default", got)
 	}
 }
+
+// TestBringUpRelaysTheShimsConversationOwnedRefusal covers the workspace
+// kernel lock's whole purpose from the daemon's side: another shim already
+// holds this conversation, and the shim says so instead of starting a second
+// vendor process on it.
+func TestBringUpRelaysTheShimsConversationOwnedRefusal(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = &shimv1.StartSessionResponse{
+		Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+			Detail: "another shim holds this workspace's conversation",
+			Cause: &shimv1.StartSessionFailure_ConversationOwned{
+				ConversationOwned: &shimv1.StartSessionConversationOwned{},
+			},
+		}},
+	}
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	asRefusal(t, err, ArmConversationOwned)
+}

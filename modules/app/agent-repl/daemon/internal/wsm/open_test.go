@@ -64,7 +64,7 @@ func TestOpenUsesASingleConnection(t *testing.T) {
 	s, _ := testStore(t)
 
 	// Act
-	got := s.db.Stats().MaxOpenConnections
+	got := s.db().Stats().MaxOpenConnections
 
 	// Assert
 	if got != 1 {
@@ -257,7 +257,7 @@ func TestOpenReadOnlyRefusesEngineLevelWrites(t *testing.T) {
 	defer ro.Close()
 
 	// Act
-	_, err = ro.(*store).db.ExecContext(context.Background(), `INSERT INTO tasks (id, title, done, created_at) VALUES ('x', 'y', 0, 0)`)
+	_, err = ro.(*store).db().ExecContext(context.Background(), `INSERT INTO tasks (id, title, done, created_at) VALUES ('x', 'y', 0, 0)`)
 
 	// Assert
 	if err == nil {

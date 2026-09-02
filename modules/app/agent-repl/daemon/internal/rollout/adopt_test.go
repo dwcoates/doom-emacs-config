@@ -3,7 +3,9 @@ package rollout
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
@@ -100,22 +102,57 @@ func TestAdoptHostCompletesASingleHostRendezvous(t *testing.T) {
 	}
 }
 
-func TestTheRendezvousCompletesOnlyWhenEveryExpectedParticipantHasCalled(t *testing.T) {
+// TestEveryExpectedParticipantSucceedsTogether pins the rendezvous's meaning:
+// the participants call CONCURRENTLY and "all calls succeed together", so the
+// caller that arrives first waits for the one that completes it rather than
+// being told not_yet_adopted. That answer is reserved for a caller whose own
+// context expires first, which the next test covers.
+func TestEveryExpectedParticipantSucceedsTogether(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	arm(t, h, ws, Participants{Host: true, Web: true})
 
 	// Act
-	first := h.c.AdoptHost(context.Background(), ws)
-	second := h.c.AdoptWeb(context.Background(), ws)
+	var wg sync.WaitGroup
+	var hostErr, webErr error
+	wg.Add(2)
+	go func() { defer wg.Done(); hostErr = h.c.AdoptHost(context.Background(), ws) }()
+	go func() { defer wg.Done(); webErr = h.c.AdoptWeb(context.Background(), ws) }()
+	wg.Wait()
 
 	// Assert
-	if !errors.Is(first, ErrNotYetAdopted) {
-		t.Fatalf("the first call answered %v, want not_yet_adopted", first)
+	if hostErr != nil {
+		t.Fatalf("AdoptHost answered %v, want success", hostErr)
 	}
-	if second != nil {
-		t.Fatalf("the second call answered %v, want success", second)
+	if webErr != nil {
+		t.Fatalf("AdoptWeb answered %v, want success", webErr)
+	}
+}
+
+// TestAnAdoptCallerThatGivesUpFirstAnswersNotYetAdopted covers the one case
+// the arm is for: the other participant has not called, and this caller's own
+// context expired. It is the retry-with-backoff answer.
+func TestAnAdoptCallerThatGivesUpFirstAnswersNotYetAdopted(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	arm(t, h, ws, Participants{Host: true, Web: true})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Act: the host calls and nothing else ever will.
+	done := make(chan error, 1)
+	go func() { done <- h.c.AdoptHost(ctx, ws) }()
+	cancel()
+
+	// Assert
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrNotYetAdopted) {
+			t.Fatalf("AdoptHost answered %v, want not_yet_adopted", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AdoptHost never answered after its context was cancelled")
 	}
 }
 

@@ -100,7 +100,7 @@ func (s *store) Session(ctx context.Context, id WorkspaceID) (Session, bool, err
 		found bool
 	)
 	err := s.read(ctx, "daemon.wsm.session", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		sess, err := scanSession(s.db.QueryRowContext(ctx,
+		sess, err := scanSession(s.db().QueryRowContext(ctx,
 			`SELECT workspace_id, host_session_id, vendor_session_id, config_dir, model, permission_mode, started_at, last_engagement_at, shim_pid, terminal_kind, terminal_detail, terminal_at
 			 FROM sessions WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
