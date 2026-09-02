@@ -576,6 +576,35 @@ go build ./... && go vet ./... && go test -race ./...
   module, and `modules/app/agent-repl/bin/test-all.sh` runs every tracked suite
   across the module. Both are available for a review pass; neither is a gate.
 
+### Test wait bounds
+
+Every harness timeout is a small multiple (~3x) of the healthy max observed on
+a clean `go test -race -count=1 -v ./...` run, never a round number picked by
+feel. Re-derive them the same way after a change materially alters a suite's
+real timing (a heavier scenario, a new outage ladder) rather than nudging a
+number that started failing.
+
+| Bound | Where | Old | New | Basis |
+| --- | --- | --- | --- | --- |
+| `waitBudget` | `integration/helpers_test.go` | 60s | 50s | `integration` package healthy max ~16.6s (`TestMockScenarios/!subagent`, a real vendor+sidecar+store scenario); nearly every other scenario finishes in well under a second |
+| `snapshotBudget` | `integration/helpers_test.go` | 2s | 1s | a single RPC against an already-running store (no process boot in this wait), so it does not need `waitBudget`'s headroom |
+| `standDownGrace` | `integration/mock_helpers_test.go` | 10s | 3s | the mocked vendor writes every file synchronously and exits promptly on SIGTERM in every observed run; the extra margin over `shim-store`'s comparable 2s shutdown bound accounts for this being a real node process rather than a compiled binary |
+
+Per-site exception, deliberately NOT tightened by this pass:
+
+- `pollTick` (`integration/helpers_test.go`, 20ms) is a poll cadence, not a
+  failure bound — tightening it would only add CPU and log churn, not
+  correctness margin.
+- `rpcTimeout` (`cycle.go`, 30s), `dialTimeout`
+  (`internal/storeclient/client.go`, 5s), `UnownedSpoolWindow` (`held.go`,
+  60s default), `DefaultPollInterval`/`DefaultRescanInterval` (`main.go`), and
+  `DefaultGrace` (`internal/stale/stale.go`, 30s) are production runtime
+  defaults, not test-only harness bounds, and are out of scope: they govern
+  the cycle's real behavior, and tests exercise them through the injected
+  clock (`sidecar.now`/`sidecar.jitter`/`sidecar.bootTimeMs`) or explicit
+  per-test overrides (`--poll-interval`, `--rescan-interval`,
+  `--unowned-spool-window`), never by waiting them out.
+
 ## Conversion rules
 
 Owned by `internal/convert` and `internal/handler`. The reader (this package's
