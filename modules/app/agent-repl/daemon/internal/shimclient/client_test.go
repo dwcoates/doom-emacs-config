@@ -430,7 +430,7 @@ func TestSessionStreamRaisesOnAnUnsetPush(t *testing.T) {
 	client := adoptReady(t, f, dir, uds)
 
 	type opened struct {
-		stream Stream[*conversationv1.SessionUpdate]
+		stream Stream[*shimv1.WatchSessionResponse]
 		err    error
 	}
 	done := make(chan opened, 1)

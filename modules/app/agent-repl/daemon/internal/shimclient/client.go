@@ -304,9 +304,9 @@ func (c *client) exitedAlready() bool {
 // liveness evidence — with the open SELECTED against process death, because
 // Connect's server-stream open blocks until the shim's first frame and a dead
 // process must end the wait at once.
-func (c *client) openSupervisedSession(parent context.Context) (Stream[*conversationv1.SessionUpdate], error) {
+func (c *client) openSupervisedSession(parent context.Context) (Stream[*shimv1.WatchSessionResponse], error) {
 	type opened struct {
-		stream Stream[*conversationv1.SessionUpdate]
+		stream Stream[*shimv1.WatchSessionResponse]
 		err    error
 	}
 	result := make(chan opened, 1)
@@ -353,7 +353,7 @@ func (c *client) openSupervisedSession(parent context.Context) (Stream[*conversa
 // redial re-establishes the link to a still-running shim, FOREVER with capped
 // backoff. It stops only when the evidence says the process is gone or the
 // supervision context ends.
-func (c *client) redial(ctx context.Context) (Stream[*conversationv1.SessionUpdate], error) {
+func (c *client) redial(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error) {
 	c.link.publish(LinkRedialing)
 	for attempt := 0; ; attempt++ {
 		if err := c.deathOrContext(ctx); err != nil {
@@ -377,7 +377,7 @@ func (c *client) redial(ctx context.Context) (Stream[*conversationv1.SessionUpda
 // healthy. Unhealthy is an ANSWER, not readiness: the client keeps waiting.
 // The frames come from the ONE receive loop the stream has; a second loop on
 // the same stream would be two concurrent receivers.
-func (c *client) awaitHealthy(ctx context.Context, frames <-chan *conversationv1.SessionUpdate, errs <-chan error) error {
+func (c *client) awaitHealthy(ctx context.Context, frames <-chan *shimv1.WatchSessionResponse, errs <-chan error) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -386,8 +386,8 @@ func (c *client) awaitHealthy(ctx context.Context, frames <-chan *conversationv1
 			return c.deathError()
 		case err := <-errs:
 			return fmt.Errorf("shimclient: session stream ended during bring-up: %w", err)
-		case update := <-frames:
-			diagnostics := update.GetDiagnostics()
+		case frame := <-frames:
+			diagnostics := frame.GetUpdate().GetDiagnostics()
 			if diagnostics == nil {
 				continue
 			}
@@ -407,7 +407,7 @@ func (c *client) awaitHealthy(ctx context.Context, frames <-chan *conversationv1
 // monitor holds the session stream as the link's liveness evidence. A break
 // while the process still lives is a REDIAL, forever, with capped backoff; a
 // break with the process gone stops, because the evidence decided.
-func (c *client) monitor(stream Stream[*conversationv1.SessionUpdate], frames <-chan *conversationv1.SessionUpdate, errs <-chan error) {
+func (c *client) monitor(stream Stream[*shimv1.WatchSessionResponse], frames <-chan *shimv1.WatchSessionResponse, errs <-chan error) {
 	ctx := c.monitorCtx
 	for {
 		var broke error
@@ -560,20 +560,23 @@ func (c *client) StartSession(ctx context.Context, req *shimv1.StartSessionReque
 }
 
 // WatchSession opens the session update stream.
-func (c *client) WatchSession(ctx context.Context) (Stream[*conversationv1.SessionUpdate], error) {
+func (c *client) WatchSession(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error) {
 	return c.watchSession(ctx)
 }
 
 // watchSession is the one place a session stream is opened — the verb and the
 // client's own liveness stream share it.
-func (c *client) watchSession(ctx context.Context) (Stream[*conversationv1.SessionUpdate], error) {
+func (c *client) watchSession(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error) {
 	return openStream(ctx, c, "watch_session", &shimv1.WatchSessionRequest{}, nil, c.rpc.WatchSession,
-		func(resp *shimv1.WatchSessionResponse) (*conversationv1.SessionUpdate, error) {
-			update := resp.GetUpdate()
-			if update == nil {
-				return nil, invalid("WatchSessionResponse", "WatchSessionResponse.update", "is unset on a pushed frame")
+		func(resp *shimv1.WatchSessionResponse) (*shimv1.WatchSessionResponse, error) {
+			// THE FRAME ONEOF IS VALIDATED, never guessed: an unset frame is
+			// illegal on the wire and is raised rather than read as an empty
+			// update. The ARMS are handed on whole — the session watcher is
+			// what tells an update from the landing-7 re-announcement.
+			if resp.GetFrame() == nil {
+				return nil, invalid("WatchSessionResponse", "WatchSessionResponse.frame", "oneof is unset on a pushed frame")
 			}
-			return update, nil
+			return resp, nil
 		})
 }
 

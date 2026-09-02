@@ -5,7 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -189,5 +193,73 @@ func TestMergeIsPendingOnlyWhileAMergeStillOwesWork(t *testing.T) {
 				t.Fatalf("mergeIsPending(%q) = %v, want %v", tt.state, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestCloseBlockerCountsTheLiveWorkItems is landing 7's evidence half: the
+// blocker carries the live-work COUNT, not only the sentence.
+func TestCloseBlockerCountsTheLiveWorkItems(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.running.LiveWork = sessionwatcher.LiveWorkSet{
+		Agents: []*conversationv1.AgentId{{Value: "agent-1"}},
+		Shells: []*conversationv1.DetachedWorkId{{Value: "w-1"}, {Value: "w-2"}},
+	}
+
+	// Act.
+	blocked, err := f.verbs.(*verbs).closeBlocker(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("closeBlocker: %v", err)
+	}
+	if blocked == nil || blocked.LiveWork != 3 {
+		t.Fatalf("blocker = %+v, want live_work 3", blocked)
+	}
+}
+
+// TestCloseBlockerCountsTheHeldPromptsBehindALeadingBlocker is the whole-picture
+// half: every blocker is computed, so evidence for one that is NOT the leading
+// reason still rides the refusal.
+func TestCloseBlockerCountsTheHeldPromptsBehindALeadingBlocker(t *testing.T) {
+	// Arrange: a turn in flight leads, with a held prompt behind it.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	f.db.held["w1"] = []wsm.HeldPrompt{{Workspace: "w1", Turn: "t2"}}
+
+	// Act.
+	blocked, err := f.verbs.(*verbs).closeBlocker(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("closeBlocker: %v", err)
+	}
+	if blocked == nil || blocked.Reason != "turn_in_flight" || blocked.HeldPrompts != 1 {
+		t.Fatalf("blocker = %+v, want turn_in_flight leading with held_prompts 1", blocked)
+	}
+}
+
+// TestCloseBlockerReportsAQueuedMergeBehindALeadingBlocker is the same for the
+// merge blocker.
+func TestCloseBlockerReportsAQueuedMergeBehindALeadingBlocker(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+	f.merge.facts["w1"] = footer.MergeFacts{State: "queued"}
+
+	// Act.
+	blocked, err := f.verbs.(*verbs).closeBlocker(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("closeBlocker: %v", err)
+	}
+	if blocked == nil || !blocked.MergeQueued {
+		t.Fatalf("blocker = %+v, want merge_queued evidence", blocked)
 	}
 }

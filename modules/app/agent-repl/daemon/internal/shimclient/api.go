@@ -87,9 +87,11 @@ type Client interface {
 	// StartSession starts or resumes the session. Session facts travel only
 	// here.
 	StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error)
-	// WatchSession opens the session update stream. Its first healthy
-	// diagnostics push is the readiness signal.
-	WatchSession(ctx context.Context) (Stream[*conversationv1.SessionUpdate], error)
+	// WatchSession opens the session frame stream. Its first healthy
+	// diagnostics push is the readiness signal. The FRAME is handed on whole:
+	// a frame is either a SessionUpdate or the landing-7 re-announcement of
+	// the session's own SessionStarted, and the consumer tells them apart.
+	WatchSession(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error)
 	// SetSessionModel switches the session's model; the cold arm is an answer.
 	SetSessionModel(ctx context.Context, req *shimv1.SetSessionModelRequest) (*shimv1.SetSessionModelResponse, error)
 	// SetSessionPermissionMode switches the session's permission mode.

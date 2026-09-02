@@ -88,9 +88,6 @@ type FleetDeps struct {
 	NodeBin, MainJS string
 	// ShimBuildSHA is the build every spawn is stamped with.
 	ShimBuildSHA string
-	// DefaultModel is the model a fresh session starts on when the create
-	// asked for none; empty means FallbackModel.
-	DefaultModel string
 	// Fake forces the shim's offline scripted SDK.
 	Fake bool
 	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS on every spawn.
@@ -178,9 +175,6 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	now := deps.Now
 	if now == nil {
 		now = time.Now
-	}
-	if deps.DefaultModel == "" {
-		deps.DefaultModel = FallbackModel
 	}
 	return &Fleet{
 		deps:       deps,
@@ -632,23 +626,18 @@ func (f *Fleet) resumeGuard(ctx context.Context, log dlog.Logger, dir string, sr
 	return nil
 }
 
-// DefaultModelEnv names the model a session starts on when the create did not
-// ask for one. CreateWorkspace.model is optional and an unset one means "the
-// daemon's default", but StartSessionFresh.model is REQUIRED, so the daemon
-// has to have one to name.
-const DefaultModelEnv = "AGENT_REPL_DEFAULT_MODEL"
-
-// FallbackModel is the built-in default when DefaultModelEnv names none. It is
-// the vendor's own alias for its most capable model, not a minted id.
-const FallbackModel = "opus"
-
-// modelOrDefault answers the model a fresh session starts on: the one recorded
-// at creation, else the daemon's configured default.
-func (f *Fleet) modelOrDefault(recorded string) string {
-	if recorded != "" {
-		return recorded
+// freshModel answers the model a fresh session names, or nil when the user
+// chose none.
+//
+// LANDING 7: StartSessionFresh.model is OPTIONAL and an unset one means the
+// SDK's own default, so the daemon no longer substitutes a model of its own —
+// it states the user's choice or says nothing. SessionStarted.effective_model
+// is what took effect, and recordFacts persists that.
+func freshModel(recorded string) *conversationv1.AgentModel {
+	if recorded == "" {
+		return nil
 	}
-	return f.deps.DefaultModel
+	return &conversationv1.AgentModel{Name: recorded}
 }
 
 // startSession runs StartSession and answers a COLD refusal with the gate. A
@@ -658,7 +647,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	req := &shimv1.StartSessionRequest{}
 	if src.Fresh {
 		req.Source = &shimv1.StartSessionRequest_Fresh{Fresh: &shimv1.StartSessionFresh{
-			Model:          &conversationv1.AgentModel{Name: f.modelOrDefault(session.Model)},
+			Model:          freshModel(session.Model),
 			PermissionMode: permissionMode(session.PermissionMode),
 		}}
 	} else {

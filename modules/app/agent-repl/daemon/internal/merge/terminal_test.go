@@ -433,6 +433,26 @@ func TestAnswerDequeueReleaseTakesTheMergeOff(t *testing.T) {
 	}
 }
 
+// TestAnswerDequeuesAbandonedTerminalCarriesTheUsersCause is the other reachable
+// cause: the user released the slot, and the summary says so rather than
+// reading like the operator's eviction.
+func TestAnswerDequeuesAbandonedTerminalCarriesTheUsersCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+	h.o.OnInterrupt(context.Background(), theWorkspace)
+
+	// Act.
+	if err := h.o.AnswerDequeue(context.Background(), theWorkspace, false); err != nil {
+		t.Fatalf("AnswerDequeue failed: %v", err)
+	}
+
+	// Assert.
+	if got := h.feed.lastAbandonedSummary(); got != "the user released this merge's queue slot" {
+		t.Fatalf("the dequeued merge's summary = %q, want the user's cause", got)
+	}
+}
+
 // TestAnswerDequeueRefusesWithNoOfferStanding covers the refusal an answer gets
 // when the question it answers is gone.
 func TestAnswerDequeueRefusesWithNoOfferStanding(t *testing.T) {
