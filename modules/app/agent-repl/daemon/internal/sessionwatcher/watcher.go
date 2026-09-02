@@ -387,10 +387,16 @@ func (w *watcher) Close() error {
 	w.mu.Unlock()
 
 	w.cancel()
-	for _, c := range closing {
-		c()
-	}
+	closeStreams(closing)
 	return nil
+}
+
+// closeStreams runs a taken set of stream closers. It is a function of its own
+// because a close must never happen under mu.
+func closeStreams(closing []func()) {
+	for _, closer := range closing {
+		closer()
+	}
 }
 
 // takeStreamsLocked detaches every open stream from the fleet and returns
@@ -522,9 +528,14 @@ func (w *watcher) severedLocked(operation, detail string, err error) {
 // old goroutines' errors stale rather than a second severing.
 func (w *watcher) reopenLocked(reason string) {
 	w.gen++
-	for _, closer := range w.takeStreamsLocked() {
-		closer()
-	}
+	// The closers run OFF the lock, for the reason takeStreamsLocked states:
+	// a stream's Close drains its response body and does not return until the
+	// SERVER ends the stream, and a standing watch is never ended by the
+	// daemon side. Closing here would hold mu for the whole drain and wedge
+	// every caller of the watcher -- the prompt queue's freeness read included.
+	// The generation bump above is what makes the detached streams' goroutines
+	// stale, so nothing waits on the close completing.
+	go closeStreams(w.takeStreamsLocked())
 	w.log.Warn("daemon.sessionwatcher.reopen", "re-opening the session's watches", dlog.Context{
 		"reason": reason, "agents": len(w.agents), "shells": len(w.shells),
 	})
