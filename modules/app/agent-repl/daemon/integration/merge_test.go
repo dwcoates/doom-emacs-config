@@ -618,13 +618,19 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert: the merge lands (no conflict, gate passes).
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -720,6 +726,13 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 	script.SetStdout("daemon: passed in 1s\n")
 	dir := f.ws.GetDir()
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act: race a poller watching for the worktree's disappearance against
 	// awaiting the terminal push, so the ordering is proven across two
 	// independent timelines rather than sampled once right after the other —
@@ -748,7 +761,6 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 	}()
 
 	// Assert: FeedMergeSuccess{commit}.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
@@ -796,11 +808,17 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 	// that brought in nothing triggers nothing, correctly.
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so an open after the enqueue races the
+	// teardown and intermittently finds no such workspace to watch.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	f.awaitRowInFeed(nil, "the merge's success", func(row *frontendv1.FeedRow) bool {
+	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 
@@ -953,13 +971,19 @@ func TestTheNonEmacsRepoMethodNeverDrawsTheEmacsOnlyTabs(t *testing.T) {
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert: the merge bubble reaches a terminal state.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -1039,13 +1063,19 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 	branch := mergeBranchOf(t, f.ws)
 	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert: the run fails loudly rather than silently parking or hanging.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's loud failure", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -1142,6 +1172,13 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 		PostprocessingPrompt: said("clean up after landing"),
 	})
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act: land, then answer the post-prompt's turn with a FAILURE.
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
@@ -1159,7 +1196,6 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 
 	// Assert: the merge STILL lands as FeedMergeSuccess — the post-prompt's
 	// failure rides the terminal rather than turning it into FeedMergeError.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -1386,11 +1422,17 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 	script.SetStdout("daemon: passed in 1s\n")
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/internal/merge/blastradius.go", "touched\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
@@ -1415,11 +1457,17 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 	script.SetStdout("\x1b[32mall green\x1b[0m\ndaemon: passed in 1s\n")
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/internal/merge/paint.go", "touched\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
@@ -1457,11 +1505,17 @@ func TestTheMergeTabNarratesTheNoFFLandingByContent(t *testing.T) {
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
