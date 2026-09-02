@@ -1057,11 +1057,32 @@ Selection-handling stays orthogonal to the always-close hide path."
                  (lambda () (setq hidden t)))
                 ((symbol-function 'agent-repl--send-to-agent)
                  (lambda (text origin)
-                   (should (equal origin "PROMPT_ORIGIN_PANEL_SELECTION"))
+                   (should (equal origin :user-sent))
                    (setq sent-text text))))
         (agent-repl)
         (should (equal sent-text "hello world"))
         (should-not hidden)))))
+
+(ert-deftest agent-repl-test-panels-selection-origin-is-in-the-closed-vocabulary ()
+  "`agent-repl--send' refuses an origin Emacs never spells, so this site's must be one.
+The old string named a `PromptOrigin' that does not exist, which would
+have been fatal at the first region send."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((origin nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'use-region-p) (lambda () t))
+                ((symbol-function 'region-beginning) (lambda () 1))
+                ((symbol-function 'region-end) (lambda () 12))
+                ((symbol-function 'buffer-substring-no-properties)
+                 (lambda (_beg _end) "hello world"))
+                ((symbol-function 'deactivate-mark) (lambda () nil))
+                ((symbol-function 'agent-repl--send-to-agent)
+                 (lambda (_text o) (setq origin o))))
+        ;; Act
+        (agent-repl))
+      ;; Assert
+      (should (memq origin agent-repl--input-origins)))))
 
 (ert-deftest agent-repl-test-panels-entry-point-simple-not-running-initializes ()
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
