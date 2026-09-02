@@ -913,6 +913,9 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "onceconflict", "do the feature", nil)
+	// THE CREATION ALREADY SENT ONE StartTurn — its initial prompt — so the
+	// brief is counted as a DELTA over that, never as an absolute count.
+	turnsBeforeTheMerge := f.shim.Count(harness.RPCStartTurn)
 	branch := mergeBranchOf(t, f.ws)
 	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -928,8 +931,8 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 
 	// Assert: with the run settled on park, still exactly one StartTurn was
 	// ever sent for this conflict commit — the ONE brief, never a repeat.
-	if got := f.shim.Count(harness.RPCStartTurn); got != 1 {
-		t.Fatalf("StartTurn count once parked = %d, want exactly 1 (the conflict is briefed once, then parks)", got)
+	if got := f.shim.Count(harness.RPCStartTurn) - turnsBeforeTheMerge; got != 1 {
+		t.Fatalf("StartTurns since the merge began = %d, want exactly 1 (the conflict is briefed once, then parks)", got)
 	}
 }
 
