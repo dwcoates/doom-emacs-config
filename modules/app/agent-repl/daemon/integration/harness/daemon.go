@@ -31,9 +31,32 @@ import (
 	"golang.org/x/net/http2"
 )
 
-// DefaultTimeout bounds every wait the harness performs. It is a failure
+// DefaultTimeout bounds every wait the harness performs, from one Daemon's
+// process start to the last wait a test makes against it. It is a failure
 // bound, never a synchronization device.
-const DefaultTimeout = 30 * time.Second
+//
+// Sized off teamlead run 8 (443 passing tests: median 0.2s, max 1.7s wall
+// time per test, including ordinary boots, restarts on the same state root,
+// and hibernation cutoffs): ~3x the observed max leaves headroom for a
+// slower machine without letting one red test burn 30s. A wait that is
+// structurally different from an ordinary single-daemon test — because it
+// chains a SECOND real process boot onto the same context, rather than
+// getting its own fresh one — gets its own longer, justified override
+// through Opts.Timeout (see HandoverChainTimeout) instead of a bigger
+// default for everyone.
+const DefaultTimeout = 5 * time.Second
+
+// HandoverChainTimeout bounds the few tests whose single Daemon context must
+// span an entire self-reload handover: a merge landing, the rollout trigger,
+// a SECOND real claude-repld's full boot and workspace adoption, and the
+// incumbent's own orderly exit — all chained on the ONE budget that started
+// ticking at the incumbent's own process start, never a fresh context of its
+// own. That is structurally two real process lifecycles, not one, so it gets
+// 3x DefaultTimeout rather than sharing the ordinary bound: run 8's observed
+// max (1.7s) already covers this chain today, so 15s leaves ample headroom
+// for exactly the case that is most likely to grow (a slower deploy chain or
+// a slower successor boot) without reintroducing a blanket 30s bound.
+const HandoverChainTimeout = 3 * DefaultTimeout
 
 // pollInterval is how often a file-existence wait re-checks. Nothing in the
 // harness sleeps to let another party make progress.
@@ -87,6 +110,11 @@ type Opts struct {
 	// ExtraArgs and ExtraEnv are appended verbatim.
 	ExtraArgs []string
 	ExtraEnv  []string
+	// Timeout overrides DefaultTimeout for this one Daemon's context. Zero
+	// means DefaultTimeout. Set it ONLY to a named, documented constant (for
+	// example HandoverChainTimeout) with a one-line reason at the call site —
+	// never to an ad hoc duration.
+	Timeout time.Duration
 }
 
 // Daemon is one running claude-repld process and the client dialed to it.
@@ -256,7 +284,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 
 	d.MultiRepoRoot = multiRoot
 
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	t.Cleanup(cancel)
 	d.ctx = ctx
 
@@ -404,7 +436,8 @@ func shortTempDir(t *testing.T) string {
 
 // requireSocketPathBudget fails the test before the daemon is launched when
 // the state root cannot hold a shim socket. The daemon refuses such a root at
-// boot; without this the failure surfaces as a 30-second wait for daemon.addr.
+// boot; without this the failure surfaces as a DefaultTimeout wait for
+// daemon.addr instead.
 func requireSocketPathBudget(t *testing.T, stateDir string) {
 	t.Helper()
 	layout, err := stateroot.Root(stateDir, "")
