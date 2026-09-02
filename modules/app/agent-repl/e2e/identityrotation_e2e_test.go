@@ -144,7 +144,7 @@ func awaitTopbarSessionLineNonEmpty(t *testing.T, w *World, topbar *harness.Stre
 func TestClearRotatesIdentity(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	topbar := w.WatchTopbar(ws)
 
@@ -185,7 +185,7 @@ func TestClearRotatesIdentity(t *testing.T) {
 func TestSecondRotateUnderRotatedIdentity(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	topbar := w.WatchTopbar(ws)
 
