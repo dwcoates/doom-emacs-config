@@ -90,6 +90,12 @@ type graph struct {
 	// Bind completes the late bindings once the surface exists. It is called
 	// immediately after server.New and before anything is served.
 	Bind func(srv server.Server)
+	// Prime publishes what a client must be able to receive before it has
+	// asked for anything — today the editor-global roster. The boot spine
+	// calls it after the bindings and before anything is served, and its
+	// failure is a BOOT FATAL: a surface that cannot state its opening truth
+	// is not serving.
+	Prime func(ctx context.Context) error
 	// Background are the long-running loops the daemon owns. They start after
 	// the bindings, because each of them can push.
 	Background []backgroundLoop
@@ -510,6 +516,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Adopted:        fleet.Install,
 			Log:            p.Surfaces,
 		},
+		Prime: verbs.PublishRegistry,
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)
 			relay.bind(srv.Relay())

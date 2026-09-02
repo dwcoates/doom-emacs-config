@@ -247,6 +247,14 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if built.Bind != nil {
 		built.Bind(srv)
 	}
+	if built.Prime != nil {
+		if err := built.Prime(serving); err != nil {
+			log.Error("daemon.cmd.serve", "the opening views could not be published", dlog.Context{
+				"error": err.Error(),
+			})
+			return fmt.Errorf("claude-repld: publish the opening views: %w", err)
+		}
+	}
 	// The background loops start only now, for the same reason: each of them
 	// can push, and pushing into a surface that does not exist is a drop.
 	for _, loop := range built.Background {
