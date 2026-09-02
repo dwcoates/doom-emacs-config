@@ -1,0 +1,27 @@
+{
+  "scenario": "permission-denied-by-policy",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `curl https://example.com`.",
+  "prompts": [
+    {
+      "text": "Run `curl https://example.com`.",
+      "resume": false
+    }
+  ],
+  "world": "permission-denied-by-policy",
+  "cwd_init": null,
+  "vendor_session_id": "b2e5b68a-810a-4e1b-a0a3-c4d2c61bf85c",
+  "manual": null,
+  "expect": [
+    "system:permission_denied",
+    "no can_use_tool callback for the denied call"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-permission-denied-by-policy-DhcxCi-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:49:48.687Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

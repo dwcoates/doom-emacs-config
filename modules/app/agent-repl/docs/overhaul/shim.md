@@ -644,6 +644,17 @@ EVIDENCE, ranked:
   the stream, at the moment of rotation. That is why the shim must capture it
   then and write it down: nobody can recover it afterwards.
 
+ROTATION, OBSERVED (real capture identity-rotation-clear, 2026-09-01): at
+/clear the stream carries ONE `conversation_reset` whose `session_id` is the
+OLD id and whose `new_conversation_id` is an id NOTHING later uses; the id
+the session rotates TO is the `session_id` of the SECOND `system:init` that
+follows (a third uuid), repeated by every later turn's init. On disk a new
+transcript file appears under that init id; the old file simply stops (no
+closing record — the mock's "closing system record" was declared-not-observed
+and is dropped). Rule: `SessionIdentityRotated.new` = the post-clear init's
+session_id; the link file is written for that id; `new_conversation_id` is
+never adopted as an identity.
+
 CONCLUSION FOR THE FILE PLANE: files alone suffice for resume and compaction;
 they do NOT suffice for rotation or fork, and the shim-written pointer file
 above is the smallest link that closes the gap. No store verb is involved.
@@ -690,6 +701,16 @@ from CONTROL ANSWERS and from fields riding other messages:
   records `context_tip` as itself (residue `attachment/context_tip`) and only a
   record whose own type says `context_budget_warning` becomes the warning. Which
   record the vendor really uses is a capture-run question.
+  CAPTURE RUN RESULT (2026-09-01, read from the 67 goldens): NO capture
+  carries a `context_tip` or any budget-warning attachment (the scenario ran
+  to success without one); the only token-budget carrier observed is a
+  `total_tokens_reminder` attachment (`text: "<total_tokens>N tokens
+  left</total_tokens>"`, once). The spelling is an OPEN EVIDENCE GAP — the
+  `context_budget_warning` producer (sidecar plane) stays marked ungrounded,
+  never guessed. Also recorded as negatives from the same run: no failed
+  subagent, no compaction summary line, no /clear rotation record (the last
+  two because the harness closed the query before the later turns — fixed,
+  re-capture owed).
 
 ### The e2e mock additions, and what they found (mock agent evidence)
 
@@ -765,3 +786,7 @@ Five families joined the mocked vendor for the e2e suite. Each is a registered
 - SessionUpdate.rate_limit_status maps the SDK's `rate_limit_event` (seconds→ms, fraction→percent, presence never sentinels).
 - SessionUpdate tag 24 retired; the budget warning is the sidecar's AgentUpdate page line.
 - SessionStarted.live_work always announces `created`-origin; DetachedWorkId.value == the unit's AgentActivityId.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- No shim.v1 or conversation.v1 change. For awareness: SubmitPromptError.turn_already_open (daemon side) is retired because YOUR UpdateAgentFailure refusal of a busy subagent is the one producer; keep that refusal typed and named.

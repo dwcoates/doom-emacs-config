@@ -1,0 +1,27 @@
+{
+  "scenario": "bash-foreground-completed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `echo capture-harness-ok && ls -1` in the current directory and tell me the output.",
+  "prompts": [
+    {
+      "text": "Run `echo capture-harness-ok && ls -1` in the current directory and tell me the output.",
+      "resume": false
+    }
+  ],
+  "world": "bash-foreground-completed",
+  "cwd_init": null,
+  "vendor_session_id": "d3029333-8e66-471a-9d2c-1414318fb526",
+  "manual": null,
+  "expect": [
+    "tool:Bash",
+    "tool_result:bash(exit 0)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-bash-foreground-completed-Qqdf8c-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:19:56.270Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

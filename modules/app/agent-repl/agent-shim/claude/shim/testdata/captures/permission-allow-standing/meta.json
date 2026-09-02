@@ -1,0 +1,28 @@
+{
+  "scenario": "permission-allow-standing",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `rm -f one.txt`, then run `rm -f two.txt`. I will grant a standing allowance on the first ask.",
+  "prompts": [
+    {
+      "text": "Run `rm -f one.txt`, then run `rm -f two.txt`. I will grant a standing allowance on the first ask.",
+      "resume": false
+    }
+  ],
+  "world": "permission-allow-standing",
+  "cwd_init": null,
+  "vendor_session_id": "b3cd777c-e3b7-4d75-b359-3c9c09416aa1",
+  "manual": null,
+  "expect": [
+    "can_use_tool options.suggestions non-empty",
+    "PermissionResult allow with updatedPermissions",
+    "second Bash NOT re-asked"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-permission-allow-standing-xXQqvM-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:49:33.498Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
