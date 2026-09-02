@@ -321,6 +321,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       keepalive: open?.keepalive === true,
       nowMs: deps.nowMs,
       pendingAsk: (toolUseId) => gate.pendingAsk(toolUseId),
+      deniedCall: (toolUseId) => gate.deniedCall(toolUseId),
       reportFault: (_kind, detail) => {
         noteConverterDefect(detail);
       },
@@ -1040,6 +1041,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const frame = entry.item.frame;
       if (frame.result.case !== "update") continue;
       const update = frame.result.value.update;
+      // A DENIAL THE FOLD PRODUCED is still a denial this shim has to remember:
+      // the policy and undecidable arms never reach the gate's ask, and the
+      // `tool_result` that follows them must be recognised as the relayed deny
+      // rather than as a call that ran. Relayed into the gate's one memory so
+      // `deniedCall` does not depend on which half saw the denial.
+      if (update.case === "permission") {
+        const result = update.value.result;
+        if (result.case === "success" && result.value.decision.case === "denied") {
+          gate.noteVendorDenial(update.value.gatedCall?.value ?? "");
+        }
+        continue;
+      }
       if (update.case !== "activity") continue;
       const activity = update.value;
       const item = activity.item;

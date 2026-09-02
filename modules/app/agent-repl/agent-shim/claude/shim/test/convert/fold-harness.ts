@@ -48,6 +48,8 @@ export interface ContextOverrides {
   readonly keepalive?: boolean;
   readonly nowMs?: number;
   readonly pendingAsk?: (toolUseId: string) => PendingAsk | undefined;
+  /** Calls the shim denied, so their tool_result settles nothing. */
+  readonly deniedCall?: (toolUseId: string) => boolean;
   readonly liveTask?: (taskId: string) => LiveTask | undefined;
   readonly subagentFor?: (toolUseId: string) => conversationv1.AgentId | undefined;
   readonly mcpServerNames?: readonly string[];
@@ -63,6 +65,7 @@ export function foldContext(overrides: ContextOverrides = {}): FoldContext {
     keepalive: overrides.keepalive ?? false,
     nowMs: () => overrides.nowMs ?? 1_000,
     pendingAsk: overrides.pendingAsk ?? (() => undefined),
+    deniedCall: overrides.deniedCall ?? (() => false),
     liveTask: overrides.liveTask ?? (() => undefined),
     subagentFor: overrides.subagentFor ?? (() => undefined),
     mcpServerNames: () => overrides.mcpServerNames ?? [],

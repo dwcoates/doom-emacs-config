@@ -17,6 +17,7 @@ const CONTEXT: FoldContext = {
   keepalive: false,
   nowMs: () => 1,
   pendingAsk: () => undefined,
+    deniedCall: () => false,
   liveTask: () => undefined,
 };
 
