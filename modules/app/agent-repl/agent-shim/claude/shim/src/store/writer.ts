@@ -211,6 +211,13 @@ export function createPersistence(options: PersistenceOptions): Persistence {
    * the first retry after the real name arrived.
    */
   let producer = options.producer;
+  /**
+   * Whether any row has been handed to the store under the current name.
+   *
+   * The one fact {@link Persistence.clearProducer} turns on: a name nothing has
+   * written under is still free, and a name a row carries never is.
+   */
+  let wroteUnderProducer = false;
   const requireProducer = (): string => {
     if (producer === undefined || producer === "") {
       const message =
@@ -427,8 +434,28 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       LOGGER.log({ producer: next }, "named this writer from the conversation's original vendor session id");
     },
 
+    clearProducer(): void {
+      if (producer === undefined) return;
+      if (wroteUnderProducer) {
+        // A name a row already carries cannot be taken back: the write ids are
+        // derived from it, and a later name would put one conversation's rows
+        // in two namespaces that can never absorb each other.
+        LOGGER.log(
+          { level: "error", producer },
+          "refusing to un-name the producer: rows have already been written under it",
+        );
+        throw new PersistenceError(
+          "store_unavailable",
+          `the producer ${JSON.stringify(producer)} has already written rows and cannot be un-named`,
+        );
+      }
+      LOGGER.log({ producer }, "un-named the writer: the attempt that named it was abandoned before writing");
+      producer = undefined;
+    },
+
     async writeDurable(entries: PersistEntry[]): Promise<void> {
       if (entries.length === 0) return;
+      wroteUnderProducer = true;
       noteShellRuns(entries);
       // ORDERED BEHIND WHATEVER IS BUFFERED: a durable write that jumped the
       // queue could land a turn's first activity frame before the prompt row
@@ -446,6 +473,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     write(entries: PersistEntry[]): void {
       if (entries.length === 0) return;
+      wroteUnderProducer = true;
       noteShellRuns(entries);
       if (queue.length >= retry.bufferCapacity) {
         const evicted = queue.shift();

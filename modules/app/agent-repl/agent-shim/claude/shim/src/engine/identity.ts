@@ -39,7 +39,7 @@
  *      instead of a scan, and the AgentId never moves.
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
@@ -103,6 +103,19 @@ export interface AgentIdentityStore {
   write(originalVendorSessionId: string): Promise<void>;
   /** Record that `vendorSessionId` belongs to this conversation's book. */
   link(vendorSessionId: string): Promise<void>;
+  /**
+   * Remove the persisted identity, because the start that minted it FAILED.
+   *
+   * The file is written before the query is created on purpose — a crash
+   * between the mint and the first record must still leave the identity
+   * recoverable — but a start that never reached a query left no conversation
+   * for that identity to name. Keeping it would hand the next reader a
+   * persisted AgentId for a conversation the vendor never opened.
+   *
+   * Only ever called when the file was ABSENT before the failed attempt, so it
+   * can never discard an identity an earlier session established.
+   */
+  forget(): Promise<void>;
 }
 
 /** The file-backed store, rooted at `$AGENT_REPL_STATE_DIR/shim/<workspace-key>/`. */
@@ -144,6 +157,17 @@ export function createAgentIdentityStore(
       LOGGER.log({ file, ...record }, "persisted the main agent identity");
       return Promise.resolve();
     },
+    forget(): Promise<void> {
+      try {
+        rmSync(file);
+        LOGGER.log({ file }, "removed the identity a failed start had minted");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return Promise.resolve();
+        return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+      }
+      return Promise.resolve();
+    },
+
     link(vendorSessionId: string): Promise<void> {
       const target = vendorLinkPath(stateDir, workspaceKey, vendorSessionId);
       const link: VendorSessionLink = {
