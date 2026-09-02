@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -408,10 +409,15 @@ func (m *fakeMerge) Enqueue(_ context.Context, ws ids.WorkspaceID) error {
 type fakeRollout struct {
 	rollout.Controller
 
+	mu          sync.Mutex
 	relaunches  []rolloutCall
 	relaunchErr error
 	reloads     []ids.WorkspaceID
 	reloadErr   error
+	// done fires once per finished relaunch. The restart verb ACCEPTS and
+	// runs the engine behind it, so a test synchronizes on this rather than
+	// on the verb's return.
+	done chan struct{}
 }
 
 type rolloutCall struct {
@@ -420,13 +426,54 @@ type rolloutCall struct {
 }
 
 func (r *fakeRollout) RelaunchShim(_ context.Context, ws ids.WorkspaceID, reason rollout.RelaunchReason) error {
+	r.mu.Lock()
 	r.relaunches = append(r.relaunches, rolloutCall{ws, reason})
-	return r.relaunchErr
+	err := r.relaunchErr
+	r.mu.Unlock()
+	if err != nil {
+		r.signal()
+	}
+	return err
 }
 
 func (r *fakeRollout) ReloadWebapp(_ context.Context, ws ids.WorkspaceID) error {
+	r.mu.Lock()
 	r.reloads = append(r.reloads, ws)
-	return r.reloadErr
+	err := r.reloadErr
+	r.mu.Unlock()
+	r.signal()
+	return err
+}
+
+func (r *fakeRollout) signal() {
+	select {
+	case r.done <- struct{}{}:
+	default:
+	}
+}
+
+// relaunchCalls answers the recorded relaunches under the fake's own lock.
+func (r *fakeRollout) relaunchCalls() []rolloutCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]rolloutCall(nil), r.relaunches...)
+}
+
+// reloadCalls answers the recorded webapp reloads under the fake's own lock.
+func (r *fakeRollout) reloadCalls() []ids.WorkspaceID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ids.WorkspaceID(nil), r.reloads...)
+}
+
+// awaitRelaunch blocks until the restart's background engine has run.
+func (r *fakeRollout) awaitRelaunch(t *testing.T) {
+	t.Helper()
+	select {
+	case <-r.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restart's relaunch engine never ran")
+	}
 }
 
 // fakeFeed is a feed.Resolver that records the rows it was given.
@@ -836,7 +883,7 @@ func newFixture(t *testing.T) *fixture {
 		account: &fakeAccounts{configDir: "/config"},
 		queue:   newFakeQueue(),
 		merge:   newFakeMerge(),
-		rollout: &fakeRollout{},
+		rollout: &fakeRollout{done: make(chan struct{}, 8)},
 		feed:    &fakeFeed{},
 		footer:  newFakeFooter(),
 		sidebar: &fakeSidebar{},
