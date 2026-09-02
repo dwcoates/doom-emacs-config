@@ -52,6 +52,14 @@ func (r *run) finish(ctx context.Context, out outcome) error {
 		if err := r.o.deps.DB.SetClosed(ctx, r.ws, true); err != nil {
 			log.Error(op, "could not close the merged workspace", dlog.Context{"workspace": string(r.ws), "error": err.Error()})
 		}
+		// THE ROSTER'S DURABLE HALF MOVED: merged_at and closed are what put
+		// the row under `recently_merged`, and nothing else republishes them.
+		if r.o.deps.PublishRegistry != nil {
+			if err := r.o.deps.PublishRegistry(ctx); err != nil {
+				log.Error(op, "could not republish the roster after the landing",
+					dlog.Context{"workspace": string(r.ws), "error": err.Error()})
+			}
+		}
 		log.Debug(op, "a merge landed", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "commit": out.landed, "commits": len(out.commits)})
 	}
