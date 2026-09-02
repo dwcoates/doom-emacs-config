@@ -425,6 +425,8 @@ func New(deps Deps) (Verbs, error) {
 		return nil, missing("a merge orchestrator")
 	case deps.Rollout == nil:
 		return nil, missing("a rollout controller")
+	case deps.Health == nil:
+		return nil, missing("a health reporter")
 	case deps.Feed == nil:
 		return nil, missing("a feed resolver")
 	case deps.Footer == nil:

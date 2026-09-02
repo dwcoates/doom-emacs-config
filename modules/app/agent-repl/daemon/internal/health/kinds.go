@@ -136,6 +136,12 @@ func sessionFault(f wsm.Fault) *agentreplv1.SessionFault {
 	return out
 }
 
+// EvidenceExitCode is exitCode, exported for the HOST stream's HostFault,
+// which fills the very same SessionFaultShimStartFailed / SessionFaultShimDied
+// arms. One reader means the two surfaces cannot disagree about what a
+// recorded exit code is.
+func EvidenceExitCode(f wsm.Fault) int32 { return exitCode(f) }
+
 // exitCode reads a recorded exit code. A missing or unparsable one answers
 // zero, because the arm's field is not optional and an absent exit code is
 // reported through the detail line rather than invented as a number.
