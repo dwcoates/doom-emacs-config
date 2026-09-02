@@ -1,9 +1,11 @@
 # E2E remediation plan: real sidecar, no hand-written store events
 
 User ruling 2026-09-02: the e2e suite (daemon/e2e) must not write sidecar
-events into the store itself. Tests that need transcript-derived facts write
-the vendor JSONL the sidecar expects and a REAL shim-sidecar process turns it
-into store rows. Remediation is done by a sonnet-medium agent (orchestrated
+events into the store, and must not write vendor JSONL either. The FAKE SDK
+is the ONLY writer of vendor files; a REAL shim-sidecar process turns them
+into store rows. Where the fake lacks a shape a test needs, the fake grows a
+named scenario or option (grounded by a golden, or explicitly marked
+ungrounded in the shim's manifest). Remediation is done by a sonnet-medium agent (orchestrated
 by the project lead), after the five-way merge lands and before the coverage
 hardening step. Nobody edits by hand.
 
@@ -33,17 +35,20 @@ hardening step. Nobody edits by hand.
       /clear, /compact, skill bodies): drive the scenario through the shim
       and let the sidecar ingest what the SDK wrote. Preferred.
    b. The fact needs a transcript shape no scenario yields (an ingest-order
-      corner, a boundary redelivered, a rewound cursor): append vendor-format
-      JSONL lines to the transcript file the sidecar tails, via one helper
-      `appendTranscriptLines(t, configDir, sessionID, lines...)` that
-      writes exactly what the vendor would. Never a store write.
+      corner, a boundary redelivered, a rewound cursor, a specific compact
+      summary, a skill body mid-turn): EXTEND THE FAKE SDK with a named
+      scenario or scenario option that writes it, with a shim unit test and
+      a grounding note. Tests never touch the config dir or spool root.
 3. Waits: assertions poll the daemon's rendered frames (as now) bounded by
    the harness default; no sleeps. The sidecar's poll interval is the only
    added latency; keep it at the sidecar harness's value.
 4. Delete `sidecar*Event`, `ingestTranscriptAsSidecar` and the store-side
-   event constructors from e2e once no caller remains; a store write from a
-   test is a lint failure (grep gate in the e2e package's TestMain or a
-   `go vet`-style check in bin/).
+   event constructors from e2e once no caller remains. Grep gate: an e2e test
+   that dials the store's write verbs or writes under the config dir or
+   spool root fails the run.
+4b. Fold in the two known fake-writer defects: the fan-wide-cancel agent-spool
+   `EXIT=` terminator (agent spools carry no terminator) and the
+   context-budget-warning attachment spelling (needs a grounding capture).
 5. Record in daemon/e2e's package doc: five real processes minus the
    frontends; the sidecar is real; the daemon is hosted in-process (its
    black-box coverage lives in daemon/integration).
@@ -52,8 +57,12 @@ hardening step. Nobody edits by hand.
 
 - After the five-way merge into overhaul/integration (the e2e package must
   compile against the landed protos first).
-- One sonnet-medium agent for step 1 plus the helper of 2b; then a fanout of
-  sonnet-medium agents, one per heavy file group, for step 2 (worktrees off
-  overhaul/integration; project lead merges and resolves). Step 4 last.
+- Step 0 (first): one sonnet-medium agent inventories every hand-written
+  event shape in the 30 files and maps each to an existing fake scenario or
+  a proposed new one; the project lead reviews the map.
+- Step 1 and the fake-SDK additions of 2b: sonnet-medium agents in a shim
+  worktree (the fake lives in the shim tree). Then a fanout of sonnet-medium
+  agents, one per heavy file group, for the e2e rewrites in worktrees off
+  overhaul/integration; project lead merges and resolves. Step 4 last.
 - Then the scenario→e2e audit is rerun against daemon/e2e alone, and the
   coverage hardening step begins.
