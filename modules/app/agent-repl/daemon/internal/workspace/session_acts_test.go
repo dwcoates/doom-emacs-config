@@ -13,6 +13,7 @@ func TestSetModelGoesThroughTheQueue(t *testing.T) {
 	// on a model the user did not choose for it.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
+	f.cards.models, f.cards.hasModels = []string{"opus", "sonnet"}, true
 
 	// Act.
 	if err := f.verbs.SetModel(context.Background(), "w1", "opus"); err != nil {
@@ -24,6 +25,40 @@ func TestSetModelGoesThroughTheQueue(t *testing.T) {
 	if len(acts) != 1 || acts[0].Kind != actSetModel || acts[0].Value != "opus" {
 		t.Fatalf("session acts = %+v, want one set_model act naming opus", acts)
 	}
+}
+
+// TestSetModelRefusesAModelOutsideTheServedCatalog covers the selector's
+// contract: the daemon accepts only the tokens it offered, so a model nobody
+// was shown never reaches the vendor.
+func TestSetModelRefusesAModelOutsideTheServedCatalog(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.models, f.cards.hasModels = []string{"opus", "sonnet"}, true
+
+	// Act.
+	err := f.verbs.SetModel(context.Background(), "w1", "not-a-real-model")
+
+	// Assert.
+	asRefusal(t, err, ArmNotInCatalog)
+	if acts := f.queue.acts["w1"]; len(acts) != 0 {
+		t.Fatalf("session acts = %+v, want none for a model outside the catalog", acts)
+	}
+}
+
+// TestSetModelRefusesWhenNoCatalogWasServed covers the other half: with no
+// catalog served there is nothing the daemon offered, so there is nothing it
+// can accept.
+func TestSetModelRefusesWhenNoCatalogWasServed(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	err := f.verbs.SetModel(context.Background(), "w1", "opus")
+
+	// Assert.
+	asRefusal(t, err, ArmNotInCatalog)
 }
 
 func TestSetModelRefusesAnEmptyModel(t *testing.T) {

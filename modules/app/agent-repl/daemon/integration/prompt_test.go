@@ -627,14 +627,18 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	_, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
+	resp, err := f.d.Client().SetModel(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetModelRequest{
 		Workspace: f.ws,
 		Model:     &conversationv1.AgentModel{Name: "not-a-real-model"},
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "SetModelError.not_in_catalog") {
-		t.Fatalf("SetModel(not-a-real-model) = %v, want the not_in_catalog refusal", err)
+	// Assert: `not_in_catalog` is a LANDED arm of SetModelError, so the
+	// refusal is a typed answer rather than a transport error.
+	if err != nil {
+		t.Fatalf("SetModel(not-a-real-model) = error %v, want the typed not_in_catalog answer", err)
+	}
+	if resp.Msg.GetError().GetNotInCatalog() == nil {
+		t.Fatalf("SetModel(not-a-real-model) = %v, want error.not_in_catalog", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -692,14 +696,18 @@ func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	_, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
+	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
 		Workspace: f.ws,
 		Mode:      "not-a-real-mode",
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "SetPermissionModeError.mode_not_served") {
-		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want the mode_not_served refusal", err)
+	// Assert: `mode_not_served` is a LANDED arm of SetPermissionModeError, so
+	// the refusal is a typed answer rather than a transport error.
+	if err != nil {
+		t.Fatalf("SetPermissionMode(not-a-real-mode) = error %v, want the typed mode_not_served answer", err)
+	}
+	if resp.Msg.GetError().GetModeNotServed() == nil {
+		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want error.mode_not_served", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
@@ -711,15 +719,17 @@ func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 
 	// Act
-	_, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
+	resp, err := f.d.Client().SetPermissionMode(f.d.Ctx(), connect.NewRequest(&agentreplv1.SetPermissionModeRequest{
 		Workspace: f.ws,
 		Mode:      "bypass",
 	}))
 
-	// Assert
-	if !namesIntendedArm(err, "SetPermissionModeError.ungated_without_consent") &&
-		!namesIntendedArm(err, "SetPermissionModeError.mode_not_served") {
-		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want ungated_without_consent", err)
+	// Assert: both arms are LANDED, so the refusal is a typed answer.
+	if err != nil {
+		t.Fatalf("SetPermissionMode(bypass) = error %v, want a typed refusal", err)
+	}
+	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil && resp.Msg.GetError().GetModeNotServed() == nil {
+		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want ungated_without_consent", resp.Msg)
 	}
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }

@@ -302,11 +302,24 @@ type fakeAccounts struct {
 	transcriptErr error
 	ported        []portedTranscript
 	portErr       error
+	// email is the signed-in address Read answers with; empty is logged out.
+	email string
+	// readErr makes Read fail, which registration must surface.
+	readErr error
 }
 
 type portedTranscript struct{ Path, ConfigDir, WorkspaceDir string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
+
+// Read answers the account the fixture holds; an unset email is the logged-out
+// arm, which is an answer and not a failure.
+func (a *fakeAccounts) Read(_ context.Context, configDir string) (account.Account, error) {
+	if a.readErr != nil {
+		return account.Account{}, a.readErr
+	}
+	return account.Account{ConfigDir: configDir, Email: a.email, LoggedIn: a.email != ""}, nil
+}
 
 func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.Transcript, error) {
 	return a.transcript, a.transcriptErr
@@ -425,6 +438,8 @@ type fakeFooter struct {
 	closingSet   int
 	coldGates    map[ids.WorkspaceID]footer.ColdGate
 	interrupting map[ids.WorkspaceID]bool
+	// dirs is what registration bound, keyed by workspace.
+	dirs map[ids.WorkspaceID]string
 }
 
 func newFakeFooter() *fakeFooter {
@@ -631,6 +646,8 @@ type fakeCards struct {
 	coldGate    *ServedColdGate
 	modes       []string
 	hasModes    bool
+	models      []string
+	hasModels   bool
 }
 
 func newFakeCards() *fakeCards {
@@ -659,6 +676,10 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 
 func (c *fakeCards) PermissionModes(ids.WorkspaceID) ([]string, bool) {
 	return c.modes, c.hasModes
+}
+
+func (c *fakeCards) Models(ids.WorkspaceID) ([]string, bool) {
+	return c.models, c.hasModels
 }
 
 // fakeSurfaces is a dlog.Surfaces backed by one capturing logger.
@@ -853,6 +874,21 @@ func (f *fixture) workspace(id ids.WorkspaceID, dir string) wsm.Workspace {
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct{ topbar.Resolver }
 type stubHolds struct{ holds.Resolver }
+
+// The three resolvers registration BINDS record the directory it bound, which
+// is all any verb test needs of them.
+func (f *fakeFooter) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
+	if f.dirs == nil {
+		f.dirs = map[ids.WorkspaceID]string{}
+	}
+	f.dirs[ws] = dir
+	return nil
+}
+
+func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
+func (stubTopbar) SetNaming(ids.WorkspaceID, topbar.Naming)      {}
+func (stubTopbar) SetAccount(ids.WorkspaceID, string)            {}
+func (stubHolds) SetWorkspaceDir(ids.WorkspaceID, string) error  { return nil }
 
 // asRefusal fails the test unless err is a refusal naming arm.
 func asRefusal(t *testing.T, err error, arm string) *Refusal {

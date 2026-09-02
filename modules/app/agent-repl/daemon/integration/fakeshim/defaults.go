@@ -37,6 +37,23 @@ func HealthyDiagnostics() *conversationv1.SessionUpdate {
 	}
 }
 
+// DefaultContextUsage is the opening context-usage push. The real shim states
+// the session's usage at its own cadence starting at the session's start, and
+// the topbar draws NO view at all until it has one, so the fake states it
+// alongside the readiness push. A test asserting on particular figures pushes
+// its own, which supersedes this.
+func DefaultContextUsage() *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+			TotalTokens:  1000,
+			MaxTokens:    200000,
+			RawMaxTokens: 200000,
+			Percentage:   1,
+			Model:        DefaultModel,
+		}},
+	}
+}
+
 // EmptyFloorPage is a history page with no entries that states it is the
 // bottom of the transcript.
 func EmptyFloorPage() *conversationv1.HistoryPage {

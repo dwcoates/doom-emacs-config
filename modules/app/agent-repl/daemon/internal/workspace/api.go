@@ -366,6 +366,10 @@ type Cards interface {
 	// served, false when the workspace has served no picker. SetPermissionMode
 	// validates against it, because the daemon accepts only what it offered.
 	PermissionModes(ws ids.WorkspaceID) ([]string, bool)
+	// Models answers exactly the model catalog the topbar's selector served,
+	// reporting false when none has been served. SetModel validates against
+	// it: the daemon accepts only the tokens it offered.
+	Models(ws ids.WorkspaceID) ([]string, bool)
 }
 
 // ServedPermission is one served permission ask: who asked, and whether a
