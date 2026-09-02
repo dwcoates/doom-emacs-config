@@ -75,6 +75,11 @@ import {
   feedId,
   findingsUnit,
   hookUnit,
+  mergeUnit,
+  responseRow,
+  FINDINGS_LOCATION_NO_LINE,
+  PLAN_EDIT_PATH,
+  WORKTREE_PATH,
   mergeTabRow,
   permissionRow,
   planUnit,
@@ -1334,5 +1339,512 @@ describe("token formatting across surfaces", () => {
     const row = await drawRow(activityRow(responseUnit("success", "prose", "182k tok")));
     // Assert
     expect(row.textContent).toContain("182k tok");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STOPPING A DETACHED HEAD (audit 1, item 1)
+//
+// THE ARM IS THE TARGET: a live bubble or shell head stops ITS OWN work, by
+// the bubble row's `FeedId` exactly as the feed served it. The id is echoed
+// verbatim — `FeedId` is one of the four identifier spaces and is never
+// parsed or constructed.
+// ---------------------------------------------------------------------------
+
+describe("a live detached subagent's stop", () => {
+  it("sends the detached target", async () => {
+    // Arrange
+    await drawRow(detachedSubagentRow("live", { id: feedId("agent-7") }));
+    // Act
+    await harness.click('[data-feed-row="agent-7"] [data-interrupt]');
+    // Assert
+    const [request] = harness.fake.calls<{ target: { case?: string } }>("interrupt");
+    expect(request.target.case).toBe("detached");
+  });
+
+  it("echoes the row's own FeedId as the target", async () => {
+    // Arrange
+    await drawRow(detachedSubagentRow("live", { id: feedId("agent-7") }));
+    // Act
+    await harness.click('[data-feed-row="agent-7"] [data-interrupt]');
+    // Assert
+    const [request] = harness.fake.calls<{ target: { value?: { value?: string } } }>("interrupt");
+    expect(request.target.value?.value).toBe("agent-7");
+  });
+
+  it("marks the control with the row's own FeedId", async () => {
+    // Arrange / Act
+    const row = await drawRow(detachedSubagentRow("live", { id: feedId("agent-7") }));
+    // Assert
+    expect(row.querySelector("[data-interrupt]")?.getAttribute("data-interrupt")).toBe("agent-7");
+  });
+
+  it("draws no refusal for an interrupted-detached answer", async () => {
+    // Arrange
+    await drawRow(detachedSubagentRow("live", { id: feedId("agent-7") }));
+    // Act
+    await harness.click('[data-feed-row="agent-7"] [data-interrupt]');
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+});
+
+describe("a live detached shell's stop", () => {
+  it("sends the detached target", async () => {
+    // Arrange
+    await drawRow(detachedShellRow("live", { id: feedId("shell-3") }));
+    // Act
+    await harness.click('[data-feed-row="shell-3"] [data-interrupt]');
+    // Assert
+    const [request] = harness.fake.calls<{ target: { case?: string } }>("interrupt");
+    expect(request.target.case).toBe("detached");
+  });
+
+  it("echoes the shell row's own FeedId", async () => {
+    // Arrange
+    await drawRow(detachedShellRow("live", { id: feedId("shell-3") }));
+    // Act
+    await harness.click('[data-feed-row="shell-3"] [data-interrupt]');
+    // Assert
+    const [request] = harness.fake.calls<{ target: { value?: { value?: string } } }>("interrupt");
+    expect(request.target.value?.value).toBe("shell-3");
+  });
+
+  it("offers no stop on a settled shell", async () => {
+    // Arrange / Act: there is nothing left to stop.
+    const row = await drawRow(detachedShellRow("completed", { id: feedId("shell-3") }));
+    // Assert
+    expect(row.querySelector("[data-interrupt]")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2: THE WIRE'S FOLD IS THE INITIAL FOLD (audit 1, item 4)
+//
+// "R2 fold fields are the INITIAL fold on first draw; the user's toggle wins
+// after (a re-push never un-toggles)." Every fold field in the contract is
+// asserted the same way: draw it folded, toggle it open, re-push the SAME row
+// id, and read the fold back.
+// ---------------------------------------------------------------------------
+
+describe("a merge bubble's fold", () => {
+  /** The merge bubble arrives folded (FeedMergeHead.fold.folded = true). */
+  const drawMerge = () => drawRow(activityRow(mergeUnit("update"), { id: feedId("merge-1") }));
+
+  it("starts folded where the wire said", async () => {
+    // Arrange / Act
+    const row = await drawMerge();
+    // Assert
+    expect(row.dataset.expanded).toBe("false");
+  });
+
+  it("opens on the reader's toggle", async () => {
+    // Arrange
+    await drawMerge();
+    // Act
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Assert
+    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+  });
+
+  it("keeps the reader's toggle across a re-push of the same row", async () => {
+    // Arrange
+    await drawMerge();
+    await harness.click('[data-feed-row="merge-1"] [data-expand]');
+    // Act: the wire still says folded; the reader's toggle wins.
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      activityRow(mergeUnit("update"), { id: feedId("merge-1") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("merge-1")?.dataset.expanded).toBe("true");
+  });
+});
+
+describe("a compaction divider's fold", () => {
+  it("starts folded where the wire said", async () => {
+    // Arrange / Act
+    const row = await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
+    // Assert
+    expect(row.querySelector('[data-fold="compaction-summary"]')?.getAttribute("data-folded")).toBe(
+      "true",
+    );
+  });
+
+  it("opens on the reader's toggle", async () => {
+    // Arrange
+    await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
+    // Act
+    await harness.click('[data-feed-row="cut-1"] [data-fold="compaction-summary"]');
+    // Assert
+    expect(
+      harness.$('[data-feed-row="cut-1"] [data-fold="compaction-summary"]')?.getAttribute("data-folded"),
+    ).toBe("false");
+  });
+
+  it("keeps the reader's toggle across a re-push of the same row", async () => {
+    // Arrange
+    await drawRow(separationRow("compacted", { id: feedId("cut-1") }));
+    await harness.click('[data-feed-row="cut-1"] [data-fold="compaction-summary"]');
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, separationRow("compacted", { id: feedId("cut-1") }));
+    await harness.settle();
+    // Assert
+    expect(
+      harness.$('[data-feed-row="cut-1"] [data-fold="compaction-summary"]')?.getAttribute("data-folded"),
+    ).toBe("false");
+  });
+});
+
+describe("a skill document's fold", () => {
+  it("starts folded", async () => {
+    // Arrange / Act: a SKILL.md is long, and the reader asked for a skill to
+    // run rather than to be read to.
+    const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    // Assert
+    expect(row.querySelector("[data-fold]")?.getAttribute("data-folded")).toBe("true");
+  });
+
+  it("keeps the reader's toggle across a re-push of the same row", async () => {
+    // Arrange
+    const row = await drawRow(activityRow(skillUnit("loaded"), { id: feedId("skill-1") }));
+    const name = row.querySelector("[data-fold]")?.getAttribute("data-fold") ?? "";
+    await harness.click(`[data-feed-row="skill-1"] [data-fold="${name}"]`);
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      activityRow(skillUnit("loaded"), { id: feedId("skill-1") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(
+      harness.$(`[data-feed-row="skill-1"] [data-fold="${name}"]`)?.getAttribute("data-folded"),
+    ).toBe("false");
+  });
+});
+
+describe("a finding's scenario fold", () => {
+  it("starts folded", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(findingsUnit(), { id: feedId("find-1") }));
+    // Assert
+    expect(
+      row.querySelector('[data-fold="finding-scenario-0"]')?.getAttribute("data-folded"),
+    ).toBe("true");
+  });
+
+  it("keeps the reader's toggle across a re-push of the same row", async () => {
+    // Arrange
+    await drawRow(activityRow(findingsUnit(), { id: feedId("find-1") }));
+    await harness.click('[data-feed-row="find-1"] [data-fold="finding-scenario-0"]');
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      activityRow(findingsUnit(), { id: feedId("find-1") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(
+      harness.$('[data-feed-row="find-1"] [data-fold="finding-scenario-0"]')?.getAttribute("data-folded"),
+    ).toBe("false");
+  });
+
+  it("keeps one finding's toggle without opening its neighbours", async () => {
+    // Arrange
+    await drawRow(activityRow(findingsUnit(), { id: feedId("find-1") }));
+    // Act
+    await harness.click('[data-feed-row="find-1"] [data-fold="finding-scenario-0"]');
+    // Assert: each row's fold is its own, keyed by its index.
+    expect(
+      harness.$('[data-feed-row="find-1"] [data-fold="finding-scenario-1"]')?.getAttribute("data-folded"),
+    ).toBe("true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R8: A CROSS-WORKSPACE CLICK CALLS SelectWorkspace AND NOTHING ELSE
+// (audit 1, item 5)
+// ---------------------------------------------------------------------------
+
+describe("a merge queue entry's jump", () => {
+  /** The queue tab, whose entries name other workspaces. */
+  const drawQueue = () => drawRow(mergeTabRow("queue", "live", { id: feedId("tab-q") }));
+
+  it("calls SelectWorkspace exactly once", async () => {
+    // Arrange
+    await drawQueue();
+    harness.fake.clearCalls();
+    // Act
+    await harness.click('[data-queue-place="ahead"] [data-select]');
+    // Assert
+    expect(harness.fake.calls("selectWorkspace")).toHaveLength(1);
+  });
+
+  it("echoes that entry's own WorkspaceRef", async () => {
+    // Arrange
+    await drawQueue();
+    // Act
+    await harness.click('[data-queue-place="ahead"] [data-select]');
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectWorkspace");
+    expect(request.workspace?.id).toBe("ws-ahead");
+  });
+
+  it("makes no other call for the jump", async () => {
+    // Arrange
+    await drawQueue();
+    harness.fake.clearCalls();
+    // Act
+    await harness.click('[data-queue-place="behind"] [data-select]');
+    // Assert
+    expect(harness.fake.log().map((c) => c.rpc)).toEqual(["selectWorkspace"]);
+  });
+
+  it("echoes the behind entry's own ref rather than the current one", async () => {
+    // Arrange
+    await drawQueue();
+    // Act
+    await harness.click('[data-queue-place="behind"] [data-select]');
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("selectWorkspace");
+    expect(request.workspace?.id).toBe("ws-behind");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A CARD ANSWER DERIVES NO STATE (audit 1, item 10)
+//
+// "STATELESS RENDERER ... nothing accumulates across pushes." A successful
+// AnswerPermission is not the card closing: the card closes when the DAEMON
+// pushes the answered row. Closing it locally would be the client deciding
+// what happened, and would be wrong the moment the daemon disagreed.
+// ---------------------------------------------------------------------------
+
+describe("an answered permission card", () => {
+  it("stays open until the daemon pushes the answer", async () => {
+    // Arrange
+    await drawRow(permissionRow("open", undefined, { id: feedId("perm-1") }));
+    // Act
+    await harness.click('[data-permission="allowOnce"]');
+    // Assert
+    expect(harness.row("perm-1")?.dataset.state).toBe("open");
+  });
+
+  it("closes when the daemon pushes the answered row", async () => {
+    // Arrange
+    await drawRow(permissionRow("open", undefined, { id: feedId("perm-1") }));
+    await harness.click('[data-permission="allowOnce"]');
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      permissionRow("allowedOnce", undefined, { id: feedId("perm-1") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("perm-1")?.dataset.state).toBe("allowedOnce");
+  });
+
+  it("draws no refusal for a successful answer", async () => {
+    // Arrange
+    await drawRow(permissionRow("open", undefined, { id: feedId("perm-1") }));
+    // Act
+    await harness.click('[data-permission="allowOnce"]');
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
+  it("draws the state the daemon pushed even when it is not the answer clicked", async () => {
+    // Arrange: the daemon is the authority on what happened.
+    await drawRow(permissionRow("open", undefined, { id: feedId("perm-1") }));
+    await harness.click('[data-permission="allowOnce"]');
+    // Act
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      permissionRow("deniedByPolicy", undefined, { id: feedId("perm-1") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("perm-1")?.dataset.state).toBe("deniedByPolicy");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE ONE SHARED EDITOR LINK, AT ALL THREE SITES (audit 1, item 12)
+//
+// Ruling (2026-08-29): `renderEditorLink` is the ONE shared component for the
+// plan edit button, findings locations and worktree divider paths, and
+// `OpenInEditor{path, line?}` carries the SERVED values — the client never
+// parses a location string to derive them.
+// ---------------------------------------------------------------------------
+
+describe("the editor link on a plan", () => {
+  it("wears the shared editor-link hook", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(planUnit("planned"), { id: feedId("plan-1") }));
+    // Assert
+    expect(row.querySelector("[data-editor-link]")).not.toBeNull();
+  });
+
+  it("calls OpenInEditor with the served path", async () => {
+    // Arrange
+    await drawRow(activityRow(planUnit("planned"), { id: feedId("plan-1") }));
+    // Act
+    await harness.click('[data-feed-row="plan-1"] [data-editor-link]');
+    // Assert
+    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
+    expect(request.path).toBe(PLAN_EDIT_PATH);
+  });
+
+  it("echoes the workspace on the editor call", async () => {
+    // Arrange
+    await drawRow(activityRow(planUnit("planned"), { id: feedId("plan-1") }));
+    // Act
+    await harness.click('[data-feed-row="plan-1"] [data-editor-link]');
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("openInEditor");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
+  });
+});
+
+describe("the editor link on a finding's location", () => {
+  it("wears the shared editor-link hook on every location", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
+    // Assert
+    expect(row.querySelectorAll("[data-editor-link]")).toHaveLength(3);
+  });
+
+  it("calls OpenInEditor with the served path", async () => {
+    // Arrange
+    await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
+    // Act
+    await harness.click('[data-feed-row="find-2"] [data-editor-link]');
+    // Assert
+    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
+    expect(request.path).toBe(FINDINGS_LOCATION.path);
+  });
+
+  it("carries the served line rather than one parsed off the text", async () => {
+    // Arrange
+    await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
+    // Act
+    await harness.click('[data-feed-row="find-2"] [data-editor-link]');
+    // Assert
+    const [request] = harness.fake.calls<{ line?: number }>("openInEditor");
+    expect(request.line).toBe(FINDINGS_LOCATION.line);
+  });
+
+  it("omits the line where the location carries none", async () => {
+    // Arrange: an absent `optional` field means send nothing, never a zero.
+    await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
+    const links = harness.$$('[data-feed-row="find-2"] [data-editor-link]');
+    // Act
+    await harness.clickElement(links[2]);
+    // Assert
+    const [request] = harness.fake.calls<{ line?: number }>("openInEditor");
+    expect(request.line).toBeUndefined();
+  });
+
+  it("names the path the third location carries", async () => {
+    // Arrange
+    await drawRow(activityRow(findingsUnit(), { id: feedId("find-2") }));
+    const links = harness.$$('[data-feed-row="find-2"] [data-editor-link]');
+    // Act
+    await harness.clickElement(links[2]);
+    // Assert
+    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
+    expect(request.path).toBe(FINDINGS_LOCATION_NO_LINE.path);
+  });
+});
+
+describe("the editor link on a worktree divider", () => {
+  it("wears the shared editor-link hook", async () => {
+    // Arrange / Act
+    const row = await drawRow(separationRow("worktreeEntered", { id: feedId("wt-1") }));
+    // Assert
+    expect(row.querySelector("[data-editor-link]")).not.toBeNull();
+  });
+
+  it("calls OpenInEditor with the served worktree path", async () => {
+    // Arrange
+    await drawRow(separationRow("worktreeEntered", { id: feedId("wt-1") }));
+    // Act
+    await harness.click('[data-feed-row="wt-1"] [data-editor-link]');
+    // Assert
+    const [request] = harness.fake.calls<{ path: string }>("openInEditor");
+    expect(request.path).toBe(WORKTREE_PATH);
+  });
+
+  it("sends no line for a directory", async () => {
+    // Arrange
+    await drawRow(separationRow("worktreeEntered", { id: feedId("wt-1") }));
+    // Act
+    await harness.click('[data-feed-row="wt-1"] [data-editor-link]');
+    // Assert
+    const [request] = harness.fake.calls<{ line?: number }>("openInEditor");
+    expect(request.line).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AGENTIC MERGE TABS ARE CONTAINERS (audit 1, item 17)
+//
+// "AGENTIC tabs (pre_prompt, conflicts, fixes, post_prompt) are containers —
+// their content is the sub-feed rows parented to this row." So a row whose
+// parent is a tab's FeedId draws INSIDE that tab, and a tab that was never
+// served draws nothing at all (tabs are conditional: a tab appears BECAUSE
+// that work began).
+// ---------------------------------------------------------------------------
+
+describe("an agentic merge tab", () => {
+  /** Draw the pre-prompt tab, then push a row parented to it. */
+  const withChild = async (tabId: string): Promise<void> => {
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, mergeTabRow("prePrompt", "live", { id: feedId(tabId) }));
+    await harness.settle();
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      responseRow("success", "the lease said this", {
+        id: feedId("lease-1"),
+        parent: { row: feedId(tabId) },
+      }),
+    );
+    await harness.settle();
+  };
+
+  it("draws a row parented to the tab inside that tab's row", async () => {
+    // Arrange / Act
+    await withChild("tab-pre");
+    // Assert
+    expect(harness.row("tab-pre")?.contains(harness.row("lease-1"))).toBe(true);
+  });
+
+  it("draws the parented row's text verbatim", async () => {
+    // Arrange / Act
+    await withChild("tab-pre");
+    // Assert
+    expect(harness.row("tab-pre")?.textContent).toContain("the lease said this");
+  });
+
+  it("draws no tab for a kind the daemon never served", async () => {
+    // Arrange / Act: tabs are CONDITIONAL — no conflicts means no tab.
+    await withChild("tab-pre");
+    // Assert
+    expect(harness.$('[data-merge-tab="conflicts"]')).toBeNull();
+  });
+
+  it("draws only the tab kinds that were served", async () => {
+    // Arrange / Act
+    await withChild("tab-pre");
+    // Assert
+    expect(harness.$$("[data-merge-tab]").map((el) => el.dataset.mergeTab)).toEqual(["prePrompt"]);
   });
 });
