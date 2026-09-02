@@ -781,11 +781,16 @@ describe("permission", () => {
     expect(undecidable.detail).toBe("the classifier could not reach a verdict");
   });
 
-  it("settles NOTHING from a denied call's tool_result", () => {
-    // A denied tool never ran. The vendor still emits a tool_result for it --
-    // the deny message IS the result the model sees -- and folding that into an
-    // activity would put a settled unit in the feed for work that never
-    // happened, when the permission frame has already given the whole account.
+  it("retires a denied call's unit with failure and NO content", () => {
+    // THE RULING (project lead, 2026-09-01, final): starts are NOT deferred, so
+    // the gated unit is already on the stream and must reach a terminal like
+    // every other. A denial RETIRES it: the `failure` arm settles with content
+    // UNSET (the producer observed no error content) and `settled_at` stamped.
+    // The vendor's own tool_result for a denial is the deny sentence the MODEL
+    // was shown -- `toolUseResult` is a bare "Error: ..." string there rather
+    // than the tool's Output object -- which is why neither is carried. It is
+    // drawn denied through the permission unit, whose id IS this unit's
+    // AgentActivityId, so no `denied` cause on AgentToolFailure is needed.
     const fold = createFold();
     const denied = foldContext({ deniedCall: (toolUseId) => toolUseId === "toolu_d" });
     fold.onSdkMessage(
@@ -795,9 +800,20 @@ describe("permission", () => {
       denied,
     );
 
-    const output = fold.onSdkMessage(toolResult("toolu_d", { stdout: "" }, true), denied);
+    const output = fold.onSdkMessage(
+      toolResult("toolu_d", "Error: the user denied this call", true),
+      denied,
+    );
 
-    expect(output.entries).toHaveLength(0);
+    expect(output.entries).toHaveLength(1);
+    const activity = activityOf(output.entries[0]);
+    expect(activity?.activityId?.value).toBe("toolu_d");
+    if (activity?.item.case !== "bash" || activity.item.value.result.case !== "failure") {
+      throw new Error("a denied call did not settle its unit's failure arm");
+    }
+    const error = activity.item.value.result.value.error;
+    expect(error?.content).toBeUndefined();
+    expect(error?.settledAt).toBeDefined();
   });
 
   it("still settles a call the shim did NOT deny", () => {
