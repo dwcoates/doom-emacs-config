@@ -1,0 +1,42 @@
+{
+  "scenario": "identity-rotation-clear",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": null,
+  "prompts": [
+    {
+      "text": "Summarize in one sentence everything we have discussed so far in this conversation.",
+      "resume": false
+    },
+    {
+      "text": "/clear",
+      "resume": false
+    },
+    {
+      "text": "What did we discuss before? Answer in one sentence.",
+      "resume": false
+    }
+  ],
+  "world": "conversation-history",
+  "cwd_init": null,
+  "vendor_session_id": "73995f70-bd24-43fb-8d0b-13e42a54249b",
+  "manual": null,
+  "expect": [
+    "system:local_command_output",
+    "the vendor session id BEFORE and AFTER the clear (they differ)",
+    "ContextCleared",
+    "the post-clear turn having no memory of the pre-clear turns"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-ybyfcK-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:32:27.603Z",
+  "controls": [
+    {
+      "verb": "initializationResult",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

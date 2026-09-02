@@ -1,0 +1,27 @@
+{
+  "scenario": "monitor-deadline",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Start `bash slow.sh > out.log 2>&1 &` and then use the Monitor tool to wait, with a 30 second deadline, until out.log contains the word DONE.",
+  "prompts": [
+    {
+      "text": "Start `bash slow.sh > out.log 2>&1 &` and then use the Monitor tool to wait, with a 30 second deadline, until out.log contains the word DONE.",
+      "resume": false
+    }
+  ],
+  "world": "monitor-deadline",
+  "cwd_init": null,
+  "vendor_session_id": "86948985-a3bf-496a-ad3c-8061089a22f2",
+  "manual": null,
+  "expect": [
+    "tool:Monitor",
+    "tool_result:monitor(deadline)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-monitor-deadline-yWGiQw-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:24:56.946Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

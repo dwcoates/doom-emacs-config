@@ -18,6 +18,7 @@ import {
   expectsApiError,
   hasTruthyKeyAtAnyDepth,
   initMessage,
+  isTransportClosedFailure,
   sdkMessages,
   verdictLine,
 } from "./outcome.mjs";
@@ -285,5 +286,62 @@ describe("expectedErrorSubtypes", () => {
       { dir: "sdk", msg: { type: "result", subtype: "success", is_error: true, terminal_reason: "api_error", api_error_status: null } },
     ];
     expect(classifyCapture(entries, { name: "t", expects_error_subtypes: ["success"] }).reasons).toContain('result.terminal_reason is "api_error"');
+  });
+});
+
+describe("a control driven against an already-closed query", () => {
+  const messages = [
+    { type: "system", subtype: "init", session_id: "s-1" },
+    { type: "result", subtype: "success", is_error: false },
+  ];
+  const entries = messages.map((msg) => ({ dir: "sdk", msg }));
+  const transportFailure = {
+    verb: "stopTask",
+    ok: false,
+    error: "Error: ProcessTransport is not ready for writing",
+  };
+
+  it("recognizes the transport-closed failure shape", () => {
+    expect(isTransportClosedFailure(transportFailure)).toBe(true);
+  });
+
+  it("does not mistake a control that succeeded for one", () => {
+    expect(isTransportClosedFailure({ verb: "stopTask", ok: true })).toBe(false);
+  });
+
+  it("does not mistake an unrelated control failure for one", () => {
+    expect(
+      isTransportClosedFailure({ verb: "setModel", ok: false, error: "Error: unknown model" }),
+    ).toBe(false);
+  });
+
+  it("quarantines the capture rather than passing it silently", () => {
+    expect(
+      classifyCapture(entries, { name: "fan-wide-cancel" }, { errors: [], controls: [transportFailure] }).ok,
+    ).toBe(false);
+  });
+
+  it("names the verb whose golden was never captured", () => {
+    const { reasons } = classifyCapture(
+      entries,
+      { name: "fan-wide-cancel" },
+      { errors: [], controls: [transportFailure] },
+    );
+    expect(reasons.join(" ")).toContain("control stopTask was driven against an already-closed query");
+  });
+
+  it("reports one reason per failed control", () => {
+    const { reasons } = classifyCapture(
+      entries,
+      { name: "fan-wide-cancel" },
+      { errors: [], controls: [transportFailure, { ...transportFailure, verb: "setModel" }] },
+    );
+    expect(reasons).toHaveLength(2);
+  });
+
+  it("leaves a capture whose controls all reached the vendor alone", () => {
+    expect(
+      classifyCapture(entries, { name: "fan-wide-cancel" }, { errors: [], controls: [{ verb: "stopTask", ok: true }] }).ok,
+    ).toBe(true);
   });
 });

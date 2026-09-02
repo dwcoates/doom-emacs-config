@@ -314,3 +314,7 @@ bounded streams, clock convention, validation/logging invariants) are in
 - AgentFrame.detached_work is a PAGE LINE (upsert key `detached:<work id>`), the source of GetLiveWork.live_detached; lifecycle tables never hold the announcement.
 - R9 (shim-settled): rotation/fork lineage lives in the shim's link files, not in the store; no store verb.
 - DetachedLost `lost` arms replace the sidecar's LostTerminal placeholder.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- No store.v1 or conversation.v1 change in landing 6.

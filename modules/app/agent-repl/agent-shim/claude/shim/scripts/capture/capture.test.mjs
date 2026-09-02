@@ -8,7 +8,14 @@
  * the gate.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,9 +32,14 @@ import {
   answersFor,
   assertCaptureAuthorized,
   createInputChannel,
+  controlMatches,
   createWorld,
+  drainToResult,
   cwdSlug,
+  fireTriggers,
+  lateReclaimSlug,
   loadPrompts,
+  mergeTreeAnonymized,
   messageMatches,
   parseArgv,
   patternMatches,
@@ -604,5 +616,433 @@ describe("createInputChannel", () => {
     const channel = createInputChannel();
     channel.close();
     expect(() => channel.push({})).toThrow(/closed input channel/);
+  });
+});
+
+describe("controlMatches", () => {
+  it("does not match when there is no matcher at all", () => {
+    expect(controlMatches(undefined, { kind: "can_use_tool_parked" })).toBe(false);
+  });
+
+  it("matches a parked gate on kind", () => {
+    expect(controlMatches({ kind: "can_use_tool_parked" }, { kind: "can_use_tool_parked" })).toBe(true);
+  });
+
+  it("rejects a different control kind", () => {
+    expect(controlMatches({ kind: "can_use_tool_parked" }, { kind: "can_use_tool_request" })).toBe(false);
+  });
+
+  it("matches on tool_name", () => {
+    expect(
+      controlMatches({ tool_name: "Bash" }, { kind: "can_use_tool_parked", tool_name: "Bash" }),
+    ).toBe(true);
+  });
+
+  it("rejects a different tool_name", () => {
+    expect(
+      controlMatches({ tool_name: "Bash" }, { kind: "can_use_tool_parked", tool_name: "Read" }),
+    ).toBe(false);
+  });
+
+  it("matches on a substring of the serialized control record", () => {
+    expect(controlMatches({ contains: "park" }, { kind: "can_use_tool_parked" })).toBe(true);
+  });
+});
+
+/** A query stub that records which control verbs were driven against it. */
+function recordingQuery() {
+  const calls = [];
+  return {
+    calls,
+    interrupt: async () => {
+      calls.push("interrupt");
+      return { ok: true };
+    },
+  };
+}
+
+describe("fireTriggers", () => {
+  const parkedControl = {
+    at: "on_control",
+    after: { kind: "can_use_tool_parked" },
+    do: "interrupt",
+  };
+
+  it("fires the interrupt when a parked-gate control record is replayed", async () => {
+    const query = recordingQuery();
+    await fireTriggers(
+      query,
+      [parkedControl],
+      "on_control",
+      { kind: "can_use_tool_parked", tool_name: "Bash", rule: "park" },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual(["interrupt"]);
+  });
+
+  it("reports the driven verb back to the caller", async () => {
+    const results = await fireTriggers(
+      recordingQuery(),
+      [parkedControl],
+      "on_control",
+      { kind: "can_use_tool_parked" },
+      new Set(),
+      () => {},
+    );
+    expect(results).toEqual([{ verb: "interrupt", ok: true }]);
+  });
+
+  it("does not fire an on_control trigger for a plain stream message", async () => {
+    const query = recordingQuery();
+    await fireTriggers(
+      query,
+      [parkedControl],
+      "on_message",
+      { type: "assistant", message: { content: "can_use_tool_parked" } },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual([]);
+  });
+
+  it("does not fire the same control twice", async () => {
+    const query = recordingQuery();
+    const fired = new Set();
+    const payload = { kind: "can_use_tool_parked" };
+    await fireTriggers(query, [parkedControl], "on_control", payload, fired, () => {});
+    await fireTriggers(query, [parkedControl], "on_control", payload, fired, () => {});
+    expect(query.calls).toEqual(["interrupt"]);
+  });
+
+  it("leaves an on_message control alone while dispatching on_control", async () => {
+    const query = recordingQuery();
+    const messageControl = { at: "on_message", after: { type: "assistant" }, do: "interrupt" };
+    await fireTriggers(
+      query,
+      [messageControl],
+      "on_control",
+      { kind: "can_use_tool_parked" },
+      new Set(),
+      () => {},
+    );
+    expect(query.calls).toEqual([]);
+  });
+});
+
+/** A fake account root and capture directory — no vendor, no real ~/.claude. */
+function fakeRoot(slug) {
+  const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-late-reclaim-")));
+  const accountRoot = path.join(base, "root");
+  const captureDir = path.join(base, "capture");
+  mkdirSync(path.join(accountRoot, "projects", slug), { recursive: true });
+  mkdirSync(path.join(captureDir, "files", "projects", slug), { recursive: true });
+  return { base, accountRoot, captureDir };
+}
+
+describe("lateReclaimSlug", () => {
+  const slug = "-private-var-folders-scratch-cwd";
+
+  it("moves a file the vendor wrote after the first reclaim into the capture", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    writeFileSync(
+      path.join(accountRoot, "projects", slug, "late.jsonl"),
+      '{"type":"user"}\n',
+      "utf8",
+    );
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    expect(
+      readFileSync(path.join(captureDir, "files", "projects", slug, "late.jsonl"), "utf8"),
+    ).toContain('"type":"user"');
+  });
+
+  it("leaves the operator's root clean afterwards", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    writeFileSync(path.join(accountRoot, "projects", slug, "late.jsonl"), "{}\n", "utf8");
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    expect(existsSync(path.join(accountRoot, "projects", slug))).toBe(false);
+  });
+
+  it("does not touch an unrelated project directory", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    const other = path.join(accountRoot, "projects", "-Users-someone-real-project");
+    mkdirSync(other, { recursive: true });
+    writeFileSync(path.join(other, "session.jsonl"), "{}\n", "utf8");
+    lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } });
+    expect(existsSync(path.join(other, "session.jsonl"))).toBe(true);
+  });
+
+  it("logs the late reclaim", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    writeFileSync(path.join(accountRoot, "projects", slug, "late.jsonl"), "{}\n", "utf8");
+    const lines = [];
+    lateReclaimSlug({
+      accountRoot,
+      slug,
+      captureDir,
+      report: { unparsed: [] },
+      log: (line) => lines.push(line),
+    });
+    expect(lines.join("")).toContain(`late reclaim ${slug}`);
+  });
+
+  it("reports nothing moved when the vendor wrote nothing late", () => {
+    const { accountRoot, captureDir } = fakeRoot(slug);
+    expect(lateReclaimSlug({ accountRoot, slug, captureDir, report: { unparsed: [] } })).toEqual({
+      slug,
+      moved: [],
+    });
+  });
+});
+
+describe("mergeTreeAnonymized", () => {
+  it("refuses to overwrite a larger captured file with a smaller late flush", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-merge-")));
+    const from = path.join(base, "from");
+    const to = path.join(base, "to");
+    mkdirSync(from, { recursive: true });
+    mkdirSync(to, { recursive: true });
+    const full = `${'{"a":1}\n'.repeat(20)}`;
+    writeFileSync(path.join(to, "session.jsonl"), full, "utf8");
+    writeFileSync(path.join(from, "session.jsonl"), '{"a":1}\n', "utf8");
+    mergeTreeAnonymized(from, to, { unparsed: [] });
+    expect(readFileSync(path.join(to, "session.jsonl"), "utf8")).toBe(full);
+  });
+
+  it("writes a file the capture does not have yet", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-merge-")));
+    const from = path.join(base, "from");
+    const to = path.join(base, "to");
+    mkdirSync(from, { recursive: true });
+    writeFileSync(path.join(from, "new.txt"), "hello", "utf8");
+    expect(mergeTreeAnonymized(from, to, { unparsed: [] })).toEqual([path.join(to, "new.txt")]);
+  });
+
+  it("merges a nested subagent sidechain directory", () => {
+    const base = realpathSync(mkdtempSync(path.join(tmpdir(), "capture-merge-")));
+    const from = path.join(base, "from");
+    const to = path.join(base, "to");
+    mkdirSync(path.join(from, "sub"), { recursive: true });
+    writeFileSync(path.join(from, "sub", "agent.json"), '{"id":"x"}', "utf8");
+    mergeTreeAnonymized(from, to, { unparsed: [] });
+    expect(existsSync(path.join(to, "sub", "agent.json"))).toBe(true);
+  });
+});
+
+describe("the corpus's control triggers", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const controls = doc.scenarios.flatMap((scenario) =>
+    (scenario.controls ?? []).map((control) => ({ scenario: scenario.name, control })),
+  );
+
+  // THE DEFECT SHAPE, PINNED SHUT. A permission gate is recorded on the control
+  // plane (can_use_tool_request / _response / _parked), never as a stream
+  // message, so an `on_message` trigger naming one of those spellings can never
+  // fire — which is exactly how permission-undecidable-parked wedged forever.
+  it("carries no on_message trigger whose contains names a can_use_tool spelling", () => {
+    const offenders = controls
+      .filter(({ control }) => control.at === "on_message")
+      .filter(({ control }) => (control.after?.contains ?? "").includes("can_use_tool"))
+      .map(({ scenario }) => scenario);
+    expect(offenders).toEqual([]);
+  });
+
+  it("triggers held-turn-gate off the gate's own control record", () => {
+    const scenario = doc.scenarios.find((entry) => entry.name === "held-turn-gate");
+    expect(scenario.controls).toEqual([
+      { at: "on_control", after: { kind: "can_use_tool_request" }, do: "getContextUsage" },
+    ]);
+  });
+
+  it("uses only trigger points the harness dispatches", () => {
+    const unknown = controls
+      .filter(({ control }) => !["session_start", "on_message", "on_control", "turn_end"].includes(control.at))
+      .map(({ scenario, control }) => `${scenario}:${control.at}`);
+    expect(unknown).toEqual([]);
+  });
+
+  it("gives every on_control trigger a matcher, since an absent one never fires", () => {
+    const unmatched = controls
+      .filter(({ control }) => control.at === "on_control" && control.after === undefined)
+      .map(({ scenario }) => scenario);
+    expect(unmatched).toEqual([]);
+  });
+});
+
+/**
+ * A fake query: an async generator over scripted per-turn message batches, with
+ * the SDK's own surface (an async iterator plus `close`).
+ *
+ * It records whether `return()` was ever called on its iterator — the exact
+ * thing a `for await ... break` does, and the reason every turn after the first
+ * went unrecorded in the real multi-turn captures.
+ */
+function fakeQuery(turnBatches) {
+  const state = { returned: false, closed: false, pulls: 0 };
+  const batches = turnBatches.map((batch) => [...batch]);
+  const generator = (async function* messages() {
+    try {
+      for (const batch of batches) {
+        for (const msg of batch) {
+          state.pulls += 1;
+          yield msg;
+        }
+      }
+    } finally {
+      state.returned = true;
+    }
+  })();
+  return {
+    state,
+    close: () => {
+      state.closed = true;
+    },
+    [Symbol.asyncIterator]: () => generator,
+  };
+}
+
+const TURN_ONE = [
+  { type: "system", subtype: "init", session_id: "s-1" },
+  { type: "assistant", message: { content: "one" } },
+  { type: "result", subtype: "success" },
+];
+const TURN_TWO = [
+  { type: "system", subtype: "compact_boundary" },
+  { type: "result", subtype: "success" },
+];
+
+describe("drainToResult", () => {
+  it("returns the turn's result message", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const iterator = query[Symbol.asyncIterator]();
+    await expect(drainToResult(iterator, () => {})).resolves.toEqual({
+      type: "result",
+      subtype: "success",
+    });
+  });
+
+  it("hands every message of the turn to the recorder, in order", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.type));
+    expect(seen).toEqual(["system", "assistant", "result"]);
+  });
+
+  it("stops at the result rather than draining the next turn", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.subtype));
+    expect(seen).toEqual(["init", undefined, "success"]);
+  });
+
+  it("does NOT end the iterator when it stops at a result", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    await drainToResult(query[Symbol.asyncIterator](), () => {});
+    expect(query.state.returned).toBe(false);
+  });
+
+  it("records the SECOND turn on the same held iterator", async () => {
+    const query = fakeQuery([TURN_ONE, TURN_TWO]);
+    const iterator = query[Symbol.asyncIterator]();
+    await drainToResult(iterator, () => {});
+    const seen = [];
+    await drainToResult(iterator, (msg) => seen.push(msg.subtype));
+    expect(seen).toEqual(["compact_boundary", "success"]);
+  });
+
+  it("awaits an async recorder before pulling the next message", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    const order = [];
+    await drainToResult(query[Symbol.asyncIterator](), async (msg) => {
+      order.push(`enter:${msg.type}`);
+      await Promise.resolve();
+      order.push(`leave:${msg.type}`);
+    });
+    expect(order.slice(0, 4)).toEqual([
+      "enter:system",
+      "leave:system",
+      "enter:assistant",
+      "leave:assistant",
+    ]);
+  });
+
+  it("returns null when the query ends without a result", async () => {
+    const query = fakeQuery([[{ type: "assistant", message: { content: "orphan" } }]]);
+    await expect(drainToResult(query[Symbol.asyncIterator](), () => {})).resolves.toBeNull();
+  });
+
+  it("still reports the messages seen before a query ended without a result", async () => {
+    const query = fakeQuery([[{ type: "assistant" }]]);
+    const seen = [];
+    await drainToResult(query[Symbol.asyncIterator](), (msg) => seen.push(msg.type));
+    expect(seen).toEqual(["assistant"]);
+  });
+
+  it("leaves the query open for a turn_end control to be driven against", async () => {
+    const query = fakeQuery([TURN_ONE]);
+    await drainToResult(query[Symbol.asyncIterator](), () => {});
+    expect(query.state.closed).toBe(false);
+  });
+});
+
+describe("the corpus's declared error terminals", () => {
+  const doc = loadPrompts(path.join(HERE, "prompts.json"));
+  const scenarioNamed = (name) => doc.scenarios.find((entry) => entry.name === name);
+
+  // The parked gate's golden IS an aborted terminal: the interrupt fires while
+  // a permission callback is pending, and the vendor ends the turn with
+  // subtype "error_during_execution" / terminal_reason "aborted_tools"
+  // (observed in captures/_failed/permission-undecidable-parked). Without the
+  // declaration the quarantine rule condemns the capture the scenario exists
+  // for, exactly as it did on the first real run.
+  it("declares the aborted terminal permission-undecidable-parked exists to capture", () => {
+    expect(scenarioNamed("permission-undecidable-parked").expects_error_subtypes).toEqual([
+      "error_during_execution",
+    ]);
+  });
+
+  it("keeps that scenario's interrupt scripted off the parked control record", () => {
+    expect(scenarioNamed("permission-undecidable-parked").controls).toEqual([
+      { at: "on_control", after: { kind: "can_use_tool_parked" }, do: "interrupt" },
+    ]);
+  });
+
+  // NOT every interrupt-driven scenario: hook-cancelled's real capture ended
+  // `success` / `completed`, so declaring an error terminal for it would
+  // whitelist a failure it is not supposed to have.
+  it("declares an error terminal only as a non-empty list of subtypes", () => {
+    const malformed = doc.scenarios
+      .filter((entry) => entry.expects_error_subtypes !== undefined)
+      .filter((entry) => {
+        const declared = entry.expects_error_subtypes;
+        return (
+          !Array.isArray(declared) ||
+          declared.length === 0 ||
+          declared.some((subtype) => typeof subtype !== "string" || subtype === "")
+        );
+      })
+      .map((entry) => entry.name);
+    expect(malformed).toEqual([]);
+  });
+
+  // A provocation the model declines on its own judgement never reaches the
+  // gate: `rm -rf .` recorded no can_use_tool at all, so the scenario captured
+  // nothing about denial.
+  it("provokes permission-denied-by-user with a command the model will attempt", () => {
+    expect(scenarioNamed("permission-denied-by-user").prompt).not.toContain("rm -rf");
+  });
+
+  it("materializes the file that scenario's command acts on", () => {
+    expect(scenarioNamed("permission-denied-by-user").cwd_setup).toEqual([
+      { path: "stale.log", content: "stale\n" },
+    ]);
+  });
+
+  it("keeps that scenario's expectations about the denial", () => {
+    expect(scenarioNamed("permission-denied-by-user").expect).toEqual([
+      "can_use_tool request",
+      "PermissionResult deny",
+      "no activity frames for the denied call",
+    ]);
   });
 });

@@ -243,6 +243,7 @@ export function outputPathFromProse(
 interface RawTask {
   readonly subtype?: string;
   readonly task_id?: string;
+  readonly task_type?: string;
   readonly tool_use_id?: string;
   readonly skip_transcript?: boolean;
   readonly output_file?: string;
@@ -252,10 +253,72 @@ interface RawTask {
   readonly patch?: { readonly is_backgrounded?: boolean; readonly status?: string };
 }
 
+/**
+ * WHAT KIND OF WORK EACH LIVE TASK IS, from the one message that says.
+ *
+ * `task_started` states `task_type` — `local_agent` for a spawned agent,
+ * `local_bash` for a shell command that outlived its timeout — and
+ * `task_notification` states NOTHING about the kind. Without this join a
+ * notification cannot tell the two apart, and the shell case is not a harmless
+ * ambiguity: settling a Bash unit with an `AgentSubagent` terminal restates that
+ * unit as a subagent run and invents an empty spawn prompt for it (observed in
+ * the `ctrl-b-detach-of-foreground-work` capture, where the moved-to-background
+ * `Bash` call was settled as `activity.subagent.success`).
+ *
+ * BOUNDED AND SELF-EMPTYING, like the call registry beside it: an entry is
+ * dropped the moment its task settles, and the table is capped so a vendor that
+ * starts tasks and never notifies cannot grow it without end.
+ */
+export const TASK_KIND_CAPACITY = 512;
+
+/**
+ * The kinds of the tasks in flight, held BY THE FOLD and never module-wide: two
+ * concurrent sessions must not be able to read each other's tasks.
+ */
+export interface TaskKindRegistry {
+  /** Remember one task's kind, forgetting the oldest when the cap is reached. */
+  remember(taskId: string, taskType: string): void;
+  /**
+   * Whether a settling task is an AGENT run, and so owns a subagent terminal.
+   *
+   * A task whose kind was never stated answers `true`: the subagent terminal is
+   * the long-standing behavior for an untyped task, and silently dropping it
+   * would lose a real settle. Only a task the vendor NAMED as something other
+   * than an agent is refused one. Answering also FORGETS the task, which is
+   * what keeps the table self-emptying.
+   */
+  settlesAsSubagent(taskId: string): boolean;
+}
+
+export function createTaskKindRegistry(): TaskKindRegistry {
+  const kinds = new Map<string, string>();
+  return {
+    remember(taskId, taskType) {
+      if (kinds.size >= TASK_KIND_CAPACITY) {
+        const [oldest] = kinds.keys();
+        if (oldest !== undefined) {
+          kinds.delete(oldest);
+          LOGGER.log(
+            { level: "warn", task_id: oldest },
+            "the task-kind table is full; the oldest task's kind is forgotten and its notification cannot be typed",
+          );
+        }
+      }
+      kinds.set(taskId, taskType);
+    },
+    settlesAsSubagent(taskId) {
+      const kind = kinds.get(taskId);
+      kinds.delete(taskId);
+      return kind === undefined || kind === "local_agent";
+    },
+  };
+}
+
 /** Every task-stream message. */
 export function convertDetached(
   message: Extract<SdkMessage, { type: "system" }>,
   context: FoldContext,
+  taskKinds: TaskKindRegistry,
 ): readonly PersistEntry[] {
   const raw = message as unknown as RawTask;
   const uuid = (message as { uuid: string }).uuid;
@@ -307,7 +370,13 @@ export function convertDetached(
           ),
         ];
       }
-      LOGGER.log({ uuid, task_id: taskId, tool_use_id: toolUseId }, "work left the turn");
+      if (raw.task_type !== undefined && raw.task_type !== "") {
+        taskKinds.remember(taskId, raw.task_type);
+      }
+      LOGGER.log(
+        { uuid, task_id: taskId, tool_use_id: toolUseId, task_type: raw.task_type ?? "" },
+        "work left the turn",
+      );
       return [
         detachmentEntry(context, agentId, uuid, {
           detachedFromToolUseId: toolUseId,
@@ -366,6 +435,17 @@ export function convertDetached(
         LOGGER.log(
           { level: "warn", uuid, task_id: taskId },
           "a task notification names no originating call; its unit cannot be settled",
+        );
+        return entries;
+      }
+      if (!taskKinds.settlesAsSubagent(taskId)) {
+        // A SHELL TASK'S UNIT SETTLES ON ITS OWN TOOL RESULT, never here: the
+        // vendor already returned the `Bash` call with the backgrounding notice,
+        // and stamping a subagent terminal on it would restate a shell command
+        // as an agent run carrying a prompt it never had.
+        LOGGER.log(
+          { uuid, task_id: taskId, tool_use_id: toolUseId },
+          "the settling task is not an agent run; its own unit's result settles it and no subagent terminal is written",
         );
         return entries;
       }

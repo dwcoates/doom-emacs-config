@@ -1,0 +1,27 @@
+{
+  "scenario": "push-notification-sent",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Send me a push notification that says 'capture harness probe: sent'.",
+  "prompts": [
+    {
+      "text": "Send me a push notification that says 'capture harness probe: sent'.",
+      "resume": false
+    }
+  ],
+  "world": "push-notification-sent",
+  "cwd_init": null,
+  "vendor_session_id": "5e77cd93-d444-4ece-a5c1-d46543ba71bd",
+  "manual": null,
+  "expect": [
+    "tool:PushNotification",
+    "tool_result:push_notification(sent)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-push-notification-sent-z7BrXO-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:24:35.361Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

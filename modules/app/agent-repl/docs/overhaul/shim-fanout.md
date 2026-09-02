@@ -531,3 +531,95 @@ every UX or contract gap you surfaced instead of improvising.
   the shim reports ''), six handler exceptions escape as Code.Internal,
   the fake store lacks the typed refusal arms, !ctrl-b vs DetachForeground
   confirmation mismatch, a cold-seed ENOENT path mismatch.
+- LEDGER (resumption 2026-09-01, recreated fable-low lead): tip f70941f0c
+  (pause tip + four capture-harness fixes by the project lead). Rulings
+  received: R15 wins the fresh-page contradiction (StartTurn's page holds
+  exactly the prompt row); store relays (WatchBashRun CodeNotFound before the
+  first row; post-terminal deltas served then end; re-upsert absorbed); 67
+  real goldens at ~/.config/doom-overhaul/captures (mock scripts rebuilt FROM
+  them; `_failed/` never fixtures); harness defects (parked-gate interrupt
+  trigger; sweep-end second reclaim) to fix and report; dead-code pass
+  (knip/tsc unused/vitest coverage) before the final report; re-check audit
+  reds for stale-payload shape before production fixes. Dispatched opus-low
+  in hand-made worktrees shim-agents/{harness,engine,fakes} (branches
+  overhaul/shim-{harness,engine,fakes}): harness = the two capture defects;
+  engine = buckets 1,2,3-rem,5,8(engine),10,12(engine) + R15 amendment +
+  store relays + audit A2–A5,A7,A11,A13,A15,A22,A23,A25,B4–B6,B11,C7,C12,
+  E1,E5–E8; fakes = buckets 4,6,7,8(mock),9,11,12(rest) + the remaining
+  audit items. Integration run #3 started on f70941f0c for the record
+  (scratch `shim-itest-run3.log`). Queued next: captures-rebuild brief
+  (scenario scripts + converter goldens from the captures; checklist
+  answers read out of them), fable auditor #2, dead-code pass.
+- AMENDMENT (user ruling, TEAMLEAD.md on overhaul/integration @ 25bf69341):
+  the dead-code pass is dispatched to a `sonnet-medium` agent (never opus-low,
+  never the lead) in its own worktree, tool output as its brief; the lead
+  reviews, merges, and carries the deletion + kept-with-reason lists into the
+  final report.
+- LEDGER: harness fixes merged at f12b754c3 (`on_control` trigger kind;
+  sweep-end late reclaim; capture subset 315 green; `--check` 75 scenarios);
+  project lead notified for re-capture. Run #3 on f70941f0c: 101 failed /
+  92 passed / 1 todo. A held-turn-gate trigger follow-up is in flight on
+  overhaul/shim-harness.
+- LEDGER: held-turn-gate on_control trigger merged at 5554d2d0b. CAPTURE
+  READOUT (read-only Explore over the 67 goldens): no context_tip and no
+  budget-warning attachment anywhere (nearest carrier observed once:
+  attachment `total_tokens_reminder`); no failed subagent; no
+  compact_boundary; no /clear rotation — compaction-directed and
+  identity-rotation-clear recorded only turn 1 (later turns submitted after
+  the query closed; 14 `control_failed` "ProcessTransport is not ready for
+  writing" corpus-wide) → harness fix in flight, re-capture owed. Real
+  subagent files are keyed by the vendor agentId (17-hex task id) with
+  meta.toolUseId the only link to the spawning call; bucket 9 corrected to a
+  reader-side join (mock layout stays vendor-faithful). The spawning tool is
+  `Agent` on the wire, `Task` in init.tools. toolUseResult is polymorphic
+  (object | bare string on denials/StructuredOutput | list for MCP).
+- LEDGER: harness batch merged at 48ed642eb (multi-turn drain held across
+  turns via drainToResult; transport-closed control_failed quarantines;
+  permission-undecidable-parked expects_error_subtypes; denied-by-user
+  prompt rewrite); harness worktree/branch retired. Re-capture list (12)
+  sent to the project lead: compaction-directed, identity-rotation-clear,
+  fan-wide-cancel, permission-mode-changed, model-changed, account-usage,
+  bash-detached, subagent-detached, context-usage, mcp-server-healths,
+  permission-undecidable-parked, permission-denied-by-user.
+- LEDGER: slow-down lifted (user go); project lead re-capturing the 12.
+  Running: engine (shim-agents/engine), fakes (shim-agents/fakes, resumed
+  twice after rate-limit/watchdog stalls), GOLDENS (new, shim-agents/goldens,
+  branch overhaul/shim-goldens off 691982ddf): commits the 55 stable
+  captures selectively under agent-shim/claude/shim/testdata/captures/ +
+  MANIFEST, converter golden suites through fold-harness, converter fixes
+  only in src/convert. Queued: scenario-script rebuild from captures (after
+  fakes merge + re-capture), fresh integration run, fable auditor #2,
+  sonnet-medium dead-code pass.
+- LEDGER: re-capture sweep complete (project lead): 16 ran, none
+  quarantined; 13 goldens replaced (the 12 + held-turn-gate); 69 goldens
+  total. Caveat to verify: compaction-directed may still carry no
+  compact_boundary under the cheap model. Goldens agent told to include all
+  69 and to report the compaction and /clear shapes; the scenario-script
+  rebuild waits on the fakes merge.
+- LEDGER: goldens agent interim: 69 goldens folded; compaction-directed
+  holds NO compaction record ("Not enough messages to compact" local_command)
+  → gap stays open; /clear rotates to the post-clear init's session_id (three
+  ids, three files, no closing record) → rule written into shim.md R9 and
+  sent to the engine agent; two converter defects fixed (task_notification
+  kind, per-block assistant line before content_block_stop). The scenario
+  rebuild brief must emit assistant lines per block BEFORE content_block_stop
+  and the observed /clear shape.
+- LEDGER: goldens merged at eb7930399 (worktree/branch retired): 69 real
+  captures under agent-shim/claude/shim/testdata/captures/ (7.8 MB; the
+  241 MB turn-stop-max-turns spool excluded) + MANIFEST with an
+  evidence-gaps section; golden suites test/convert/goldens/*; converter
+  fixes in convert/detached.ts (task kind only on task_started) and
+  convert/stream-events.ts (per-block assistant line before
+  content_block_stop); unit 3682 green. Arms no capture exercises (asserted
+  nowhere, not faked): glob, grep, artifact, scheduleWakeup, worktree,
+  contextInjected; no failed subagent; no compact_boundary. Queued fix:
+  unify the two `SourceCoordinates` types (store/keys.ts vs
+  store/persistence.ts) into one shared declaration (rides the scenario
+  rebuild brief).
+- LEDGER: landing 6 (overhaul/integration d46e601e7/8a98e4fca/bc0a07bae)
+  merged at c9280627f, no conflicts; no shim.v1/conversation.v1 change;
+  typecheck/unit(3682)/build green. Notes from the project lead: the
+  daemon's SubmitPromptError.turn_already_open is retired — the shim's
+  UpdateAgentFailure refusal of a busy subagent is the ONE producer and stays
+  typed and named; the compaction writer stays graded against the corpus
+  fixture and marked synthetic until a longer-history capture is approved.

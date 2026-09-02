@@ -1,0 +1,28 @@
+{
+  "scenario": "hook-blocked",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `echo this-will-be-blocked`.",
+  "prompts": [
+    {
+      "text": "Run `echo this-will-be-blocked`.",
+      "resume": false
+    }
+  ],
+  "world": "hook-blocked",
+  "cwd_init": null,
+  "vendor_session_id": "92a36244-3d4b-405b-b849-d5d50a7efb2f",
+  "manual": null,
+  "expect": [
+    "hook_started",
+    "hook_response(blocked)",
+    "attachment:hook_blocking_error"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-hook-blocked-oQhV8z-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:26:32.688Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
