@@ -47,6 +47,7 @@
 (declare-function agent-repl--path-canonical "core" (path))
 (declare-function agent-repl--agent-panel-buffer-p "core" (&optional buf))
 (declare-function agent-repl--log "core" (ws format &rest args))
+(declare-function agent-repl--warn "core" (ws format &rest args))
 (declare-function agent-repl-window--side-window-p "window" (win &optional ws))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--ws-known-p "workspace" (ws))
@@ -229,10 +230,85 @@ which is the signal the caller falls back to ordinary display."
     (agent-repl--log ws "find-file-workspace: ws not open, no placement ws=%s" ws)
     nil))
 
+(defvar agent-repl--ffw-pending (make-hash-table :test 'equal)
+  "Pending one-shot placements, keyed by canonical git root.
+Each value is the buffer to place the moment that root's tab appears.
+PER ROOT AND LATEST WINS: a second visit into a root still waiting for
+its tab replaces the first, because the user asked for the newer file.
+An entry is cleared when it fires and when its verb is refused, so
+nothing here outlives the arrival it is waiting for.")
+
+(defun agent-repl--ffw-pending-register (root buffer)
+  "Record BUFFER as the one-shot placement waiting on ROOT's tab."
+  (agent-repl--log nil "find-file-workspace: pending placement root=%s buffer=%s"
+                   root (buffer-name buffer))
+  (puthash root buffer agent-repl--ffw-pending))
+
+(defun agent-repl--ffw-pending-drop (root reason)
+  "Forget ROOT's pending placement, recording REASON."
+  (when (gethash root agent-repl--ffw-pending)
+    (agent-repl--log nil "find-file-workspace: pending dropped root=%s reason=%s"
+                     root reason)
+    (remhash root agent-repl--ffw-pending)))
+
+(defun agent-repl--ffw-pending-fire (&rest _)
+  "Place every pending buffer whose workspace tab has now appeared.
+Installed on `agent-repl-roster-update-functions', the hook the roster
+runs after it has reconciled a push into tabs — so the ARRIVAL of the tab
+is what fires a placement.  Nothing here polls, waits or schedules: a tab
+that never arrives simply leaves its entry pending.
+
+An entry whose buffer died is dropped rather than placed, and an entry
+fires exactly ONCE because it is removed before the placement runs."
+  (maphash
+   (lambda (root buffer)
+     (let ((ws (agent-repl--ws-name-for-dir root)))
+       (cond
+        ((not (buffer-live-p buffer))
+         (agent-repl--ffw-pending-drop root "buffer-died"))
+        ((and ws (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
+         (remhash root agent-repl--ffw-pending)
+         (agent-repl--log ws "find-file-workspace: pending fired root=%s ws=%s"
+                          root ws)
+         (agent-repl--ws-switch ws)
+         (agent-repl--ffw-place buffer)))))
+   (copy-hash-table agent-repl--ffw-pending)))
+
+(add-hook 'agent-repl-roster-update-functions #'agent-repl--ffw-pending-fire)
+
+(defun agent-repl--ffw-acquire (root buffer thunk)
+  "Register BUFFER as ROOT's pending placement, then run THUNK to acquire it.
+THUNK is the injected open or create verb.  Returns non-nil when the
+display has been HANDLED — either placed immediately, because the tab was
+already there when the verb returned, or held as the pending placement
+that ROOT's tab arrival will fire.  A REFUSAL — the verb signalling —
+drops the pending entry, is logged and messaged, and answers nil so the
+caller falls back to ordinary display."
+  (agent-repl--ffw-pending-register root buffer)
+  (condition-case err
+      (progn
+        (funcall thunk)
+        (or (when-let* ((ws (agent-repl--ws-name-for-dir root)))
+              (when (agent-repl--ffw-switch-and-place ws buffer)
+                (agent-repl--ffw-pending-drop root "placed-immediately")
+                t))
+            'pending))
+    (error
+     (agent-repl--ffw-pending-drop root "verb-refused")
+     (agent-repl--warn nil "find-file-workspace: verb refused root=%s error=%S"
+                       root err)
+     (message "agent-repl: could not open the workspace for %s; opening the file here"
+              root)
+     nil)))
+
 (defun agent-repl--ffw-route (buffer)
   "Route BUFFER into the workspace owning its file's git root.
-Returns the window BUFFER was placed in when the routing handled the
-display, and nil when the caller must display BUFFER itself."
+Returns non-nil when the routing HANDLED the display — the file was
+placed, or it is held as the pending placement its workspace's tab
+arrival will fire — and nil when the caller must display BUFFER itself.
+A held file is deliberately not shown anywhere in the meantime: the user
+asked for it in its workspace, and a transient placement elsewhere is
+the thing this routing exists to stop."
   (when-let* ((file (buffer-file-name buffer))
               (root (agent-repl--ffw-root-for-file file)))
     (let ((ws (agent-repl--ws-name-for-dir root)))
@@ -241,14 +317,16 @@ display, and nil when the caller must display BUFFER itself."
         (agent-repl--log ws "find-file-workspace: already current ws=%s file=%s"
                          ws file)
         nil)
-       (ws
-        (unless (and (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
-          (funcall agent-repl-find-file-workspace-open-function ws))
+       ((and ws (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
         (agent-repl--ffw-switch-and-place ws buffer))
+       (ws
+        (agent-repl--ffw-acquire
+         root buffer
+         (lambda () (funcall agent-repl-find-file-workspace-open-function ws))))
        (t
-        (funcall agent-repl-find-file-workspace-create-function root)
-        (when-let* ((created (agent-repl--ws-name-for-dir root)))
-          (agent-repl--ffw-switch-and-place created buffer)))))))
+        (agent-repl--ffw-acquire
+         root buffer
+         (lambda () (funcall agent-repl-find-file-workspace-create-function root))))))))
 
 ;;;; ---- The display-step advice -------------------------------------------
 
