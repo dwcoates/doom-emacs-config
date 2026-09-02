@@ -741,3 +741,13 @@ every UX or contract gap you surfaced instead of improvising.
   block, no response unit); billing/oauth_org/max_output_tokens
   indistinguishable by HTTP status; continuation_prevented ungrounded.
   h1 multi-stream compressed-envelope defect handed to agent S.
+- LEDGER: remediation #4 agent S follow-ups merged at 3a60a11b5
+  (worktree/branch retired): failed StartSession undoes itself
+  (Persistence.clearProducer, identity removed only if this attempt minted
+  it; held cuts land after the query is up; `AGENT_REPL_FAKE_REFUSE=start-once`);
+  h1 multi-stream compressed-envelope defect = early-head flush absorbing the
+  adapter's connect-content-encoding head → response compression OFF
+  (compressMinBytes max; request decompression kept; a post-head non-identity
+  encoding is reported at error). FINAL CODE TIP 3a60a11b5: typecheck,
+  unit 3745, build, smoke, integration 302 / 0 / 3 todo (30 s). Dead-code
+  pass (sonnet-medium, shim-agents/deadcode) next; then the final report.
