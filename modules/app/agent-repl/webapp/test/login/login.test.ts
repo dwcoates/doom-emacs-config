@@ -399,7 +399,10 @@ describe("the refusals", () => {
     );
     overlay.open();
     await flush();
-    expect(refusal()).toBe("malformed");
+    // An error with no cause set is a frame this build cannot read, not a
+    // refusal with no words: it is reported through the failure sink, and no
+    // sentence is invented at the control (src/rpc/refuse.ts).
+    expect(refusal()).toBeNull();
     overlay.dispose();
   });
 
