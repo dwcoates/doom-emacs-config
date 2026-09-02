@@ -204,3 +204,14 @@ each is graded against the grounding named below, or marked ungrounded.
   invented from the family's established pattern rather than a specific
   recording. Retires `subagentrouting_e2e_test.go`'s `sidechainResponseLine`
   fabrication.
+
+- **`!usage-historical`** (`src/fake/scenarios/subagents.ts`). UNGROUNDED,
+  INVENTED (per the inventory's own step 2b instruction): no capture in this
+  manifest carries a FILE-plane-only historical usage record — one with no
+  paired STREAM-plane `message_start` — attributed to a NESTED (spawnDepth 2)
+  subagent id, carrying `cache_creation`'s ephemeral 5m/1h split,
+  `server_tool_use` counts, `service_tier`, `speed` and `inference_geo`. The
+  field VALUES mirror `sidecarAssistantUsageEvent`
+  (`tokenutilization_e2e_test.go`), the daemon/e2e harness's own invented
+  fixture, since no vendor recording exists to ground them from. Retires
+  `tokenutilization_e2e_test.go`'s `sidecarAssistantUsageEvent` call sites.
