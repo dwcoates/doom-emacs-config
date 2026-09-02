@@ -59,15 +59,17 @@ func TestRecognizeRefusesAgentsAndHelp(t *testing.T) {
 	}
 }
 
-func TestRecognizeRefusesACommandTheClosedSetDoesNotName(t *testing.T) {
+// TestRecognizeFallsAnUnnamedCommandThroughToTheVendor covers the closed set's
+// edge: `command_refused` is for a command the daemon RECOGNIZES and neither
+// answers nor forwards, and endpoint_submit_prompt.proto says an unrecognized
+// command falls through to the vendor like any other text. Refusing here would
+// suppress every vendor and user-authored slash command the enum lacks.
+func TestRecognizeFallsAnUnnamedCommandThroughToTheVendor(t *testing.T) {
 	// Arrange / Act
 	got := recognize("/deploy-everything")
 	// Assert
-	if got.kind != RecognizedRefused {
-		t.Fatalf("recognition = %s, want a refusal", recognitionName(got.kind))
-	}
-	if got.literal != "/deploy-everything" {
-		t.Fatalf("literal = %q, want the command as typed", got.literal)
+	if got.kind != RecognizedNone {
+		t.Fatalf("recognition = %s, want it forwarded as an ordinary prompt", recognitionName(got.kind))
 	}
 }
 
