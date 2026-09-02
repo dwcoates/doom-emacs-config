@@ -859,9 +859,7 @@ describe("a cold gate resolved by compacting", () => {
     // Arrange / Act
     const row = await drawRow(coldGateResolvedRow("compact", { scope: SessionCompactScope.PROMPTS }));
     // Assert
-    expect(row.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope")).toBe(
-      String(SessionCompactScope.PROMPTS),
-    );
+    expect(row.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope")).toBe("PROMPTS");
   });
 
   it("draws the model the resolution carries", async () => {
@@ -875,9 +873,7 @@ describe("a cold gate resolved by compacting", () => {
     // Arrange / Act
     const row = await drawRow(coldGateResolvedRow("compact", { scope: SessionCompactScope.RESPONSES }));
     // Assert
-    expect(row.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope")).toBe(
-      String(SessionCompactScope.RESPONSES),
-    );
+    expect(row.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope")).toBe("RESPONSES");
   });
 });
 
