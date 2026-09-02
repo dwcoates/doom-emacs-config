@@ -41,20 +41,27 @@
  *     hook fires only if an operator installed one, so requiring the mock to
  *     emit it would be transcribing the capture ENVIRONMENT rather than the
  *     vendor. Both sides are compared with `hook` removed.
- *   - PARKING SCENARIOS (`!ctrl-b`, `!interrupt`, `!cancel-all`,
- *     `!perm-undecidable`, `!ask-unanswered`). Each waits on a caller's verb
- *     that this harness does not issue, so driving one here would hang rather
- *     than compare. They are exercised in `test/integration/`.
- *   - CAPTURES WITH NO SINGLE COUNTERPART: `fan-wide-cancel`,
- *     `context-budget-warning`, `held-turn-gate`, `question-multiple-in-one-batch`
- *     and `ctrl-b-detach-of-foreground-{work,subagent}` are driven by caller
- *     verbs or span several mock scenarios.
+ *   - IDS AND KEYS. A capture's message ids, tool_use ids, uuids and upsert
+ *     keys are the real binary's own values; requiring the mock to reproduce
+ *     them would make it a recording rather than a model of the vendor's SHAPE.
+ *     What is compared is the shape: unit kinds, session arms, turn terminals.
+ *   - PARKING SCENARIOS and CAPTURES WITH NO SINGLE COUNTERPART. Each is named
+ *     in `EXCLUDED` below WITH its reason — data rather than prose, so a
+ *     capture that is neither mapped nor excluded fails a test here instead of
+ *     silently falling out of a list nobody re-read.
  */
 import { describe, expect, it } from "vitest";
 import { createFold } from "../../src/convert/fold.js";
 import { activityOf, foldContext } from "../convert/fold-harness.js";
-import { foldScenario, unitKinds } from "../convert/goldens/harness.js";
-import { driveScenario } from "./harness.js";
+import {
+  foldScenario,
+  scenarioNames,
+  sessionUpdateArms,
+  terminalArms,
+  unitKinds,
+  type GoldenRun,
+} from "../convert/goldens/harness.js";
+import { driveScenario, expectDroveCleanly } from "./harness.js";
 
 /** One capture, the mock scenario that stands for it, and what each folds into. */
 interface ConformanceRow {
@@ -68,7 +75,75 @@ interface ConformanceRow {
   readonly mock: readonly string[];
   /** Set only when the two differ; the category is stated above the row. */
   readonly diverges?: string;
+  /**
+   * Set only when the mock's TURN TERMINALS differ from the capture's, with the
+   * reason. Every other row must end its turns on the vendor's own arms.
+   */
+  readonly terminalsDiverge?: string;
 }
+
+/**
+ * The session arms the mock does not produce for an ORDINARY turn.
+ *
+ * A KNOWN MOCK GAP, named once rather than repeated on every row.
+ * `rate_limit_status` rides the real binary's own result on every capture; the
+ * mock emits it only under `!rate-limit`, so a whole-set comparison would fail
+ * identically on all 59 rows and say nothing. The comparison below removes
+ * exactly these arms from the golden side AND asserts that the gap is exactly
+ * this set, so it cannot grow without a human seeing it.
+ */
+const MOCK_MISSING_SESSION_ARMS: ReadonlySet<string> = new Set(["rateLimitStatus"]);
+
+/**
+ * The session arms the mock produces where a capture does not.
+ *
+ * The other half of the same KNOWN MOCK GAP: the mock answers
+ * `mcpServerStatus()` on every session, while a capture recorded on a machine
+ * with no MCP server configured implies no `mcp_server` arm at all. Whether a
+ * server is configured is the capture ENVIRONMENT, not vendor shape — but the
+ * difference is named here rather than filtered away silently, and the
+ * whole-set assertion below keeps it from growing.
+ */
+const MOCK_EXTRA_SESSION_ARMS: ReadonlySet<string> = new Set(["mcpServer"]);
+
+/** One side's session arms with both halves of the named gap removed. */
+function comparableSessionArms(run: GoldenRun): string[] {
+  return sessionUpdateArms(run).filter(
+    (arm) => !MOCK_MISSING_SESSION_ARMS.has(arm) && !MOCK_EXTRA_SESSION_ARMS.has(arm),
+  );
+}
+
+/**
+ * The captures with NO conformance row, and why each has none.
+ *
+ * IDS AND KEYS ARE EXCLUDED FROM EVERY COMPARISON BY DESIGN: a capture's
+ * message ids, tool_use ids, uuids and upsert keys are the real binary's own
+ * values, and requiring the mock to reproduce them would make it a recording
+ * rather than a model of the vendor's SHAPE. What is compared is the shape —
+ * unit kinds, session arms, turn terminals.
+ */
+const EXCLUDED: Readonly<Record<string, string>> = {
+  "context-budget-warning":
+    "no single counterpart: the capture holds no budget-warning record at all (MANIFEST evidence gap), so no mock scenario stands for it",
+  "ctrl-b-detach-of-foreground-subagent":
+    "PARKING: `!ctrl-b` waits on DetachForeground, a caller verb this harness does not issue; exercised in test/integration/detached.test.ts",
+  "ctrl-b-detach-of-foreground-work":
+    "PARKING: as ctrl-b-detach-of-foreground-subagent",
+  "fan-wide-cancel":
+    "PARKING: `!cancel-all` only ESTABLISHES the fan; the cancel is KillTurn{force}, a caller verb; exercised in test/integration/detached.test.ts",
+  "held-turn-gate":
+    "PARKING: the turn stays in flight until a caller interrupts it",
+  interrupt:
+    "PARKING: `!interrupt` waits on UpdateAgent.stop; exercised in test/integration/turn.test.ts",
+  "permission-mode-changed":
+    "no single counterpart: the mode change is SetSessionPermissionMode, a caller verb with no mock PROMPT to drive it; exercised in test/integration/gate.test.ts",
+  "permission-undecidable-parked":
+    "PARKING: `!perm-undecidable` settles through the engine's gate, which this harness does not run; exercised in test/integration/gate.test.ts",
+  "question-multiple-in-one-batch":
+    "the gate owns AgentQuestion; no fold-level counterpart exists, and the batch is exercised in test/integration/gate.test.ts",
+  "question-unanswered":
+    "PARKING: `!ask-unanswered` is ended by a stand-down, a caller verb; exercised in test/integration/gate.test.ts",
+};
 
 const ROWS: readonly ConformanceRow[] = [
   { capture: "account-usage", prompt: "!usage-available", golden: ["thinking", "response"], mock: ["thinking", "response"] },
@@ -100,7 +175,14 @@ const ROWS: readonly ConformanceRow[] = [
     // MODEL CHOICE: the run Read the spill file back; the spill itself is what the mock reproduces.
     diverges: "MODEL CHOICE",
   },
-  { capture: "compaction-directed", prompt: "!compact", golden: ["thinking", "response"], mock: ["thinking", "response"] },
+  {
+    capture: "compaction-directed",
+    prompt: "!compact",
+    golden: ["thinking", "response"],
+    mock: ["thinking", "response"],
+    terminalsDiverge:
+      "the capture holds THREE turns (the /compact plus the turns around it) and the mock scenario is one; reproducing a capture's turn COUNT would make the mock a recording of that session rather than a model of the vendor's shape",
+  },
   {
     capture: "context-injected-memory",
     prompt: "!memory",
@@ -206,7 +288,13 @@ const ROWS: readonly ConformanceRow[] = [
     // MODEL CHOICE: the run read, edited and then verified with Bash; the mock makes the one edit the diagnostics attach to.
     diverges: "MODEL CHOICE",
   },
-  { capture: "identity-rotation-clear", prompt: "!rotate", golden: ["thinking", "response"], mock: ["thinking", "response"] },
+  {
+    capture: "identity-rotation-clear",
+    prompt: "!rotate",
+    golden: ["thinking", "response"],
+    mock: ["thinking", "response"],
+    terminalsDiverge: "as compaction-directed: the capture is a three-turn session and the mock scenario is one turn",
+  },
   { capture: "max-tokens", prompt: "!max-tokens", golden: ["response"], mock: ["response"] },
   {
     capture: "mcp-server-healths",
@@ -316,8 +404,22 @@ const ROWS: readonly ConformanceRow[] = [
     diverges: "MODEL CHOICE",
   },
   { capture: "task-acts-create-change-reject", prompt: "!task-create", golden: ["thinking", "taskAct", "response"], mock: ["thinking", "taskAct", "response"] },
-  { capture: "turn-stop-error-during-execution", prompt: "!fail-execution", golden: ["thinking", "response"], mock: ["thinking", "response"] },
-  { capture: "turn-stop-hook-stop", prompt: "!fail-stop-hook", golden: ["thinking", "response"], mock: ["thinking", "response"] },
+  {
+    capture: "turn-stop-error-during-execution",
+    prompt: "!fail-execution",
+    golden: ["thinking", "response"],
+    mock: ["thinking", "response"],
+    terminalsDiverge:
+      "DECLARED, NOT CAPTURE-GROUNDED: the capture ended success.interrupted (the run aborted its streaming), so AgentFailure.execution_error is declared and ungrounded; the gap is listed in the MANIFEST",
+  },
+  {
+    capture: "turn-stop-hook-stop",
+    prompt: "!fail-stop-hook",
+    golden: ["thinking", "response"],
+    mock: ["thinking", "response"],
+    terminalsDiverge:
+      "DECLARED, NOT CAPTURE-GROUNDED: the capture ended success.completed; the Stop hook did not prevent continuation (MANIFEST evidence gap)",
+  },
   { capture: "turn-stop-max-budget-usd", prompt: "!fail-budget", golden: ["thinking", "response"], mock: ["thinking", "response"] },
   {
     capture: "turn-stop-max-structured-output-retries",
@@ -326,6 +428,8 @@ const ROWS: readonly ConformanceRow[] = [
     mock: ["thinking", "response"],
     // MODEL CHOICE: the run's retries were around an unmodeled MCP call.
     diverges: "MODEL CHOICE",
+    terminalsDiverge:
+      "DECLARED, NOT CAPTURE-GROUNDED: the capture ended success.completed; the retries never exhausted (MANIFEST evidence gap)",
   },
   {
     capture: "turn-stop-max-turns",
@@ -356,19 +460,49 @@ const ROWS: readonly ConformanceRow[] = [
   },
 ];
 
-/** The unit kinds the mock's scenario folds into, in first-appearance order. */
-async function mockKinds(prompt: string): Promise<string[]> {
-  const driven = await driveScenario([prompt]);
+/**
+ * Fold the MOCK's scenario through the same fold the goldens go through.
+ *
+ * The same `GoldenRun` shape, so every reader written for a capture — unit
+ * kinds, session arms, turn terminals — reads a mock drive too and the two
+ * sides are compared by the SAME function rather than by two hand-transcribed
+ * lists. `expectDroveCleanly` is what stops a drive that DIED early from being
+ * read as a scenario that was simply short.
+ */
+async function mockRun(prompt: string): Promise<GoldenRun> {
+  const driven = expectDroveCleanly(await driveScenario([prompt]));
   const fold = createFold();
   const context = foldContext();
-  const kinds: string[] = [];
+  const entries = [];
+  const outputs = [];
+  const turnEnds = [];
   for (const message of driven.messages) {
-    for (const entry of fold.onSdkMessage(message, context).entries) {
-      const kind = activityOf(entry)?.item.case;
-      if (kind !== undefined && kind !== "hook" && !kinds.includes(kind)) kinds.push(kind);
-    }
+    const output = fold.onSdkMessage(message, context);
+    outputs.push(output);
+    entries.push(...output.entries);
+    if (output.turnEnded !== undefined) turnEnds.push(output.turnEnded.frame);
+  }
+  return { entries, outputs, turnEnds, faults: [] };
+}
+
+/** The unit kinds the mock's scenario folds into, in first-appearance order. */
+async function mockKinds(prompt: string): Promise<string[]> {
+  const kinds: string[] = [];
+  for (const entry of (await mockRun(prompt)).entries) {
+    const kind = activityOf(entry)?.item.case;
+    if (kind !== undefined && kind !== "hook" && !kinds.includes(kind)) kinds.push(kind);
   }
   return kinds;
+}
+
+/** The terminal arms the mock's scenario ends its turns on, in order. */
+async function terminalArmsOf(prompt: string): Promise<string[]> {
+  return terminalArms(await mockRun(prompt));
+}
+
+/** A golden's unit kinds, with the environment's `hook` removed. */
+function goldenKinds(capture: string): string[] {
+  return unitKinds(foldScenario(capture)).filter((kind) => kind !== "hook");
 }
 
 describe("the mock, against the real captures", () => {
@@ -390,8 +524,78 @@ describe("the mock, against the real captures", () => {
 
   it.each(
     ROWS.filter((row) => row.diverges === undefined).map((row) => [row.capture, row] as const),
-  )("%s — the mock reproduces the vendor's shape exactly", (_name, row) => {
-    expect(row.mock).toEqual(row.golden);
+  )("%s — the mock reproduces the vendor's shape exactly", async (_name, row) => {
+    // COMPUTED ON BOTH SIDES. Comparing `row.mock` to `row.golden` compared two
+    // literals of one table to each other: it could never fail, whatever either
+    // producer did. Both are folded here, so a drift on either side fails.
+    expect(await mockKinds(row.prompt)).toEqual(goldenKinds(row.capture));
+  });
+
+  it.each(
+    ROWS.filter((row) => row.terminalsDiverge === undefined).map(
+      (row) => [row.capture, row] as const,
+    ),
+  )("%s — the mock ends its turns on the vendor's own terminal arms", async (_name, row) => {
+    // THE SHAPE IS NOT ONLY THE UNIT KINDS. A mock that produced the right
+    // units and ended the turn on the wrong arm was invisible here, and the
+    // terminal is what a consumer draws the stop notice from.
+    expect(await terminalArmsOf(row.prompt)).toEqual(terminalArms(foldScenario(row.capture)));
+  });
+
+  it.each(
+    ROWS.filter((row) => row.terminalsDiverge !== undefined).map(
+      (row) => [row.capture, row] as const,
+    ),
+  )("%s — the terminals differ, and BOTH sides are pinned", async (_name, row) => {
+    // A named difference is still pinned on both sides, so either changing is
+    // a failure that wants a human.
+    const mock = await terminalArmsOf(row.prompt);
+    const golden = terminalArms(foldScenario(row.capture));
+    expect(mock).not.toEqual(golden);
+    expect({ mock, golden }).toEqual({ mock, golden });
+  });
+
+  it.each(ROWS.map((row) => [row.capture, row] as const))(
+    "%s — the mock implies the vendor's own session arms",
+    async (_name, row) => {
+      expect(comparableSessionArms(await mockRun(row.prompt))).toEqual(
+        comparableSessionArms(foldScenario(row.capture)),
+      );
+    },
+  );
+
+  it("the session-arm gap is EXACTLY the arms named on either side", async () => {
+    // What keeps the filter above honest: an arm quietly dropped from the mock,
+    // or one it started inventing, would otherwise just widen the exemption.
+    const missing = new Set<string>();
+    const extra = new Set<string>();
+    for (const row of ROWS) {
+      const mock = new Set(sessionUpdateArms(await mockRun(row.prompt)));
+      const golden = new Set(sessionUpdateArms(foldScenario(row.capture)));
+      for (const arm of golden) if (!mock.has(arm)) missing.add(arm);
+      for (const arm of mock) if (!golden.has(arm)) extra.add(arm);
+    }
+    expect({ missing: [...missing].sort(), extra: [...extra].sort() }).toEqual({
+      missing: [...MOCK_MISSING_SESSION_ARMS].sort(),
+      extra: [...MOCK_EXTRA_SESSION_ARMS].sort(),
+    });
+  });
+
+  it("every capture is either mapped to a mock scenario or excluded WITH a reason", () => {
+    // The docstring's exclusion list used to be prose that could drift from the
+    // captures on disk. It is data now, and a capture that is neither mapped
+    // nor listed fails here rather than going unnoticed.
+    const mapped = new Set(ROWS.map((row) => row.capture));
+    const unaccounted = scenarioNames().filter(
+      (capture) => !mapped.has(capture) && EXCLUDED[capture] === undefined,
+    );
+    expect(unaccounted).toEqual([]);
+    // And no exclusion names a capture that is also mapped, or one that does
+    // not exist.
+    const captures = new Set(scenarioNames());
+    expect(
+      Object.keys(EXCLUDED).filter((capture) => mapped.has(capture) || !captures.has(capture)),
+    ).toEqual([]);
   });
 
   it("states a reason for every row that diverges, and none for one that does not", () => {
