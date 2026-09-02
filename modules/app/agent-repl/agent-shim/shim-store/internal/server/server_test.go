@@ -239,7 +239,10 @@ func newHarness(t *testing.T, store Store, watchBuffer int) *harness {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// 1s: an in-process httptest.Server over a fake Store shuts down in
+		// single-digit milliseconds even under -race; see flush_test.go's
+		// openBound for the same package-level basis.
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
 			t.Errorf("shutdown: %v", err)
@@ -847,8 +850,9 @@ func TestShutdownEndsAStandingWatchCleanly(t *testing.T) {
 	w := startWatch(h, ctx, token)
 	<-store.sinceEntered
 
-	// Act.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Act. 1s: same in-process fake-Store basis as the package's other
+	// shutdown bounds.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer shutdownCancel()
 	if err := h.server.Shutdown(shutdownCtx); err != nil {
 		t.Fatalf("Shutdown = %v, want nil", err)
@@ -1156,7 +1160,10 @@ func TestServesOverAUnixSocket(t *testing.T) {
 	srv := New(newFakeStore(), log, 0)
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// 1s: an in-process httptest.Server over a fake Store shuts down in
+		// single-digit milliseconds even under -race; see flush_test.go's
+		// openBound for the same package-level basis.
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {
 			t.Errorf("shutdown: %v", err)
