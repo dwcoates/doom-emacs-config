@@ -792,13 +792,73 @@ describe("SetSessionModel", () => {
       }),
     );
 
-    await h.engine.setSessionModel(
+    // NOT AWAITED: the call itself does not resolve until the turn boundary
+    // (B4), because an ack while the running turn still answers on the old
+    // model would be contradicted by that turn's own context_usage.
+    const pending = h.engine.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+      }),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(h.queries[0]?.query.calls).not.toContain("setModel:claude-sonnet-5");
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+  });
+
+  it("does not RESOLVE the call until the turn ends (B4)", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    let settled = false;
+    const pending = h.engine
+      .setSessionModel(
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
+        }),
+      )
+      .then((response) => {
+        settled = true;
+        return response;
+      });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(settled).toBe(false);
+    h.queries[0]?.query.emit(resultMessage());
+    await pending;
+  });
+
+  it("answers a call still waiting on a turn boundary when the session stands down", async () => {
+    // Leaving the daemon holding a promise nothing can settle is worse than
+    // telling it the change did not land.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+    const pending = h.engine.setSessionModel(
       create(shimv1.SetSessionModelRequestSchema, {
         model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
       }),
     );
 
-    expect(h.queries[0]?.query.calls).not.toContain("setModel:claude-sonnet-5");
+    await h.engine.standDown("KillSession");
+
+    expect((await pending).result.case).toBe("failure");
   });
 
   it("applies the deferred model once the turn ends", async () => {
@@ -812,14 +872,14 @@ describe("SetSessionModel", () => {
         pageSize: 5,
       }),
     );
-    await h.engine.setSessionModel(
+    const pending = h.engine.setSessionModel(
       create(shimv1.SetSessionModelRequestSchema, {
         model: create(conversationv1.AgentModelSchema, { name: "claude-sonnet-5" }),
       }),
     );
 
     h.queries[0]?.query.emit(resultMessage());
-    await new Promise((resolve) => setImmediate(resolve));
+    await pending;
 
     expect(h.queries[0]?.query.calls).toContain("setModel:claude-sonnet-5");
   });
