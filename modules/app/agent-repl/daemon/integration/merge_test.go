@@ -1241,13 +1241,32 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 // mid-method, and a scripted conflict is the only park point this harness
 // offers, but reaching it requires the conflict brief's OWN Queue.Submit to
 // go through, which is exactly the call this scenario would leave held.
+// SECOND FINDING, 2026-09-02: the missing hook is NOT the only thing standing
+// in the way, and it is not the deeper one. THE BOUNCE-CROSSING RESUBMISSION
+// HAS NO PRODUCER. `wsm.Turn.Displaced` is WRITTEN by
+// internal/workspace/fleet_rollout.go's CaptureDisplaced and is read back by
+// NOTHING: grep the tree and the only non-test readers of the column are
+// wsm/turns.go's own scan and insert. internal/merge/recover.go re-enqueues an
+// interrupted merge and runs it again, but the second run's CaptureDisplaced
+// finds nothing in flight (the first run already KILLED the turn), so its
+// `r.displaced` is nil and terminal.go's resubmitDisplaced returns
+// immediately. A turn displaced by a merge that then crashes is marked
+// displaced in the database forever and is never put back.
+//
+// So a pause hook alone would only make the gap OBSERVABLE. Un-skipping this
+// test needs a PRODUCTION behavior first: a boot-time recovery that finds the
+// turns still marked displaced on a workspace whose merge lease did not
+// survive, resubmits each exactly once with
+// PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, and clears the mark in the same
+// step so a second boot cannot double it. That is a behavior question for the
+// project lead, not something a test hook can paper over.
 func TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce(t *testing.T) {
-	t.Skip("unexpressible: no harness hook pauses a merge run between CaptureDisplaced " +
-		"and its own next Queue.Submit, so a crash cannot be landed deterministically " +
-		"in the window that leaves a turn open-and-displaced without also blocking the " +
-		"merge's own submissions via internal/promptqueue/submit.go's unconditional " +
-		"watcher.TurnInFlight() hold-check (see this test's own doc comment, and the " +
-		"suite's report, for the full trace)")
+	t.Skip("behavior not implemented: nothing reads wsm.Turn.Displaced back, so a merge " +
+		"that crashes after CaptureDisplaced never resubmits the turn it took -- there is " +
+		"no boot recovery for displaced turns in internal/merge/recover.go or anywhere " +
+		"else. The missing harness hook (no knob freezes a merge run between " +
+		"CaptureDisplaced and its own next Queue.Submit) is the SECOND blocker, not the " +
+		"first: see this test's own doc comment for both traces")
 }
 
 // ---------------------------------------------------------------------------
