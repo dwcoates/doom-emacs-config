@@ -39,6 +39,7 @@ import { mountSidebar } from "../../src/sidebar/sidebar";
 import { mountHoldTray } from "../../src/tray/tray";
 import { mountComposer, createComposerGate } from "../../src/composer/composer";
 import { mountLoginOverlay, type LoginHandle } from "../../src/login/login";
+import type { TerminalFactory } from "../../src/login/terminal";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
@@ -175,6 +176,52 @@ function installShell(doc: Document): void {
   doc.body.innerHTML = body[1].replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
+/**
+ * A TERMINAL FOR JSDOM, the second and last environment substitution.
+ *
+ * xterm.js is a browser bundle: it reads `self` at import time, measures the
+ * device pixel ratio through `window.matchMedia`, and paints through a canvas
+ * 2d context. jsdom has none of the three, so the real factory throws before
+ * the overlay has written a byte — the terminal cannot run here for the same
+ * reason `fetch` cannot, and for no reason that lives in the app.
+ *
+ * So the harness supplies the same `LoginTerminalView` the overlay is written
+ * against, backed by the DOM: bytes are appended as text (which is what the
+ * suite reads back), a keydown on the host is reported as keystrokes, and
+ * `fit()` answers a fixed geometry. Everything the tests actually assert —
+ * which rpcs are called, which arms are sent, when the stream is cancelled —
+ * is the app's own.
+ */
+const jsdomTerminalFactory: TerminalFactory = async (host) => {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const screen = document.createElement("pre");
+  screen.className = "login-term-screen";
+  host.replaceChildren(screen);
+  const listeners: ((data: Uint8Array) => void)[] = [];
+  const onKeydown = (event: KeyboardEvent): void => {
+    // One key, one report: the pty sees the bytes, never a key name.
+    const bytes = encoder.encode(event.key === "Enter" ? "\r" : event.key);
+    for (const fn of listeners) fn(bytes);
+  };
+  host.addEventListener("keydown", onKeydown);
+  return {
+    write: (data) => {
+      screen.textContent = (screen.textContent ?? "") + decoder.decode(data);
+    },
+    onData: (fn) => {
+      listeners.push(fn);
+    },
+    fit: () => ({ rows: 24, cols: 100 }),
+    focus: () => {},
+    dispose: () => {
+      host.removeEventListener("keydown", onKeydown);
+      listeners.length = 0;
+      screen.remove();
+    },
+  };
+};
+
 export interface HarnessOptions {
   /** Dev mode: mount the root composer (`&composer=1`). Default false. */
   composer?: boolean;
@@ -262,7 +309,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ),
   );
 
-  const login = mountLoginOverlay(shell.loginOverlay, ctx);
+  const login = mountLoginOverlay(shell.loginOverlay, ctx, {
+    terminalFactory: jsdomTerminalFactory,
+  });
   handles.push(login);
   handles.push(mountTopbar(shell.topbar, ctx, { openLogin: () => login.open() }));
   handles.push(mountSidebar(shell.sidebar, ctx));

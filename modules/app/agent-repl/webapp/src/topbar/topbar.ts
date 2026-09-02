@@ -32,6 +32,7 @@ import { drawTopbarPermissionModePicker } from "./permission-mode.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import {
   bindSessionReveal,
+  bindTitleSessionReveal,
   drawTopbarAccount,
   drawTopbarConnectivity,
   drawTopbarTitle,
@@ -117,6 +118,8 @@ export function drawTopbarView(u: TopbarView, tc: TopbarContext): HTMLElement {
   );
 
   const center = drawTopbarTitle(requireMessage(u.title, "TopbarView.title"));
+  // The title opens the session line too, in every account state.
+  bindTitleSessionReveal(center, u.sessionLine, tc);
 
   const right = document.createElement("div");
   right.className = "topbar-right";

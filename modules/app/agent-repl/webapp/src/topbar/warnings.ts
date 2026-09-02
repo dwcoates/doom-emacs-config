@@ -64,7 +64,6 @@ export function drawTopbarWarningStrip(
   const button = document.createElement("button");
   button.type = "button";
   button.className = "topbar-warning-chip";
-  asAnchor(button, "warnings");
 
   // A GLYPH, not an emoji: a triangle that inherits the chip's color.
   const mark = document.createElement("span");
@@ -81,9 +80,11 @@ export function drawTopbarWarningStrip(
   button.append(mark, badge);
   wrap.append(button);
 
+  // The wrap is the control; see `drawTopbarModelSelector` for the reasoning.
+  asAnchor(wrap, "warnings");
   const body = (): HTMLElement => drawWarningList(u, tc);
   tc.reveals.register("warnings", "warnings", body);
-  button.addEventListener("click", () => {
+  wrap.addEventListener("click", () => {
     tc.reveals.toggle("warnings", "warnings", body);
   });
   return wrap;
