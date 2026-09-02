@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"sort"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
 )
 
@@ -25,10 +27,17 @@ import (
 // Everything that was merely QUEUED comes back in the order it was waiting in,
 // because the queue is durable and the order is the whole point of a queue.
 
-// Recover resumes or loudly fails every in-flight merge, then re-enqueues the
-// waiting ones.
+// Recover puts back the turns a merge displaced and never resubmitted, then
+// resumes or loudly fails every in-flight merge and re-enqueues the waiting
+// ones.
 func (o *orchestrator) Recover(ctx context.Context) error {
 	const op = "daemon.merge.recover"
+	// THE DISPLACED TURNS GO FIRST, before a recovered merge can be admitted
+	// again: the sweep is then reading a settled set of marks rather than
+	// racing a fresh run's own capture.
+	if err := o.recoverDisplaced(ctx); err != nil {
+		return err
+	}
 	queues, err := o.deps.DB.AllMergeQueues(ctx)
 	if err != nil {
 		return err
@@ -50,12 +59,13 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	for _, repo := range repos {
 		for _, entry := range queues[repo] {
 			if entry.State != wsm.MergeAdmitted {
-				o.mu.Lock()
-				o.repoOf[entry.Workspace] = repo
-				o.mu.Unlock()
-				o.publish(entry.Workspace, MergeFacts{
-					State: StateQueued, QueuePosition: entry.Position, QueueDepth: len(queues[repo]),
-				})
+				requeued, err := o.recoverWaiting(ctx, repo, entry, len(queues[repo]))
+				if err != nil {
+					return err
+				}
+				if !requeued {
+					continue
+				}
 				o.deps.Log.Global().Debug(op, "re-enqueued a waiting merge", dlog.Context{
 					"workspace": string(entry.Workspace), "repo": string(repo), "position": entry.Position})
 				continue
@@ -69,6 +79,56 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		o.kick(repo)
 	}
 	return nil
+}
+
+// recoverWaiting puts one merely-WAITING merge back on its queue, or ABANDONS
+// it when it cannot go back.
+//
+// The queue is durable, so the daemon's own shutdown does not end a waiting
+// merge — the restart is where a merge that shut down queued either resumes its
+// wait or gives up, and the give-up is what the DAEMON SHUTDOWN cause names. A
+// merge whose workspace no longer records the geometry the merge would run
+// against cannot be re-queued: the workspace was nuked, or its creation job is
+// gone, and admitting it later would only fail at the front of the queue with
+// nothing said about why it was ever there.
+//
+// A ROW THAT WILL NOT DECODE STILL REFUSES THE BOOT, exactly as an admitted
+// merge's does: half-written state is evidence, not an outcome.
+func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry, depth int) (bool, error) {
+	const op = "daemon.merge.recover"
+	ws := entry.Workspace
+	_, jobErr := o.layoutFor(ctx, ws)
+	var decodeErr *wsm.DecodeError
+	if errors.As(jobErr, &decodeErr) {
+		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
+		o.log(ctx, ws).Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
+		o.deps.Log.Global().Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
+		return false, fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
+	}
+	if jobErr != nil {
+		o.deps.Log.Global().Warn(op, "abandoning a merge the restart could not put back on its queue", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "error": jobErr.Error()})
+		// THE LEDGER IDENTITY IS MINTED HERE. A merely-queued merge's bubble
+		// is addressed by an identity minted in memory at enqueue and never
+		// written down, so the pre-restart bubble is unreachable; without a
+		// fresh one the abandoned terminal would have nowhere to land and the
+		// cause would reach nobody.
+		ledger := o.mintLedger(ws)
+		o.mu.Lock()
+		delete(o.repoOf, ws)
+		delete(o.ledgerOf, ws)
+		o.mu.Unlock()
+		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(CauseDaemonShutdown)); err != nil {
+			return false, err
+		}
+		o.publishAbandoned(ctx, ws, ledger, CauseDaemonShutdown)
+		return false, nil
+	}
+	o.mu.Lock()
+	o.repoOf[ws] = repo
+	o.mu.Unlock()
+	o.publish(ws, MergeFacts{State: StateQueued, QueuePosition: entry.Position, QueueDepth: depth})
+	return true, nil
 }
 
 // recoverAdmitted decides one in-flight merge's fate. RESUMABLE means the
@@ -180,4 +240,67 @@ func (o *orchestrator) lastTab(ctx context.Context, ws wsm.WorkspaceID) string {
 		return TabQueue
 	}
 	return last.Intervals[len(last.Intervals)-1].Kind
+}
+
+// recoverDisplaced puts back every turn a merge took the session away from and
+// never resubmitted, EXACTLY ONCE across every boot.
+//
+// A merge captures the user's in-flight turn durably and ends it, and puts it
+// back when its lease is released. A merge that DIES between those two acts
+// leaves the turn marked and nobody holding it: the interrupted merge is
+// re-enqueued, but its second run captures nothing (the first run already
+// ended the turn), so without this sweep the turn the user typed stays marked
+// displaced forever and is never put back.
+//
+// ONE OWNER PER RECORD, AND THE DATABASE PICKS IT. Both owners — the merge's
+// own release and this sweep — take a record through ClaimDisplacedTurn, whose
+// `WHERE displaced = 1` lets exactly one of them win however the two are
+// scheduled; the loser is told false and puts nothing back. The claim is taken
+// BEFORE the resubmission, so no second boot can double it either.
+//
+// A merge the recovery RE-ENQUEUES is not an owner of the old record: its
+// second run captures nothing (the first run already ended the turn), which is
+// precisely the gap this sweep closes. Such a run may displace the resubmitted
+// turn all over again and put THAT one back at its own release — one
+// displacement, one resubmission, which is the contract.
+//
+// A submission that fails is recorded and the sweep goes on: one workspace
+// whose session refuses a turn is not a reason to leave every other user's
+// displaced turn unrecovered. A DURABLE READ OR CLAIM that fails fails the
+// boot, as every other recovery step's does.
+func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
+	const op = "daemon.merge.recover_displaced"
+	displaced, err := o.deps.DB.AllDisplacedTurns(ctx)
+	if err != nil {
+		o.deps.Log.Global().Error(op, "the displaced turns could not be read", dlog.Context{"error": err.Error()})
+		return fmt.Errorf("merge: read the displaced turns: %w", err)
+	}
+	if len(displaced) == 0 {
+		return nil
+	}
+	o.deps.Log.Global().Info(op, "resubmitting the turns a merge displaced and never put back", dlog.Context{
+		"turns": len(displaced)})
+	for _, t := range displaced {
+		fields := dlog.Context{"workspace": string(t.Workspace), "turn": string(t.ID)}
+		claimed, err := o.deps.DB.ClaimDisplacedTurn(ctx, t.ID, o.deps.Now())
+		if err != nil {
+			o.deps.Log.Global().Error(op, "a displaced turn could not be claimed", withField(fields, "error", err.Error()))
+			return fmt.Errorf("merge: claim the displaced turn %q: %w", t.ID, err)
+		}
+		if !claimed {
+			o.deps.Log.Global().Debug(op, "a displaced turn was already put back by its merge", fields)
+			continue
+		}
+		if _, err := o.deps.Queue.Submit(ctx, promptqueue.Submission{
+			WS: t.Workspace, Turn: wsm.NewTurnID(), Said: saidText(t.Text),
+			Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+		}); err != nil {
+			o.log(ctx, t.Workspace).Error(op, "could not resubmit a turn a merge displaced", withField(fields, "error", err.Error()))
+			o.deps.Log.Global().Error(op, "could not resubmit a turn a merge displaced", withField(fields, "error", err.Error()))
+			continue
+		}
+		o.log(ctx, t.Workspace).Info(op, "resubmitted a turn a merge displaced and never put back", fields)
+		o.deps.Log.Global().Info(op, "resubmitted a turn a merge displaced and never put back", fields)
+	}
+	return nil
 }

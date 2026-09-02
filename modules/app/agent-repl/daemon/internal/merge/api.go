@@ -74,6 +74,11 @@ type Orchestrator interface {
 	// OnInterrupt raises the dequeue offer when the user interrupts a
 	// workspace that is queued.
 	OnInterrupt(ctx context.Context, ws ids.WorkspaceID)
+	// OnWorkspaceClosed abandons a workspace's WAITING merge when the
+	// workspace itself is torn down (killed or nuked), recording the close as
+	// the abandon cause. It is a no-op for a workspace with no waiting merge,
+	// and never touches a merge already in flight.
+	OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID)
 	// RouteParked delivers a submission that arrived while this workspace's
 	// merge lease stands PARKED. It is the queue's one ingress into the
 	// orchestrator: the queue recognizes the parked lease policy, never merge
@@ -170,6 +175,13 @@ type Deps struct {
 	// admission, so it is resubmitted EXACTLY ONCE at lease release even across
 	// a daemon bounce. It reports false when nothing was in flight.
 	CaptureDisplaced DisplacedCapture
+	// PauseAfterCapture is a TEST-ONLY seam: when set, a run blocks in it
+	// immediately after the displaced turn was captured, which is the one
+	// window a test cannot otherwise reach (the merge's own next submission,
+	// or a clean run's finish, closes it instantly). PRODUCTION LEAVES IT NIL
+	// — nothing in the daemon's own graph builds one unless the test-only
+	// knob names a rendezvous file.
+	PauseAfterCapture AdmissionPause
 	// ParkedRoute delivers a parked submission to the resolution agent as
 	// guidance, landing it in the parked tab.
 	ParkedRoute ParkedRouter
@@ -230,6 +242,11 @@ type Displaced struct {
 	Turn ids.TurnID
 	Text string
 }
+
+// AdmissionPause blocks a merge run at admission. It exists for the test seam
+// PauseAfterCapture and has no production implementation; a nil pause is the
+// production value and is never called.
+type AdmissionPause func(ctx context.Context, ws ids.WorkspaceID)
 
 // DisplacedCapture durably records the turn a merge displaced. The bool is
 // false when no turn was in flight, which is not a failure.

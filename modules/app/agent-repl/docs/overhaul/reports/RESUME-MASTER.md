@@ -91,6 +91,28 @@ daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
 suite (real shim + store + sidecar, hosted daemon, no frontends). Both
 survive the merge.
 
+## STEP 7 PROCEDURE (user, 2026-09-02): run once, table first, then remediation
+
+The project lead runs the rebuilt e2e suite ONCE with `-v -json` redirected to
+a file in the scratchpad (never read raw output into context), derives a
+per-test `test | duration | result` table sorted by duration into a second
+file, and shows the user that table plus totals BEFORE any remediation is
+dispatched. Failures are then dispatched to opus-low implementers (all
+collected in one run, never fail-fast).
+
+## USER DECISION 2026-09-02: REBUILD the cross-system e2e suite
+
+Approved ("go for it"). New top-level package modules/app/agent-repl/e2e,
+owned by the project lead (only the project lead runs it). Basis: the daemon
+integration harness (real claude-repld binary), with the REAL shim, store and
+sidecar in place of its fakes; the fake SDK is the only mock and the only
+writer of vendor files; tests write nothing. Spec inputs: E2E-EVENT-INVENTORY
+(what the old suite asserted), the 69 goldens and E2E-SCENARIO-COVERAGE gaps,
+the cross-system rulings in the plan docs. Orchestrated by the existing
+e2e-cleanup opus-low orchestrator (sonnet-medium writers; compile gate only;
+no production changes) on branch overhaul/e2e-cleanup (worktree
+doom-overhaul/e2e-cleanup, now at the merged integration tip).
+
 ## FIVE-WAY MERGE LANDED 2026-09-02 (overhaul/integration)
 
 Merged in order daemon 892fab33e, shim d8236003d, webapp e5cd9002c, store

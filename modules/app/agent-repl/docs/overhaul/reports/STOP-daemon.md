@@ -267,16 +267,40 @@ The dead-code pass's live-code/dead-code pairs, resolved:
 
 ## Remaining items
 
-- `TestAnAbandonedQueuedMergeHasNoReachableCause` stays SKIPPED, and
-  `FeedMergeAbandoned.summary` did not unblock it: `dropQueued` has only two
-  call sites (operator evict, user dequeue) and no production site raises a
-  merge's own give-up, so the "workspace closed" and "daemon shutdown" causes
-  the relay names have no producer in `internal/merge` at all. The distinct
-  `FeedMergeError` evict/dequeue/abandon arms alone would NOT be enough; a
-  producer has to exist first. Route this to the project lead as a behavior
-  question, not a proto ask.
+- RESOLVED (project lead's ruling, 2026-09-02).
+  `TestAnAbandonedQueuedMergeHasNoReachableCause` is un-skipped, renamed
+  `TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause`. The two
+  missing producers were built: `merge.OnWorkspaceClosed`, called by both
+  teardown verbs (`CloseWorkspace` still refuses outright while a merge is
+  queued, so Kill/Nuke are the one door such a workspace leaves through), and
+  `recoverWaiting`, which abandons a merge the restart cannot put back on its
+  queue under the daemon-shutdown cause. `AbandonCause` declares all four
+  causes beside the one sentence each draws, and `publishAbandoned` records
+  the abandonment at INFO keyed by the cause. No proto changed.
+- RESOLVED (project lead's ruling, 2026-09-02).
+  `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` is
+  un-skipped, and a second test covers the double-boot edge. Both blockers were
+  built: `merge.recoverDisplaced`, a boot sweep that resubmits every turn still
+  marked displaced under `PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME`, and
+  `merge.Deps.PauseAfterCapture`, a test-only pause (nil in production, wired
+  only from `AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE`) that holds a run in the
+  window between the capture and everything that would close it. Exactly-once
+  is arbitrated by the database: `wsm.ClaimDisplacedTurn` clears the mark under
+  `WHERE displaced = 1` and reports whether THIS caller took the record, so the
+  merge's own release and the sweep can never both put one turn back. No proto
+  changed. The original reading, kept for the trace:
 - `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` stays
-  skipped: no crash-window hook.
+  skipped, and the earlier reading of WHY was wrong. The blocker is not the
+  missing crash-window hook: THE BOUNCE-CROSSING RESUBMISSION HAS NO PRODUCER.
+  `wsm.Turn.Displaced` is written by `workspace.CaptureDisplaced` and read back
+  by nothing outside `wsm/turns.go`'s own scan and insert. `merge/recover.go`
+  re-runs an interrupted merge, but that second run's `CaptureDisplaced` finds
+  nothing in flight (the first run already killed the turn), so
+  `resubmitDisplaced` no-ops. A turn displaced by a merge that then crashes
+  stays marked displaced forever and is never put back. Un-skipping needs a
+  boot-time recovery that resubmits every still-marked displaced turn exactly
+  once with `PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME` and clears the mark in
+  the same step. Behavior question for the project lead, not a test-hook ask.
 - The merge ENDS the displaced user turn (KillTurn) after capturing it, then
   resubmits exactly once at lease release. daemon.md says only "captured
   durably and resubmitted exactly once"; the rationale for ending it is that a
@@ -377,7 +401,11 @@ instances of the same defect and deserve a sweep.
    then the per-cause arms. This is a behavior question for the project lead,
    not a proto ask.
 2. `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` — the
-   BEHAVIOR IS IMPLEMENTED; the skip is a missing TEST HOOK. The merge captures
+   BEHAVIOR IS **NOT** IMPLEMENTED (corrected 2026-09-02; see "Remaining
+   items"). Nothing reads `wsm.Turn.Displaced` back, so no bounce ever
+   resubmits. The paragraph below records the SECOND blocker, the missing test
+   hook, which only matters once the behavior exists. Original text:
+   the skip is a missing TEST HOOK. The merge captures
    the displaced turn durably, ends it (KillTurn), and resubmits exactly once
    at lease release. What cannot be constructed is a deterministic crash inside
    the narrow window between `CaptureDisplaced` and either the merge's own next

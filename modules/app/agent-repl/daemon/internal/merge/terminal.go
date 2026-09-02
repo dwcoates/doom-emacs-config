@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -158,7 +159,8 @@ func terminalCause(out outcome) string {
 // resubmitDisplaced puts back the user turn the merge displaced, EXACTLY ONCE.
 // The capture is durable, so the resubmission survives a bounce; the run's own
 // record is cleared by the submission itself, so a second teardown cannot
-// double it.
+// double it, and the DURABLE mark is retired here so the boot recovery's sweep
+// (recoverDisplaced) never puts the same turn back a second time.
 //
 // The text comes from the CAPTURE, not from a re-read of the open turns: the
 // displaced turn was ended when the merge took the session away from it, so its
@@ -170,6 +172,22 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 	displaced := *r.displaced
 	r.displaced = nil
 	fields := dlog.Context{"workspace": string(r.ws), "turn": string(displaced.Turn)}
+	// THE CLAIM GOES DOWN BEFORE THE SUBMISSION, AND THE DATABASE ARBITRATES
+	// IT. Clearing the durable mark is what tells the boot recovery's sweep
+	// this record is spent; a submission made first, with a crash before the
+	// mark came down, would have the next boot put the same turn back a second
+	// time. A claim that answers false means the sweep already put it back,
+	// and this owner resubmits NOTHING.
+	claimed, err := r.o.deps.DB.ClaimDisplacedTurn(ctx, displaced.Turn, r.o.deps.Now())
+	if err != nil {
+		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not claim the displaced turn",
+			withField(fields, "error", err.Error()))
+		return
+	}
+	if !claimed {
+		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn was already put back by a boot recovery", fields)
+		return
+	}
 	if _, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: r.ws, Turn: wsm.NewTurnID(), Said: saidText(displaced.Text),
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
@@ -177,13 +195,6 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not resubmit the displaced turn",
 			withField(fields, "error", err.Error()))
 		return
-	}
-	// The captured record is retired whether or not it was still open: the
-	// displaced turn is spent, and a record left marked displaced would be
-	// resubmitted again by a boot recovery.
-	if err := r.o.deps.DB.CloseTurn(ctx, displaced.Turn, r.o.deps.Now(), wsm.CloseCompleted); err != nil {
-		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn's record was already retired",
-			withField(fields, "cause", err.Error()))
 	}
 	r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "resubmitted the displaced turn", fields)
 }
@@ -223,14 +234,27 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // it: an empty one means no bubble was ever drawn and there is nothing to end.
 //
 // THE ABANDONED ARM IS STILL THE ONLY ARM. `FeedMergeError` carries `failed`
-// and `abandoned` and nothing else, so an evict, a dequeue release and a run's
-// own give-up all end here under the same arm. What landing 7 added is
-// `FeedMergeAbandoned.summary`: the resolved sentence for the collapsed line,
-// composed from the abandon CAUSE by the caller that dropped the merge, so the
-// cause reaches a reader in prose even though the arm does not distinguish it.
-func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, summary string) {
-	o.deps.Log.Global().Debug("daemon.merge.abandoned", "a merge left the queue without running",
-		dlog.Context{"workspace": string(ws), "summary": summary})
+// and `abandoned` and nothing else, so a user drop, a dequeue release, a
+// workspace close and a daemon shutdown all end here under the same arm. What
+// landing 7 added is `FeedMergeAbandoned.summary`: the resolved sentence for
+// the collapsed line, composed from the abandon CAUSE, so the cause reaches a
+// reader in prose even though the arm does not distinguish it.
+func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, cause AbandonCause) {
+	const op = "daemon.merge.abandoned"
+	summary, declared := cause.summary()
+	if !declared {
+		// AN UNDECLARED CAUSE IS A DEFECT, never a silent empty line: the
+		// bubble still ends, and the raw cause rides the sentence so the
+		// reader is not left with nothing while the ERROR names the gap.
+		summary = fmt.Sprintf("this merge left the queue before it ran (%s)", cause)
+		o.deps.Log.Global().Error(op, "a merge was abandoned under a cause with no declared summary",
+			dlog.Context{"workspace": string(ws), "cause": string(cause)})
+	}
+	// THE ABANDONMENT IS AN INFO RECORD, keyed by the cause: which of the four
+	// ends a merge had is exactly what a reader of the run log comes for, and
+	// the cause key is what makes them countable.
+	o.deps.Log.Global().Info(op, "a merge left the queue without running",
+		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
 		label := o.abandonedLabel(ctx, ws)
 		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
@@ -300,7 +324,7 @@ func (o *orchestrator) AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, ke
 	// DEBUG and the release arm is no more of a warning than it is. The work
 	// actually abandoned is recorded by dropQueued's own WARN below.
 	o.log(ctx, ws).Debug(op, "releasing a queued merge's slot on the user's answer", dlog.Context{"workspace": string(ws)})
-	return o.dropQueued(ctx, ws, "dequeued", "the user released this merge's queue slot")
+	return o.dropQueued(ctx, ws, CauseUserDequeue)
 }
 
 // clearOffer retires the dequeue offer, whether it was answered, superseded by
