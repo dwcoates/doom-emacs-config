@@ -377,6 +377,13 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 	if turnID := prompt.GetId().GetValue(); turnID != "" {
 		turn := ids.TurnID(turnID)
 		w.turn = &turn
+		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
+		// stream frame states that a turn was accepted.
+		w.sinks.Footer.OnTurnOpened(ws, turn)
+	} else {
+		w.log.Error("daemon.sessionwatcher.turn_opened_unidentified", "an opened turn named no id", dlog.Context{
+			"agent_id": prompt.GetAgent().GetValue(),
+		})
 	}
 	w.log.Debug("daemon.sessionwatcher.turn_opened", "the queue opened a turn", dlog.Context{
 		"turn_id":  prompt.GetId().GetValue(),
