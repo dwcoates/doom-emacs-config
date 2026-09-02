@@ -187,6 +187,12 @@ func setResponseError(resp proto.Message, arm string, fields map[string]any) boo
 	return true
 }
 
+// nestedArm is a refusal field value naming an arm of a oneof INSIDE the
+// `<Rpc>Error` arm message — SubmitPromptBubbleRefused's `kind`. The nested
+// arms are empty messages, so the arm NAME is the whole value; the refusal
+// keys it by the oneof's own name.
+type nestedArm string
+
 // setArm populates one `<Rpc>Error` arm by name, filling whichever of the arm
 // message's own fields the refusal supplied.
 func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) bool {
@@ -195,6 +201,9 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 		return false
 	}
 	armMessage := errMessage.NewField(armField).Message()
+	if !setNestedArms(armMessage, fields) {
+		return false
+	}
 	for i := 0; i < armMessage.Descriptor().Fields().Len(); i++ {
 		field := armMessage.Descriptor().Fields().Get(i)
 		value, ok := fields[string(field.Name())]
@@ -214,9 +223,42 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 			if number, ok := value.(int32); ok {
 				armMessage.Set(field, protoreflect.ValueOfInt32(number))
 			}
+		case protoreflect.Uint32Kind:
+			if number, ok := value.(uint32); ok {
+				armMessage.Set(field, protoreflect.ValueOfUint32(number))
+			}
+		case protoreflect.BoolKind:
+			if flag, ok := value.(bool); ok {
+				armMessage.Set(field, protoreflect.ValueOfBool(flag))
+			}
 		}
 	}
 	errMessage.Set(armField, protoreflect.ValueOfMessage(armMessage))
+	return true
+}
+
+// setNestedArms selects the arm of every NESTED oneof the refusal named,
+// reporting false when it named one this message does not carry — an arm the
+// contract does not spell is answered as an unlanded arm, never silently
+// dropped beside a bare sentence.
+func setNestedArms(armMessage protoreflect.Message, fields map[string]any) bool {
+	oneofs := armMessage.Descriptor().Oneofs()
+	for i := 0; i < oneofs.Len(); i++ {
+		oneof := oneofs.Get(i)
+		value, ok := fields[string(oneof.Name())]
+		if !ok {
+			continue
+		}
+		name, ok := value.(nestedArm)
+		if !ok {
+			return false
+		}
+		nested := oneof.Fields().ByName(protoreflect.Name(name))
+		if nested == nil || nested.Kind() != protoreflect.MessageKind {
+			return false
+		}
+		armMessage.Set(nested, protoreflect.ValueOfMessage(armMessage.NewField(nested).Message()))
+	}
 	return true
 }
 

@@ -195,35 +195,41 @@ func refOf(record wsm.Workspace) *workspacev1.WorkspaceRef {
 }
 
 // The bubble-addressed submit refusals the SHIM makes, and the kind each one
-// takes on the landing-7 candidate arm `SubmitPromptError.bubble_refused
-// {kind: not_deliverable | agent_busy}`. Until that arm lands the two answer
-// through server.UnlandedArm naming `bubble_refused` with the kind in the
-// reason; both shapes are recorded under that one row in daemon/ERROR-ARMS.md.
+// takes on the LANDED arm `SubmitPromptError.bubble_refused {detail; kind:
+// not_deliverable | agent_busy}` (landing 7). The daemon never judges a
+// subagent's turn itself: it relays the shim's verdict by name.
 const (
-	// armBubbleRefused is the intended (unlanded) arm both shapes answer under.
+	// armBubbleRefused is the landed SubmitPromptError arm both shapes answer
+	// under.
 	armBubbleRefused = "bubble_refused"
 	// bubbleKindNotDeliverable is the shim's UpdateAgentFailure.not_deliverable:
 	// the SDK has no route to the addressed subagent.
 	bubbleKindNotDeliverable = "not_deliverable"
-	// bubbleKindAgentBusy is the shim's StartTurnFailure.turn_already_open: the
+	// bubbleKindAgentBusy is the shim's UpdateAgentFailure.agent_busy: the
 	// addressed subagent's own turn is already running.
 	bubbleKindAgentBusy = "agent_busy"
 )
 
 // bubbleRefused folds the shim's two bubble-addressed submit refusals onto the
-// one intended arm, carrying the kind in the reason. Any other refusal passes
-// through untouched.
+// one landed arm, naming the kind as the arm's own nested oneof and keeping the
+// shim's sentence as `detail`. Any other refusal passes through untouched.
 func bubbleRefused(r refusal) refusal {
 	var kind string
 	switch r.Arm {
 	case bubbleKindNotDeliverable:
 		kind = bubbleKindNotDeliverable
-	case "turn_already_open":
+	case bubbleKindAgentBusy:
 		kind = bubbleKindAgentBusy
 	default:
 		return r
 	}
 	r.Arm = armBubbleRefused
-	r.Reason = fmt.Sprintf("kind %s: %s", kind, r.Reason)
+	// The map is COPIED rather than mutated: it may be the component's own.
+	fields := make(map[string]any, len(r.Fields)+1)
+	for name, value := range r.Fields {
+		fields[name] = value
+	}
+	fields["kind"] = nestedArm(kind)
+	r.Fields = fields
 	return r
 }
