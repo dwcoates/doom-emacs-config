@@ -386,8 +386,9 @@ func TestWorkflowArmIsAcceptedDurablyWithAWarning(t *testing.T) {
 		t.Errorf("the workflow warning names write_id %v, want w-workflow-1", written[0].Context["write_id"])
 	}
 
-	page := openSession(ctx, t, cli, "main", 10, nil)
-	assertTexts(t, "a book beside a workflow frame", pageTexts(page.GetPage()), nil)
+	// A workflow frame is not a page line and it is not an agent's first
+	// sight either, so "main" is still an agent this store has never heard of.
+	openUnknownAgent(ctx, t, cli, "main")
 
 	// THE ARM IS THE ANSWER, NEVER THE DETAIL. `detail` is prose for a human
 	// and nothing may switch on it; a caller learns from `not_implemented` that

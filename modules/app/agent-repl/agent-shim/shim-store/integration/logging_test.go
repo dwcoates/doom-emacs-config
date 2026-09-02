@@ -194,6 +194,7 @@ func TestACallersRequestIdReachesTheStoresRecords(t *testing.T) {
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
+	seedBook(ctx, t, streamProducer(store.client()), "main", "reqid")
 	mark := store.logMark()
 	const requestID = "req-itest-0f1e2d3c"
 

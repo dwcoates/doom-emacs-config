@@ -50,7 +50,9 @@ func TestARefusedIdentityChangeLeavesTheOriginalLineServed(t *testing.T) {
 
 	// Assert
 	assertTexts(t, "the original book", pageTexts(openSession(ctx, t, cli, "main", 10, nil).GetPage()), []string{"L1"})
-	assertTexts(t, "the book it tried to move to", pageTexts(openSession(ctx, t, cli, "other", 10, nil).GetPage()), nil)
+	// The book the write tried to move the line INTO was never created at all,
+	// so it is not an empty book: the store has never heard of that agent.
+	openUnknownAgent(ctx, t, cli, "other")
 }
 
 func TestAPageLineWhoseEnvelopeAndFrameDisagreeIsRefused(t *testing.T) {

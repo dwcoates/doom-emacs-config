@@ -72,23 +72,26 @@ func TestFloorArmMarksTheOldestRetainedLine(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-// TestUnknownBookReadsEmptyAtFloor: a book nothing was ever written to is
-// empty and complete, not a refusal.
-func TestUnknownBookReadsEmptyAtFloor(t *testing.T) {
+// TestKnownButUnwrittenBookReadsEmptyAtFloor: a book its agent has written
+// nothing to is empty and complete, not a refusal.
+func TestKnownButUnwrittenBookReadsEmptyAtFloor(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
-	writeNumberedLines(ctx, t, streamProducer(cli), "main", 2)
+	shim := streamProducer(cli)
+	writeNumberedLines(ctx, t, shim, "main", 2)
+	registerEmptyBook(ctx, t, shim, "main", "unwritten", "unwritten")
 	opened := openSession(ctx, t, cli, "main", 1, nil)
 	pointerInMain := assertPageMore(t, opened.GetPage())
 
-	// Act: the same store, a book with no rows, read from its own open.
+	// Act: the same store, a known agent with no rows of its own, read from its
+	// own open.
 	empty := openSession(ctx, t, cli, "unwritten", 5, nil)
 
 	// Assert.
-	assertTexts(t, "an unknown book's page", pageTexts(empty.GetPage()), nil)
+	assertTexts(t, "a known but unwritten book's page", pageTexts(empty.GetPage()), nil)
 	assertPageFloor(t, empty.GetPage())
 
 	// And a pointer from ANOTHER book is stale here, never silently accepted.
