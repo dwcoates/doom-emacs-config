@@ -24,9 +24,11 @@ import {
   stopAgent,
   UNCATALOGED_MODEL,
   watchAgentRequest,
+  workId,
   model as modelNamed,
   DEFAULT_MODEL,
 } from "../integration-support/client.js";
+import { createStoreClient, seedBashLifecycle, sidecarProducer } from "../integration-support/store.js";
 import {
   hibernateAcked,
   hibernateKind,
@@ -44,6 +46,7 @@ import {
   watchAgentEntry,
   watchAgentPage,
   entryUpdateArm,
+  bashFrame,
 } from "../integration-support/expect.js";
 import {
   awaitFile,
@@ -914,32 +917,63 @@ describe("KillSession", () => {
     // The stream's terminal frame is the consumer's only stop notice, and it
     // must arrive before the process goes: a stream that ended without one is
     // read as a transport failure.
+    //
+    // THE DETACHED STREAM IS `WatchBash`, not the agent's. A shell run's
+    // lifecycle frames are lifecycle rows and never page lines, so its
+    // interrupted terminal cannot appear on a WatchAgent tail — waiting for it
+    // there waits for the process to die, which is the transport failure this
+    // test exists to forbid.
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await agent.until((frame) => {
+    const announced = await agent.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const inner = watchAgentEntry(frame).entry?.entry;
       return inner?.case === "agentFrame" && inner.value.result.case === "detachedWork";
     });
+    const inner = watchAgentEntry(announced).entry?.entry;
+    const run =
+      inner?.case === "agentFrame" && inner.value.result.case === "detachedWork"
+        ? (inner.value.result.value.work?.value ?? "")
+        : "";
+    expect(run).not.toBe("");
+    // Seeded as everywhere else: no integration harness runs a sidecar, so the
+    // run's START row has no other producer. It is left UNTERMINATED, which is
+    // what leaves the kill something live to conclude.
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "sleep 100000",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["running\n"],
+        exitCode: null,
+        topLevel: started.vendorSessionId,
+      },
+    );
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+        options,
+      ),
+    );
+    await bash.next();
 
     await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
-    const terminal = await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      const inner = watchAgentEntry(frame).entry?.entry;
-      if (inner?.case !== "agentFrame") return false;
-      const result = inner.value.result;
-      return (
-        (result.case === "success" && result.value.outcome.case === "interrupted") ||
-        result.case === "failure"
-      );
-    });
 
-    expect(watchAgentEntry(terminal).at?.value).not.toBe("");
+    // THE TERMINAL, AND NOT A CUT STREAM. `drain` resolves only on the
+    // producer's own conclusion; the process going first would reject here.
+    const terminal = (await bash.drain()).map(bashFrame).at(-1);
+    expect(terminal?.result.case).toBe("success");
+    if (terminal?.result.case === "success") {
+      expect(terminal.result.value.outcome.case).toBe("interrupted");
+    }
     agent.close();
   });
 });
