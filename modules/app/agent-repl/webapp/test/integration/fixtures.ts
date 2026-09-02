@@ -569,6 +569,11 @@ export const TURN_ERROR_ARMS = [
   "modelNotFound",
   "oauthOrgNotAllowed",
   "maxOutputTokens",
+  "maxTurns",
+  "maxBudget",
+  "executionError",
+  "turnFailed",
+  "stopHookPrevented",
 ] as const;
 export type TurnErrorArm = (typeof TURN_ERROR_ARMS)[number];
 
@@ -601,7 +606,18 @@ export const TURN_ERROR_HEADLINES: Record<TurnErrorArm, string> = {
   modelNotFound: "that model does not exist",
   oauthOrgNotAllowed: "this organization is not allowed",
   maxOutputTokens: "refused outright at the output ceiling",
+  maxTurns: "the run reached the turn ceiling",
+  maxBudget: "the run reached its budget",
+  executionError: "the run broke while executing",
+  turnFailed: "the turn ended abnormally",
+  stopHookPrevented: "a Stop hook forbade the stop",
 };
+
+/** The vendor conversation the run's own terminals name as their context. */
+const VENDOR_FAILURE_CONTEXT = {
+  vendorSessionId: "vendor-session-1",
+  requestId: "req-1",
+} as const;
 
 type TurnEndedValue = Extract<RowArm, { case: "turnEnded" }>["value"];
 type TurnEndedOutcome = NonNullable<TurnEndedValue["outcome"]>;
@@ -611,6 +627,14 @@ const turnErrorValue = (arm: TurnErrorArm, retryAfterMs?: bigint) => {
     return { case: arm, value: { retryAfterMs: retryAfterMs ?? 30_000n } };
   }
   if (arm === "vendorUnmodeled") return { case: arm, value: { type: "vendor_teapot" } };
+  // The run's own terminals import failure.proto's evidence messages, so they
+  // carry the vendor context rather than being empty (Landing 8).
+  if (arm === "turnFailed") {
+    return { case: arm, value: { vendor: VENDOR_FAILURE_CONTEXT, stopReason: "structured_output_retry_exhausted" } };
+  }
+  if (arm === "maxTurns" || arm === "maxBudget" || arm === "executionError") {
+    return { case: arm, value: { vendor: VENDOR_FAILURE_CONTEXT } };
+  }
   return { case: arm, value: {} };
 };
 
