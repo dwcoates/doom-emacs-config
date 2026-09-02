@@ -610,3 +610,56 @@ func TestLedgerRecordsTheQueueInterval(t *testing.T) {
 		t.Fatalf("the queue interval = %+v, want a well-formed [started, ended] interval", closed)
 	}
 }
+
+// TestResubmittingTheDisplacedTurnClearsItsDurableMark covers the handoff to
+// the boot recovery: a turn this run put back is no longer owed, so the next
+// boot's sweep must find nothing to put back.
+func TestResubmittingTheDisplacedTurnClearsItsDurableMark(t *testing.T) {
+	// Arrange: a merge that displaced a user turn and lands.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.displaceTurn("carry on with the refactor")
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Act: a later boot sweeps the displaced marks.
+	left, err := h.db.AllDisplacedTurns(context.Background())
+	if err != nil {
+		t.Fatalf("AllDisplacedTurns: %v", err)
+	}
+
+	// Assert.
+	if len(left) != 0 {
+		t.Fatalf("turns still marked displaced after the release = %v, want none", left)
+	}
+}
+
+// TestAReleaseResubmitsNothingWhenTheDisplacedRecordIsAlreadyClaimed covers
+// the loser of the two owners: a boot recovery that already put the turn back
+// leaves no mark, and the release must not put it back a second time.
+func TestAReleaseResubmitsNothingWhenTheDisplacedRecordIsAlreadyClaimed(t *testing.T) {
+	// Arrange: a run holding the capture, with NO durable mark left — which is
+	// exactly what a sweep that already claimed the record leaves behind.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.displaced = &Displaced{Turn: wsm.NewTurnID(), Text: "carry on with the refactor"}
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 0 {
+		t.Fatalf("the release resubmitted %d turns for a record it does not own, want none", n)
+	}
+}
