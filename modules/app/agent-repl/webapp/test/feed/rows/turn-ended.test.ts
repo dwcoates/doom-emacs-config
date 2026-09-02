@@ -163,6 +163,54 @@ describe("drawFeedTurnEnded: every error arm", () => {
     );
   });
 
+  it("draws the unmodeled arm's vendor type as its own element", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "an API error this build does not model" },
+          error: { case: "vendorUnmodeled", value: { type: "vendor_teapot" } },
+        }),
+      }),
+      contextWithRow(null),
+    );
+    // Assert
+    expect(el.querySelector("[data-vendor-type]")?.textContent).toBe("vendor_teapot");
+  });
+
+  it("draws no vendor-type element for an unmodeled arm whose type is empty", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "an API error this build does not model" },
+          error: { case: "vendorUnmodeled", value: { type: "" } },
+        }),
+      }),
+      contextWithRow(null),
+    );
+    // Assert
+    expect(el.querySelector("[data-vendor-type]")).toBeNull();
+  });
+
+  it("draws no vendor-type element for a modeled arm", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEnded(
+      ended({
+        case: "errored",
+        value: create(FeedTurnEndedErroredSchema, {
+          headline: { text: "the turn hit the vendor's internal error" },
+          error: { case: "internal", value: {} },
+        }),
+      }),
+      contextWithRow(null),
+    );
+    // Assert
+    expect(el.querySelector("[data-vendor-type]")).toBeNull();
+  });
+
   it("refuses an errored row with no headline to draw", () => {
     expect(() =>
       drawFeedTurnEnded(
