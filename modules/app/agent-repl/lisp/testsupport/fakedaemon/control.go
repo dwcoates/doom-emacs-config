@@ -178,9 +178,14 @@ func (s *fakeServer) handleGate(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "fakedaemon.control.gate-unparseable", err)
 		return
 	}
-	if _, ok := unaryResponseTypes[body.Method]; !ok {
+	// A gate may hold a unary method's RESPONSE or a stream method's
+	// ACCEPTANCE; anything else is a scenario naming an rpc this fake does
+	// not serve, which must fail loudly rather than arm a gate nothing hits.
+	_, unary := unaryResponseTypes[body.Method]
+	_, stream := streamMethods[body.Method]
+	if !unary && !stream {
 		badRequest(w, "fakedaemon.control.gate-unknown-method",
-			fmt.Errorf("unknown unary method %q", body.Method))
+			fmt.Errorf("unknown unary or stream method %q", body.Method))
 		return
 	}
 	if body.Release {
