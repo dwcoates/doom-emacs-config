@@ -40,7 +40,17 @@ directives. The plan docs are authoritative over memory of any prior session.
 The shim's 138-scenario mock table lives on overhaul/shim (AGENTS.md) and
 has NOT reached overhaul/integration yet.
 
-## Landing 7 (batched for the next resume, NOT landed)
+## Landing 7 — LANDED 2026-09-02 (protos ab7e681f2, bindings c10714a41, docs d67a34ab4)
+
+Adaptation dispatched 2026-09-02 by the project lead (no leads): opus-low
+implementers in <sys>-agents/landing7 worktrees on branches
+overhaul/<sys>-landing7 (cut from each lead tip, overhaul/integration merged
+in) for shim, webapp, elisp, store; the daemon's share is queued on the
+running opus-medium finisher after its dead-code merge. Project lead merges
+each branch into overhaul/<sys> on report, then removes worktree + branch.
+Store tightwaits merged 7c49a7d77; elisp tightwaits still running.
+
+Original list (all landed, none deferred beyond the two noted):
 
 - agentrepl SubmitPromptError.bubble_refused{kind: not_deliverable|agent_busy}
 - shim.v1 StartSessionFresh.model optional (SDK default)
