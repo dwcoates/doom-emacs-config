@@ -5,6 +5,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,256 @@ func TestAPromptEntrySubmitsToTheNamedWorkspace(t *testing.T) {
 	if req.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT {
 		t.Fatalf("StartTurn.origin = %v, want PROMPT_ORIGIN_LEGACY_HOST_PROMPT", req.GetOrigin())
 	}
+}
+
+func TestASendEntrySubmitsToTheNamedWorkspaceExactlyLikePrompt(t *testing.T) {
+	// Arrange: "send" is prompt's older spelling and behaves identically.
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_send.json",
+		`[{"type":"send","workspace":"`+f.ws.GetId()+`","prompt":"hello from a send entry"}]`)
+
+	// Assert: delivered exactly like a prompt entry, including the origin.
+	req := f.shim.ExpectStartTurn()
+	if got := text(req.GetSaid()); got != "hello from a send entry" {
+		t.Fatalf("StartTurn.said = %q, want the send entry's prompt", got)
+	}
+	if req.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_LEGACY_HOST_PROMPT {
+		t.Fatalf("StartTurn.origin = %v, want PROMPT_ORIGIN_LEGACY_HOST_PROMPT", req.GetOrigin())
+	}
+}
+
+func TestACloseEntryClosesTheNamedWorkspaceOnTheRoster(t *testing.T) {
+	// Arrange: registered but never opened, so it is quiet and closable.
+	d := harness.StartDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	roster := d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, d, "workspace_commands_close.json",
+		`[{"type":"close","workspace":"`+ws.GetId()+`"}]`)
+
+	// Assert: closed exactly like CloseWorkspace draws closed:true.
+	got := awaitRoster(t, d, roster, "the command-file close reflected", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, ws.GetId())
+		return row != nil && row.GetClosed().GetClosed()
+	})
+	if row := rosterRow(got, ws.GetId()); !row.GetClosed().GetClosed() {
+		t.Fatalf("command-file-closed workspace roster row.closed = false, want true")
+	}
+}
+
+func TestAnOpenEntrySpawnsTheShimForAClosedWorkspace(t *testing.T) {
+	// Arrange: registered but never opened, so nothing has spawned a shim yet.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_open.json",
+		`[{"type":"open","workspace":"`+f.ws.GetId()+`"}]`)
+
+	// Assert: the fake shim's control socket comes up exactly like
+	// OpenWorkspace would spawn it. Shim blocks on the connect, bounded by the
+	// daemon's own context, so a shim that never spawns fails the test loudly
+	// rather than passing silently.
+	if shim := f.d.Shim(f.ws); shim == nil {
+		t.Fatalf("f.d.Shim(f.ws) = nil, want a connected control client for the command-file-opened shim")
+	}
+}
+
+func TestASwitchEntrySelectsTheNamedWorkspace(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_switch.json",
+		`[{"type":"switch","workspace":"`+f.ws.GetId()+`"}]`)
+
+	// Assert: stamped current exactly like SelectWorkspace.
+	got := awaitRoster(t, f.d, roster, "the command-file switch stamped current", func(r *frontendv1.WorkspaceRoster) bool {
+		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
+	})
+	row := rosterRow(got, f.ws.GetId())
+	if row == nil || !row.GetCurrent().GetCurrent() {
+		t.Fatalf("command-file-switched workspace row.current = %v, want current=true", row.GetCurrent())
+	}
+}
+
+func TestATaskToggleDoneEntryChecksTheTaskSection(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "toggle via commandfile")
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the fresh task section", func(r *frontendv1.WorkspaceRoster) bool {
+		return taskSection(r, task.GetId()) != nil
+	})
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_task_toggle.json",
+		`[{"type":"task-toggle-done","id":"`+task.GetId()+`","done":true}]`)
+
+	// Assert: checked exactly like UpdateTask{set_done}.
+	got := awaitRoster(t, f.d, roster, "the task section's done check", func(r *frontendv1.WorkspaceRoster) bool {
+		s := taskSection(r, task.GetId())
+		return s != nil && s.GetHeader().GetDone().GetDone()
+	})
+	if !taskSection(got, task.GetId()).GetHeader().GetDone().GetDone() {
+		t.Fatalf("command-file-toggled task section done = false, want true")
+	}
+}
+
+func TestATaskAddWorkspaceEntryAssignsTheNamedWorkspace(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "assign via commandfile")
+	roster := f.d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_task_assign.json",
+		`[{"type":"task-add-workspace","id":"`+task.GetId()+`","workspace":"`+f.ws.GetId()+`"}]`)
+
+	// Assert: grouped under the task exactly like AssignWorkspaceTask.
+	got := awaitRoster(t, f.d, roster, "the workspace grouped under its task", func(r *frontendv1.WorkspaceRoster) bool {
+		return rosterTaskRow(r, task.GetId(), f.ws.GetId()) != nil
+	})
+	if rosterTaskRow(got, task.GetId(), f.ws.GetId()) == nil {
+		t.Fatalf("roster = %v, want %s grouped under task %s", got, f.ws.GetId(), task.GetId())
+	}
+}
+
+func TestADirAddressedPromptEntryResolvesTheSameWorkspaceAsAnIdAddressedOne(t *testing.T) {
+	// Arrange: registered directly on the repo root, so its dir is exactly
+	// repo.Dir — the shape the older dir-only producers write, resolved
+	// through wsm.DB.WorkspaceByDir rather than the verbs' ref resolution.
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	commandfileWrite(t, f.d, "workspace_commands_dir.json",
+		`[{"type":"prompt","dir":"`+f.repo.Dir+`","prompt":"hello via dir addressing"}]`)
+
+	// Assert: delivered to the SAME workspace a workspace-addressed entry
+	// would reach, exactly like SubmitPrompt.
+	req := f.shim.ExpectStartTurn()
+	if got := text(req.GetSaid()); got != "hello via dir addressing" {
+		t.Fatalf("StartTurn.said = %q, want the dir-addressed entry's prompt", got)
+	}
+}
+
+func TestAOneShotCreateEntryDecoratesThePromptLikeCreateWorkspace(t *testing.T) {
+	// Arrange
+	repo := harness.NewRepo(t)
+	d := harness.StartDaemon(t, harness.Opts{})
+	roster := d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, d, "workspace_commands_oneshot.json",
+		`[{"type":"create","git_root":"`+repo.Dir+`","name":"cmdfile-oneshot","prompt":"add a health check endpoint","one_shot":true}]`)
+
+	// Assert: the sent prompt is the user's text PLUS the success-suffix
+	// brief spliced around it, never the bare text — exactly like a one-shot
+	// CreateWorkspace.
+	got := awaitRoster(t, d, roster, "the one-shot command-file workspace's row", func(r *frontendv1.WorkspaceRoster) bool {
+		return commandfileRowByName(r, "cmdfile-oneshot") != nil
+	})
+	row := commandfileRowByName(got, "cmdfile-oneshot")
+	ws := row.GetWorkspace().GetWorkspace()
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+	saidText := text(shim.ExpectStartTurn().GetSaid())
+	if !strings.Contains(saidText, "add a health check endpoint") {
+		t.Fatalf("the command-file one-shot's decorated prompt = %q, want the user's prompt spliced in", saidText)
+	}
+	if !strings.Contains(strings.ToLower(saidText), "invoke") {
+		t.Fatalf("the command-file one-shot's decorated prompt = %q, want the success-suffix brief spliced in", saidText)
+	}
+}
+
+func TestACreateEntryHonorsAnExplicitBaseRef(t *testing.T) {
+	// Arrange
+	repo := harness.NewRepo(t)
+	d := harness.StartDaemon(t, harness.Opts{})
+	repo.Branch("release")
+	repo.Checkout(harness.DefaultBranch)
+	roster := d.WatchRoster()
+
+	// Act
+	commandfileWrite(t, d, "workspace_commands_baseref.json",
+		`[{"type":"create","git_root":"`+repo.Dir+`","name":"cmdfile-baseref","base_ref":"release"}]`)
+
+	// Assert: the worktree was cut from the named base ref, not the default —
+	// exactly like CreateWorkspace{base_ref}.
+	awaitRoster(t, d, roster, "the command-file create's workspace row", func(r *frontendv1.WorkspaceRoster) bool {
+		return commandfileRowByName(r, "cmdfile-baseref") != nil
+	})
+	found := false
+	for _, c := range d.Git.Calls() {
+		if createArgsContainAll(c.Args, "worktree", "add") && createArgsContain(c.Args, "release") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("git calls = %v, want a `worktree add` naming the base ref %q", d.Git.Calls(), "release")
+	}
+}
+
+func TestAFileWithOneInvalidEntryAppliesNothing(t *testing.T) {
+	// Arrange: one valid entry (a task-create) followed by one invalid entry
+	// (a prompt missing its required prompt text) in the SAME array. Every
+	// entry is validated before any of them is applied, so this is one
+	// request, and half of it is not a smaller request.
+	d := harness.StartDaemon(t, harness.Opts{})
+	roster := d.WatchRoster()
+	awaitRoster(t, d, roster, "the daemon's initial roster", func(r *frontendv1.WorkspaceRoster) bool { return true })
+	path := commandfileWrite(t, d, "workspace_commands_partial_invalid.json",
+		`[{"type":"task-create","title":"should-never-appear"},{"type":"prompt","workspace":"whatever"}]`)
+
+	// Act / Assert: the whole file is refused and quarantined, exactly like a
+	// syntactically malformed one.
+	d.AwaitFileGone(path)
+	quarantined := filepath.Join(d.StateDir, "output", "quarantine", "workspace_commands_partial_invalid.json")
+	d.AwaitFileExists(quarantined)
+	d.AwaitRunLogOperation("daemon.commandfile.quarantine")
+	d.ExpectWarnings("daemon.commandfile.quarantine")
+
+	// Assert: the valid entry that preceded the invalid one applied NOTHING —
+	// no roster push at all follows the quarantine (a task-create would push
+	// a fresh task section).
+	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "a quarantined file applies nothing, not even its valid entries")
+}
+
+// TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined pins down the
+// audit's critique that a merge entry naming an unmergeable workspace is
+// quarantined like any other command file the ingress cannot honor.
+//
+// Per ingress.go as read: ArmNoLayoutFacts surfaces only once the entry
+// actually APPLIES (i.deps.Merge.Enqueue returns the refusal from inside
+// ApplyFile's per-entry loop), which is AFTER the file is already claimed —
+// unlike the parse-time refusals TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested
+// and TestAFileWithOneInvalidEntryAppliesNothing exercise, which quarantine
+// before ever leaving the parse step. Only i.quarantine (called from the
+// parse-failure branch) ever moves a file into QuarantineDir; an apply-time
+// failure is instead joined into ApplyFile's returned error and logged at
+// ERROR under daemon.commandfile.entry / daemon.commandfile.run, leaving the
+// file sitting in ClaimedDir. This test asserts the CONTRACT the critique
+// names; if the file never reaches quarantine, that is the gap to report.
+func TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined(t *testing.T) {
+	// Arrange: registered directly, never created, so it carries no creation
+	// job — internal/merge's layoutFor refuses ANY merge of it
+	// (ArmNoLayoutFacts), which is as unmergeable as a workspace gets.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	path := commandfileWrite(t, f.d, "workspace_commands_unmergeable.json",
+		`[{"type":"merge","workspace":"`+f.ws.GetId()+`"}]`)
+
+	// Assert
+	f.d.AwaitFileGone(path)
+	quarantined := filepath.Join(f.d.StateDir, "output", "quarantine", "workspace_commands_unmergeable.json")
+	f.d.AwaitFileExists(quarantined)
+	f.d.AwaitRunLogOperation("daemon.commandfile.quarantine")
+	f.d.ExpectWarnings("daemon.commandfile.quarantine")
 }
 
 func TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested(t *testing.T) {
