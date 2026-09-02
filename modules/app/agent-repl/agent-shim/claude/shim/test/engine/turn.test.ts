@@ -391,6 +391,39 @@ describe("KillTurn", () => {
     expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("noTurnOpen");
   });
 
+  it("refuses `live` when the turn has CLOSED but its work is still running", async () => {
+    // Detached work outlives the turn that spawned it by design, so answering
+    // "no turn is open" would leave the daemon with a running shell it has no
+    // verb to stop under the turn it belongs to.
+    const h = await harness();
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+
+    expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("live");
+  });
+
+  it("forced, ends the work a CLOSED turn left running", async () => {
+    const h = await harness();
+    h.live.onTaskStarted(
+      { type: "system", subtype: "task_started", task_id: "b01", tool_use_id: "t", description: "", uuid: "00000000-0000-4000-8000-000000000000", session_id: "s" } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+
+    const response = await h.turns.killTurn(kill(true));
+
+    expect(response.result.case === "success" ? response.result.value.killed?.how.case : undefined).toBe(
+      "forced",
+    );
+  });
+
+  it("still refuses noTurnOpen when a closed turn left nothing running", async () => {
+    const h = await harness();
+
+    expect(failureKind(await h.turns.killTurn(kill(false)))).toBe("noTurnOpen");
+  });
+
   it("refuses a turn that is not the open one", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());

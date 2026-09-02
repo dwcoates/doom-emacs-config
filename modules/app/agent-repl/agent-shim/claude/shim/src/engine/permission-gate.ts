@@ -473,6 +473,30 @@ export class PermissionGate {
     return pending === undefined ? undefined : { kind: pending.kind };
   }
 
+  /**
+   * The refusal for an answer that names no ask the gate is holding.
+   *
+   * THE TWO ARMS ARE DIFFERENT FACTS and the daemon acts on them differently.
+   * `no_open_ask` means the agent is not waiting on anything of this kind, so
+   * there is nothing to answer and nothing to retry. `answer_mismatch` means an
+   * ask of this kind IS open and the answer named a different one -- a stale or
+   * crossed answer, where the right move is to answer the ask actually in hand.
+   * Collapsing the second onto the first told the daemon to stop when it should
+   * re-send.
+   */
+  private unmatchedAnswer(kind: "permission" | "question", id: string): AnswerOutcome {
+    const openOfKind = [...this.pendingByToolUse.values()].some(
+      (pending) => pending.kind === kind,
+    );
+    LOGGER.log(
+      { level: "warn", ask_kind: kind, ask_id: id, another_open: openOfKind },
+      openOfKind
+        ? "REFUSED an answer naming an ask the shim is not holding while another of its kind is open"
+        : "an answer arrived for an ask that is not open",
+    );
+    return openOfKind ? "answer_mismatch" : "no_open_ask";
+  }
+
   /** How many asks are blocking the vendor right now. */
   get pendingCount(): number {
     return this.pendingByToolUse.size;
@@ -527,8 +551,7 @@ export class PermissionGate {
   ): AnswerOutcome {
     const pending = this.pendingByToolUse.get(ask.value);
     if (pending === undefined || pending.kind !== "question") {
-      LOGGER.log({ level: "warn", question_id: ask.value }, "answer for a question that is not open");
-      return "no_open_ask";
+      return this.unmatchedAnswer("question", ask.value);
     }
     const problem = validateAnswers(pending.batch, answers);
     if (problem !== undefined) {
@@ -643,8 +666,7 @@ export class PermissionGate {
     const askId = decision.ask?.value ?? "";
     const pending = this.pendingByToolUse.get(askId);
     if (pending === undefined || pending.kind !== "permission") {
-      LOGGER.log({ level: "warn", permission_id: askId }, "decision for a permission that is not open");
-      return "no_open_ask";
+      return this.unmatchedAnswer("permission", askId);
     }
     switch (decision.decision.case) {
       case "allowed": {
