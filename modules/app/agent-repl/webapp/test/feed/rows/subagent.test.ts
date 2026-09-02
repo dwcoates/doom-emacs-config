@@ -110,6 +110,13 @@ describe("drawFeedSubagent: the clocks", () => {
     expect(el.querySelector(".subagent-clock")?.textContent).toBe("5s");
   });
 
+  it("reads the live clock's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the start does not share the shared ticker's phase.
+    const { el } = drawRow(subagentRow("b1", { startedAtMs: 1_000_000n - 4920n }));
+    // Assert: five real seconds of running reads 5s, not the lagging 4s.
+    expect(el.querySelector(".subagent-clock")?.textContent).toBe("5s");
+  });
+
   it("stops the clock at the settled instant", () => {
     const { el } = drawRow(
       subagentRow("b1", {
