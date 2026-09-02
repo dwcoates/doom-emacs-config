@@ -7,9 +7,13 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 ## Build and test
 
 - `go build ./... && go vet ./... && go test ./...` from this directory.
-- Integration suite: `go test -tags integration ./integration/...` (a real
-  daemon subprocess against a fake shim.v1 server, fake git repos and a temp
-  state root; the fake shim binary is `integration/fakeshim`).
+- Integration suite: `TMPDIR=/tmp go test -tags integration ./integration/...`
+  (a real daemon subprocess against a fake shim.v1 server, fake git repos and a
+  temp state root; the fake shim binary is `integration/fakeshim`).
+  `TMPDIR=/tmp` IS REQUIRED on macOS: `t.TempDir()` otherwise roots the state
+  under `/var/folders/...`, and `<state>/sock/<workspace-id>.sock` then exceeds
+  the 103-byte unix socket path limit, so the daemon refuses the state root at
+  boot before anything else runs.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1`. No test
   ever calls the vendor.
 
