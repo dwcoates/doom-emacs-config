@@ -74,6 +74,18 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   control-socket script would be racing.
 - CODECS: `Opts.JSONCodec` dials the daemon with the JSON codec instead of
   the binary one, so one test proves both are served on the one origin.
+- PAGE SIZE: `harness.FeedPageSize` IS the daemon's own
+  `internal/resolve/feed.DefaultPageSize`, never a copy. A walk test pushes
+  `FeedPageSize + 1` rows and FAILS if `has_more` is unset; it never skips on
+  "the page size is unknown".
+- TRANSCRIPTS: `harness.TranscriptPath`, `d.WriteTranscript` and
+  `harness.HasTranscript` lay down and read back a `<vendor session id>.jsonl`
+  under either account root, which is how account-switch PORTING is watched
+  under a root no session has ever run in. `d.RemoveTranscripts` is the other
+  side (a resume whose transcript is gone).
+- LAUNCHER FAILURE: the fake browser and every other recorder executable take
+  `SetExitCode(n)`, so `OpenExternal`'s `launch_failed` arm is driven by a
+  launcher that really exits non-zero rather than by a stub.
 
 ## Suites and tests (one `_test.go` file per suite; one edge case per test)
 
