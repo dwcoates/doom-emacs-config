@@ -69,6 +69,17 @@ func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T)
 	if got := info.Env["AGENT_REPL_FORBID_VENDOR_CALLS"]; got != "1" {
 		t.Fatalf("shim AGENT_REPL_FORBID_VENDOR_CALLS = %q, want \"1\"", got)
 	}
+	// AGENT_REPL_SESSION_ID is the host session identity (shimclient.EnvSessionID,
+	// log correlation only): it must equal the very id the host stream serves
+	// for this session (agentrepl/v1's HostSessionExisting.id).
+	hostView := harness.AwaitView(t, f.d.Ctx(), f.host, "the host session identity",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetHost().GetExisting().GetId().GetValue() != ""
+		})
+	wantSessionID := hostView.GetHost().GetExisting().GetId().GetValue()
+	if got := info.Env["AGENT_REPL_SESSION_ID"]; got == "" || got != wantSessionID {
+		t.Fatalf("shim AGENT_REPL_SESSION_ID = %q, want the host session id %q", got, wantSessionID)
+	}
 
 	// Assert: cwd.
 	if info.Cwd != f.repo.Dir {
