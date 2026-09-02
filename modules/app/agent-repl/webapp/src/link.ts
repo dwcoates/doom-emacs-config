@@ -36,7 +36,6 @@ import {
   type OpenInEditorError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import type { AppContext } from "./rpc/context.js";
-import { isMalformedView } from "./rpc/malformed.js";
 import {
   clearRefusals,
   drawMalformedRefusal,
