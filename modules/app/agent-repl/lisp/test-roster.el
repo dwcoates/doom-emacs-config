@@ -367,6 +367,134 @@ that follows must not care which of the two got there first."
     ;; Assert
     (should (equal (agent-repl-test-roster--tabs) '("new-name")))))
 
+(ert-deftest agent-repl-test-roster-a-rename-re-keys-host-state ()
+  "Host state is keyed on the name too, so the NEW name answers with the ref."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal)))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "old-name" :ready))))))
+      (agent-repl-host--put "old-name" :ref (list :id "a" :dir "/w/a"))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready))))))
+      ;; Assert
+      (should (equal (agent-repl-host-ref "new-name") (list :id "a" :dir "/w/a"))))))
+
+(ert-deftest agent-repl-test-roster-a-rename-drops-the-old-host-key ()
+  "The old name stops answering, so no push updates a dead key's state."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal)))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "old-name" :ready))))))
+      (agent-repl-host--put "old-name" :ref (list :id "a" :dir "/w/a"))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "new-name" :ready))))))
+      ;; Assert
+      (should (null (agent-repl-host-ref "old-name"))))))
+
+(ert-deftest agent-repl-test-roster-a-rename-onto-a-tombstone-keeps-the-old-tab ()
+  "A collision with a tombstoned name is refused whole: the tab keeps its name."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "gone" :ready)
+                                    (agent-repl-test-roster--row "b" "stays" :ready))))))
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
+    ;; Act -- "gone" is now tombstoned; rename b onto it
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "b" "gone" :ready))))))
+    ;; Assert
+    (should (equal (agent-repl-test-roster--tabs) '("stays")))))
+
+(ert-deftest agent-repl-test-roster-a-refused-rename-does-not-abort-the-walk ()
+  "The `user-error' must not escape the push handler mid-reconcile."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "gone" :ready)
+                                    (agent-repl-test-roster--row "b" "stays" :ready))))))
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
+    ;; Act
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "b" "gone" :ready)
+                                    (agent-repl-test-roster--row "c" "later" :ready))))))
+    ;; Assert -- the row AFTER the refused rename was still opened
+    (should (member "later" (agent-repl-test-roster--tabs)))))
+
+(ert-deftest agent-repl-test-roster-a-refused-rename-leaves-host-state-alone ()
+  "Refused whole: host state is not half-moved either."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal)))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "gone" :ready)
+                                      (agent-repl-test-roster--row "b" "stays" :ready))))))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
+      (agent-repl-host--put "stays" :ref (list :id "b" :dir "/w/b"))
+      ;; Act
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "b" "gone" :ready))))))
+      ;; Assert
+      (should (equal (agent-repl-host-ref "stays") (list :id "b" :dir "/w/b"))))))
+
+(ert-deftest agent-repl-test-roster-a-refused-rename-is-recorded ()
+  "Refusals are loud: the reason rides the record."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (let ((logs nil))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "a" "gone" :ready)
+                                      (agent-repl-test-roster--row "b" "stays" :ready))))))
+      (agent-repl-roster-apply
+       (agent-repl-test-roster--roster
+        :sections (list (agent-repl-test-roster--section
+                         "repo" (list (agent-repl-test-roster--row "b" "stays" :ready))))))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--error)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs))))
+        (agent-repl-roster-apply
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "repo" (list (agent-repl-test-roster--row "b" "gone" :ready)))))))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-search "elisp.roster.tab-rename-refused" text))
+                        logs)))))
+
 (ert-deftest agent-repl-test-roster-a-rename-opens-no-second-tab ()
   "A rename leaves exactly one tab: the same workspace, whatever its name."
   ;; Arrange
