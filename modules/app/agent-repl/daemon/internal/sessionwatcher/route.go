@@ -293,13 +293,15 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 
 	w.sinks.Feed.OnActivity(w.ws, agent, act, w.addr)
 	w.sinks.Footer.OnActivity(w.ws, agent, act)
+	// THE TOPBAR SEES EVERY ACTIVITY. It shows an unmodeled tool as a warning,
+	// but it also accumulates the SESSION's token spend from the usage every
+	// activity carries (internal/resolve/topbar's observeUsage), and a sink
+	// handed only the unmodeled frames would count nothing at all.
+	w.sinks.Topbar.OnActivity(w.ws, agent, act)
 	if act.GetUnmodeled() != nil {
-		// The topbar sees an activity for ONE reason: an activity the schema
-		// does not model is a warning it shows.
 		w.log.Warn("daemon.sessionwatcher.unmodeled_activity", "an activity the schema does not model", dlog.Context{
 			"agent_id": agent.GetValue(), "tool_name": unmodeledToolName(act.GetUnmodeled()),
 		})
-		w.sinks.Topbar.OnActivity(w.ws, agent, act)
 	}
 	w.reapEndedMonitorLocked(act)
 	w.watchSpawnedSubagentLocked(act)

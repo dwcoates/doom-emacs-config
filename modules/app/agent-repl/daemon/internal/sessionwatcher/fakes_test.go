@@ -1269,6 +1269,9 @@ func assertPerAgentOrder(t *testing.T, got []event, agent string, frames int) {
 		if i+1 >= len(got) || got[i+1].name() != "footer.OnActivity" || got[i+1].detail != want {
 			t.Fatalf("%s activity %q was interrupted between the feed and the footer", agent, want)
 		}
+		if i+2 >= len(got) || got[i+2].name() != "topbar.OnActivity" || got[i+2].detail != want {
+			t.Fatalf("%s activity %q was interrupted between the footer and the topbar", agent, want)
+		}
 		seen++
 	}
 	if seen != frames {

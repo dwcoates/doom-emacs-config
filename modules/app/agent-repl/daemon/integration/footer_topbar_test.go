@@ -702,8 +702,13 @@ func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
 	// for 142_300 tokens (figures.Tokens, internal/figures/tokens.go), and the
 	// chip always ships a populated breakdown (no round-trip needed to open
 	// the hover).
+	// The fake's OPENING context_usage push already fills the chip
+	// (fakeshim.DefaultContextUsage, 1000 tokens), so the wait is for the
+	// chip to move off that opening figure -- waiting merely for a non-empty
+	// one would read the opening view and assert against it.
 	got := awaitTopbar(t, f, topbar, "the context chip after context_usage", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() != ""
+		text := v.GetContext().GetText()
+		return text != "" && text != "1k"
 	})
 	if got.GetContext().GetText() != "142.3k" {
 		t.Fatalf("context chip text = %q, want the canonical formatter's \"142.3k\" for 142_300 tokens", got.GetContext().GetText())
@@ -727,8 +732,10 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 	// Assert: the session section's headline rows carry the section's own
 	// precomputed share (permille of its own basis) and are drawn emphasized;
 	// the nested detail row carries neither.
+	// Every section ships every row from the first view on, at zero, so the
+	// wait is for the FIGURES to arrive rather than for the row to exist.
 	got := awaitTopbar(t, f, topbar, "the context chip's breakdown after the usage-carrying unit", func(v *frontendv1.TopbarView) bool {
-		return ftFindBreakdownRow(v.GetContext().GetBreakdown(), "uncached input") != nil
+		return ftFindBreakdownRow(v.GetContext().GetBreakdown(), "uncached input").GetTokens() > 0
 	})
 	breakdown := got.GetContext().GetBreakdown()
 	uncached := ftFindBreakdownRow(breakdown, "uncached input")
