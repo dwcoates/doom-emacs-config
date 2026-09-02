@@ -39,6 +39,23 @@ func (v *verbs) UpdateTask(ctx context.Context, id ids.TaskID, change wsm.TaskCh
 	if change.Title != nil && strings.TrimSpace(*change.Title) == "" {
 		return refuse(log, "UpdateTask", ArmBlankTitle, "a task must carry a title", false)
 	}
+	// THE TASK IS RESOLVED BEFORE IT IS CHANGED. A ref naming no task and a
+	// change the task already holds are both ANSWERS the contract spells
+	// (UpdateTaskError.unknown_task, UpdateTaskError.no_change); left to the
+	// state client they surface as a not-found error and a silent success.
+	current, found, err := v.task(ctx, id)
+	if err != nil {
+		log.Error(opUpdateTask, "could not read the task", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("update task %q: %w", id, err)
+	}
+	if !found {
+		return refuse(log, "UpdateTask", ArmUnknownTask,
+			fmt.Sprintf("no task %q is recorded", id), true)
+	}
+	if !changesAnything(current, change) {
+		return refuse(log, "UpdateTask", ArmNoChange,
+			"the change asked for is what the task already holds", false)
+	}
 	if err := v.deps.DB.UpdateTask(ctx, id, change); err != nil {
 		log.Error(opUpdateTask, "could not update the task", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("update task %q: %w", id, err)
@@ -56,6 +73,17 @@ func (v *verbs) AssignTask(ctx context.Context, ws ids.WorkspaceID, task *ids.Ta
 	if err != nil {
 		return err
 	}
+	if task != nil {
+		_, found, err := v.task(ctx, *task)
+		if err != nil {
+			log.Error(opAssignTask, "could not read the task", dlog.Context{"cause": err.Error()})
+			return fmt.Errorf("assign task on %q: %w", ws, err)
+		}
+		if !found {
+			return refuse(log, "AssignWorkspaceTask", ArmUnknownTask,
+				fmt.Sprintf("no task %q is recorded", *task), true)
+		}
+	}
 	if err := v.deps.DB.AssignWorkspaceTask(ctx, ws, task); err != nil {
 		log.Error(opAssignTask, "could not record the assignment", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("assign task on %q: %w", ws, err)
@@ -63,4 +91,31 @@ func (v *verbs) AssignTask(ctx context.Context, ws ids.WorkspaceID, task *ids.Ta
 	log.Debug(opAssignTask, "recorded the task assignment", dlog.Context{"unassigned": task == nil})
 	v.republishRegistry(ctx, log, opAssignTask)
 	return nil
+}
+
+// task answers one recorded task by id, reporting whether it exists.
+func (v *verbs) task(ctx context.Context, id ids.TaskID) (wsm.Task, bool, error) {
+	tasks, err := v.deps.DB.Tasks(ctx)
+	if err != nil {
+		return wsm.Task{}, false, err
+	}
+	for _, t := range tasks {
+		if t.ID == id {
+			return t, true, nil
+		}
+	}
+	return wsm.Task{}, false, nil
+}
+
+// changesAnything reports whether a change would move the task at all. A
+// retitle to the title it already carries and a set_done on a task already
+// done are the same non-change, and the contract has one arm for both.
+func changesAnything(current wsm.Task, change wsm.TaskChange) bool {
+	if change.Title != nil && strings.TrimSpace(*change.Title) != current.Title {
+		return true
+	}
+	if change.Done != nil && *change.Done != current.Done {
+		return true
+	}
+	return false
 }

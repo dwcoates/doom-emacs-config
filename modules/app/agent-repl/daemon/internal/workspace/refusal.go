@@ -55,6 +55,10 @@ const (
 	// ArmTranscriptMissing is a resume whose vendor transcript file is gone —
 	// refused BEFORE any process spawns.
 	ArmTranscriptMissing = "transcript_missing"
+	// ArmUnknownTask is a task ref naming no task this daemon minted.
+	ArmUnknownTask = "unknown_task"
+	// ArmNoChange is a task update asking for what the task already holds.
+	ArmNoChange = "no_change"
 	// ArmBlankTitle is a task verb with a blank title.
 	ArmBlankTitle = "blank_title"
 	// ArmNoStandingOffer is allow_standing on an ask that offered no standing
