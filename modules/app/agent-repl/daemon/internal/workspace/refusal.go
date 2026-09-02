@@ -103,6 +103,9 @@ const (
 	// ArmLaunchFailed is an OpenExternal whose launcher would not run. It
 	// carries the launcher's own account of the failure as `detail`.
 	ArmLaunchFailed = "launch_failed"
+	// ArmGitFailed is a NukeWorkspace whose destruction of the worktree and
+	// branch failed in git. It carries git's OWN account as `detail`.
+	ArmGitFailed = "git_failed"
 )
 
 // Refusal is a state the daemon must refuse for which the contract has no
