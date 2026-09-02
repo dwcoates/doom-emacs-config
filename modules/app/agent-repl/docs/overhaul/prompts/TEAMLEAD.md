@@ -271,6 +271,32 @@ classes, with different freedom to depart from it:
   a requirement. Coverage is rebuilt FROM the contract, not recovered
   from the old assertions.
 
+## Dead code is hunted programmatically (user ruling, 2026-09-01)
+
+- AFTER your integration suite is green and BEFORE you report your final
+  tip, run a dead-code pass over your system with tooling, not by eye:
+  - Go (daemon, store, sidecar): `staticcheck` (U1000 unused) plus
+    `go test -coverprofile` across unit+integration and read the
+    zero-hit functions; delete or justify each.
+  - TypeScript (shim, webapp): `knip` (or `ts-prune`) for unused exports
+    and files, `tsc --noUnusedLocals --noUnusedParameters`, and vitest
+    `--coverage` with zero-hit functions read the same way.
+  - Elisp: byte-compile with warnings as errors for unused lexical
+    variables, plus `elisp-refs`/grep for defuns with no caller outside
+    their own file and no test.
+- Every zero-coverage production function is one of: DELETED, or named in
+  your final report with the reason it is live (reached only by a path
+  the suites cannot drive, e.g. a real vendor call) and covered by a
+  unit test that pins it. "It might be useful later" is not a reason.
+- The old-tree removals you were already ruled (dead surfaces, deleted
+  features) are part of this pass: a ruled-dead file still on disk at
+  your final tip is a defect.
+- You ORCHESTRATE this pass, you never perform it: dispatch it to a
+  `sonnet-medium` agent (user ruling, 2026-09-01) in its own worktree,
+  with the tool output as its brief; the agent runs the tools, deletes,
+  pins, and reports the deletion list and the kept-with-reason list; you
+  review, merge, and carry both lists into your final report.
+
 ## Building messages piecemeal under the non-optional rule
 
 A recurring situation: the message you must produce has non-optional

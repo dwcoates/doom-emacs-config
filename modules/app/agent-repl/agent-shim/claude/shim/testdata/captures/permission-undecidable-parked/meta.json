@@ -1,0 +1,33 @@
+{
+  "scenario": "permission-undecidable-parked",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `rm -f parked.txt`.",
+  "prompts": [
+    {
+      "text": "Run `rm -f parked.txt`.",
+      "resume": false
+    }
+  ],
+  "world": "permission-undecidable-parked",
+  "cwd_init": null,
+  "vendor_session_id": "86208ec0-0b96-4acd-a99d-0e15bc7fb848",
+  "manual": null,
+  "expect": [
+    "can_use_tool request never answered",
+    "whatever the SDK emits when the query is interrupted with a pending gate",
+    "result:error_during_execution with terminal_reason aborted_tools"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-permission-undecidable-parked-9A1Tcw-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:32:40.406Z",
+  "controls": [
+    {
+      "verb": "interrupt",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

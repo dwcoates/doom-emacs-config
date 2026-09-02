@@ -20,6 +20,10 @@
  *   - the CALLS IN FLIGHT, so a tool result can restate its call's own facts —
  *     each entry dropped the moment its unit settles, and the table capped;
  *   - the HOOK FIRINGS in flight, for the same reason and on the same terms;
+ *   - the KINDS OF THE TASKS in flight, on the same terms again: `task_started`
+ *     is the only message that says whether a detached task is an agent run or
+ *     a backgrounded shell command, and its `task_notification` must not settle
+ *     a shell unit as a subagent;
  *   - ONE pending COMPACTION, because `ContextCompacted.summary` is not optional
  *     and the vendor states the boundary before the summary;
  *   - the LAST TOP-LEVEL RESPONSE unit, because `AgentCompleted.answer` names it
@@ -51,7 +55,7 @@ import { bindLog } from "../log.js";
 import type { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import type { PersistEntry } from "../store/persistence.js";
-import { convertDetached } from "./detached.js";
+import { convertDetached, createTaskKindRegistry, type TaskKindRegistry } from "./detached.js";
 import type { FoldContext } from "./fold-context.js";
 import {
   convertHookResponse,
@@ -132,6 +136,7 @@ interface FoldState {
   readonly blocks: BlockState;
   readonly calls: CallRegistry;
   readonly hooks: HookRegistry;
+  readonly taskKinds: TaskKindRegistry;
   pendingCompaction?: PendingCompaction;
   lastAnswer?: conversationv1.AgentActivityId;
 }
@@ -147,6 +152,7 @@ export function createFold(): Fold {
     blocks: createBlockState(),
     calls: createCallRegistry(),
     hooks: createHookRegistry(),
+    taskKinds: createTaskKindRegistry(),
   };
 
   return {
@@ -247,7 +253,7 @@ function convertSystemMessage(
     case "task_notification":
     case "task_progress":
     case "background_tasks_changed":
-      return convertDetached(message, context);
+      return convertDetached(message, context, state.taskKinds);
     case "hook_started":
       return convertHookStarted(message, context, state.hooks);
     case "hook_response":

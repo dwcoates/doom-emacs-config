@@ -367,6 +367,78 @@ export function messageMatches(matcher, msg) {
 }
 
 /**
+ * Pull messages off ONE query's iterator until that turn's result.
+ *
+ * WHY AN EXPLICIT ITERATOR AND NOT `for await (const msg of query)`: breaking
+ * out of a for-await loop calls the iterator's `return()`, which ENDS the
+ * async generator the SDK query is. On a multi-turn scenario that silently
+ * destroyed every turn after the first — the loop broke on turn 1's result,
+ * the query was finished, and turn 2's `for await` completed immediately
+ * without yielding anything. The recorded evidence is exactly that: in
+ * `compaction-directed` and `identity-rotation-clear` the stream holds one
+ * result, then `turn_submitted` lines for later turns with no SDK message
+ * after them, no second `system:init`, no `compact_boundary`, no
+ * `conversation_reset` — and every later control failed with
+ * "ProcessTransport is not ready for writing", because the transport had been
+ * closed by that first `break`.
+ *
+ * Holding the iterator across turns is the fix: it is pulled with `next()` and
+ * never returned, so the query stays open until the scenario closes it.
+ *
+ * Returns the result message, or `null` if the query ended without one.
+ */
+export async function drainToResult(iterator, onMessage) {
+  for (;;) {
+    const { value, done } = await iterator.next();
+    if (done === true) return null;
+    await onMessage(value);
+    if (value?.type === "result") return value;
+  }
+}
+
+/**
+ * Whether a CONTROL record satisfies a control's `after` matcher.
+ *
+ * A parked permission gate is recorded as a control entry (`can_use_tool_parked`),
+ * never as a stream message, so an `on_message` trigger can never observe it and
+ * the scenario waits forever. `at: "on_control"` matches these records instead:
+ * `kind` and `tool_name` select the record, `contains` is a substring of it.
+ */
+export function controlMatches(matcher, entry) {
+  if (matcher === undefined) return false;
+  if (matcher.kind !== undefined && entry?.kind !== matcher.kind) return false;
+  if (matcher.tool_name !== undefined && entry?.tool_name !== matcher.tool_name) return false;
+  if (matcher.contains !== undefined) {
+    if (!JSON.stringify(entry ?? null).includes(matcher.contains)) return false;
+  }
+  return true;
+}
+
+/**
+ * Fire every not-yet-fired control whose trigger point is `at` and whose
+ * matcher accepts `payload`.
+ *
+ * ONE dispatcher for both trigger kinds, so the two can never drift: an
+ * `on_message` control is matched against a stream message and an `on_control`
+ * control against a control record, and neither ever sees the other's payload.
+ */
+export async function fireTriggers(query, controls, at, payload, fired, record) {
+  const results = [];
+  for (const control of controls ?? []) {
+    if (control.at !== at) continue;
+    const key = JSON.stringify([control.at, control.do, control.after ?? null]);
+    if (fired.has(key)) continue;
+    const matched = at === "on_control"
+      ? controlMatches(control.after, payload)
+      : messageMatches(control.after, payload);
+    if (!matched) continue;
+    fired.add(key);
+    results.push(await driveControl(query, control, record));
+  }
+  return results;
+}
+
+/**
  * Drive one scripted control verb against the live query.
  *
  * Every verb the shim relies on is reachable from here, because the capture is
@@ -522,6 +594,77 @@ export function copyTreeAnonymized(sourceDir, destDir, report) {
 }
 
 /**
+ * Merge a source tree into an existing capture tree, anonymizing on the way.
+ *
+ * Used only by the SWEEP-END LATE RECLAIM. It differs from
+ * `copyTreeAnonymized` in one rule: a destination file is never overwritten by
+ * a SMALLER one. The vendor's late flush rewrites a transcript it had already
+ * written, and a truncated re-write landing on top of the full capture would
+ * silently destroy the golden.
+ */
+export function mergeTreeAnonymized(sourceDir, destDir, report, moved = []) {
+  if (!existsSync(sourceDir)) return moved;
+  mkdirSync(destDir, { recursive: true });
+  for (const name of readdirSync(sourceDir)) {
+    const from = path.join(sourceDir, name);
+    const to = path.join(destDir, name);
+    const info = statSync(from);
+    if (info.isDirectory()) {
+      mergeTreeAnonymized(from, to, report, moved);
+      continue;
+    }
+    if (!info.isFile()) continue;
+    const raw = readFileSync(from, "utf8");
+    let text;
+    if (name.endsWith(".jsonl")) {
+      text = anonymizeJsonl(raw, (lineNo, err) =>
+        report.unparsed.push({ file: from, line: lineNo, error: String(err) }),
+      );
+    } else if (name.endsWith(".json")) {
+      text = `${JSON.stringify(anonymize(JSON.parse(raw)), null, 2)}\n`;
+    } else {
+      text = anonymizePlainText(raw);
+    }
+    if (existsSync(to) && statSync(to).size >= Buffer.byteLength(text, "utf8")) continue;
+    writeFileSync(to, text, "utf8");
+    moved.push(to);
+  }
+  return moved;
+}
+
+/**
+ * The SECOND reclaim pass, run once at sweep end.
+ *
+ * The vendor re-writes small late transcript flushes into
+ * `<config-root>/projects/<slug>/` AFTER the per-scenario reclaim has already
+ * emptied it — the SDK child is still alive then. Anything that reappeared is
+ * merged into the scenario's capture and the slug directory is deleted from the
+ * operator's root, so the account really is left as found. ONLY the slugs this
+ * run created are ever looked at; no other project directory is read or removed.
+ */
+export function lateReclaimSlug({ accountRoot, slug, captureDir, report, log }) {
+  const projectDir = path.join(accountRoot, "projects", slug);
+  if (!existsSync(projectDir)) return { slug, moved: [] };
+  const moved = mergeTreeAnonymized(
+    projectDir,
+    path.join(captureDir, "files", "projects", slug),
+    report,
+  );
+  rmSync(projectDir, { recursive: true, force: true });
+  log?.(
+    `capture.mjs: late reclaim ${slug} — ${moved.length} file(s) re-copied, ` +
+      `${projectDir} removed\n`,
+  );
+  return { slug, moved };
+}
+
+/** Run the sweep-end late reclaim for every scenario slug this run created. */
+export function lateReclaimAll(auth, reclaims, log) {
+  if (auth.mode !== AUTH_CONFIG_ROOT) return [];
+  return reclaims.map((entry) => lateReclaimSlug({ ...entry, log }));
+}
+
+/**
  * Create the scratch world a group of scenarios shares.
  *
  * The CWD IS ALWAYS SCRATCH, in every authentication mode — a capture must
@@ -599,31 +742,44 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   const abort = new AbortController();
   const input = createInputChannel();
   const parked = [];
+  // Controls fire at most once per scenario. Tracked in a LOCAL set rather than
+  // by stamping the control object: the corpus is loaded once per process, so a
+  // flag written onto it would leak across runs (and across tests).
+  const firedControls = new Set();
   let query;
   // The vendor's own session id, learned from system:init and needed by a
   // `resume` turn.
   let vendorSessionId = null;
 
+  // A control record the VENDOR provoked (not one the capture drove itself),
+  // recorded and then offered to the scenario's `on_control` triggers.
+  const recordVendorControl = async (payload) => {
+    record("control", payload);
+    report.controls.push(
+      ...(await fireTriggers(query, scenario.controls, "on_control", payload, firedControls, record)),
+    );
+  };
+
   const canUseTool = async (toolName, toolInput, options) => {
-    record("control", { kind: "can_use_tool_request", tool_name: toolName, input: toolInput, options });
+    await recordVendorControl({ kind: "can_use_tool_request", tool_name: toolName, input: toolInput, options });
     if (toolName === "AskUserQuestion") {
       const answers = answersFor(scenario.question_script, toolInput);
       const result = Object.keys(answers).length === 0
         ? { behavior: "deny", message: "left unanswered by the capture script" }
         : { behavior: "allow", updatedInput: { ...toolInput, answers } };
-      record("control", { kind: "can_use_tool_response", tool_name: toolName, result });
+      await recordVendorControl({ kind: "can_use_tool_response", tool_name: toolName, result });
       return result;
     }
     const rule = resolvePermissionDecision(scenario.permission_script, toolName);
     const result = permissionResultFor(rule, toolInput, options);
     if (result === null) {
-      record("control", { kind: "can_use_tool_parked", tool_name: toolName, rule });
-      // The undecidable arm: never resolved here. The scenario's controls are
-      // expected to abort, and the settle below denies every parked callback
-      // so the vendor process is not left wedged.
+      // The undecidable arm: never resolved here. The scenario's `on_control`
+      // trigger fires off THIS record and aborts the turn, and the settle below
+      // denies every parked callback so the vendor process is not left wedged.
+      await recordVendorControl({ kind: "can_use_tool_parked", tool_name: toolName, rule });
       return new Promise((resolve) => parked.push(resolve));
     }
-    record("control", { kind: "can_use_tool_response", tool_name: toolName, result });
+    await recordVendorControl({ kind: "can_use_tool_response", tool_name: toolName, result });
     return result;
   };
 
@@ -661,13 +817,14 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   }
 
   const turns = promptTurnsOf(scenario);
-  // Controls fire at most once per scenario. Tracked in a LOCAL set rather than
-  // by stamping the control object: the corpus is loaded once per process, so a
-  // flag written onto it would leak across runs (and across tests).
-  const firedControls = new Set();
+
+  // The query's iterator, held across turns. NEVER re-derived per turn and
+  // never `return()`ed by a for-await break: see drainToResult.
+  let iterator = null;
 
   const openQuery = (extraOptions) => {
     query = sdk.query({ prompt: input, options: { ...options, ...extraOptions } });
+    iterator = query[Symbol.asyncIterator]();
     record("control", {
       kind: "query_started",
       options: {
@@ -716,20 +873,26 @@ async function runScenario(sdk, scenario, opts, auth, world) {
         session_id: "",
       });
 
-      for await (const msg of query) {
+      // WAIT FOR THIS TURN'S RESULT before the next turn is submitted. Without
+      // it the loop races ahead and every later turn is submitted into a query
+      // that is no longer reading — which is what the recorded t_ms ordering of
+      // the multi-turn captures shows.
+      const result = await drainToResult(iterator, async (msg) => {
         record("sdk", msg);
         if (msg?.type === "system" && msg?.subtype === "init" && typeof msg.session_id === "string") {
           vendorSessionId = msg.session_id;
         }
-        for (const control of scenario.controls ?? []) {
-          if (control.at !== "on_message") continue;
-          const controlKey = JSON.stringify([control.at, control.do, control.after ?? null]);
-          if (firedControls.has(controlKey)) continue;
-          if (!messageMatches(control.after, msg)) continue;
-          firedControls.add(controlKey);
-          report.controls.push(await driveControl(query, control, record));
-        }
-        if (msg.type === "result") break;
+        report.controls.push(
+          ...(await fireTriggers(query, scenario.controls, "on_message", msg, firedControls, record)),
+        );
+      });
+      if (result === null) {
+        // The query ended without a terminal. Submitting the remaining turns
+        // into a dead query would record turn_submitted lines that never
+        // happened, so the scenario stops here and the gate quarantines it for
+        // the missing result.
+        record("control", { kind: "query_ended_without_result", turn: turnIndex });
+        break;
       }
     }
 
@@ -823,7 +986,7 @@ async function runScenario(sdk, scenario, opts, auth, world) {
   renameSync(outDir, finalDir);
 
   process.stderr.write(`${verdictLine(scenario.name, outcome)}\n`);
-  return { report, outcome, dir: finalDir };
+  return { report, outcome, dir: finalDir, slug: cwdSlug(cwd), accountRoot: configDir };
 }
 
 /** Run one control and record both halves of the exchange. */
@@ -879,6 +1042,8 @@ async function main(argv, env) {
   mkdirSync(opts.outDir, { recursive: true });
   const skipped = [];
   const poisoned = [];
+  // Every scenario slug this run created, for the sweep-end late reclaim.
+  const reclaims = [];
   // Scenarios sharing a world run against ONE cwd and account root, in corpus
   // order, so a later one sees what the earlier ones did — that is how a
   // /clear has an identity to rotate and a /compact has a conversation.
@@ -901,10 +1066,21 @@ async function main(argv, env) {
     }
     for (const scenario of runnable) {
       process.stderr.write(`capture.mjs: capturing ${scenario.name}\n`);
-      const { outcome } = await runScenario(sdk, scenario, opts, auth, world);
-      if (!outcome.ok) poisoned.push({ scenario: scenario.name, reasons: outcome.reasons });
+      const run = await runScenario(sdk, scenario, opts, auth, world);
+      reclaims.push({
+        accountRoot: run.accountRoot,
+        slug: run.slug,
+        captureDir: run.dir,
+        report: run.report,
+      });
+      if (!run.outcome.ok) poisoned.push({ scenario: scenario.name, reasons: run.outcome.reasons });
     }
   }
+
+  // SWEEP END, after every query is closed and every SDK child has gone: the
+  // vendor flushes late transcript writes into the operator's real root after
+  // the per-scenario reclaim ran, and this pass is what keeps that root clean.
+  lateReclaimAll(auth, reclaims, (line) => process.stderr.write(line));
   writeFileSync(
     path.join(opts.outDir, "SKIPPED.json"),
     `${JSON.stringify({ skipped, reason: "manual scenarios have no prompt-only provocation" }, null, 2)}\n`,
