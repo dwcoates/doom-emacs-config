@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -181,6 +182,12 @@ type server struct {
 	// streams, which is what ParticipantSource answers from.
 	hostHeld map[ids.WorkspaceID]int
 	webHeld  map[ids.WorkspaceID]int
+	// daemonWatchers are the live WatchDaemon streams whose subscription
+	// already exists. The stand-down announcement is flushed onto every one of
+	// them BEFORE the orderly exit cancels serving, so a client learns the
+	// daemon is standing down from the announcement rather than from the
+	// socket going away underneath it.
+	daemonWatchers map[*daemonWatcher]struct{}
 	// watchTokens memoizes which workspace and feed each minted watch token
 	// addresses. WatchFeedRequest carries ONLY the token while the feed
 	// resolver's Tail takes the workspace and feed explicitly, so the one mint
@@ -251,6 +258,7 @@ func New(deps Deps) (Server, error) {
 		hostTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
 		hostStateTopics: make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
 		webTopics:       make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
+		daemonWatchers:  make(map[*daemonWatcher]struct{}),
 		hostHeld:        make(map[ids.WorkspaceID]int),
 		webHeld:         make(map[ids.WorkspaceID]int),
 		watchTokens:     make(map[string]tokenTarget),
@@ -459,12 +467,100 @@ func (s *server) DrainCancelled(push *agentreplv1.DaemonDrainCancelled) {
 	})
 }
 
-// ShutdownAnnounced publishes the stand-down announcement.
+// ShutdownAnnounced publishes the stand-down announcement AND BLOCKS until
+// every WatchDaemon stream that was live when it was published has actually
+// sent it, or has ended.
+//
+// The wait is the point. Publishing is asynchronous — publish.Topic hands each
+// subscriber an unbounded queue drained by its own goroutine — and every
+// caller of this method exits the process immediately afterwards by cancelling
+// the serving lifetime. Without the wait, the cancellation races the delivery
+// and the announcement is simply lost: the client sees its stream end with no
+// error and no reason, which is exactly the "the daemon vanished" state the
+// announcement exists to prevent.
 func (s *server) ShutdownAnnounced(push *agentreplv1.DaemonShutdownAnnounced) {
-	s.log.Info("daemon.server.shutdown_announced", "published the stand-down announcement", nil)
+	waiting := s.snapshotDaemonWatchers()
 	s.daemonTopic.Publish(&agentreplv1.WatchDaemonResponse{
 		Push: &agentreplv1.WatchDaemonResponse_ShutdownAnnounced{ShutdownAnnounced: push},
 	})
+	undelivered := s.awaitAnnouncement(waiting)
+	if undelivered > 0 {
+		// NOT SWALLOWED, and not waited on forever either: a client wedged
+		// mid-write would otherwise hold the daemon's shutdown open
+		// indefinitely, so the failure to reach it is recorded loudly and the
+		// stand-down proceeds.
+		s.log.Warn("daemon.server.shutdown_announced", "the stand-down announcement did not reach every client before the exit",
+			dlog.Context{"undelivered": undelivered, "bound_ms": announcementFlush.Milliseconds()})
+	}
+	s.log.Info("daemon.server.shutdown_announced", "published the stand-down announcement",
+		dlog.Context{"clients": len(waiting)})
+}
+
+// announcementFlush bounds the stand-down announcement's delivery wait. It is
+// not a poll cadence and no healthy path ever rides it: a live stream takes
+// the announcement in microseconds, and a stream that has gone away satisfies
+// the wait at once. It exists purely so a wedged client cannot hold the
+// orderly exit open forever.
+const announcementFlush = 2 * time.Second
+
+// daemonWatcher is one live WatchDaemon stream, as the announcer sees it: a
+// latch closed the moment that stream has sent a stand-down announcement, or
+// has ended without one.
+type daemonWatcher struct {
+	once sync.Once
+	sent chan struct{}
+}
+
+func (w *daemonWatcher) done() { w.once.Do(func() { close(w.sent) }) }
+
+func (s *server) addDaemonWatcher(w *daemonWatcher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.daemonWatchers[w] = struct{}{}
+}
+
+func (s *server) removeDaemonWatcher(w *daemonWatcher) {
+	s.mu.Lock()
+	delete(s.daemonWatchers, w)
+	s.mu.Unlock()
+	w.done()
+}
+
+// snapshotDaemonWatchers lists the streams an announcement must reach. It is
+// taken BEFORE the publish: a stream that opens afterwards subscribes to the
+// topic's latest value and therefore receives the announcement anyway, and
+// waiting on one that had not subscribed yet would be waiting on a stream the
+// publish never reached.
+func (s *server) snapshotDaemonWatchers() []*daemonWatcher {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*daemonWatcher, 0, len(s.daemonWatchers))
+	for w := range s.daemonWatchers {
+		out = append(out, w)
+	}
+	return out
+}
+
+// awaitAnnouncement waits for every snapshotted stream to have sent the
+// announcement or ended, and reports how many did neither inside the bound.
+func (s *server) awaitAnnouncement(waiting []*daemonWatcher) int {
+	if len(waiting) == 0 {
+		return 0
+	}
+	// ONE DEADLINE FOR THE WHOLE SET, not one per stream: the bound is how
+	// long the exit is willing to be held, and a per-stream timer would
+	// multiply it by the number of clients.
+	deadline, cancel := context.WithTimeout(context.Background(), announcementFlush)
+	defer cancel()
+	undelivered := 0
+	for _, w := range waiting {
+		select {
+		case <-w.sent:
+		case <-deadline.Done():
+			undelivered++
+		}
+	}
+	return undelivered
 }
 
 // UnlandedArm is the standard refusal for a state whose typed error arm does

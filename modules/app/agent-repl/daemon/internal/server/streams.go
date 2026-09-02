@@ -61,10 +61,41 @@ func serveTopic[T comparable, R any](
 	out *connect.ServerStream[R],
 	wrap func(T) *R,
 ) error {
+	return serveTopicWith(s, ctx, rpc, log, topic, out, wrap, topicHooks[T]{})
+}
+
+// topicHooks are the optional edges one stream family can take on the pump.
+// WatchDaemon is the only family that needs them: the stand-down announcement
+// must be PROVEN onto every live stream before the orderly exit cancels
+// serving, and proving it needs both the instant the subscription exists (so
+// an announcer never waits on a stream that cannot yet receive) and the
+// instant a view has actually been sent.
+type topicHooks[T any] struct {
+	// attached runs once the subscription exists; the func it returns runs
+	// when the stream ends.
+	attached func() func()
+	// sent runs after each successful Send, with the view that was sent.
+	sent func(T)
+}
+
+func serveTopicWith[T comparable, R any](
+	s *server,
+	ctx context.Context,
+	rpc string,
+	log dlog.Logger,
+	topic *publish.Topic[T],
+	out *connect.ServerStream[R],
+	wrap func(T) *R,
+	hooks topicHooks[T],
+) error {
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
 	views := topic.Subscribe(streamCtx)
+	if hooks.attached != nil {
+		detach := hooks.attached()
+		defer detach()
+	}
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
@@ -90,6 +121,9 @@ func serveTopic[T comparable, R any](
 				log.Debug(rpc, "the standing stream's client went away",
 					dlog.Context{"cause": err.Error()})
 				return nil
+			}
+			if hooks.sent != nil {
+				hooks.sent(view)
 			}
 		}
 	}
@@ -305,8 +339,23 @@ func (s *server) WatchDaemon(
 	_ *connect.Request[agentreplv1.WatchDaemonRequest],
 	out *connect.ServerStream[agentreplv1.WatchDaemonResponse],
 ) error {
-	return serveTopic(s, ctx, "WatchDaemon", s.log, &s.daemonTopic, out,
-		func(push *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return push })
+	w := &daemonWatcher{sent: make(chan struct{})}
+	return serveTopicWith(s, ctx, "WatchDaemon", s.log, &s.daemonTopic, out,
+		func(push *agentreplv1.WatchDaemonResponse) *agentreplv1.WatchDaemonResponse { return push },
+		topicHooks[*agentreplv1.WatchDaemonResponse]{
+			attached: func() func() {
+				s.addDaemonWatcher(w)
+				// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits
+				// for delivery or for the stream to be gone, never for a
+				// client that has already stopped listening.
+				return func() { s.removeDaemonWatcher(w) }
+			},
+			sent: func(push *agentreplv1.WatchDaemonResponse) {
+				if push.GetShutdownAnnounced() != nil {
+					w.done()
+				}
+			},
+		})
 }
 
 // holdParticipant records that one of a workspace's two per-workspace streams
