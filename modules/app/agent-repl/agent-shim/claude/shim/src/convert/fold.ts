@@ -246,7 +246,15 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
     }
 
     case "user":
-      return { entries: convertUserRecord(message, context, state.calls, TOOL_CONVERTERS) };
+      return {
+        entries: convertUserRecord(
+          message,
+          context,
+          state.calls,
+          TOOL_CONVERTERS,
+          state.taskKinds,
+        ),
+      };
 
     case "result":
       return convertResult(message, context, state.lastAnswer);

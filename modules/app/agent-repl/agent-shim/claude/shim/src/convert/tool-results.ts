@@ -27,7 +27,7 @@ import {
   type ToolOutcome,
 } from "./tool-calls.js";
 import { skillDocumentSettle } from "./tools/skill-use.js";
-import { bashDetachmentEntry } from "./detached.js";
+import { bashDetachmentEntry, type TaskKindRegistry } from "./detached.js";
 import { activityEntry, agentActivity } from "./entries.js";
 import { toolCallActivityId } from "./ids.js";
 
@@ -52,6 +52,7 @@ export function convertUserRecord(
   context: FoldContext,
   registry: CallRegistry,
   converters: ReadonlyMap<string, ToolConverter>,
+  taskKinds: TaskKindRegistry,
 ): readonly PersistEntry[] {
   const record = message as unknown as Record<string, unknown>;
   const skillDocument = skillDocumentEntry(message, context, registry);
@@ -146,6 +147,9 @@ export function convertUserRecord(
         // The vendor names the spool path only in the result's PROSE on a
         // backgrounded Bash; see outputPathFromProse.
         outcome.content,
+        // So the cause this result STATES is the one the later
+        // `task_notification` upserts, rather than a hard-coded `requested`.
+        taskKinds,
       );
       if (detachment !== undefined) entries.push(detachment);
     }
