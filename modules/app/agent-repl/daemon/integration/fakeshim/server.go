@@ -87,6 +87,20 @@ type server struct {
 	profile Profile
 	log     *logSink
 
+	// bashMu serializes a bash push against a WatchBash subscription, which is
+	// what makes a pushed frame IMPOSSIBLE to lose. A test pushes as soon as
+	// the daemon has drawn the shell's head row, but the daemon opens the
+	// WatchBash stream on its own goroutine: without this seam the push can
+	// land while the hub has no subscriber for the work handle at all, and the
+	// frame is dropped rather than delayed. Under GOMAXPROCS=1 that is the
+	// ordinary outcome, not a rare one.
+	bashMu sync.Mutex
+	// bashLog is every frame pushed for a work handle, in publication order.
+	// A WatchBash stream replays it from the snapshot taken atomically with
+	// its own subscription, so each frame is delivered exactly once whether it
+	// was pushed before the stream opened or after.
+	bashLog map[string][]*conversationv1.AgentBash
+
 	sessions            *hub[*conversationv1.SessionUpdate]
 	sessionStreamOpened bool
 
@@ -143,6 +157,7 @@ func newServer(rec *Recorder, p Profile, log *logSink) *server {
 		agents:          newHub[agentFrame](),
 		bashes:          newHub[bashFrame](),
 		answers:         map[string][]scriptedAnswer{},
+		bashLog:         map[string][]*conversationv1.AgentBash{},
 		bashStarts:      map[string]*conversationv1.AgentBash{},
 		openPermissions: map[string]openPermission{},
 		unhang:          make(chan struct{}),
@@ -495,7 +510,7 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 		return err
 	}
 	work := req.Msg.GetWork().GetValue()
-	id, ch := s.bashes.subscribe()
+	id, ch, backlog := s.subscribeBash(work)
 	defer s.bashes.unsubscribe(id)
 
 	// THE OPENING FRAME IS THE CONTRACT'S: a WatchBash stream opens with the
@@ -504,6 +519,15 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 	// sent nothing until the next delta would stall every caller.
 	if err := stream.Send(&shimv1.WatchBashResponse{Bash: s.bashStart(work)}); err != nil {
 		return err
+	}
+	// THE BACKLOG COMES FIRST, in publication order: it is the frames that
+	// were pushed before this subscription existed. Nothing in it can also
+	// arrive on the channel -- the snapshot and the subscription were taken
+	// under one lock -- so no frame is sent twice.
+	for _, bash := range backlog {
+		if err := stream.Send(&shimv1.WatchBashResponse{Bash: bash}); err != nil {
+			return err
+		}
 	}
 	for {
 		select {
@@ -716,6 +740,41 @@ const NotImplementedMessage = "intended arm: %sError.not_implemented: workflow i
 
 func notImplemented(rpc string) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New(sprintf(NotImplementedMessage, rpc)))
+}
+
+// publishBash records a pushed frame in the work handle's log and hands it to
+// every live stream, under the one lock a subscription also takes. It answers
+// how many bash streams are open, which is what the control reply reports.
+func (s *server) publishBash(work string, bash *conversationv1.AgentBash) int {
+	s.bashMu.Lock()
+	defer s.bashMu.Unlock()
+	s.bashLog[work] = append(s.bashLog[work], bash)
+	s.bashes.publish(bashFrame{work: work, bash: bash})
+	return s.bashes.count()
+}
+
+// subscribeBash opens a bash subscription together with the snapshot of what
+// was published to the work handle before it existed. Taking both under
+// bashMu is the whole guarantee: a frame is in the snapshot or on the channel,
+// never in neither and never in both.
+func (s *server) subscribeBash(work string) (int, chan bashFrame, []*conversationv1.AgentBash) {
+	s.bashMu.Lock()
+	defer s.bashMu.Unlock()
+	id, ch := s.bashes.subscribe()
+	backlog := append([]*conversationv1.AgentBash(nil), s.bashLog[work]...)
+	return id, ch, backlog
+}
+
+// dropBashStreams severs every open bash stream AND forgets what was pushed
+// to them. A redial is a fresh observer of a shell that has kept running, not
+// a replay of the frames the severed stream already carried: handing it the
+// log again would feed the daemon the same deltas twice and read as a spool
+// gap.
+func (s *server) dropBashStreams() {
+	s.bashMu.Lock()
+	defer s.bashMu.Unlock()
+	s.bashLog = map[string][]*conversationv1.AgentBash{}
+	s.bashes.dropAll()
 }
 
 // rememberBashStart files a shell's start under a key (its detached-work
