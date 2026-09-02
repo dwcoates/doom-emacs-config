@@ -89,7 +89,7 @@ import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, VendorFiles } from "./vendo
  * incremental bytes terminated by `EXIT=<code>`, and an agent spool is the
  * agent's own JSONL with no terminator ever.
  */
-export function isShellTaskId(taskId: string): boolean {
+function isShellTaskId(taskId: string): boolean {
   return taskId.startsWith("b");
 }
 
@@ -99,12 +99,10 @@ export {
   FAKE_ACCOUNT_INFO,
   FAKE_AGENTS,
   FAKE_COMMANDS,
-  FAKE_DEFAULT_MODEL,
   FAKE_MCP_SERVERS,
   FAKE_MODELS,
 } from "./catalogs.js";
-export { FAIL_TURN_MARKER, SCENARIOS, selectScenario } from "./registry.js";
-export type { Scenario, ScenarioContext } from "./scenario.js";
+export { FAIL_TURN_MARKER } from "./registry.js";
 
 /**
  * THE TURN GATE. A test that must arrange "this turn is STILL RUNNING while
@@ -138,7 +136,7 @@ export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
  * `set_permission_mode`. Anything else is a refusal to start rather than a
  * silently ignored knob.
  */
-export const REFUSE_ENV = "AGENT_REPL_FAKE_REFUSE";
+const REFUSE_ENV = "AGENT_REPL_FAKE_REFUSE";
 
 /** The control verbs {@link REFUSE_ENV} may name. */
 const REFUSABLE = new Set(["start", "start-once", "set_model", "set_permission_mode"]);
@@ -156,7 +154,7 @@ const REFUSABLE = new Set(["start", "start-once", "set_model", "set_permission_m
 let startOnceRefusals = 0;
 
 /** Which control verbs this process was told to refuse. */
-export function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
+function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
   const raw = env[REFUSE_ENV] ?? "";
   const named = raw
     .split(",")

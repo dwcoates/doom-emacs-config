@@ -21,7 +21,7 @@ import { rawStruct } from "./residue.js";
 const LOGGER = bindLog({ component: "shim-convert-blocks", operation: "shim.convert.blocks" });
 
 /** A vendor content block, as loosely as it must be read before it is typed. */
-export interface VendorBlock {
+interface VendorBlock {
   readonly type?: string;
   readonly text?: string;
   readonly source?: { readonly type?: string; readonly media_type?: string; readonly url?: string };

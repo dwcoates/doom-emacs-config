@@ -52,7 +52,7 @@ const LOGGER = bindLog({ component: "shim-convert-permission", operation: "shim.
  */
 const UNDECIDED_DECIDER = "classifier";
 
-export function policyDenial(
+function policyDenial(
   toolUseId: string,
   message: string,
   decider: string | undefined,
@@ -163,22 +163,3 @@ export function convertPermissionDenied(
   ];
 }
 
-/**
- * Cross-check the turn result's `permission_denials` against what was recorded.
- *
- * A DIAGNOSTIC, NOT A PRODUCER: the result restates every denial the turn saw,
- * and a denial that never reached the record means a `permission_denied` message
- * was missed. Logging it is what makes that discoverable; emitting a second
- * denial row from here would paper over the gap instead.
- */
-export function crossCheckDenials(denials: unknown, recorded: ReadonlySet<string>): void {
-  if (!Array.isArray(denials)) return;
-  for (const denial of denials) {
-    const toolUseId = (denial as { tool_use_id?: unknown }).tool_use_id;
-    if (typeof toolUseId !== "string" || recorded.has(toolUseId)) continue;
-    LOGGER.log(
-      { level: "warn", tool_use_id: toolUseId },
-      "the turn result names a permission denial the record never saw; a permission_denied message was missed",
-    );
-  }
-}

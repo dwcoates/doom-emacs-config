@@ -146,6 +146,17 @@ describe("serve", () => {
     expect(server.socketPath).toBe(sock);
   });
 
+  it("rejects when the underlying listen() itself fails, past the stale/live probe", async () => {
+    // A path under a directory that does not exist: probeSocket reports "free"
+    // (nothing is listening there), so this reaches the real listener.listen()
+    // and fails there -- the bind-failure branch the stale/live pre-check never
+    // exercises. The OS reports this as ENOENT on some platforms and EACCES on
+    // others; either is the same "listen() itself failed" branch.
+    const sock = path.join(mkdtempSync(path.join(os.tmpdir(), "shim-server-")), "missing", "shim.sock");
+
+    await expect(serve(sock, shimRoutes(new NotImplementedEngine()))).rejects.toThrow(/ENOENT|EACCES/);
+  });
+
   it("REFUSES to bind over a live listener rather than orphaning it", async () => {
     // Arrange.
     const sock = socketPath();

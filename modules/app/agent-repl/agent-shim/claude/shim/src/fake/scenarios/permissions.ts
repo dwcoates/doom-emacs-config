@@ -23,7 +23,7 @@
  */
 import { askPermission, conclude, scenario } from "./support.js";
 
-export const PERM_ALLOW_ONCE = scenario({
+const PERM_ALLOW_ONCE = scenario({
   name: "perm-allow-once",
   prompt: "!perm-allow-once",
   emits: "a gated `Bash`, one `canUseTool` ask, and the run that follows an ALLOW with no `updatedPermissions`",
@@ -53,7 +53,7 @@ export const PERM_ALLOW_ONCE = scenario({
   },
 });
 
-export const PERM_ALLOW_STANDING = scenario({
+const PERM_ALLOW_STANDING = scenario({
   name: "perm-allow-standing",
   prompt: "!perm-allow-standing",
   emits:
@@ -86,7 +86,7 @@ export const PERM_ALLOW_STANDING = scenario({
   },
 });
 
-export const PERM_DENY_USER = scenario({
+const PERM_DENY_USER = scenario({
   name: "perm-deny-user",
   prompt: "!perm-deny-user",
   emits:
@@ -115,7 +115,7 @@ export const PERM_DENY_USER = scenario({
   },
 });
 
-export const PERM_DENY_POLICY = scenario({
+const PERM_DENY_POLICY = scenario({
   name: "perm-deny-policy",
   prompt: "!perm-deny-policy",
   emits:
@@ -151,7 +151,7 @@ export const PERM_DENY_POLICY = scenario({
   },
 });
 
-export const PERM_UNDECIDABLE = scenario({
+const PERM_UNDECIDABLE = scenario({
   name: "perm-undecidable",
   prompt: "!perm-undecidable",
   emits:
@@ -188,7 +188,7 @@ export const PERM_UNDECIDABLE = scenario({
   },
 });
 
-export const PERM_ALLOW_STANDING_MODE = scenario({
+const PERM_ALLOW_STANDING_MODE = scenario({
   name: "perm-allow-standing-mode",
   prompt: "!perm-allow-standing-mode",
   emits:
@@ -236,7 +236,7 @@ export const PERM_ALLOW_STANDING_MODE = scenario({
   },
 });
 
-export const PERM_NO_STANDING_OFFERED = scenario({
+const PERM_NO_STANDING_OFFERED = scenario({
   name: "perm-no-standing",
   prompt: "!perm-no-standing",
   emits:
@@ -264,7 +264,7 @@ export const PERM_NO_STANDING_OFFERED = scenario({
   },
 });
 
-export const PERM_HOLD = scenario({
+const PERM_HOLD = scenario({
   name: "perm-hold",
   prompt: "!perm-hold",
   emits:

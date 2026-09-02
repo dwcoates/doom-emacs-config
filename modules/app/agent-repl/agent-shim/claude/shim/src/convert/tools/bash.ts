@@ -27,7 +27,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { startedAt } from "../entries.js";
-import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
+import type { PendingCall, ToolConverter } from "../tool-calls.js";
 import { asRecord, bool, failureOf, settle, str, strOr, uint } from "./support.js";
 
 const LOGGER = bindLog({ component: "shim-convert-tools", operation: "shim.convert.tools.bash" });

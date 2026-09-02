@@ -18,7 +18,6 @@ import type {
   ModelInfoLike,
   PermissionModeLike,
   SdkMessage,
-  SdkUserMessage,
   SlashCommandLike,
   AgentInfoLike,
   QueryLike,

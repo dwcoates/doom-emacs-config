@@ -223,7 +223,7 @@ export function createCallRegistry(): CallRegistry {
 // ---------------------------------------------------------------------------
 
 /** Which of the four dispositions a tool name has. */
-export type ToolDisposition =
+type ToolDisposition =
   | { readonly case: "modelled"; readonly converter: ToolConverter }
   | { readonly case: "exempt" }
   | { readonly case: "engine_owned" }
@@ -256,7 +256,7 @@ export function environmentOf(context: FoldContext): ToolEnvironment {
 }
 
 /** The activity envelope every tool frame shares: the unit's identity. */
-export function toolActivity(
+function toolActivity(
   call: PendingCall,
   item: conversationv1.AgentActivity["item"],
   envelope: Parameters<typeof agentActivity>[2] = {},

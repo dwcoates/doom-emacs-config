@@ -71,10 +71,10 @@ export const FAKE_REASONING_SIGNATURE =
  * the SDK's CLI stamps `sdk-cli` (corpus: every `sdk-cli` line was produced by
  * a shim-driven session; `cli` lines came from interactive terminals).
  */
-export const FAKE_ENTRYPOINT = "sdk-cli";
+const FAKE_ENTRYPOINT = "sdk-cli";
 
 /** The `userType` every record reports. The corpus has exactly one value. */
-export const FAKE_USER_TYPE = "external";
+const FAKE_USER_TYPE = "external";
 
 /**
  * Slugify an absolute directory the way the vendor names its project folder.
@@ -138,7 +138,7 @@ export type TranscriptRecord = Record<string, unknown>;
  * are session facts, and a record that disagreed with its siblings about the
  * cwd or the branch would be a shape no real transcript contains.
  */
-export interface TranscriptEnvelope {
+interface TranscriptEnvelope {
   readonly cwd: string;
   readonly sessionId: string;
   readonly gitBranch: string;
@@ -354,7 +354,7 @@ export class SpoolWriter {
 }
 
 /** How a {@link VendorFiles} tree is rooted. */
-export interface VendorFilesConfig {
+interface VendorFilesConfig {
   /** `CLAUDE_CONFIG_DIR` — the account root the transcripts hang under. */
   readonly configDir: string;
   /** The workspace directory; the slug's source and every record's `cwd`. */

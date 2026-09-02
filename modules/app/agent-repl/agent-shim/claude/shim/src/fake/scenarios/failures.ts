@@ -105,7 +105,7 @@ function stopScenario(spec: {
   });
 }
 
-export const FAIL_EXECUTION = stopScenario({
+const FAIL_EXECUTION = stopScenario({
   name: "fail-execution",
   subtype: "error_during_execution",
   // NO terminal_reason: `execution_error` is the UNCLASSIFIED arm, so a row
@@ -117,7 +117,7 @@ export const FAIL_EXECUTION = stopScenario({
     "AgentFailure.execution_error — DECLARED-ONLY: no capture grounds this terminal (`turn-stop-error-during-execution` ended `success.interrupted` after an `aborted_streaming`), so the mock keeps the declared arm and the evidence gap is listed in testdata/captures/MANIFEST.md",
 });
 
-export const FAIL_MAX_TURNS = stopScenario({
+const FAIL_MAX_TURNS = stopScenario({
   name: "fail-max-turns",
   subtype: "error_max_turns",
   terminalReason: "max_turns",
@@ -125,7 +125,7 @@ export const FAIL_MAX_TURNS = stopScenario({
   arms: "AgentFailure.max_turns",
 });
 
-export const FAIL_BUDGET = stopScenario({
+const FAIL_BUDGET = stopScenario({
   name: "fail-budget",
   subtype: "error_max_budget_usd",
   terminalReason: "budget_exhausted",
@@ -133,7 +133,7 @@ export const FAIL_BUDGET = stopScenario({
   arms: "AgentFailure.budget_exhausted",
 });
 
-export const FAIL_STRUCTURED_OUTPUT = stopScenario({
+const FAIL_STRUCTURED_OUTPUT = stopScenario({
   name: "fail-structured-output",
   subtype: "error_max_structured_output_retries",
   terminalReason: "structured_output_retry_exhausted",
@@ -142,7 +142,7 @@ export const FAIL_STRUCTURED_OUTPUT = stopScenario({
     "AgentFailure.structured_output_retry_exhausted — DECLARED-ONLY: no capture grounds this terminal (`turn-stop-max-structured-output-retries` ended `success.completed`), so the mock keeps the declared arm and the evidence gap is listed in testdata/captures/MANIFEST.md",
 });
 
-export const FAIL_BLOCKING_LIMIT = stopScenario({
+const FAIL_BLOCKING_LIMIT = stopScenario({
   name: "fail-blocking-limit",
   subtype: "error_during_execution",
   terminalReason: "blocking_limit",
@@ -150,7 +150,7 @@ export const FAIL_BLOCKING_LIMIT = stopScenario({
   arms: "AgentFailure.blocking_limit",
 });
 
-export const FAIL_RAPID_REFILL = stopScenario({
+const FAIL_RAPID_REFILL = stopScenario({
   name: "fail-rapid-refill",
   subtype: "error_during_execution",
   terminalReason: "rapid_refill_breaker",
@@ -158,7 +158,7 @@ export const FAIL_RAPID_REFILL = stopScenario({
   arms: "AgentFailure.rapid_refill_breaker",
 });
 
-export const FAIL_PROMPT_TOO_LONG = stopScenario({
+const FAIL_PROMPT_TOO_LONG = stopScenario({
   name: "fail-prompt-too-long",
   subtype: "error_during_execution",
   terminalReason: "prompt_too_long",
@@ -166,7 +166,7 @@ export const FAIL_PROMPT_TOO_LONG = stopScenario({
   arms: "AgentFailure.prompt_too_long",
 });
 
-export const FAIL_IMAGE = stopScenario({
+const FAIL_IMAGE = stopScenario({
   name: "fail-image",
   subtype: "error_during_execution",
   terminalReason: "image_error",
@@ -174,7 +174,7 @@ export const FAIL_IMAGE = stopScenario({
   arms: "AgentFailure.image_error",
 });
 
-export const FAIL_MODEL = stopScenario({
+const FAIL_MODEL = stopScenario({
   name: "fail-model",
   subtype: "error_during_execution",
   terminalReason: "model_error",
@@ -182,7 +182,7 @@ export const FAIL_MODEL = stopScenario({
   arms: "AgentFailure.model_error",
 });
 
-export const FAIL_MALFORMED_TOOL_USE = stopScenario({
+const FAIL_MALFORMED_TOOL_USE = stopScenario({
   name: "fail-malformed-tool-use",
   subtype: "error_during_execution",
   terminalReason: "malformed_tool_use_exhausted",
@@ -190,7 +190,7 @@ export const FAIL_MALFORMED_TOOL_USE = stopScenario({
   arms: "AgentFailure.malformed_tool_use_exhausted",
 });
 
-export const FAIL_TOOL_DEFERRED = stopScenario({
+const FAIL_TOOL_DEFERRED = stopScenario({
   name: "fail-tool-deferred",
   subtype: "error_during_execution",
   terminalReason: "tool_deferred",
@@ -198,7 +198,7 @@ export const FAIL_TOOL_DEFERRED = stopScenario({
   arms: "AgentFailure.tool_deferred",
 });
 
-export const FAIL_TOOL_DEFERRED_UNAVAILABLE = stopScenario({
+const FAIL_TOOL_DEFERRED_UNAVAILABLE = stopScenario({
   name: "fail-tool-deferred-unavailable",
   subtype: "error_during_execution",
   terminalReason: "tool_deferred_unavailable",
@@ -206,7 +206,7 @@ export const FAIL_TOOL_DEFERRED_UNAVAILABLE = stopScenario({
   arms: "AgentFailure.tool_deferred_unavailable",
 });
 
-export const FAIL_TURN_SETUP = stopScenario({
+const FAIL_TURN_SETUP = stopScenario({
   name: "fail-turn-setup",
   subtype: "error_during_execution",
   terminalReason: "turn_setup_failed",
@@ -214,7 +214,7 @@ export const FAIL_TURN_SETUP = stopScenario({
   arms: "AgentFailure.turn_setup_failed",
 });
 
-export const FAIL_ABORTED_TOOLS = stopScenario({
+const FAIL_ABORTED_TOOLS = stopScenario({
   name: "fail-aborted-tools",
   subtype: "error_during_execution",
   terminalReason: "aborted_tools",
@@ -222,7 +222,7 @@ export const FAIL_ABORTED_TOOLS = stopScenario({
   arms: "AgentInterrupted.by_user, reached through the tools rather than the stream",
 });
 
-export const FAIL_STOP_HOOK = stopScenario({
+const FAIL_STOP_HOOK = stopScenario({
   name: "fail-stop-hook",
   subtype: "error_during_execution",
   terminalReason: "stop_hook_prevented",
@@ -251,7 +251,7 @@ export const FAIL_STOP_HOOK = stopScenario({
   },
 });
 
-export const FAIL_HOOK_STOPPED = stopScenario({
+const FAIL_HOOK_STOPPED = stopScenario({
   name: "fail-hook-stopped",
   subtype: "error_during_execution",
   terminalReason: "hook_stopped",
@@ -259,7 +259,7 @@ export const FAIL_HOOK_STOPPED = stopScenario({
   arms: "AgentFailure.hook_stopped",
 });
 
-export const FAIL_CONTINUATION_PREVENTED = scenario({
+const FAIL_CONTINUATION_PREVENTED = scenario({
   name: "fail-continuation-prevented",
   prompt: "!fail-continuation-prevented",
   emits:
@@ -366,7 +366,7 @@ function apiErrorScenario(spec: {
   });
 }
 
-export const API_RATE_LIMITED = apiErrorScenario({
+const API_RATE_LIMITED = apiErrorScenario({
   name: "api-429",
   status: 429,
   errorClass: "rate_limit",
@@ -375,7 +375,7 @@ export const API_RATE_LIMITED = apiErrorScenario({
   retries: true,
   extra: { rateLimits: { retryAfterSeconds: 30 } },
 });
-export const API_OVERLOADED = apiErrorScenario({
+const API_OVERLOADED = apiErrorScenario({
   name: "api-529",
   status: 529,
   errorClass: "overloaded",
@@ -383,7 +383,7 @@ export const API_OVERLOADED = apiErrorScenario({
   arm: "ApiOverloaded",
   retries: true,
 });
-export const API_UNAUTHENTICATED = apiErrorScenario({
+const API_UNAUTHENTICATED = apiErrorScenario({
   name: "api-401",
   status: 401,
   errorClass: "authentication_failed",
@@ -391,7 +391,7 @@ export const API_UNAUTHENTICATED = apiErrorScenario({
   arm: "ApiAuthenticationFailed",
   retries: false,
 });
-export const API_FORBIDDEN = apiErrorScenario({
+const API_FORBIDDEN = apiErrorScenario({
   name: "api-403",
   status: 403,
   errorClass: "invalid_request",
@@ -399,7 +399,7 @@ export const API_FORBIDDEN = apiErrorScenario({
   arm: "ApiPermissionDenied",
   retries: false,
 });
-export const API_INVALID = apiErrorScenario({
+const API_INVALID = apiErrorScenario({
   name: "api-400",
   status: 400,
   errorClass: "invalid_request",
@@ -407,7 +407,7 @@ export const API_INVALID = apiErrorScenario({
   arm: "ApiInvalidRequest",
   retries: false,
 });
-export const API_TOO_LARGE = apiErrorScenario({
+const API_TOO_LARGE = apiErrorScenario({
   name: "api-413",
   status: 413,
   errorClass: "invalid_request",
@@ -415,7 +415,7 @@ export const API_TOO_LARGE = apiErrorScenario({
   arm: "ApiRequestTooLarge",
   retries: false,
 });
-export const API_NOT_FOUND = apiErrorScenario({
+const API_NOT_FOUND = apiErrorScenario({
   name: "api-404",
   status: 404,
   errorClass: "model_not_found",
@@ -423,7 +423,7 @@ export const API_NOT_FOUND = apiErrorScenario({
   arm: "ApiNotFound",
   retries: false,
 });
-export const API_INTERNAL = apiErrorScenario({
+const API_INTERNAL = apiErrorScenario({
   name: "api-500",
   status: 500,
   errorClass: "server_error",
@@ -431,7 +431,7 @@ export const API_INTERNAL = apiErrorScenario({
   arm: "ApiInternal",
   retries: true,
 });
-export const API_BILLING = apiErrorScenario({
+const API_BILLING = apiErrorScenario({
   name: "api-billing",
   status: 402,
   errorClass: "billing_error",
@@ -439,7 +439,7 @@ export const API_BILLING = apiErrorScenario({
   arm: "ApiBillingError",
   retries: false,
 });
-export const API_OAUTH_ORG = apiErrorScenario({
+const API_OAUTH_ORG = apiErrorScenario({
   name: "api-oauth-org",
   status: 403,
   errorClass: "oauth_org_not_allowed",
@@ -447,7 +447,7 @@ export const API_OAUTH_ORG = apiErrorScenario({
   arm: "ApiOauthOrgNotAllowed",
   retries: false,
 });
-export const API_MAX_OUTPUT = apiErrorScenario({
+const API_MAX_OUTPUT = apiErrorScenario({
   name: "api-max-output",
   status: null,
   errorClass: "max_output_tokens",
@@ -455,7 +455,7 @@ export const API_MAX_OUTPUT = apiErrorScenario({
   arm: "ApiMaxOutputTokens",
   retries: false,
 });
-export const API_UNMODELED = apiErrorScenario({
+const API_UNMODELED = apiErrorScenario({
   name: "api-unmodeled",
   status: 418,
   errorClass: "unknown",
@@ -464,7 +464,7 @@ export const API_UNMODELED = apiErrorScenario({
   retries: false,
 });
 
-export const MAX_TOKENS = scenario({
+const MAX_TOKENS = scenario({
   name: "max-tokens",
   prompt: "!max-tokens",
   emits:
@@ -485,7 +485,7 @@ export const MAX_TOKENS = scenario({
   },
 });
 
-export const REFUSAL_FALLBACK = scenario({
+const REFUSAL_FALLBACK = scenario({
   name: "refusal-fallback",
   prompt: "!refusal-fallback",
   emits:
@@ -552,7 +552,7 @@ export const REFUSAL_FALLBACK = scenario({
   },
 });
 
-export const REFUSAL_NO_FALLBACK = scenario({
+const REFUSAL_NO_FALLBACK = scenario({
   name: "refusal-no-fallback",
   prompt: "!refusal-no-fallback",
   emits:
@@ -599,7 +599,7 @@ export const REFUSAL_NO_FALLBACK = scenario({
 /** The hook the two converter-fault scenarios announce, well-formed or not. */
 const FAULT_HOOK = { hook_name: "PreToolUse:Read", hook_event: "PreToolUse" } as const;
 
-export const FAULT_CONVERTER = scenario({
+const FAULT_CONVERTER = scenario({
   name: "fault-converter",
   prompt: "!fault-converter",
   emits:
@@ -626,7 +626,7 @@ export const FAULT_CONVERTER = scenario({
   },
 });
 
-export const FAULT_RECOVER = scenario({
+const FAULT_RECOVER = scenario({
   name: "fault-recover",
   prompt: "!fault-recover",
   emits:
@@ -654,7 +654,7 @@ export const FAULT_RECOVER = scenario({
   },
 });
 
-export const CONTEXT_WINDOW_EXCEEDED = scenario({
+const CONTEXT_WINDOW_EXCEEDED = scenario({
   name: "context-window",
   prompt: "!context-window",
   emits: "a `prompt_too_long` terminal preceded by the vendor's informational notice naming the window",

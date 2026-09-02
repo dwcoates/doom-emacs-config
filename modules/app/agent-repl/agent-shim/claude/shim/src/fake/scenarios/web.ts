@@ -9,7 +9,7 @@
  */
 import { conclude, scenario } from "./support.js";
 
-export const WEB_FETCH = scenario({
+const WEB_FETCH = scenario({
   name: "web-fetch",
   prompt: "!web-fetch",
   emits: "a `WebFetch` answered with the corpus shape: bytes, code, codeText, result, durationMs, url",
@@ -33,7 +33,7 @@ export const WEB_FETCH = scenario({
   },
 });
 
-export const WEB_FETCH_REDIRECT = scenario({
+const WEB_FETCH_REDIRECT = scenario({
   name: "web-fetch-redirect",
   prompt: "!web-fetch-redirect",
   emits: "a `WebFetch` answered with a 302 and the vendor's redirect instruction as the result body",
@@ -58,7 +58,7 @@ export const WEB_FETCH_REDIRECT = scenario({
   },
 });
 
-export const WEB_SEARCH = scenario({
+const WEB_SEARCH = scenario({
   name: "web-search",
   prompt: "!web-search",
   emits: "a `WebSearch` answered with BOTH result kinds — a hit list keyed by a server tool_use id, and a bare commentary string",

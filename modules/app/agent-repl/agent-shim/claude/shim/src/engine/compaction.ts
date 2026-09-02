@@ -69,7 +69,7 @@ export function compactionPrompt(scope: conversationv1.SessionCompactScope): str
 }
 
 /** The ambient fields every line of one transcript shares. */
-export interface TranscriptAmbient {
+interface TranscriptAmbient {
   readonly sessionId: string;
   readonly cwd?: string;
   readonly version?: string;
@@ -116,7 +116,7 @@ export function readAmbient(file: string): TranscriptAmbient {
 }
 
 /** Everything the two written lines need that the transcript does not state. */
-export interface CompactionLinesSpec {
+interface CompactionLinesSpec {
   readonly ambient: TranscriptAmbient;
   readonly summary: string;
   readonly preTokens: number;

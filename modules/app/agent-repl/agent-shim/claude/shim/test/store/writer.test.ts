@@ -369,3 +369,69 @@ describe("the producer's name", () => {
     expect(() => plane.setProducer("vendor-session-2")).toThrow(/cannot become/);
   });
 });
+
+describe("clearProducer", () => {
+  it("is a no-op when nothing was ever named", async () => {
+    const { persistence: plane } = await persistence("clear-unnamed");
+
+    expect(() => plane.clearProducer()).not.toThrow();
+  });
+
+  it("un-names an attempt that named the producer but wrote nothing", async () => {
+    const { persistence: plane } = await persistence("clear-before-write");
+    plane.setProducer("vendor-session-1");
+
+    plane.clearProducer();
+
+    // Un-named again is legal: a caller may name it fresh, exactly as if this
+    // attempt had never happened.
+    expect(() => plane.setProducer("vendor-session-2")).not.toThrow();
+  });
+
+  it("refuses to un-name a producer that already wrote rows", async () => {
+    const { persistence: plane } = await persistence("clear-after-write");
+    plane.setProducer("vendor-session-1");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    expect(() => plane.clearProducer()).toThrow(/has already written rows/);
+  });
+});
+
+describe("liveWork", () => {
+  it("delegates to the reconciler's own answer", async () => {
+    const { persistence: plane } = await persistence("writer-live-work");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    const live = await plane.liveWork();
+
+    expect(live.liveAgents.map((id) => id.value)).toContain("book-1");
+  });
+});
+
+describe("the default backoff sleep", () => {
+  it("lets a write that fails then recovers still land, using the real timer", async () => {
+    const started = await startFakeStore(socketPathForTest("default-sleep"));
+    store = started;
+    const plane = createPersistence({
+      client: createStoreClient(started.socketPath),
+      producer: PRODUCER,
+      nowMs: () => 1_000,
+      // No `sleep` override: exercises the module's own real, unref'd
+      // setTimeout-based default rather than a test double.
+      retry: { ...DEFAULT_RETRY_POLICY, backoffMs: [20, 20, 20, 20] },
+    });
+    started.failWrites("transient");
+
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    // The first attempt fails on the real backoff timer; let it elapse, then
+    // recover the store before the schedule runs out.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    started.failWrites(null);
+
+    await plane.flush();
+
+    expect(started.book("book-1")).toHaveLength(1);
+  });
+});

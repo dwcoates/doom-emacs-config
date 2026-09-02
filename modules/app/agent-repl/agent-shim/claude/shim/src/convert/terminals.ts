@@ -22,7 +22,6 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
-import type { PersistEntry } from "../store/persistence.js";
 import { terminalEntry } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import type { FoldOutput } from "./fold.js";
@@ -42,7 +41,7 @@ const LOGGER = bindLog({ component: "shim-convert-terminals", operation: "shim.c
  * retry delay only on its `api_retry` message, which is a different record, and
  * carrying one across would be a join the fold does not make.
  */
-export function apiRequestFailed(
+function apiRequestFailed(
   message: string,
   httpStatus: number | undefined,
   vendorError: string | undefined,
@@ -52,12 +51,10 @@ export function apiRequestFailed(
 }
 
 /** Which arm of the taxonomy a status or a vendor error string names. */
-export function apiFailureKind(
+function apiFailureKind(
   httpStatus: number | undefined,
   vendorError: string | undefined,
 ): conversationv1.ApiRequestFailed["kind"] {
-  const empty = <T>(schema: T): T => schema;
-  void empty;
   switch (vendorError) {
     case "authentication_failed":
       return {
@@ -206,7 +203,7 @@ interface RawResult {
 }
 
 /** The error strings the run accumulated, oldest first. */
-export function accumulatedErrors(raw: RawResult): string[] {
+function accumulatedErrors(raw: RawResult): string[] {
   const errors = raw.errors;
   if (!Array.isArray(errors)) return [];
   return errors.filter((entry): entry is string => typeof entry === "string");

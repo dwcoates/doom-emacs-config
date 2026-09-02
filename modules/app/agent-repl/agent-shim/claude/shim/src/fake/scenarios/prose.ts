@@ -67,7 +67,7 @@ export const PROSE = scenario({
 });
 
 /** A long markdown reply, for the webapp's renderer. */
-export const MARKDOWN = scenario({
+const MARKDOWN = scenario({
   name: "md",
   prompt: "!md",
   emits: "one text block carrying the markdown showcase, then a success `result`",

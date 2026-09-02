@@ -43,7 +43,7 @@ function backgroundingProse(taskId: string, outputPath: string): string {
   );
 }
 
-export const BASH = scenario({
+const BASH = scenario({
   name: "bash",
   prompt: "!bash [command]",
   emits: "a foreground `Bash` tool_use, then its result — nothing in between, because foreground output is unobservable while running",
@@ -58,7 +58,7 @@ export const BASH = scenario({
   },
 });
 
-export const BASH_HOLD = scenario({
+const BASH_HOLD = scenario({
   name: "bash-hold",
   prompt: "!bash-hold",
   emits:
@@ -84,7 +84,7 @@ export const BASH_HOLD = scenario({
   },
 });
 
-export const BASH_FAIL = scenario({
+const BASH_FAIL = scenario({
   name: "bash-fail",
   prompt: "!bash-fail",
   emits: "a foreground `Bash` whose result is an ERROR carrying stderr and a non-zero interpretation",
@@ -107,7 +107,7 @@ export const BASH_FAIL = scenario({
   },
 });
 
-export const BASH_TIMEOUT = scenario({
+const BASH_TIMEOUT = scenario({
   name: "bash-timeout",
   prompt: "!bash-timeout",
   emits:
@@ -139,7 +139,7 @@ export const BASH_TIMEOUT = scenario({
   },
 });
 
-export const BASH_SPILL = scenario({
+const BASH_SPILL = scenario({
   name: "bash-spill",
   prompt: "!bash-spill",
   emits: "a foreground `Bash` whose output was too large for the message and spilled to a file on disk",
@@ -163,7 +163,7 @@ export const BASH_SPILL = scenario({
   },
 });
 
-export const BASH_IMAGE = scenario({
+const BASH_IMAGE = scenario({
   name: "bash-image",
   prompt: "!bash-image",
   emits: "a foreground `Bash` whose stdout IS image data (`isImage: true`), answered with an image content block",
@@ -180,7 +180,7 @@ export const BASH_IMAGE = scenario({
   },
 });
 
-export const BASH_DETACH = scenario({
+const BASH_DETACH = scenario({
   name: "bash-detach",
   prompt: "!bash-detach",
   emits:
@@ -227,7 +227,7 @@ export const BASH_DETACH = scenario({
   },
 });
 
-export const BASH_DETACH_FAIL = scenario({
+const BASH_DETACH_FAIL = scenario({
   name: "bash-detach-fail",
   prompt: "!bash-detach-fail",
   emits: "a detached `Bash` that ends non-zero: `task_updated{status:\"failed\"}` and a failed `task_notification`",
@@ -262,7 +262,7 @@ export const BASH_DETACH_FAIL = scenario({
   },
 });
 
-export const BASH_DETACH_LIVE = scenario({
+const BASH_DETACH_LIVE = scenario({
   name: "bash-detach-live",
   prompt: "!bash-detach-live",
   emits: "a detached `Bash` that NEVER finishes: no terminal notification, and the task stays in the live set",
@@ -285,7 +285,7 @@ export const BASH_DETACH_LIVE = scenario({
   },
 });
 
-export const CTRL_B = scenario({
+const CTRL_B = scenario({
   name: "ctrl-b",
   prompt: "!ctrl-b",
   emits:

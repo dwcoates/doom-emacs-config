@@ -52,7 +52,7 @@ export function reconciledCoordinate(subject: string): string {
 }
 
 /** The reconciler, as the engine drives it. */
-export interface Reconciler {
+interface Reconciler {
   /** Everything the record holds a start for and no terminal. */
   liveWork(): Promise<storev1.GetLiveWorkSuccess>;
   /** The row that closes an agent that did not survive the shim's restart. */
@@ -289,14 +289,14 @@ export function stoppedBashTerminal(
  * the only thing that reads files, and `went_silent` belongs to whoever holds a
  * silence ruling — neither is knowable from a store row.
  */
-export function sweptUp(): conversationv1.DetachedLost {
+function sweptUp(): conversationv1.DetachedLost {
   return create(conversationv1.DetachedLostSchema, {
     how: { case: "sweptUp", value: create(conversationv1.DetachedLostSweptUpSchema, {}) },
   });
 }
 
 /** What a reconciler needs to exist. */
-export interface ReconcilerOptions {
+interface ReconcilerOptions {
   readonly client: StoreClient;
 }
 
@@ -347,7 +347,7 @@ export function findBashStart(
  * detached, and an announcement with an invented description is worse than one
  * that is missing.
  */
-export function describeDetachable(
+function describeDetachable(
   item: conversationv1.AgentActivity["item"] | undefined,
 ): conversationv1.DetachableWork | undefined {
   if (item === undefined) return undefined;

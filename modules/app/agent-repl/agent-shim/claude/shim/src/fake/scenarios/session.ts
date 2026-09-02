@@ -18,7 +18,7 @@
 import type { AccountUsageArm } from "../scenario.js";
 import { conclude, scenario, withheldThinking } from "./support.js";
 
-export const ROTATE = scenario({
+const ROTATE = scenario({
   name: "rotate",
   prompt: "!rotate",
   emits:
@@ -37,7 +37,7 @@ export const ROTATE = scenario({
   },
 });
 
-export const SLASH_LOCAL = scenario({
+const SLASH_LOCAL = scenario({
   name: "slash",
   prompt: "!slash",
   emits:
@@ -69,7 +69,7 @@ export const SLASH_LOCAL = scenario({
   },
 });
 
-export const CONTEXT_USAGE_DRIFT = scenario({
+const CONTEXT_USAGE_DRIFT = scenario({
   name: "context-usage-drift",
   prompt: "!context-usage-drift",
   emits:
@@ -87,7 +87,7 @@ export const CONTEXT_USAGE_DRIFT = scenario({
   },
 });
 
-export const MODEL_FALLBACK = scenario({
+const MODEL_FALLBACK = scenario({
   name: "model-fallback",
   prompt: "!model-fallback",
   emits:
@@ -176,11 +176,11 @@ function fastModeScenario(name: string, state: "on" | "off" | "cooldown", reason
   });
 }
 
-export const FAST_ON = fastModeScenario("fast-on", "on");
-export const FAST_OFF = fastModeScenario("fast-off", "off", "preference");
-export const FAST_COOLDOWN = fastModeScenario("fast-cooldown", "cooldown", "extra_usage_disabled");
+const FAST_ON = fastModeScenario("fast-on", "on");
+const FAST_OFF = fastModeScenario("fast-off", "off", "preference");
+const FAST_COOLDOWN = fastModeScenario("fast-cooldown", "cooldown", "extra_usage_disabled");
 
-export const MCP_ALL = scenario({
+const MCP_ALL = scenario({
   name: "mcp-all",
   prompt: "!mcp-all",
   emits:
@@ -195,7 +195,7 @@ export const MCP_ALL = scenario({
   },
 });
 
-export const MCP_HEALTHY = scenario({
+const MCP_HEALTHY = scenario({
   name: "mcp-healthy",
   prompt: "!mcp-healthy",
   emits: "prose only. It narrows `mcpServerStatus()` to the single connected server, so the arms CHANGE rather than merely existing",
@@ -224,7 +224,7 @@ function usageScenario(name: string, arm: AccountUsageArm, armDoc: string) {
   });
 }
 
-export const USAGE_AVAILABLE = usageScenario(
+const USAGE_AVAILABLE = usageScenario(
   "usage-available",
   "available",
   "SessionAccountUsage.outcome=available with five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage",
@@ -238,38 +238,38 @@ export const USAGE_AVAILABLE = usageScenario(
  * session cost rollup. Renaming the older one would have broken every caller
  * that already spells it.
  */
-export const USAGE_FULL = usageScenario(
+const USAGE_FULL = usageScenario(
   "usage-full",
   "available",
   "SessionAccountUsage.outcome=available with EVERY window populated — five_hour, seven_day, seven_day_oauth_apps, seven_day_opus, seven_day_sonnet, model_scoped and extra_usage, each with utilization and resets_at — beside subscription_type",
 );
-export const USAGE_OPUS_ABSENT = usageScenario(
+const USAGE_OPUS_ABSENT = usageScenario(
   "usage-opus-absent",
   "opus_absent",
   "SessionAccountUsage.outcome=available with seven_day_opus UNSET — an absent optional window, which is not an unavailability",
 );
-export const USAGE_SERVICE_UNAVAILABLE = usageScenario(
+const USAGE_SERVICE_UNAVAILABLE = usageScenario(
   "usage-service-unavailable",
   "service_unavailable",
   "SessionAccountUsage.outcome=unavailable reason=service_unavailable",
 );
-export const USAGE_WINDOW_UNAVAILABLE = usageScenario(
+const USAGE_WINDOW_UNAVAILABLE = usageScenario(
   "usage-window-unavailable",
   "window_unavailable",
   "SessionAccountUsage.outcome=unavailable reason=window_unavailable — the FIVE-HOUR window is null, which is what that reason means",
 );
-export const USAGE_UTILIZATION_UNAVAILABLE = usageScenario(
+const USAGE_UTILIZATION_UNAVAILABLE = usageScenario(
   "usage-utilization-unavailable",
   "utilization_unavailable",
   "SessionAccountUsage.outcome=unavailable reason=utilization_unavailable",
 );
-export const USAGE_SAMPLING_FAILURE = usageScenario(
+const USAGE_SAMPLING_FAILURE = usageScenario(
   "usage-sampling-failure",
   "sampling_failure",
   "SessionAccountUsage.outcome=unavailable reason=sampling_failure",
 );
 
-export const RATE_LIMIT = scenario({
+const RATE_LIMIT = scenario({
   name: "rate-limit",
   prompt: "!rate-limit",
   emits: "a `rate_limit_event` in the corpus's shape — allowed_warning on the overage window with a threshold",
@@ -336,7 +336,7 @@ function rateLimitWindowScenario(
   });
 }
 
-export const RATE_LIMIT_FIVE_HOUR = rateLimitWindowScenario(
+const RATE_LIMIT_FIVE_HOUR = rateLimitWindowScenario(
   "rate-limit-five-hour",
   "five_hour",
   "five_hour",
@@ -344,7 +344,7 @@ export const RATE_LIMIT_FIVE_HOUR = rateLimitWindowScenario(
   3_600,
 );
 
-export const RATE_LIMIT_SEVEN_DAY = rateLimitWindowScenario(
+const RATE_LIMIT_SEVEN_DAY = rateLimitWindowScenario(
   "rate-limit-seven-day",
   "seven_day",
   "seven_day",
@@ -352,7 +352,7 @@ export const RATE_LIMIT_SEVEN_DAY = rateLimitWindowScenario(
   259_200,
 );
 
-export const CONTEXT_TIP = scenario({
+const CONTEXT_TIP = scenario({
   name: "context-tip",
   prompt: "!context-tip",
   emits:
@@ -376,7 +376,7 @@ export const CONTEXT_TIP = scenario({
   },
 });
 
-export const TOKENS_REMINDER = scenario({
+const TOKENS_REMINDER = scenario({
   name: "tokens-reminder",
   prompt: "!tokens-reminder",
   emits:
@@ -399,7 +399,7 @@ export const TOKENS_REMINDER = scenario({
   },
 });
 
-export const COMPACT = scenario({
+const COMPACT = scenario({
   name: "compact",
   prompt: "!compact",
   emits:
@@ -449,7 +449,7 @@ export const COMPACT = scenario({
   },
 });
 
-export const COMPACT_AUTO = scenario({
+const COMPACT_AUTO = scenario({
   name: "compact-auto",
   prompt: "!compact-auto",
   emits: "an AUTOMATIC compaction — the same shapes with `trigger: \"auto\"`, which is the only discriminator",
@@ -493,7 +493,7 @@ export const COMPACT_AUTO = scenario({
   },
 });
 
-export const COMPACT_FAILED = scenario({
+const COMPACT_FAILED = scenario({
   name: "compact-failed",
   prompt: "!compact-failed",
   emits: "a compaction that FAILS: `status{compacting}` then `status{compact_result:\"failed\", compact_error}` and NO boundary",
@@ -511,7 +511,7 @@ export const COMPACT_FAILED = scenario({
   },
 });
 
-export const AWAY_SUMMARY = scenario({
+const AWAY_SUMMARY = scenario({
   name: "away-summary",
   prompt: "!away-summary",
   emits: "prose only; the vendor's recap is a `system:away_summary` transcript record",
@@ -532,7 +532,7 @@ export const AWAY_SUMMARY = scenario({
   },
 });
 
-export const RESIDUE = scenario({
+const RESIDUE = scenario({
   name: "residue",
   prompt: "!residue",
   emits: "prose only; it writes the two attachment records BOTH planes agree are vendor bookkeeping, not context",
@@ -563,7 +563,7 @@ export const RESIDUE = scenario({
   },
 });
 
-export const COLD_SEED = scenario({
+const COLD_SEED = scenario({
   name: "cold-seed",
   prompt: "!cold-seed",
   emits:

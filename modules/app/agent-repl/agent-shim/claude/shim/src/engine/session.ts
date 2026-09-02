@@ -32,7 +32,7 @@ import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
-import { bashUpsertKey, terminalUpsertKey } from "../store/keys.js";
+import { terminalUpsertKey } from "../store/keys.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,
@@ -118,7 +118,7 @@ export interface QuerySpec {
 export type CreateQuery = (spec: QuerySpec) => Promise<QueryLike>;
 
 /** Everything the engine needs that it does not own. */
-export interface EngineDeps {
+interface EngineDeps {
   readonly persistence: Persistence;
   readonly fold: EngineFold;
   readonly createQuery: CreateQuery;
@@ -197,13 +197,13 @@ interface OpenBashWatcher {
  * head. This only bounds a consumer that stopped pulling, so it cannot keep a
  * killed shim alive forever.
  */
-export const WATCHER_CONCLUSION_BUDGET_MS = 5_000;
+const WATCHER_CONCLUSION_BUDGET_MS = 5_000;
 
 /** The component name the log sink's own fault and degraded window carry. */
-export const LOG_SINK_COMPONENT = "log-sink";
+const LOG_SINK_COMPONENT = "log-sink";
 
 /** How often the account's rate-limit windows are sampled. */
-export const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
+const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * A push-style bridge onto the SDK's pull-style streaming input.

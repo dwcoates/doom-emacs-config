@@ -33,7 +33,7 @@ import { hookActivityId } from "./ids.js";
 const LOGGER = bindLog({ component: "shim-convert-hooks", operation: "shim.convert.hooks" });
 
 /** How many hook firings are remembered before the oldest is forgotten. */
-export const HOOK_REGISTRY_CAPACITY = 128;
+const HOOK_REGISTRY_CAPACITY = 128;
 
 /** One hook firing, remembered until its response arrives. */
 export interface PendingHook {
@@ -81,7 +81,7 @@ export function createHookRegistry(): HookRegistry {
  * to UNSPECIFIED, which the proto declares as a malformed frame — so it is
  * logged loudly rather than silently becoming PreToolUse.
  */
-export function hookEvent(literal: string): conversationv1.AgentHookEvent {
+function hookEvent(literal: string): conversationv1.AgentHookEvent {
   const screaming = literal
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
@@ -99,7 +99,7 @@ export function hookEvent(literal: string): conversationv1.AgentHookEvent {
 }
 
 /** A hook's printed output, when it printed anything. */
-export function hookOutput(stdout: string, stderr: string): conversationv1.AgentHookOutput | undefined {
+function hookOutput(stdout: string, stderr: string): conversationv1.AgentHookOutput | undefined {
   if (stdout === "" && stderr === "") return undefined;
   return create(conversationv1.AgentHookOutputSchema, { stdout, stderr });
 }

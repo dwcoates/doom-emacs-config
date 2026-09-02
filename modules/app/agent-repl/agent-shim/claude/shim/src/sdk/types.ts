@@ -233,7 +233,7 @@ export interface QueryLike extends AsyncIterable<SdkMessage> {
  * do this: nothing in the shim calls every verb on every path.
  */
 type Assert<T extends true> = T;
-export type _QueryStillSatisfiesQueryLike = Assert<Query extends QueryLike ? true : false>;
+type _QueryStillSatisfiesQueryLike = Assert<Query extends QueryLike ? true : false>;
 
 /**
  * Describe an interrupt receipt that reports surviving work, or return null
