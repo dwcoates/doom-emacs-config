@@ -10,12 +10,22 @@
  * No other real system is ever involved, which is what keeps these integration
  * tests rather than e2e tests.
  *
- * # Every wait is an event
+ * # Every wait is LEVEL-THEN-EDGE, and never a sleep
  *
- * Nothing in this harness sleeps or polls. "The shim is serving" is a LOG
- * RECORD the shim writes when its listener binds; "the shim exited" is the
- * child's own exit event; "a frame arrived" is the stream yielding. A sleep
- * would turn each of those into a race that passes on a fast machine.
+ * No wait here is a timed guess. "The shim is serving" is a LOG RECORD the shim
+ * writes when its listener binds; "the shim exited" is the child's own exit
+ * event; "a frame arrived" is the stream yielding. A sleep would turn each of
+ * those into a race that passes on a fast machine.
+ *
+ * The file-backed waits are not PURELY edge-driven, and saying so would be a
+ * lie the flakes already caught: the shape is check the level, install the
+ * watcher, re-check the level — and, under `fs.watch` on macOS, a bounded 20 ms
+ * re-check alongside it (`redrain.ts`), because FSEvents can drop an append
+ * notification outright and a lost edge would otherwise hang the wait for the
+ * whole test budget. That re-check is a BACKSTOP FOR A MISSING NOTIFICATION,
+ * never the mechanism a wait is expected to succeed by, and it sequences
+ * nothing: the condition it re-reads is the same level the edge would have
+ * announced.
  *
  * # Isolation
  *
