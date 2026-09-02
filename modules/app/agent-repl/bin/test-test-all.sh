@@ -144,7 +144,7 @@ test_default_runs_every_suite_without_recording() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 18 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 17 ] &&
         [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 1 ] &&
         grep -q "timing: proto" "$tree/stdout" &&
         grep -q "timings were not recorded" "$tree/stdout"; then
@@ -160,7 +160,7 @@ test_record_appends_every_suite() {
     run_test_all "$tree" --record
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 19 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 18 ] &&
         grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,logging,' "$tree/modules/app/agent-repl/test_time.csv" &&
@@ -175,16 +175,16 @@ test_record_appends_every_suite() {
 test_failure_continues_and_summarizes_every_failure() {
     local tree="$TMP/failure-continues"
     make_tree "$tree"
-    STUB_FAIL_SUITES="store:7 wire:9" run_test_all "$tree"
+    STUB_FAIL_SUITES="store:7 logging:9" run_test_all "$tree"
 
-    if grep -q '^wire$' "$tree/stub.log" &&
+    if grep -q '^logging$' "$tree/stub.log" &&
         grep -q '^proto$' "$tree/stub.log" &&
         grep -q '^logging-density$' "$tree/stub.log" &&
         grep -q "store failed after .*with exit code 7" "$tree/stderr" &&
-        grep -q "wire failed after .*with exit code 9" "$tree/stderr" &&
-        grep -q "failure summary, 2 of 18 suites failed" "$tree/stderr" &&
+        grep -q "logging failed after .*with exit code 9" "$tree/stderr" &&
+        grep -q "failure summary, 2 of 17 suites failed" "$tree/stderr" &&
         grep -q "failed: store exit code 7 after" "$tree/stderr" &&
-        grep -q "failed: wire exit code 9 after" "$tree/stderr"; then
+        grep -q "failed: logging exit code 9 after" "$tree/stderr"; then
         pass "suite failures run every later suite and summarize each failure"
     else
         fail "suite failures run every later suite and summarize each failure"
@@ -307,7 +307,7 @@ test_no_suites_argument_still_runs_everything() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 18 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 17 ] &&
         ! grep -q "not selected" "$tree/stdout"; then
         pass "an absent --suites leaves the run at every suite"
     else
