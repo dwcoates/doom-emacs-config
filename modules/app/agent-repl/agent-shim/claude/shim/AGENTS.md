@@ -442,6 +442,44 @@ way a refusal does.
 - **Workflow is kicked** (ruled 2026-08-29): `GetWorkflow`, `WatchWorkflow` and
   `StopWorkflow` answer `Code.Unimplemented` and have no `Engine` method.
 
+## What landing 7 settled (2026-09-02)
+
+- **`WatchSession` serves a oneof.** `WatchSessionResponse.frame` is
+  `update | session_started`. The opening diagnostics stays FIRST AND ALONE —
+  it is the readiness signal connect surfaces at the first Receive, so nothing
+  may be computed ahead of it — and the session's own `SessionStarted` follows
+  it, ONCE PER WATCH, on every new watch rather than only the first. That is
+  what lets a daemon adopting an already-started shim (crash boot, handover)
+  attach purely.
+  - Identity, runtime, model, mode and catalog are the ORIGINAL facts; they are
+    fixed for the session, which is why an opening states them at all.
+  - `turn_in_flight` and `live_work` are recomputed to NOW. `live_work` comes
+    from the STORE's live set, never the in-memory table: work re-adopted at
+    `StartSession` was never seen to START in this process, so the table does
+    not hold it.
+  - Re-announcing is A READ AND NOTHING ELSE. The `StartSession` reconciliation
+    writes terminals for work the vendor no longer holds; a daemon attaching is
+    not a reason to close anybody's run, so the two share only the pure
+    description step (`announceLiveWork`). A record plane the shim cannot reach
+    goes out as a session fault, never as a quietly empty membership.
+- **`StartSessionFresh.model` is optional.** UNSET = pass no model to the SDK
+  and let its own default take effect; `SessionStarted.effective_model` states
+  what did. A model that IS set still has to name something — saying nothing
+  and meaning to say something are different requests.
+- **`UpdateAgentFailure.agent_busy`.** A prompt to a subagent whose OWN TURN is
+  already running is refused with this arm, and the daemon relays it as
+  `SubmitPromptError.bubble_refused{agent_busy}` — this refusal is that relay's
+  ONE producer. The addressee's state is answered before the route question:
+  an IDLE subagent still gets `not_deliverable` (the pinned SDK declares no
+  route to a named agent), and a `local_bash` run under the same handle is not
+  an agent at all.
+- **`OpenAgentSessionFailure.unknown_agent`** maps to `unknown_agent`, which
+  `WatchAgent` already closes at the transport as `Code.NotFound`.
+  - **THE INTERIM SHIM-SIDE RULE STAYS** (`SessionContext.knowsAgent`, the
+    empty-book refusal in `watchAgent`): no store implementation produces the
+    arm yet, and the relay conditions its retirement on the store producing it.
+    Retire it — and `knowsAgent` with it — once the store does.
+
 ## Verification
 
 ```bash
