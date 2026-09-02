@@ -480,14 +480,34 @@ describe("the shell that moved rather than ended", () => {
 });
 
 describe("detached work", () => {
-  it("announces work that left the turn", () => {
+  it("announces an AGENT task that left the turn", () => {
+    // The corpus's only real `task_started` is a `local_bash` one, so the
+    // AGENT case is that record with its `task_type` changed — a field value,
+    // not an invented shape.
     const fold = createFold();
+    const agentTask = {
+      ...(streamMessage("task_started") as unknown as Record<string, unknown>),
+      task_type: "local_agent",
+    } as unknown as SdkMessage;
 
-    const output = fold.onSdkMessage(streamMessage("task_started"), foldContext());
+    const output = fold.onSdkMessage(agentTask, foldContext());
 
     const frame =
       output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
     expect(frame?.result.case).toBe("detachedWork");
+  });
+
+  it("announces NOTHING for a shell task's start", () => {
+    // A FOREGROUND shell is tracked as a task from the moment it starts — that
+    // is what makes Ctrl-B addressable — so `task_started` says neither that
+    // the work left the turn nor why. The Bash result is the only record that
+    // states the cause, and announcing `requested` here put a wrong-cause
+    // announcement on the stream ahead of the right one.
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(streamMessage("task_started"), foldContext());
+
+    expect(output.entries).toHaveLength(0);
   });
 
   it("consumes the background-task LEVEL without recording it", () => {
