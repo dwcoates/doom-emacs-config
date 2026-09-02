@@ -24,11 +24,17 @@ type OpenedPage struct {
 
 // OpenPage answers one agent's opening page.
 //
-// AN AGENT WITH NO ROWS IS A LEGAL, EMPTY BOOK — an empty page at the floor.
-// "Unknown agent" is only an EMPTY agent value: the store cannot distinguish an
-// agent that has said nothing yet from one that never existed, and refusing the
-// open would make a freshly spawned subagent unwatchable for exactly as long as
-// it takes it to speak.
+// AN AGENT THE STORE HAS HEARD OF BUT THAT HAS SAID NOTHING IS A LEGAL, EMPTY
+// BOOK — an empty page at the floor. A freshly spawned subagent has an `agent`
+// row from its spawn frame before it says a word, so it is openable and
+// watchable immediately.
+//
+// AN AGENT ID THE STORE HOLDS NO `agent` ROW FOR NAMES NO BOOK AND IS REFUSED
+// (ErrUnknownAgent, Landing 7). Serving it an empty page told a caller with a
+// stale or mistyped target exactly what it told a caller watching a live agent
+// that had not spoken yet, so the two were indistinguishable and the mistake
+// looked like patience. The `agent` table is the register that separates them:
+// every page-line write ensures a row there, so "no row" is "never heard of".
 func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, knownThrough *storev1.StoreItemPointer) (OpenedPage, error) {
 	base := logging.Fields{Operation: "store.db.open-page", Table: "entry", BookAgentID: agentID}
 	if err := validateBook(agentID, pageSize); err != nil {
@@ -41,6 +47,14 @@ func (d *DB) OpenPage(ctx context.Context, agentID string, pageSize uint32, know
 		return OpenedPage{}, d.refuse(base, storagef(err, "begin read transaction"))
 	}
 	defer tx.Rollback() //nolint:errcheck // a read transaction commits nothing
+
+	// THE REGISTER IS ASKED FIRST, before the pointer. A known_through against
+	// a book that does not exist is stale only as a consequence of the book not
+	// existing, and answering `stale_pointer` would send the caller off to
+	// repaint a book nobody ever kept.
+	if err := d.agentIsKnown(ctx, tx, agentID); err != nil {
+		return OpenedPage{}, d.refuse(base, err)
+	}
 
 	var floorPosition int64
 	if knownThrough != nil {
@@ -178,6 +192,27 @@ func (d *DB) LinesSince(ctx context.Context, agentID string, afterSeq uint64) ([
 	d.traceStatement(ctx, StatementLinesSince, "entry", base, int64(len(out)))
 	d.log.LogVerbose(base, "replay read lines=%d", len(out))
 	return out, nil
+}
+
+// agentIsKnown reports whether the store holds an `agent` row for this id, and
+// refuses with ErrUnknownAgent when it does not.
+//
+// IT ASKS THE `agent` TABLE AND NOT `entry`. The entry spine answers "has this
+// agent said anything", which is a different question: a spawned subagent is
+// registered by its spawn frame and is legitimately openable with an empty
+// book. Asking the spine would refuse every agent for as long as it stayed
+// quiet.
+func (d *DB) agentIsKnown(ctx context.Context, tx *sql.Tx, agentID string) error {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM agent WHERE agent_id = ?`, agentID).Scan(&one)
+	switch {
+	case err == nil:
+		return nil
+	case isNoRows(err):
+		return unknownAgentf("agent", "agent %q names no book of this store", agentID)
+	default:
+		return storagef(err, "looking up agent %q", agentID)
+	}
 }
 
 // validateBook is the shared refusal for the two paging verbs.

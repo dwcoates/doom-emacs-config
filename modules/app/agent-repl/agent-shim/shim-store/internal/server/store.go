@@ -51,7 +51,7 @@ type Store interface {
 	Close() error
 }
 
-// The three storage-layer sentinels, matched with errors.Is and re-exported
+// The storage-layer sentinels, matched with errors.Is and re-exported
 // under this package's own names so a reader of the refusal mapping below does
 // not have to cross packages to see what is being matched.
 var (
@@ -61,6 +61,8 @@ var (
 	ErrStalePointer = db.ErrStalePointer
 	// ErrStorage is a database failure: the transaction committed nothing.
 	ErrStorage = db.ErrStorage
+	// ErrUnknownAgent is a well-formed agent id naming no book of this store.
+	ErrUnknownAgent = db.ErrUnknownAgent
 )
 
 // The database satisfies the contract as written — asserted here so a

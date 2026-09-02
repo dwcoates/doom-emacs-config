@@ -48,8 +48,10 @@ func TestAStoreBootsOverADatabaseStampedByAnotherBinary(t *testing.T) {
 	// gone rather than half-readable.
 	ctx, cancel := callContext(t)
 	defer cancel()
-	page := openSession(ctx, t, store.client(), "main", 10, nil)
-	assertTexts(t, "the book after a nuke", pageTexts(page.GetPage()), nil)
+	// NOT AN EMPTY BOOK — NO BOOK. The nuke dropped the agent register with
+	// everything else, so the store has never heard of this agent and refuses
+	// rather than serving a page that would look like a quiet live agent.
+	openUnknownAgent(ctx, t, store.client(), "main")
 }
 
 func TestNukingAForeignSchemaIsAnnouncedAsAWarning(t *testing.T) {

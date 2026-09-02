@@ -12908,9 +12908,13 @@ func (x *FeedMergeFailed) GetSummary() string {
 	return ""
 }
 
-// Taken off the queue before it ever reached the front.
+// Taken off the queue before it ever reached the front; a resolved sentence
+// for the collapsed line, as `failed` carries — the cause (user pause and
+// drop, workspace closed, daemon shutdown) otherwise survives only in the
+// daemon's log. (summary: landing 7, 2026-09-02.)
 type FeedMergeAbandoned struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Summary       string                 `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12943,6 +12947,13 @@ func (x *FeedMergeAbandoned) ProtoReflect() protoreflect.Message {
 // Deprecated: Use FeedMergeAbandoned.ProtoReflect.Descriptor instead.
 func (*FeedMergeAbandoned) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_feed_proto_rawDescGZIP(), []int{214}
+}
+
+func (x *FeedMergeAbandoned) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
 }
 
 // The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
@@ -15536,8 +15547,9 @@ const file_frontend_v1_feed_proto_rawDesc = "" +
 	"\tabandoned\x18\x03 \x01(\v2\x1f.frontend.v1.FeedMergeAbandonedH\x00R\tabandonedB\b\n" +
 	"\x06reason\"+\n" +
 	"\x0fFeedMergeFailed\x12\x18\n" +
-	"\asummary\x18\x01 \x01(\tR\asummary\"\x14\n" +
-	"\x12FeedMergeAbandoned\"'\n" +
+	"\asummary\x18\x01 \x01(\tR\asummary\".\n" +
+	"\x12FeedMergeAbandoned\x12\x18\n" +
+	"\asummary\x18\x01 \x01(\tR\asummary\"'\n" +
 	"\rFeedMergeFold\x12\x16\n" +
 	"\x06folded\x18\x01 \x01(\bR\x06folded\"\xfd\x03\n" +
 	"\fFeedMergeTab\x124\n" +

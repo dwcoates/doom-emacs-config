@@ -52,6 +52,7 @@ const (
 	SiteUpsertChangesIdentity = db.SiteUpsertChangesIdentity
 	SitePageBookMismatch      = db.SitePageBookMismatch
 	SiteResidueRawUnset       = db.SiteResidueRawUnset
+	SiteUnknownAgent          = db.SiteUnknownAgent
 )
 
 // refusalClass is WHICH FAILURE ARM a refusal becomes.
@@ -74,6 +75,10 @@ const (
 	classStorage
 	// classNotImplemented is a verb this wave does not answer.
 	classNotImplemented
+	// classUnknownAgent is a well-formed agent id naming no book of this store.
+	// It is neither a request to fix nor a race to repaint: the target does not
+	// exist, and the shim maps it to NotFound.
+	classUnknownAgent
 )
 
 // armName is the WIRE ARM this class becomes, spelled as the proto spells it.
@@ -93,6 +98,8 @@ func (c refusalClass) armName() string {
 		return "storage_failure"
 	case classNotImplemented:
 		return "not_implemented"
+	case classUnknownAgent:
+		return "unknown_agent"
 	default:
 		panic(fmt.Sprintf("shim-store server: refusal class %d has no wire arm", int(c)))
 	}

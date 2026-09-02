@@ -131,8 +131,9 @@ func TestAKeepAlivesRowItselfSurvivesARestart(t *testing.T) {
 	// the BOOK half of the identity check that fires — a never-served row's book
 	// is NULL, and a page line's is the agent.
 	assertWriteInvalidRequest(t, failure, "entries[0].agent_update.serveable_frame.page_agent_id")
-	page := openSession(after, t, store.client(), "main", 10, nil)
-	assertTexts(t, "the book after the refused overwrite", pageTexts(page.GetPage()), nil)
+	// A keep-alive is never an agent's first sight, so the refused page line
+	// left the store with no agent row for "main" at all.
+	openUnknownAgent(after, t, store.client(), "main")
 }
 
 // TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed: never-served is not
@@ -162,7 +163,6 @@ func TestKeepAliveIsHeldDurablyEvenThoughItIsNeverServed(t *testing.T) {
 	if resp.GetSuccess() == nil {
 		t.Fatalf("replaying a durable keep-alive was refused: %s", resp.GetFailure().GetDetail())
 	}
-	opened := openSession(after, t, store.client(), "main", 10, nil)
-	assertTexts(t, "the book after a durable keep-alive", pageTexts(opened.GetPage()), nil)
+	openUnknownAgent(after, t, store.client(), "main")
 	store.assertNoErrorRecords()
 }

@@ -129,8 +129,10 @@ func (*StartSessionRequest_Resume) isStartSessionRequest_Source() {}
 // mode to begin with.
 type StartSessionFresh struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The model to start on — an echo of a served option.
-	Model *v1.AgentModel `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
+	// The model to start on — an echo of a served option. UNSET = the SDK's
+	// own default; SessionStarted.effective_model states what took effect.
+	// (Optional since landing 7, 2026-09-02.)
+	Model *v1.AgentModel `protobuf:"bytes,1,opt,name=model,proto3,oneof" json:"model,omitempty"`
 	// The permission mode to start in. Session state, changed later by
 	// SetSessionPermissionMode; never per prompt.
 	PermissionMode *v1.AgentPermissionMode `protobuf:"bytes,2,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
@@ -678,10 +680,11 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x13StartSessionRequest\x122\n" +
 	"\x05fresh\x18\x01 \x01(\v2\x1a.shim.v1.StartSessionFreshH\x00R\x05fresh\x125\n" +
 	"\x06resume\x18\x02 \x01(\v2\x1b.shim.v1.StartSessionResumeH\x00R\x06resumeB\b\n" +
-	"\x06source\"\x95\x01\n" +
-	"\x11StartSessionFresh\x121\n" +
-	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelR\x05model\x12M\n" +
-	"\x0fpermission_mode\x18\x02 \x01(\v2$.conversation.v1.AgentPermissionModeR\x0epermissionMode\"\xae\x01\n" +
+	"\x06source\"\xa4\x01\n" +
+	"\x11StartSessionFresh\x126\n" +
+	"\x05model\x18\x01 \x01(\v2\x1b.conversation.v1.AgentModelH\x00R\x05model\x88\x01\x01\x12M\n" +
+	"\x0fpermission_mode\x18\x02 \x01(\v2$.conversation.v1.AgentPermissionModeR\x0epermissionModeB\b\n" +
+	"\x06_model\"\xae\x01\n" +
 	"\x12StartSessionResume\x12*\n" +
 	"\x11vendor_session_id\x18\x01 \x01(\tR\x0fvendorSessionId\x12W\n" +
 	"\x10cold_remediation\x18\x02 \x01(\v2'.conversation.v1.SessionColdRemediationH\x00R\x0fcoldRemediation\x88\x01\x01B\x13\n" +
@@ -765,6 +768,7 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 		(*StartSessionRequest_Fresh)(nil),
 		(*StartSessionRequest_Resume)(nil),
 	}
+	file_shim_v1_endpoint_start_session_proto_msgTypes[1].OneofWrappers = []any{}
 	file_shim_v1_endpoint_start_session_proto_msgTypes[2].OneofWrappers = []any{}
 	file_shim_v1_endpoint_start_session_proto_msgTypes[3].OneofWrappers = []any{
 		(*StartSessionResponse_Success)(nil),
