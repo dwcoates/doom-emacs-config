@@ -449,8 +449,10 @@ The WEBVIEW buffer is deliberately left alone: its name is a lookup key
 workspace name without ever seeing the title.
 
 Silent and inert when WS has no live input buffer — a workspace whose
-composer has not been created yet has no name to write the title into,
-and the name is built at creation from the title the daemon has by then."
+composer has not been created yet has no name to write the title into.
+panels.el calls THIS function at creation for exactly that reason, so a
+composer born after the last `naming' push is named from the title the
+daemon has by then rather than wearing the bare canonical name forever."
   (let ((buffer (agent-repl--ws-get ws :input-buffer)))
     (when (buffer-live-p buffer)
       (let ((want (agent-repl--input-buffer-name ws (agent-repl-host-display-title ws))))

@@ -15,6 +15,7 @@
 (declare-function agent-repl-host-conn "host" (ws))
 (declare-function agent-repl-host-state "host" (ws))
 (declare-function agent-repl-host-subscribe "host" (conn ws ref))
+(declare-function agent-repl-host--apply-naming "host" (ws))
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl--force-tab-bar-redraw "status" ())
 
@@ -884,6 +885,14 @@ Errors if the buffer is already initialized (already in
                       ws project-dir)
     (let ((input-buf (agent-repl--create-buffer ws "-input")))
       (agent-repl--ws-put ws :input-buffer input-buf)
+      ;; TITLES NAME THE BUFFERS (fanout §7), and the daemon may already
+      ;; have pushed `naming' before the composer existed -- host.el's
+      ;; rename runs on a PUSH, so a buffer born after the last one would
+      ;; otherwise wear the bare canonical name forever.  Creation goes
+      ;; through the very function the push uses, so the two cannot
+      ;; disagree about what this buffer is called.  Inert when no title
+      ;; has arrived.
+      (agent-repl-host--apply-naming ws)
       (with-current-buffer input-buf
         (when (eq major-mode 'agent-repl-input-mode)
           (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s branch=already-initialized"
