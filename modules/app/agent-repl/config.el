@@ -280,6 +280,15 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "emoji")
 (agent-repl--load-module "prevent-select")
 (agent-repl--load-module "close-panels-on-open")
+;; WHY: find-file-workspace.el advises the DISPLAY primitives so a visited
+;; file lands in the workspace owning its git root.  It reads window.el's
+;; side-window predicate, worktree.el's dir→workspace reverse lookup,
+;; verbs.el's open verb and commands.el's register verb, so it loads after
+;; all of them.  Loading it AFTER close-panels-on-open.el also makes its
+;; :around advice the OUTER one on the two shared primitives, so a routed
+;; file never triggers that module's panel close: the panels belong to the
+;; workspace the file is being routed INTO.
+(agent-repl--load-module "find-file-workspace")
 ;; WHY: interaction-record.el depends on core.el alone (the logging
 ;; ladder and the state-dir resolver) and is loaded LAST so its
 ;; startup env check (`AGENT_REPL_RECORD_INTERACTIONS') arms
