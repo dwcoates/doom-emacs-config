@@ -26,6 +26,19 @@ import {
   socketPathForTest,
 } from "./persistence-fixtures.js";
 
+/**
+ * Resolve `"hung"` only after the event loop has turned enough times that a
+ * sub-millisecond settle must already have happened.
+ *
+ * The budget is in TICKS, not milliseconds: every tick is loop progress, so the
+ * guard is independent of how loaded the machine is and cannot lose a race to a
+ * descheduled worker.
+ */
+async function hangGuard(): Promise<string> {
+  for (let i = 0; i < 1_000; i++) await new Promise((resolve) => setImmediate(resolve));
+  return "hung";
+}
+
 const PRODUCER = producerId("vendor-session-1");
 const BOOK = agent("book-1");
 
@@ -166,11 +179,11 @@ describe("the tail", () => {
     await expect(
       Promise.race([
         pending.then(() => "settled"),
-        // 300ms: a HANG guard, not the mechanism of success — the real settle
-        // is sub-millisecond, so this only bounds how long a genuine hang
-        // costs before the assertion fails with a clear "hung" value instead
-        // of the test's own timeout.
-        new Promise((resolve) => setTimeout(() => resolve("hung"), 300)),
+        // A HANG guard, not the mechanism of success. It is counted in
+        // MACROTASK TICKS rather than milliseconds on purpose: a wall-clock
+        // guard races the settle, so under machine load the guard can win and
+        // report a hang that never happened. A tick budget cannot.
+        hangGuard(),
       ]),
     ).resolves.toBe("settled");
   });
@@ -196,11 +209,11 @@ describe("the tail", () => {
     await expect(
       Promise.race([
         iterator.next().then(() => "settled"),
-        // 300ms: a HANG guard, not the mechanism of success — the real settle
-        // is sub-millisecond, so this only bounds how long a genuine hang
-        // costs before the assertion fails with a clear "hung" value instead
-        // of the test's own timeout.
-        new Promise((resolve) => setTimeout(() => resolve("hung"), 300)),
+        // A HANG guard, not the mechanism of success. It is counted in
+        // MACROTASK TICKS rather than milliseconds on purpose: a wall-clock
+        // guard races the settle, so under machine load the guard can win and
+        // report a hang that never happened. A tick budget cannot.
+        hangGuard(),
       ]),
     ).resolves.toBe("settled");
   });
