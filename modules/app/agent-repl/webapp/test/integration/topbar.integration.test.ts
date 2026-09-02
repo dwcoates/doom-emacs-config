@@ -241,6 +241,30 @@ describe("the model selector", () => {
   });
 
   it("draws the refusal at the picker", async () => {
+    // Arrange: a TYPED cause, because since landing 4 every `<Rpc>Error`
+    // carries one — an error whose cause oneof is unset is a malformed view,
+    // which the test below asserts separately.
+    await withTopbar({});
+    harness.fake.refuse("setModel", "notInCatalog");
+    await harness.click(".topbar-model");
+    // Act
+    await harness.click('[data-model-option="sonnet"]');
+    // Assert
+    expect(harness.$(".topbar-model .refusal")).not.toBeNull();
+  });
+
+  it("carries the refused arm at the picker", async () => {
+    // Arrange
+    await withTopbar({});
+    harness.fake.refuse("setModel", "vendorRefused");
+    await harness.click(".topbar-model");
+    // Act
+    await harness.click('[data-model-option="sonnet"]');
+    // Assert
+    expect(harness.$(".topbar-model .refusal")?.dataset.arm).toBe("vendorRefused");
+  });
+
+  it("reports a malformed view for an error with no cause", async () => {
     // Arrange
     await withTopbar({});
     harness.fake.answer(
@@ -251,7 +275,21 @@ describe("the model selector", () => {
     // Act
     await harness.click('[data-model-option="sonnet"]');
     // Assert
-    expect(harness.$(".topbar-model .refusal")).not.toBeNull();
+    expect(harness.failureArms()).toContain("frameUndecodable");
+  });
+
+  it("draws no refusal for an error with no cause", async () => {
+    // Arrange: inventing a sentence would state a refusal the daemon never made.
+    await withTopbar({});
+    harness.fake.answer(
+      "setModel",
+      create(SetModelResponseSchema, { result: { case: "error", value: {} } }),
+    );
+    await harness.click(".topbar-model");
+    // Act
+    await harness.click('[data-model-option="sonnet"]');
+    // Assert
+    expect(harness.$(".topbar-model .refusal")).toBeNull();
   });
 
   it("opens the model reveal downward", async () => {
@@ -304,6 +342,28 @@ describe("the permission-mode picker", () => {
   });
 
   it("draws the refusal at the mode button", async () => {
+    // Arrange: a TYPED cause (see the model picker's note above).
+    await withTopbar({});
+    harness.fake.refuse("setPermissionMode", "modeNotServed");
+    await harness.click(".topbar-mode");
+    // Act
+    await harness.click('[data-mode-option="plan"]');
+    // Assert
+    expect(harness.$(".topbar-mode .refusal")).not.toBeNull();
+  });
+
+  it("carries the refused arm at the mode button", async () => {
+    // Arrange
+    await withTopbar({});
+    harness.fake.refuse("setPermissionMode", "ungatedWithoutConsent");
+    await harness.click(".topbar-mode");
+    // Act
+    await harness.click('[data-mode-option="plan"]');
+    // Assert
+    expect(harness.$(".topbar-mode .refusal")?.dataset.arm).toBe("ungatedWithoutConsent");
+  });
+
+  it("reports a malformed view for an error with no cause", async () => {
     // Arrange
     await withTopbar({});
     harness.fake.answer(
@@ -314,7 +374,7 @@ describe("the permission-mode picker", () => {
     // Act
     await harness.click('[data-mode-option="plan"]');
     // Assert
-    expect(harness.$(".topbar-mode .refusal")).not.toBeNull();
+    expect(harness.failureArms()).toContain("frameUndecodable");
   });
 });
 
@@ -691,5 +751,129 @@ describe("the login terminal", () => {
     await harness.settle();
     // Assert
     expect(harness.fake.liveStreams("watchLoginTerminal", WORKSPACE_ID)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE WARNING STRIP IS PART OF A WHOLE-VIEW PUSH (audit 1, item 11)
+//
+// "Whole-view pushes replace their unit whole; nothing accumulates across
+// pushes." A `TopbarView` with an empty warning list is the daemon saying
+// there are no warnings — so the strip goes, rather than standing on the
+// strength of an older push.
+// ---------------------------------------------------------------------------
+
+describe("the warning strip's omission", () => {
+  it("removes the strip when the next push carries no warnings", async () => {
+    // Arrange
+    await withTopbar({ warnings: [topbarWarning("accounting")] });
+    // Act
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
+    await harness.settle();
+    // Assert
+    expect(harness.$(".topbar-warnings")).toBeNull();
+  });
+
+  it("drops a warning the next push omits", async () => {
+    // Arrange
+    await withTopbar({
+      warnings: [topbarWarning("accounting"), topbarWarning("unmodeledTool")],
+    });
+    // Act
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("accounting")] }));
+    await harness.settle();
+    await harness.click(".topbar-warnings");
+    // Assert
+    expect(harness.$$(".topbar-warning-row").map((el) => el.dataset.arm)).toEqual(["accounting"]);
+  });
+
+  it("closes the reveal along with the strip it belonged to", async () => {
+    // Arrange
+    await withTopbar({ warnings: [topbarWarning("accounting")] });
+    await harness.click(".topbar-warnings");
+    // Act
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
+    await harness.settle();
+    // Assert
+    expect(harness.$('.topbar-reveal[data-reveal="warnings"]')).toBeNull();
+  });
+
+  it("draws the strip again when a warning comes back", async () => {
+    // Arrange
+    await withTopbar({ warnings: [topbarWarning("accounting")] });
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
+    await harness.settle();
+    // Act
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [topbarWarning("sessionFault")] }));
+    await harness.settle();
+    await harness.click(".topbar-warnings");
+    // Assert
+    expect(harness.$('.topbar-warning-row[data-arm="sessionFault"]')).not.toBeNull();
+  });
+
+  it("reports no failure for an empty warning list", async () => {
+    // Arrange / Act: an empty repeated field is a fact, not a malformed view.
+    await withTopbar({ warnings: [topbarWarning("accounting")] });
+    harness.fake.setTopbar(WORKSPACE_ID, topbarView({ warnings: [] }));
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE LOGIN PTY DYING WITHOUT `closed` (audit 1, item 13)
+//
+// `closed` is the pty's legitimate end — the login child exited. A stream that
+// ends ANY other way is a transport failure and is reported, because a terminal
+// that has silently stopped taking keystrokes is indistinguishable from one
+// waiting for the user's next character.
+// ---------------------------------------------------------------------------
+
+describe("the login terminal's transport death", () => {
+  /** Boot logged out, open the overlay, and kill the pty stream mid-flight. */
+  const killTerminal = async (): Promise<void> => {
+    await withTopbar({ account: "loggedOut" });
+    await harness.click(".topbar-account");
+    await harness.fake.awaitStream("watchLoginTerminal");
+    harness.fake.endStream("watchLoginTerminal", WORKSPACE_ID);
+    await harness.tick(1_000);
+  };
+
+  it("reports the failure", async () => {
+    // Arrange / Act
+    await killTerminal();
+    // Assert
+    expect(harness.failureArms()).toContain("controlPlaneFailed");
+  });
+
+  it("names the login terminal in the report", async () => {
+    // Arrange / Act
+    await killTerminal();
+    // Assert
+    expect(harness.$('[data-component="failure-overlay"]')?.textContent).toContain(
+      "login terminal",
+    );
+  });
+
+  it("does not re-probe the pty", async () => {
+    // Arrange / Act: nothing is re-attached; the login child is gone.
+    await killTerminal();
+    const attempts = harness.fake.calls("watchLoginTerminal").length;
+    await harness.tick(10_000);
+    // Assert
+    expect(harness.fake.calls("watchLoginTerminal").length).toBe(attempts);
+  });
+
+  it("reports nothing for the pty's own closed frame", async () => {
+    // Arrange
+    await withTopbar({ account: "loggedOut" });
+    await harness.click(".topbar-account");
+    await harness.fake.awaitStream("watchLoginTerminal");
+    // Act: `closed` is the legitimate end.
+    harness.fake.closeLoginTerminal(WORKSPACE_ID);
+    await harness.tick(1_000);
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
   });
 });
