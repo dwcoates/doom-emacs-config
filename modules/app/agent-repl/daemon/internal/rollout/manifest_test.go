@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/wsm"
@@ -64,7 +65,7 @@ func reconcileOnePID(t *testing.T, h *harness, intent Intent, lock sessionlock.S
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)
 	}
-	got, err := h.c.Reconcile(context.Background())
+	got, err := h.c.Reconcile(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -124,7 +125,9 @@ func TestASessionThatSilentlyDiedLeavesAnOpenFault(t *testing.T) {
 
 	// Act
 	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	// The DIED disposition is recorded under health.KindBounceDied, which is
+	// the arm the host view renders; the generic kind reaches no arm at all.
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
 
 	// Assert
 	if err != nil {
@@ -144,7 +147,7 @@ func TestAnUndeterminableSessionLeavesAnOpenFault(t *testing.T) {
 
 	// Act
 	ws, _ := reconcileOne(t, h, IntentStandDown, sessionlock.StateHeld)
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
 
 	// Assert
 	if err != nil {
@@ -161,7 +164,9 @@ func TestTheDispositionRecordCarriesTheManifestsPidRatherThanACount(t *testing.T
 
 	// Act
 	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	// The DIED disposition is recorded under health.KindBounceDied, which is
+	// the arm the host view renders; the generic kind reaches no arm at all.
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
 
 	// Assert
 	if err != nil {
@@ -177,7 +182,7 @@ func TestReconcileAnswersNothingWithNoManifest(t *testing.T) {
 	h := newHarness(t)
 
 	// Act
-	got, err := h.c.Reconcile(context.Background())
+	got, err := h.c.Reconcile(context.Background(), nil)
 
 	// Assert
 	if err != nil {
@@ -185,6 +190,88 @@ func TestReconcileAnswersNothingWithNoManifest(t *testing.T) {
 	}
 	if got != nil {
 		t.Fatalf("dispositions = %+v, want none on an ordinary boot", got)
+	}
+}
+
+func TestNoManifestWithASurvivingSessionAnswersBounceUnknown(t *testing.T) {
+	// Arrange: a crash — the outgoing daemon wrote no manifest — whose shim
+	// this boot adopted.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	got, err := h.c.Reconcile(context.Background(), []ids.WorkspaceID{ws})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(got) != 1 || got[0].Kind != DispositionUnknown || got[0].Workspace != ws {
+		t.Fatalf("dispositions = %+v, want one UNKNOWN for the adopted workspace", got)
+	}
+}
+
+func TestNoManifestWithASurvivingSessionLeavesAnOpenFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if _, err := h.c.Reconcile(context.Background(), []ids.WorkspaceID{ws}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceUnknown})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open faults = %+v, want one bounce_unknown: an unaccounted session is surfaced per workspace", open)
+	}
+}
+
+func TestNoManifestWithNoSurvivingSessionIsAnOrdinaryBoot(t *testing.T) {
+	// Arrange: nothing survived, so nothing went unaccounted for.
+	h := newHarness(t)
+
+	// Act
+	got, err := h.c.Reconcile(context.Background(), nil)
+
+	// Assert
+	if err != nil || got != nil {
+		t.Fatalf("Reconcile() = (%+v, %v), want no dispositions on an ordinary boot", got, err)
+	}
+}
+
+func TestADiedDispositionIsRecordedUnderTheBounceDiedKind(t *testing.T) {
+	// Arrange, Act
+	h := newHarness(t)
+	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+	generic, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+
+	// Assert: nothing is left under the generic kind, which maps to no
+	// SessionFault or HostFault arm.
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(generic) != 0 {
+		t.Fatalf("open faults under %q = %+v, want none", FaultBounceDisposition, generic)
+	}
+}
+
+func TestAPreservedDispositionKeepsTheGenericKind(t *testing.T) {
+	// Arrange, Act: an ordinary disposition is accounting, not a fault the
+	// host view renders, so it stays under the generic kind.
+	h := newHarness(t)
+	_, got := reconcileOne(t, h, IntentPreserve, sessionlock.StateHeld)
+
+	// Assert
+	if len(got) != 1 || got[0].Kind != DispositionPreserved {
+		t.Fatalf("dispositions = %+v, want one PRESERVED", got)
+	}
+	if kind := faultKind(DispositionPreserved); kind != FaultBounceDisposition {
+		t.Fatalf("faultKind(PRESERVED) = %q, want %q", kind, FaultBounceDisposition)
 	}
 }
 
@@ -292,7 +379,7 @@ func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
 	h.c.flushDispositions(context.Background())
 
 	// Assert
-	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: health.KindBounceDied})
 	if err != nil {
 		t.Fatalf("OpenFaults: %v", err)
 	}

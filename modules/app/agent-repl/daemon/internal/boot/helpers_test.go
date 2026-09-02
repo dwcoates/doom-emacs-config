@@ -106,11 +106,15 @@ type fakeRollout struct {
 	reconcileErr error
 	joins        int
 	joinErr      error
+	// adopted is the adopted set the boot handed Reconcile, which is what the
+	// no-manifest accounting keys on.
+	adopted []ids.WorkspaceID
 }
 
-func (r *fakeRollout) Reconcile(context.Context) ([]rollout.Disposition, error) {
+func (r *fakeRollout) Reconcile(_ context.Context, adopted []ids.WorkspaceID) ([]rollout.Disposition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.adopted = append([]ids.WorkspaceID(nil), adopted...)
 	if r.reconcileErr != nil {
 		return nil, r.reconcileErr
 	}
