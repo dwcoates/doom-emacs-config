@@ -60,7 +60,7 @@ Deviations / overrides (all recorded in daemon.md or ARCHITECTURE.md):
 12. /clear and /compact run as the turn they mint (command_acted is for /model <arg>); unknown slash text falls through to the vendor; duplicate idempotency_key → duplicate_submission.
 13. ShimBuildSHA: stamp file first (`agent-shim/claude/shim/dist/.built-sha`), `SHIM_BUILD_SHA` env when absent; a present-but-blank stamp refuses. Flagged fragile (a built stamp silently outranks a test env).
 14. Default model when CreateWorkspaceRequest.model is unset: `AGENT_REPL_DEFAULT_MODEL`, fallback "opus" (landing-7 candidate below removes the need).
-15. Log-sink eviction on close evicts the HANDLE (link and target stay on disk); dlog targets are still created in os.TempDir (remed8 item 7 — verify whether it landed).
+15. Log-sink eviction on close evicts the HANDLE (link and target stay on disk); dlog durable targets live under `<state>/logs/` (moved from os.TempDir by remed8).
 
 Landing-7 sentinels (all unlanded; every one answers via `server.UnlandedArm`
 naming the arm, WARN `daemon.refusal.unlanded_arm`, rows in ERROR-ARMS.md):
@@ -80,49 +80,49 @@ the shim-name propagation rows on Interrupt/Answer* (`not_deliverable`,
 `unknown_work`, `live`, `not_the_open_turn`, `unspecified`). Report any that
 end up with no producer; the project lead retires them.
 
-## (b) Current red list (run 8 on 5dee94f8d: 537 run / 443 pass / 19 fail / 2 skip)
+## (b) Current red list (after remed8 merged at e56fb80c5)
 
-remed8 (opus-low, branch `overhaul/daemon-remed8`, worktree
-`daemon-agents/remed8`) was working these when the halt came; the handoff
-message says whether it merged. Diagnosis per item:
+remed8 completed every item and its full run showed EXACTLY ONE failure:
+`TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal`
+— RED BY DESIGN until the shim's `UpdateAgentFailure.agent_busy` lands
+(landing 7). Never "fix" it. The three flakes (layout-table race,
+millisecond-equality assertion, admission pump dying on one repo's git
+failure) are fixed. The lead did NOT re-run the full suite after the merge
+(halt directive): FIRST ACTION for the new lead is one full run at
+`-timeout 180s` on the tip to confirm 1 red / 0 unexpected WARN, then the
+>1 s re-profile.
 
-Production defects (audit-3 tests, verified pre-existing):
-1. TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears — no boot caller of wsm `DrainSchedule()`; re-arm + republish after `drain.New` in graph.go.
-2. TestBootRefusesACorruptCreationJobOfAnAdmittedMerge — `merge/recover.go recoverAdmitted` folds a `*wsm.DecodeError` into "geometry gone"; corrupt ⇒ refuse the boot.
-3. TestAnEvictedQueuedMergeEndsAsFeedMergeAbandoned…, TestADequeuedQueuedMergeEndsAsFeedMergeAbandoned… — `FeedMergeAbandoned` has no producer; footer/roster end states unasserted.
-4. TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed — git error not wrapped into `NukeWorkspaceError.git_failed{detail}`; TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns — ordering KillSession before git.
-5. TestInterruptTurnWithATransportFailureAnswersShimRefused — `shim_refused{detail}` unreachable (transport failure is never a `*ShimRefusal`).
-6. TestAnswerColdGateWithNoLiveShimAnswersNoSession — `Fleet.Shim` reads liveness from map presence; a dead client must be no_session. TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate — resolved gate id must answer `no_cold_gate`.
-7. TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing — unlanded `brief_missing` must answer via UnlandedArm + WARN (check the test's expected shape).
-8. TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo — arm answered but the INFO run-log record is missing.
-9. TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldWithClassificationError — vendor guard at the classifier site → `classification_error` + ERROR naming "classifier" (harness `Opts.NoFake`).
-10. TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeploy — self-reload must fire only when the TARGET is the daemon's own checkout (common-dir identity, sibling worktrees excluded).
-11. TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRelease — StartTurn count must be exactly 2 with origin MERGE_DISPLACED_TURN_RESUME; the resubmission never arrives.
-12. TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen — roster `degraded` arm from an unhealthy diagnostics push not produced.
-13. TestHibernateTransportFailureDefersTheStandDown — the drain sweep must NOT proceed to KillSession on a Hibernate transport failure; logs ERROR (the test also saw 29 unexpected WARNs — inspect).
-14. TestSubscriptionInvariantAcrossWatchKinds, TestFlushOnAcceptAcrossWatchKinds — table over every Watch*; read the log for which kinds fail (latest-first on late subscribe; headers before any frame).
-15. TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePath… — RED BY DESIGN until `UpdateAgentFailure.agent_busy` lands. Never "fix".
+Skips that stay (each names its hook): `TestAnAbandonedQueuedMergeHasNoReachableCause`
+(landing-7 per-cause arms; also `FeedMergeAbandoned` needs a `summary` field —
+proposal recorded in ERROR-ARMS.md), `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce`
+(no crash-window hook), and the Watch* kinds with no two-step driver inside
+`TestSubscriptionInvariantAcrossWatchKinds` (`WatchHostWorkspace` deliberately).
 
-Also queued for remed8 (not in run 8's red list): dlog targets in os.TempDir
-(leak; move under `<state>/logs/`), `--feed-tail-retention` flag +
-`AGENT_REPL_FEED_TAIL_RETENTION` wired into `feed.New` (token_expired test
-blocked on it), and three FLAKES seen once each in two clean runs:
-TestBootRefusesAForeignLayoutVersion (`no such table: layout` — schema vs
-WithDB write race), TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress
-(millisecond-equality assertion in the test), TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails
-("the admission pump stopped on an error" — pump must record merge_failed and
-continue; production).
+Decision needing the project lead's confirmation (remed8): the merge now ENDS
+the displaced user turn (KillTurn) after capturing it, then resubmits exactly
+once at lease release; daemon.md says only "captured durably and resubmitted
+exactly once". Rationale: a merge driving the session under a still-live user
+turn is incoherent. Escalate as an FYI in the final report.
 
-Skips that stay: TestAnAbandonedQueuedMergeHasNoReachableCause (landing 7),
-TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce (needs a
-pause point across a crash window).
+Run-8 diagnoses (all fixed by remed8; kept for the record): drain schedule not
+republished at boot; corrupt creation_jobs folded into "geometry gone";
+FeedMergeAbandoned had no producer; NukeWorkspace git error not wrapped;
+shim_refused unreachable; Fleet.Shim liveness by map presence; dlog targets in
+os.TempDir (now `<state>/logs/`); feed tail retention unwired (now
+`--feed-tail-retention` / `AGENT_REPL_FEED_TAIL_RETENTION`); displaced turn
+never ended and worktree removed before resubmit; refusing lease released
+holds at turn end; Diagnostics arm never reached the roster (degraded); idle
+sweep wrote per-workspace records to the run log; answered cold gate never
+retired; merge pump died on one start error. New test-only knob:
+`AGENT_REPL_FAKE_SHIMS` (turn fake ON only) so a suite reaches a real vendor
+call site with a live session.
 
 ## (c) Remaining queue, in order
 
-1. Finish the reds to zero (except the by-design agent_busy red) with ZERO
-   WARN/ERROR on green paths (the harness's `ExpectWarnings` lists are exact;
-   `AllowAllWarnings` is retired). Confirm with one full run at
-   `-timeout 180s`, then re-profile (>1 s table) once.
+1. Confirm the tip with one full run at `-timeout 180s` (expected: exactly the
+   agent_busy red, zero unexpected WARN/ERROR; `ExpectWarnings` lists are exact,
+   `AllowAllWarnings` is retired); fix anything else that shows; re-profile
+   (>1 s table) once.
 2. Dead-code pass — dispatch ONE `sonnet-medium` agent in its own worktree
    (never opus-low, never yourself): `staticcheck` (U1000; install via `go
    install honnef.co/go/tools/cmd/staticcheck@latest`) plus `go test
