@@ -51,14 +51,14 @@ import (
 	"claude-repld/integration/harness"
 )
 
-// newHookWorld builds one test's World plus one real git repository
+// newHookWorld builds one test's World plus one repository (fake-git backed)
 // registered as its workspace. Every hook test needs exactly this and
 // nothing more — no fixture data, no pre-seeded transcripts (the grep gate
 // forbids hand-authoring the latter anyway).
-func newHookWorld(t *testing.T) (*World, *RealRepo, *workspacev1.WorkspaceRef) {
+func newHookWorld(t *testing.T) (*World, *harness.Repo, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	return w, repo, ws
 }
