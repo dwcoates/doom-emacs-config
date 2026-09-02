@@ -455,7 +455,9 @@ export function createFakeQuery(
       emitBlockStream(block, index);
       const uuid = opts.newUuid();
       uuids.push(uuid);
-      const timestamp = nowIso();
+      // A SCENARIO MAY LIE ABOUT WHEN, and about nothing else: see
+      // AssistantOptions.timestamp.
+      const timestamp = options.timestamp ?? nowIso();
       const message = {
         model: reportedModel,
         id: messageId,
