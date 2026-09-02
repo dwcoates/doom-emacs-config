@@ -530,6 +530,18 @@ func (w *watcher) setLinkLocked(state LinkState) {
 	if w.link == state {
 		return
 	}
+	// DEAD IS TERMINAL. The shim process being gone is the strongest evidence
+	// the daemon has about this hop, and it arrives on the client's exit path
+	// while every standing stream is breaking of the very same cause. A stream
+	// break after death is a CONSEQUENCE of it, never a fresh severing, so it
+	// must not walk the link back to redialing: this client redials no more,
+	// and a revival is a new client with a new watcher.
+	if w.link == shimclient.LinkDead {
+		w.log.Debug("daemon.sessionwatcher.link", "the link is dead; a later transition is a consequence of the death", dlog.Context{
+			"proposed": int(state),
+		})
+		return
+	}
 	w.log.Debug("daemon.sessionwatcher.link", "link state changed", dlog.Context{
 		"previous": int(w.link), "link": int(state),
 	})

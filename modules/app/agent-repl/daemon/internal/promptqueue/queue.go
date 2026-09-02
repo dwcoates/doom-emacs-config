@@ -42,6 +42,16 @@ const (
 // a within-process ordering fact whose loss costs a re-issued model change, not
 // a lost prompt.
 type wsState struct {
+	// drain serializes the two events that DELIVER a standing hold — a turn's
+	// end and a lease change — for one workspace. Without it a handover's
+	// quiesce (a lease change) runs concurrently with the turn end that freed
+	// the workspace, and the held intake leaves in whichever order the two
+	// races settle in rather than in arrival order.
+	//
+	// It is NOT q.mu: a delivery is an rpc to the shim, and holding the
+	// queue's own mutex across it would wedge every other workspace.
+	drain sync.Mutex
+
 	head            *ids.TurnID
 	interrupting    bool
 	uninterruptible conversationv1.SessionCommand
