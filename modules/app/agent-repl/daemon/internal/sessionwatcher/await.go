@@ -1,0 +1,197 @@
+package sessionwatcher
+
+import (
+	"context"
+	"errors"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+)
+
+// ErrWatcherClosed is what a wait answers when the watcher was torn down under
+// it. A closed watcher will never become free and will never see a turn end,
+// so the wait is ANSWERED rather than left hanging on a state that can no
+// longer change.
+var ErrWatcherClosed = errors.New("sessionwatcher: the watcher closed while a wait was standing")
+
+// closedTurnMemory is how many just-ended turns a watcher remembers so an
+// AwaitTurnEnd that arrives AFTER the terminal still gets its answer. The
+// window exists because the caller submits a turn and waits on it in two
+// steps, and the turn can end between them.
+const closedTurnMemory = 32
+
+// turnEnd is one delivery to a turn waiter.
+type turnEnd struct {
+	how TurnClose
+	err error
+}
+
+// AwaitFree blocks until the workspace has no turn in flight and no live
+// detached work, or until ctx ends. It is DRIVEN BY THE STREAMS: every turn
+// end and every live-work change signals the standing waiters, so nothing
+// polls and nothing sleeps.
+func (w *watcher) AwaitFree(ctx context.Context) error {
+	ch, standing, err := w.registerFreeWaiter()
+	if !standing {
+		return err
+	}
+	select {
+	case err := <-ch:
+		return err
+	case <-ctx.Done():
+		w.dropFreeWaiter(ch)
+		return ctx.Err()
+	}
+}
+
+// registerFreeWaiter takes the answer that needs no wait, or files a waiter.
+// It is separate from AwaitFree so the registration is one atomic step: the
+// caller — and an in-package test — holds the channel BEFORE the edge it is
+// waiting on can be routed.
+func (w *watcher) registerFreeWaiter() (ch chan error, standing bool, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return nil, false, ErrWatcherClosed
+	}
+	if w.turn == nil && w.liveWorkLocked().Empty() {
+		return nil, false, nil
+	}
+	ch = make(chan error, 1)
+	w.freeWaiters = append(w.freeWaiters, ch)
+	w.log.Debug("daemon.sessionwatcher.await_free", "a caller is waiting for freeness", dlog.Context{
+		"turn_in_flight": turnValue(w.turn),
+		"waiters":        len(w.freeWaiters),
+	})
+	return ch, true, nil
+}
+
+// AwaitTurnEnd blocks until the named turn ends and reports HOW it ended. A
+// turn that ended just before the call is answered from the watcher's memory
+// of recently closed turns rather than waiting for an edge that already
+// passed.
+func (w *watcher) AwaitTurnEnd(ctx context.Context, turn ids.TurnID) (TurnClose, error) {
+	ch, standing, end := w.registerTurnWaiter(turn)
+	if !standing {
+		return end.how, end.err
+	}
+	select {
+	case end := <-ch:
+		return end.how, end.err
+	case <-ctx.Done():
+		w.dropTurnWaiter(turn, ch)
+		return 0, ctx.Err()
+	}
+}
+
+// registerTurnWaiter takes the answer the watcher already holds, or files a
+// waiter, in one atomic step.
+func (w *watcher) registerTurnWaiter(turn ids.TurnID) (ch chan turnEnd, standing bool, answer turnEnd) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if how, ok := w.closedTurns[turn]; ok {
+		return nil, false, turnEnd{how: how}
+	}
+	if w.closed {
+		return nil, false, turnEnd{err: ErrWatcherClosed}
+	}
+	ch = make(chan turnEnd, 1)
+	w.turnWaiters[turn] = append(w.turnWaiters[turn], ch)
+	w.log.Debug("daemon.sessionwatcher.await_turn_end", "a caller is waiting for a turn to end", dlog.Context{
+		"turn_id": string(turn),
+	})
+	return ch, true, turnEnd{}
+}
+
+// turnEndedLocked is the ONE place a turn's end is recorded: the in-flight
+// turn is cleared, the lifecycle sink is told, the close is remembered for a
+// late waiter, every standing waiter on that turn is answered, and the
+// freeness signal is raised.
+func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
+	w.turn = nil
+	w.sinks.Lifecycle.OnTurnEnded(w.ws, turn, how)
+	w.rememberClosedTurnLocked(turn, how)
+	for _, ch := range w.turnWaiters[turn] {
+		ch <- turnEnd{how: how}
+	}
+	delete(w.turnWaiters, turn)
+	w.signalFreenessLocked()
+}
+
+// rememberClosedTurnLocked records a turn's close, evicting the oldest once
+// the memory is full.
+func (w *watcher) rememberClosedTurnLocked(turn ids.TurnID, how TurnClose) {
+	if _, known := w.closedTurns[turn]; !known {
+		w.closedTurnOrder = append(w.closedTurnOrder, turn)
+	}
+	w.closedTurns[turn] = how
+	for len(w.closedTurnOrder) > closedTurnMemory {
+		delete(w.closedTurns, w.closedTurnOrder[0])
+		w.closedTurnOrder = w.closedTurnOrder[1:]
+	}
+}
+
+// signalFreenessLocked answers every standing freeness waiter once the
+// workspace is actually free. It is a no-op while anything is still in flight.
+func (w *watcher) signalFreenessLocked() {
+	if w.turn != nil || !w.liveWorkLocked().Empty() {
+		return
+	}
+	if len(w.freeWaiters) == 0 {
+		return
+	}
+	w.log.Debug("daemon.sessionwatcher.await_free", "the workspace is free; releasing the waiters", dlog.Context{
+		"waiters": len(w.freeWaiters),
+	})
+	for _, ch := range w.freeWaiters {
+		ch <- nil
+	}
+	w.freeWaiters = nil
+}
+
+// failWaitersLocked answers every standing wait with ErrWatcherClosed. A
+// closed watcher can no longer produce the edge the waiter is waiting for, so
+// the wait is ended loudly rather than left to the caller's context.
+func (w *watcher) failWaitersLocked() {
+	for _, ch := range w.freeWaiters {
+		ch <- ErrWatcherClosed
+	}
+	w.freeWaiters = nil
+	for turn, waiters := range w.turnWaiters {
+		for _, ch := range waiters {
+			ch <- turnEnd{err: ErrWatcherClosed}
+		}
+		delete(w.turnWaiters, turn)
+	}
+}
+
+// dropFreeWaiter removes a waiter whose context ended, so an abandoned wait
+// does not accumulate on a long-lived watcher.
+func (w *watcher) dropFreeWaiter(ch chan error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i, c := range w.freeWaiters {
+		if c == ch {
+			w.freeWaiters = append(w.freeWaiters[:i], w.freeWaiters[i+1:]...)
+			return
+		}
+	}
+}
+
+// dropTurnWaiter removes a turn waiter whose context ended.
+func (w *watcher) dropTurnWaiter(turn ids.TurnID, ch chan turnEnd) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	waiters := w.turnWaiters[turn]
+	for i, c := range waiters {
+		if c == ch {
+			waiters = append(waiters[:i], waiters[i+1:]...)
+			if len(waiters) == 0 {
+				delete(w.turnWaiters, turn)
+			} else {
+				w.turnWaiters[turn] = waiters
+			}
+			return
+		}
+	}
+}

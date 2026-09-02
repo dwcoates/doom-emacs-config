@@ -84,6 +84,17 @@ type watcher struct {
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
 
+	// freeWaiters are the standing AwaitFree calls. They are answered by the
+	// stream edges — a turn end and a live-work change — never by a poll.
+	freeWaiters []chan error
+	// turnWaiters are the standing AwaitTurnEnd calls, keyed by the turn.
+	turnWaiters map[ids.TurnID][]chan turnEnd
+	// closedTurns remembers how the last few turns ended, so a wait that
+	// arrives after the terminal is still answered; closedTurnOrder is its
+	// eviction order.
+	closedTurns     map[ids.TurnID]TurnClose
+	closedTurnOrder []ids.TurnID
+
 	sessionStream shimclient.Stream[*conversationv1.SessionUpdate]
 	main          *agentWatch
 
@@ -195,7 +206,10 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		shells:   map[string]*shellWatch{},
 		monitors: map[string]*conversationv1.DetachedWorkId{},
 		known:    map[string]*conversationv1.HistoryPointer{},
-		facts:    map[string]*activityFact{},
+
+		turnWaiters: map[ids.TurnID][]chan turnEnd{},
+		closedTurns: map[ids.TurnID]TurnClose{},
+		facts:       map[string]*activityFact{},
 	}
 	if session.MainKnownThrough != nil {
 		w.known[mainWatchKey] = session.MainKnownThrough
@@ -365,6 +379,7 @@ func (w *watcher) Close() error {
 	}
 	w.closed = true
 	w.gen++
+	w.failWaitersLocked()
 	closing := w.takeStreamsLocked()
 	w.log.Debug("daemon.sessionwatcher.close", "closing the session's watch fleet", dlog.Context{
 		"streams": len(closing),
@@ -444,6 +459,9 @@ func (w *watcher) publishLiveWorkLocked() {
 	// The roster hears the same set: its `idle_async` arm retires on an empty
 	// one, which no announcement can ever state.
 	w.sinks.Sidebar.OnLiveWorkChanged(w.ws, live)
+	// The live-work set is half of freeness, so every change to it is a
+	// freeness edge a lease holder may be waiting on.
+	w.signalFreenessLocked()
 }
 
 // ---- connectivity ----
