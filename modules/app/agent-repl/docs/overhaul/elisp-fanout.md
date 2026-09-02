@@ -456,6 +456,19 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   the rename-collision test awaits `elisp.rpc.push-invalid` but the ruled
   refused-whole path logs `elisp.roster.tab-rename-refused` (suite bug);
   the re-key test fails only on the final host-push gate wait.
+- R-RED-3A MERGED (1ff2522e2): FINDING — a Connect server-streaming
+  REFUSAL arrives as HTTP 200 + an error end-stream frame, never a non-200;
+  ON-OPEN legitimately fires once before it, so "subscribed" must be keyed
+  on the close outcome too (the two connect tests retargeted); the fake's
+  `/_fake/gate` can now hold a STREAM's acceptance; cold start reports
+  own/foreign provenance once the address appears (`own-adopted` was
+  unreachable); host stream callbacks resolve the workspace name from the
+  ref id at call time (pushes follow a rename). R-RED-3B MERGED: a reopened
+  roster row revives its tombstoned name (production); collision test
+  awaits the ruled slug; finish-edge banner passes ACTIVATE nil BY CONTRACT
+  (nil = the backend's workspace-activation default; audit-3 #41's
+  "non-nil" premise was wrong); merge-queue roster fixtures name their row
+  after the workspace (arrangement). No agent worktrees remain.
 
 ## 1. Module map (final tree of lisp/)
 
