@@ -1,0 +1,27 @@
+{
+  "scenario": "question-unanswered",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Ask me exactly one question with the question tool: whether to proceed.",
+  "prompts": [
+    {
+      "text": "Ask me exactly one question with the question tool: whether to proceed.",
+      "resume": false
+    }
+  ],
+  "world": "question-unanswered",
+  "cwd_init": null,
+  "vendor_session_id": "60aa7437-18f2-4d3d-9328-e6ce1ecf0ff0",
+  "manual": null,
+  "expect": [
+    "tool:AskUserQuestion",
+    "the vendor's own shape for a question that was not answered"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-question-unanswered-uh3PXT-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:23:16.917Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

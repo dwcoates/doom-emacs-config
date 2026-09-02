@@ -1,0 +1,29 @@
+{
+  "scenario": "grep-content-files-count",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Search this directory for the word 'needle' three ways: once showing the matching lines with their content, once listing only the files that match, and once reporting just the number of matches per file.",
+  "prompts": [
+    {
+      "text": "Search this directory for the word 'needle' three ways: once showing the matching lines with their content, once listing only the files that match, and once reporting just the number of matches per file.",
+      "resume": false
+    }
+  ],
+  "world": "conversation-history",
+  "cwd_init": null,
+  "vendor_session_id": "f947ef8c-cefd-45b2-b037-61a7caee0de7",
+  "manual": null,
+  "expect": [
+    "tool:Grep(output_mode=content)",
+    "tool:Grep(output_mode=files_with_matches)",
+    "tool:Grep(output_mode=count)",
+    "tool_result:grep"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-TcFrqH-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:19:07.437Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

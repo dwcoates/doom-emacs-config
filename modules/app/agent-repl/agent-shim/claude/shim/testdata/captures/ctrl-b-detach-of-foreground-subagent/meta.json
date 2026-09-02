@@ -1,0 +1,32 @@
+{
+  "scenario": "ctrl-b-detach-of-foreground-subagent",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Spawn one subagent in the FOREGROUND that counts from 1 to 90 with a one-second sleep between numbers, and wait for it.",
+  "prompts": [
+    {
+      "text": "Spawn one subagent in the FOREGROUND that counts from 1 to 90 with a one-second sleep between numbers, and wait for it.",
+      "resume": false
+    }
+  ],
+  "world": "ctrl-b-detach-of-foreground-subagent",
+  "cwd_init": null,
+  "vendor_session_id": "d698fdb4-83de-45a5-bc72-ef568fba7580",
+  "manual": null,
+  "expect": [
+    "task_updated{patch.is_backgrounded} present or ABSENT — either answer settles the gotcha",
+    "whatever the agent tool result carries when it is backgrounded by the user"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-ctrl-b-detach-of-foreground-subagent-8iME4O-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:31:30.543Z",
+  "controls": [
+    {
+      "verb": "backgroundTasks",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

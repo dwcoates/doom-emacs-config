@@ -1,0 +1,27 @@
+{
+  "scenario": "monitor-persistent",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Set up a persistent monitor that watches watched.log and wakes you whenever a line containing ERROR appears. Do not give it a deadline.",
+  "prompts": [
+    {
+      "text": "Set up a persistent monitor that watches watched.log and wakes you whenever a line containing ERROR appears. Do not give it a deadline.",
+      "resume": false
+    }
+  ],
+  "world": "monitor-persistent",
+  "cwd_init": null,
+  "vendor_session_id": "e87a931f-ad02-4407-8a53-ae79f6173fb4",
+  "manual": null,
+  "expect": [
+    "tool:Monitor(persistent)",
+    "tool_result:monitor"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-monitor-persistent-liNwPM-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:25:10.668Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
