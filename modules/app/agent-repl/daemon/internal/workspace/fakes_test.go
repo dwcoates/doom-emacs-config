@@ -29,6 +29,7 @@ import (
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -614,8 +615,8 @@ type editorOpen struct {
 }
 
 type hostNote struct {
-	WS               ids.WorkspaceID
-	Text, Kind, Tool string
+	WS                       ids.WorkspaceID
+	Text, Kind, Tool, Header string
 }
 
 func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
@@ -624,8 +625,8 @@ func (h *fakeHost) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 
 func (h *fakeHost) ReloadWebapp(ws ids.WorkspaceID) { h.reloads = append(h.reloads, ws) }
 
-func (h *fakeHost) Notify(ws ids.WorkspaceID, text, kind, tool string) {
-	h.notes = append(h.notes, hostNote{ws, text, kind, tool})
+func (h *fakeHost) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
+	h.notes = append(h.notes, hostNote{ws, note.Text, string(note.Kind), note.ToolName, note.Header})
 }
 
 // fakeSessions is a Sessions fleet.

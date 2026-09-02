@@ -38,6 +38,7 @@ import (
 	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/resolve/topbar"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/workspace"
 	"claude-repld/internal/wsm"
 )
@@ -323,8 +324,8 @@ func (r hostRelay) PublishHostWorkspace(ws ids.WorkspaceID) {
 	r.s.PublishHostWorkspace(r.s.life, ws)
 }
 
-func (r hostRelay) Notify(ws ids.WorkspaceID, text, kind, toolName string) {
-	r.s.notify(ws, text, kind, toolName)
+func (r hostRelay) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
+	r.s.notify(ws, note)
 }
 
 // pushOpenInEditor publishes the open_in_editor arm.
@@ -353,14 +354,14 @@ func (s *server) ReloadWebapp(ws ids.WorkspaceID) {
 func (s *server) PushReloadWebapp(ws ids.WorkspaceID) { s.ReloadWebapp(ws) }
 
 // notify publishes a host notification.
-func (s *server) notify(ws ids.WorkspaceID, text string, kind string, toolName string) {
+func (s *server) notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
 	s.log.Debug("daemon.server.notify", "relayed a host notification",
-		dlog.Context{"workspace": string(ws), "kind": kind})
+		dlog.Context{"workspace": string(ws), "kind": string(note.Kind)})
 	s.hostTopic(ws).Publish(&agentreplv1.WatchHostWorkspaceResponse{
 		Push: &agentreplv1.WatchHostWorkspaceResponse_Notification{
 			Notification: &agentreplv1.HostWorkspaceNotification{
-				Text: text,
-				Kind: s.notificationKind(kind, toolName),
+				Text: note.Text,
+				Kind: s.notificationKind(note),
 			},
 		},
 	})
@@ -369,24 +370,27 @@ func (s *server) notify(ws ids.WorkspaceID, text string, kind string, toolName s
 // notificationKind renders the verbs' notification kind name as the typed arm.
 // An unrecognized name is never guessed at silently: it raises agent_addressed
 // and is logged at ERROR, because a dropped notification is a lost one.
-func (s *server) notificationKind(kind, toolName string) *agentreplv1.HostNotificationKind {
-	switch kind {
-	case "permission_requested":
+func (s *server) notificationKind(note sessionwatcher.HostNotification) *agentreplv1.HostNotificationKind {
+	switch note.Kind {
+	case sessionwatcher.NotificationPermissionRequested:
 		return &agentreplv1.HostNotificationKind{
 			Kind: &agentreplv1.HostNotificationKind_PermissionRequested{
-				PermissionRequested: &agentreplv1.HostNotificationPermissionRequested{ToolName: toolName},
+				PermissionRequested: &agentreplv1.HostNotificationPermissionRequested{ToolName: note.ToolName},
 			},
 		}
-	case "question_asked":
+	case sessionwatcher.NotificationQuestionAsked:
+		// The chip label is the QUESTION's own header, which is why the
+		// notification carries a Header field distinct from a permission
+		// ask's ToolName.
 		return &agentreplv1.HostNotificationKind{
 			Kind: &agentreplv1.HostNotificationKind_QuestionAsked{
-				QuestionAsked: &agentreplv1.HostNotificationQuestionAsked{Header: toolName},
+				QuestionAsked: &agentreplv1.HostNotificationQuestionAsked{Header: note.Header},
 			},
 		}
-	case "agent_addressed":
+	case sessionwatcher.NotificationAgentAddressed:
 	default:
 		s.log.Error("daemon.server.notify", "a host notification named an unknown kind",
-			dlog.Context{"kind": kind})
+			dlog.Context{"kind": string(note.Kind)})
 	}
 	return &agentreplv1.HostNotificationKind{
 		Kind: &agentreplv1.HostNotificationKind_AgentAddressed{
