@@ -578,10 +578,16 @@ describe("DetachForeground", () => {
     // `unsupported` and NOT `not_detachable`: the unit is perfectly
     // detachable-in-kind, and the pinned SDK simply offers no verb to initiate
     // it — the wrong arm would have lied about the reason.
+    //
+    // `!bash-hold` RATHER THAN `!bash`: the refusal under test is only reachable
+    // while the unit is genuinely live, and `!bash` settles in the same tick it
+    // starts, so the call raced the settle and the table answered
+    // `already_concluded` instead. `!bash-hold` parks the foreground call until
+    // an interrupt, with no background work for it anywhere.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-hold" }));
     const running = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
