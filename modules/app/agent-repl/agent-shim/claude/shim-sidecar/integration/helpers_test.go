@@ -66,14 +66,20 @@ const (
 	spoolUID = "501"
 
 	// waitBudget bounds every "wait until the store shows X" helper. Exceeding
-	// it is a test failure, never a retry.
-	waitBudget = 60 * time.Second
+	// it is a test failure, never a retry. 50s is ~3x the observed healthy max
+	// across this package (a real vendor+sidecar+store scenario, -race,
+	// go test -v ./... baseline): the heaviest legitimate scenario
+	// (TestMockScenarios/!subagent) took ~16.6s; nearly everything else
+	// finishes in well under a second.
+	waitBudget = 50 * time.Second
 
 	// snapshotBudget bounds watchBashRun's read of an UNFINISHED run. The
 	// endpoint follows until the terminal, so a snapshot of a live run has no
 	// other way to end; it is a bound on a stream that is deliberately still
-	// open, never a sleep standing in for a signal.
-	snapshotBudget = 2 * time.Second
+	// open, never a sleep standing in for a signal. 1s: this is a single RPC
+	// against a store that is already up (no process boot in the wait), so it
+	// does not need waitBudget's headroom for a real vendor/sidecar/store boot.
+	snapshotBudget = 1 * time.Second
 
 	// pollTick is the re-read cadence of the bounded store-polling helpers. It
 	// is a POLL of a durable surface, never a sleep standing in for a signal.

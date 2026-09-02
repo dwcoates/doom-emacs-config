@@ -44,14 +44,20 @@ import (
 const (
 	// readyTimeout bounds the wait for the store's socket to accept. It is a
 	// deadline on a polling loop, never a sleep that stands in for a signal.
-	readyTimeout = 30 * time.Second
+	// 2s is ~3x the observed healthy max for this package (0.62s, -race,
+	// go test -v ./... baseline) — the store binary is built once in TestMain
+	// and every boot in this suite lands in well under 100ms.
+	readyTimeout = 2 * time.Second
 	// shutdownTimeout bounds an orderly SIGTERM exit before the harness kills.
-	shutdownTimeout = 20 * time.Second
+	// Same 2s basis as readyTimeout: this suite's real store process has never
+	// taken close to that long to exit.
+	shutdownTimeout = 2 * time.Second
 	// callTimeout bounds any single rpc so a hung store fails the test loudly
-	// instead of hanging the suite.
-	callTimeout = 30 * time.Second
-	// streamTimeout bounds a watch stream's first delivery.
-	streamTimeout = 30 * time.Second
+	// instead of hanging the suite. Same 2s basis as readyTimeout.
+	callTimeout = 2 * time.Second
+	// streamTimeout bounds a watch stream's first delivery. Same 2s basis as
+	// readyTimeout.
+	streamTimeout = 2 * time.Second
 
 	// baseURL is a syntactic placeholder: every transport below dials the
 	// unix socket, so the authority is never resolved.
