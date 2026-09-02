@@ -79,6 +79,14 @@ type controller struct {
 	// joining is the set of workspaces the manifest named, so the daemon.addr
 	// write happens exactly when the last one is owned.
 	joining map[ids.WorkspaceID]bool
+	// transferred is every workspace this daemon handed to a successor, mapped
+	// to the successor's address. It is what makes a per-workspace rpc refuse
+	// with `transferring_away{address}` instead of serving a workspace this
+	// daemon no longer owns.
+	transferred map[ids.WorkspaceID]string
+	// successor is the address of the daemon taking over, empty while no
+	// handover is in flight.
+	successor string
 }
 
 // entry is one workspace's rendezvous state.

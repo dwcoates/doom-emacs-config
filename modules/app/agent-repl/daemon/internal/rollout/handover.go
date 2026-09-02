@@ -120,6 +120,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, successor s
 		c.log.Warn(opTransfer, "could not release serving ownership", withCause(fields, err))
 	}
 
+	c.recordTransfer(ws.ID, successor)
 	c.deps.Pusher.PushTransferred(ws.ID, successor)
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
 		merge(fields, dlog.Context{"expected_host": expected.Host, "expected_web": expected.Web}))

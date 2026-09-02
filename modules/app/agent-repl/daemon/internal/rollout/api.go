@@ -92,6 +92,14 @@ type Controller interface {
 	// adoption call for a workspace, which is what makes the rendezvous
 	// terminate.
 	ExpectedParticipants(ws ids.WorkspaceID) int
+	// Standing answers a workspace's SERVING STANDING on this daemon, which is
+	// what every per-workspace rpc refuses on before it delegates. The two
+	// non-owned standings are the two the rollout itself creates: a workspace
+	// transferred away, and one a joining daemon has not adopted yet.
+	Standing(ws ids.WorkspaceID) Standing
+	// SuccessorAddress answers the address a transferred workspace moved to,
+	// empty when no handover is in flight.
+	SuccessorAddress() string
 	// Reconcile reads the intent manifest against the kernel locks actually
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.
