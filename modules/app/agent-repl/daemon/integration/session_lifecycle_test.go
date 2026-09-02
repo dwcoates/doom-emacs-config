@@ -183,7 +183,6 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	if !strings.Contains(startFailed.GetStderrTail(), "boom: fake bring-up death") {
 		t.Fatalf("shim_start_failed.stderr_tail = %q, want it to carry the fake's stderr", startFailed.GetStderrTail())
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
@@ -257,11 +256,6 @@ func TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawnsBefore {
 		t.Fatalf("shim spawn records = %d after the refusal, want the %d before it: the guard refuses BEFORE the spawn", got, spawnsBefore)
 	}
-	// internal/workspace/refusal.go's refuse() helper — what resumeGuard calls
-	// for ArmTranscriptMissing — logs WARN under this exact operation for
-	// EVERY refusal it raises, landed arm or not; it is not gated on the
-	// arm's landing status the way server.UnlandedArm is.
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing.T) {
@@ -425,10 +419,6 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	if resp.Msg.GetError().GetUnservedRemediation() == nil {
 		t.Fatalf("AnswerColdGate = %v, want AnswerColdGateError.unserved_remediation", resp.Msg)
 	}
-	// internal/workspace/refusal.go's refuse() helper — what raises
-	// ArmUnservedRemediation — logs WARN under this operation unconditionally,
-	// regardless of the arm's landing status.
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
