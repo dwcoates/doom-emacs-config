@@ -26,7 +26,7 @@
  * needs.
  */
 import { create } from "@bufbuild/protobuf";
-import { bindLog, setClaudeSessionId } from "../log.js";
+import { bindLog, onLogSinkPoisoned, setClaudeSessionId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
 import { acquireSessionLock } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
@@ -178,6 +178,9 @@ interface OpenWatcher {
  */
 export const WATCHER_CONCLUSION_BUDGET_MS = 5_000;
 
+/** The component name the log sink's own fault and degraded window carry. */
+export const LOG_SINK_COMPONENT = "log-sink";
+
 /** How often the account's rate-limit windows are sampled. */
 export const ACCOUNT_USAGE_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -277,6 +280,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   });
   deps.persistence.onDegradedWindow((window) => {
     pushes.recordDegradedWindow(window);
+  });
+  // THE SHIM'S OWN LOG DYING IS A SESSION FACT. Once fd 3 is gone the shim has
+  // no durable channel left to complain through, so WatchSession is the only
+  // place the loss can still be stated -- and it is stated ONCE, as a fault and
+  // a window that never closes, because nothing restores a lost record.
+  onLogSinkPoisoned((cause) => {
+    pushes.fault(sessionFault({ kind: "logSinkPoisoned" }, LOG_SINK_COMPONENT, cause.message));
+    pushes.openDegradedWindow(LOG_SINK_COMPONENT, `the durable log sink is poisoned: ${cause.message}`);
   });
 
   const gate = new PermissionGate({
