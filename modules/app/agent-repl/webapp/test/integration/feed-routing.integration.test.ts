@@ -398,3 +398,109 @@ describe("the final answer", () => {
     expect(harness.row("r1")?.dataset.finalAnswer).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// SUB-FEED PAGING (audit 1, item 3)
+//
+// A bubble IS a feed, so its history is paged by the SAME verb with the
+// bubble's own FeedId — the self-similarity the whole feed mechanism rests on.
+// A `GetFeedPage` that dropped the address would page the ROOT into the
+// bubble, which is exactly the defect these assertions catch.
+// ---------------------------------------------------------------------------
+
+describe("paging a sub-feed", () => {
+  /** A bubble whose sub-feed has one row and more history behind it. */
+  const openPagedBubble = async (): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(
+          WORKSPACE_ID,
+          "bubble",
+          feedPageSuccess([responseRow("success", "newest inner", { id: feedId("inner-new") })], {
+            edge: "hasMore",
+          }),
+        );
+        fake.setNextPage(
+          WORKSPACE_ID,
+          "bubble",
+          feedPageSuccess([responseRow("success", "older inner", { id: feedId("inner-old") })]),
+        );
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+  };
+
+  it("draws a load-more control inside the bubble", async () => {
+    // Arrange / Act
+    await openPagedBubble();
+    // Assert
+    expect(harness.$('[data-feed-row="bubble"] [data-subfeed] [data-load-more]')).not.toBeNull();
+  });
+
+  it("addresses GetFeedPage to the bubble's own FeedId", async () => {
+    // Arrange
+    await openPagedBubble();
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-subfeed] [data-load-more]');
+    // Assert
+    const [request] = harness.fake.calls<{ feed?: { value: string } }>("getFeedPage");
+    expect(request.feed?.value).toBe("bubble");
+  });
+
+  it("asks for `next`, never for a cursor", async () => {
+    // Arrange
+    await openPagedBubble();
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-subfeed] [data-load-more]');
+    // Assert
+    const [request] = harness.fake.calls<{ page: { case?: string } }>("getFeedPage");
+    expect(request.page.case).toBe("next");
+  });
+
+  it("prepends the older rows inside the bubble", async () => {
+    // Arrange
+    await openPagedBubble();
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-subfeed] [data-load-more]');
+    // Assert
+    const subfeed = harness.$('[data-feed-row="bubble"] [data-subfeed]');
+    expect(harness.rowIds(subfeed ?? undefined)).toEqual(["inner-old", "inner-new"]);
+  });
+
+  it("draws no older row on the root feed", async () => {
+    // Arrange
+    await openPagedBubble();
+    // Act
+    await harness.click('[data-feed-row="bubble"] [data-subfeed] [data-load-more]');
+    // Assert: the page landed in the feed it was asked for.
+    expect(harness.row("bubble")?.contains(harness.row("inner-old"))).toBe(true);
+  });
+
+  it("draws no load-more inside a bubble whose page is at_start", async () => {
+    // Arrange / Act
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(
+          WORKSPACE_ID,
+          "bubble",
+          feedPageSuccess([responseRow("success", "all of it", { id: feedId("inner") })], {
+            edge: "atStart",
+          }),
+        );
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    // Assert
+    expect(harness.$('[data-feed-row="bubble"] [data-subfeed] [data-load-more]')).toBeNull();
+  });
+});
