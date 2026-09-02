@@ -2593,6 +2593,118 @@ touched."
                                     entries))))
             (agent-repl-connect-close successor-conn)))))))
 
+;;;; ---- Audit-3 #30 (R-SUITE-3) ----
+;;
+;; Finding 30 has two halves.  The SECOND half -- the `awaiting-successor'
+;; branch, otherwise reached only through a hand-called `handle-refusal' -- is
+;; pinned here against the real link.
+;;
+;; The FIRST half, as the audit words it ("assert WatchDaemon and adopt land
+;; on B, not A"), is NOT pinnable as written, and the test below pins what
+;; production actually does instead.  host.el's `--redial-successor' docstring
+;; does say "a successor already standing at a DIFFERENT address is a stale
+;; handover, so the dial is made either way" -- but the dial it makes goes
+;; through `agent-repl-link-dial-successor', which delegates to
+;; `agent-repl-link--attach-successor', whose second `cond' arm refuses a
+;; changed address outright: it logs `elisp.link.successor-address-changed'
+;; ERROR and leaves the standing successor untouched.  That guard is not
+;; incidental -- audit-3 #8 pins it, in this same document, as the CORRECT
+;; behavior of the announced path.  So host.el's docstring and daemon-link.el's
+;; guard contradict each other, and only a ruling can say which one is the
+;; contract.  Pinning the audit's wording would pin a fiction; pinning the
+;; guard's behavior documents the conflict where the next reader will find it.
+
+;; audit-3 #30
+(ert-deftest agent-repl-itest-host-redial-to-a-different-address-hits-the-link-guard ()
+  "A `transferring_away' naming an address OTHER than the standing successor.
+THIS TEST RECORDS A CONTRADICTION, deliberately.  host.el's
+`agent-repl-host--redial-successor' documents a stale-handover redial
+\(\"the dial is made either way\"), and it does call
+`agent-repl-link-dial-successor' -- but that lands in
+`agent-repl-link--attach-successor', which refuses a CHANGED address with
+`elisp.link.successor-address-changed' and keeps the successor it has.
+Audit-3 #8 pins that refusal as correct for the announced path, so the two
+rules cannot both hold for this one.
+
+Until the conflict is ruled, this pins the OBSERVED behavior: host.el asks
+to redial, the link guard refuses, and NO adopt reaches the third daemon.
+A ruling that host.el's stale-handover redial wins must rewrite this test
+\(and #8's sibling); a ruling the other way makes host.el's docstring the
+thing to fix."
+  ;; Arrange: successor A is announced and ACCEPTED on the real link.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-link-and-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor-a
+        (agent-repl-itest-host--announce
+         primary (agent-repl-itest-daemon-address successor-a))
+        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
+                                      "successor A to be ACCEPTED")
+        ;; A THIRD daemon, at an address the link has never been told about.
+        (let ((daemon-b (agent-repl-itest--start-daemon)))
+          (unwind-protect
+              (let ((address-b (agent-repl-itest-daemon-address daemon-b)))
+                (agent-repl-itest--script
+                 primary "SelectWorkspace"
+                 `((error . ((transferringAway . ((address . ,address-b)))))))
+                ;; Act.
+                (agent-repl-host-select agent-repl-itest-host--ws)
+                ;; Assert: host.el asked for the redial ...
+                (agent-repl-itest--await-log primary "elisp.host.redial" "info")
+                ;; ... and the link guard refused it, naming both addresses.
+                (agent-repl-itest--await-log
+                 primary "elisp.link.successor-address-changed" "error")
+                ;; The standing successor is STILL A.
+                (should (equal (agent-repl-itest-daemon-address successor-a)
+                               (agent-repl-connect-connection-address
+                                (agent-repl-link-successor))))
+                ;; And nothing was ever adopted onto B.
+                (should (null (agent-repl-itest--calls
+                               daemon-b "AdoptHostWorkspace")))
+                (should (null (agent-repl-itest--subscribers daemon-b "daemon"))))
+            (agent-repl-itest--stop-daemon daemon-b)))))))
+
+;; audit-3 #30
+(ert-deftest agent-repl-itest-host-redial-awaiting-acceptance-defers-the-adopt ()
+  "A redial that STANDS but is not yet accepted defers the adopt.
+host.el: \"Answers nil while the dial has not been ACCEPTED yet -- the
+caller must then wait for acceptance rather than adopt onto an unproven
+daemon.\"  The `elisp.host.awaiting-successor' branch is otherwise reached
+only through a hand-called `agent-repl-host-handle-refusal'; here the
+refusal comes off the real wire and the successor's own `WatchDaemon' is
+withheld, so the dial is genuinely pending.  This fails if Emacs ever
+adopts onto a daemon that has not proven it is listening."
+  ;; Arrange: the successor exists but will not accept its watch yet.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-host--with-link-and-subscription primary ref
+      (agent-repl-itest--with-second-daemon primary successor
+        (agent-repl-itest--gate successor "WatchDaemon")
+        (unwind-protect
+            (let ((address (agent-repl-itest-daemon-address successor)))
+              (agent-repl-itest--script
+               primary "SelectWorkspace"
+               `((error . ((transferringAway . ((address . ,address)))))))
+              ;; Act.
+              (agent-repl-host-select agent-repl-itest-host--ws)
+              ;; Assert: the dial stands, unaccepted, and the adopt WAITS.
+              (agent-repl-itest--await-log primary "elisp.host.redial" "info")
+              (agent-repl-itest--await-log
+               primary "elisp.host.awaiting-successor" "info")
+              (should (null (agent-repl-link-successor)))
+              (should (null (agent-repl-itest--calls
+                             successor "AdoptHostWorkspace")))
+              ;; The workspace is still served by the daemon it has.
+              (should (equal (agent-repl-itest-daemon-address primary)
+                             (agent-repl-connect-connection-address
+                              (agent-repl-host-conn agent-repl-itest-host--ws))))
+              ;; Releasing the watch accepts the successor, which wakes the
+              ;; deferred adopt -- exactly once.
+              (agent-repl-itest--release-gate successor "WatchDaemon")
+              (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+              (agent-repl-itest--await-subscriber
+               successor "host" (plist-get ref :id)))
+          (ignore-errors
+            (agent-repl-itest--release-gate successor "WatchDaemon")))))))
+
 (provide 'test-integration-host)
 
 ;;; test-integration-host.el ends here
