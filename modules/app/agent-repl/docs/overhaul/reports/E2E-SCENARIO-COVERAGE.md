@@ -258,3 +258,48 @@ shim's `fake-query.ts`, the golden-capture `prompts.json`, the fakesdk
 worktree's `src/fake/registry.ts` and `scenarios/*.ts` (for contrast only),
 and `E2E-SIDECAR-PLAN.md`. `daemon/e2e` not compiling was not tested and is
 consistent with the task's stated expectation.
+
+---
+
+## Manifest/registry naming drift (recorded 2026-09-02; NOT a blocker)
+
+While writing the rebuilt `modules/app/agent-repl/e2e` suite, area writers
+found that a GOLDEN's name and the fake SDK's REGISTERED scenario prompt
+often differ. `src/fake/registry.ts` matches on the scenario's own registered
+name, so driving a golden by its capture name silently reaches nothing. Every
+writer resolved this by reading the scenario source and documenting the
+mapping in its test header; no test guessed.
+
+The project lead has ruled this a SHIM-SIDE CLEANUP for later. It blocks
+nothing: the e2e tests drive the registered names and are correct as written.
+
+### One golden, one differently-named scenario
+
+| Golden (capture / manifest) | Registered prompt |
+|---|---|
+| `hook-succeeded` | `!hook-success` |
+| `mcp-server-healths` | `!mcp-all` |
+| `mcp-unmodeled-tool` | `!unmodeled` |
+| `context-injected-memory` | `!memory` |
+| `context-injected-skills` | `!skills-injected` |
+
+### One golden, SEVERAL scenarios driven in combination
+
+| Golden (capture / manifest) | Registered prompts |
+|---|---|
+| `artifact-publish-and-list` | `!artifact-publish` + `!artifact-list` |
+| `schedule-wakeup-schedule-and-stop` | `!wakeup-schedule` + `!wakeup-stop` |
+| `send-message-queued-and-resumed` | `!send-message` + `!send-message-resumed` |
+| `task-acts-create-change-reject` | `!task-create` + `!task-change` + `!task-reject` |
+| `worktree-enter-exit-kept-and-removed` | `!worktree-keep` + `!worktree-remove` |
+
+### A golden with NO registered scenario at all
+
+- `diagnostics` — no `!`-prefixed scenario exists. RULED: a healthy shim's
+  diagnostics push produces no topbar warning, so the e2e test asserts
+  exactly that, plus that the topbar stream delivered at least one view (so
+  "no warning" can never pass as "no stream").
+
+This list comes from the area writers' own reports and is not claimed to be
+exhaustive; a shim-side pass should reconcile the manifest against
+`registry.ts` in full.
