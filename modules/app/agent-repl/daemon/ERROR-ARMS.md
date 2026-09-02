@@ -96,33 +96,12 @@ the only one a refused open makes.
 
 ## Landing 6 batch, opened by the server handlers (wave 3a)
 
-Every row below is a refusal the server MAKES and the contract has no arm for.
-Each answers through `server.UnlandedArm`.
-
-One consequence is recorded as a row rather than lost: the SHIM refuses a
-bubble-addressed submit in TWO shapes and `SubmitPromptError` has a home for
-neither. By project-lead ruling the landing-7 candidate is ONE arm,
-`SubmitPromptError.bubble_refused { kind: not_deliverable | agent_busy }`, and
-until it lands both shapes answer through `server.UnlandedArm` naming
-`SubmitPromptError.bubble_refused` with the kind in the reason
-(`kind <kind>: <reason>`). `server.bubbleRefused` is the one mapping.
-
-| rpc | arm | condition | package |
-| --- | --- | --- | --- |
-| SubmitPrompt (the bubble path) | `bubble_refused` | ONE arm, two kinds. `kind: not_deliverable` — the shim's `UpdateAgentFailure.not_deliverable` for an `UpdateAgent{prompt}` the SDK cannot route to the addressed subagent. `kind: agent_busy` — the shim's `StartTurnFailure.turn_already_open` for a subagent whose own turn is already running. `SubmitPromptError` carries neither shape today | workspace / server |
-
-SHIM-SIDE GAP (remediation pass 3b, unresolved): the `agent_busy` kind has NO
-PRODUCER. A bubble-addressed submit reaches the shim as `UpdateAgent{prompt}`,
-never as `StartTurn`, and `UpdateAgentFailure`'s kind oneof has no busy arm —
-`unknown_agent`, `no_open_ask`, `answer_mismatch`, `nothing_running`,
-`no_session`, `not_deliverable`. So a second bubble submit while the addressed
-agent's own turn runs cannot be refused honestly by any landed shape, and the
-daemon delivers it. PROPOSAL: `UpdateAgentFailure.agent_busy = 8`
-(`UpdateAgentAgentBusy {}`) — "the addressed agent's own turn is already
-open" — which `server.bubbleRefused` then maps to `kind: agent_busy` with no
-other change. The integration test
-`TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal`
-stays RED until it lands.
+Every row this batch opened has LANDED. The one consequence it recorded — the
+shim's two bubble-addressed submit refusals with no `SubmitPromptError` home —
+became `SubmitPromptError.bubble_refused {detail; kind: not_deliverable |
+agent_busy}` in landing 7, with `shim.v1 UpdateAgentFailure.agent_busy` as the
+second kind's producer. `server.bubbleRefused` maps both onto the landed arm and
+the rows were deleted here in the commit that switched the handler onto it.
 
 `SubmitPromptError.turn_already_open` is RETIRED (landing 6, tag 8 reserved):
 it never had a producer — the session watcher answers the MAIN turn's flight and
@@ -154,20 +133,18 @@ the panel is the version row plus the spliced account/model/mode rows and
 nothing else. cwd, auth, plugins and memory return if the handshake deferral
 ever lands. A playtest seeing the thin panel is seeing the settled consequence.
 
-## Proto proposals opened by the remediation pass (landing 7 candidates)
+## Proto proposals opened by the remediation pass — ALL LANDED (landing 7)
 
-Neither is an unlanded ARM: both messages exist, and each is missing a FIELD
-the daemon has evidence for and nowhere to put it.
+Both fields landed on 2026-09-02 and the daemon was switched onto them:
+`frontend.v1 FeedMergeAbandoned.summary` now carries the abandon cause
+(`internal/merge/terminal.go` publishAbandoned), and `shim.v1
+UpdateAgentFailure.agent_busy` is the producer for
+`SubmitPromptError.bubble_refused{agent_busy}`.
 
-1. `FeedMergeAbandoned` is an EMPTY message. `internal/merge/terminal.go`'s
-   `publishAbandoned` states WHY a queued merge left the queue — the operator
-   evicted it, the user released its slot — and the arm carries nothing, so the
-   cause survives only in the daemon's own log. PROPOSAL: a `summary` string,
-   as `FeedMergeFailed` carries. The three distinct causes remain the separate
-   landing-7 shape already recorded above.
-
-2. `UpdateAgentFailure.agent_busy` (recorded in the landing-6 batch above) is
-   still owed: the `agent_busy` kind of `SubmitPromptError.bubble_refused` has
-   no producer without it, and
-   `TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal`
-   stays RED by design until it lands.
+STILL OWED, recorded so it is not lost: `FeedMergeError` carries `failed` and
+`abandoned` and nothing else, so the THREE distinct ends a queued merge can have
+— the operator's evict, the user's dequeue release, and a run's own give-up —
+still share one arm. `summary` states the cause in prose; it does not make them
+distinguishable by arm. The integration test
+`TestAnAbandonedQueuedMergeHasNoReachableCause` stays skipped, for the separate
+reason its skip states: the third cause has no production call site at all.

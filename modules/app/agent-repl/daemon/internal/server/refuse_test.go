@@ -222,3 +222,56 @@ func TestSetArmFillsTheBaseRefUnresolvedRef(t *testing.T) {
 		t.Fatalf("base_ref_unresolved.ref = %q, want origin/nope", got)
 	}
 }
+
+// TestSetArmSelectsANestedOneofArm pins the landing-7 shape: an arm message
+// with a oneof of its OWN (SubmitPromptBubbleRefused.kind) has that arm
+// selected by name.
+func TestSetArmSelectsANestedOneofArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	ok := setResponseError(resp, "bubble_refused", map[string]any{
+		"detail": "the subagent's turn is running",
+		"kind":   nestedArm("agent_busy"),
+	})
+
+	// Assert.
+	if !ok || resp.GetError().GetBubbleRefused().GetAgentBusy() == nil {
+		t.Fatalf("setResponseError = %v, %v, want bubble_refused{kind: agent_busy}", ok, resp)
+	}
+}
+
+// TestSetArmCarriesTheDetailBesideTheNestedArm pins that the shim's own words
+// ride the arm as `detail`, one edge case per test.
+func TestSetArmCarriesTheDetailBesideTheNestedArm(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	setResponseError(resp, "bubble_refused", map[string]any{
+		"detail": "the subagent's turn is running",
+		"kind":   nestedArm("agent_busy"),
+	})
+
+	// Assert.
+	if got := resp.GetError().GetBubbleRefused().GetDetail(); got != "the subagent's turn is running" {
+		t.Fatalf("bubble_refused.detail = %q, want the shim's sentence", got)
+	}
+}
+
+// TestSetArmRefusesANestedArmTheMessageDoesNotCarry pins that an unknown nested
+// arm is REFUSED rather than dropped: the refusal then answers as an unlanded
+// arm instead of arriving with an empty kind.
+func TestSetArmRefusesANestedArmTheMessageDoesNotCarry(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.SubmitPromptResponse{}
+
+	// Act.
+	ok := setResponseError(resp, "bubble_refused", map[string]any{"kind": nestedArm("no_such_kind")})
+
+	// Assert.
+	if ok {
+		t.Fatalf("setResponseError with an unknown nested arm = true, want a refusal")
+	}
+}
