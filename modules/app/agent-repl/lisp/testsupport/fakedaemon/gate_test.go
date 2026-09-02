@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
@@ -73,7 +75,8 @@ func TestReleasingAnUnarmedGateIsRefused(t *testing.T) {
 	}
 }
 
-// A gate names a unary method; anything else is a caller mistake.
+// A gate names a unary method or one of Emacs's streams; anything else is a
+// caller mistake.
 func TestGatingAnUnknownMethodIsRefused(t *testing.T) {
 	// Arrange.
 	_, baseURL := newTestServer(t)
@@ -85,7 +88,92 @@ func TestGatingAnUnknownMethodIsRefused(t *testing.T) {
 	if status != 400 {
 		t.Fatalf("status = %d, want 400 (body %s)", status, body)
 	}
-	if !strings.Contains(body, "unknown unary method") {
+	if !strings.Contains(body, "unknown unary or stream method") {
 		t.Fatalf("body = %s, want the unknown-method reason", body)
+	}
+}
+
+// A GATED STREAM is a stream that was dialled but not accepted: the fake
+// withholds the response header block, which is the one thing a client reads
+// as "this subscription stands" (fanout §3 STANDING-STREAM ACCEPTANCE).  No
+// unary gate can stage that, and without it a scenario cannot observe a
+// client that must wait for acceptance before it acts.
+func TestAGatedStreamWithholdsItsAcceptance(t *testing.T) {
+	// Arrange.
+	server, baseURL := newTestServer(t)
+	if status, body := controlPost(t, baseURL, "/_fake/gate",
+		`{"method":"WatchDaemon"}`); status != 200 {
+		t.Fatalf("/_fake/gate answered %d: %s", status, body)
+	}
+
+	// Act: dial, and leave the dial standing on its own goroutine.
+	type opened struct {
+		resp *http.Response
+		err  error
+	}
+	headers := make(chan opened, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		baseURL+"/agentrepl.v1.AgentRepl/WatchDaemon", connectStreamBody("{}"))
+	if err != nil {
+		t.Fatalf("build WatchDaemon request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/connect+json")
+	req.Header.Set("Connect-Protocol-Version", "1")
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		headers <- opened{resp, err}
+	}()
+	// Real synchronization: the call is on the record the moment it lands.
+	server.awaitRecordedCalls("WatchDaemon", 1)
+
+	// Assert: recorded, yet neither accepted nor subscribed.
+	select {
+	case out := <-headers:
+		if out.resp != nil {
+			out.resp.Body.Close()
+		}
+		t.Fatalf("the gated stream was accepted before release (err=%v)", out.err)
+	default:
+	}
+	if infos := server.subscriberInfos(); len(infos) != 0 {
+		t.Fatalf("subscribers = %v, want none while acceptance is withheld", infos)
+	}
+
+	// Act: release.
+	if status, body := controlPost(t, baseURL, "/_fake/gate",
+		`{"method":"WatchDaemon","release":true}`); status != 200 {
+		t.Fatalf("release answered %d: %s", status, body)
+	}
+
+	// Assert: NOW the headers land and the subscription stands.
+	out := <-headers
+	if out.err != nil {
+		t.Fatalf("the released stream never sent headers: %v", out.err)
+	}
+	defer out.resp.Body.Close()
+	if out.resp.StatusCode != http.StatusOK {
+		t.Fatalf("released stream answered %d, want 200", out.resp.StatusCode)
+	}
+	server.awaitSubscribers(streamDaemon, "", 1)
+}
+
+// The gate's method set is closed over the rpcs this fake serves: a stream it
+// refuses outright, or a name that is no rpc at all, must fail loudly rather
+// than arm a gate nothing will ever hit.
+func TestGatingAWebappOnlyStreamIsRefused(t *testing.T) {
+	// Arrange.
+	_, baseURL := newTestServer(t)
+
+	// Act.
+	status, body := controlPost(t, baseURL, "/_fake/gate", `{"method":"WatchFeed"}`)
+
+	// Assert.
+	if status != 400 {
+		t.Fatalf("/_fake/gate WatchFeed answered %d, want 400 (body %s)", status, body)
+	}
+	if !strings.Contains(body, "unknown unary or stream method") {
+		t.Fatalf("refusal body = %s, want it to name the unknown method", body)
 	}
 }

@@ -696,11 +696,19 @@ more than once, or never runs at all."
         (agent-repl-connect-close conn)))))
 
 ;; audit-3 #2
-(ert-deftest agent-repl-itest-connect-on-open-never-runs-for-an-unset-ref-refusal ()
-  "A stream refused at validation never reaches its acceptance instant.
-fanout §3 STANDING-STREAM ACCEPTANCE: \"a non-200 ... never calls
-[ON-OPEN]\".  A refusal that ran ON-OPEN anyway would tell every consumer
-it had a standing subscription it never got."
+(ert-deftest agent-repl-itest-connect-on-open-runs-before-an-unset-ref-refusal ()
+  "A stream refused at VALIDATION is refused AFTER acceptance, not instead of it.
+fanout §3 STANDING-STREAM ACCEPTANCE says ON-OPEN fires on the HTTP 200
+header block and that \"a non-200 ... never calls\" it.  A Connect
+SERVER-STREAMING refusal is not a non-200: connect-go reports an
+in-handler error through the terminal `EndStreamResponse' frame at HTTP
+200 (see the NOTE on
+`agent-repl-itest-connect-watch-host-workspace-unset-ref-never-opens',
+which captured this off the socket).  So acceptance DOES happen here and
+ON-OPEN runs exactly once; what marks the refusal is the CLOSE outcome's
+Connect code and the absent subscriber.  This is the seam daemon-link
+keys \"subscribed\" on, so it is pinned rather than left to be
+rediscovered: ON-OPEN alone never proves a subscription stands."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (let ((opened 0) (outcomes nil)
@@ -717,16 +725,21 @@ it had a standing subscription it never got."
             (agent-repl-itest--wait-until
              (lambda () outcomes) nil
              "the refused WatchHostWorkspace stream's close outcome")
-            ;; Assert.
+            ;; Assert: refused with the validation code and nothing
+            ;; subscribed -- while acceptance itself happened, exactly once.
             (should (eq (car (car outcomes)) :error))
-            (should (equal 0 opened)))
+            (should (equal (plist-get (cadr (car outcomes)) :code)
+                           "invalid_argument"))
+            (should (null (agent-repl-itest--subscribers daemon)))
+            (should (equal 1 opened)))
         (agent-repl-connect-close conn)))))
 
 ;; audit-3 #2
-(ert-deftest agent-repl-itest-connect-on-open-never-runs-for-an-unimplemented-stream ()
-  "A stream the daemon answers `unimplemented' never reaches ON-OPEN either.
+(ert-deftest agent-repl-itest-connect-on-open-runs-before-an-unimplemented-refusal ()
+  "A stream answered `unimplemented' is likewise refused AFTER acceptance.
 The sibling of the validation refusal: a DIFFERENT refusal reason, the
-same acceptance contract."
+same acceptance contract -- HTTP 200, one ON-OPEN, then an error end
+frame and no subscriber left behind."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (let ((opened 0) (outcomes nil)
@@ -744,7 +757,8 @@ same acceptance contract."
              "the unimplemented WatchFeed stream's close outcome")
             ;; Assert.
             (should (equal (plist-get (cadr (car outcomes)) :code) "unimplemented"))
-            (should (equal 0 opened)))
+            (should (null (agent-repl-itest--subscribers daemon)))
+            (should (equal 1 opened)))
         (agent-repl-connect-close conn)))))
 
 ;; audit-3 #3
