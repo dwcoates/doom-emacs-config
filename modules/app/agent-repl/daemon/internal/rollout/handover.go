@@ -3,7 +3,9 @@ package rollout
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
@@ -14,6 +16,10 @@ import (
 
 // FaultAdoptionExpired is the fault kind an expired adoption window records.
 const FaultAdoptionExpired = "adoption_window_expired"
+
+// adoptionPoll is how often the outgoing daemon looks for serving ownership
+// having moved. It only ever shortens the adoption window.
+const adoptionPoll = 25 * time.Millisecond
 
 // Handover is the outgoing daemon's whole blue-green flow.
 //
@@ -57,7 +63,7 @@ func (c *controller) Handover(ctx context.Context) error {
 	for _, ws := range workspaces {
 		p := c.deps.Participants.Participants(ws.ID)
 		snapshot[ws.ID] = p
-		c.rendezvous[ws.ID] = &entry{expected: p}
+		c.rendezvous[ws.ID] = &entry{expected: p, done: make(chan struct{})}
 	}
 	c.mu.Unlock()
 	c.log.Info(opHandover, "announced the stand-down and snapshotted the expected participants",
@@ -142,11 +148,38 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, field
 	if c.adopted(ctx, ws, fields) {
 		return
 	}
-	select {
-	case <-ctx.Done():
-		c.log.Debug(opAdoption, "the adoption window ended with its context", fields)
-		return
-	case <-c.deps.Clock.After(c.deps.AdoptionWindow):
+	// THE WINDOW IS A DEADLINE, NOT A DELAY. The rendezvous closes the moment
+	// every expected participant has adopted, and waiting on it is what lets
+	// the outgoing daemon exit as soon as the successor is serving. Slept out
+	// instead, the exit is held for the whole window after the last transfer
+	// even when the adoption landed immediately — precisely the outage the
+	// handover exists to bound.
+	//
+	// Two things end the wait early: the rendezvous closing (the participants
+	// adopted through this daemon's own handlers) and serving ownership moving
+	// to the successor (the headless case, claimed inside the successor's
+	// Join, which this daemon can only observe by looking). The look is a real
+	// ticker rather than the injected clock: the clock times the WINDOW, which
+	// a test drives; the look only ever shortens the wait.
+	expired := c.deps.Clock.After(c.deps.AdoptionWindow)
+	done := c.rendezvousDone(ws)
+	look := time.NewTicker(adoptionPoll)
+	defer look.Stop()
+	for waiting := true; waiting; {
+		select {
+		case <-ctx.Done():
+			c.log.Debug(opAdoption, "the adoption window ended with its context", fields)
+			return
+		case <-done:
+			c.log.Debug(opAdoption, "the rendezvous completed inside its window", fields)
+			return
+		case <-look.C:
+			if c.adopted(ctx, ws, fields) {
+				return
+			}
+		case <-expired:
+			waiting = false
+		}
 	}
 	if c.adopted(ctx, ws, fields) {
 		return
@@ -165,6 +198,18 @@ func (c *controller) timeAdoption(ctx context.Context, ws ids.WorkspaceID, field
 	}
 	c.log.Warn(opAdoption, "the adoption window expired; recorded the workspace's own fault",
 		merge(fields, dlog.Context{"adoption_window": c.deps.AdoptionWindow.String()}))
+}
+
+// rendezvousDone answers the channel that closes when this workspace's
+// adoption completes, or a nil channel (which blocks forever) when no
+// rendezvous is armed for it.
+func (c *controller) rendezvousDone(ws ids.WorkspaceID) <-chan struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.rendezvous[ws]; ok {
+		return e.done
+	}
+	return nil
 }
 
 // adopted reports whether some OTHER daemon instance now serves the workspace,
@@ -236,9 +281,21 @@ func (c *controller) served(ctx context.Context) ([]wsm.Workspace, error) {
 				withCause(dlog.Context{"workspace": string(ws.ID)}, err))
 			return nil, fmt.Errorf("rollout: handover: %w", err)
 		}
-		if owner != nil && *owner == c.deps.Instance {
-			out = append(out, ws)
+		if owner == nil || *owner != c.deps.Instance {
+			continue
 		}
+		// A WORKSPACE WHOSE WORKTREE IS GONE HAS NOTHING TO HAND OVER. A merged
+		// workspace's worktree is removed at the merge's terminal while its
+		// registry row survives, and the successor cannot even resolve a log
+		// sink for a directory that is not there — so it fails that adoption,
+		// and the incumbent then waits out a whole adoption window for a
+		// workspace nobody can serve.
+		if _, statErr := os.Stat(ws.Dir); statErr != nil {
+			c.log.Info(opHandover, "the workspace's worktree is gone; it is not handed over",
+				dlog.Context{"workspace": string(ws.ID), "dir": ws.Dir, "cause": statErr.Error()})
+			continue
+		}
+		out = append(out, ws)
 	}
 	return out, nil
 }

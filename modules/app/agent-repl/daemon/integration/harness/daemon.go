@@ -111,12 +111,13 @@ type Daemon struct {
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
-	t      *testing.T
-	ctx    context.Context
-	cmd    *exec.Cmd
-	stderr *syncBuffer
-	client agentreplv1connect.AgentReplClient
-	http   *http.Client
+	t          *testing.T
+	ctx        context.Context
+	cmd        *exec.Cmd
+	stderr     *syncBuffer
+	stderrPath string
+	client     agentreplv1connect.AgentReplClient
+	http       *http.Client
 
 	mu            sync.Mutex
 	workspaceDirs []string
@@ -327,8 +328,20 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	cmd := exec.Command(binary, args...)
 	cmd.Dir = root
 	cmd.Env = cleanGitEnv(env)
-	cmd.Stderr = d.stderr
-	cmd.Stdout = d.stderr
+	// THE PROCESS WRITES TO A FILE, NEVER TO A PIPE. exec gives an io.Writer a
+	// pipe and makes Wait block until every writer of it closes — and a
+	// HANDOVER's successor inherits this daemon's stderr, so a piped harness
+	// waits for the successor to die before it will admit the incumbent
+	// exited. A file has no such reader to drain.
+	stderrPath := filepath.Join(root, "daemon.stderr.log")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("harness: create the daemon's stderr file: %v", err)
+	}
+	t.Cleanup(func() { _ = stderrFile.Close() })
+	d.stderrPath = stderrPath
+	cmd.Stderr = stderrFile
+	cmd.Stdout = stderrFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("harness: start daemon: %v", err)
@@ -601,7 +614,16 @@ func (d *Daemon) AwaitExit() int {
 }
 
 // Stderr is everything the daemon wrote to its terminal mirror.
-func (d *Daemon) Stderr() string { return d.stderr.String() }
+func (d *Daemon) Stderr() string {
+	if d.stderrPath == "" {
+		return d.stderr.String()
+	}
+	raw, err := os.ReadFile(d.stderrPath)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
 
 // Register registers a repository's worktree and answers the minted ref.
 func Register(t *testing.T, d *Daemon, dir string) *workspacev1.WorkspaceRef {
