@@ -121,7 +121,7 @@ function nextIndexFor(state: BlockState, messageId: string): number {
  * business: the vendor sent something this contract cannot carry, and that is
  * worth a warning even though nothing is lost from the figures below.
  */
-export function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
+function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefined {
   if (typeof usage !== "object" || usage === null) return undefined;
   let normalized: NormalizedApiUsage;
   try {
@@ -183,7 +183,7 @@ export function tokenUsage(usage: unknown): conversationv1.TokenUsage | undefine
  * and the pinned SDK stream states no agent id anywhere — so the resolution is
  * {@link subagentBook}, the ONE function that mints it.
  */
-export function bookFor(context: FoldContext, parentToolUseId: string | null): conversationv1.AgentId {
+function bookFor(context: FoldContext, parentToolUseId: string | null): conversationv1.AgentId {
   if (parentToolUseId === null || parentToolUseId === "") return context.mainAgentId;
   return subagentBook(context, parentToolUseId);
 }
@@ -403,7 +403,7 @@ interface RawAssistantMessage {
  * consumer that trusted the shape would draw an outage as something the agent
  * said. ABSENCE MEANS UNEVALUATED, never "the model wrote it".
  */
-export function synthesizedSubject(
+function synthesizedSubject(
   message: Extract<SdkMessage, { type: "assistant" }>,
 ): conversationv1.AgentResponseSynthesizedNotice | undefined {
   const record = message as unknown as Record<string, unknown>;
@@ -438,7 +438,7 @@ export function synthesizedSubject(
  * ordinary completion, and `pause_turn` means the vendor resumes it itself, so
  * nothing ended.
  */
-export function responseFailureReason(
+function responseFailureReason(
   stopReason: string | null | undefined,
   aborted: boolean,
 ): conversationv1.AgentResponseFailureReason | undefined {

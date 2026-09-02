@@ -159,7 +159,7 @@ export function resetAgentBinaryVersionForTest(): void {
 }
 
 /** What is known about this process right now; the binary version may be absent. */
-export interface ShimRuntimeIdentity {
+interface ShimRuntimeIdentity {
   readonly shimBuildSha: string;
   readonly sdkVersion: string;
   readonly agentBinaryVersion?: string;

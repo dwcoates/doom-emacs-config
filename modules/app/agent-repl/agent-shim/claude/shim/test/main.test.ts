@@ -7,11 +7,16 @@
  * as pure functions and asserted directly; the end-to-end behavior of the built
  * bundle is the dist smoke's job.
  */
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { LOCK_DIR_ENV, lockDir } from "../src/locks.js";
 import {
   DEFAULT_STATE_DIR_NAME,
   FAKE_KEEPALIVE_INTERVAL_ENV,
+  logCorrelation,
+  queryFactory,
   resolveKeepaliveIntervalMs,
   OWNED_ENV,
   STORE_SOCKET_ENV,
@@ -23,8 +28,10 @@ import {
   shutdownSignalHandlers,
   versionLine,
   type CliArgs,
+  type ShimEnvironment,
 } from "../src/main.js";
 import type { Engine } from "../src/engine/engine.js";
+import type { QuerySpec } from "../src/engine/session.js";
 
 /** A complete, legal spawn environment. */
 function spawnEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -569,5 +576,73 @@ describe("the keep-alive interval override", () => {
 
   it("refuses a value that is not a number at all", () => {
     expect(resolveKeepaliveIntervalMs({ [FAKE_KEEPALIVE_INTERVAL_ENV]: "soon" }, true)).toBeUndefined();
+  });
+});
+
+describe("logCorrelation", () => {
+  const env = (agentReplSessionId?: string): ShimEnvironment => ({
+    claudeConfigDir: "/accounts/primary",
+    stateDir: "/state",
+    shimBuildSha: "abc1234",
+    storeSocket: "/tmp/store.sock",
+    ...(agentReplSessionId === undefined ? {} : { agentReplSessionId }),
+  });
+
+  it("uses the daemon's exported id when it exported one", () => {
+    expect(logCorrelation(env("daemon-id-1"), "/ws")).toEqual({
+      agentReplSessionId: "daemon-id-1",
+      source: "daemon_env",
+    });
+  });
+
+  it("self-names from the cwd when the daemon exported none", () => {
+    const correlation = logCorrelation(env(), "/ws");
+
+    expect(correlation.source).toBe("self_named");
+    expect(correlation.agentReplSessionId).toBe(processIdentity("/ws"));
+  });
+
+  it("self-names when the daemon exported an empty string", () => {
+    expect(logCorrelation(env(""), "/ws").source).toBe("self_named");
+  });
+});
+
+describe("queryFactory", () => {
+  const configDir = mkdtempSync(path.join(os.tmpdir(), "shim-query-factory-config-"));
+  const cwd = mkdtempSync(path.join(os.tmpdir(), "shim-query-factory-cwd-"));
+  const env: ShimEnvironment = {
+    claudeConfigDir: configDir,
+    stateDir: "/state",
+    shimBuildSha: "abc1234",
+    storeSocket: "/tmp/store.sock",
+  };
+
+  function spec(overrides: Partial<QuerySpec> = {}): QuerySpec {
+    return {
+      binding: { kind: "fresh", sessionId: "session-1" },
+      permissionMode: "default",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      abortController: new AbortController(),
+      prompt: (async function* () {})(),
+      ...overrides,
+    };
+  }
+
+  it("under --fake, builds a factory that constructs the mocked vendor", async () => {
+    const create = queryFactory(true, env, cwd);
+
+    const query = await create(spec());
+
+    expect(query).toBeDefined();
+    await query.interrupt?.();
+  });
+
+  it("without --fake, builds a factory whose calls the vendor-guard refuses", async () => {
+    const create = queryFactory(false, env, cwd);
+
+    // AGENT_REPL_FORBID_VENDOR_CALLS=1 is set for every test run in this
+    // worktree; constructing the real-query factory never touches the vendor,
+    // only CALLING it does, which is exactly what is pinned here.
+    await expect(create(spec())).rejects.toThrow();
   });
 });
