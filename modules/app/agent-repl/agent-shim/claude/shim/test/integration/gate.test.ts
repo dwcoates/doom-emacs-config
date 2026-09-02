@@ -25,6 +25,7 @@ import {
   freshSession,
   openStream,
   startTurnRequest,
+  stopAgent,
   watchAgentRequest,
 } from "../integration-support/client.js";
 import {
@@ -578,19 +579,25 @@ describe("a question ask", () => {
     stream.close();
   });
 
-  test("!ask-unanswered settles success.unanswered", async () => {
-    // `sdk.d.ts` declares NO question timeout, so an expiry is modeled as the
-    // gate's own DENY and the gap is recorded rather than invented.
+  test("!ask-unanswered settles success.unanswered when the agent is STOPPED", async () => {
+    // RULED: `sdk.d.ts` declares NO question timeout, so an expiry is modeled
+    // as the gate's own DENY and the gap is recorded rather than invented --
+    // which makes the STAND-DOWN the only producer of `unanswered`. Nothing
+    // ever answers this question, so the test is the thing that ends it: the
+    // stop resolves every pending callback as denied (an unresolved
+    // `canUseTool` wedges the vendor), and the batch settles unanswered.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!ask-unanswered" }));
+    await awaitQuestionStart(stream);
+    await shim.clients.h1.updateAgent(stopAgent());
+
     const settled = await stream.until((frame) => {
       const update = updateOf(frame);
       return update?.update.case === "question" && update.update.value.result.case === "success";
     });
-
     const update = updateOf(settled);
     if (update?.update.case !== "question" || update.update.value.result.case !== "success") {
       throw new Error("the question did not settle");
