@@ -236,6 +236,10 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 			t.Fatalf("harness: mkdir state root: %v", err)
 		}
 	}
+	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
+	// end with an empty expected set, so a test that never calls ExpectWarnings
+	// still gets the assertion. ExpectWarnings only widens this set.
+	t.Cleanup(d.assertNoUnexpectedWarnings)
 	requireSocketPathBudget(t, d.StateDir)
 	for _, dir := range []string{d.ProfileDir, d.LockDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
