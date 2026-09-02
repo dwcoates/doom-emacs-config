@@ -22,6 +22,13 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	}
 	log = log.With(dlog.Context{"turn": string(turn), "close": closeName(how)})
 
+	// SERIALIZED AGAINST A LEASE CHANGE. The turn end that frees a workspace
+	// and the handover's quiesce arrive together, and both deliver from the
+	// same standing holds: taken concurrently the intake leaves out of order.
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
+
 	q.mu.Lock()
 	if state, ok := q.states[ws]; ok {
 		state.interrupting = false
@@ -123,6 +130,12 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if err != nil {
 		return
 	}
+
+	// SERIALIZED AGAINST A TURN END, for the reason OnTurnEnded states: the
+	// two events deliver from the same standing holds.
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
 
 	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
