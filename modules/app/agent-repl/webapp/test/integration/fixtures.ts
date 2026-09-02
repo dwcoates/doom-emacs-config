@@ -1275,6 +1275,9 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   loading: ["contextInjected", "notification", "rateLimited", "contextBudget"],
 };
 
+/** The status arms whose `activity` is NOT optional on the wire. */
+const STATUS_REQUIRING_ACTIVITY: readonly string[] = ["waiting", "loading"];
+
 /**
  * The status arm, built from the string tables above.
  *
@@ -1299,10 +1302,17 @@ export function footerStatus(
     const substatus = init?.substatus ?? substatuses[0];
     value.substatus = { case: substatus, value: substatusValue(substatus) };
   }
-  if (init?.activity) {
+  // TWO STATUSES REQUIRE AN ACTIVITY (footer.proto: waiting, loading — every
+  // such state has a composable line by construction). Elsewhere the field is
+  // `optional` and absence is a legitimate state, so it is set only when a case
+  // asks for one.
+  const kind = init?.activity ?? (STATUS_REQUIRING_ACTIVITY.includes(status)
+    ? FOOTER_STATUS_ACTIVITIES[status][0]
+    : undefined);
+  if (kind !== undefined) {
     value.activity = {
-      at: { atMs: init.activityAtMs ?? 3_000n },
-      kind: { case: init.activity, value: init.activityOverride ?? FOOTER_ACTIVITY_KINDS[init.activity] },
+      at: { atMs: init?.activityAtMs ?? 3_000n },
+      kind: { case: kind, value: init?.activityOverride ?? FOOTER_ACTIVITY_KINDS[kind] },
     };
   }
   return { case: status, value } as StatusArm;
@@ -1337,7 +1347,12 @@ export function footerView(init?: FooterInit): FooterView {
   return create(FooterViewSchema, {
     strip: {
       status: { status: footerStatus(init?.status ?? "thinking", init) },
-      clock: { turnStartedAtMs: init?.turnStartedAtMs ?? 1_000n },
+      // `turn_started_at_ms` is optional: an EXPLICIT undefined is the
+      // no-turn-is-live case, which a `??` default would quietly overwrite.
+      clock: {
+        turnStartedAtMs:
+          init !== undefined && "turnStartedAtMs" in init ? init.turnStartedAtMs : 1_000n,
+      },
       tokens: {
         input: { text: init?.tokensText ?? "42.1k" },
         alarm: init?.alarm ? {} : undefined,

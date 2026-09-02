@@ -175,6 +175,20 @@ function installShell(doc: Document): void {
   doc.body.innerHTML = body[1].replace(/<script[\s\S]*?<\/script>/gi, "");
 }
 
+/**
+ * JSDOM HAS NO LAYOUT, so it implements no `Element.scrollIntoView`.
+ *
+ * The feed's reveal (a footer jump row, a breadcrumb) calls it, and without one
+ * the whole reveal throws before it has marked the row it landed on. Like
+ * `fetch`, this is a capability the environment is missing rather than a seam
+ * in the app: scrolling is not observable under jsdom either way, and every
+ * assertion about a jump is about what the page SAYS, not where it scrolled.
+ */
+function installScrollIntoView(): void {
+  if (typeof Element.prototype.scrollIntoView === "function") return;
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+}
+
 export interface HarnessOptions {
   /** Dev mode: mount the root composer (`&composer=1`). Default false. */
   composer?: boolean;
@@ -210,6 +224,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   options.arrange?.(fake);
 
   installShell(document);
+  installScrollIntoView();
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.
@@ -362,6 +377,16 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       for (const handle of [...handles].reverse()) handle.dispose();
       await fake.stop();
       await harness.secondFake?.stop();
+      // A FRESH BROWSER PROFILE PER TEST. The webview-local preferences (R14 —
+      // the open footer panel, the sidebar grouping, folds) live in
+      // `localStorage`, which jsdom shares across every test in a file. Left
+      // behind, one test's click decides what the NEXT test's page opens with,
+      // which is a dependency between tests and not a fact about the app.
+      try {
+        window.localStorage.clear();
+      } catch {
+        // A jsdom without storage is fine: there is then nothing to clear.
+      }
       vi.useRealTimers();
     },
 
