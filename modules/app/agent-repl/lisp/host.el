@@ -66,6 +66,7 @@
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
 (declare-function agent-repl--ws-current-name "workspace" ())
 (declare-function agent-repl--live-ws-names "workspace" ())
+(declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 
 (declare-function agent-repl--notify "notifications" (ws title message &optional activate))
@@ -337,15 +338,30 @@ replacements.  Returns the stream.
 SUBSCRIBED IS AN ACCEPTANCE, not a spawn: `elisp.host.subscribed' is
 written from the transport's ON-OPEN — the daemon's HTTP 200 header block
 — so the record never claims a workspace is being watched by a daemon
-that never answered."
+that never answered.
+
+THE CALLBACKS RESOLVE THE NAME AT CALL TIME, never the one captured
+here.  A stream outlives renames (§8 makes a roster row's changed name a
+rename of the tab), and host state is keyed on the NAME, so a callback
+closed over the subscribe-time name would keep updating the OLD key
+after `agent-repl-host-rename' moved the entry — the renamed tab's gate
+would then never advance again.  The REF ID is the tab identity, so the
+current name is looked up from it; the subscribe-time name is the
+fallback for the one case the id no longer resolves (a closed or
+tombstoned workspace), where it is the best name the record has."
   (agent-repl-host--attach ws conn ref)
-  (let ((stream (agent-repl-rpc-watch-host-workspace
-                 conn ref
-                 (lambda (push) (agent-repl-host--handle-push ws push))
-                 (lambda (outcome) (agent-repl-host--handle-close ws outcome))
-                 (lambda ()
-                   (agent-repl--info ws "elisp.host.subscribed ws=%s method=%S id=%S"
-                                     ws "WatchHostWorkspace" (plist-get ref :id))))))
+  (let* ((id (plist-get ref :id))
+         (current (lambda () (or (agent-repl--ws-by-ref-id id) ws)))
+         (stream (agent-repl-rpc-watch-host-workspace
+                  conn ref
+                  (lambda (push)
+                    (agent-repl-host--handle-push (funcall current) push))
+                  (lambda (outcome)
+                    (agent-repl-host--handle-close (funcall current) outcome))
+                  (lambda ()
+                    (let ((now (funcall current)))
+                      (agent-repl--info now "elisp.host.subscribed ws=%s method=%S id=%S"
+                                        now "WatchHostWorkspace" id))))))
     (agent-repl-host--put ws :stream stream)
     (agent-repl--info ws "elisp.host.subscribe-opened ws=%s id=%S" ws (plist-get ref :id))
     stream))
@@ -366,9 +382,13 @@ Host state is keyed on the WORKSPACE NAME (fanout §7), and §8 makes a
 roster row's changed name a RENAME of the tab -- so a rename that moved
 only `agent-repl--workspaces' would strand every fact this file holds
 under a name nothing asks about again: `agent-repl-host-ref' for NEW
-would answer nil (the composer and every verb refuse), the standing
-stream's pushes would update a dead name's gate, and a teardown by NEW
-would unsubscribe nothing and leak the stream.
+would answer nil (the composer and every verb refuse), a teardown by NEW
+would unsubscribe nothing and leak the stream, and NEW would hold no
+stream to cancel.  The standing stream's own callbacks do not depend on
+this move: they resolve the current name from the ref id at call time
+(see `agent-repl-host-subscribe'), so a push lands on NEW whether or not
+the entry moved -- but with no entry under NEW there is nothing for it
+to update.
 
 The whole entry moves -- `:ref' `:conn' `:stream' `:host' -- because it is
 the SAME workspace under a new name and none of those facts changed.
