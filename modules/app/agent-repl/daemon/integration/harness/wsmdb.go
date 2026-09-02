@@ -59,3 +59,17 @@ func (d *Daemon) CountRows(table string) int {
 	})
 	return n
 }
+
+// DisplacedTurnCount answers how many turns still carry the displaced mark,
+// which is what a recovery that put a turn back must leave at zero: a record
+// still marked is one the next boot would submit a second time.
+func (d *Daemon) DisplacedTurnCount() int {
+	d.t.Helper()
+	var n int
+	d.WithDB(func(db *sql.DB) {
+		if err := db.QueryRow("SELECT count(*) FROM turns WHERE displaced = 1").Scan(&n); err != nil {
+			d.t.Fatalf("harness: count the displaced turns: %v", err)
+		}
+	})
+	return n
+}

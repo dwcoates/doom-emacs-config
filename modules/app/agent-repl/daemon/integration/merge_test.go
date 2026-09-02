@@ -13,6 +13,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
@@ -345,25 +346,19 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Evict / dequeue / abandon: the THREE DISTINCT ENDS a queued merge can meet
-// before it ever runs (internal/merge/queue.go's own doc comment on Evict:
-// "evict is the operator's, dequeue is the user's answer to the interrupt
-// offer, and abandon is the merge's own give-up"). frontend/v1/feed.proto's
-// FeedMergeError carries only `failed` and `abandoned` -- no per-cause arm --
-// so the three are NOT distinguishable on the wire; that is a known stale
-// shape escalated to landing 7. These tests assert exactly what today's
-// protos and production code CAN express, invent no arm, and edit no proto.
+// The FOUR DISTINCT ENDS a queued merge can meet before it ever runs: the
+// user's own evict, the user's release of the dequeue offer, the workspace
+// being killed or nuked under it, and a restart that cannot put it back on its
+// queue.
 //
-// A DEEPER GAP the tests below expose (beyond the proto's own limitation):
-// grepping internal/merge, `dropQueued`'s only two callers are Evict and the
-// dequeue release, and neither its own call nor the `publishAbandoned` /
-// `forget` helpers underneath it ever construct or push a `FeedMergeError`
-// (frontend/v1's FeedMergeAbandoned has NO producer anywhere in internal/,
-// confirmed by grep). Both `forget` and its callers DO reach the footer and
-// the roster (`Footer.SetMerge` / `Sidebar.SetMerge` to `MergeFacts{State:
-// "none"}`), so the footer-leaving-merging and roster-arm assertions below
-// are expected GREEN; the feed-bubble assertion is expected RED, because the
-// bubble is silently forgotten rather than ever told it ended.
+// frontend/v1/feed.proto's FeedMergeError carries only `failed` and
+// `abandoned` -- no per-cause arm -- so the four are NOT distinguishable by
+// arm. Landing 7's `FeedMergeAbandoned.summary` is where the cause lives
+// instead: one resolved sentence per cause, composed in internal/merge from
+// the AbandonCause the dropping site names, drawn as the collapsed line
+// exactly as `FeedMergeFailed.summary` is. These tests assert the arm and the
+// surfaces here, and the sentence itself where the cause is the point; the
+// per-cause sentences are pinned as a set in internal/merge's own suite.
 // ---------------------------------------------------------------------------
 
 func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
@@ -479,15 +474,38 @@ func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 	}
 }
 
-func TestAnAbandonedQueuedMergeHasNoReachableCause(t *testing.T) {
-	t.Skip("unexpressible: internal/merge/queue.go documents THREE distinct ends " +
-		"(evict, dequeue, abandon) but grepping internal/merge finds `dropQueued` " +
-		"has only TWO callers -- Evict (the operator's) and the dequeue release " +
-		"(the user's) -- and no third call site exists anywhere that raises a " +
-		"queued merge's OWN give-up. There is no RPC, shim frame, or harness hook " +
-		"that reaches a self-abandon distinct from the other two, so this cause " +
-		"cannot be constructed as a black-box scenario without inventing a " +
-		"production call site this suite is not permitted to add")
+// TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause is the
+// third end, reachable at last. CloseWorkspace refuses outright while a merge
+// is queued, so KillWorkspace is the one door such a workspace leaves through,
+// and the abandoned terminal it draws is the ONLY place the wire can say why:
+// FeedMergeError has one `abandoned` arm for every end, so the cause lives in
+// FeedMergeAbandoned.summary and nowhere else.
+func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testing.T) {
+	// Arrange
+	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the kill abandons, a KillSession the fake shim answers by exiting, a session fault the kill opens, the shim death and severed link the kill drives.
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
+		"daemon.merge.drop_queued", "daemon.merge.merge_tab", "daemon.health.open_fault",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.sessionwatcher.link_fault",
+		"daemon.workspace.kill", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+	root := behind.watchRootFeed()
+
+	// Act
+	if _, err := behind.d.Client().KillWorkspace(behind.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{
+		Workspace: behind.ws,
+	})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+
+	// Assert
+	mergeRow := awaitRow(t, behind, root, "the killed workspace's abandoned merge terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetError().GetAbandoned() != nil
+	})
+	abandoned := mergeRow.GetActivity().GetMerge().GetError().GetAbandoned()
+	want := "the workspace was closed while this merge was waiting in the queue"
+	if abandoned.GetSummary() != want {
+		t.Fatalf("the killed workspace's merge summary = %q, want %q", abandoned.GetSummary(), want)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -618,13 +636,19 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert: the merge lands (no conflict, gate passes).
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -720,6 +744,13 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 	script.SetStdout("daemon: passed in 1s\n")
 	dir := f.ws.GetDir()
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act: race a poller watching for the worktree's disappearance against
 	// awaiting the terminal push, so the ordering is proven across two
 	// independent timelines rather than sampled once right after the other —
@@ -748,7 +779,6 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 	}()
 
 	// Assert: FeedMergeSuccess{commit}.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
@@ -796,11 +826,17 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 	// that brought in nothing triggers nothing, correctly.
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so an open after the enqueue races the
+	// teardown and intermittently finds no such workspace to watch.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	f.awaitRowInFeed(nil, "the merge's success", func(row *frontendv1.FeedRow) bool {
+	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 
@@ -953,13 +989,19 @@ func TestTheNonEmacsRepoMethodNeverDrawsTheEmacsOnlyTabs(t *testing.T) {
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert: the merge bubble reaches a terminal state.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -1039,13 +1081,19 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 	branch := mergeBranchOf(t, f.ws)
 	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert: the run fails loudly rather than silently parking or hanging.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's loud failure", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -1142,6 +1190,13 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 		PostprocessingPrompt: said("clean up after landing"),
 	})
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act: land, then answer the post-prompt's turn with a FAILURE.
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
@@ -1159,7 +1214,6 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 
 	// Assert: the merge STILL lands as FeedMergeSuccess — the post-prompt's
 	// failure rides the terminal rather than turning it into FeedMergeError.
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's terminal push", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil || row.GetActivity().GetMerge().GetError() != nil
 	})
@@ -1205,13 +1259,137 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 // mid-method, and a scripted conflict is the only park point this harness
 // offers, but reaching it requires the conflict brief's OWN Queue.Submit to
 // go through, which is exactly the call this scenario would leave held.
+// SECOND FINDING, 2026-09-02: the missing hook is NOT the only thing standing
+// in the way, and it is not the deeper one. THE BOUNCE-CROSSING RESUBMISSION
+// HAS NO PRODUCER. `wsm.Turn.Displaced` is WRITTEN by
+// internal/workspace/fleet_rollout.go's CaptureDisplaced and is read back by
+// NOTHING: grep the tree and the only non-test readers of the column are
+// wsm/turns.go's own scan and insert. internal/merge/recover.go re-enqueues an
+// interrupted merge and runs it again, but the second run's CaptureDisplaced
+// finds nothing in flight (the first run already KILLED the turn), so its
+// `r.displaced` is nil and terminal.go's resubmitDisplaced returns
+// immediately. A turn displaced by a merge that then crashes is marked
+// displaced in the database forever and is never put back.
+//
+// So a pause hook alone would only make the gap OBSERVABLE. Un-skipping this
+// test needs a PRODUCTION behavior first: a boot-time recovery that finds the
+// turns still marked displaced on a workspace whose merge lease did not
+// survive, resubmits each exactly once with
+// PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, and clears the mark in the same
+// step so a second boot cannot double it. That is a behavior question for the
+// project lead, not something a test hook can paper over.
+//
+// BOTH BLOCKERS ARE GONE (2026-09-02). The behavior exists:
+// internal/merge/recover.go's recoverDisplaced sweeps every turn still marked
+// displaced at boot and puts it back exactly once, claiming each record
+// through wsm's conditional ClaimDisplacedTurn so the merge's own release and
+// the sweep can never both submit one turn. The hook exists too:
+// merge.Deps.PauseAfterCapture, nil in production, wired only from
+// AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE, holds a run in exactly the window a
+// crash has to land in.
 func TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce(t *testing.T) {
-	t.Skip("unexpressible: no harness hook pauses a merge run between CaptureDisplaced " +
-		"and its own next Queue.Submit, so a crash cannot be landed deterministically " +
-		"in the window that leaves a turn open-and-displaced without also blocking the " +
-		"merge's own submissions via internal/promptqueue/submit.go's unconditional " +
-		"watcher.TurnInFlight() hold-check (see this test's own doc comment, and the " +
-		"suite's report, for the full trace)")
+	// Arrange / Act: displace a turn, crash inside the capture window, and
+	// bring a fresh daemon up on the same state root.
+	f, _, resubmit := displacedTurnAcrossABounce(t)
+
+	// Assert: the turn came back with the user's own words, under the resume
+	// origin, on a turn id of its own.
+	if got := text(resubmit.GetSaid()); got != displacedBounceText {
+		t.Fatalf("the resubmitted turn's StartTurn.said = %q, want the displaced turn's own text %q", got, displacedBounceText)
+	}
+	if resubmit.GetOrigin() != mergeDisplacedResumeOrigin {
+		t.Fatalf("the resubmitted turn's StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME (%d)", resubmit.GetOrigin(), mergeDisplacedResumeOrigin)
+	}
+	// Assert: the mark is DOWN. A record still marked is one the next boot
+	// would put back a second time.
+	if n := f.d.DisplacedTurnCount(); n != 0 {
+		t.Fatalf("turns still marked displaced after the recovery = %d, want none", n)
+	}
+}
+
+// TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain covers the
+// exactly-once edge across TWO bounces: the claim that put the turn back is
+// durable, so the boot after it finds nothing owed and submits nothing.
+func TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain(t *testing.T) {
+	// Arrange: the turn already recovered by the first bounce.
+	f, d2, _ := displacedTurnAcrossABounce(t)
+	afterFirstBounce := f.shim.Count(harness.RPCStartTurn)
+	d2.Kill()
+
+	// Act: a second fresh daemon on the same state root.
+	d3 := harness.StartDaemon(t, harness.Opts{StateDir: d2.StateDir,
+		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d2.LockDir}})
+	displacedBounceWarnings(d3)
+	// The recovery's own record is the rendezvous: it is logged AFTER the
+	// displaced sweep ran, so the count below is settled rather than probed.
+	d3.AwaitRunLogOperation("daemon.merge.recover")
+
+	// Assert.
+	if got := f.shim.Count(harness.RPCStartTurn); got != afterFirstBounce {
+		t.Fatalf("StartTurns after a second boot = %d, want %d (the displaced turn is put back once, ever)", got, afterFirstBounce)
+	}
+}
+
+// displacedBounceWarnings declares the records every daemon in this scenario
+// legitimately writes: see the call site in displacedTurnAcrossABounce.
+func displacedBounceWarnings(d *harness.Daemon) {
+	d.ExpectWarnings("daemon.rollout.reconcile", "daemon.merge.recover", "daemon.promptqueue.restore_holds")
+}
+
+// displacedBounceText is the user's own words, asserted end to end.
+const displacedBounceText = "keep going"
+
+// displacedTurnAcrossABounce stages the whole scenario: a user turn in flight
+// when a merge admits, a daemon killed inside the window between the capture
+// and everything that would close it, and a fresh daemon on the same state
+// root. It answers the fixture (rebound to the new daemon), that daemon, and
+// the resubmission's own StartTurn.
+//
+// THE MERGE MUST NOT COME BACK. An unclean merge target is not resumable, so
+// the restart FAILS the interrupted merge instead of running it again — which
+// is what leaves the displaced record to the boot sweep and keeps this test's
+// StartTurn trace free of a second run's traffic.
+func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv1.StartTurnRequest) {
+	t.Helper()
+	repo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	rendezvous := filepath.Join(t.TempDir(), "capture.rendezvous")
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, ExtraEnv: []string{
+		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+		"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + rendezvous,
+	}})
+	// The sweep covers every test; these declared records are evidence of the
+	// crash this test stages. A daemon killed mid-merge writes no stand-down
+	// manifest (daemon.rollout.reconcile), the restart refuses to resume the
+	// merge into an unclean target (daemon.merge.recover), and a turn left in
+	// flight by a killed daemon is closed by the next boot
+	// (daemon.promptqueue.restore_holds) -- which is what the RESUBMITTED turn
+	// becomes when this test kills the daemon that received it.
+	displacedBounceWarnings(d)
+	repoRef := mergeRepositoryRef(t, d, repo)
+	f := mergeCreateChild(t, d, repoRef, "displaced", "do the clean thing", nil)
+	f.submit(displacedBounceText, "k-displace-bounce", origin)
+	// No terminal frame is ever pushed for it: it is the workspace's in-flight
+	// turn when the merge admits, which is what CaptureDisplaced reads.
+	f.shim.ExpectStartTurn()
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	d.AwaitFileExists(rendezvous)
+	repo.SetDirty(repo.Dir, true)
+	d.Kill()
+
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir, ExtraEnv: []string{
+		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+		"AGENT_REPL_LOCK_DIR=" + d.LockDir,
+	}})
+	displacedBounceWarnings(d2)
+	f.d = d2
+	// ExpectStartTurn BLOCKS for the next request, so this is the
+	// resubmission's own arrival rather than a race against the boot.
+	return f, d2, f.shim.ExpectStartTurn()
 }
 
 // ---------------------------------------------------------------------------
@@ -1386,11 +1564,17 @@ func TestTheTestGateNarrowsToTheBlastRadiusOfTheLandedChange(t *testing.T) {
 	script.SetStdout("daemon: passed in 1s\n")
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/internal/merge/blastradius.go", "touched\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
@@ -1415,11 +1599,17 @@ func TestTheTestsTabPaintsANSISpansFromTheScriptedOutput(t *testing.T) {
 	script.SetStdout("\x1b[32mall green\x1b[0m\ndaemon: passed in 1s\n")
 	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/internal/merge/paint.go", "touched\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
@@ -1457,11 +1647,17 @@ func TestTheMergeTabNarratesTheNoFFLandingByContent(t *testing.T) {
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
 
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
+
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	mergeRow := awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
