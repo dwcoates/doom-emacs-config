@@ -168,3 +168,21 @@ func TestRegisterRepublishesTheRoster(t *testing.T) {
 		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
 	}
 }
+
+// TestPublishRegistryPublishesTheEmptyRoster covers the opening truth a booted
+// daemon owes its first client: an empty roster is a roster, and nothing else
+// publishes one until a verb happens to run.
+func TestPublishRegistryPublishesTheEmptyRoster(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+
+	// Act
+	if err := f.verbs.PublishRegistry(context.Background()); err != nil {
+		t.Fatalf("PublishRegistry: %v", err)
+	}
+
+	// Assert
+	if len(f.sidebar.registries) != 1 {
+		t.Fatalf("SetRegistry calls = %d, want exactly one opening publication", len(f.sidebar.registries))
+	}
+}

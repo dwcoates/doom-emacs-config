@@ -92,6 +92,10 @@ type wsState struct {
 	// gatedCalls maps a permission ask id to the activity it gates, so a
 	// denial marks that call denied.
 	gatedCalls map[string]string
+	// questionAsks maps a question ask id to what the daemon SERVED for it, so
+	// an answer is delivered to the right agent and echoed against the batch
+	// the user actually saw.
+	questionAsks map[string]*questionState
 	// turnEvidence collects per-turn evidence lines — a mid-turn api error, a
 	// compaction that failed — that the turn's terminal row surfaces.
 	turnEvidence map[string][]string
@@ -251,6 +255,7 @@ func (r *resolver) state(ws ids.WorkspaceID) *wsState {
 		subagents:      map[string]*subagentState{},
 		standing:       map[string]*conversationv1.AgentPermissionStanding{},
 		permissionRows: map[string]*permissionState{},
+		questionAsks:   map[string]*questionState{},
 		gatedCalls:     map[string]string{},
 		turnEvidence:   map[string][]string{},
 		answerRows:     map[string]*frontendv1.FeedId{},
@@ -494,6 +499,37 @@ func (r *resolver) StandingFor(ws ids.WorkspaceID, id *frontendv1.FeedId) (*conv
 	s := r.state(ws)
 	standing, ok := s.standing[id.GetValue()]
 	return standing, ok
+}
+
+// ServedPermission answers what the daemon served for one permission ask: the
+// agent that is blocked on it, and the standing token the vendor offered
+// (nil when none was). It reports false when this workspace drew no such ask.
+//
+// The ANSWER VERB is the caller: a client sends back only the ask's identity,
+// and the agent it must be delivered to lives nowhere else.
+func (r *resolver) ServedPermission(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentPermissionStanding, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	state, ok := s.permissionRows[ask]
+	if !ok {
+		return nil, nil, false
+	}
+	return state.agent, s.standing[state.row.GetValue()], true
+}
+
+// ServedQuestion answers what the daemon served for one question ask: the
+// agent that is blocked on it and the batch as served. It reports false when
+// this workspace drew no such ask.
+func (r *resolver) ServedQuestion(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentQuestionBatch, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	state, ok := s.questionAsks[ask]
+	if !ok {
+		return nil, nil, false
+	}
+	return state.agent, state.batch, true
 }
 
 // MintSubFeedHead records a bubble row's sub-feed and its crumb label.
