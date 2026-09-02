@@ -33,6 +33,10 @@ type fakeStream[T any] struct {
 	errs   chan error
 	closed chan struct{}
 	once   sync.Once
+	// blockClose, when non-nil, holds Close until it is closed. It stands for
+	// the real transport's Close, which drains the response body and does not
+	// return until the SERVER ends the stream.
+	blockClose chan struct{}
 }
 
 func newFakeStream[T any]() *fakeStream[T] {
@@ -57,7 +61,14 @@ func (s *fakeStream[T]) Recv() (T, error) {
 }
 
 // Close implements shimclient.Stream.
-func (s *fakeStream[T]) Close() { s.once.Do(func() { close(s.closed) }) }
+func (s *fakeStream[T]) Close() {
+	s.once.Do(func() {
+		if s.blockClose != nil {
+			<-s.blockClose
+		}
+		close(s.closed)
+	})
+}
 
 // send hands one frame to the watcher and returns once it has been received.
 func (s *fakeStream[T]) send(t *testing.T, frame T) {
