@@ -464,41 +464,35 @@ a spec edit and never a rationalization in the suite.
   WARNING belongs to `server.UnlandedArm` alone, so that operation stays usable
   for reconciling ERROR-ARMS.md. A test therefore declares that operation only
   when the arm it exercises is genuinely unlanded per ERROR-ARMS.md.
-- CLOSEWORKSPACE DOES NOT REMOVE THE LOG SINK SYMLINK. The audit read it as
-  removing the workspace's sink on close; `internal/workspace/close.go` states
-  the opposite in as many words ("the canonical links and their targets stay on
-  disk"), and `internal/dlog/surfaces_test.go`'s
-  `TestEvictLeavesTheCanonicalLinkAndTargetOnDisk` pins it. The suite asserts
-  the link SURVIVES a close; the removal claim is retired, not tested.
+- CLOSEWORKSPACE EVICTS THE LOG SINK AND LEAVES THE LINK. daemon.md's LOG
+  SURFACES ruling prescribes "eviction on workspace close": the SINK HANDLE is
+  released, and the canonical link and its target stay on disk
+  (`internal/workspace/close.go`; pinned by `internal/dlog/surfaces_test.go`'s
+  `TestEvictLeavesTheCanonicalLinkAndTargetOnDisk`), because a closed
+  workspace's log is still the record of what it did. The close record is
+  written through that same sink and therefore lands BEFORE the eviction
+  releases it.
 
-- A `workspace_commands_*.json` FILE IS QUARANTINED ONLY AT PARSE TIME. The
-  quarantine directory is reached from `Ingress.quarantine` alone, which runs
-  when `parse()` rejects the file. An entry that parses but is REFUSED at apply
-  time (a merge on a workspace with no layout facts) is joined into the run's
-  error and logged at ERROR under `daemon.commandfile.entry`/`.run`, and the
-  file stays in `ClaimedDir`. The suite tests the audit's stated contract (the
-  file lands in quarantine) so the divergence is a failing test the teamlead
-  dispositions, not a rationalized assertion.
+- A `workspace_commands_*.json` FILE IS QUARANTINED AT PARSE TIME AND AT APPLY
+  TIME. daemon.md's file route for a refused verb is quarantine, so an entry
+  the daemon refuses while applying retires the file there with the refusal
+  recorded: the rpc route answers the refusal to the caller who made it, and a
+  file has no caller to answer, so a file left in `ClaimedDir` would be
+  invisible — neither applied, nor swept again, nor anywhere a person looks.
 
-- THREE CONTRACT CLAIMS HAVE NO PRODUCTION HOOK and are `t.Skip`ped naming it,
-  never silently dropped. They are decisions owed, recorded here so the skips
-  are not read as suite defects:
-  - ACCOUNT-SWITCH TRANSCRIPT PORTING. `internal/account/transcript.go`'s
-    `MoveTranscript` has zero production callers, and
-    `internal/workspace/sessions.go`'s `Fleet.Start` reuses `session.ConfigDir`
-    verbatim rather than recomputing the routing for the current boot. Nothing
-    ports a `<vendor id>.jsonl` when a workspace crosses the MULTI_REPO_ROOT
-    boundary between boots. The hook owed: a reconciliation in `Fleet.Start`
-    that diffs the stored ConfigDir against `Accounts.ConfigDirFor(dir)` and
-    calls `MoveTranscript` before `StartSession(resume)`.
+- THE THREE CLAIMS THAT ONCE HAD NO PRODUCTION HOOK NOW DO, and their tests
+  run:
+  - ACCOUNT-SWITCH TRANSCRIPT PORTING. `internal/workspace/sessions.go`'s
+    `Fleet.Start` recomputes `Accounts.ConfigDirFor(dir)` at EVERY start
+    (daemon.md 10a) and, when a resume's recorded ConfigDir disagrees, calls
+    `Accounts.MoveTranscript` before `StartSession(resume)`.
   - `agent_addressed` HOST NOTIFICATIONS. `internal/sessionwatcher/route.go`
-    calls `sinks.Lifecycle.OnNotification` only for permissions and questions;
-    no path routes an `AgentPushNotification` start frame to one, and
-    `NotificationAgentAddressed` is built nowhere but the unknown-kind
-    fallback. The `question_asked` half of the same critique IS covered.
-  - `no_browser_configured`. `cmd/claude-repld/graph.go` always constructs an
-    external-browser launcher, so the daemon can never be in the configured-
-    with-no-browser state the arm exists for.
+    routes an `AgentPushNotification` START frame to
+    `sinks.Lifecycle.OnNotification` as `agent_addressed`, carrying the pushed
+    message as the notification's text.
+  - `no_browser_configured`. `cmd/claude-repld/graph.go` leaves the Browser
+    dependency NIL under `--no-browser`, or when neither
+    `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists.
 
 - THE MERGE LEDGER HAS NO WIRE SURFACE. No rpc serves it: it exists only as
   the `merge_ledger` / `merge_tab_intervals` rows in `wsm.db`. The tab-interval

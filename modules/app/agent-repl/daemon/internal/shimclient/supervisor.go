@@ -149,7 +149,15 @@ func (s *supervisor) workspaceProbe(workspaceDir string) func(ids.WorkspaceID) (
 // abandonBringUp stops a spawned process whose bring-up failed, so a failed
 // spawn never leaves an orphan holding the workspace lock.
 func (c *client) abandonBringUp(cause error) {
+	// THE ABANDONMENT IS RECORDED ON BOTH PATHS. A bring-up that failed
+	// because the process had already died leaves nothing to stop, but it is
+	// the same failure and the workspace's own log is where it belongs: the
+	// exit record says the process is gone, and only this one says the
+	// bring-up was given up on because of it.
 	if c.exitedAlready() {
+		c.log.Warn("daemon.shimclient.spawn", "bring-up failed; the spawned shim is already gone", dlog.Context{
+			"pid": c.PID(), "error": cause.Error(),
+		})
 		c.cancelMonitor()
 		return
 	}

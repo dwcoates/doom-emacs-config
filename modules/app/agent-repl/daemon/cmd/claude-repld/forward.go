@@ -9,6 +9,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/workspace"
 )
 
@@ -154,9 +155,9 @@ func (f *relayForwarder) PublishHostWorkspace(ws ids.WorkspaceID) {
 	}
 }
 
-func (f *relayForwarder) Notify(ws ids.WorkspaceID, text, kind, toolName string) {
+func (f *relayForwarder) Notify(ws ids.WorkspaceID, note sessionwatcher.HostNotification) {
 	if target, ok := f.relay(); ok {
-		target.Notify(ws, text, kind, toolName)
+		target.Notify(ws, note)
 	}
 }
 

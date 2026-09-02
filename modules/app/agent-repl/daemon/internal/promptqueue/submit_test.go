@@ -307,8 +307,8 @@ func TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp(t *testing.T) {
 }
 
 // TestSubmitSurfacesAFailedRevival is the other edge: a workspace that will not
-// come back fails the submission loudly rather than refusing it as "no
-// session", which would read as an ordinary state.
+// come back answers the submission with the revival-pending hold, off the
+// request path, and the failure is surfaced by the revival's own record.
 func TestSubmitSurfacesAFailedRevival(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -319,20 +319,64 @@ func TestSubmitSurfacesAFailedRevival(t *testing.T) {
 	got, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
 	h.waitRevivals()
 
-	// Assert: the failure happens off the request path, so the prompt STAYS
-	// HELD and visible in the tray rather than being lost -- the revival's own
-	// error record is where the failure is surfaced.
+	// Assert
 	if err != nil {
 		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
 	}
 	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
 		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
 	}
+}
+
+// TestAFailedRevivalDropsItsPendingHolds pins daemon_hold.proto's settled exit
+// for HeldPromptSessionStartingHold: "a loud drop when the bring-up fails (a
+// session that never comes up can never deliver, so a retained entry would be
+// a leak, not a delay)". The hold has no force-through, so an entry left
+// standing would wait forever on an exit that never arrives.
+func TestAFailedRevivalDropsItsPendingHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveErr = errors.New("the shim would not spawn")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
 	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("reading the standing holds: %v", err)
 	}
-	if len(standing) != 1 || standing[0].Tombstone != nil {
-		t.Fatalf("standing holds = %+v, want the prompt still held after the failed revival", standing)
+	if len(standing) != 0 {
+		t.Fatalf("standing holds = %+v, want none after the failed bring-up", standing)
+	}
+	retired := h.db.retired("t1")
+	if retired == nil || retired.Kind != tombstoneDropped {
+		t.Fatalf("tombstone = %+v, want a %q retirement", retired, tombstoneDropped)
+	}
+}
+
+// TestAFailedRevivalRepushesTheTrayWithoutTheDroppedEntry pins that the drop
+// is VISIBLE: a tray still drawing the entry would show a state whose only
+// exit never comes.
+func TestAFailedRevivalRepushesTheTrayWithoutTheDroppedEntry(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveErr = errors.New("the shim would not spawn")
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert.
+	last := h.holds.last()
+	if len(last) != 0 {
+		t.Fatalf("the last pushed tray = %+v, want it empty after the drop", last)
 	}
 }

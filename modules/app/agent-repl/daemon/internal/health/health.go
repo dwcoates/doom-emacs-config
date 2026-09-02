@@ -101,24 +101,11 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 
 	var faults []*agentreplv1.SessionFault
 
-	exists, connected := r.live(ws)
-	switch {
-	case !exists:
-		wsLog.Warn(opSession, "no live session", dlog.Context{"kind": KindSessionAbsent})
-		faults = append(faults, sessionFault(wsm.Fault{
-			Kind: KindSessionAbsent, Detail: "the workspace has no live session",
-		}))
-	case !connected:
-		wsLog.Warn(opSession, "the daemon-to-shim link is not serving", dlog.Context{
-			"kind": KindLinkSevered,
-		})
-		faults = append(faults, sessionFault(wsm.Fault{
-			Kind: KindLinkSevered, Detail: "the daemon-to-shim link is not serving",
-		}))
-	default:
-		wsLog.Debug(opSession, "the session is live and the link is serving", nil)
-	}
-
+	// THE RECORDED FAULTS ARE READ FIRST, because they OUTRANK the liveness
+	// probe's own observation. The probe answers two booleans and can neither
+	// carry an exit code nor tell a reaped process from a broken stream; the
+	// records opened at the reap and at the severance can, and they survive a
+	// redial that walked the link back into place.
 	open, err := r.db.OpenFaults(ctx, wsm.FaultScope{Workspace: &ws})
 	if err != nil {
 		wsLog.Error(opSession, "state client refused the open-fault read", dlog.Context{"cause": err.Error()})
@@ -129,6 +116,27 @@ func (r *reporter) Session(ctx context.Context, ws ids.WorkspaceID) (*agentreplv
 	}
 	for _, f := range open {
 		faults = append(faults, sessionFault(f))
+	}
+
+	exists, connected := r.live(ws)
+	switch {
+	case !exists:
+		wsLog.Warn(opSession, "no live session", dlog.Context{"kind": KindSessionAbsent})
+		faults = append(faults, sessionFault(wsm.Fault{
+			Kind: KindSessionAbsent, Detail: "the workspace has no live session",
+		}))
+	case !connected && !hasLostLinkFault(open):
+		// The probe's observation is only reported when NOTHING recorded the
+		// loss — a session parked behind a cold gate has no watcher and so no
+		// link truth. A recorded loss already says it, with its evidence.
+		wsLog.Warn(opSession, "the daemon-to-shim link is not serving", dlog.Context{
+			"kind": KindLinkSevered,
+		})
+		faults = append(faults, sessionFault(wsm.Fault{
+			Kind: KindLinkSevered, Detail: "the daemon-to-shim link is not serving",
+		}))
+	default:
+		wsLog.Debug(opSession, "the session's link needs no probe-derived fault", nil)
 	}
 
 	if len(faults) > 0 {
@@ -220,4 +228,16 @@ func unhealthySession(faults []*agentreplv1.SessionFault) *agentreplv1.SessionHe
 			},
 		},
 	}
+}
+
+// hasLostLinkFault reports whether a lost daemon-to-shim link is already on
+// the record, which is what makes the liveness probe's own observation
+// redundant rather than a second voice on the same condition.
+func hasLostLinkFault(open []wsm.Fault) bool {
+	for _, f := range open {
+		if f.Kind == KindShimDied || f.Kind == KindLinkSevered {
+			return true
+		}
+	}
+	return false
 }
