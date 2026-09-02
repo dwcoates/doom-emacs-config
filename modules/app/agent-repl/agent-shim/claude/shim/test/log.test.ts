@@ -130,29 +130,34 @@ describe("shim runtime logging", () => {
   it("uses emergency stderr when the sink errors or makes zero progress", async () => {
     const log = await configured();
     const terminal = stderr();
+    // NOT FATAL (the EPIPE incident, 2026-08-10): a shim outlives its daemon by
+    // design, so a process that died because its log line could not be written
+    // would take a live turn with it. The loss is announced ONCE on the
+    // emergency path and then stated as a standing degraded window; repeating
+    // it per record would only bury the announcement.
     mockedWriteSync.mockImplementation(() => 0);
-    expect(() => log.bindLog({ operation: "shim.test.zero" }).log({}, "nope")).toThrow("made no progress");
+    log.bindLog({ operation: "shim.test.zero" }).log({}, "nope");
     expect(JSON.parse(terminal[0]!)).toMatchObject({
       runtime: "shim", level: "error", operation: "shim.logging.emergency",
       workspace_dir: "/canonical/workspace",
     });
     const writesAfterFailure = mockedWriteSync.mock.calls.length;
-    expect(() => log.bindLog({ operation: "shim.test.poisoned" }).log({}, "again")).toThrow("made no progress");
+    log.bindLog({ operation: "shim.test.poisoned" }).log({}, "again");
     expect(mockedWriteSync).toHaveBeenCalledTimes(writesAfterFailure);
-    expect(JSON.parse(terminal[1]!)).toMatchObject({ operation: "shim.logging.emergency" });
+    expect(terminal).toHaveLength(1);
   });
 
   it("uses emergency stderr when the sink throws or over-reports bytes", async () => {
     const log = await configured();
     const terminal = stderr();
     mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
-    expect(() => log.bindLog({ operation: "shim.test.throw" }).log({}, "nope")).toThrow("bad fd");
+    log.bindLog({ operation: "shim.test.throw" }).log({}, "nope");
     expect(JSON.parse(terminal[0]!).message).toContain("bad fd");
     vi.clearAllMocks();
     const overLog = await configured();
     const overTerminal = stderr();
     mockedWriteSync.mockImplementation(((...args: unknown[]) => (args[3] as number) + 1) as typeof writeSync);
-    expect(() => overLog.bindLog({ operation: "shim.test.over" }).log({}, "nope")).toThrow("invalid write length");
+    overLog.bindLog({ operation: "shim.test.over" }).log({}, "nope");
     expect(JSON.parse(overTerminal[0]!).message).toContain("invalid write length");
   });
 
@@ -219,6 +224,50 @@ describe("shim runtime logging", () => {
     vi.spyOn(process.stderr, "write").mockImplementation(() => { throw new Error("write EPIPE"); });
     log.bindLog({ operation: "shim.test.epipe" }).log({}, "retire the mirror");
     mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
-    expect(() => log.bindLog({ operation: "shim.test.epipe" }).log({}, "durable failure")).toThrow("bad fd");
+    const terminal = stderr();
+    log.bindLog({ operation: "shim.test.epipe" }).log({}, "durable failure");
+
+    // The mirror is gone and the durable sink has just died, so the emergency
+    // path is the only channel left -- and it still carries the cause.
+    expect(JSON.parse(terminal[0]!).message).toContain("bad fd");
+  });
+
+  it("tells a registered observer that the sink is poisoned", async () => {
+    // WatchSession is where a lost log becomes visible to anyone outside the
+    // process; without an observer the loss stayed inside the dead logger.
+    const log = await configured();
+    stderr();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+
+    log.bindLog({ operation: "shim.test.observed" }).log({}, "durable failure");
+
+    expect(causes).toEqual(["bad fd"]);
+  });
+
+  it("tells an observer that registers AFTER the poisoning, since it is a standing condition", async () => {
+    const log = await configured();
+    stderr();
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+    log.bindLog({ operation: "shim.test.late" }).log({}, "durable failure");
+
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+
+    expect(causes).toEqual(["bad fd"]);
+  });
+
+  it("announces the poisoning exactly once, however many records are lost after it", async () => {
+    const log = await configured();
+    stderr();
+    const causes: string[] = [];
+    log.onLogSinkPoisoned((cause) => causes.push(cause.message));
+    mockedWriteSync.mockImplementation((() => { throw new Error("bad fd"); }) as typeof writeSync);
+
+    log.bindLog({ operation: "shim.test.once" }).log({}, "one");
+    log.bindLog({ operation: "shim.test.once" }).log({}, "two");
+
+    expect(causes).toHaveLength(1);
   });
 });
