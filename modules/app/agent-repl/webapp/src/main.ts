@@ -149,7 +149,7 @@ export async function boot(): Promise<void> {
     const login = mountLoginOverlay(shell.loginOverlay, ctx);
 
     mountSidebar(shell.sidebar, ctx);
-    mountTopbar(shell.topbar, ctx, { openLogin: () => login.open() });
+    mountTopbar(shell.topbar, ctx, { openLogin: (control) => login.open(control) });
 
     const feed = mountFeed(shell.feed, ctx, {
       renderers: createRowRenderers(ctx),

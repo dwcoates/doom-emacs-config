@@ -49,19 +49,23 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
   });
 
   const wrap = document.createElement("div");
-  wrap.className = "topbar-context";
+  // YELLOW rides the control itself as well as the figure: `.topbar-context` is
+  // the hook the DOM contract names, and the context figure's color is a fact
+  // about the control, not about one span inside it.
+  wrap.className = `topbar-context ${toneClass("yellow")}`;
 
   const button = document.createElement("button");
   button.type = "button";
   // YELLOW is the context figure's color across the app.
   button.className = `topbar-context-figure ${toneClass("yellow")}`;
   button.textContent = u.text;
-  asAnchor(button, "context");
   wrap.append(button);
 
+  // The wrap is the control; see `drawTopbarModelSelector` for the reasoning.
+  asAnchor(wrap, "context");
   const body = (): HTMLElement => drawTokenBreakdownView(breakdown);
   tc.reveals.register("context", "context", body);
-  button.addEventListener("click", () => {
+  wrap.addEventListener("click", () => {
     tc.reveals.toggle("context", "context", body);
   });
   return wrap;
@@ -114,7 +118,9 @@ export function drawTokenBreakdownRow(u: TokenBreakdownRow, path: string): HTMLE
   row.setAttribute("data-depth", String(u.depth));
   // A LAYOUT FACT RESOLVED DAEMON-SIDE: emphasized rows are headlines and sit
   // unindented, detail rows sit under them.
-  row.toggleAttribute("data-emphasized", u.emphasized);
+  // THE VALUE IS "true", per the DOM hooks contract (`[data-emphasized="true"]`);
+  // an unemphasized row carries no attribute at all rather than "false".
+  if (u.emphasized) row.setAttribute("data-emphasized", "true");
   if (u.depth > 0) row.style.paddingLeft = `${u.depth * DEPTH_INDENT_REM}rem`;
 
   const label = document.createElement("span");

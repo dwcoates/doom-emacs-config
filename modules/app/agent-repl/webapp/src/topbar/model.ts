@@ -38,7 +38,10 @@ import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { isMalformedView } from "../rpc/malformed.js";
 import {
+  clearRefusals,
   drawTransportRefusal,
   drawTypedRefusal,
   drawUnreadableRefusal,
@@ -117,12 +120,17 @@ export function drawTopbarModelSelector(u: TopbarModelSelector, tc: TopbarContex
   // selection — drawing both as the placeholder would erase the difference.
   button.textContent = u.selected?.displayName ?? MODEL_PLACEHOLDER;
   button.toggleAttribute("data-unselected", u.selected === undefined);
-  asAnchor(button, "model");
   wrap.append(button);
 
+  // THE CONTROL IS THE WRAP, not the label inside it. `.topbar-model` is the
+  // hook the DOM contract names (preamble §5b), so the anchor and the click
+  // both live on it: a reader clicking anywhere in the chip — the label or the
+  // padding beside it — opens the same reveal, and the layer's outside-click
+  // handler spares the whole control rather than one node of it.
+  asAnchor(wrap, "model");
   const body = (): HTMLElement => drawModelOptions(u, tc, wrap, button);
   tc.reveals.register("model", "model", body);
-  button.addEventListener("click", () => {
+  wrap.addEventListener("click", () => {
     tc.reveals.toggle("model", "model", body);
   });
   return wrap;
@@ -245,6 +253,10 @@ export async function pickModel(
     operation: "topbar.model-picked",
     context: { model: model.name },
   });
+  // CLEARED BEFORE THE CALL, never after: a refusal from the previous pick
+  // standing beside the control the reader just clicked again reads as the
+  // answer to the NEW click.
+  clearRefusals(wrap);
   const answered = await whileInFlight([row, button], () =>
     callUnary(
       tc.ctx,
@@ -254,6 +266,13 @@ export async function pickModel(
     ),
   );
   if ("failed" in answered) {
+    // AN ANSWER THIS BUILD CANNOT READ IS MACHINERY, not the daemon refusing:
+    // it is filed as `frame_undecodable` through the one click guard and
+    // nothing is drawn at the control, because there is no refusal to state.
+    if (isMalformedView(answered.failed)) {
+      await guardMalformed(tc.ctx, "topbar.model-pick", Promise.reject(answered.failed));
+      return;
+    }
     drawTransportRefusal(wrap);
     return;
   }

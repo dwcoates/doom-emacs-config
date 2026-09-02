@@ -9,7 +9,7 @@ import { TopbarPermissionModePickerSchema } from "../../../proto/gen/ts/frontend
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { drawTopbarPermissionModePicker } from "../../src/topbar/permission-mode.js";
 import { oneofArms } from "../arms.js";
-import { appContext, openPanel, topbarContext } from "./fixtures.js";
+import { RecordingSink, appContext, openPanel, topbarContext } from "./fixtures.js";
 
 const picker = (
   current = { mode: "default", displayName: "default" },
@@ -75,6 +75,73 @@ describe("the pick", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     return host;
   }
+
+  it("files a response with no result arm as machinery, not a refusal", async () => {
+    // ARRANGE: an unset `result` is a malformed view arriving on a click — the
+    // same condition an unreadable push is — so it is reported once and
+    // nothing is drawn at the control.
+    const sink = new RecordingSink();
+    const { host, tc } = topbarContext(
+      appContext({ setPermissionMode: () => create(SetPermissionModeResponseSchema, {}) }, sink),
+    );
+    const button = mountPicker(tc, host);
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    openPanel(host)!
+      .querySelector("[data-mode-option]")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(sink.reported.map((k) => k.kind.case)).toContain("frameUndecodable");
+  });
+
+  it("draws no refusal for a response with no result arm", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { host, tc } = topbarContext(
+      appContext({ setPermissionMode: () => create(SetPermissionModeResponseSchema, {}) }, sink),
+    );
+    const button = mountPicker(tc, host);
+    // ACT
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    openPanel(host)!
+      .querySelector("[data-mode-option]")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(host.querySelector(".refusal")).toBeNull();
+  });
+
+  it("clears the previous refusal before the next pick", async () => {
+    // ARRANGE
+    let answers = 0;
+    const { host, tc } = topbarContext(
+      appContext({
+        setPermissionMode: () => {
+          answers += 1;
+          return answers === 1
+            ? create(SetPermissionModeResponseSchema, {
+                result: { case: "error", value: { cause: { case: "noSession", value: {} } } },
+              })
+            : create(SetPermissionModeResponseSchema, { result: { case: "success", value: {} } });
+        },
+      }),
+    );
+    const button = mountPicker(tc, host);
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const clickOption = (): void => {
+      openPanel(host)!
+        .querySelector("[data-mode-option]")!
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    };
+    clickOption();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ACT: the reveal stays open on a refusal, so the second pick is one click.
+    clickOption();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // ASSERT
+    expect(host.querySelector(".refusal")).toBeNull();
+  });
 
   it("echoes the served spelling verbatim", async () => {
     // ARRANGE

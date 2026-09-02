@@ -70,7 +70,7 @@ export function appContext(
 /** A mounted host, its reveal layer, and the TopbarContext over both. */
 export function topbarContext(
   ctx: AppContext = appContext(),
-  openLogin: () => void = () => undefined,
+  openLogin: (control: HTMLElement) => void = () => undefined,
 ): { host: HTMLElement; tc: TopbarContext } {
   const host = document.createElement("div");
   document.body.replaceChildren(host);

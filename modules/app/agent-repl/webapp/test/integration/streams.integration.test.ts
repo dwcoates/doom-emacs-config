@@ -147,9 +147,14 @@ describe.each(STREAM_CASES)("$name", (streamCase) => {
   });
 
   it("reports the daemon unreachable when the stream dies with no terminal frame", async () => {
-    // Arrange
+    // Arrange: the reopens fail too, so the link is DOWN rather than flapping.
+    // A stream that comes straight back retracts its own card on the reopen's
+    // first frame (streams.ts: "retracted on the first successful push"), which
+    // is the app behaving correctly — the standing card is the link staying
+    // gone, and that is what this asserts.
     harness = await startHarness();
     await harness.fake.awaitStream(streamCase.rpc);
+    for (let i = 0; i < 20; i += 1) harness.fake.failNext(streamCase.rpc, "the daemon is down");
     // Act
     harness.fake.endStream(streamCase.rpc);
     await harness.tick(5_000);
