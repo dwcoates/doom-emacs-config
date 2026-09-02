@@ -34,18 +34,3 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID s
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
-
-// WorkflowSpool converts a `w*.output` workflow spool's bytes.
-//
-// Same disposition as the journal: discovered, tailed, and held as residue until
-// the workflow wave, so no byte the vendor wrote is lost in the meantime.
-func (c *Converter) WorkflowSpool(at Attribution, output string) *storev1.StoreEntry {
-	c.log.With(at.ctxFor("workflow-spool")).
-		LogVerbose("workflow spool bytes=%d held as residue (workflow is kicked this wave)", len(output))
-	return VendorSpecificEntry(at, "workflow_spool", map[string]any{
-		"task_id": at.TaskID,
-		"path":    at.Path,
-		"offset":  float64(at.Offset),
-		"output":  output,
-	})
-}
