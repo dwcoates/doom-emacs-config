@@ -230,6 +230,25 @@ export interface FakeDaemon {
   refusalArms(rpc: RpcName): string[];
   /** Put an unknown field on the next response or push of `rpc`. */
   injectUnknown(rpc: RpcName): void;
+  /**
+   * UNSET A REQUIRED FIELD on the next push of `rpc` — the second shape of a
+   * malformed view, and the one `injectUnknown` cannot make.
+   *
+   * An unknown field is a NEWER daemon saying something extra; an unset
+   * non-optional message field or an unset oneof is a daemon that composed the
+   * view WRONG. The client's contract refuses both, but through different code
+   * (`assertNoUnknownFields` versus `requireCase`/`requireMessage`), so a suite
+   * that only ever injects unknowns leaves half of "TYPED ARMS, NO FALLBACKS"
+   * untested.
+   *
+   * WHICH field is stripped is fixed per rpc by `FIELD_STRIPPERS`, and an rpc
+   * with no stripper THROWS rather than quietly serving a healthy frame. The
+   * strip copies down the path it edits, so a stored view is never corrupted
+   * and the frame AFTER the poisoned one is the healthy original.
+   */
+  injectUnsetField(rpc: RpcName): void;
+  /** The message-tree path `injectUnsetField` unsets for `rpc`. */
+  unsetFieldPath(rpc: RpcName): string;
 
   // --- observation ---------------------------------------------------------
   calls<Req = unknown>(rpc: RpcName): Req[];
@@ -254,6 +273,93 @@ const withUnknown = <T extends object>(message: T): T => {
   (message as { $unknown?: unknown[] }).$unknown = [{ ...UNKNOWN_FIELD }];
   return message;
 };
+
+/**
+ * HOW EACH RPC'S PUSH IS MADE INCOMPLETE, one required field per rpc.
+ *
+ * Each stripper returns a SHALLOW-COPIED message with exactly one field along
+ * the named path unset. Copying rather than mutating matters: the view a
+ * `set*` call stored is the same object the push carries, so an in-place strip
+ * would poison every later push of that view and the "next frame renders"
+ * assertion would be testing a broken fixture rather than the client.
+ *
+ * The three paths are the three shapes the contract names: an unset ONEOF on a
+ * feed row (`FeedRow.row`), an unset non-optional MESSAGE field on a
+ * whole-view push (`FooterStrip.status`), and an unset oneof on a REPEATED
+ * element deep inside a view (`RosterRow.status`).
+ */
+const FIELD_STRIPPERS: Partial<Record<RpcName, { path: string; strip(message: object): object }>> = {
+  watchFeed: {
+    path: "FeedRow.row",
+    strip: (message) => {
+      const response = message as { row?: object };
+      const row = required(response.row, "WatchFeedResponse.row");
+      // A ONEOF is unset as `{ case: undefined }`: protobuf-es reads the
+      // wrapper to serialize, and dropping it outright fails the codec
+      // rather than producing the incomplete frame the test wants.
+      return { ...response, row: { ...row, row: { case: undefined } } };
+    },
+  },
+  watchFooter: {
+    path: "FooterStrip.status",
+    strip: (message) => {
+      const response = message as { footer?: { strip?: object } };
+      const footer = required(response.footer, "WatchFooterResponse.footer");
+      const strip = required(footer.strip, "FooterView.strip");
+      return { ...response, footer: { ...footer, strip: { ...strip, status: undefined } } };
+    },
+  },
+  watchWorkspaceRoster: {
+    path: "RosterRow.status",
+    strip: (message) => {
+      const response = message as { roster?: { repository?: { sections?: readonly object[] } } };
+      const roster = required(response.roster, "WatchWorkspaceRosterResponse.roster");
+      const repository = required(roster.repository, "WorkspaceRoster.repository");
+      const sections = required(repository.sections, "RosterGrouping.sections");
+      return {
+        ...response,
+        roster: {
+          ...roster,
+          repository: {
+            ...repository,
+            sections: sections.map((section) => {
+              const held = section as { rows?: { rows?: readonly object[] } };
+              const rows = required(held.rows, "RosterSection.rows");
+              const list = required(rows.rows, "RosterRows.rows");
+              return {
+                ...held,
+                rows: { ...rows, rows: list.map((row) => ({ ...row, status: { case: undefined } })) },
+              };
+            }),
+          },
+        },
+      };
+    },
+  },
+};
+
+/**
+ * The value at PATH, or a loud throw.
+ *
+ * A stripper that silently found nothing to strip would serve a HEALTHY frame
+ * to a test asserting the client refused a broken one — a pass for the wrong
+ * reason, which is the one outcome the fake exists to prevent.
+ */
+function required<T>(value: T | undefined, path: string): T {
+  if (value === undefined) throw new Error(`the fake cannot strip ${path}: it is already unset`);
+  return value;
+}
+
+/** The stripper for RPC, or a throw naming the rpcs that have one. */
+function stripperFor(rpc: RpcName): { path: string; strip(message: object): object } {
+  const stripper = FIELD_STRIPPERS[rpc];
+  if (stripper === undefined) {
+    throw new Error(
+      `injectUnsetField has no stripper for ${rpc}; it knows [${Object.keys(FIELD_STRIPPERS).join(", ")}]`,
+    );
+  }
+  return stripper;
+}
 
 /**
  * The streaming content types a watch request arrives with. The response
@@ -444,6 +550,7 @@ export function createFakeDaemon(): FakeDaemon {
   const scripted = new Map<RpcName, unknown>();
   const failures = new Map<RpcName, string[]>();
   const unknowns = new Set<RpcName>();
+  const unsets = new Set<RpcName>();
 
   let server: Server | undefined;
   let baseUrl = "";
@@ -534,8 +641,10 @@ export function createFakeDaemon(): FakeDaemon {
    * injection before the stream is open still taints the FIRST frame that
    * reaches a reader rather than being swallowed by a push nobody received.
    */
-  const taint = <T extends object>(rpc: RpcName, message: T): T =>
-    unknowns.delete(rpc) ? withUnknown(message) : message;
+  const taint = <T extends object>(rpc: RpcName, message: T): T => {
+    const stripped = unsets.delete(rpc) ? (stripperFor(rpc).strip(message) as T) : message;
+    return unknowns.delete(rpc) ? withUnknown(stripped) : stripped;
+  };
 
   /** Push one value to every live stream of `rpc` matching workspace/feed. */
   const broadcast = (
@@ -1104,6 +1213,15 @@ export function createFakeDaemon(): FakeDaemon {
     },
     injectUnknown(rpc) {
       unknowns.add(rpc);
+    },
+    injectUnsetField(rpc) {
+      // Resolved EAGERLY so an rpc with no stripper fails at the arrange step,
+      // where the test can see it, rather than inside a push nobody awaits.
+      stripperFor(rpc);
+      unsets.add(rpc);
+    },
+    unsetFieldPath(rpc) {
+      return stripperFor(rpc).path;
     },
 
     calls<Req>(rpc: RpcName): Req[] {
