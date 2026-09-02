@@ -139,15 +139,6 @@ two of them disagree about what live means."
         (when (eq (plist-get standing :arm) :live)
           (plist-get standing :value))))))
 
-(defun agent-repl-host-session-id (ws)
-  "Return WS's `HostSessionId' value string, or nil when no session exists.
-This is what Emacs correlates transcripts, health probes and fault
-windows against; sessions rotate under one workspace."
-  (let* ((host (agent-repl-host-state ws))
-         (session (plist-get host :session)))
-    (when (eq (plist-get session :arm) :existing)
-      (plist-get (plist-get (plist-get session :value) :id) :value))))
-
 (defun agent-repl-host-backfill (ws)
   "Return WS's backfill arm keyword, or nil.
 One of `:none', `:pending', `:done', `:failed'.  Nil when there is no
