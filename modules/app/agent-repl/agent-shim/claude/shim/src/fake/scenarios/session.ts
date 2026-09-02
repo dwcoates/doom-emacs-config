@@ -458,6 +458,29 @@ const TOKENS_REMINDER = scenario({
   },
 });
 
+const CONTEXT_BUDGET_WARNING = scenario({
+  name: "context-budget-warning",
+  prompt: "!context-budget-warning",
+  emits:
+    "prose only, plus a `context_budget_warning` ATTACHMENT (`{type: \"context_budget_warning\", content}`), the " +
+    "shape `convertAttachment` already recognizes (`test/convert/attachments.test.ts`). UNGROUNDED, INVENTED: no " +
+    "capture — not even the one literally NAMED `context-budget-warning` (MANIFEST evidence gap; excluded from " +
+    "golden-conformance) — carries a record of this spelling. `!context-tip` and `!tokens-reminder` stay exactly " +
+    "as landing 5 ruled them (a generic CLI tip and the one observed token-count reminder, neither the budget " +
+    "warning); this is a SEPARATE, separately-named producer added only so the converter's arm has a fake-SDK " +
+    "path to drive it from, pending a grounding capture (orchestrator ruling, pending the project lead's)",
+  writes: "a `context_budget_warning` attachment line",
+  arms: "AgentUpdate.update=contextBudgetWarning(ContextBudgetWarning) — UNGROUNDED, invented; see MANIFEST.md",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "context-budget-warning" }, "fake INVENTED context-budget-warning turn");
+    ctx.attachment({
+      type: "context_budget_warning",
+      content: "The conversation is approaching its context window budget.",
+    });
+    conclude(ctx, "The CLI warned that the context budget is filling.");
+  },
+});
+
 const COMPACT = scenario({
   name: "compact",
   prompt: "!compact [summary]",
@@ -685,6 +708,7 @@ export const SESSION_SCENARIOS = [
   RATE_LIMIT_SEVEN_DAY,
   CONTEXT_TIP,
   TOKENS_REMINDER,
+  CONTEXT_BUDGET_WARNING,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,
