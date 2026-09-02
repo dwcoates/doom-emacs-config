@@ -226,3 +226,115 @@ func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
 		t.Fatalf("SelectWorkspace over the JSON codec = error %v, want a success", err)
 	}
 }
+
+// TestWorkspaceBoundWarnStaysOffTheRunLog pins the log-discipline split:
+// a WARN record scoped to one workspace lands ONLY in that workspace's own
+// `<workspace>/.claude/emacs/daemon.log` sink and never on the daemon-wide
+// `daemon.run.log`. A fake shim that dies during bring-up produces exactly
+// this: shimclient.abandonBringUp logs `daemon.shimclient.spawn` at WARN
+// through the workspace-scoped surfaces.Workspace(dir) logger
+// (internal/shimclient/supervisor.go), never through the global one.
+func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+		ExitOn: harness.ExitOnStartup, ExitCode: 3, Stderr: "boom: workspace-bound warn",
+	})
+
+	// Act: bring-up dies, which drives the workspace-scoped WARN.
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace onto a dying shim = transport error %v, want the spawn_failed arm", err)
+	}
+	if resp.Msg.GetError().GetSpawnFailed() == nil {
+		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	}
+
+	// Assert: the WARN record IS in the workspace's own daemon.log.
+	rec := f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.shimclient.spawn")
+	if lvl := strings.ToLower(rec.Level); lvl != "warn" && lvl != "warning" {
+		t.Fatalf("daemon.shimclient.spawn record level = %q, want WARN", rec.Level)
+	}
+
+	// Assert: it is NOT on the daemon-wide run log.
+	for _, r := range f.d.RunLog() {
+		if r.Operation == "daemon.shimclient.spawn" {
+			t.Fatalf("daemon.run.log carries the workspace-bound record %v, want it confined to %s",
+				r, harness.WorkspaceLogPath(f.repo.Dir, "daemon"))
+		}
+	}
+
+	f.d.ExpectWarnings("daemon.shimclient.spawn", "daemon.workspace.open")
+}
+
+// TestCloseWorkspaceRemovesTheLogSinkSymlink pins a claim from the audit's
+// critique 15: that CloseWorkspace removes the workspace's log-sink symlink.
+//
+// UNEXPRESSIBLE as the intended-behavior arm: it CONTRADICTS the settled,
+// already-tested contract. internal/workspace/close.go evicts the sinks and
+// explicitly documents "the canonical links and their targets stay on disk";
+// internal/dlog/surfaces_test.go pins that exact behavior in
+// TestEvictLeavesTheCanonicalLinkAndTargetOnDisk. Asserting removal here
+// would fight a settled invariant, not catch a regression, so this proves
+// the DOCUMENTED behavior instead (the link survives Close, still readable)
+// and skips the removal claim by name.
+func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	link := harness.WorkspaceLogPath(f.repo.Dir, "daemon")
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("stat the workspace's daemon.log symlink before Close: %v", err)
+	}
+
+	// Act
+	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
+	}
+	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.workspace.close")
+
+	// Assert: the link SURVIVES (the settled contract), so the critique's
+	// removal claim does not hold against this codebase.
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("stat the workspace's daemon.log symlink after Close = %v, want it left on disk per internal/workspace/close.go and internal/dlog/surfaces_test.go's TestEvictLeavesTheCanonicalLinkAndTargetOnDisk", err)
+	}
+	t.Skip("critique 15's \"CloseWorkspace removes the workspace's log sink symlink\" contradicts the settled contract (internal/workspace/close.go: \"the canonical links and their targets stay on disk\"; pinned by internal/dlog/surfaces_test.go TestEvictLeavesTheCanonicalLinkAndTargetOnDisk) — no removal to assert; see the positive assertion above instead.")
+}
+
+// TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords pins the run
+// log's restart-scoped rotation (internal/dlog/runlog.go: openRunLog rotates
+// the previous run's file to daemon.run.log.1 before opening a fresh one).
+func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) {
+	// Arrange: first boot; capture its own records and pid before stopping it.
+	d1 := newDaemon(t, harness.Opts{})
+	d1.AwaitRunLogOperation("daemon.pprof.disabled")
+	prior := d1.RunLog()
+	if len(prior) == 0 {
+		t.Fatal("the first boot's run log holds no records, want the boot sequence recorded before restart")
+	}
+	firstPID := d1.PID()
+	runLogPath := d1.RunLogPath()
+	d1.Stop()
+
+	// Act: restart on the same state root.
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir})
+	d2.AwaitRunLogOperation("daemon.pprof.disabled")
+
+	// Assert: daemon.run.log.1 holds the prior boot's records, verbatim.
+	backup := harness.ReadLog(t, runLogPath+".1")
+	if len(backup) != len(prior) {
+		t.Fatalf("daemon.run.log.1 holds %d records, want the prior boot's %d", len(backup), len(prior))
+	}
+	for i := range prior {
+		if backup[i].Raw != prior[i].Raw {
+			t.Fatalf("daemon.run.log.1[%d] = %q, want the prior boot's record %q", i, backup[i].Raw, prior[i].Raw)
+		}
+	}
+
+	// Assert: the new run log describes only the new boot, never the old pid.
+	for _, r := range d2.RunLog() {
+		if r.PID == firstPID {
+			t.Fatalf("daemon.run.log after restart carries a record from the prior boot's pid %d: %v", firstPID, r)
+		}
+	}
+	d2.ExpectWarnings()
+}
