@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"sync"
 
@@ -173,7 +174,15 @@ func (s *server) gate(ctx context.Context) error {
 // through it, so `expect` and `hang` work uniformly.
 func (s *server) enter(ctx context.Context, rpc string, req proto.Message) error {
 	s.rec.Record(rpc, req)
-	s.log.write(rpc, map[string]any{"verb": rpc})
+	// THE REQUEST RIDES THE LOG, not only the in-memory recorder. The recorder
+	// dies with the process, and the verbs that END the process -- a forced
+	// KillSession above all -- can only be asserted after the fact from
+	// something that outlives it.
+	fields := map[string]any{"verb": rpc}
+	if raw, err := proto.Marshal(req); err == nil {
+		fields["request"] = base64.StdEncoding.EncodeToString(raw)
+	}
+	s.log.write(rpc, fields)
 	return s.gate(ctx)
 }
 
