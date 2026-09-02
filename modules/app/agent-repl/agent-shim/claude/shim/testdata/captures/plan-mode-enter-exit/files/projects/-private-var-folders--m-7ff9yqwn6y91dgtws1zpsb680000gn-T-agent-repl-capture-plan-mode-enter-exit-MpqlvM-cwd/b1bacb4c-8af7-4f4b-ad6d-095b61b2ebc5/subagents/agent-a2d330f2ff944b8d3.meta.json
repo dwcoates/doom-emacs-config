@@ -1,0 +1,6 @@
+{
+  "agentType": "Explore",
+  "description": "Explore the codebase structure and find app.py",
+  "toolUseId": "toolu_01YGQbqgswz6FCYLskZU9nAW",
+  "spawnDepth": 1
+}
