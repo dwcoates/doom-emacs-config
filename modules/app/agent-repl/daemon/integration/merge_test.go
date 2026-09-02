@@ -327,6 +327,146 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Evict / dequeue / abandon: the THREE DISTINCT ENDS a queued merge can meet
+// before it ever runs (internal/merge/queue.go's own doc comment on Evict:
+// "evict is the operator's, dequeue is the user's answer to the interrupt
+// offer, and abandon is the merge's own give-up"). frontend/v1/feed.proto's
+// FeedMergeError carries only `failed` and `abandoned` -- no per-cause arm --
+// so the three are NOT distinguishable on the wire; that is a known stale
+// shape escalated to landing 7. These tests assert exactly what today's
+// protos and production code CAN express, invent no arm, and edit no proto.
+//
+// A DEEPER GAP the tests below expose (beyond the proto's own limitation):
+// grepping internal/merge, `dropQueued`'s only two callers are Evict and the
+// dequeue release, and neither its own call nor the `publishAbandoned` /
+// `forget` helpers underneath it ever construct or push a `FeedMergeError`
+// (frontend/v1's FeedMergeAbandoned has NO producer anywhere in internal/,
+// confirmed by grep). Both `forget` and its callers DO reach the footer and
+// the roster (`Footer.SetMerge` / `Sidebar.SetMerge` to `MergeFacts{State:
+// "none"}`), so the footer-leaving-merging and roster-arm assertions below
+// are expected GREEN; the feed-bubble assertion is expected RED, because the
+// bubble is silently forgotten rather than ever told it ended.
+// ---------------------------------------------------------------------------
+
+func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
+	// Arrange
+	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	root := behind.watchRootFeed()
+	footer := behind.d.WatchFooter(behind.ws)
+
+	// Act
+	resp, err := behind.d.Client().UpdateMergeQueue(behind.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
+	}))
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("UpdateMergeQueue(evict) = %v, %v, want a success", resp.Msg, err)
+	}
+
+	// Assert: the bubble's terminal row. FeedMergeError.abandoned is the
+	// ONLY arm this proto has for any queued merge dropped before it ran --
+	// there is no distinct "evicted" arm to ask for instead.
+	mergeRow := awaitRow(t, behind, root, "the evicted merge's abandoned terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetError() != nil
+	})
+	if mergeRow.GetActivity().GetMerge().GetError().GetAbandoned() == nil {
+		t.Fatalf("evicted merge terminal = %v, want FeedMergeError.abandoned (the only end this proto expresses for evict, dequeue AND a self-abandon alike)", mergeRow.GetActivity().GetMerge().GetError())
+	}
+
+	// Assert: the footer's merging status ENDS. FooterStatusMerging's oneof
+	// (frontend/v1/footer.proto) has no dedicated evicted/abandoned
+	// substatus, so all this proto can express is that "merging" no longer
+	// stands.
+	fv := awaitFooter(t, behind, footer, "the footer leaving merging after the evict", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMerging() == nil
+	})
+	if fv.GetStrip().GetStatus().GetMerging() != nil {
+		t.Fatalf("footer status = %v, want merging cleared after the evict", fv.GetStrip().GetStatus())
+	}
+
+	// Assert: the roster arm afterward carries none of the merge arms.
+	roster := behind.d.WatchRoster()
+	got := awaitRoster(t, behind.d, roster, "the evicted workspace off every merge arm", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, behind.ws.GetId())
+		return row != nil && row.GetMergeQueued() == nil && row.GetMerging() == nil &&
+			row.GetMergeConflict() == nil && row.GetMergeFailed() == nil && row.GetMerged() == nil
+	})
+	row := rosterRow(got, behind.ws.GetId())
+	if row.GetMergeQueued() != nil || row.GetMerging() != nil || row.GetMergeConflict() != nil ||
+		row.GetMergeFailed() != nil || row.GetMerged() != nil {
+		t.Fatalf("evicted workspace roster status = %v, want no merge arm standing", row)
+	}
+}
+
+func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
+	// Arrange: the user's own answer to the interrupt offer, DISTINCT from an
+	// operator's evict, though the proto cannot tell the two apart (see the
+	// section comment above).
+	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	holds := behind.d.WatchHolds(behind.ws)
+	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	})); err != nil {
+		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
+	}
+	awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.DaemonHoldTray) bool {
+		return mergeDequeueOffer(tray) != nil
+	})
+	root := behind.watchRootFeed()
+	footer := behind.d.WatchFooter(behind.ws)
+
+	// Act
+	resp, err := behind.d.Client().AnswerHeldOffer(behind.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerHeldOfferRequest{
+		Workspace: behind.ws,
+		Answer: &agentreplv1.AnswerHeldOfferRequest_MergeDequeue{MergeDequeue: &agentreplv1.AnswerHeldOfferMergeDequeue{
+			Decision: &agentreplv1.AnswerHeldOfferMergeDequeue_Release{Release: &agentreplv1.AnswerHeldOfferRelease{}},
+		}},
+	}))
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("AnswerHeldOffer(release) = %v, %v, want a success", resp.Msg, err)
+	}
+
+	// Assert: the SAME FeedMergeError.abandoned arm as an evict -- the proto
+	// has no way to tell "the user released the queue slot" apart from "the
+	// operator evicted it" or a self give-up.
+	mergeRow := awaitRow(t, behind, root, "the dequeued merge's abandoned terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetError() != nil
+	})
+	if mergeRow.GetActivity().GetMerge().GetError().GetAbandoned() == nil {
+		t.Fatalf("dequeued merge terminal = %v, want FeedMergeError.abandoned", mergeRow.GetActivity().GetMerge().GetError())
+	}
+
+	fv := awaitFooter(t, behind, footer, "the footer leaving merging after the dequeue", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetMerging() == nil
+	})
+	if fv.GetStrip().GetStatus().GetMerging() != nil {
+		t.Fatalf("footer status = %v, want merging cleared after the dequeue", fv.GetStrip().GetStatus())
+	}
+
+	roster := behind.d.WatchRoster()
+	got := awaitRoster(t, behind.d, roster, "the dequeued workspace off every merge arm", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, behind.ws.GetId())
+		return row != nil && row.GetMergeQueued() == nil && row.GetMerging() == nil &&
+			row.GetMergeConflict() == nil && row.GetMergeFailed() == nil && row.GetMerged() == nil
+	})
+	row := rosterRow(got, behind.ws.GetId())
+	if row.GetMergeQueued() != nil || row.GetMerging() != nil || row.GetMergeConflict() != nil ||
+		row.GetMergeFailed() != nil || row.GetMerged() != nil {
+		t.Fatalf("dequeued workspace roster status = %v, want no merge arm standing", row)
+	}
+}
+
+func TestAnAbandonedQueuedMergeHasNoReachableCause(t *testing.T) {
+	t.Skip("unexpressible: internal/merge/queue.go documents THREE distinct ends " +
+		"(evict, dequeue, abandon) but grepping internal/merge finds `dropQueued` " +
+		"has only TWO callers -- Evict (the operator's) and the dequeue release " +
+		"(the user's) -- and no third call site exists anywhere that raises a " +
+		"queued merge's OWN give-up. There is no RPC, shim frame, or harness hook " +
+		"that reaches a self-abandon distinct from the other two, so this cause " +
+		"cannot be constructed as a black-box scenario without inventing a " +
+		"production call site this suite is not permitted to add")
+}
+
+// ---------------------------------------------------------------------------
 // The Emacs-repo method: a conflicting branch opens the conflicts tab, briefs
 // the agent once with the spliced brief, then parks.
 // ---------------------------------------------------------------------------
