@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/wsm"
@@ -35,6 +36,11 @@ const (
 	// of these as a session that silently died would raise a fault on the most
 	// ordinary handover there is.
 	IntentNoSession Intent = "no_session"
+	// IntentUnattested is a session whose outgoing daemon stated NO intent at
+	// all, because it wrote no manifest: it crashed or was force-killed. There
+	// is nothing to compare a lock against, which is why every such session is
+	// UNKNOWN rather than judged.
+	IntentUnattested Intent = "unattested"
 )
 
 // DispositionKind is what actually became of one session. THE FOUR ARE NEVER
@@ -106,9 +112,29 @@ type Disposition struct {
 	Kind DispositionKind
 }
 
-// FaultBounceDisposition is the fault kind every reconciled session is recorded
-// under.
+// FaultBounceDisposition is the fault kind an ORDINARY reconciled session is
+// recorded under — one the bounce preserved or rolled, opened and closed in the
+// same breath so the per-session accounting survives without polluting the open
+// fault set.
+//
+// A disposition that NEEDS A HUMAN is recorded under its own health kind
+// instead, because that is what the host view renders: health.KindBounceDied
+// and health.KindBounceUnknown are the two SessionFault/HostFault arms the
+// contract spells for a bounce, and a fault opened under this generic kind
+// would reach neither.
 const FaultBounceDisposition = "bounce_disposition"
+
+// faultKind names the WSM fault kind one disposition is recorded under.
+func faultKind(kind DispositionKind) string {
+	switch kind {
+	case DispositionDied:
+		return health.KindBounceDied
+	case DispositionUnknown:
+		return health.KindBounceUnknown
+	default:
+		return FaultBounceDisposition
+	}
+}
 
 // writeManifest records the outgoing daemon's intent for every workspace it is
 // handing over. It is written ATOMICALLY — a half-written manifest would make
@@ -187,7 +213,7 @@ func ReadManifest(path string) (Manifest, bool, error) {
 // PRESERVED and ROLLED are recorded as ALREADY-RESOLVED faults, so the record
 // exists per session without polluting the open-fault set; DIED and UNKNOWN
 // stay OPEN, because each is a workspace whose session state needs a human.
-func (c *controller) Reconcile(ctx context.Context) ([]Disposition, error) {
+func (c *controller) Reconcile(ctx context.Context, adopted []ids.WorkspaceID) ([]Disposition, error) {
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opReconcile, "could not read the intent manifest",
@@ -195,9 +221,7 @@ func (c *controller) Reconcile(ctx context.Context) ([]Disposition, error) {
 		return nil, err
 	}
 	if !found {
-		c.log.Debug(opReconcile, "no intent manifest is present; this is an ordinary boot",
-			dlog.Context{"path": c.deps.IntentManifest})
-		return nil, nil
+		return c.reconcileWithoutManifest(ctx, adopted), nil
 	}
 	out := make([]Disposition, 0, len(m.Sessions))
 	for _, session := range m.Sessions {
@@ -233,6 +257,34 @@ func (c *controller) Reconcile(ctx context.Context) ([]Disposition, error) {
 	c.log.Info(opReconcile, "reconciled the stand-down intent manifest against the kernel locks",
 		dlog.Context{"outgoing_daemon": string(m.Daemon), "sessions": len(out)})
 	return out, nil
+}
+
+// reconcileWithoutManifest accounts for a boot that found NO manifest. With no
+// surviving session that is an ordinary boot and there is nothing to account
+// for. With sessions this boot ADOPTED it is a crash or a force-kill: the
+// outgoing daemon never stood down, so nothing states what its bounce meant for
+// them, and BOUNCE ACCOUNTABILITY surfaces that per workspace rather than
+// passing over it. Each adopted session gets an OPEN bounce_unknown fault.
+func (c *controller) reconcileWithoutManifest(ctx context.Context, adopted []ids.WorkspaceID) []Disposition {
+	if len(adopted) == 0 {
+		c.log.Debug(opReconcile, "no intent manifest is present and no session survived; this is an ordinary boot",
+			dlog.Context{"path": c.deps.IntentManifest})
+		return nil
+	}
+	c.log.Warn(opReconcile, "sessions survived a bounce that wrote no intent manifest; each one is unaccounted for",
+		dlog.Context{"path": c.deps.IntentManifest, "adopted": len(adopted)})
+	out := make([]Disposition, 0, len(adopted))
+	for _, ws := range adopted {
+		d := Disposition{
+			Workspace: ws,
+			Intent:    IntentUnattested,
+			Lock:      sessionlock.StateHeld,
+			Kind:      DispositionUnknown,
+		}
+		out = append(out, d)
+		c.recordDisposition(ctx, ManifestSession{Workspace: ws}, d)
+	}
+	return out
 }
 
 // disposition names what an intent and a lock state together mean.
@@ -305,7 +357,7 @@ func (c *controller) recordDisposition(ctx context.Context, session ManifestSess
 	}
 	id, err := c.deps.DB.OpenFault(ctx, wsm.Fault{
 		Workspace: &ws,
-		Kind:      FaultBounceDisposition,
+		Kind:      faultKind(d.Kind),
 		Detail: fmt.Sprintf("the bounce meant to %s this session; its workspace lock reads %s",
 			d.Intent, d.Lock),
 		Evidence: map[string]string{

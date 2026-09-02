@@ -171,3 +171,29 @@ func TestPanelsRefusesWhenNoContextPanelStands(t *testing.T) {
 		t.Fatal("an absent context panel was answered as a panel")
 	}
 }
+
+// TestStatusPanelOmitsTheVersionRowWhenNoStampWasWritten pins that the Version
+// row obeys the same omission rule as the rest: a checkout the deploy chain
+// never stamped has no version to state, and an empty-valued row would state
+// one anyway.
+func TestStatusPanelOmitsTheVersionRowWhenNoStampWasWritten(t *testing.T) {
+	// Arrange.
+	source := Panels(&panelTopbar{
+		factsHeld: true,
+		facts:     topbar.StatusFacts{Model: "opus", PermissionMode: "plan"},
+	}, stamp(""), fakeLogger{})
+
+	// Act.
+	panel, err := source(context.Background(), testWorkspaceID,
+		conversationv1.SessionCommand_SESSION_COMMAND_STATUS)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("status panel: %v", err)
+	}
+	for _, row := range panel.GetStatus().GetRows() {
+		if row.GetLabel() == "Version" {
+			t.Fatalf("rows = %v, want no Version row when the deploy chain wrote no stamp", panel.GetStatus().GetRows())
+		}
+	}
+}

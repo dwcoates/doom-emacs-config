@@ -106,6 +106,13 @@ type TurnStarted struct {
 type Resolver interface {
 	sessionwatcher.FooterSink
 
+	// SetParticipants states the OTHER TWO HOPS of connectivity truth: whether
+	// this workspace's WatchHostWorkspace and WatchWebWorkspace streams are
+	// held right now. The server calls it on every open and close edge of
+	// either stream. Per daemon.md invariant 11 the workspace is connected
+	// only while all three hops are live, so a hop down is drawn as not
+	// connected however healthy the shim link is.
+	SetParticipants(ws ids.WorkspaceID, host, web bool)
 	// SetWorkspaceDir binds the workspace's directory, which is what resolves
 	// its durable log sink. The daemon calls it at registration, BEFORE any
 	// frame can arrive; a frame for an unbound workspace is an invariant

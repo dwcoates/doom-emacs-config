@@ -46,6 +46,8 @@ type fixture struct {
 	spawns   string
 	routes   map[ids.WorkspaceID]string
 	routeErr error
+	// log is the manager's logger, so a test can assert what it recorded.
+	log *dlog.TestLogger
 }
 
 // newFixture builds a manager whose fake vendor binary is an explicit path, so
@@ -64,7 +66,8 @@ func newFixture(t *testing.T, routes map[ids.WorkspaceID]string) *fixture {
 		t.Fatalf("WriteFile() = %v", err)
 	}
 
-	m, err := login.New(envc.NewVendorGuard(envc.Load()), bin, f.route, dlog.NewTestLogger())
+	f.log = dlog.NewTestLogger()
+	m, err := login.New(envc.NewVendorGuard(envc.Load()), bin, f.route, f.log)
 	if err != nil {
 		t.Fatalf("login.New() = %v, want nil", err)
 	}
@@ -414,6 +417,23 @@ func TestWatchWithoutAStandingLoginIsTyped(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, login.ErrNoSession) {
 		t.Fatalf("Watch() = %v, want login.ErrNoSession", err)
+	}
+}
+
+func TestSendKeystrokesWithoutAStandingLoginIsNotAWarning(t *testing.T) {
+	// Arrange: `no_login_open` is a LANDED SendLoginInputError arm, so the
+	// refusal is an ordinary answer rather than a fault.
+	routes, _, _ := twoWorkspaces(t)
+	f := newFixture(t, routes)
+
+	// Act.
+	_ = f.m.SendKeystrokes(context.Background(), "ws-a", []byte("x"))
+
+	// Assert.
+	for _, record := range f.log.Records() {
+		if record.Level == "warn" || record.Level == "error" {
+			t.Fatalf("record = %+v, want no warning for a landed typed refusal", record)
+		}
 	}
 }
 
