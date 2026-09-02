@@ -698,23 +698,38 @@ export function createFakeQuery(
    * a `compact_boundary`-shaped system record on the retired file) rather than
    * an observed one — flagged in `docs/overhaul/shim.md`'s mock section.
    */
+  /**
+   * A `/clear`, in THE SHAPE THE REAL BINARY USES.
+   *
+   * Observed in the `identity-rotation-clear` capture (2026-09-01), and it is
+   * not what the mock used to do. THREE uuids are involved:
+   *
+   *   1. the OLD session id, which `conversation_reset.session_id` carries;
+   *   2. `new_conversation_id` — a uuid NOTHING LATER EVER USES, on that one
+   *      message and nowhere else. It is never adopted as an identity;
+   *   3. the REAL new id, which is the `session_id` of the SECOND `system:init`
+   *      that follows, and which every later turn's init repeats.
+   *
+   * On disk a new transcript file appears under the init id and THE OLD FILE
+   * SIMPLY STOPS. There is no closing record of any kind — the mock's invented
+   * `compact_boundary` "Conversation cleared" line was declared-not-observed
+   * and is gone; it also said the wrong thing, since compaction is IN PLACE and
+   * never rotates an id.
+   */
   const rotate = (): string => {
+    // Announced under the OLD identity: `emitWithUuid` stamps `session_id` from
+    // `sessionUuid`, so the reset must be pushed BEFORE the swap.
+    const announcedButUnused = opts.newUuid();
+    emit({ type: "conversation_reset", new_conversation_id: announcedButUnused });
     const next = opts.newUuid();
-    files.transcript.append({
-      type: "system",
-      subtype: "compact_boundary",
-      content: "Conversation cleared",
-      isMeta: false,
-      level: "info",
-      compactMetadata: { trigger: "manual", preTokens: 0, postTokens: 0 },
-      uuid: opts.newUuid(),
-      timestamp: nowIso(),
-    });
     sessionUuid = next;
     files.rotate(next);
-    emit({ type: "conversation_reset", new_conversation_id: next });
+    // THE SECOND INIT is where the real new id is stated.
     emitInit();
-    LOGGER.log({ claude_session_id: next }, "fake vendor session identity ROTATED");
+    LOGGER.log(
+      { claude_session_id: next, announced_conversation_id: announcedButUnused },
+      "fake vendor session identity ROTATED; new_conversation_id is announced and never used again",
+    );
     return next;
   };
 

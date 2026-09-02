@@ -7,55 +7,82 @@ import { describe, expect, it } from "vitest";
 import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 
 describe("identity rotation", () => {
-  it("announces the new conversation id on the stream", async () => {
+  /** Every message, as plain records, in arrival order. */
+  const records = (driven: Awaited<ReturnType<typeof driveScenario>>): Record<string, unknown>[] =>
+    driven.messages as unknown as Record<string, unknown>[];
+
+  it("announces the reset under the OLD identity", async () => {
+    // OBSERVED (identity-rotation-clear, 2026-09-01): `conversation_reset`
+    // carries the session id it is RETIRING, not the one it is moving to.
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
     const reset = ofType(driven, "conversation_reset")[0];
 
     // Assert
-    expect(typeof reset?.new_conversation_id).toBe("string");
+    expect(reset?.session_id).toBe("sess-fake-1");
   });
 
-  it("follows the reset with a fresh init reporting the NEW id", async () => {
+  it("announces a new_conversation_id that NOTHING later uses", async () => {
+    // The third uuid. It exists on this one message and is never adopted as an
+    // identity — reading it as the new session id was the old mock's mistake
+    // and would have made the shim write a link file for a phantom.
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
-    const resetIndex = (driven.messages as unknown as Record<string, unknown>[]).findIndex(
-      (m) => m.type === "conversation_reset",
-    );
-    const init = (driven.messages as unknown as Record<string, unknown>[])[resetIndex + 1];
-    const newId = (driven.messages as unknown as Record<string, unknown>[])[resetIndex]?.new_conversation_id;
+    const announced = String(ofType(driven, "conversation_reset")[0]?.new_conversation_id);
 
     // Assert
-    expect({ type: init?.type, subtype: init?.subtype, id: init?.session_id }).toEqual({
+    expect(typeof announced).toBe("string");
+    expect(records(driven).filter((m) => m.session_id === announced)).toEqual([]);
+  });
+
+  it("follows the reset with a SECOND init that states the real new id", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rotate"]);
+    const all = records(driven);
+    const resetIndex = all.findIndex((m) => m.type === "conversation_reset");
+    const init = all[resetIndex + 1];
+    const announced = all[resetIndex]?.new_conversation_id;
+
+    // Assert
+    expect({ type: init?.type, subtype: init?.subtype }).toEqual({
       type: "system",
       subtype: "init",
-      id: newId,
     });
+    expect(init?.session_id).not.toBe("sess-fake-1");
+    expect(init?.session_id).not.toBe(announced);
   });
 
   it("carries the turn's own result under the NEW identity", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
-    const newId = String(ofType(driven, "conversation_reset")[0]?.new_conversation_id);
+    const all = records(driven);
+    const resetIndex = all.findIndex((m) => m.type === "conversation_reset");
+    const newId = all[resetIndex + 1]?.session_id;
 
     // Assert. The turn STARTED under one id and ENDS under another; that split
     // is the whole shape rotation handling exists for.
     expect(theResult(driven).session_id).toBe(newId);
   });
 
-  it("leaves the retired transcript intact with a closing record", async () => {
+  it("leaves the retired transcript with NO closing record", async () => {
+    // The old file SIMPLY STOPS. The mock used to append a `compact_boundary`
+    // "Conversation cleared" line, which no capture carries — and which said
+    // the wrong thing besides, since compaction is IN PLACE and rotates nothing.
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
     const oldLines = driven.transcript("sess-fake-1");
 
     // Assert
-    expect(oldLines.at(-1)).toMatchObject({ type: "system", subtype: "compact_boundary" });
+    expect(oldLines.filter((line) => line.subtype === "compact_boundary")).toEqual([]);
+    expect(oldLines.at(-1)?.type).not.toBe("system");
   });
 
-  it("starts a new transcript file whose chain begins fresh", async () => {
+  it("starts a new transcript file under the INIT's id", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
-    const newId = String(ofType(driven, "conversation_reset")[0]?.new_conversation_id);
+    const all = records(driven);
+    const resetIndex = all.findIndex((m) => m.type === "conversation_reset");
+    const newId = String(all[resetIndex + 1]?.session_id);
 
     // Assert
     expect(driven.transcript(newId)[0]).toMatchObject({ parentUuid: null, sessionId: newId });
