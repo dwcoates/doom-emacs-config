@@ -59,6 +59,7 @@
 (declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl--ws-create "workspace" (ws &optional project-dir))
 (declare-function agent-repl--ws-del "workspace" (ws))
+(declare-function agent-repl--ws-revive "workspace" (ws))
 (declare-function agent-repl--ws-persp-kill "workspace" (ws))
 (declare-function agent-repl--ws-rename-state "workspace" (old new dir))
 (declare-function agent-repl--ws-rename-persp "workspace" (old new))
@@ -281,6 +282,16 @@ this file's verb — so the tab's whole birth is a perspective plus the
   (let* ((name (plist-get desired :name))
          (ref (plist-get desired :ref))
          (dir (plist-get ref :dir)))
+    ;; A row that went `closed = true' and came back tore its tab down, and
+    ;; `--ws-del' TOMBSTONES rather than removes: the name still carries
+    ;; `:killed-at', so `--ws-by-ref-id', `--live-ws-names' and every
+    ;; filtered iterator skip it.  Reopening it without clearing that stamp
+    ;; would write the ref and the dir onto a name that stays dead --
+    ;; `closed = false' would never actually "ensure a tab exists" (fanout
+    ;; §8).  The tombstone is cleared through workspace.el's own revive
+    ;; boundary, which keeps `:last-killed-at' so the previous close stays
+    ;; on the record.
+    (agent-repl--ws-revive name)
     (agent-repl--ws-create name dir)
     (agent-repl--ws-put name :ref ref)
     (agent-repl--ws-put name :dir dir)
