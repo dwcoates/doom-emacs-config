@@ -401,6 +401,142 @@ func TestCreateWorkspaceOneShotOpenPrRunsThePrPostPrompt(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceOneShotOpenPrPostPromptSplicesTheSelfCertifiedAndMergeQueueFlags(t *testing.T) {
+	// Arrange: both request-carried flags asked for.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+			Finish: &agentreplv1.CreateWorkspaceOneShot_OpenPr{OpenPr: &agentreplv1.CreateWorkspaceOneShotOpenPr{
+				SelfCertified:   true,
+				AddToMergeQueue: true,
+			}},
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot, open_pr) = (%v, %v), want a success", resp, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+
+	// Act: the turn concludes, firing the CICD-gated post-prompt.
+	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: both flags are spliced into the pr command the post-prompt
+	// TEXT names (internal/workspace/oneshot.go's createPrCommand, read back
+	// through openPrFollowup's own splice).
+	got := text(shim.ExpectStartTurn().GetSaid())
+	if !strings.Contains(got, "--self-certified") {
+		t.Fatalf("the one-shot's PR post-prompt = %q, want --self-certified spliced in", got)
+	}
+	if !strings.Contains(got, "--add-to-merge-queue") {
+		t.Fatalf("the one-shot's PR post-prompt = %q, want --add-to-merge-queue spliced in", got)
+	}
+}
+
+func TestOneShotSelfMergeFailureTerminalNeverEnqueuesTheMerge(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot, self_merge) = (%v, %v), want a success", resp, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+
+	// Act: the turn concludes with a FAILURE terminal, never the success
+	// marker the finish hook gates on (internal/promptqueue/lifecycle.go's
+	// runFinishHook: `how != wsm.CloseCompleted` skips the hook entirely).
+	shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Message: "boom",
+			Kind:    &conversationv1.ApiRequestFailed_Internal{Internal: &conversationv1.ApiInternal{}},
+		}},
+	}))
+
+	// Assert: the queue's own turn-ended handling has run to completion --
+	// this log fires only AFTER runFinishHook's decision is already made, so
+	// checking the merge's absence past this point is race-free rather than
+	// a timing guess.
+	d.AwaitWorkspaceLogOperation(ws.GetDir(), "daemon.promptqueue.turn_ended")
+
+	// Assert: no merge was ever enqueued for this workspace -- proven with a
+	// synchronous RPC read of current daemon state, not a probe window.
+	evict, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: ws}},
+	}))
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue(evict) = error %v, want a success carrying no_such_queued_merge", err)
+	}
+	if evict.Msg.GetError().GetNoSuchQueuedMerge() == nil {
+		t.Fatalf("UpdateMergeQueue(evict) after a one-shot failure = %v, want no_such_queued_merge: the finish action must not fire on a failure terminal", evict.Msg)
+	}
+}
+
+func TestOneShotOpenPrFinishWithTheFollowupBriefRemovedAnswersBriefMissing(t *testing.T) {
+	// Arrange: the followup brief the finish hook reads at conclusion is
+	// removed from this daemon's OWN prompts directory (a per-test copy, so
+	// deleting from it touches nothing else).
+	d := newDaemon(t, harness.Opts{})
+	if err := os.Remove(filepath.Join(d.PromptsDir, "oneshot-create-pr-then-close-followup.md")); err != nil {
+		t.Fatalf("remove the pr-followup brief: %v", err)
+	}
+	repo := harness.NewRepo(t)
+	repository := createRepositoryRef(t, d, repo)
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+			Finish: &agentreplv1.CreateWorkspaceOneShot_OpenPr{OpenPr: &agentreplv1.CreateWorkspaceOneShotOpenPr{}},
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot, open_pr) = (%v, %v), want a success", resp, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	d.WatchWorkspaceLogs(ws.GetDir())
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+
+	// Act: the turn concludes with the success marker, driving the finish
+	// hook straight into the now-missing followup brief.
+	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: `SubmitPromptError.brief_missing` is STILL an unlanded arm
+	// (daemon/ERROR-ARMS.md's own row for exactly this hook and this exact
+	// brief filename) -- the one-shot finish hook is not a live RPC a client
+	// awaits, so the intended arm surfaces only in the daemon's own log
+	// (internal/workspace/refusal.go's "daemon.refusal.typed") rather than as
+	// a response the client could read.
+	rec := d.AwaitWorkspaceLogOperation(ws.GetDir(), "daemon.refusal.typed")
+	if got := rec.Context["arm"]; got != "brief_missing" {
+		t.Fatalf("refusal arm = %v, want brief_missing", got)
+	}
+	if got := rec.Context["rpc"]; got != "SubmitPrompt" {
+		t.Fatalf("refusal rpc = %v, want SubmitPrompt (the one-shot finish hook's own rpc name per ERROR-ARMS.md)", got)
+	}
+	if reason, _ := rec.Context["reason"].(string); !strings.Contains(reason, "oneshot-create-pr-then-close-followup.md") {
+		t.Fatalf("refusal reason = %q, want it to name the missing brief file", reason)
+	}
+	d.ExpectWarnings("daemon.promptqueue.one_shot_finish")
+}
+
 // ---- Merge actions ----
 
 func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testing.T) {
@@ -439,6 +575,125 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 	// Created through CreateWorkspace (real layout facts), so the enqueue and
 	// pre-prompt admission reach none of internal/merge's WARN sites.
 	d.ExpectWarnings()
+}
+
+// ---- NukeWorkspace: kill-before-destroy ordering, and a git failure ----
+
+func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
+	// Arrange: an opened, LIVE workspace, its fake shim HUNG so KillSession's
+	// arrival is observable before it is ever answered.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.shim.Hang()
+
+	// Act: NukeWorkspace blocks on the hung KillSession
+	// (internal/workspace/teardown.go's kill() awaits it before Nuke() ever
+	// touches git), so it runs in its own goroutine.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp, err := f.d.Client().NukeWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: f.ws}))
+		if err != nil || resp.Msg.GetSuccess() == nil {
+			t.Errorf("NukeWorkspace = (%v, %v), want a success", resp, err)
+		}
+	}()
+
+	// Assert: KillSession has reached the shim -- proof of ORDER, since the
+	// fake's own log write happens on arrival, before it is gated on the
+	// hang -- while the fake git's recorded calls carry no worktree removal
+	// yet, because the daemon-side call is still blocked on the hung
+	// KillSession and nothing past it has run.
+	f.d.AwaitShimVerbOrder(f.ws.GetDir(), harness.RPCKillSession)
+	for _, c := range f.d.Git.Calls() {
+		if createArgsContainAll(c.Args, "worktree", "remove") {
+			t.Fatalf("a worktree remove already ran while KillSession is still hung: %v, want the kill to finish first", c.Args)
+		}
+	}
+
+	// Act: release the fake, letting KillSession answer and the nuke proceed.
+	f.shim.Unhang()
+	<-done
+
+	// Assert: the worktree removal now follows the completed kill.
+	found := false
+	for _, c := range f.d.Git.Calls() {
+		if createArgsContainAll(c.Args, "worktree", "remove") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("git calls = %v, want a worktree remove once the kill completed", f.d.Git.Calls())
+	}
+}
+
+func TestNukeWorkspaceAGitFailureDuringTheWorktreeRemoveAnswersGitFailed(t *testing.T) {
+	// Arrange: a registered (no live session) workspace whose worktree
+	// removal is scripted to fail.
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "nuke-fails")
+	ws := harness.Register(t, d, dir)
+	repo.ScriptFailure(repo.Dir, 1, "fatal: unable to remove worktree", "worktree", "remove")
+
+	// Act
+	resp, err := d.Client().NukeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.NukeWorkspaceRequest{Workspace: ws}))
+
+	// Assert: NukeWorkspaceError.git_failed{detail} is the LANDED arm
+	// endpoint_nuke_workspace.proto contracts for exactly this condition.
+	// EXPECTED RED: grepping internal/, no production site wraps
+	// internal/workspace/teardown.go's Nuke() git error into a
+	// workspace.Refusal naming this arm (no "git_failed" producer anywhere
+	// outside the proto and daemon/ERROR-ARMS.md's own commentary), so
+	// server.answerRefusal's asRefusal falls through to a bare Connect
+	// error today instead of this typed answer.
+	if err != nil {
+		t.Fatalf("NukeWorkspace with a scripted worktree-remove failure = transport error %v, want the git_failed arm", err)
+	}
+	failed := resp.Msg.GetError().GetGitFailed()
+	if failed == nil {
+		t.Fatalf("NukeWorkspace with a scripted worktree-remove failure = %v, want NukeWorkspaceError.git_failed", resp.Msg)
+	}
+	if !strings.Contains(failed.GetDetail(), "unable to remove worktree") {
+		t.Fatalf("git_failed.detail = %q, want git's own account of the failure", failed.GetDetail())
+	}
+	d.ExpectWarnings("NukeWorkspace")
+}
+
+// ---- CloseWorkspace: blocked by live detached work with no turn open ----
+
+func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *testing.T) {
+	// Arrange: detached work announced with NO turn EVER opened -- distinct
+	// from a turn-in-flight refusal (internal/workspace/open.go's
+	// closeBlocker: `running.Turn != nil` is checked FIRST and answers
+	// "turn_in_flight"; this test's own branch is reached only once that is
+	// nil AND live work remains, answering "live_work" instead).
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-close-1", "sleep 100")))
+	awaitLiveWork(t, f, 1)
+
+	// Act
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the exact refusal arm the proto contracts.
+	if err != nil {
+		t.Fatalf("CloseWorkspace with live detached work and no open turn = transport error %v, want the blocked arm", err)
+	}
+	if resp.Msg.GetError().GetBlocked() == nil {
+		t.Fatalf("CloseWorkspace with live detached work and no open turn = %v, want CloseWorkspaceError.blocked", resp.Msg)
+	}
+
+	// Assert: the footer's composed reason names the LIVE_WORK cause, not a
+	// turn in flight (CloseWorkspaceBlocked itself carries no field per
+	// ERROR-ARMS.md, so the evidence rides only the footer's own text).
+	fv := awaitFooter(t, f, footer, "footer closing.blocked with the live-work reason", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
+	})
+	line := fv.GetStrip().GetStatus().GetClosing().GetActivity().GetCloseBlocked().GetText()
+	if !strings.Contains(line, "detached") {
+		t.Fatalf("close-blocked activity text = %q, want it to name the live detached work, not a turn in flight", line)
+	}
+	f.d.ExpectWarnings("daemon.workspace.close")
 }
 
 // ---- create* helpers (prefixed create* so they cannot collide) ----
