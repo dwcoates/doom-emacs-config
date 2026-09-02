@@ -124,6 +124,22 @@ function bashOutput(
 }
 
 /** How the command ended: run to completion, or cut short. */
+/**
+ * The exit status a foreground result STATED, when it stated one.
+ *
+ * `returnCodeInterpretation` ("exited with code 3") is the only place a
+ * foreground call carries the shell's status. A result without one says
+ * nothing about how the command ended, which is why `termination` stays unset
+ * for it rather than being synthesized as a zero.
+ */
+function exitedCode(record: Record<string, unknown> | undefined): number | undefined {
+  const interpretation = str(record, "returnCodeInterpretation");
+  if (interpretation === undefined) return undefined;
+  const match = /(-?\d+)/.exec(interpretation);
+  if (match === null) return undefined;
+  return Number(match[1]);
+}
+
 function bashOutcome(
   record: Record<string, unknown>,
   output: conversationv1.AgentBashOutput,
@@ -149,12 +165,26 @@ function bashOutcome(
       }),
     };
   }
+  const exited = exitedCode(record);
   return {
     case: "completed",
     value: create(conversationv1.AgentBashCompletedSchema, {
       output,
-      // UNSET: no producer states a termination for a foreground command.
-      termination: undefined,
+      // UNSET unless the result STATED a status. A foreground call ordinarily
+      // carries none, and synthesizing `exited(0)` would be the shim inventing
+      // a fact nothing reported; a non-zero exit, however, IS stated -- in
+      // `returnCodeInterpretation` -- and dropping it would lose the command's
+      // own verdict on itself.
+      ...(exited === undefined
+        ? { termination: undefined }
+        : {
+            termination: create(conversationv1.AgentBashTerminationSchema, {
+              how: {
+                case: "exited",
+                value: create(conversationv1.AgentBashExitedSchema, { code: exited }),
+              },
+            }),
+          }),
     }),
   };
 }
@@ -188,7 +218,14 @@ export const bashConverter: ToolConverter = {
   },
 
   settle(call, outcome) {
-    if (outcome.isError) {
+    // A NON-ZERO EXIT IS THE COMMAND'S OWN VERDICT ON ITSELF, NOT A FAILURE OF
+    // THE CALL. The vendor marks such a result an error FOR THE MODEL (`grep`
+    // found nothing, a test failed) and states the ending in
+    // `returnCodeInterpretation`. Reading `isError` alone drew every non-zero
+    // exit as `AgentBashFailure`, which tells the user the shell broke when the
+    // shell did exactly what it was asked.
+    const exited = exitedCode(asRecord(outcome.structured));
+    if (outcome.isError && exited === undefined) {
       LOGGER.logVerbose({ tool_use_id: call.toolUseId }, "a shell call could not be performed");
       return {
         case: "bash",
@@ -207,6 +244,12 @@ export const bashConverter: ToolConverter = {
         "a command settled with no typed output; no terminal frame is produced",
       );
       return undefined;
+    }
+    if (exited !== undefined) {
+      LOGGER.logVerbose(
+        { tool_use_id: call.toolUseId, exit_code: exited },
+        "a command exited non-zero; it COMPLETED, and the code is its own verdict",
+      );
     }
     const backgroundTaskId = str(record, "backgroundTaskId");
     if (backgroundTaskId !== undefined && backgroundTaskId !== "") {
