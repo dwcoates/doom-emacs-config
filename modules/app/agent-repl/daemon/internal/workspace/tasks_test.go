@@ -50,9 +50,15 @@ func TestCreateTaskSurfacesTheRecordFailure(t *testing.T) {
 	}
 }
 
+// arrangeTask records one task the update verbs can resolve.
+func arrangeTask(f *fixture, id ids.TaskID, title string, done bool) {
+	f.db.tasks = append(f.db.tasks, wsm.Task{ID: id, Title: title, Done: done})
+}
+
 func TestUpdateTaskRetitles(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
+	arrangeTask(f, "task-1", "original", false)
 	title := "renamed"
 
 	// Act.
@@ -93,6 +99,7 @@ func TestUpdateTaskRefusesABlankRetitle(t *testing.T) {
 func TestUpdateTaskCompletesATask(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
+	arrangeTask(f, "task-1", "original", false)
 	done := true
 
 	// Act.
@@ -111,6 +118,7 @@ func TestAssignTaskRecordsTheAssignment(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
+	arrangeTask(f, "task-1", "original", false)
 	task := ids.TaskID("task-1")
 
 	// Act.
@@ -152,4 +160,82 @@ func TestAssignTaskRefusesAnUnknownWorkspace(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
+}
+
+// TestUpdateTaskRefusesAnUnknownTask pins UpdateTaskError.unknown_task: a ref
+// naming no task is an ANSWER, not a state-client error.
+func TestUpdateTaskRefusesAnUnknownTask(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	done := true
+
+	// Act.
+	err := f.verbs.UpdateTask(context.Background(), "no-such-task", wsm.TaskChange{Done: &done})
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownTask)
+}
+
+// TestUpdateTaskRefusesACompletionOfADoneTask pins UpdateTaskError.no_change:
+// set_done on a task already done moves nothing.
+func TestUpdateTaskRefusesACompletionOfADoneTask(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	arrangeTask(f, "task-1", "original", true)
+	done := true
+
+	// Act.
+	err := f.verbs.UpdateTask(context.Background(), "task-1", wsm.TaskChange{Done: &done})
+
+	// Assert.
+	asRefusal(t, err, ArmNoChange)
+}
+
+// TestUpdateTaskRefusesARetitleToTheSameTitle pins the other half of
+// no_change: a retitle to the title the task already carries.
+func TestUpdateTaskRefusesARetitleToTheSameTitle(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	arrangeTask(f, "task-1", "original", false)
+	title := "original"
+
+	// Act.
+	err := f.verbs.UpdateTask(context.Background(), "task-1", wsm.TaskChange{Title: &title})
+
+	// Assert.
+	asRefusal(t, err, ArmNoChange)
+}
+
+// TestAssignTaskRefusesAnUnknownTask pins
+// AssignWorkspaceTaskError.unknown_task, which the foreign key would otherwise
+// surface as a constraint failure.
+func TestAssignTaskRefusesAnUnknownTask(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	task := ids.TaskID("no-such-task")
+
+	// Act.
+	err := f.verbs.AssignTask(context.Background(), "w1", &task)
+
+	// Assert.
+	asRefusal(t, err, ArmUnknownTask)
+}
+
+// TestAssignTaskUnassignsWithoutResolvingATask pins that clearing an
+// assignment needs no task to exist: there is no ref to be unknown.
+func TestAssignTaskUnassignsWithoutResolvingATask(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.AssignTask(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("AssignTask(nil): %v", err)
+	}
+
+	// Assert.
+	if got, ok := f.db.assignments["w1"]; !ok || got != nil {
+		t.Fatalf("recorded assignment = %v, want an unassignment", got)
+	}
 }
