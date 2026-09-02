@@ -25,9 +25,18 @@ func (r *resolver) drawQuestion(s *wsState, agent *conversationv1.AgentId, q *co
 	}
 	at := r.place(s, agent)
 	card := &frontendv1.FeedQuestion{}
+	served, known := s.questionAsks[askID]
+	if !known {
+		served = &questionState{}
+		s.questionAsks[askID] = served
+	}
+	if agent.GetValue() != "" {
+		served.agent = agent
+	}
 
 	switch frame := q.GetResult().(type) {
 	case *conversationv1.AgentQuestion_Start:
+		served.batch = frame.Start.GetBatch()
 		card.Questions = questionItems(frame.Start.GetBatch())
 		card.State = &frontendv1.FeedQuestion_Open{Open: &frontendv1.FeedQuestionOpen{}}
 	case *conversationv1.AgentQuestion_Success:
