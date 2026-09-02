@@ -294,7 +294,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MainJS:       paths.ShimMain,
 		ShimBuildSHA: paths.ShimBuildSHA,
 		DefaultModel: os.Getenv(workspace.DefaultModelEnv),
-		Fake:         p.Contracts.Fake(),
+		Fake:         p.Contracts.Fake() || fakeShims(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		Log:          p.Surfaces,
 	})
@@ -845,6 +845,23 @@ func guidanceOrigin(tab string) (conversationv1.PromptOrigin, error) {
 		return conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED,
 			fmt.Errorf("claude-repld: a parked merge on the %q tab has no prompt origin to route guidance under", tab)
 	}
+}
+
+// FakeShimsEnv forces every shim spawn into the shim's offline scripted SDK
+// WITHOUT putting the whole stack in fake mode. It is a TEST HOOK, and the one
+// seam that lets a suite exercise a REAL vendor call site — the classifier's
+// headless run — against a live session: whole-stack fake mode makes the
+// classifier scripted too, and turning it off makes the shim spawn a vendor
+// call the guard refuses before any session exists.
+//
+// It can only turn fake ON. Nothing about it can make a production spawn less
+// fake than the contract already says it is.
+const FakeShimsEnv = "AGENT_REPL_FAKE_SHIMS"
+
+// fakeShims reports whether the shim-only fake hook is set.
+func fakeShims() bool {
+	value := os.Getenv(FakeShimsEnv)
+	return value != "" && value != "0" && !strings.EqualFold(value, "false")
 }
 
 // buildJudge builds the interjection classifier: the scripted one under the

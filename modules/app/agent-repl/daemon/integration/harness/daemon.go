@@ -326,6 +326,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	// NoFake therefore withholds it deliberately.
 	if !opts.NoFake {
 		env = append(env, "AGENT_REPL_CLAUDE_BIN="+fakeClaude)
+	} else {
+		// The SHIMS stay fake even with the whole stack's fake mode off:
+		// --node names the fake shim, but the daemon cannot know that and its
+		// vendor guard refuses a non-fake spawn before any session exists.
+		// Without this, NoFake could never reach a REAL vendor call site that
+		// needs a live session — which is the only thing NoFake is for.
+		env = append(env, "AGENT_REPL_FAKE_SHIMS=1")
 	}
 	env = append(env, opts.ExtraEnv...)
 
