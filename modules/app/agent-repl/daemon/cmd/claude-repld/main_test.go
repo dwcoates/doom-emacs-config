@@ -89,6 +89,7 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		"--idle-cutoff", "45m",
 		"--pprof", "/tmp/pprof.sock",
 		"--self-repo", "/checkout",
+		"--feed-tail-retention", "16",
 	}
 
 	// Act.
@@ -123,6 +124,8 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 		t.Fatalf("opts.pprof = %q", opts.pprof)
 	case opts.selfRepo != "/checkout":
 		t.Fatalf("opts.selfRepo = %q", opts.selfRepo)
+	case opts.feedTailRetention != 16:
+		t.Fatalf("opts.feedTailRetention = %d", opts.feedTailRetention)
 	}
 }
 
@@ -148,5 +151,60 @@ func TestTheGraphNamesEveryUnwiredCollaborator(t *testing.T) {
 		if !strings.Contains(err.Error(), u) {
 			t.Fatalf("the refusal does not name %q: %v", u, err)
 		}
+	}
+}
+
+// TestTheFeedTailRetentionEnvironmentKnobBeatsTheFlag pins the precedence a
+// test relies on: a suite sets the environment and must not also have to know
+// how the daemon under it was launched.
+func TestTheFeedTailRetentionEnvironmentKnobBeatsTheFlag(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveFeedTailRetention(4096, "3")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveFeedTailRetention: %v", err)
+	}
+	if got != 3 {
+		t.Fatalf("retention = %d, want the environment's 3", got)
+	}
+}
+
+// TestTheFeedTailRetentionKnobRefusesANonNumber covers the loud failure: a knob
+// that silently did nothing would make the suite it was set for lie.
+func TestTheFeedTailRetentionKnobRefusesANonNumber(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFeedTailRetention(0, "lots")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFeedTailRetention with a non-numeric knob = nil, want a refusal")
+	}
+}
+
+// TestTheFeedTailRetentionKnobRefusesANonPositiveNumber covers the other
+// malformed shape: zero rows retains nothing and is not what any caller means.
+func TestTheFeedTailRetentionKnobRefusesANonPositiveNumber(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFeedTailRetention(0, "0")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFeedTailRetention with a zero knob = nil, want a refusal")
+	}
+}
+
+// TestTheFeedTailRetentionDefaultsToTheResolversOwn covers the ordinary boot:
+// neither the flag nor the knob is set, and zero means the resolver decides.
+func TestTheFeedTailRetentionDefaultsToTheResolversOwn(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveFeedTailRetention(0, "")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveFeedTailRetention: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("retention = %d, want zero so the resolver's own default stands", got)
 	}
 }

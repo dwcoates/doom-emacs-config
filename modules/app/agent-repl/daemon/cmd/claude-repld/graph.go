@@ -238,6 +238,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// servable source; the resolver refuses loudly and names what is
 		// missing rather than drawing a broken image.
 		ResolveImage: feed.UnproducedImageResolver(log),
+		// Zero leaves the resolver's own DefaultTailRetention in force; the
+		// flag and its environment knob are what make token_expired reachable.
+		TailRetention: p.Opts.feedTailRetention,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
