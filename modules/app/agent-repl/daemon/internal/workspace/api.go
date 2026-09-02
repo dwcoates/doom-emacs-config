@@ -231,6 +231,11 @@ type HostRelay interface {
 
 // Deps are the verbs' collaborators.
 type Deps struct {
+	// Instance is THIS DAEMON's identity. Registration claims serving
+	// ownership of every workspace under it, which is what a handover hands
+	// over: without a claim the outgoing daemon serves nothing as far as the
+	// durable record is concerned, and transfers nothing.
+	Instance ids.InstanceID
 	DB       wsm.DB
 	Git      gitclient.Git
 	Accounts account.Resolver
