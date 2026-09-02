@@ -34,7 +34,13 @@ func runRelaunch(t *testing.T, h *harness, ws ids.WorkspaceID, reason RelaunchRe
 	}
 }
 
-func TestTheEngineGoesPrelaunchThenHoldThenStandDownThenReapThenResume(t *testing.T) {
+// TestTheEngineGoesHoldThenStandDownThenReapThenLaunchThenResume pins the
+// INTERIM order (see RelaunchShim's comment): the replacement is launched only
+// after the old shim is reaped, because the shim takes the workspace lock at
+// startup and a second process for one workspace cannot come up beside it.
+// When the shim moves that lock into StartSession this assertion goes back to
+// prelaunch-first, along with the one call site the comment names.
+func TestTheEngineGoesHoldThenStandDownThenReapThenLaunchThenResume(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -53,12 +59,15 @@ func TestTheEngineGoesPrelaunchThenHoldThenStandDownThenReapThenResume(t *testin
 	if prelaunch < 0 || kill < 0 || install < 0 || resume < 0 {
 		t.Fatalf("steps = %v, want the whole engine", taken)
 	}
-	if !(prelaunch < kill && kill < install && install < resume) {
-		t.Fatalf("steps = %v, want prelaunch, stand-down, install, resume in order", taken)
+	if !(kill < prelaunch && prelaunch < install && install < resume) {
+		t.Fatalf("steps = %v, want stand-down, launch, install, resume in order", taken)
 	}
 }
 
-func TestThePrelaunchedShimIsBroughtUpBeforeTheOldOneIsTouched(t *testing.T) {
+// TestTheReplacementIsLaunchedOnlyOnceTheOldShimIsReaped is the same interim
+// order from the other side: at most one shim process per workspace exists at
+// any instant, which is what the workspace lock enforces anyway.
+func TestTheReplacementIsLaunchedOnlyOnceTheOldShimIsReaped(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
@@ -74,8 +83,8 @@ func TestThePrelaunchedShimIsBroughtUpBeforeTheOldOneIsTouched(t *testing.T) {
 		t.Fatalf("stand-down calls on the old shim = %d, want exactly one", len(old.KillRequests()))
 	}
 	taken := h.order.Taken()
-	if indexOf(taken, "prelaunch") > indexOf(taken, "kill_session") {
-		t.Fatalf("steps = %v, want the inert prelaunch first", taken)
+	if indexOf(taken, "prelaunch") < indexOf(taken, "kill_session") {
+		t.Fatalf("steps = %v, want the replacement launched only after the stand-down", taken)
 	}
 }
 
@@ -333,22 +342,26 @@ func TestTheNewShimsPidIsRecordedForTheNextManifest(t *testing.T) {
 	}
 }
 
-func TestAPrelaunchFailureLeavesTheOldShimUntouched(t *testing.T) {
+// TestALaunchFailureReleasesTheRestartHold covers the interim order's own
+// failure mode: the old shim is already reaped by the time the replacement is
+// launched, so "leaves the old shim untouched" is no longer expressible. What
+// still must hold is that a failed launch does not strand the workspace behind
+// the restart-pending hold with nothing coming.
+func TestALaunchFailureReleasesTheRestartHold(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
-	old := h.fleet.live[ws]
 	h.fleet.prelaunchErr[ws] = errFake
 
 	// Act
-	err := h.c.RelaunchShim(context.Background(), ws, ReasonShimChanged)
+	err := runRelaunch(t, h, ws, ReasonShimChanged)
 
 	// Assert
 	if err == nil {
 		t.Fatalf("RelaunchShim succeeded with no shim to swap onto")
 	}
-	if len(old.KillRequests()) != 0 || len(old.ForceKills()) != 0 {
-		t.Fatalf("the old shim was touched after a failed prelaunch")
+	if _, held, dbErr := h.db.Lease(context.Background(), ws); dbErr != nil || held {
+		t.Fatalf("lease held = %v (err %v), want the restart hold released after a failed launch", held, dbErr)
 	}
 }
 

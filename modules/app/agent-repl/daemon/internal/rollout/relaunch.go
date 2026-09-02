@@ -57,17 +57,25 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 
 	old, hasOld := c.deps.Shims.Client(ws)
 
-	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
-	if err != nil {
-		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
-		return fmt.Errorf("rollout: relaunch %q: prelaunch: %w", ws, err)
-	}
-	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
-
-	if err := c.awaitFreeForever(ctx, ws, opRelaunch, fields); err != nil {
-		return err
-	}
-
+	// THE LAUNCH IS SEQUENTIAL, NOT A PRELAUNCH -- an interim order, recorded.
+	//
+	// THE CONFLICT: this engine was specified to launch the new shim BESIDE
+	// the running one and swap at freeness, but the shim takes
+	// workspace-<hash>.lock with flock(LOCK_EX) AT STARTUP, so a second
+	// process for one workspace blocks in flock and never listens; the
+	// daemon's dial ladder then retries forever and the restart never
+	// answers. The two ways out are (a) the shim takes the workspace lock
+	// inside StartSession, which restores the overlap, or (b) this order:
+	// wait for freeness, hold intake, stand the old shim DOWN and reap it,
+	// and only then launch. The project lead has ruled (a), and this is (b)
+	// until the shim carries it. FLIPPING BACK IS ONE SITE: move the
+	// Prelaunch call above awaitFreeForever again and delete this comment.
+	// THE HOLD IS TAKEN BEFORE THE WAIT, not after it. The wait is the window
+	// the hold exists for: a graceful restart asked for while a turn runs
+	// waits out that turn, and every prompt arriving meanwhile would otherwise
+	// be delivered to the very shim about to be stood down. Held first, the
+	// intake queues under `build_refresh` for the whole wait and drains when
+	// the replacement is ready.
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
 	if err != nil {
 		c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
@@ -75,6 +83,11 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	}
 	fields["lease"] = string(lease.ID)
 	c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
+
+	if err := c.awaitFreeForever(ctx, ws, opRelaunch, fields); err != nil {
+		c.release(ctx, ws, lease.ID, fields)
+		return err
+	}
 
 	if hasOld {
 		if err := c.standDown(ctx, old, ws, reason, fields); err != nil {
@@ -84,6 +97,16 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	} else {
 		c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
 	}
+
+	// THE REAP HAS PASSED, so the workspace lock is free and the new shim can
+	// take it. Nothing of the old process survives this line.
+	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
+	if err != nil {
+		c.release(ctx, ws, lease.ID, fields)
+		c.log.Error(opRelaunch, "the replacement shim did not come up", withCause(fields, err))
+		return fmt.Errorf("rollout: relaunch %q: launch the replacement: %w", ws, err)
+	}
+	c.log.Debug(opRelaunch, "launched the replacement shim once the old one was reaped", fields)
 
 	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
 		c.release(ctx, ws, lease.ID, fields)

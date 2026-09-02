@@ -621,11 +621,19 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
 	}
-	// A forced restart interrupts first: KillSession arrives WITHOUT waiting
-	// for the turn's own terminal frame.
-	killed := f.shim.ExpectKillSession()
-	if !killed.GetForce() {
-		t.Fatalf("KillSession.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
+	// A forced restart interrupts THE TURN first -- KillTurn{force:true} --
+	// which is what lets the relaunch engine's freeness wait complete without
+	// the turn's own terminal frame. The stand-down that follows is still the
+	// engine's GRACEFUL KillSession: the force is the caller's verdict on the
+	// running turn, never on the session's own shutdown.
+	killedTurn := f.shim.ExpectKillTurn()
+	if !killedTurn.GetForce() {
+		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
+	}
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
+	if killed.GetForce() {
+		t.Fatalf("KillSession.force = true, want the engine's graceful stand-down")
 	}
 }
 

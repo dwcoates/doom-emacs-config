@@ -88,11 +88,14 @@ type server struct {
 	agents   *hub[agentFrame]
 	bashes   *hub[bashFrame]
 
-	mu       sync.Mutex
-	answers  map[string][]scriptedAnswer
-	hung     bool
-	unhang   chan struct{}
-	vendorID string
+	mu      sync.Mutex
+	answers map[string][]scriptedAnswer
+	hung    bool
+	unhang  chan struct{}
+	// sessionKilled records an accepted KillSession: the process exits once
+	// its answer has been written.
+	sessionKilled bool
+	vendorID      string
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
@@ -421,6 +424,18 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 	if resp, done, err := scripted[shimv1.KillTurnResponse, *shimv1.KillTurnResponse](s, RPCKillTurn); done {
 		return resp, err
 	}
+	// A KILLED TURN ENDS ON THE STREAM, as the real shim's does: the daemon
+	// learns a turn is over from the agent's terminal frame and from nothing
+	// else, so a fake that only ANSWERED would leave every waiter on freeness
+	// blocked forever.
+	s.agents.publish(agentFrame{agent: MainAgentID, frame: &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: MainAgentID},
+		Result: &conversationv1.AgentFrame_Success{Success: &conversationv1.AgentSuccess{
+			Outcome: &conversationv1.AgentSuccess_Interrupted{Interrupted: &conversationv1.AgentInterrupted{
+				Cause: &conversationv1.AgentInterrupted_ByUser{ByUser: &conversationv1.AgentInterruptedByUser{}},
+			}},
+		}},
+	}})
 	return connect.NewResponse(&shimv1.KillTurnResponse{
 		Result: &shimv1.KillTurnResponse_Success{Success: &shimv1.KillTurnSuccess{
 			Killed: &conversationv1.TurnKilled{How: &conversationv1.TurnKilled_AgentOnly{AgentOnly: &conversationv1.TurnKilledAgentOnly{}}},
@@ -428,13 +443,29 @@ func (s *server) KillTurn(ctx context.Context, req *connect.Request[shimv1.KillT
 	}), nil
 }
 
+// killedSession reports that a KillSession was ACCEPTED, which is the process's
+// cue to exit once the answer is written.
+func (s *server) killedSession() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessionKilled
+}
+
 func (s *server) KillSession(ctx context.Context, req *connect.Request[shimv1.KillSessionRequest]) (*connect.Response[shimv1.KillSessionResponse], error) {
 	if err := s.enter(ctx, RPCKillSession, req.Msg); err != nil {
 		return nil, err
 	}
 	if resp, done, err := scripted[shimv1.KillSessionResponse, *shimv1.KillSessionResponse](s, RPCKillSession); done {
+		if err == nil && resp.Msg.GetSuccess() != nil {
+			s.mu.Lock()
+			s.sessionKilled = true
+			s.mu.Unlock()
+		}
 		return resp, err
 	}
+	s.mu.Lock()
+	s.sessionKilled = true
+	s.mu.Unlock()
 	return connect.NewResponse(&shimv1.KillSessionResponse{
 		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{
 			Closed: &conversationv1.SessionKilled{How: &conversationv1.SessionKilled_Idle{Idle: &conversationv1.SessionKilledIdle{}}},
