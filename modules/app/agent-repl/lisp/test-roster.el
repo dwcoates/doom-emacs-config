@@ -238,6 +238,30 @@ whose calls are the observation."
       ;; Assert
       (should (equal (agent-repl-test-roster--tabs) '("fix-login"))))))
 
+(ert-deftest agent-repl-test-roster-a-new-tab-carries-its-project-dir ()
+  "A new tab carries `:project-dir', taken from the row's ref, on its own.
+`agent-repl--ws-create' seeds `:project-dir' only when persp-mode hands
+back a real perspective object, so the inner stub here creates the entry
+WITHOUT one -- the persp-absent reality.  `:project-dir' is the identity
+key the durable log sink, history, the composer's attachment root, panels
+and magit all read, and a tab born without one is a `(no repo)' stub for
+the rest of its life."
+  ;; Arrange
+  (agent-repl-test-roster--with-editor
+    (cl-letf (((symbol-function 'agent-repl--ws-create)
+               (lambda (ws &optional _dir)
+                 (push ws agent-repl-test-roster--created)
+                 (agent-repl--ws-put ws :ws-id ws)
+                 ws)))
+      (let ((roster (agent-repl-test-roster--roster
+                     :sections (list (agent-repl-test-roster--section
+                                      "repo" (list (agent-repl-test-roster--row
+                                                    "a" "fix-login" :ready)))))))
+        ;; Act
+        (agent-repl-roster-apply roster)
+        ;; Assert
+        (should (equal (agent-repl--ws-get "fix-login" :project-dir) "/w/a"))))))
+
 (ert-deftest agent-repl-test-roster-a-new-tab-subscribes-its-host-stream ()
   "Opening a tab opens that workspace's WatchHostWorkspace subscription."
   ;; Arrange
