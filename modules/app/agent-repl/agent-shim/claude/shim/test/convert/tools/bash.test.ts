@@ -222,6 +222,60 @@ describe("bashConverter.settle", () => {
     );
   });
 
+  it("says COMPLETED with the exit code when a non-zero run is marked an error", () => {
+    // A NON-ZERO EXIT IS THE COMMAND'S OWN VERDICT ON ITSELF. The vendor marks
+    // the result an error FOR THE MODEL and states the ending in
+    // `returnCodeInterpretation`; reading `isError` alone drew every such run
+    // as `AgentBashFailure`, which tells the user the shell broke.
+    // Arrange.
+    const pending = call({ command: "exit 3" });
+    const result = {
+      stdout: "",
+      stderr: "boom\n",
+      interrupted: false,
+      returnCodeInterpretation: "exited with code 3",
+    };
+
+    // Act.
+    const success = successOf(bashConverter.settle(pending, outcome(result, true)));
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(success.outcome.case).toBe("completed");
+    expect(completed.termination?.how.value).toEqual(
+      create(conversationv1.AgentBashExitedSchema, { code: 3 }),
+    );
+  });
+
+  it("leaves termination UNSET when the result states no status at all", () => {
+    // The honest shape for the foreground path: nothing reported how the shell
+    // ended, and a synthesized `exited(0)` would be a fact the shim invented.
+    // Arrange.
+    const pending = call({ command: "echo hi" });
+
+    // Act.
+    const success = successOf(
+      bashConverter.settle(pending, outcome({ stdout: "hi\n", stderr: "", interrupted: false })),
+    );
+
+    // Assert.
+    const completed = success.outcome.value as conversationv1.AgentBashCompleted;
+    expect(completed.termination).toBeUndefined();
+  });
+
+  it("still says FAILED when an errored result states no exit status", () => {
+    // The coverage the change above must not erase: a call that could not be
+    // performed at all has no status to report, and it is still a failure.
+    // Arrange.
+    const pending = call({ command: "nope" });
+
+    // Act.
+    const item = bashConverter.settle(pending, outcome({ stdout: "", stderr: "" }, true));
+
+    // Assert.
+    expect((item?.value as conversationv1.AgentBash).result.case).toBe("failure");
+  });
+
   it("produces NO frame for IMAGE output, which the vendor gives no media type for", () => {
     // Arrange.
     const pending = call({ command: "screencapture -" });
