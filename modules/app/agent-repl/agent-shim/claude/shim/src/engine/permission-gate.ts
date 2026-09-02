@@ -40,7 +40,7 @@ const LOGGER = bindLog({ component: "shim-engine-permission", operation: "shim.e
 export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
 
 /** How a joined multi-select answer is spelled, in both directions. */
-export const ANSWER_JOIN = ", ";
+const ANSWER_JOIN = ", ";
 
 /**
  * How many denied calls are remembered.
@@ -49,7 +49,7 @@ export const ANSWER_JOIN = ", ";
  * a denial, so it has to outlive one message and nothing more; the bound is
  * what keeps it from becoming a second history of the session.
  */
-export const DENIED_MEMORY = 256;
+const DENIED_MEMORY = 256;
 
 // ---------------------------------------------------------------------------
 // permission mode, both ways
@@ -404,7 +404,7 @@ export function validateAnswers(
 // ---------------------------------------------------------------------------
 
 /** What the gate needs from the session around it. */
-export interface PermissionGateDeps {
+interface PermissionGateDeps {
   /** The book every gate frame lands on. */
   mainAgentId(): conversationv1.AgentId;
   /** Record a frame. Enqueued, never awaited: the vendor is blocked on us. */
@@ -439,7 +439,7 @@ interface PendingPermission extends PendingBase {
 type Pending = PendingQuestion | PendingPermission;
 
 /** Why an answer or decision could not be applied. */
-export type AnswerOutcome = "delivered" | "no_open_ask" | "answer_mismatch";
+type AnswerOutcome = "delivered" | "no_open_ask" | "answer_mismatch";
 
 /**
  * The one vendor gate.

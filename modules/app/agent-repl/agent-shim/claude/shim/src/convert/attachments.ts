@@ -79,7 +79,7 @@ export function diagnosticSeverity(literal: unknown): conversationv1.AgentDiagno
 }
 
 /** One file's findings, in the vendor's order. */
-export function diagnosticsFile(entry: unknown): conversationv1.AgentDiagnosticsFile | undefined {
+function diagnosticsFile(entry: unknown): conversationv1.AgentDiagnosticsFile | undefined {
   const record = entry as Record<string, unknown> | undefined;
   const path = record?.uri;
   if (typeof path !== "string" || path === "") return undefined;
@@ -112,7 +112,7 @@ export function diagnosticsFile(entry: unknown): conversationv1.AgentDiagnostics
  * the terminal, and the consumer applies it to the settled card. No frame ever
  * says "none are coming"; absence is simply no such frame.
  */
-export function convertDiagnostics(
+function convertDiagnostics(
   record: AttachmentRecord,
   context: FoldContext,
   unit: conversationv1.AgentActivityId,
@@ -166,7 +166,7 @@ export function convertDiagnostics(
  * Surfaced so the user can see what shaped the agent's behavior. The unit has no
  * lifecycle: one record, whole.
  */
-export function convertContextInjected(
+function convertContextInjected(
   record: AttachmentRecord,
   context: FoldContext,
   activityId: conversationv1.AgentActivityId,
@@ -277,7 +277,7 @@ export function convertContextInjected(
  * The producer composes the text and no structured figure rides the record, so
  * none is invented.
  */
-export function convertContextBudgetWarning(
+function convertContextBudgetWarning(
   record: AttachmentRecord,
   context: FoldContext,
 ): readonly PersistEntry[] {

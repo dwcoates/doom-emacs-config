@@ -46,7 +46,7 @@ const LOGGER = bindLog({ component: "shim-convert-detached", operation: "shim.co
 export type DetachCause = "requested" | "by_user" | "timed_out";
 
 /** The cause arm, with the timeout figure the timed-out arm carries. */
-export function detachCause(
+function detachCause(
   cause: DetachCause,
   timeoutMs: number | undefined,
 ): conversationv1.DetachedWorkDetached["cause"] {
@@ -68,7 +68,7 @@ export function detachCause(
 }
 
 /** Where a detached unit's output is accumulating, and whether it may be opened. */
-export function detachedOutput(path: string, readable: boolean): conversationv1.DetachedWorkOutput {
+function detachedOutput(path: string, readable: boolean): conversationv1.DetachedWorkOutput {
   return create(conversationv1.DetachedWorkOutputSchema, {
     path,
     readability: readable
@@ -81,7 +81,7 @@ export function detachedOutput(path: string, readable: boolean): conversationv1.
 }
 
 /** What one detachment announcement says. */
-export interface DetachmentFacts {
+interface DetachmentFacts {
   /**
    * The in-turn unit it detached FROM — and, by the same bytes, the HANDLE the
    * work is addressed by.
@@ -110,7 +110,7 @@ export interface DetachmentFacts {
  * before it backgrounds, so it always has an item it detached FROM; it simply
  * never has a foreground running phase.
  */
-export function detachmentEntry(
+function detachmentEntry(
   context: FoldContext,
   agentId: conversationv1.AgentId,
   vendorUuid: string,
