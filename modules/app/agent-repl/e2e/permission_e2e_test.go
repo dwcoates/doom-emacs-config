@@ -62,24 +62,24 @@ import (
 // helpers do for the rpcs it already wraps.
 // ---------------------------------------------------------------------------
 
-// newPermissionWorld builds one World, registers a fresh (scripted fake-git)
+// pmNewPermissionWorld builds one World, registers a fresh (scripted fake-git)
 // repository as a workspace, and opens it — the precondition every
 // permission test shares. Real git is out of scope for this suite (project
 // lead ruling, 2026-09-02): every external dependency here is mocked — the
 // scripted fake `git` the harness installs by default, and the fake SDK
 // behind the real shim's `--fake` flag.
-func newPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
+func pmNewPermissionWorld(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	t.Helper()
 	w := NewWorld(t, WorldOpts{})
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
-	openWorkspace(t, w, ws)
+	pmOpenWorkspace(t, w, ws)
 	return w, ws
 }
 
-// openWorkspace sends OpenWorkspace, which is what spawns the real shim
+// pmOpenWorkspace sends OpenWorkspace, which is what spawns the real shim
 // session a permission test needs before it can SubmitPrompt.
-func openWorkspace(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
+func pmOpenWorkspace(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	t.Helper()
 	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
 	if err != nil {
@@ -90,11 +90,11 @@ func openWorkspace(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) {
 	}
 }
 
-// openFeedWatch opens the workspace's root feed and answers both the current
+// pmOpenFeedWatch opens the workspace's root feed and answers both the current
 // page and a live tail from exactly where the page ends — the same pattern
 // world_test.go's AwaitTurnEnded uses, generalized so this file's own
 // predicates are not limited to "turn ended".
-func openFeedWatch(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) (*frontendv1.FeedPageSuccess, *harness.Stream[*frontendv1.FeedRow]) {
+func pmOpenFeedWatch(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) (*frontendv1.FeedPageSuccess, *harness.Stream[*frontendv1.FeedRow]) {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -107,15 +107,15 @@ func openFeedWatch(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) (*front
 	return success.GetPage().GetSuccess(), w.WatchFeedOn(w.Client(), success.GetWatch())
 }
 
-// awaitFeedRow opens the feed and answers the first row (already on the
+// pmAwaitFeedRow opens the feed and answers the first row (already on the
 // current page, or arriving on the tail) satisfying pred. Used whenever a
 // permission test needs a row whose CURRENT state is stable until the test
 // itself changes it (an open ask stays open until answered; a settled row
-// stays settled) — see watchFeedFromNow for the case where the sequence of
+// stays settled) — see pmWatchFeedFromNow for the case where the sequence of
 // pushes, not merely the current value, is the fact under test.
-func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func pmAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
-	page, stream := openFeedWatch(t, w, ws)
+	page, stream := pmOpenFeedWatch(t, w, ws)
 	defer stream.Close()
 	for _, row := range page.GetRows() {
 		if pred(row) {
@@ -125,25 +125,25 @@ func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what str
 	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
 }
 
-// watchFeedFromNow opens a fresh feed watch and answers only the live
+// pmWatchFeedFromNow opens a fresh feed watch and answers only the live
 // stream, discarding the current page. A feed row is upserted by id — a
 // watch started AFTER the fact only ever sees an id's final value — so a
 // test that must prove something never happened along the way (an ask was
 // never open; a turn never ended early) has to be watching before the event
 // that might produce it, not merely check the outcome afterward.
-func watchFeedFromNow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *harness.Stream[*frontendv1.FeedRow] {
+func pmWatchFeedFromNow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) *harness.Stream[*frontendv1.FeedRow] {
 	t.Helper()
-	_, stream := openFeedWatch(t, w, ws)
+	_, stream := pmOpenFeedWatch(t, w, ws)
 	return stream
 }
 
-// expectNoTurnEndedPush asserts that no FeedTurnEnded row for turn arrives on
+// pmExpectNoTurnEndedPush asserts that no FeedTurnEnded row for turn arrives on
 // stream within probe. A negative assertion, so it necessarily waits out a
 // bound (harness.ProbeWindow, the suite's existing convention for this)
 // rather than synchronizing on an event — mirrors harness.ExpectNoPush, but
 // filtered to one turn, since unrelated pushes (a running-tool progress beat)
 // are expected and must not trip it.
-func expectNoTurnEndedPush(t *testing.T, ctx context.Context, stream *harness.Stream[*frontendv1.FeedRow], turn *conversationv1.TurnId, probe time.Duration, what string) {
+func pmExpectNoTurnEndedPush(t *testing.T, ctx context.Context, stream *harness.Stream[*frontendv1.FeedRow], turn *conversationv1.TurnId, probe time.Duration, what string) {
 	t.Helper()
 	deadline, cancel := context.WithTimeout(ctx, probe)
 	defer cancel()
@@ -234,9 +234,9 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			w, ws := newPermissionWorld(t)
+			w, ws := pmNewPermissionWorld(t)
 			turn := SubmitPrompt(t, w, ws, tc.prompt)
-			askRow := awaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
+			askRow := pmAwaitFeedRow(t, w, ws, "the open permission ask", func(r *frontendv1.FeedRow) bool {
 				return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
 			})
 			// support.ts: "askPermission always offers one" (a standing
@@ -253,7 +253,7 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 			}
 
 			// Assert: the card settles with the matching verdict.
-			answeredRow := awaitFeedRow(t, w, ws, "the answered permission card", func(r *frontendv1.FeedRow) bool {
+			answeredRow := pmAwaitFeedRow(t, w, ws, "the answered permission card", func(r *frontendv1.FeedRow) bool {
 				return r.GetId().GetValue() == askRow.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
 			})
 			answer := answeredRow.GetPermission().GetAnswered()
@@ -273,7 +273,7 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 			}
 
 			// Assert: the gated Bash tool call settles under the SAME turn.
-			toolRow := awaitFeedRow(t, w, ws, "the gated Bash tool call's settled state", func(r *frontendv1.FeedRow) bool {
+			toolRow := pmAwaitFeedRow(t, w, ws, "the gated Bash tool call's settled state", func(r *frontendv1.FeedRow) bool {
 				call := r.GetActivity().GetSimpleToolCall()
 				return r.GetTurn().GetValue() == turn.GetValue() && call != nil && (call.GetReturned() != nil || call.GetDenied() != nil)
 			})
@@ -313,11 +313,11 @@ func TestPermissionAskAnsweredArms(t *testing.T) {
 // only denial that never had an open ask: a consumer sees `start` and this
 // in one frame, or this alone". This test watches the feed from BEFORE the
 // prompt is submitted so it can prove the open state was never observed —
-// not merely absent from the final snapshot (see watchFeedFromNow).
+// not merely absent from the final snapshot (see pmWatchFeedFromNow).
 func TestPermissionDeniedByPolicy(t *testing.T) {
 	// Arrange
-	w, ws := newPermissionWorld(t)
-	stream := watchFeedFromNow(t, w, ws)
+	w, ws := pmNewPermissionWorld(t)
+	stream := pmWatchFeedFromNow(t, w, ws)
 	defer stream.Close()
 
 	// Act
@@ -368,9 +368,9 @@ func TestPermissionDeniedByPolicy(t *testing.T) {
 // gate").
 func TestPermissionUndecidableParked(t *testing.T) {
 	// Arrange
-	w, ws := newPermissionWorld(t)
+	w, ws := pmNewPermissionWorld(t)
 	turn := SubmitPrompt(t, w, ws, "!perm-hold")
-	askRow := awaitFeedRow(t, w, ws, "the parked permission ask", func(r *frontendv1.FeedRow) bool {
+	askRow := pmAwaitFeedRow(t, w, ws, "the parked permission ask", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
 	})
 	if askRow.GetPermission().GetOpen() == nil {
@@ -378,8 +378,8 @@ func TestPermissionUndecidableParked(t *testing.T) {
 	}
 
 	// Assert: no terminal arrives while the ask stands.
-	probeStream := watchFeedFromNow(t, w, ws)
-	expectNoTurnEndedPush(t, w.Ctx(), probeStream, turn, harness.ProbeWindow, "the turn ending while its ask is still parked")
+	probeStream := pmWatchFeedFromNow(t, w, ws)
+	pmExpectNoTurnEndedPush(t, w.Ctx(), probeStream, turn, harness.ProbeWindow, "the turn ending while its ask is still parked")
 	probeStream.Close()
 
 	// Act: release the park.
@@ -412,7 +412,7 @@ func TestPermissionUndecidableParked(t *testing.T) {
 // is what delivery takes)".
 func TestHeldTurnGate(t *testing.T) {
 	// Arrange
-	w, ws := newPermissionWorld(t)
+	w, ws := pmNewPermissionWorld(t)
 	turn1 := SubmitPrompt(t, w, ws, "!hold")
 	holds := w.WatchHolds(ws)
 	defer holds.Close()
@@ -484,7 +484,7 @@ func TestHeldTurnGate(t *testing.T) {
 // on the topbar's permission-mode picker (frontend/v1/topbar.proto).
 func TestPermissionModeChangedMidSession(t *testing.T) {
 	// Arrange
-	w, ws := newPermissionWorld(t)
+	w, ws := pmNewPermissionWorld(t)
 	topbar := w.WatchTopbar(ws)
 	defer topbar.Close()
 	initial := harness.AwaitView(t, w.Ctx(), topbar, "the initial permission-mode picker", func(v *frontendv1.TopbarView) bool {
@@ -493,7 +493,7 @@ func TestPermissionModeChangedMidSession(t *testing.T) {
 	beforeMode := initial.GetPermissionModePicker().GetCurrent().GetMode()
 
 	turn := SubmitPrompt(t, w, ws, "!perm-allow-standing-mode")
-	askRow := awaitFeedRow(t, w, ws, "the mode-offering permission ask", func(r *frontendv1.FeedRow) bool {
+	askRow := pmAwaitFeedRow(t, w, ws, "the mode-offering permission ask", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue() && r.GetPermission().GetOpen() != nil
 	})
 	if askRow.GetPermission().GetStandingOffered() == nil {
