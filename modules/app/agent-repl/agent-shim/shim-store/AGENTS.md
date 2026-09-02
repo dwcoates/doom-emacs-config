@@ -209,9 +209,25 @@ transaction that begins DEFERRED.
   `WatchAgentSession` consumes it, and an unknown, consumed, or
   previous-process token is refused. Tokens live in memory and do not survive a
   restart — "you already used this" and "the store restarted" are the same
-  recovery for the caller: re-open. **An agent with no rows is a legal EMPTY
-  book** (empty page, floor, valid token); "unknown agent" is only an empty
-  agent value.
+  recovery for the caller: re-open. **An agent the store HAS HEARD OF with no
+  rows is a legal EMPTY book** (empty page, floor, valid token) — a freshly
+  spawned subagent has an `agent` row from its spawn frame before it says a
+  word, so it is openable and watchable immediately.
+- **AN AGENT ID THE STORE HOLDS NO `agent` ROW FOR NAMES NO BOOK AND IS
+  REFUSED** with `OpenAgentSessionFailure.unknown_agent` (landing 7), never
+  served an empty page; the shim maps it to `CodeNotFound`. Serving it told a
+  caller with a stale or mistyped target exactly what it told a caller watching
+  a live agent that had not spoken yet, so the two were indistinguishable and
+  the mistake looked like patience. THE `agent` TABLE IS THE REGISTER that
+  separates them — every page-line write ensures a row there, so "no row" is
+  "never heard of" — and it is asked BEFORE the pointer, because a
+  `known_through` against a book that does not exist is stale only as a
+  consequence, and `stale_pointer` would send the caller off to repaint a book
+  nobody ever kept. It is its own refusal class (`db.ErrUnknownAgent`) with its
+  own site and arm, both spelled `unknown_agent`: the request is well formed and
+  respelling it cannot help, so it is neither `invalid_request` nor a race to
+  retry. `ReadAgentPage` is unchanged — it always carries a pointer, which is
+  already stale for a book that does not exist.
 - The watch pin is the global `write_seq` at the moment the page was read,
   taken INSIDE that read transaction. `WatchAgentSession` then **subscribes to
   the fan-out BEFORE running the replay query** and dedupes by `write_seq`, so
@@ -267,8 +283,9 @@ arms are derived from, and each one is logged once with `refusal_site`.
 `cursor_file_id_empty`, `agent_id_empty`, `page_size_zero`, `pointer_empty`,
 `token_empty`, `unknown_watch_token`, `file_id_empty`, `run_empty`,
 `unknown_bash_run`, `store_refused_request`, `upsert_changes_identity`,
-`page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `database_failure`,
-`workflow_not_implemented`, `watch_buffer_overflow`, `listen_occupied`.
+`page_book_mismatch`, `residue_raw_unset`, `stale_pointer`, `unknown_agent`,
+`database_failure`, `workflow_not_implemented`, `watch_buffer_overflow`,
+`listen_occupied`.
 
 - **THE SITE IS NOT THE ARM.** A site says which of the store's many checks said
   no — the vocabulary an operator counts by — while the failure's `kind` arm says
@@ -297,7 +314,9 @@ arms are derived from, and each one is logged once with `refusal_site`.
   the site and the field for anything INSIDE one come up from `internal/db`
   through the refusal it returns. Per verb: `WriteBatch`
   invalid_request|storage_failure (a stale pointer is unreachable — the verb
-  names no position); `OpenAgentSession`/`ReadAgentPage` all three; `GetLiveWork`
+  names no position); `OpenAgentSession`
+  invalid_request|stale_pointer|storage_failure|unknown_agent; `ReadAgentPage`
+  all three; `GetLiveWork`
   storage_failure only, because it takes no request fields; `GetSidecarCursors`
   invalid_request|storage_failure; `GetWorkflow` not_implemented, the one honest
   arm while nothing routes into the workflow table.
@@ -356,7 +375,7 @@ arms are derived from, and each one is logged once with `refusal_site`.
 - **EVERY REFUSAL RECORD CARRIES BOTH `refusal_site` AND `refusal_kind`.** The
   site is which of the store's checks said no; the kind is the wire arm the
   caller received (`invalid_request`, `stale_pointer`, `storage_failure`,
-  `not_implemented`), derived from the refusal's class in `logRefusal` and never
+  `not_implemented`, `unknown_agent`), derived from the refusal's class in `logRefusal` and never
   restated by hand. Several sites map to one arm, so a record naming only the
   site leaves a reader unable to tell whether the caller could ever have retried,
   and one naming only the arm leaves it unable to find the check that fired.
