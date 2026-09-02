@@ -265,7 +265,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
-	footerResolver, err := footer.New(p.Surfaces)
+	footerResolver, err := footer.New(colors, p.Surfaces)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the footer resolver: %w", err)
 	}
