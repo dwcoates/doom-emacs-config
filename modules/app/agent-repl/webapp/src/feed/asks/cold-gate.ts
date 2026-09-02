@@ -1,0 +1,574 @@
+/**
+ * cold-gate — THE COLD-CONTEXT GATE: the one row this page words itself.
+ *
+ * A DELIBERATE DEPARTURE FROM "THE DAEMON COMPOSES THE SENTENCE". Everywhere
+ * else the wire carries resolved presentation and this end draws it verbatim.
+ * Here the wire carries DATA — a raw token count, an instant, a model identity,
+ * a menu of echo tokens — because the gate's facts are counts and instants
+ * rather than prose, and the schema says so explicitly. So the wording, the
+ * token formatting and the ticking lapse are this module's, and they are kept in
+ * ONE exported `COLD_GATE_COPY` object so a ruling on the wording is a change to
+ * one literal rather than a hunt through a renderer.
+ *
+ * IT IS A BLOCKING GATE, NOT A NOTICE. Nothing else can be done with this
+ * session until one of the three remediations is chosen, so it draws as a ringed
+ * card in the palette's "you must decide something" band — the same treatment
+ * the revival gate wore, which is the gate's visual ancestor. There is no
+ * dismiss: a dismissed gate would come back on the next push having taught the
+ * reader that the block is optional.
+ *
+ * THE THREE CHOICES ARE THE SCHEMA'S THREE ARMS, and each says what it KEEPS
+ * rather than only what it costs — the reader is deciding what the conversation
+ * loses, and a label that names only the price cannot be weighed against one
+ * that names only the loss.
+ *
+ * EVERY COMPACT VALUE IS ECHOED FROM THE MENU. The summarizer is the served
+ * `AgentModel` handed back whole; the scope is one of the served enum values.
+ * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
+ * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
+ */
+import { formatAge } from "../../duration.js";
+import { formatTokens } from "../../format.js";
+import { log } from "../../log.js";
+import {
+  AnswerColdGateResponseSchema,
+  type AnswerColdGateResponse,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_cold_gate_pb";
+import type { AgentModel } from "../../../../proto/gen/ts/conversation/v1/api_pb";
+import { SessionCompactScope } from "../../../../proto/gen/ts/conversation/v1/session_pb";
+import type {
+  FeedColdGate,
+  FeedColdGateCompactMenu,
+  FeedColdGateContextTokens,
+  FeedColdGateLastRequest,
+  FeedColdGateModel,
+  FeedColdGateResolved,
+  FeedColdGateResolvedCompact,
+  FeedColdGateStanding,
+} from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { MalformedView } from "../../rpc/malformed.js";
+import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
+import { callUnary } from "../../rpc/unary.js";
+import {
+  clearRefusals,
+  drawMalformedRefusal,
+  refusal,
+  whileInFlight,
+} from "../cards/controls.js";
+import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
+import { armName } from "../renderers.js";
+import type { RowContext } from "../renderers.js";
+import { tick } from "../ticking.js";
+import { buildAnswerColdGateRequest, type ColdGateChoice } from "./requests.js";
+
+const PATH = "FeedColdGate";
+
+/**
+ * EVERY STRING THIS CARD SAYS, in one place.
+ *
+ * The gate is the one client-worded surface, so its wording is the one thing a
+ * ruling is likely to rewrite. Keeping it here means a rewrite touches this
+ * object and nothing else — and it means the suite can assert the drawn text
+ * against the source of the words rather than against a copy of them.
+ */
+export const COLD_GATE_COPY = {
+  title: "context is cold",
+  /** {tokens} and {model} are filled from the served facts. */
+  lead: "resuming this session re-reads {tokens} tokens of context at full price on {model}.",
+  /** {age} is the ticking lapse since the last vendor request. */
+  lapse: "last vendor request {age} ago",
+  pay: { label: "pay and resume", hint: "re-read everything now, in the background" },
+  clear: { label: "clear and start fresh", hint: "drop the conversation; keep the worktree" },
+  compact: { label: "compact first", hint: "summarize, then resume from the summary" },
+  submenu: { model: "summarizer", scope: "what to summarize", send: "compact and resume" },
+  scopes: {
+    ALL: "everything",
+    PROMPTS: "my prompts only",
+    RESPONSES: "the agent's responses only",
+  },
+  resolved: {
+    pay: "paid the cold read",
+    clear: "cleared the context",
+    /** {scope} and {model} are the trace's own served values. */
+    compact: "compacted {scope} with {model}",
+  },
+} as const;
+
+/** The scopes this build can word. UNSPECIFIED is deliberately absent. */
+const SCOPE_NAMES = {
+  [SessionCompactScope.ALL]: "ALL",
+  [SessionCompactScope.PROMPTS]: "PROMPTS",
+  [SessionCompactScope.RESPONSES]: "RESPONSES",
+} as const satisfies Partial<Record<SessionCompactScope, keyof typeof COLD_GATE_COPY.scopes>>;
+
+/** The cold-context gate row. */
+export function drawFeedColdGate(u: FeedColdGate, rc: RowContext): HTMLElement {
+  const state = requireCase(u.state, `${PATH}.state`);
+  log("debug", "drawing a cold-context gate", {
+    operation: "feed.asks.cold-gate",
+    context: { state: state.case },
+  });
+
+  switch (state.case) {
+    case "standing":
+      return drawFeedColdGateStanding(state.value, rc, `${PATH}.standing`);
+    case "resolved":
+      return drawFeedColdGateResolved(state.value, rc, `${PATH}.resolved`);
+    default:
+      return unreachableArm(`${PATH}.state`, armName(state));
+  }
+}
+
+/** The standing gate: the facts, then the three remediations. */
+export function drawFeedColdGateStanding(
+  u: FeedColdGateStanding,
+  rc: RowContext,
+  path: string,
+): HTMLElement {
+  const tokens = requireMessage(u.contextTokens, `${path}.context_tokens`);
+  const lastRequest = requireMessage(u.lastRequest, `${path}.last_request`);
+  const model = requireMessage(u.model, `${path}.model`);
+  const menu = requireMessage(u.compact, `${path}.compact`);
+  log("debug", "drawing a standing cold gate", {
+    operation: "feed.asks.cold-gate.standing",
+    context: { path, models: menu.models.length, scopes: menu.scopes.length },
+  });
+
+  const card = document.createElement("div");
+  card.className = "cold-gate";
+  card.setAttribute("data-state", "standing");
+
+  const head = document.createElement("div");
+  head.className = "hibernation-head";
+  const heading = document.createElement("span");
+  heading.className = "hibernation-heading";
+  heading.textContent = COLD_GATE_COPY.title;
+  head.append(heading, drawFeedColdGateLastRequest(lastRequest, rc, `${path}.last_request`));
+  card.append(head);
+
+  card.append(
+    drawLead(
+      drawFeedColdGateContextTokens(tokens, `${path}.context_tokens`),
+      drawFeedColdGateModel(model, `${path}.model`),
+    ),
+  );
+
+  card.append(drawActions(rc, menu, `${path}.compact`));
+  return card;
+}
+
+/**
+ * The lead sentence, with the token figure as an element of its own.
+ *
+ * The figure is the one number on this page the CLIENT scaled, so it is drawn
+ * in its own span rather than interpolated into a string: a reader can see what
+ * was formatted, and a test can hold that one figure to the ruled table without
+ * reading the sentence around it.
+ */
+function drawLead(tokens: string, model: string): HTMLElement {
+  const lead = document.createElement("div");
+  lead.className = "hibernation-context";
+  const [before, rest] = COLD_GATE_COPY.lead.split("{tokens}");
+  const figure = document.createElement("span");
+  figure.className = "cold-gate-tokens";
+  figure.setAttribute("data-context-tokens", "");
+  figure.textContent = tokens;
+  lead.append(
+    document.createTextNode(before),
+    figure,
+    document.createTextNode(rest.replace("{model}", model)),
+  );
+  return lead;
+}
+
+/** The token figure, formatted client-side from the raw count. */
+export function drawFeedColdGateContextTokens(
+  u: FeedColdGateContextTokens,
+  path: string,
+): string {
+  log("debug", "reading a cold gate's context size", {
+    operation: "feed.asks.cold-gate.tokens",
+    context: { path },
+  });
+  return formatTokens(tokenCountOf(u.tokens, `${path}.tokens`));
+}
+
+/** The session's model NAME, drawn verbatim. */
+export function drawFeedColdGateModel(u: FeedColdGateModel, path: string): string {
+  const model = requireMessage(u.model, `${path}.model`);
+  log("debug", "reading a cold gate's model", {
+    operation: "feed.asks.cold-gate.model",
+    context: { path, model: model.name },
+  });
+  return model.name;
+}
+
+/**
+ * The lapse since the last vendor request, TICKING.
+ *
+ * The wire ships the instant and the client derives the "ago" — the one clock
+ * discipline this page has — so a gate left standing keeps telling the truth
+ * about how long it has been standing.
+ */
+export function drawFeedColdGateLastRequest(
+  u: FeedColdGateLastRequest,
+  rc: RowContext,
+  path: string,
+): HTMLElement {
+  const at = msOf(u.atMs, `${path}.at_ms`);
+  const el = document.createElement("span");
+  el.className = "hibernation-since";
+  tick(el, rc.ctx.ticker, (nowMs) => {
+    el.textContent = COLD_GATE_COPY.lapse.replace("{age}", formatAge(nowMs - at));
+  });
+  return el;
+}
+
+/** The resolved trace: which remediation was taken, and when. */
+export function drawFeedColdGateResolved(
+  u: FeedColdGateResolved,
+  rc: RowContext,
+  path: string,
+): HTMLElement {
+  const choice = requireCase(u.choice, `${path}.choice`);
+  log("debug", "drawing a resolved cold gate", {
+    operation: "feed.asks.cold-gate.resolved",
+    context: { path, choice: choice.case },
+  });
+
+  const el = document.createElement("div");
+  el.className = "cold-gate-resolved";
+  // The card's state IS the resolution taken (preamble §5: a card carries its
+  // state/outcome arm), so a resolved gate reads `pay`, `clear` or `compact`
+  // rather than the word "resolved", which says nothing a reader needs.
+  el.setAttribute("data-state", choice.case);
+  el.setAttribute("data-arm", choice.case);
+
+  const word = document.createElement("span");
+  word.className = "cold-gate-trace";
+  switch (choice.case) {
+    case "pay":
+      word.textContent = COLD_GATE_COPY.resolved.pay;
+      break;
+    case "clear":
+      word.textContent = COLD_GATE_COPY.resolved.clear;
+      break;
+    case "compact":
+      word.textContent = drawFeedColdGateResolvedCompact(choice.value, `${path}.compact`);
+      // The trace states WHICH scope was summarized as a datum of its own, so
+      // the choice is readable without parsing the sentence it was worded into.
+      word.setAttribute(
+        "data-compact-scope",
+        scopeName(choice.value.scope, `${path}.compact.scope`),
+      );
+      break;
+    default:
+      return unreachableArm(`${path}.choice`, armName(choice as { case: string }));
+  }
+
+  const when = document.createElement("span");
+  when.className = "cold-gate-when";
+  const at = msOf(u.atMs, `${path}.at_ms`);
+  tick(when, rc.ctx.ticker, (nowMs) => {
+    when.textContent = `${formatAge(nowMs - at)} ago`;
+  });
+  el.append(word, when);
+  return el;
+}
+
+/**
+ * The compact trace: what was summarized, and by which summarizer.
+ *
+ * The scope is worded with THE SAME labels the submenu offered, so the trace
+ * reads back the choice the reader made in the words they made it in.
+ */
+export function drawFeedColdGateResolvedCompact(
+  u: FeedColdGateResolvedCompact,
+  path: string,
+): string {
+  const model = requireMessage(u.model, `${path}.model`);
+  log("debug", "reading a compact resolution", {
+    operation: "feed.asks.cold-gate.resolved-compact",
+    context: { path, scope: u.scope },
+  });
+  return COLD_GATE_COPY.resolved.compact
+    .replace("{scope}", scopeLabel(u.scope, `${path}.scope`))
+    .replace("{model}", drawFeedColdGateModel(model, `${path}.model`));
+}
+
+/** The three action rows, plus the compact submenu the third one opens. */
+function drawActions(
+  rc: RowContext,
+  menu: FeedColdGateCompactMenu,
+  path: string,
+): HTMLElement {
+  const actions = document.createElement("div");
+  actions.className = "hibernation-actions";
+
+  const buttons: HTMLButtonElement[] = [];
+  const pay = actionRow("pay", COLD_GATE_COPY.pay, buttons);
+  const clear = actionRow("clear", COLD_GATE_COPY.clear, buttons);
+  actions.append(pay.row, clear.row);
+
+  // The compact path needs two values before it can be sent, so its row opens a
+  // submenu rather than firing on the first click. The opener is not the verb's
+  // control — the submenu's send button is — so the two carry different hooks.
+  const opener = document.createElement("button");
+  opener.type = "button";
+  opener.className = "hibernation-compact";
+  opener.setAttribute("data-compact-open", "");
+  opener.textContent = COLD_GATE_COPY.compact.label;
+  const compactRow = document.createElement("div");
+  compactRow.className = "hibernation-option";
+  const compactHint = document.createElement("span");
+  compactHint.className = "hibernation-option-text";
+  compactHint.textContent = COLD_GATE_COPY.compact.hint;
+  compactRow.append(opener, compactHint);
+  actions.append(compactRow);
+
+  const submenu = drawCompactSubmenu(rc, menu, buttons, actions, path);
+  submenu.el.hidden = true;
+  actions.append(submenu.el);
+  buttons.push(opener);
+  opener.addEventListener("click", () => {
+    submenu.el.hidden = !submenu.el.hidden;
+    log("debug", `the reader ${submenu.el.hidden ? "closed" : "opened"} the compact submenu`, {
+      operation: "feed.asks.cold-gate.submenu-toggled",
+      context: { open: !submenu.el.hidden },
+    });
+  });
+
+  pay.button.addEventListener("click", () => {
+    void answer(rc, actions, buttons, { kind: "pay" });
+  });
+  clear.button.addEventListener("click", () => {
+    void answer(rc, actions, buttons, { kind: "clear" });
+  });
+  return actions;
+}
+
+/** One remediation row: its button, and the sentence saying what it keeps. */
+function actionRow(
+  arm: "pay" | "clear",
+  copy: { label: string; hint: string },
+  buttons: HTMLButtonElement[],
+): { row: HTMLElement; button: HTMLButtonElement } {
+  const row = document.createElement("div");
+  row.className = arm === "clear" ? "hibernation-option warn" : "hibernation-option";
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = arm === "clear" ? "hibernation-clear" : "hibernation-direct";
+  button.setAttribute("data-cold-gate", arm);
+  button.textContent = copy.label;
+
+  const hint = document.createElement("span");
+  hint.className = "hibernation-option-text";
+  hint.textContent = copy.hint;
+
+  row.append(button, hint);
+  buttons.push(button);
+  return { row, button };
+}
+
+/**
+ * The compact submenu: the summarizer radios, the scope radios, and the send.
+ *
+ * BOTH LISTS COME FROM THE SERVED MENU and the first of each is pre-selected, so
+ * the send is always a legal answer: an unselected submenu would either need a
+ * disabled send or a default this end invented.
+ */
+function drawCompactSubmenu(
+  rc: RowContext,
+  menu: FeedColdGateCompactMenu,
+  buttons: HTMLButtonElement[],
+  actions: HTMLElement,
+  path: string,
+): { el: HTMLElement } {
+  const el = document.createElement("div");
+  el.className = "cold-gate-submenu";
+
+  const models: { input: HTMLInputElement; model: AgentModel }[] = [];
+  const modelList = document.createElement("div");
+  modelList.className = "cold-gate-choices list-rows";
+  const modelLabel = document.createElement("div");
+  modelLabel.className = "cold-gate-submenu-label";
+  modelLabel.textContent = COLD_GATE_COPY.submenu.model;
+  menu.models.forEach((option, index) => {
+    const model = requireMessage(
+      requireMessage(option, `${path}.models[${index}]`).model,
+      `${path}.models[${index}].model`,
+    );
+    const row = document.createElement("label");
+    row.className = "cold-gate-choice";
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "cold-gate-model";
+    input.value = model.name;
+    input.setAttribute("data-compact-model", model.name);
+    if (index === 0) input.checked = true;
+    const text = document.createElement("span");
+    text.textContent = model.name;
+    row.append(input, text);
+    modelList.append(row);
+    models.push({ input, model });
+  });
+  el.append(modelLabel, modelList);
+
+  const scopes: { input: HTMLInputElement; scope: SessionCompactScope }[] = [];
+  const scopeList = document.createElement("div");
+  scopeList.className = "cold-gate-choices list-rows";
+  const scopeLabelEl = document.createElement("div");
+  scopeLabelEl.className = "cold-gate-submenu-label";
+  scopeLabelEl.textContent = COLD_GATE_COPY.submenu.scope;
+  menu.scopes.forEach((scope, index) => {
+    // A menu offering UNSPECIFIED (or an enum value this build has no word for)
+    // is a malformed view: there is no honest label to draw, and picking one
+    // would offer a scope the daemon did not.
+    const name = scopeName(scope, `${path}.scopes[${index}]`);
+    const row = document.createElement("label");
+    row.className = "cold-gate-choice";
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "cold-gate-scope";
+    input.value = name;
+    input.setAttribute("data-compact-scope", name);
+    if (index === 0) input.checked = true;
+    const text = document.createElement("span");
+    text.textContent = COLD_GATE_COPY.scopes[name];
+    row.append(input, text);
+    scopeList.append(row);
+    scopes.push({ input, scope });
+  });
+  el.append(scopeLabelEl, scopeList);
+
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "hibernation-compact";
+  send.setAttribute("data-cold-gate", "compact");
+  send.textContent = COLD_GATE_COPY.submenu.send;
+  el.append(send);
+  buttons.push(send);
+
+  send.addEventListener("click", () => {
+    const model = models.find((m) => m.input.checked)?.model ?? models[0]?.model;
+    const scope = scopes.find((s) => s.input.checked)?.scope ?? scopes[0]?.scope;
+    if (model === undefined || scope === undefined) {
+      // A menu with no summarizers or no scopes cannot be answered, and this end
+      // must not invent either value.
+      throw new MalformedView(path, "the compact menu offered no model or no scope");
+    }
+    void answer(rc, actions, buttons, { kind: "compact", model, scope });
+  });
+  return { el };
+}
+
+/** Send the choice, and draw a refusal at the buttons if it was refused. */
+async function answer(
+  rc: RowContext,
+  actions: HTMLElement,
+  buttons: readonly HTMLButtonElement[],
+  choice: ColdGateChoice,
+): Promise<void> {
+  const id = requireMessage(rc.row.id, "FeedRow.id");
+  clearRefusals(actions);
+  log("info", `answering a cold gate with ${choice.kind}`, {
+    operation: "feed.asks.cold-gate.answer",
+    context: {
+      row: id.value,
+      choice: choice.kind,
+      model: choice.kind === "compact" ? choice.model.name : undefined,
+      scope: choice.kind === "compact" ? choice.scope : undefined,
+    },
+  });
+  const answered = await whileInFlight(buttons, () =>
+    callUnary(
+      rc.ctx,
+      "AnswerColdGate",
+      (client) =>
+        client.answerColdGate(buildAnswerColdGateRequest(rc.ctx.workspace, id, choice)),
+      AnswerColdGateResponseSchema,
+    ),
+  );
+  if ("failed" in answered) {
+    // callUnary already logged the transport failure once, as its owner.
+    actions.append(refusal("transport", "the daemon could not be reached"));
+    return;
+  }
+  try {
+    drawAnswerOutcome(answered.value, actions, buttons);
+  } catch (err) {
+    // A refusal this build cannot read is still a failure the reader owns; it is
+    // stated at the control and reported once rather than becoming an unhandled
+    // rejection inside a click handler.
+    if (!drawMalformedRefusal(rc.ctx, actions, "feed.asks.cold-gate.malformed-refusal", err)) throw err;
+  }
+}
+
+/** The causes only AnswerColdGate can answer with; the four are shared. */
+const OWN_CAUSES = {
+  noColdGate: () => "no cold gate is standing for this workspace",
+  unservedRemediation: () => "the gate never offered that remediation",
+  noSession: () => "the workspace has no session to answer",
+} as unknown as SentenceTable;
+
+/** Nothing on success (the gate re-pushes resolved); the refusal on error. */
+function drawAnswerOutcome(
+  response: AnswerColdGateResponse,
+  actions: HTMLElement,
+  buttons: readonly HTMLButtonElement[],
+): void {
+  const result = requireCase(response.result, "AnswerColdGateResponse.result");
+  switch (result.case) {
+    case "success":
+      return;
+    case "error": {
+      const said = refusalOf(result.value.cause, OWN_CAUSES, "AnswerColdGateError.cause");
+      actions.append(refusal(said.arm, said.text));
+      for (const button of buttons) button.disabled = false;
+      return;
+    }
+    default:
+      unreachableArm("AnswerColdGateResponse.result", armName(result));
+  }
+}
+
+/**
+ * One scope's ENUM NAME — the single spelling `[data-compact-scope]` carries,
+ * on the standing gate's radios and on the resolved trace alike.
+ *
+ * UNSPECIFIED (or an enum value this build has no word for) is a malformed
+ * view: there is no honest name to draw.
+ */
+export function scopeName(
+  scope: SessionCompactScope,
+  path: string,
+): keyof typeof COLD_GATE_COPY.scopes {
+  const name = SCOPE_NAMES[scope as keyof typeof SCOPE_NAMES];
+  if (name === undefined) {
+    throw new MalformedView(
+      path,
+      `compaction scope ${String(scope)} is not one this build can word`,
+    );
+  }
+  return name;
+}
+
+/** One scope's offered words. */
+export function scopeLabel(scope: SessionCompactScope, path: string): string {
+  return COLD_GATE_COPY.scopes[scopeName(scope, path)];
+}
+
+/**
+ * An `int64` count as the number the formatter takes.
+ *
+ * `Number` silently rounds past 2^53 and a negative count is not a size, so both
+ * are refused rather than drawn as a figure that would be a lie.
+ */
+export function tokenCountOf(v: bigint, path: string): number {
+  if (v < 0n) throw new MalformedView(path, `token count ${v.toString()} is negative`);
+  if (v > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new MalformedView(path, `token count ${v.toString()} does not fit a JS safe integer`);
+  }
+  return Number(v);
+}

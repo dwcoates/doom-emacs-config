@@ -122,15 +122,6 @@ durable.  See `test-history.el\='s state-file invariant test."
     (agent-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
     nil))
 
-(defun agent-repl--make-instantiation-from-plist (saved)
-  "Create a new `agent-repl-instantiation' from SAVED plist.
-Returns a fresh empty instantiation when SAVED is nil."
-  (when saved
-    (agent-repl--log nil
-                     "make-instantiation-from-plist: ignoring persisted keys=%S — nothing in an instantiation is durable any more"
-                     (cl-loop for (k _v) on saved by #'cddr collect k)))
-  (make-agent-repl-instantiation))
-
 ;;;; State migration
 
 (defun agent-repl--migrate-saved-state (saved)
@@ -354,7 +345,7 @@ stray save never clobbers it.  The project picker sorts on this key.
 `:model' records the model the USER ASKED FOR — the workspace-generation
 alias, or whatever a model-picking variant like `SPC j C-o' supplied — and
 never the model a live session happens to be running.
-`agent-repl--apply-display-state' restores it so the re-booted session
+the daemon's own pushed views restore it, so the re-booted session
 launches under the same request."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (file (agent-repl--state-file root)))
@@ -382,7 +373,7 @@ launches under the same request."
                                  (plist-get existing :last-viewed-at)))
              ;; The model the USER ASKED FOR, and only that: the
              ;; workspace-generation alias, or whatever a model-picking
-             ;; variant like `SPC j C-o' supplied.  `agent-repl--apply-display-state'
+             ;; variant like `SPC j C-o' supplied.  The daemon's pushed views
              ;; restores it onto `:model' so `agent-repl--build-start-cmd' passes
              ;; `--model' when re-booting the session.
              ;;

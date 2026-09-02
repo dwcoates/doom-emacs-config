@@ -24,7 +24,7 @@ everything needed, so re-derive nothing.
 
 | System | Branch @ tip | STOP file (on that branch) | Left in place |
 |---|---|---|---|
-| Daemon | overhaul/daemon @ (PENDING final report; last known 8c5b2fd23, itest 289/342, final pass + audit 1 running) | docs/overhaul/reports/STOP-daemon.md | see STOP |
+| Daemon | overhaul/daemon @ 892fab33e (FINAL 2026-09-02; opus-medium finisher; itest 539/0/4 skip) | docs/overhaul/reports/STOP-daemon.md | see STOP |
 | Shim | overhaul/shim @ f9dcbaa80 (STOP-shim.md; code 032a9f0ab) — RESOLVED 2026-09-02: itest 302/0/3, unit 3806, landing 6 merged, dead-code lists STOP §7, capture-checklist answers in STOP | docs/overhaul/reports/STOP-shim.md | none |
 | Webapp | overhaul/webapp @ a2bc62c88 (STOP-webapp.md; code 3c2c632fb) — RESOLVED 2026-09-02: integration 13 files/1601/0, unit 3279, landing 6 merged, dead-code done | docs/overhaul/reports/STOP-webapp.md (+ webapp-briefs/UX-LIST.md for the user) | none |
 | Elisp | overhaul/elisp @ 53bc5b96e (STOP-elisp.md; code 05c49d574) — RESOLVED 2026-09-02: 3517/3518 (one order-dependent red documented), audits 2+3, dead-code lists elisp-fanout.md §17, user toss-ups STOP §Toss-ups | docs/overhaul/reports/STOP-elisp.md | none |
@@ -69,6 +69,18 @@ Original list (all landed, none deferred beyond the two noted):
 - Webapp: no pull-driven health surface; session faults via pushed topbar warnings; UpdateMergeQueue has no webapp surface.
 - Compaction summary line still ungrounded (cheap-model capture never compacted); needs a user-approved longer-history capture.
 
+## E2E cleanup orchestration (2026-09-02)
+
+Steps 2-6 of reports/E2E-SIDECAR-PLAN.md are orchestrated by ONE opus-low
+agent that dispatches sonnet-medium writers only, never runs the e2e or
+integration suites (compile gate only), and makes NO production code changes
+(fake SDK and e2e harness/tests are test tooling and in scope; anything
+needing production change is reported back undone). Branches:
+overhaul/shim-fakesdk (worktree shim-agents/fakesdk) and overhaul/e2e-cleanup
+(worktree doom-overhaul/e2e-cleanup, off integration). Steps 5-6 wait for
+the project lead's "merge landed" message. Project lead resumes at step 7:
+run the e2e suite, dispatch remediation, then audit gaps, coverage, hardening.
+
 ## USER RULING 2026-09-02: e2e runs a REAL sidecar; no test writes the store
 
 daemon/e2e tests that hand-write sidecar events into the store are wrong.
@@ -78,6 +90,27 @@ merge, before coverage hardening. Also settled: daemon/integration = real
 daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
 suite (real shim + store + sidecar, hosted daemon, no frontends). Both
 survive the merge.
+
+## FIVE-WAY MERGE LANDED 2026-09-02 (overhaul/integration)
+
+Merged in order daemon 892fab33e, shim d8236003d, webapp e5cd9002c, store
+92bb708e4, elisp b80504704 (two docs conflicts resolved: agent-shim/AGENTS.md
+takes the store text with `wire/` marked DELETED; wire/AGENTS.md deleted with
+the package). Everything builds: proto check-generated, daemon build + vet
+(both tag sets), store, sidecar, shim typecheck, webapp typecheck. Elisp's
+tightwaits and shared-fake-daemon branches are test-only and merge later.
+
+FINDING: daemon/e2e NO LONGER EXISTS. The daemon lead rebuilt the daemon from
+scratch (23cc6a672, 2026-08-29) and deleted the whole old tree including the
+83-file e2e suite, which targeted the OLD daemon's internals. The cross-system
+e2e suite must be REBUILT against the new daemon; E2E-SIDECAR-PLAN steps 5-6
+(rewriting the old files) are moot; the step-2 inventory becomes part of the
+new suite's spec. Decision owed by the user (see the ledger).
+
+Daemon final: 892fab33e, STOP-daemon.md; owed items: abandoned-merge cause has
+no producer (behavior decision), displaced-turn test needs a freeze hook,
+~10 subscribe-after-trigger race sites in merge_test.go, KillTurn-after-capture
+confirmed as ruled (daemon.md wording to update).
 
 ## USER RULING 2026-09-02: no playtests; e2e coverage hardening instead
 

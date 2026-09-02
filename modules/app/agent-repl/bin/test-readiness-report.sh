@@ -58,7 +58,7 @@ git_c() {
 make_repo() {
     local root="$1" n=0 d
     mkdir -p "$root/bin" "$root/daemon/bin" "$root/proto" \
-             "$root/agent-shim/wire" "$root/agent-shim/shim-store" \
+             "$root/agent-shim/shim-store" \
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
              "$root/webapp/dist" "$root/home/.cache/agent-repl/bin"
@@ -66,7 +66,7 @@ make_repo() {
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
 
     git_c "$root" init -q
-    for d in proto agent-shim/wire agent-shim/shim-store \
+    for d in proto agent-shim/shim-store \
              agent-shim/claude/shim agent-shim/claude/shim-sidecar \
              webapp daemon; do
         echo "rev0" > "$root/$d/file.txt"

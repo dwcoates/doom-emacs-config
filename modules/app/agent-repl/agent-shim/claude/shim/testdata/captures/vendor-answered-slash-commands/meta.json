@@ -1,0 +1,33 @@
+{
+  "scenario": "vendor-answered-slash-commands",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "/help",
+  "prompts": [
+    {
+      "text": "/help",
+      "resume": false
+    }
+  ],
+  "world": "vendor-answered-slash-commands",
+  "cwd_init": null,
+  "vendor_session_id": "08d116f2-9f17-4df6-bf2f-2b096ec0cfa0",
+  "manual": null,
+  "expect": [
+    "system:local_command_output",
+    "SlashCommand[] listing the vendor's own commands",
+    "no assistant message"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-vendor-answered-slash-commands-cet393-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:49:30.978Z",
+  "controls": [
+    {
+      "verb": "supportedCommands",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

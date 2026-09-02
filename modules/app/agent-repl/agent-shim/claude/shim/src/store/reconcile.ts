@@ -1,0 +1,462 @@
+/**
+ * store/reconcile.ts — the OPEN OBLIGATIONS, and how each one is closed.
+ *
+ * # What "live" means here
+ *
+ * `GetLiveWork` is not a claim about the world. It answers "what did the record
+ * see START and never see END", which is timeless and cannot go stale. The SHIM
+ * calls it once at session start and resolves every item: re-adopt what the
+ * revived vendor process actually has, and WRITE the closing terminal for what
+ * did not survive. Either way the set shrinks to empty, which is what makes
+ * "every started thing eventually gets a terminal row" hold across any gap in
+ * observation.
+ *
+ * # The honest closing arm: `lost.swept_up`
+ *
+ * A thing the record holds no terminal for after a restart is NOT known to have
+ * failed and NOT known to have finished — we simply stopped being able to see
+ * it. `DetachedLost.swept_up` is that fact exactly: "a boot sweep found the run
+ * open with no living producer" (landing 3). Every other arm would be a claim
+ * nobody can support: `execution_error` says something broke, `interrupted.
+ * by_user` accuses the user of a stop they did not command, and
+ * `interrupted.host_shutdown` asserts a cause the record cannot distinguish
+ * from a shim that was simply not watching.
+ *
+ * # Why the original start has to be read back
+ *
+ * A shell run's terminal restates the command that ran (`AgentBashSuccess.
+ * command` is not optional, because a settled frame describes itself). After a
+ * bounce the shim remembers nothing, so the start is recovered FROM THE STORE by
+ * walking the agent's own book for the unit — the one place the fact still is.
+ */
+import { create } from "@bufbuild/protobuf";
+import { bindLog } from "../log.js";
+import { conversationv1, storev1 } from "../proto.js";
+import type { StoreClient } from "./client.js";
+import { activityUpsertKey, bashTerminalUpsertKey, terminalUpsertKey } from "./keys.js";
+import { PersistenceError, type PersistEntry } from "./persistence.js";
+import { readFailure, transportFailure } from "./reader.js";
+
+const LOGGER = bindLog({ component: "shim-store-reconcile", operation: "shim.store.reconcile" });
+
+/**
+ * The vendor-record coordinate a RECONCILED terminal is keyed by.
+ *
+ * Deterministic and synthetic: no vendor record states this terminal, so the
+ * coordinate names the reconciliation itself. Deterministic so a second
+ * reconciliation of the same agent upserts the same row rather than adding a
+ * second stop notice to the feed.
+ */
+export function reconciledCoordinate(subject: string): string {
+  return `reconcile:${subject}`;
+}
+
+/** The reconciler, as the engine drives it. */
+interface Reconciler {
+  /** Everything the record holds a start for and no terminal. */
+  liveWork(): Promise<storev1.GetLiveWorkSuccess>;
+  /** The row that closes an agent that did not survive the shim's restart. */
+  closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry;
+  /**
+   * The row that closes a shell run that did not survive, with its command and
+   * its ORIGINAL start instant recovered from the record.
+   *
+   * `originalStart` is the start frame read back from the agent's book — see
+   * {@link findBashStart}. Rejects with `unknown_work` when the record holds no
+   * start for the run, because a terminal restating a command nobody observed
+   * would be an invention.
+   */
+  closingBashTerminal(
+    agent: conversationv1.AgentId,
+    run: conversationv1.AgentActivityId,
+    originalStart: conversationv1.AgentBashStart,
+  ): PersistEntry;
+  /**
+   * The row that closes a SPAWN unit the record holds no terminal for.
+   *
+   * Distinct from {@link Reconciler.closingAgentTerminal}: that closes the
+   * detached AGENT's own book, and this closes the calling agent's unit that
+   * spawned it. Both are owed — a reader looking at the spawn bubble and a
+   * reader looking at the subagent's container are looking at two rows.
+   */
+  closingSubagentTerminal(
+    agent: conversationv1.AgentId,
+    spawn: conversationv1.AgentActivityId,
+  ): PersistEntry;
+}
+
+// ---------------------------------------------------------------------------
+// The closing terminals — pure, because they need no store at all
+// ---------------------------------------------------------------------------
+
+export function closingAgentTerminal(agent: conversationv1.AgentId): PersistEntry {
+  LOGGER.log(
+    { agent: agent.value },
+    "closing an agent the record holds no terminal for: the boot sweep found it open with no producer",
+  );
+  const frame = create(conversationv1.AgentFrameSchema, {
+    agentId: agent,
+    result: {
+      case: "failure",
+      value: create(conversationv1.AgentFailureSchema, {
+        // NO ERROR STRINGS: the run accumulated none that anyone observed,
+        // and inventing one ("did not survive the shim restart") would put
+        // a sentence in the record that no producer ever said.
+        failure: { case: "lost", value: sweptUp() },
+      }),
+}
+  });
+  const coordinate = reconciledCoordinate(agent.value);
+  return {
+    agentId: agent,
+    upsertKey: terminalUpsertKey(agent, coordinate),
+    source: { vendorUuid: coordinate, discriminator: "agent_frame.failure.lost.swept_up" },
+    keepalive: false,
+    item: { kind: "frame", frame },
+  };
+}
+
+export function closingSubagentTerminal(
+  agent: conversationv1.AgentId,
+  spawn: conversationv1.AgentActivityId,
+): PersistEntry {
+  LOGGER.log(
+    { agent: agent.value, spawn: spawn.value },
+    "closing a spawn unit the record holds no terminal for as lost",
+  );
+  const activity = create(conversationv1.AgentActivitySchema, {
+    activityId: spawn,
+    item: {
+      case: "subagent",
+      value: create(conversationv1.AgentSubagentSchema, {
+        result: {
+          case: "failure",
+          value: create(conversationv1.AgentSubagentFailureSchema, {
+            cause: { case: "lost", value: sweptUp() },
+          }),
+}
+      }),
+}
+  });
+  return {
+    agentId: agent,
+    upsertKey: activityUpsertKey(spawn),
+    source: {
+      vendorUuid: reconciledCoordinate(spawn.value),
+      discriminator: "activity.subagent.failure.lost.swept_up",
+    },
+    keepalive: false,
+    item: {
+      kind: "frame",
+      frame: create(conversationv1.AgentFrameSchema, {
+        agentId: agent,
+        result: {
+          case: "update",
+          value: create(conversationv1.AgentUpdateSchema, {
+            update: { case: "activity", value: activity },
+          }),
+}
+      }),
+}
+  };
+}
+
+export function closingBashTerminal(
+  agent: conversationv1.AgentId,
+  run: conversationv1.AgentActivityId,
+  originalStart: conversationv1.AgentBashStart,
+): PersistEntry {
+  if (originalStart.command === undefined) {
+    throw new PersistenceError(
+      "unknown_work",
+      `the recorded start for shell run ${JSON.stringify(run.value)} states no command`,
+    );
+  }
+  LOGGER.log(
+    { agent: agent.value, run: run.value },
+    "closing a shell run that did not survive the shim's restart as interrupted",
+  );
+  const frame = create(conversationv1.AgentBashSchema, {
+    result: {
+      case: "success",
+      value: create(conversationv1.AgentBashSuccessSchema, {
+        command: originalStart.command,
+        outcome: {
+          case: "interrupted",
+          value: create(conversationv1.AgentBashInterruptedSchema, {
+            // NOT OURS TO STATE, AND NOW SAYABLE (landing 5): the
+            // reconciliation observed no output at all, so the form is
+            // `not_observed` — the producer stating that it does not know,
+            // rather than a `partial` omission of zero bytes claiming we saw
+            // all none of what it printed.
+            output: create(conversationv1.AgentBashOutputSchema, {
+              form: {
+                case: "notObserved",
+                value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
+              },
+            }),
+            // THE CAUSE IS NOW STATEABLE (landing 3): we stopped being
+            // able to see the run, which is what `lost.swept_up` says.
+            cause: { case: "lost", value: sweptUp() },
+          }),
+}
+      }),
+}
+  });
+  return {
+    agentId: agent,
+    upsertKey: bashTerminalUpsertKey(run),
+    source: {
+      vendorUuid: reconciledCoordinate(run.value),
+      discriminator: "agent_bash.success.interrupted.lost.swept_up",
+    },
+    keepalive: false,
+    item: { kind: "bash_run", run, frame },
+  };
+}
+
+
+/**
+ * The terminal for a run THIS SHIM ENDED, by a stop it issued itself.
+ *
+ * # Why the shim writes it, when the sidecar writes every other bash row
+ *
+ * A detached shell's output rows are the sidecar's, read off the spool. Its
+ * TERMINAL normally is too — the spool's `EXIT=` line. But a run the shim
+ * stops during a teardown may have no sidecar left to read that line, and the
+ * contract is unconditional: every stream concludes with a terminal frame, and
+ * every started thing eventually gets a terminal row. The act was ours, so the
+ * record of the act is ours.
+ *
+ * `by_user` and not `lost`: a stop the shim issued on a caller's behalf is a
+ * cause we OBSERVED, not a run we merely lost sight of. Re-writing the same key
+ * is absorbed by the store, so a sidecar that does later see the `EXIT=` line
+ * cannot produce a second, conflicting terminal.
+ */
+export function stoppedBashTerminal(
+  agent: conversationv1.AgentId,
+  run: conversationv1.AgentActivityId,
+  command: conversationv1.AgentBashCommand,
+): PersistEntry {
+  LOGGER.log(
+    { agent: agent.value, run: run.value },
+    "closing a shell run the shim stopped, as interrupted by the user",
+  );
+  const frame = create(conversationv1.AgentBashSchema, {
+    result: {
+      case: "success",
+      value: create(conversationv1.AgentBashSuccessSchema, {
+        command,
+        outcome: {
+          case: "interrupted",
+          value: create(conversationv1.AgentBashInterruptedSchema, {
+            // WHAT WE SAW OF THE OUTPUT IS NOTHING: every byte of a detached
+            // run is read from the spool by the sidecar, and this shim read
+            // none of it. `not_observed` is the producer saying so, rather
+            // than an empty `partial` claiming the run printed nothing.
+            output: create(conversationv1.AgentBashOutputSchema, {
+              form: {
+                case: "notObserved",
+                value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
+              },
+            }),
+            cause: {
+              case: "byUser",
+              value: create(conversationv1.AgentBashInterruptedByUserSchema, {}),
+            },
+          }),
+        },
+      }),
+    },
+  });
+  return {
+    agentId: agent,
+    upsertKey: bashTerminalUpsertKey(run),
+    source: {
+      vendorUuid: reconciledCoordinate(run.value),
+      discriminator: "agent_bash.success.interrupted.by_user",
+    },
+    keepalive: false,
+    item: { kind: "bash_run", run, frame },
+  };
+}
+
+/**
+ * The one arm a RECONCILIATION may ever state.
+ *
+ * `swept_up` is the reconciliation's own word for what it did: it found the run
+ * open with no living producer. `file_vanished` belongs to the SIDECAR, which is
+ * the only thing that reads files, and `went_silent` belongs to whoever holds a
+ * silence ruling — neither is knowable from a store row.
+ */
+function sweptUp(): conversationv1.DetachedLost {
+  return create(conversationv1.DetachedLostSchema, {
+    how: { case: "sweptUp", value: create(conversationv1.DetachedLostSweptUpSchema, {}) },
+  });
+}
+
+/** What a reconciler needs to exist. */
+interface ReconcilerOptions {
+  readonly client: StoreClient;
+}
+
+/**
+ * One unit's own frames, found in an agent's book.
+ *
+ * A PLAIN SEARCH OVER PAGES the caller already has, deliberately: the reconciler
+ * does not open a reading session of its own, because the engine is already
+ * paging the book it is reconciling and a second walk would double the reads.
+ */
+export function findUnit(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  unit: conversationv1.AgentActivityId,
+): conversationv1.AgentActivity["item"] | undefined {
+  for (const at of entries) {
+    const entry = at.entry?.entry;
+    if (entry?.case !== "agentFrame") continue;
+    const result = entry.value.result;
+    if (result.case !== "update") continue;
+    const update = result.value.update;
+    if (update.case !== "activity") continue;
+    if (update.value.activityId?.value !== unit.value) continue;
+    return update.value.item;
+  }
+  return undefined;
+}
+
+/** The shell run's own `start` frame, found in one agent's book. */
+export function findBashStart(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  run: conversationv1.AgentActivityId,
+): conversationv1.AgentBashStart | undefined {
+  const item = findUnit(entries, run);
+  if (item?.case !== "bash") return undefined;
+  return item.value.result.case === "start" ? item.value.result.value : undefined;
+}
+
+/**
+ * WHAT THE WORK IS, for a consumer that has never seen it.
+ *
+ * `DetachableWork` names the UNIT TYPES themselves, each carrying the `start`
+ * arm that describes the work — so a stored unit is exactly what an
+ * announcement needs, with no separate description type and no second copy able
+ * to disagree with the first.
+ *
+ * Answers nothing for a unit whose kind cannot detach, or for one the record
+ * holds no `start` for: a kind absent from `DetachableWork` cannot claim to be
+ * detached, and an announcement with an invented description is worse than one
+ * that is missing.
+ */
+function describeDetachable(
+  item: conversationv1.AgentActivity["item"] | undefined,
+): conversationv1.DetachableWork | undefined {
+  if (item === undefined) return undefined;
+  if (item.case === "bash" && item.value.result.case === "start") {
+    return create(conversationv1.DetachableWorkSchema, { work: { case: "bash", value: item.value } });
+  }
+  if (item.case === "subagent" && item.value.result.case === "start") {
+    return create(conversationv1.DetachableWorkSchema, {
+      work: { case: "subagent", value: item.value },
+    });
+  }
+  if (item.case === "monitor" && item.value.result.case === "start") {
+    return create(conversationv1.DetachableWorkSchema, {
+      work: { case: "monitor", value: item.value },
+    });
+  }
+  return undefined;
+}
+
+/**
+ * The announcements `SessionStarted.live_work` carries.
+ *
+ * THE `created` ARM, ALWAYS. A daemon that restarted was NOT THERE for the
+ * original announcement, so it has no element to continue — and `detached`
+ * means exactly "continue the element you are already drawing". Telling a fresh
+ * consumer to continue something it never saw leaves the work undrawn and
+ * unreachable, which is the whole reason the two arms are different situations.
+ *
+ * The description comes FROM THE STORE, by unit id: the shim remembers nothing
+ * across a bounce, and the record is the only place the work's own start
+ * survives. Work the record cannot describe is OMITTED and logged rather than
+ * announced as a handle with nothing behind it.
+ */
+export function announceLiveWork(
+  entries: readonly conversationv1.HistoryEntryAt[],
+  work: readonly conversationv1.DetachedWorkId[],
+): conversationv1.AgentDetachedWork[] {
+  const announcements: conversationv1.AgentDetachedWork[] = [];
+  for (const handle of work) {
+    // THE HANDLE IS THE UNIT (ruling, landing 3), so the lookup is equality.
+    const unit = create(conversationv1.AgentActivityIdSchema, { value: handle.value });
+    const described = describeDetachable(findUnit(entries, unit));
+    if (described === undefined) {
+      LOGGER.log(
+        { level: "warn", work: handle.value },
+        "the record holds no describable start for this live work; it is not announced",
+      );
+      continue;
+    }
+    announcements.push(
+      create(conversationv1.AgentDetachedWorkSchema, {
+        work: handle,
+        origin: {
+          case: "created",
+          value: create(conversationv1.DetachedWorkCreatedSchema, { workCreated: described }),
+        },
+      }),
+    );
+  }
+  LOGGER.log(
+    { announced: announcements.length, live: work.length },
+    "described the live work a restarted consumer has never seen",
+  );
+  return announcements;
+}
+
+export function createReconciler(options: ReconcilerOptions): Reconciler {
+  return {
+    async liveWork(): Promise<storev1.GetLiveWorkSuccess> {
+      let response: storev1.GetLiveWorkResponse;
+      try {
+        response = await options.client.getLiveWork(create(storev1.GetLiveWorkRequestSchema, {}));
+      } catch (error) {
+        LOGGER.log(
+          { level: "error", detail: String(error) },
+          "the store could not be reached for the open obligations",
+        );
+        throw transportFailure(error);
+      }
+      const result = response.result;
+      if (result.case === "failure") {
+        LOGGER.log(
+          { level: "warn", detail: result.value.detail },
+          "the store refused to state the open obligations",
+        );
+        // GetLiveWork declares ONE arm (`storage_failure`); an unset arm is
+        // handled by the same default, so a store that answers with no reason
+        // is unavailable rather than silently benign.
+        throw readFailure(result.value);
+      }
+      if (result.case !== "success") {
+        throw new PersistenceError(
+          "store_unavailable",
+          "the store answered GetLiveWork with no result arm set",
+        );
+      }
+      LOGGER.log(
+        {
+          live_agents: result.value.liveAgents.length,
+          live_detached: result.value.liveDetached.length,
+          live_workflows: result.value.liveWorkflows.length,
+        },
+        "read the record's open obligations",
+      );
+      return result.value;
+    },
+
+    closingAgentTerminal,
+    closingSubagentTerminal,
+    closingBashTerminal,
+  };
+}

@@ -1,0 +1,200 @@
+/**
+ * A TOOL CALL BECOMES A UNIT, and its RETURN settles it.
+ *
+ * The three name sets are the load-bearing part: an exempt tool is a DECISION
+ * and is dropped silently, an engine-owned tool belongs to the gate, and
+ * `AgentUnmodeled` is for a tool whose schema genuinely cannot be known. A
+ * recognizable built-in in that last set is a producer defect, so the suite
+ * forbids it by name.
+ */
+import { describe, expect, it } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { conversationv1 } from "../../src/proto.js";
+import {
+  CALL_REGISTRY_CAPACITY,
+  ENGINE_OWNED_TOOLS,
+  EXEMPT_TOOLS,
+  UNMODELED_KEY,
+  createCallRegistry,
+  dispositionOf,
+  environmentOf,
+  type PendingCall,
+  type ToolOutcome,
+} from "../../src/convert/tool-calls.js";
+import { TOOL_CONVERTERS } from "../../src/convert/tools/registry.js";
+import { foldContext, MAIN_AGENT } from "./fold-harness.js";
+
+/** One call in flight. */
+function call(toolUseId: string, toolName = "Read"): PendingCall {
+  return {
+    toolUseId,
+    toolName,
+    input: { file_path: "/tmp/a" },
+    startedAtMs: 5,
+    agentId: MAIN_AGENT,
+  };
+}
+
+/** One settled outcome. */
+function outcome(): ToolOutcome {
+  return { content: undefined, isError: false, structured: undefined, settledAtMs: 9 };
+}
+
+describe("the registry of calls in flight", () => {
+  it("remembers a call so its terminal can restate the call's own facts", () => {
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_1"));
+
+    expect(registry.peek("toolu_1")?.toolName).toBe("Read");
+  });
+
+  it("forgets a call when it settles, so nothing accumulates per turn", () => {
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_1"));
+
+    registry.take("toolu_1");
+
+    expect(registry.peek("toolu_1")).toBeUndefined();
+  });
+
+  it("answers nothing for a call this shim never saw announced", () => {
+    expect(createCallRegistry().take("toolu_nope")).toBeUndefined();
+  });
+
+  it("stays BOUNDED: a vendor that never returns a result cannot grow it forever", () => {
+    const registry = createCallRegistry();
+    for (let index = 0; index <= CALL_REGISTRY_CAPACITY; index += 1) {
+      registry.remember(call(`toolu_${index}`));
+    }
+
+    // The oldest is forgotten rather than the table growing without bound.
+    expect(registry.peek("toolu_0")).toBeUndefined();
+    expect(registry.peek(`toolu_${CALL_REGISTRY_CAPACITY}`)).toBeDefined();
+  });
+
+  it("peeks without settling, which is what a progress beat needs", () => {
+    const registry = createCallRegistry();
+    registry.remember(call("toolu_1"));
+
+    registry.peek("toolu_1");
+
+    expect(registry.peek("toolu_1")).toBeDefined();
+  });
+});
+
+describe("disposition", () => {
+  it("is MODELLED for a tool a converter owns", () => {
+    expect(dispositionOf(TOOL_CONVERTERS, "Read").case).toBe("modelled");
+  });
+
+  it("is EXEMPT for a built-in the contract deliberately does not carry", () => {
+    expect(dispositionOf(TOOL_CONVERTERS, "TaskList").case).toBe("exempt");
+  });
+
+  it("is ENGINE-OWNED for the ask the permission gate holds", () => {
+    expect(dispositionOf(TOOL_CONVERTERS, "AskUserQuestion").case).toBe("engine_owned");
+  });
+
+  it("is UNMODELED for a runtime-registered MCP tool", () => {
+    expect(dispositionOf(TOOL_CONVERTERS, "mcp__Slack__send").case).toBe("unmodeled");
+  });
+
+  it("never routes a recognizable built-in to unmodeled — that would be a defect", () => {
+    const builtIns = [
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob",
+      "Bash",
+      "Agent",
+      "Task",
+      "Skill",
+      "SendMessage",
+      "TaskCreate",
+      "TaskUpdate",
+      "WebFetch",
+      "WebSearch",
+      "Monitor",
+      "ScheduleWakeup",
+      "Artifact",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "ReportFindings",
+      "EnterWorktree",
+      "ExitWorktree",
+      "CronCreate",
+      "CronDelete",
+      "CronList",
+      "PushNotification",
+      ...EXEMPT_TOOLS,
+      ...ENGINE_OWNED_TOOLS,
+    ];
+
+    const defects = builtIns.filter(
+      (name) => dispositionOf(TOOL_CONVERTERS, name).case === "unmodeled",
+    );
+    expect(defects).toEqual([]);
+  });
+});
+
+describe("the registry table", () => {
+  it("files the unmodeled converter under a key no vendor tool can be named", () => {
+    // THE INVARIANT: a genuine vendor tool literally called "unmodeled" must
+    // not silently take the fallback's place, so the key carries a character no
+    // tool name can.
+    expect(TOOL_CONVERTERS.get(UNMODELED_KEY)?.kind).toBe("unmodeled");
+    expect(TOOL_CONVERTERS.has("unmodeled")).toBe(false);
+    expect(dispositionOf(TOOL_CONVERTERS, "unmodeled").case).toBe("unmodeled");
+  });
+
+  it("spells one spawn two ways, because the vendor does", () => {
+    expect(TOOL_CONVERTERS.get("Agent")).toBe(TOOL_CONVERTERS.get("Task"));
+  });
+
+  it("gives the plan-mode pair one converter, distinguished by the call's name", () => {
+    expect(TOOL_CONVERTERS.get("EnterPlanMode")).toBe(TOOL_CONVERTERS.get("ExitPlanMode"));
+  });
+
+  it("declares a progress arm only where the proto does", () => {
+    // A monitor is armed and then ends; it has no progress arm at all.
+    expect(TOOL_CONVERTERS.get("Read")?.carriesProgress).toBe(true);
+    expect(TOOL_CONVERTERS.get("Monitor")?.carriesProgress).toBe(false);
+  });
+});
+
+describe("the tool environment", () => {
+  it("carries the MCP server names the session knows, and nothing else", () => {
+    expect(environmentOf(foldContext({ mcpServerNames: ["Slack"] }))).toEqual({
+      mcpServerNames: ["Slack"],
+    });
+  });
+
+  it("is empty when the engine states no servers", () => {
+    expect(environmentOf(foldContext()).mcpServerNames).toEqual([]);
+  });
+});
+
+describe("a converter's own contract", () => {
+  it("answers a start arm for the kind it owns", () => {
+    const item = TOOL_CONVERTERS.get("Read")?.start(call("toolu_1"));
+
+    expect(item?.case).toBe("read");
+  });
+
+  it("answers UNDEFINED from settle when this result does not conclude the unit", () => {
+    // A skill settles on its DOCUMENT, not on the acknowledgement.
+    const item = TOOL_CONVERTERS.get("Skill")?.settle(call("toolu_s", "Skill"), {
+      ...outcome(),
+      structured: { success: true, commandName: "debug-logs" },
+    });
+
+    expect(item).toBeUndefined();
+  });
+
+  it("answers a progress arm on a kind that declares one", () => {
+    const beat = create(conversationv1.AgentToolCallProgressSchema, { lastProgressAtMs: 3n });
+
+    expect(TOOL_CONVERTERS.get("Read")?.progress?.(beat)?.case).toBe("read");
+  });
+});

@@ -37,7 +37,6 @@ make_tree() {
              "$root/agent-shim/claude/shim/dist" \
              "$root/agent-shim/claude/shim-sidecar" \
              "$root/agent-shim/shim-store" \
-             "$root/agent-shim/wire" \
              "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
              "$root/webapp/src" "$root/webapp/dist" \
@@ -51,7 +50,6 @@ make_tree() {
     echo "package main" > "$root/daemon/cmd/claude-repld/main.go"
     echo "package main" > "$root/agent-shim/shim-store/main.go"
     echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
-    echo "package wire" > "$root/agent-shim/wire/wire.go"
     echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
@@ -59,7 +57,6 @@ make_tree() {
     echo "module x" > "$root/daemon/go.mod"
     echo "module store" > "$root/agent-shim/shim-store/go.mod"
     echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
-    echo "module wire" > "$root/agent-shim/wire/go.mod"
     echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
 
@@ -669,12 +666,12 @@ t_services_fresh_then_shared_dependency_stales_both() {
         return
     fi
     sleep 1
-    touch "$root/agent-shim/wire/wire.go"
+    touch "$root/proto/gen/go/proto.go"
     run_script "$root" store sidecar >/dev/null
     if [ "$(grep -c '^go build' "$root/stub.log")" -eq 2 ]; then
-        pass "services: shared wire edit rebuilds store and sidecar"
+        pass "services: shared proto edit rebuilds store and sidecar"
     else
-        fail "services: shared wire edit rebuilds both" \
+        fail "services: shared proto edit rebuilds both" \
              "stub.log: $(cat "$root/stub.log")"
     fi
     rm -rf "$root"
@@ -706,13 +703,13 @@ t_services_shared_logging_edit_rebuilds_both() {
 t_services_missing_shared_source_fails_loudly() {
     local root rc; root="$(mktemp -d)"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
-    rm -rf "$root/agent-shim/wire"
+    rm -rf "$root/proto/gen/go"
     set +e
     run_script "$root" store >"$root/out" 2>"$root/err"
     rc=$?
     set -e
     if [ "$rc" -ne 0 ] \
-       && grep -q "required service source directory missing" "$root/err"; then
+       && grep -q "required Go source directory missing" "$root/err"; then
         pass "services: missing shared source directory fails loudly"
     else
         fail "services: missing shared source directory fails loudly" \
@@ -729,9 +726,36 @@ t_no_git_leaves_no_stamp
 t_stale_source_with_space_in_name
 t_stale_source_with_glob_chars
 t_stale_empty_source_set
+# The daemon compiles against the generated proto module, so a regenerated
+# binding must stale daemon/bin/claude-repld even though it lives outside
+# daemon/.
+t_daemon_shared_proto_edit_rebuilds() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    run_script "$root" daemon >/dev/null
+    if [ -s "$root/stub.log" ]; then
+        fail "daemon: a fresh binary skips go build" \
+             "stub.log: $(cat "$root/stub.log")"
+        rm -rf "$root"
+        return
+    fi
+    sleep 1
+    touch "$root/proto/gen/go/proto.go"
+    run_script "$root" daemon >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 1 ]; then
+        pass "daemon: a regenerated proto binding rebuilds the daemon"
+    else
+        fail "daemon: a regenerated proto binding rebuilds the daemon" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
 t_services_fresh_then_shared_dependency_stales_both
 t_services_shared_logging_edit_rebuilds_both
 t_services_missing_shared_source_fails_loudly
+t_daemon_shared_proto_edit_rebuilds
 
 # --- the shim bundle carries the SAME revision its stamp records ------------
 # The daemon's stale-shim refresh compares the two, so a build that baked one

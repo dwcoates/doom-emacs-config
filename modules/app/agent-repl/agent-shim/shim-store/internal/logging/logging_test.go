@@ -37,7 +37,7 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	log.clock = func() time.Time { return at }
 	log.pid = func() int { return 84 }
 
-	log.Log(Fields{Session: "vendor-session", Producer: "sidecar", Operation: "ingest"}, "accepted=%d", 2)
+	log.Log(Fields{VendorSessionID: "vendor-session", Producer: "sidecar", Operation: "write-batch"}, "accepted=%d", 2)
 
 	var got record
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -46,10 +46,10 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	if got.Timestamp != at.Local().Format(sharedlogging.TimestampLayout) || got.Runtime != "store" || got.PID != 84 {
 		t.Fatalf("runtime identity = %#v", got)
 	}
-	if got.Level != "info" || got.Verbosity != "normal" || got.Operation != "ingest" || got.Message != "accepted=2" {
+	if got.Level != "info" || got.Verbosity != "normal" || got.Operation != "write-batch" || got.Message != "accepted=2" {
 		t.Fatalf("record fields = %#v", got)
 	}
-	if got.ClaudeSessionID != "vendor-session" || got.Context["component"] != "db" || got.Context["db"] != "/tmp/events.db" || got.Context["table"] != "event" || got.Context["producer"] != "sidecar" {
+	if got.Context["vendor_session_id"] != "vendor-session" || got.Context["component"] != "db" || got.Context["db"] != "/tmp/events.db" || got.Context["table"] != "event" || got.Context["producer"] != "sidecar" {
 		t.Fatalf("record attribution = %#v", got)
 	}
 	if stderr.String() != file.String() {
@@ -57,15 +57,17 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	}
 }
 
-func TestLogMarshalsReplayAndTerminalAttributionExactly(t *testing.T) {
+func TestLogMarshalsCorrelationAndTerminalAttributionExactly(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false).With(Fields{
 		AgentReplSessionID: "agent-1",
-		Session:            "claude-1",
 		RequestID:          "request-1",
-		ReplayFromSeq:      10,
-		ReplayFirstSeq:     11,
-		ReplayLastSeq:      12,
+		AgentID:            "agent-value",
+		BookAgentID:        "book-value",
+		WriteID:            "write-value",
+		UpsertKey:          "upsert-value",
+		Position:           "sip1-2a",
+		WriteSeq:           12,
 		Delivered:          2,
 	})
 	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
@@ -73,11 +75,11 @@ func TestLogMarshalsReplayAndTerminalAttributionExactly(t *testing.T) {
 	log.pid = func() int { return 84 }
 
 	log.Log(Fields{
-		Component:      "replay",
+		Component:      "fanout",
 		TerminalOwner:  "subscriber",
 		TerminalReason: "completed",
 		ErrorCause:     "connection reset",
-		Operation:      "store.replay",
+		Operation:      "store.watch",
 	}, "replay finished")
 
 	var got map[string]any
@@ -90,49 +92,51 @@ func TestLogMarshalsReplayAndTerminalAttributionExactly(t *testing.T) {
 		"pid":                   float64(84),
 		"level":                 "info",
 		"verbosity":             "normal",
-		"operation":             "store.replay",
+		"operation":             "store.watch",
 		"message":               "replay finished",
 		"agent_repl_session_id": "agent-1",
-		"claude_session_id":     "claude-1",
 		"request_id":            "request-1",
 		"context": map[string]any{
-			"component":        "replay",
-			"replay_from_seq":  float64(10),
-			"replay_first_seq": float64(11),
-			"replay_last_seq":  float64(12),
-			"delivered":        float64(2),
-			"terminal_owner":   "subscriber",
-			"terminal_reason":  "completed",
-			"error":            "connection reset",
+			"component":       "fanout",
+			"agent_id":        "agent-value",
+			"book_agent_id":   "book-value",
+			"write_id":        "write-value",
+			"upsert_key":      "upsert-value",
+			"position":        "sip1-2a",
+			"write_seq":       float64(12),
+			"delivered":       float64(2),
+			"terminal_owner":  "subscriber",
+			"terminal_reason": "completed",
+			"error":           "connection reset",
 		},
 	}
 	assertJSONExactly(t, got, want)
 }
 
-func TestLogOmitsEmptyReplayAndTerminalAttribution(t *testing.T) {
+func TestLogOmitsEmptyCorrelationAndTerminalAttribution(t *testing.T) {
 	var file, stderr bytes.Buffer
-	New(&file, &stderr, false).Log(Fields{Operation: "store.replay"}, "replay finished")
+	New(&file, &stderr, false).Log(Fields{Operation: "store.watch"}, "replay finished")
 
 	var got map[string]any
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
 		t.Fatalf("record is not JSON: %v: %q", err, file.String())
 	}
 	context := got["context"].(map[string]any)
-	for _, key := range []string{"replay_from_seq", "replay_first_seq", "replay_last_seq", "delivered", "terminal_owner", "terminal_reason", "error"} {
+	for _, key := range []string{"agent_id", "book_agent_id", "write_id", "upsert_key", "position", "write_seq", "offset", "delivered", "terminal_owner", "terminal_reason", "error"} {
 		if _, exists := context[key]; exists {
 			t.Fatalf("context unexpectedly contains %q: %#v", key, context)
 		}
 	}
 }
 
-func TestLogMarshalsZeroReplayCountersForTerminalRecordExactly(t *testing.T) {
+func TestLogMarshalsZeroDeliveredForTerminalRecordExactly(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)
 	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
 	log.clock = func() time.Time { return at }
 	log.pid = func() int { return 84 }
 
-	log.Log(Fields{TerminalOwner: "subscriber", TerminalReason: "exhausted", Operation: "store.replay"}, "replay finished")
+	log.Log(Fields{TerminalOwner: "subscriber", TerminalReason: "exhausted", Operation: "store.watch"}, "replay finished")
 
 	var got map[string]any
 	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
@@ -144,15 +148,12 @@ func TestLogMarshalsZeroReplayCountersForTerminalRecordExactly(t *testing.T) {
 		"pid":       float64(84),
 		"level":     "info",
 		"verbosity": "normal",
-		"operation": "store.replay",
+		"operation": "store.watch",
 		"message":   "replay finished",
 		"context": map[string]any{
-			"replay_from_seq":  float64(0),
-			"replay_first_seq": float64(0),
-			"replay_last_seq":  float64(0),
-			"delivered":        float64(0),
-			"terminal_owner":   "subscriber",
-			"terminal_reason":  "exhausted",
+			"delivered":       float64(0),
+			"terminal_owner":  "subscriber",
+			"terminal_reason": "exhausted",
 		},
 	}
 	assertJSONExactly(t, got, want)

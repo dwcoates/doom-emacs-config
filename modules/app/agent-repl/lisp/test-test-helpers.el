@@ -48,7 +48,7 @@ clean; BODY runs after the load with the same bindings still active."
 (ert-deftest agent-repl-test-helpers-interactive-load-skips-guard-install ()
   "Interactive load must not fset boundary wrappers to guards."
   ;; Arrange: plant a marker impl on one registered wrapper.
-  (let* ((sym 'agent-repl--uds-probe)
+  (let* ((sym 'agent-repl--launchctl-call)
          (marker (lambda (&rest _args) 'marker-result))
          (saved (symbol-function sym)))
     (unwind-protect
@@ -158,7 +158,7 @@ clean; BODY runs after the load with the same bindings still active."
   ;; Arrange: ambient batch session; wrapper carries the installed guard.
   ;; Act / Assert
   (let ((err (should-error
-              (agent-repl--uds-probe "/tmp/agent-repl-probe.sock"))))
+              (agent-repl--launchctl-call "list"))))
     (should (string-match-p "EXTERNAL BOUNDARY UNMOCKED"
                             (error-message-string err)))))
 
@@ -168,11 +168,11 @@ clean; BODY runs after the load with the same bindings still active."
   (let* ((fake (lambda (&rest args) (cons 'fake-result args)))
          (noninteractive nil)
          (agent-repl-test--external-original-functions
-          (list (cons 'agent-repl--uds-probe fake))))
+          (list (cons 'agent-repl--launchctl-call fake))))
     (cl-letf (((symbol-function 'display-warning) (lambda (&rest _args) nil)))
       ;; Act / Assert
-      (should (equal (agent-repl--uds-probe "/tmp/agent-repl-probe.sock")
-                     '(fake-result "/tmp/agent-repl-probe.sock"))))))
+      (should (equal (agent-repl--launchctl-call "list")
+                     '(fake-result "list"))))))
 
 (ert-deftest agent-repl-test-helpers-guard-interactive-passthrough-warns ()
   "The interactive passthrough must warn so the leak is visible."
@@ -180,16 +180,16 @@ clean; BODY runs after the load with the same bindings still active."
   (let* ((warnings nil)
          (noninteractive nil)
          (agent-repl-test--external-original-functions
-          (list (cons 'agent-repl--uds-probe
+          (list (cons 'agent-repl--launchctl-call
                       (lambda (&rest _args) nil)))))
     (cl-letf (((symbol-function 'display-warning)
                (lambda (type message &rest _) (push (cons type message) warnings))))
       ;; Act
-      (agent-repl--uds-probe "/tmp/agent-repl-probe.sock"))
+      (agent-repl--launchctl-call "list"))
     ;; Assert
     (let ((warning (assq 'agent-repl-test warnings)))
       (should warning)
-      (should (string-match-p "agent-repl--uds-probe" (cdr warning))))))
+      (should (string-match-p "agent-repl--launchctl-call" (cdr warning))))))
 
 (ert-deftest agent-repl-test-helpers-guard-interactive-missing-original-errors ()
   "A leaked guard with no captured original must still signal, not return nil."
@@ -197,26 +197,26 @@ clean; BODY runs after the load with the same bindings still active."
   (let ((noninteractive nil)
         (agent-repl-test--external-original-functions nil))
     ;; Act / Assert
-    (should-error (agent-repl--uds-probe "/tmp/agent-repl-probe.sock"))))
+    (should-error (agent-repl--launchctl-call "list"))))
 
 (ert-deftest agent-repl-test-helpers-reinstall-rearms-a-redefined-wrapper ()
   "Re-installing the guards re-arms a wrapper a production re-load re-`defun'-ed."
   ;; Arrange: simulate a production re-load putting the real impl back.
-  (let ((guard (symbol-function 'agent-repl--uds-probe)))
+  (let ((guard (symbol-function 'agent-repl--launchctl-call)))
     (unwind-protect
         (progn
-          (fset 'agent-repl--uds-probe (lambda (&rest _args) 'real-impl))
+          (fset 'agent-repl--launchctl-call (lambda (&rest _args) 'real-impl))
           ;; Act
           (agent-repl-test--reinstall-external-guards)
           ;; Assert: the guard is back, so the boundary errors instead of running.
-          (should-error (agent-repl--uds-probe "/tmp/agent-repl-probe.sock")))
-      (fset 'agent-repl--uds-probe guard))))
+          (should-error (agent-repl--launchctl-call "list")))
+      (fset 'agent-repl--launchctl-call guard))))
 
 (ert-deftest agent-repl-test-helpers-reinstall-keeps-captured-original-real ()
   "Re-installing leaves the captured original as the REAL impl, not a guard."
   ;; Arrange
-  (let ((guard (symbol-function 'agent-repl--uds-probe))
-        (before (cdr (assq 'agent-repl--uds-probe
+  (let ((guard (symbol-function 'agent-repl--launchctl-call))
+        (before (cdr (assq 'agent-repl--launchctl-call
                            agent-repl-test--external-original-functions))))
     (unwind-protect
         (progn
@@ -224,9 +224,9 @@ clean; BODY runs after the load with the same bindings still active."
           (agent-repl-test--reinstall-external-guards)
           ;; Assert
           (should (eq before
-                      (cdr (assq 'agent-repl--uds-probe
+                      (cdr (assq 'agent-repl--launchctl-call
                                  agent-repl-test--external-original-functions)))))
-      (fset 'agent-repl--uds-probe guard))))
+      (fset 'agent-repl--launchctl-call guard))))
 
 ;;;; ---- Generated protocol vocabulary readers ----
 
@@ -264,8 +264,10 @@ every vocabulary assertion built on it pass vacuously."
 (ert-deftest agent-repl-test-helpers-generated-enum-names-reads-a-value-name ()
   "The enum reader recovers a prefixed value name from the generated bindings."
   ;; Act
+  ;; PromptOrigin moved into conversation/v1 so replay resolvers can read
+  ;; it; the shim/v1 copy is gone, and this fixture names where it lives.
   (let ((names (agent-repl-test--generated-enum-names
-                "shim/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
+                "conversation/v1/prompt_origin.pb.go" "PROMPT_ORIGIN_")))
     ;; Assert
     (should (member "PROMPT_ORIGIN_USER_SENT" names))))
 

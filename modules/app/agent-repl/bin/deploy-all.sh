@@ -22,44 +22,31 @@
 #                       wait on store.sock in between — the recorded safe order
 #                       (a simultaneous bounce once cost a silent full re-read
 #                       via cold cursor recovery)
-#   5. daemon bounce    first loads daemon.el from THIS checkout so its
-#                       artifact-root constants name the binaries built above,
-#                       then calls `(agent-repl-frontend-daemon-restart)` via
-#                       emacsclient. This ordering is load-bearing for linked
-#                       worktrees: the running Emacs may have loaded the module
-#                       from the main worktree, and restarting before rebinding
-#                       those paths launches the main worktree's stale build.
+#   5. runtime bounce   first loads the runtime control plane from THIS
+#                       checkout so its artifact-root constants name the
+#                       binaries built above, then calls
+#                       `(agent-repl-runtime-restart-await)` via emacsclient.
+#                       This ordering is load-bearing for linked worktrees: the
+#                       running Emacs may have loaded the module from the main
+#                       worktree, and restarting before rebinding those paths
+#                       launches the main worktree's stale build.
 #
-#                       when no Emacs server is reachable the bounce is
+#                       The await form returns only on terminal completion (the
+#                       string `runtime-restart-complete`) and SIGNALS on
+#                       failure or timeout, so this script can never mistake a
+#                       dispatch for a finished deployment.
+#
+#                       When no Emacs server is reachable the bounce is
 #                       explicitly deferred until Emacs startup. Once a server
 #                       is reachable, any restart failure still fails this
 #                       script loudly (exit 3).
 #
-#                       The bounce ALWAYS PRESERVES the session shims — they
-#                       outlive their daemon and the replacement reattaches —
-#                       INCLUDING when step 2 moved the shim bundle. A survivor
-#                       on the previous bundle is rolled onto the new one by the
-#                       NEW daemon's per-session turn-boundary refresh, at that
-#                       session's own quiet moment. The deploy therefore never
-#                       passes STOP-SHIMS: stopping every shim at shutdown
-#                       killed whatever turns were running to buy a refresh that
-#                       arrives anyway, moments later, for free. The elisp
-#                       command keeps the parameter for explicit operator use.
-#
-#                       The bounce is likewise NOT routed through the scheduled
-#                       drain lease (agent-repl-frontend-daemon-restart-
-#                       scheduled). That lease exists to reach quiescence before
-#                       an operation that NEEDS it; a preserving daemon bounce
-#                       does not — the shims keep serving their turns across it
-#                       and the store replays whatever the gap swallowed — so
-#                       waiting for every workspace to fall idle would delay
-#                       every deploy for nothing.
-#  5b. webview refresh  `(agent-repl-refresh-webviews)` via emacsclient, right
-#                       after the bounce: the pages mounted in Emacs outlive
-#                       the daemon they loaded against, so each one is
-#                       re-navigated to re-attach to the new daemon. Guarded
-#                       with `fboundp' — a running Emacs that predates the
-#                       command reports a skip instead of failing the deploy
+#                       Surviving shims are NOT stopped here and no webview is
+#                       re-navigated here. The incoming daemon owns both: its
+#                       rollout controller bounces a shim whose reported build
+#                       identity is stale, and it pushes `reload_webapp` to the
+#                       clients that must reload. This script only reports what
+#                       moved.
 #   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
 #                       .el under modules/app/agent-repl changed in the range
 #                       into the running Emacs (test-*.el is batch-only and is
@@ -167,10 +154,9 @@ log "proto: done"
 
 # ---- 2. build-frontend (shim bundle, webapp, daemon) -----------------------
 # Whether the SHIM BUNDLE moved is REPORTED, not acted on: it tells the reader
-# of this log whether surviving shims are about to be rolled onto a new bundle
-# by the replacement daemon's turn-boundary refresh. It no longer selects a
-# stop-shims bounce — see step 5's header. Two signals, because neither alone
-# is sufficient:
+# of this log whether surviving shims are about to be bounced onto a new bundle
+# by the incoming daemon's rollout-controller staleness check. This script
+# never stops a shim itself. Two signals, because neither alone is sufficient:
 #
 #   - the built-sha stamp, which moves whenever the source revision does; and
 #   - the bundle's own content fingerprint, which is the only signal that moves
@@ -319,7 +305,6 @@ if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
         *"can't find socket"*|*"No socket or alternate editor"*|*"Could not connect to the Emacs daemon"*|*"Connection refused"*)
             log "daemon: Emacs is not running; restart deferred until Emacs starts"
             log "daemon: the rebuilt backend will start automatically at startup"
-            log "webviews: no Emacs running, so no live page to refresh"
             if [ -n "$ELISP_RANGE" ]; then
                 log "elisp: reload deferred; Emacs will load the changed files at startup"
             fi
@@ -333,19 +318,20 @@ else
     EMACS_AVAILABLE=1
     log "daemon: Emacs server probe succeeded: $EMACS_PROBE_OUT"
 
-    # The daemon, shim, and webapp paths are derived by daemon.el from the
-    # checkout that loaded it. A deploy invoked from a linked worktree must
-    # therefore load this checkout's daemon.el BEFORE asking the running Emacs
-    # to restart the daemon. Loading it after the restart would successfully
-    # build one checkout and then silently launch another checkout's artifacts.
+    # The daemon, shim, and webapp paths are derived by the runtime control
+    # plane from the checkout that loaded it. A deploy invoked from a linked
+    # worktree must therefore load THIS checkout's control plane BEFORE asking
+    # the running Emacs to restart the runtime. Loading it after the restart
+    # would successfully build one checkout and then silently launch another
+    # checkout's artifacts.
     #
     # Encode ROOT rather than interpolating it into an elisp string literal:
     # valid filesystem paths may contain quotes or backslashes. The returned
     # sentinel also reports whether the runtime artifact root moved; a moved
     # root necessarily means surviving shims execute a different bundle even
     # when this checkout's own before/after fingerprint is unchanged, so it
-    # folds into the same REPORTED shim-changed signal (nothing is stopped —
-    # the new daemon rolls each shim at its own turn boundary).
+    # folds into the same REPORTED shim-changed signal (this script stops
+    # nothing — the incoming daemon bounces each stale shim itself).
     ROOT_B64="$(printf '%s' "$ROOT" | base64 | tr -d '\n')"
     PRELOAD_FORM="(let* ((root (file-name-as-directory (decode-coding-string (base64-decode-string \"$ROOT_B64\") 'utf-8))) (before (and (boundp 'agent-repl--frontend-root) agent-repl--frontend-root))) (load (expand-file-name \"lisp/daemon.el\" root) nil t) (load (expand-file-name \"lisp/frontend-client.el\" root) nil t) (load (expand-file-name \"lisp/services.el\" root) nil t) (unless (equal agent-repl--frontend-root root) (error \"agent-repl deploy root mismatch: expected %S got %S\" root agent-repl--frontend-root)) (if (equal before root) \"artifact-root-same\" \"artifact-root-changed\"))"
     PRELOAD_OUT="$("$EMACSCLIENT" --eval "$PRELOAD_FORM" 2>&1)" || {
@@ -366,11 +352,11 @@ else
             ;;
     esac
 
-    # ALWAYS the preserving form. The deploy has no stop-shims mode any more:
-    # the restart never takes an argument here, whatever SHIM_CHANGED reported.
-    RESTART_FORM='(agent-repl-frontend-daemon-restart-await)'
+    # The await form takes no argument: what happens to surviving shims is the
+    # incoming daemon's decision, never a flag this script passes.
+    RESTART_FORM='(agent-repl-runtime-restart-await)'
     if [ "$SHIM_CHANGED" -eq 1 ]; then
-        log "daemon: restarting and awaiting completion via emacsclient (shims PRESERVED; the new daemon rolls each stale shim at its turn boundary)..."
+        log "daemon: restarting and awaiting completion via emacsclient (the incoming daemon bounces each stale shim itself)..."
     else
         log "daemon: restarting and awaiting completion via emacsclient..."
     fi
@@ -382,9 +368,8 @@ else
         *refusing*)
             # emacsclient exits 0 even when the elisp signals; the refusal text
             # is the only tell. A refused bounce means the deploy is NOT
-            # complete. A turn in flight is no longer among the reasons — this
-            # restart preserves the shims — so a refusal reaching here is one of
-            # the coordinator's other guards and is surfaced verbatim.
+            # complete, so the refusal is surfaced verbatim rather than
+            # interpreted here.
             echo "[deploy-all] daemon restart refused: $RESTART_OUT" >&2
             exit 3
             ;;
@@ -397,32 +382,10 @@ else
     esac
     log "daemon: restart completed"
 
-    # ---- 5b. webview refresh -----------------------------------------------
-    # The pages mounted in Emacs outlive the daemon they were loaded against,
-    # so a bounced daemon leaves every live webview talking to a listener that
-    # no longer exists. Re-navigate them here, from the deploy side.
-    #
-    # `fboundp'-guarded: the running Emacs may predate the command (the elisp
-    # hot-load in step 6 is what would define it, and it runs AFTER this), and
-    # a not-yet-loaded symbol must not fail the deploy — an old Emacs simply
-    # reports the refresh as skipped.
-    REFRESH_FORM='(if (fboundp (quote agent-repl-refresh-webviews)) (format "refreshed %d" (agent-repl-refresh-webviews)) "absent")'
-    REFRESH_OUT="$("$EMACSCLIENT" --eval "$REFRESH_FORM" 2>&1)" || {
-        echo "[deploy-all] webview refresh failed: $REFRESH_OUT" >&2
-        exit 3
-    }
-    case "$REFRESH_OUT" in
-        *absent*)   log "webviews: skipped — function absent (Emacs predates agent-repl-refresh-webviews)" ;;
-        *refreshed*) log "webviews: ${REFRESH_OUT//\"/}" ;;
-        *)
-            echo "[deploy-all] webview refresh returned an unrecognized result: $REFRESH_OUT" >&2
-            exit 3
-            ;;
-    esac
 fi
 
 # The build stamp is the only deployment identity for a webview artifact.
-# Assert it after the daemon bounce and webview refresh, so this command cannot
+# Assert it after the daemon bounce, so this command cannot
 # claim a complete deploy while the page artifact lags the source tree.
 verify_webapp_revision
 

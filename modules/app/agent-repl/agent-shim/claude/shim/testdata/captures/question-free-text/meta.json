@@ -1,0 +1,27 @@
+{
+  "scenario": "question-free-text",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Ask me exactly one question with the question tool: what to name the new service.",
+  "prompts": [
+    {
+      "text": "Ask me exactly one question with the question tool: what to name the new service.",
+      "resume": false
+    }
+  ],
+  "world": "question-free-text",
+  "cwd_init": null,
+  "vendor_session_id": "9782a3d6-43b7-4995-9d8a-778cc6885222",
+  "manual": null,
+  "expect": [
+    "tool:AskUserQuestion",
+    "answer string containing text matching NO offered label"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-question-free-text-6KfkwK-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:22:00.438Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

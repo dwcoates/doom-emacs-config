@@ -14,6 +14,19 @@ export default defineConfig({
     // The vendor guard keeps every test offline. The log setup installs a
     // deterministic inherited sink for canonical JSON logging assertions.
     setupFiles: ["./test/setup.ts", "./test/log-setup.ts"],
+    // The integration suite runs under vitest.integration.config.ts
+    // (`npm run test:integration`): it spawns the BUILT bundle, so including it
+    // here would make a fresh checkout's `npm test` fail for want of dist/.
+    exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**"],
+    // Tight on purpose: this suite is pure in-process work (no spawned
+    // process, no real vendor, no real store). The observed healthy max
+    // across 3,806 tests is ~640ms (test/log.test.ts, a bootstrap-stderr
+    // logging test); these are ~3x that, rounded. A unit test or hook
+    // hitting this is broken, not slow — raise it only with a measured
+    // reason, never to paper over a hang.
+    testTimeout: 2_500,
+    hookTimeout: 2_500,
+    teardownTimeout: 2_500,
     coverage: {
       provider: "v8",
       all: true,

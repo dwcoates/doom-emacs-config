@@ -1,487 +1,210 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"claude-repld/internal/dlog"
-	"claude-repld/internal/server"
 )
 
-type testFailingWriter struct{}
-
-func (testFailingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
-
-func TestWebappHandlerEmptyDirReturnsNil(t *testing.T) {
-	if webappHandler("", func(string, ...any) {}) != nil {
-		t.Fatal("expected nil handler when -webapp is empty")
-	}
-}
-
-func TestHealthzRequiresExplicitReadiness(t *testing.T) {
-	ready := &daemonReadiness{}
-	h := healthzHandler(ready, t.Logf)
-
-	// Before all listeners/dependencies are live, health must reject rather
-	// than treating process existence as readiness.
-	first := httptest.NewRecorder()
-	h.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if first.Code != http.StatusServiceUnavailable {
-		t.Fatalf("unready /healthz status=%d, want 503", first.Code)
-	}
-
-	ready.ready.Store(true)
-	second := httptest.NewRecorder()
-	h.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/healthz", nil))
-	if second.Code != http.StatusNoContent {
-		t.Fatalf("ready /healthz status=%d, want 204", second.Code)
-	}
-}
-
-func TestBootFatalLineIsCanonicalJSON(t *testing.T) {
-	var record dlog.Record
-	if err := json.Unmarshal(bytes.TrimSpace(bootFatalLine("state root unavailable")), &record); err != nil {
-		t.Fatalf("bootstrap emergency is not JSON: %v", err)
-	}
-	if record.Runtime != dlog.RuntimeDaemon || record.Level != dlog.LevelError ||
-		record.Operation != "daemon.bootstrap.fatal" || record.Message != "state root unavailable" ||
-		record.PID <= 0 || record.Context == nil {
-		t.Fatalf("bootstrap emergency=%#v", record)
-	}
-}
-
-func TestLogDaemonProcessExitLogsCleanExit(t *testing.T) {
-	// Arrange
-	var durable bytes.Buffer
-	logger := dlog.New(&durable, io.Discard, false)
-
-	// Act
-	logDaemonProcessExit(logger)
-
-	// Assert
-	var record dlog.Record
-	if err := json.Unmarshal(bytes.TrimSpace(durable.Bytes()), &record); err != nil {
-		t.Fatalf("exit trace is not JSON: %v: %q", err, durable.String())
-	}
-	if record.Operation != "exit" || record.Message != "claude-repld exiting cleanly" {
-		t.Fatalf("exit trace = %#v, want operation=exit clean message", record)
-	}
-}
-
-// TestLogDaemonProcessExitLogsThenRepanics proves the exit trace narrates a
-// panic without recovering it: logDaemonProcessExit must remain deferred
-// directly (not wrapped) for its own recover() to observe the panic, so this
-// drives it through a real deferred panic rather than calling it directly.
-func TestLogDaemonProcessExitLogsThenRepanics(t *testing.T) {
-	// Arrange
-	var durable bytes.Buffer
-	logger := dlog.New(&durable, io.Discard, false)
-	var recovered any
-
-	// Act
-	func() {
-		defer func() { recovered = recover() }()
-		func() {
-			defer logDaemonProcessExit(logger)
-			panic("invariant violated")
-		}()
-	}()
-
-	// Assert
-	if recovered != "invariant violated" {
-		t.Fatalf("re-panicked value = %v, want the original panic to survive the trace", recovered)
-	}
-	var record dlog.Record
-	if err := json.Unmarshal(bytes.TrimSpace(durable.Bytes()), &record); err != nil {
-		t.Fatalf("panic exit trace is not JSON: %v: %q", err, durable.String())
-	}
-	if record.Message != "claude-repld exiting: panic: invariant violated" {
-		t.Fatalf("panic exit trace = %#v", record)
-	}
-}
-
-func TestUDSShimLoggerPersistsDaemonOwnedDiagnosticsToWorkspaceTarget(t *testing.T) {
-	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
-	manager := dlog.NewTargetManager()
-	target, err := manager.OpenWorkspace(workspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer manager.Close()
-	var terminal bytes.Buffer
-	logger := &udsShimLogger{workspace: workspace, daemon: dlog.New(target, &terminal, true), terminal: &terminal, sessionID: "s1"}
-	logger.Log("malformed stderr: %s", "bad")
-	logger.LogVerbose("stdout scan: %s", "late")
-	logger.MirrorShimRecord(`{"runtime":"shim","verbosity":"normal"}`)
-	contents, err := os.ReadFile(target.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(contents), `"operation":"shim.stderr"`) || !strings.Contains(string(contents), `"workspace_id":"ws-test"`) || !strings.Contains(string(contents), "malformed stderr: bad") || !strings.Contains(string(contents), "stdout scan: late") || !strings.Contains(terminal.String(), `{"runtime":"shim"`) {
-		t.Fatalf("workspace diagnostic records=%q", contents)
-	}
-}
-
-// TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent pins the split the
-// level exists for: stderr retention announces itself on every healthy spawn,
-// and routing that announcement through the error channel put a level=error
-// record in the workspace log of a session that came up perfectly.
-func TestUDSShimLoggerLevelsSeparateLifecycleFromStderrContent(t *testing.T) {
+// TestTheStoreSocketPrecedence pins the store socket's three-way precedence:
+// the flag beats the environment, which beats the default under the home
+// directory. The socket ALWAYS rides argv to the shim, so whichever wins here
+// is what every session is told.
+func TestTheStoreSocketPrecedence(t *testing.T) {
+	// Arrange.
 	tests := []struct {
-		name  string
-		emit  func(*udsShimLogger)
-		want  dlog.Level
-		match string
+		name      string
+		flagValue string
+		envValue  string
+		want      string
 	}{
-		{
-			name:  "retention lifecycle announcement",
-			emit:  func(l *udsShimLogger) { l.LogLifecycle("shim: stderr retention started pid=%d", 4242) },
-			want:  dlog.LevelInfo,
-			match: "stderr retention started",
-		},
-		{
-			name:  "genuine shim stderr content",
-			emit:  func(l *udsShimLogger) { l.Log("shim stderr malformed: %s", "node stack trace") },
-			want:  dlog.LevelError,
-			match: "shim stderr malformed",
-		},
+		{name: "the flag beats the environment", flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
+		{name: "the environment beats the default", flagValue: "", envValue: "/run/env.sock", want: "/run/env.sock"},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
-			manager := dlog.NewTargetManager()
-			target, err := manager.OpenWorkspace(workspace)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer manager.Close()
-			var terminal bytes.Buffer
-			logger := &udsShimLogger{workspace: workspace, daemon: dlog.New(target, &terminal, true), terminal: &terminal, sessionID: "s1"}
-
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			// Act.
-			tc.emit(logger)
+			got := resolveStoreSocket(test.flagValue, test.envValue)
 
 			// Assert.
-			contents, err := os.ReadFile(target.Name())
-			if err != nil {
-				t.Fatal(err)
-			}
-			var record dlog.Record
-			if err := json.Unmarshal(bytes.TrimSpace(contents), &record); err != nil {
-				t.Fatalf("shim stderr record is not JSON: %v: %q", err, contents)
-			}
-			if !strings.Contains(record.Message, tc.match) {
-				t.Fatalf("record message = %q, want it to carry %q", record.Message, tc.match)
-			}
-			if record.Level != tc.want {
-				t.Fatalf("record level = %q, want %q", record.Level, tc.want)
+			if got != test.want {
+				t.Fatalf("resolveStoreSocket(%q, %q) = %q, want %q", test.flagValue, test.envValue, got, test.want)
 			}
 		})
 	}
 }
 
-func TestUDSShimLoggerReportsWorkspacePersistenceFailureToTerminal(t *testing.T) {
-	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
-	var terminal bytes.Buffer
-	logger := &udsShimLogger{workspace: workspace, daemon: dlog.New(testFailingWriter{}, &terminal, false), terminal: &terminal, sessionID: "s1"}
-	logger.Log("malformed stderr")
-	if !strings.Contains(terminal.String(), "workspace shim diagnostic persistence failed") {
-		t.Fatalf("terminal=%q", terminal.String())
+// TestTheStoreSocketFallsBackToTheHomeDefault pins the last step of the same
+// precedence: with neither a flag nor an environment value the daemon names the
+// store's default socket rather than passing nothing.
+func TestTheStoreSocketFallsBackToTheHomeDefault(t *testing.T) {
+	// Arrange.
+	t.Setenv("HOME", "/home/tester")
+
+	// Act.
+	got := resolveStoreSocket("", "")
+
+	// Assert.
+	if want := filepath.Join("/home/tester", defaultStoreSocket); got != want {
+		t.Fatalf("resolveStoreSocket(\"\", \"\") = %q, want %q", got, want)
 	}
 }
 
-// maintenanceTickWait bounds the rendezvous with a completed maintenance pass.
-// It is a FAILURE bound, never a delay: the receive completes the instant the
-// pass finishes, and this only decides how long a stalled maintenance loop
-// takes to fail the test instead of hanging it.
-const maintenanceTickWait = 10 * time.Second
+// TestNoArgvIsLegal pins the launch contract: Emacs starts the binary with NO
+// argv and the state travels in the environment, so an empty command line
+// parses.
+func TestNoArgvIsLegal(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_STORE_SOCKET", "/run/env.sock")
 
-func TestWorkspaceLogMaintenanceTicksAndStopIsIdempotent(t *testing.T) {
-	manager, err := dlog.NewTargetManagerWithCap(8)
+	// Act.
+	opts, err := parseFlags("claude-repld", nil)
+
+	// Assert.
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parseFlags with no argv: %v", err)
 	}
-	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
-	target, err := manager.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, err := target.Stat()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := target.WriteString("12345678"); err != nil {
-		t.Fatal(err)
-	}
-	var terminal bytes.Buffer
-	// THE TICK ANNOUNCES ITSELF. This used to sample the target's size in a
-	// sleep loop, which measured the clock rather than the work: the pass runs
-	// on its own goroutine, and the injected completion signal is the only
-	// thing that can say it FINISHED one.
-	ticked := make(chan struct{}, 1)
-	stop := startWorkspaceLogMaintenanceAtInterval(
-		manager, dlog.New(io.Discard, &terminal, false), &terminal, false, time.Millisecond,
-		func() {
-			select {
-			case ticked <- struct{}{}:
-			default:
-			}
-		},
-	)
-	select {
-	case <-ticked:
-	case <-time.After(maintenanceTickWait):
-		stop()
-		t.Fatalf("no maintenance pass completed within %s; terminal=%q", maintenanceTickWait, terminal.String())
-	}
-	stop()
-	stop()
-	info, statErr := target.Stat()
-	if statErr != nil {
-		t.Fatal(statErr)
-	}
-	if info.Size() != 0 {
-		t.Fatalf("maintenance did not truncate target at cap: size=%d terminal=%q", info.Size(), terminal.String())
-	}
-	if !os.SameFile(before, info) {
-		t.Fatalf("maintenance replaced target inode: before=%v after=%v", before, info)
-	}
-	if err := manager.Close(); err != nil {
-		t.Fatal(err)
+	if opts.joining != "" {
+		t.Fatalf("opts.joining = %q, want an incumbent", opts.joining)
 	}
 }
 
-func TestWorkspaceLogMaintenancePanicsWhenAllReportingChannelsFail(t *testing.T) {
-	manager, err := dlog.NewTargetManagerWithCap(8)
+// TestTheFlagSetSpellsEveryBindingName pins the AGENTS.md flag table: a
+// renamed flag is a launch that silently loses an override, because Go's flag
+// package rejects the old spelling rather than ignoring it.
+func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
+	// Arrange.
+	argv := []string{
+		"--state-dir", "/state",
+		"--fake",
+		"--joining", "127.0.0.1:41111",
+		"--store-socket", "/run/store.sock",
+		"--shim-main", "/checkout/main.js",
+		"--node", "/usr/bin/node",
+		"--webapp-dist", "/checkout/dist",
+		"--prompts-dir", "/checkout/prompts",
+		"--default-config-dir", "/home/tester/.claude",
+		"--multi-repo-config-dir", "/home/tester/.claude-multi",
+		"--idle-cutoff", "45m",
+		"--pprof", "/tmp/pprof.sock",
+		"--self-repo", "/checkout",
+		"--feed-tail-retention", "16",
+	}
+
+	// Act.
+	opts, err := parseFlags("claude-repld", argv)
+
+	// Assert.
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parseFlags: %v", err)
 	}
-	defer manager.Close()
-	workspace := dlog.Workspace{Directory: t.TempDir(), ID: "ws-test"}
-	target, err := manager.OpenWorkspaceRuntime(workspace, dlog.RuntimeDaemon)
-	if err != nil {
-		t.Fatal(err)
+	switch {
+	case opts.stateDir != "/state":
+		t.Fatalf("opts.stateDir = %q", opts.stateDir)
+	case !opts.fake:
+		t.Fatal("opts.fake = false, want the flag honored")
+	case opts.joining != "127.0.0.1:41111":
+		t.Fatalf("opts.joining = %q", opts.joining)
+	case opts.storeSocket != "/run/store.sock":
+		t.Fatalf("opts.storeSocket = %q", opts.storeSocket)
+	case opts.shim != "/checkout/main.js":
+		t.Fatalf("opts.shim = %q", opts.shim)
+	case opts.webapp != "/checkout/dist":
+		t.Fatalf("opts.webapp = %q", opts.webapp)
+	case opts.promptsDir != "/checkout/prompts":
+		t.Fatalf("opts.promptsDir = %q", opts.promptsDir)
+	case opts.defaultConfigDir != "/home/tester/.claude":
+		t.Fatalf("opts.defaultConfigDir = %q", opts.defaultConfigDir)
+	case opts.multiRepoConfigDir != "/home/tester/.claude-multi":
+		t.Fatalf("opts.multiRepoConfigDir = %q", opts.multiRepoConfigDir)
+	case opts.idleCutoff != 45*time.Minute:
+		t.Fatalf("opts.idleCutoff = %v", opts.idleCutoff)
+	case opts.pprof != "/tmp/pprof.sock":
+		t.Fatalf("opts.pprof = %q", opts.pprof)
+	case opts.selfRepo != "/checkout":
+		t.Fatalf("opts.selfRepo = %q", opts.selfRepo)
+	case opts.feedTailRetention != 16:
+		t.Fatalf("opts.feedTailRetention = %d", opts.feedTailRetention)
 	}
-	if _, err := target.WriteString("12345678"); err != nil {
-		t.Fatal(err)
+}
+
+// TestTheGraphNamesEveryUnwiredCollaborator pins that a graph which cannot be
+// built says WHICH collaborator has no landed source, rather than failing with
+// a bare refusal a reader has to go hunting behind. The list is empty today —
+// every collaborator has a producer — and the test stays so that adding one
+// keeps the refusal legible.
+func TestTheGraphNamesEveryUnwiredCollaborator(t *testing.T) {
+	// Arrange.
+	if len(unwired) == 0 {
+		t.Skip("the graph is fully wired")
 	}
-	link := filepath.Join(workspace.Directory, ".claude", "emacs", "daemon.log")
-	if err := os.Remove(link); err != nil {
-		t.Fatal(err)
+
+	// Act.
+	_, err := buildGraph(t.Context(), process{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("buildGraph returned no error while collaborators are unwired")
 	}
-	if err := os.WriteFile(link, []byte("hostile regular file"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		recovered := recover()
-		if recovered == nil || !strings.Contains(fmt.Sprint(recovered), "workspace log maintenance reporting failed") {
-			t.Fatalf("maintenance panic=%v", recovered)
+	for _, u := range unwired {
+		if !strings.Contains(err.Error(), u) {
+			t.Fatalf("the refusal does not name %q: %v", u, err)
 		}
-	}()
-	maintainWorkspaceLogTargets(manager, dlog.New(io.Discard, io.Discard, false), testFailingWriter{}, false)
-}
-
-func TestWebappHandlerServesIndexWhenPresent(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>SPA"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	warned := false
-	h := webappHandler(dir, func(string, ...any) { warned = true })
-	if warned {
-		t.Fatal("did not expect a warning when index.html exists")
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want 200", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "SPA") {
-		t.Fatalf("body %q missing index.html content", rec.Body.String())
 	}
 }
 
-func TestWebappHandlerDiagnosesMissingIndex(t *testing.T) {
-	dir := t.TempDir() // exists, but no index.html
-	warned := false
-	h := webappHandler(dir, func(string, ...any) { warned = true })
-	if !warned {
-		t.Fatal("expected a startup warning when index.html is missing")
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("got status %d, want 503", rec.Code)
-	}
-	if strings.Contains(rec.Body.String(), "404 page not found") {
-		t.Fatal("must not serve the bare Go 404 body")
-	}
-	if !strings.Contains(rec.Body.String(), "webapp assets not found") {
-		t.Fatalf("body %q missing the diagnostic message", rec.Body.String())
-	}
-}
+// TestTheFeedTailRetentionEnvironmentKnobBeatsTheFlag pins the precedence a
+// test relies on: a suite sets the environment and must not also have to know
+// how the daemon under it was launched.
+func TestTheFeedTailRetentionEnvironmentKnobBeatsTheFlag(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveFeedTailRetention(4096, "3")
 
-func TestWebappHandlerSelfCorrectsWhenIndexAppears(t *testing.T) {
-	dir := t.TempDir() // starts without index.html
-	h := webappHandler(dir, func(string, ...any) {})
-	// Assets get built after the daemon started.
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>LATE"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got status %d, want 200 after index.html appeared", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "LATE") {
-		t.Fatalf("body %q missing late index.html content", rec.Body.String())
-	}
-}
-
-func TestWebappHandlerRefusesToCacheTheDocumentButNotItsAssets(t *testing.T) {
-	// Arrange — a build whose entry point names one fingerprinted bundle.
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(filepath.Join(dir, "assets"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "assets", "index-abc123.js"), []byte("//"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h := webappHandler(dir, func(string, ...any) {})
-
-	for _, tc := range []struct {
-		name    string
-		path    string
-		noStore bool
-		reason  string
-	}{
-		{"root document", "/", true, "the entry point is the only thing naming which build to run"},
-		{"explicit document", "/index.html", true, "the same document reached by its own name"},
-		{"fingerprinted asset", "/assets/index-abc123.js", false, "the URL addresses exactly one build"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// Act
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
-
-			// Assert
-			got := rec.Header().Get("Cache-Control")
-			if tc.noStore && !strings.Contains(got, "no-store") {
-				t.Fatalf("Cache-Control %q for %s must forbid storing: %s", got, tc.path, tc.reason)
-			}
-			if !tc.noStore && got != "" {
-				t.Fatalf("Cache-Control %q for %s must be left to the client: %s", got, tc.path, tc.reason)
-			}
-		})
-	}
-}
-
-func TestLaunchedBinaryMTimeMatchesExecutableStat(t *testing.T) {
-	// Arrange — the running test binary IS an executable on disk, so
-	// launchedBinaryMTime must report exactly its stat mtime.
-	exe, err := os.Executable()
+	// Assert.
 	if err != nil {
-		t.Skipf("os.Executable unavailable in this environment: %v", err)
+		t.Fatalf("resolveFeedTailRetention: %v", err)
 	}
-	info, err := os.Stat(exe)
-	if err != nil {
-		t.Fatalf("stat %q: %v", exe, err)
-	}
-	// Act
-	var durable, terminal bytes.Buffer
-	got := launchedBinaryMTime(dlog.New(&durable, &terminal, false))
-	// Assert
-	if want := info.ModTime().Unix(); got != want {
-		t.Fatalf("launchedBinaryMTime() = %d, want %d (mtime of %q)", got, want, exe)
-	}
-	if got <= 0 {
-		t.Fatalf("launchedBinaryMTime() = %d, want a positive Unix mtime", got)
+	if got != 3 {
+		t.Fatalf("retention = %d, want the environment's 3", got)
 	}
 }
 
-func TestParseAccounts(t *testing.T) {
-	tests := []struct {
-		name    string
-		raw     string
-		want    []server.Account
-		wantErr bool
-	}{
-		{
-			name: "empty flag is an unconfigured roster, not an error",
-			raw:  "",
-			want: nil,
-		},
-		{
-			name: "one pair",
-			raw:  "work=/home/u/.claude-chesscom",
-			want: []server.Account{{Label: "work", ConfigDir: "/home/u/.claude-chesscom"}},
-		},
-		{
-			name: "empty dir names the CLI default root",
-			raw:  "personal=",
-			want: []server.Account{{Label: "personal", ConfigDir: ""}},
-		},
-		{
-			name: "two pairs keep roster order",
-			raw:  "personal=,work=/home/u/.claude-chesscom",
-			want: []server.Account{
-				{Label: "personal", ConfigDir: ""},
-				{Label: "work", ConfigDir: "/home/u/.claude-chesscom"},
-			},
-		},
-		{
-			name:    "pair without an equals sign is malformed",
-			raw:     "personal",
-			wantErr: true,
-		},
-		{
-			name:    "empty label is malformed",
-			raw:     "=/home/u/.claude",
-			wantErr: true,
-		},
-		{
-			name:    "duplicate label is rejected",
-			raw:     "work=/a,work=/b",
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got, err := parseAccounts(tt.raw)
+// TestTheFeedTailRetentionKnobRefusesANonNumber covers the loud failure: a knob
+// that silently did nothing would make the suite it was set for lie.
+func TestTheFeedTailRetentionKnobRefusesANonNumber(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFeedTailRetention(0, "lots")
 
-			// Assert
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("parseAccounts(%q) = %v, want error", tt.raw, got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("parseAccounts(%q): %v", tt.raw, err)
-			}
-			if len(got) != len(tt.want) {
-				t.Fatalf("parseAccounts(%q) = %v, want %v", tt.raw, got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("account[%d] = %v, want %v", i, got[i], tt.want[i])
-				}
-			}
-		})
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFeedTailRetention with a non-numeric knob = nil, want a refusal")
+	}
+}
+
+// TestTheFeedTailRetentionKnobRefusesANonPositiveNumber covers the other
+// malformed shape: zero rows retains nothing and is not what any caller means.
+func TestTheFeedTailRetentionKnobRefusesANonPositiveNumber(t *testing.T) {
+	// Arrange, Act.
+	_, err := resolveFeedTailRetention(0, "0")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveFeedTailRetention with a zero knob = nil, want a refusal")
+	}
+}
+
+// TestTheFeedTailRetentionDefaultsToTheResolversOwn covers the ordinary boot:
+// neither the flag nor the knob is set, and zero means the resolver decides.
+func TestTheFeedTailRetentionDefaultsToTheResolversOwn(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveFeedTailRetention(0, "")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolveFeedTailRetention: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("retention = %d, want zero so the resolver's own default stands", got)
 	}
 }

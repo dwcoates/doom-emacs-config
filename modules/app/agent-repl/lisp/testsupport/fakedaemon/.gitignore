@@ -1,0 +1,2 @@
+# The built binary is produced per test run into a temp dir; never tracked.
+/fakedaemon

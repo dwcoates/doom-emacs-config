@@ -105,7 +105,6 @@ WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
 STORE_DIR="$ROOT/agent-shim/shim-store"
 SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
-WIRE_DIR="$ROOT/agent-shim/wire"
 SHARED_LOGGING_DIR="$ROOT/agent-shim/logging/go"
 PROTO_GO_DIR="$ROOT/proto/gen/go"
 
@@ -127,9 +126,9 @@ REL_WEBAPP="${REL_ROOT:+$REL_ROOT/}webapp"
 NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/node-store}"
 
 # The shim artifact is the esbuild SINGLE-FILE bundle (`npm run build` ->
-# build.mjs). It stays at dist/main.js — the exact entry the daemon (daemon.el)
-# and the e2e harness spawn — so the bundle IS the spawned shim without a path
-# change on the (frozen) daemon side. The bundle inlines @bufbuild/protobuf,
+# build.mjs). It stays at dist/main.js — the exact entry the daemon and the e2e
+# harness spawn — so the bundle IS the spawned shim without a path change on
+# the daemon side. The bundle inlines @bufbuild/protobuf,
 # which the committed out-of-package proto stubs cannot resolve at runtime; a
 # plain tsc emit both breaks that resolution and lands under a deep rootDir path.
 SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
@@ -523,8 +522,9 @@ build_webapp() {
 }
 
 build_daemon() {
-    # The daemon's set is its manifests plus every .go file in the tree.
-    load_sources "$DAEMON_DIR" -name '*.go'
+    # The daemon's set is its manifests, every .go file in its tree, and the
+    # repo-local modules it compiles against (generated proto Go + logging).
+    load_go_sources "$DAEMON_DIR"
     if ! is_stale "$DAEMON_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] daemon: fresh, skipping"
         return 0
@@ -537,22 +537,22 @@ build_daemon() {
     echo "[build-frontend] daemon: done"
 }
 
-load_service_sources() {
-    # Both services compile against repo-local proto + wire + logging modules.
-    # Their generated/source files are real prerequisites even though they live
-    # outside the service module, so a proto, wire or logging edit must stale
-    # the installed launchd binary.
+load_go_sources() {
+    # Every Go artifact here compiles against the repo-local proto + logging
+    # modules. Their generated/source files are real prerequisites even though
+    # they live outside the built module, so a proto or logging edit must stale
+    # the binary.
     local dir="$1" source_dir f
     SOURCES=()
-    for source_dir in "$dir" "$WIRE_DIR" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
+    for source_dir in "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR"; do
         if [ ! -d "$source_dir" ]; then
-            echo "build-frontend.sh: required service source directory missing: $source_dir" >&2
+            echo "build-frontend.sh: required Go source directory missing: $source_dir" >&2
             exit 1
         fi
     done
     while IFS= read -r -d '' f; do
         SOURCES+=("$f")
-    done < <(find "$dir" "$WIRE_DIR" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" -type f \
+    done < <(find "$dir" "$SHARED_LOGGING_DIR" "$PROTO_GO_DIR" -type f \
              \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -print0)
 }
 
@@ -561,7 +561,7 @@ build_service() {
     # launchd services.  Keeping one helper prevents their source sets and
     # install semantics from drifting.
     local name="$1" dir="$2" artifact="$3" sha_stamp="$4"
-    load_service_sources "$dir"
+    load_go_sources "$dir"
     if ! is_stale "$artifact" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] $name: fresh, skipping"
         return 0

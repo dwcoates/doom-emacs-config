@@ -4,16 +4,18 @@ import {
   bindLogContext,
   resetLoggingForTests,
   setLogger,
-} from "../src/wslog.js";
+} from "../src/log.js";
 
 /**
- * Production installs the daemon-forwarding logger before runtime work begins.
- * Reproduce that invariant for every unit test without emitting diagnostics to
- * the test process. Logging-specific tests may reset or replace this instance
- * to exercise the initialization and routing contracts explicitly.
+ * Production installs the ClientLog-forwarding logger before runtime work
+ * begins. Reproduce that invariant for every unit test without emitting
+ * diagnostics to the test process and without any rpc leaving the suite: the
+ * sink resolves immediately and the console function is a no-op.
+ * Logging-specific tests may reset or replace this instance to exercise the
+ * initialization and routing contracts explicitly.
  */
 beforeEach(() => {
   resetLoggingForTests();
-  setLogger(new ForwardingLogger(() => true, () => {}));
+  setLogger(new ForwardingLogger(async () => {}, () => {}));
   bindLogContext({ connection_id: "test-connection" });
 });
