@@ -379,10 +379,25 @@ func (f *Fleet) Hibernate(ctx context.Context, ws ids.WorkspaceID) (*shimv1.Hibe
 	return client.Hibernate(ctx, &shimv1.HibernateRequest{})
 }
 
-// KillSession ends a workspace's session. It is drain.Stand's second method
-// and Deps.Sessions' Stop in one behavior, so the two cannot disagree about
-// what stopping a session means.
+// KillSession ends a workspace's session: it ASKS THE SHIM to end the session
+// first and only then stops the process.
+//
+// The order is the whole point of the verb's name. The drain's stand-down and
+// the kill verb both need the shim to write its own terminals before its
+// process goes, and a signal alone gives it no chance to. A shim that will not
+// answer is not a reason to leave the process running, so the stop below is
+// unconditional and the refusal is evidence.
 func (f *Fleet) KillSession(ctx context.Context, ws ids.WorkspaceID, force bool) error {
+	if shim, live := f.Shim(ws); live {
+		if err := shim.KillSession(ctx, force); err != nil {
+			if record, recErr := f.deps.DB.Workspace(ctx, ws); recErr == nil {
+				if log, logErr := f.deps.Log.Workspace(record.Dir); logErr == nil {
+					log.Warn(opBringUp, "the session kill did not answer; stopping the process anyway",
+						dlog.Context{"workspace": string(ws), "force": force, "cause": err.Error()})
+				}
+			}
+		}
+	}
 	return f.Stop(ctx, ws, force)
 }
 
