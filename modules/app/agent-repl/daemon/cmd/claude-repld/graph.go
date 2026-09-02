@@ -199,10 +199,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		}
 		return record.Dir, nil
 	}
+	// The metaprompt sentinels are stripped from DRAWN text only; the record
+	// keeps the full text. Both the feed resolver and the queue's mirror draw
+	// prompt rows, so both take the same one implementation.
+	stripSentinels := sentinelStripper(log)
 	feedResolver, err := feed.New(feed.Deps{
-		Log:          p.Surfaces,
-		WorkspaceDir: workspaceDir,
-		Painter:      painter,
+		Log:            p.Surfaces,
+		WorkspaceDir:   workspaceDir,
+		Painter:        painter,
+		StripSentinels: stripSentinels,
 		// THE IMAGE ORIGIN HAS NO PRODUCER. The daemon serves the webapp's
 		// dist directory and nothing else, so an image reference has no
 		// servable source; the resolver refuses loudly and names what is
@@ -271,13 +276,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	var drainController drain.Controller
 	queue, err = promptqueue.New(promptqueue.Deps{
-		DB:      p.DB,
-		Judge:   judge,
-		Feed:    feedResolver,
-		Footer:  footerResolver,
-		Holds:   holdsResolver,
-		Client:  fleet.Sender,
-		Watcher: fleet.Watcher,
+		StripSentinels: stripSentinels,
+		DB:             p.DB,
+		Judge:          judge,
+		Feed:           feedResolver,
+		Footer:         footerResolver,
+		Holds:          holdsResolver,
+		Client:         fleet.Sender,
+		Watcher:        fleet.Watcher,
 		// A submission that arrives under a PARKED merge lease goes to the
 		// orchestrator as guidance. The queue never imports merge, so the
 		// route is a function; the orchestrator does not exist yet, so the
@@ -660,6 +666,23 @@ func lockDir() string {
 // deployStamp reads the deployed build's sha from the stamp the deploy chain
 // writes. A missing stamp is an ERROR rather than an empty sha: a staleness
 // check against nothing would call every shim current.
+// sentinelStripper adapts prompts.StripSentinels to the resolvers' drawing
+// seam. An UNBALANCED marker is a producer bug: it is recorded at WARNING and
+// the text is drawn as it stands, because losing the prompt row is worse than
+// drawing a marker the reader can see and report.
+func sentinelStripper(log dlog.Logger) func(string) string {
+	return func(text string) string {
+		drawn, err := prompts.StripSentinels(text)
+		if err != nil {
+			log.Warn("daemon.cmd.strip_sentinels",
+				"a prompt's injected spans are unbalanced; it is drawn unstripped",
+				dlog.Context{"error": err.Error()})
+			return text
+		}
+		return drawn
+	}
+}
+
 func deployStamp(path string) func() (string, error) {
 	return func() (string, error) {
 		raw, err := os.ReadFile(path)

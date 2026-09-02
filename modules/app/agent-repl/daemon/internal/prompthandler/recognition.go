@@ -102,10 +102,14 @@ func recognize(text string) recognized {
 
 	matched, known := commandSpecs()[name]
 	if !known {
-		// A command the closed set does not name. It is RECOGNIZED as a
-		// command — it opens with a slash and names no prompt — and refused
-		// with the add-support offer rather than forwarded.
-		return recognized{kind: RecognizedRefused, literal: name}
+		// A command the closed set does not name FALLS THROUGH TO THE VENDOR
+		// like any other text, per endpoint_submit_prompt.proto: the retired
+		// /cost and /usage arms say so in as many words ("the commands fall
+		// through to the vendor like any unrecognized command"), and
+		// command_refused is for a command the daemon RECOGNIZES and neither
+		// answers nor forwards. Refusing here would suppress every vendor and
+		// user-authored slash command the enum has not been taught.
+		return recognized{kind: RecognizedNone}
 	}
 	if rest != "" && !matched.takesArgs {
 		return recognized{kind: RecognizedNone}
