@@ -57,7 +57,7 @@ import (
 
 // Defaults for the two loop intervals. Polling is frequent because it is what
 // carries a user's prompt echo to the GUI; rescanning is not, because a new
-// file appearing is rare and fsnotify is the latency path.
+// file appearing is rare and there is no fsnotify path to catch it sooner.
 const (
 	DefaultPollInterval   = time.Second
 	DefaultRescanInterval = 30 * time.Second
