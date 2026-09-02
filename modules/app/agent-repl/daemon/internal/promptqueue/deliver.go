@@ -52,6 +52,9 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}
 
+	// The shim TOOK the turn: the roster's `submitting` window is over.
+	q.deps.Sidebar.AckTurn(sub.WS)
+
 	if agent := success.GetPrompt().GetAgent(); agent.GetValue() != "" {
 		watcher.SetMainAgent(agent)
 	}

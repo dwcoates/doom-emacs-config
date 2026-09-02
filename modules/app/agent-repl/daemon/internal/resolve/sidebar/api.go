@@ -75,6 +75,11 @@ type Resolver interface {
 	// tells a `/clear` and a compaction apart from an ordinary prompt — the
 	// three draw different dots and only the daemon knows which act it sent.
 	SetTurn(ws ids.WorkspaceID, turn *TurnStarted)
+	// AckTurn records that the SHIM has taken the turn, which is what ends the
+	// row's `submitting` window. The shim's answer to StartTurn is the ack; a
+	// turn that then produces no activity at all still leaves `submitting`,
+	// which names a window that is over.
+	AckTurn(ws ids.WorkspaceID)
 	// SetTurnEnded installs how the last turn ended, which is what tells
 	// `interrupted` from `done`. No agent terminal states it: a user interrupt
 	// is a DAEMON fact, so the roster is told directly.
