@@ -321,6 +321,54 @@ describe("the refusals", () => {
     });
   }
 
+  it("states the refusal at the control that opened the login", async () => {
+    // ARRANGE: every click's refusal renders AT the clicked control, and the
+    // control here belongs to another component (the topbar's account chip),
+    // so it is handed in rather than guessed at.
+    const control = document.createElement("button");
+    document.body.append(control);
+    const overlay = mountLoginOverlay(
+      host,
+      appContext({
+        openLogin: () =>
+          create(OpenLoginResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+          }),
+      }),
+      { terminalFactory: async () => fakeTerminal(), link: scriptedLink([]) },
+    );
+    // ACT
+    overlay.open(control);
+    await flush();
+    // ASSERT
+    expect(control.querySelector(".refusal")?.getAttribute("data-arm")).toBe("unknownWorkspace");
+    overlay.dispose();
+    control.remove();
+  });
+
+  it("states it exactly once, at the control rather than also in the header", async () => {
+    // ARRANGE
+    const control = document.createElement("button");
+    document.body.append(control);
+    const overlay = mountLoginOverlay(
+      host,
+      appContext({
+        openLogin: () =>
+          create(OpenLoginResponseSchema, {
+            result: { case: "error", value: { cause: { case: "unknownWorkspace", value: {} } } },
+          }),
+      }),
+      { terminalFactory: async () => fakeTerminal(), link: scriptedLink([]) },
+    );
+    // ACT
+    overlay.open(control);
+    await flush();
+    // ASSERT: one click, one refusal.
+    expect(refusal()).toBeNull();
+    overlay.dispose();
+    control.remove();
+  });
+
   it("leaves the overlay hidden when the open was refused", async () => {
     const overlay = mountLoginOverlay(
       host,
