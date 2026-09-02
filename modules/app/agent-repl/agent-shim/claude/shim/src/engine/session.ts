@@ -1710,8 +1710,37 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // to continue, so it must be told what the work IS.
     // A HANDLE NAMES THE SPAWNING CALL, so "does the revived vendor still have
     // it" is a lookup by tool_use_id and never by the vendor's own task id.
+    //
+    // ASK THE VENDOR, do not wait to be told. The live table is built from
+    // messages the shim has ALREADY seen, and at StartSession it has seen
+    // almost none -- a revived process announces its surviving tasks on its own
+    // schedule, after the init this reconciliation follows. Judging survival
+    // off that table alone therefore swept up work the vendor still had, and
+    // wrote a lost.swept_up terminal over a run that was still producing.
+    // `backgroundTasks(handle)` is the same declared observation DetachForeground
+    // uses, and it answers now.
+    const active = query;
+    const surviving = new Set<string>();
+    for (const work of open.liveDetached) {
+      if (live.byToolUseId(work.value) !== undefined) {
+        surviving.add(work.value);
+        continue;
+      }
+      if (active === undefined) continue;
+      try {
+        if (await active.backgroundTasks(work.value)) surviving.add(work.value);
+      } catch (err) {
+        // A vendor that cannot answer is not a vendor that said "gone": leaving
+        // the item to be swept would close a run that may still be producing.
+        LOGGER.log(
+          { level: "warn", work_id: work.value, cause: err instanceof Error ? err.message : String(err) },
+          "the vendor could not be asked whether it still holds this work; treating it as surviving",
+        );
+        surviving.add(work.value);
+      }
+    }
     const survives = (work: conversationv1.DetachedWorkId): boolean =>
-      live.byToolUseId(work.value) !== undefined;
+      surviving.has(work.value);
     const readopted = announceLiveWork(book, open.liveDetached.filter(survives));
 
     for (const work of open.liveDetached) {
