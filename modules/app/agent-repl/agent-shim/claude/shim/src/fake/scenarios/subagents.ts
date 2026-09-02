@@ -23,7 +23,7 @@
  * scenario writes it that way, which is what lets the sidecar ingest a
  * detached agent's work at all.
  */
-import { conclude, scenario } from "./support.js";
+import { askPermission, conclude, scenario } from "./support.js";
 import { FAKE_SIGNATURE } from "./support.js";
 
 /** The `AgentOutput` a completed synchronous subagent answers with. */
@@ -217,6 +217,67 @@ export const SUBAGENT_DETACHED = scenario({
   },
 });
 
+export const SUBAGENT_DETACHED_LIVE = scenario({
+  name: "subagent-detached-live",
+  prompt: "!subagent-detached-live",
+  emits:
+    "a detached `Agent` that is left LIVE after the turn ends and then raises its OWN gated call: the " +
+    "`canUseTool` ask carries the subagent's `agentID`. Nothing here ever finishes the agent — only a " +
+    "`stopTask` does, which is what makes a stop targeted at a subagent's AgentId observable",
+  writes: "the agent's `.meta.json` and `agent-<id>.jsonl`, its spool, and the main transcript's lines",
+  arms:
+    "AgentSubagent detached_work left live, an AgentPermission raised UNDER the subagent, and " +
+    "AgentSubagentFailure.cause=stopped_by_user when the stop lands",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "subagent-detached-live" }, "fake LIVE detached-subagent turn");
+    const description = "A sweep that keeps running";
+    const agentPrompt = "Sweep until told to stop.";
+    const call = ctx.toolUse("Agent", {
+      description,
+      prompt: agentPrompt,
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    });
+    const agentId = ctx.mintAgentTaskId();
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    const writer = ctx.files.subagent(agentId);
+    writer.writeMeta({
+      agentType: "general-purpose",
+      description,
+      toolUseId: call.toolUseId,
+      spawnDepth: 1,
+    });
+    writer.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: agentPrompt },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.toolResult(call, `Async agent launched successfully.\nagentId: ${agentId}`, {
+      isAsync: true,
+      status: "async_launched",
+      agentId,
+      description,
+      prompt: agentPrompt,
+      outputFile: ctx.files.spoolPathFor(agentId),
+      canReadOutputFile: true,
+    });
+    ctx.files.spool(agentId).append(writer.read());
+    conclude(ctx, "Dispatched a long-running agent to the background.");
+    // The gated call belongs to the AGENT and lands AFTER the turn ended, which
+    // is what detached means. Never awaited here: only the consumer's answer or
+    // the shim's stand-down resolves it, and the agent stays live either way.
+    await ctx.tick();
+    const gated = ctx.toolUse("Bash", { command: "rm -rf ./scratch" });
+    void askPermission(ctx, gated, {
+      agentID: agentId,
+      title: "The background agent wants to run rm -rf ./scratch",
+    });
+  },
+});
+
 export const SUBAGENT_FAILED = scenario({
   name: "subagent-failed",
   prompt: "!subagent-failed",
@@ -345,4 +406,10 @@ export const CANCEL_ALL = scenario({
   },
 });
 
-export const SUBAGENT_SCENARIOS = [SUBAGENT_SYNC, SUBAGENT_DETACHED, SUBAGENT_FAILED, CANCEL_ALL];
+export const SUBAGENT_SCENARIOS = [
+  SUBAGENT_SYNC,
+  SUBAGENT_DETACHED,
+  SUBAGENT_DETACHED_LIVE,
+  SUBAGENT_FAILED,
+  CANCEL_ALL,
+];

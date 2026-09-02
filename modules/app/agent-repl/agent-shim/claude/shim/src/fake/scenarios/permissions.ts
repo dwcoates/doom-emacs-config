@@ -236,10 +236,39 @@ export const PERM_ALLOW_STANDING_MODE = scenario({
   },
 });
 
+export const PERM_NO_STANDING_OFFERED = scenario({
+  name: "perm-no-standing",
+  prompt: "!perm-no-standing",
+  emits:
+    "a gated `Bash` whose ask offers NO `suggestions` at all — the shape the vendor sends when no standing rule " +
+    "could be written for the call. The ask can only ever produce a once-allow",
+  writes: "the tool_use line, the tool_result line, the closing text line",
+  arms: "AgentPermission.start with offered_standing UNSET — the negative for an unoffered standing grant",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "perm-no-standing" }, "fake permission turn offering no standing");
+    const call = ctx.toolUse("Bash", { command: "git log -1" });
+    const decision = await askPermission(ctx, call, { suggestions: [] });
+    if (decision?.behavior !== "allow") {
+      ctx.toolResult(call, "denied", { error: "denied" }, { isError: true });
+      conclude(ctx, "The user declined the command.");
+      return;
+    }
+    ctx.toolResult(call, "one commit\n", {
+      stdout: "one commit\n",
+      stderr: "",
+      interrupted: false,
+      isImage: false,
+      noOutputExpected: false,
+    });
+    conclude(ctx, "Ran the command.");
+  },
+});
+
 export const PERMISSION_SCENARIOS = [
   PERM_ALLOW_ONCE,
   PERM_ALLOW_STANDING,
   PERM_ALLOW_STANDING_MODE,
+  PERM_NO_STANDING_OFFERED,
   PERM_DENY_USER,
   PERM_DENY_POLICY,
   PERM_UNDECIDABLE,
