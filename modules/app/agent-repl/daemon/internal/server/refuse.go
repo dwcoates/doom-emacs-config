@@ -62,6 +62,10 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 			Arm:      wsRefusal.Arm,
 			Reason:   wsRefusal.Reason,
 			NotFound: wsRefusal.NotFound,
+			// The verb's own arm-field values travel with the refusal: an arm
+			// that carries evidence (base_ref_unresolved's `ref`) is set from
+			// what the verb stated, never left empty beside a prose sentence.
+			Fields: wsRefusal.Fields,
 		}), true
 	}
 	var mergeRefusal *merge.RefusalError
@@ -128,9 +132,14 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 // address a transferring_away arm carries, and the sentence the text- or
 // detail-bearing arms carry.
 func (s *server) fill(r refusal) refusal {
-	if r.Fields == nil {
-		r.Fields = make(map[string]any, 3)
+	// The map is COPIED rather than filled in place: it may be the component's
+	// own, and the shared text/detail values below are the transport's
+	// business, not the verb's.
+	fields := make(map[string]any, len(r.Fields)+3)
+	for name, value := range r.Fields {
+		fields[name] = value
 	}
+	r.Fields = fields
 	if _, ok := r.Fields["address"]; !ok && r.Arm == workspace.ArmTransferringAway {
 		r.Fields["address"] = s.deps.SuccessorAddress()
 	}

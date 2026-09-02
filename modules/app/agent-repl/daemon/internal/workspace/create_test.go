@@ -649,3 +649,23 @@ func TestCreateWithAnUnresolvableBaseRefIsRefused(t *testing.T) {
 		t.Fatalf("created worktrees = %+v, want none for an unresolvable base ref", f.git.created)
 	}
 }
+
+func TestCreateBaseRefRefusalNamesTheRefAsTheArmsField(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
+	spec := standardSpec(t)
+	spec.BaseRef = "does-not-exist"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	refusal, ok := AsRefusal(err)
+	if !ok {
+		t.Fatalf("Create = %v, want the base_ref_unresolved refusal", err)
+	}
+	if got := refusal.Fields["ref"]; got != "does-not-exist" {
+		t.Fatalf("the arm's ref field = %v, want the base ref that did not resolve", got)
+	}
+}
