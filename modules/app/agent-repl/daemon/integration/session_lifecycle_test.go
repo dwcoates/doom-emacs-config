@@ -5,6 +5,7 @@ package integration
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -71,40 +72,46 @@ func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T)
 }
 
 func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
-	// Arrange
+	// Arrange: a shim that withholds its opening diagnostics.
 	f := newRegistered(t, harness.Opts{})
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	host := f.d.WatchHost(f.ws)
 
-	// Act: open. OpenWorkspace's own bring-up may block on readiness, so it
-	// runs in the background while the test drives the delayed diagnostics
-	// push from the other side.
+	// Act: open. Bring-up BLOCKS on readiness, so it runs in the background
+	// while the test drives the delayed diagnostics from the other side.
 	done := make(chan error, 1)
 	go func() {
 		_, err := f.openRaw()
 		done <- err
 	}()
 
-	// Assert: shim_attached is false before the diagnostics push arrives.
-	awaitRow_ := harness.AwaitView(t, f.d.Ctx(), host, "the session existing with the shim not yet attached",
+	// Assert: while diagnostics is withheld the workspace has NO session at
+	// all — bring-up is what records one, and it has not finished.
+	//
+	// (The proto's `existing` arm with shim_attached false is NOT asserted
+	// here: it describes a session this daemon knows of but is not attached to,
+	// and a bring-up that never completed records no session to describe.)
+	harness.AwaitView(t, f.d.Ctx(), host, "the workspace with no session while readiness is withheld",
 		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
-			live := r.GetHost().GetExisting().GetLive()
-			return live != nil && !live.GetShimAttached()
+			return r.GetHost().GetNone() != nil
 		})
-	_ = awaitRow_
+	select {
+	case err := <-done:
+		t.Fatalf("OpenWorkspace returned %v before any healthy diagnostics, want it gated on readiness", err)
+	default:
+	}
 
 	f.shim = f.d.Shim(f.ws)
-	f.shim.PushHealthy()
+	f.shim.PushHealthyWhenSubscribed()
 
-	// Assert: shim_attached flips to true once diagnostics arrives.
+	// Assert: readiness lands, the rpc answers, and the shim reads attached.
+	if err := <-done; err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success once the shim came up healthy", err)
+	}
 	harness.AwaitView(t, f.d.Ctx(), host, "shim_attached true after the delayed diagnostics push",
 		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 			return r.GetHost().GetExisting().GetLive().GetShimAttached()
 		})
-
-	if err := <-done; err != nil {
-		t.Fatalf("OpenWorkspace = error %v, want a success once the shim came up healthy", err)
-	}
 }
 
 func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
@@ -741,18 +748,36 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 }
 
 func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
-	// Arrange: the freshly registered workspace's fake reports a build sha
-	// that (whatever the daemon's own stamp is) will not equal it, since the
-	// harness never coordinates the two — any test-chosen sha is "stale"
-	// unless it coincides with the daemon's real stamp, which this suite has
-	// no way to read. This makes the assertion below racy against a
-	// coincidental match; see report.
-	f := newOpened(t, harness.Opts{})
-	f.shim.ExpectStartSession()
-	if got := f.shim.Info().Env["SHIM_BUILD_SHA"]; got == "fake" {
-		t.Skip("the daemon's own build stamp coincides with the fake's default \"fake\" sha; cannot force a mismatch without a documented override (see report)")
+	// Arrange: the deployed stamp disagrees with what the fake reports, so the
+	// mount finds the session on an older build.
+	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_DEPLOY_STAMP=deployed-sha"}})
+	if _, err := f.openRaw(); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
 	}
-	t.Skip("no documented harness knob distinguishes the daemon's own current deploy stamp from the fake's reported shim_build_sha, so a forced mismatch cannot be scripted without risking an unbounded bounce loop; see report")
+
+	// Assert: the stale shim was bounced onto the deployed build. The daemon's
+	// own record is the assertion: the relaunch prelaunches beside the running
+	// shim and swaps, so no single control socket spans the bounce.
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the completed build-staleness bounce", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.relaunch" && r.Message == "relaunched the workspace's shim"
+	})
+	spawns := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn")
+	if spawns < 2 {
+		t.Fatalf("shim spawns = %d, want the original plus the bounce's replacement", spawns)
+	}
+
+	// Act: mount again. The relaunched shim reports the SAME older stamp.
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("the second OpenWorkspace = error %v, want a success", err)
+	}
+
+	// Assert: THE BOUNCE FIRES ONCE PER STAMP. A check that did not remember
+	// what it had already bounced for would bounce again on every mount,
+	// spawning a process per round forever.
+	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawns {
+		t.Fatalf("shim spawns = %d after a second mount, want the %d already made: the stamp was already bounced for", got, spawns)
+	}
+	f.d.ExpectWarnings(harness.AllowAllWarnings)
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
@@ -766,8 +791,6 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 
 	// Act: kill the daemon with SIGKILL while the fake shim holds its locks.
 	f.d.Kill()
-	lock := harness.WorkspaceLockPath(f.d.LockDir, f.repo.Dir)
-	_ = lock
 
 	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
 
@@ -779,10 +802,19 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 		t.Fatalf("the successor talks to pid %d, want the SAME surviving fake pid %d (adoption, no second spawn)", info.PID, f.shim.Info().PID)
 	}
 
-	// Assert: the fake sees a NEW WatchSession from the successor.
-	harness.AwaitProcessGone(t, successor.Ctx(), 0) // no-op guard removed below
-	if shim.Count(harness.RPCWatchSession) <= watchesBefore {
-		t.Fatalf("WatchSession count = %d after adoption, want more than the pre-crash count %d (the successor re-subscribes)", shim.Count(harness.RPCWatchSession), watchesBefore)
+	// Assert: the fake sees a NEW WatchSession from the successor. The daemon's
+	// own record of re-opening it is the synchronization point — the adoption
+	// runs at boot, off the rpc path, so there is nothing else to wait on.
+	successor.AwaitWorkspaceLogOperationCount(f.repo.Dir, "daemon.sessionwatcher.watch_session", 1)
+	// The daemon's own record and the fake's counter are two observers of the
+	// same open, and neither orders the other; the counter is polled to the
+	// suite's deadline rather than sampled once.
+	deadline := time.Now().Add(10 * time.Second)
+	for shim.Count(harness.RPCWatchSession) <= watchesBefore {
+		if time.Now().After(deadline) {
+			t.Fatalf("WatchSession count = %d after adoption, want more than the pre-crash count %d (the successor re-subscribes)",
+				shim.Count(harness.RPCWatchSession), watchesBefore)
+		}
 	}
 
 	// The exact "intent manifest absent -> UNKNOWN/PRESERVED per session in
