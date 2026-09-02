@@ -267,6 +267,19 @@ describe("a question through the gate", () => {
     );
   });
 
+  it("refuses an answer naming a DIFFERENT open question as answer_mismatch", async () => {
+    const { gate } = gateWith();
+    void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
+    await Promise.resolve();
+
+    expect(
+      gate.answerQuestion(
+        create(conversationv1.AgentQuestionIdSchema, { value: "nobody-asked" }),
+        answers(["Pepperoni"]),
+      ),
+    ).toBe("answer_mismatch");
+  });
+
   it("refuses a mismatched echo rather than guessing", async () => {
     const { gate } = gateWith();
     void gate.canUseTool(ASK_USER_QUESTION_TOOL, QUESTION_INPUT, callOptions());
@@ -446,6 +459,26 @@ describe("a permission through the gate", () => {
         }),
       ),
     ).toBe("no_open_ask");
+  });
+
+  it("refuses a decision naming a DIFFERENT open permission as answer_mismatch", async () => {
+    // The two arms are different facts: no_open_ask means there is nothing to
+    // answer, answer_mismatch means the daemon should answer the ask in hand.
+    const { gate } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+
+    expect(
+      gate.decidePermission(
+        create(conversationv1.AgentPermissionDecisionSchema, {
+          ask: create(conversationv1.AgentPermissionIdSchema, { value: "an-id-nobody-asked-under" }),
+          decision: {
+            case: "denied",
+            value: create(conversationv1.AgentPermissionDeniedByUserSchema, { message: "x" }),
+          },
+        }),
+      ),
+    ).toBe("answer_mismatch");
   });
 });
 

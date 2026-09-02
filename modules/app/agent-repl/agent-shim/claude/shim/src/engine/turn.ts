@@ -46,7 +46,7 @@ import {
   updateAgentRefused,
 } from "../service/failures.js";
 import type { PermissionGate } from "./permission-gate.js";
-import type { LiveWorkTable } from "./detached.js";
+import type { LiveWorkEntry, LiveWorkTable } from "./detached.js";
 import type { SessionIdentity } from "./identity.js";
 import type { QueryLike } from "../sdk/types.js";
 
@@ -427,10 +427,21 @@ export class TurnEngine {
       return killTurnRefused({ kind: "noSession" }, "no session has been started on this shim");
     }
     const open = this.session.openTurn();
-    if (open === undefined) {
-      return killTurnRefused({ kind: "noTurnOpen" }, "no turn is open");
-    }
     const requested = request.turn?.value ?? "";
+    // A TURN THAT CLOSED CAN STILL OWN LIVE WORK. Detached work outlives the
+    // turn that spawned it by design, and KillTurn is the verb that ends a
+    // turn AND EVERYTHING IT SPAWNED, transitively -- so answering `no turn is
+    // open` while that work is still running would leave the daemon with a
+    // running shell it has no verb to stop under the turn it belongs to.
+    // `no_turn_open` stays the answer only when there is genuinely nothing of
+    // this turn's left.
+    if (open === undefined) {
+      const orphaned = this.session.live.spawnedBy(requested);
+      if (orphaned.length === 0) {
+        return killTurnRefused({ kind: "noTurnOpen" }, "no turn is open");
+      }
+      return this.killSpawnedWork(requested, orphaned, request.force);
+    }
     if (requested !== open.id.value) {
       return killTurnRefused(
         { kind: "notTheOpenTurn" },
@@ -470,6 +481,54 @@ export class TurnEngine {
     });
     LOGGER.log({ turn_id: open.id.value, stopped: spawned.length }, "killed a turn and everything it spawned");
     return killTurnKilled(killed);
+  }
+
+  /**
+   * End what a CLOSED turn left running.
+   *
+   * The same refusal and the same forced outcome as the open-turn path: the
+   * consumer's question ("end this turn and its work") does not change because
+   * the agent already stopped talking.
+   */
+  private async killSpawnedWork(
+    turnId: string,
+    spawned: readonly LiveWorkEntry[],
+    force: boolean,
+  ): Promise<shimv1.KillTurnResponse> {
+    const announceable = spawned.filter((entry) => !entry.skipTranscript);
+    if (!force && announceable.length > 0) {
+      LOGGER.log(
+        { level: "warn", turn_id: turnId, live: announceable.length },
+        "REFUSED KillTurn: the turn has closed but still has live work and force was not set",
+      );
+      return killTurnRefused(
+        {
+          kind: "live",
+          live: create(conversationv1.TurnLiveSchema, {
+            liveWork: this.session.live.workIds(announceable),
+          }),
+        },
+        `turn ${turnId} spawned ${announceable.length} live item(s); pass force to end them`,
+      );
+    }
+    const query = this.session.query();
+    if (query !== undefined) {
+      for (const entry of spawned) await query.stopTask(entry.taskId);
+    }
+    LOGGER.log(
+      { turn_id: turnId, stopped: spawned.length },
+      "killed the live work a closed turn left running",
+    );
+    return killTurnKilled(
+      create(conversationv1.TurnKilledSchema, {
+        how: {
+          case: "forced",
+          value: create(conversationv1.TurnKilledForcedSchema, {
+            stoppedWork: this.session.live.workIds(spawned),
+          }),
+        },
+      }),
+    );
   }
 
   // -- DetachForeground -----------------------------------------------------

@@ -43,6 +43,15 @@ const LOGGER = bindLog({ component: "shim-convert-permission", operation: "shim.
  * both are UNSET when it named none — absence is a legal answer here, never an
  * empty string.
  */
+/**
+ * The `decision_reason_type` that means the DECIDER could not answer.
+ *
+ * `sdk.d.ts` declares no discriminator separating "nobody could decide" from an
+ * ordinary policy deny, so the vendor's own classifier label is the closest
+ * producer there is -- a KNOWN-OPEN mapping, recorded as one.
+ */
+const UNDECIDED_DECIDER = "classifier";
+
 export function policyDenial(
   toolUseId: string,
   message: string,
@@ -58,14 +67,28 @@ export function policyDenial(
         decision: {
           case: "denied",
           value: create(conversationv1.AgentPermissionDeniedSchema, {
-            by: {
-              case: "policy",
-              value: create(conversationv1.AgentPermissionDeniedByPolicySchema, {
-                decider,
-                reason,
-                message,
-              }),
-            },
+            // NOBODY REFUSED is not the same fact as POLICY REFUSED. When the
+            // vendor names the CLASSIFIER as the decider, the deciding
+            // machinery is what could not reach a verdict; drawing that as
+            // policy implies a rule that does not exist, and it is the only
+            // denial here that retrying may resolve. Every other discriminator
+            // -- a rule, a mode -- is a judgement, and stays `policy`.
+            by:
+              decider === UNDECIDED_DECIDER
+                ? {
+                    case: "undecidable",
+                    value: create(conversationv1.AgentPermissionDeniedForWantOfDeciderSchema, {
+                      ...(reason === undefined ? {} : { detail: reason }),
+                    }),
+                  }
+                : {
+                    case: "policy",
+                    value: create(conversationv1.AgentPermissionDeniedByPolicySchema, {
+                      decider,
+                      reason,
+                      message,
+                    }),
+                  },
           }),
         },
       }),
