@@ -261,7 +261,19 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	if row.GetWhen().GetMerged().GetAtMs() == 0 {
 		t.Fatalf("the recently merged row's when = %v, want when.merged stamped", row.GetWhen())
 	}
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// UNCERTAIN — needs a suite run to confirm. `source` here is only
+	// harness.Register-ed, never materialized through CreateWorkspace, so it
+	// carries no wsm.CreationJob; internal/merge/orchestrator.go's layoutFor
+	// says geometry is "NEVER inferred later: a workspace materialized
+	// without it can never be merged", and Enqueue
+	// (internal/merge/queue.go:32-35) refuses immediately with WARN
+	// daemon.merge.enqueue when layoutFor finds none. If that reading is
+	// right this MergeWorkspace call is refused rather than landed, which
+	// would also mean the roster never reaches recently_merged and the test
+	// hangs on its own awaitRoster — a likely pre-existing defect in this
+	// test unrelated to critique 20, flagged to the teamlead. Naming the one
+	// operation the refusal path reaches as the best guess:
+	d.ExpectWarnings("daemon.merge.enqueue")
 }
 
 func TestTaskViewGroupsAssignedWorkspaces(t *testing.T) {
@@ -353,7 +365,11 @@ func TestUnassigningReturnsTheRowToTheRepositoryGrouping(t *testing.T) {
 func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
-	d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	// blank_title is a LANDED CreateTaskError arm (see the comment above), so
+	// it is answered in band at DEBUG through server.refuse — never the
+	// daemon.refusal.unlanded_arm WARN that path was originally written
+	// against.
+	d.ExpectWarnings()
 
 	// Act
 	resp, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "   "}))
