@@ -710,6 +710,43 @@ repository instead would exceed what the caller asked for."
       (should (equal (plist-get (agent-repl-test-verbs--request :merge-queue) :action)
                      (list :arm :resume :value (list :repository nil)))))))
 
+(ert-deftest agent-repl-verbs-merge-queue-unknown-repository-names-the-repository ()
+  "The arm is EMPTY, so the repository the user is told about is the one this
+pause sent."
+  (agent-repl-test-verbs--with
+      '((:merge-queue . (:response (:arm :error
+                                    :value (:cause (:arm :unknown-repository :value nil))))))
+    (agent-repl-test-verbs--with-repository (agent-repl-test-verbs--repo-ref)
+      (agent-repl-merge-queue-pause)
+      (should (agent-repl-test-verbs--messaged-p
+               (format "merge-queue refused: the daemon's registry does not hold repository %S"
+                       (agent-repl-test-verbs--repo-ref)))))))
+
+(ert-deftest agent-repl-verbs-merge-queue-unknown-repository-logs-the-repository ()
+  "The dynamic values go in the log context, never baked into the slug."
+  (let ((records nil))
+    (agent-repl-test-verbs--with
+        '((:merge-queue . (:response (:arm :error
+                                      :value (:cause (:arm :unknown-repository :value nil))))))
+      (agent-repl-test-verbs--with-repository (agent-repl-test-verbs--repo-ref)
+        (cl-letf (((symbol-function 'agent-repl--warn)
+                   (lambda (_ws fmt &rest args) (push (apply #'format fmt args) records))))
+          (agent-repl-merge-queue-pause))))
+    (should (cl-find-if
+             (lambda (record)
+               (string-prefix-p "elisp.verbs.merge-queue-unknown-repository action=:pause"
+                                record))
+             records))))
+
+(ert-deftest agent-repl-verbs-merge-queue-other-arms-still-report-generically ()
+  "Claiming one arm must not swallow the rest: another arm reports as always."
+  (agent-repl-test-verbs--with
+      '((:merge-queue . (:response (:arm :error
+                                    :value (:cause (:arm :already-paused :value nil))))))
+    (agent-repl-test-verbs--with-repository (agent-repl-test-verbs--repo-ref)
+      (agent-repl-merge-queue-pause)
+      (should (agent-repl-test-verbs--messaged-p "merge-queue refused: already-paused")))))
+
 (ert-deftest agent-repl-verbs-merge-queue-evict-names-the-workspace ()
   "Evict takes ONE workspace's merge off the queue, named by its ref."
   (agent-repl-test-verbs--with nil
