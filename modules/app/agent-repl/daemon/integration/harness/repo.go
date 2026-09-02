@@ -156,14 +156,6 @@ func (r *Repo) state(s *fakegit.State) *fakegit.Repo {
 	return repo
 }
 
-// Commit records a commit on the repository's current branch and answers its
-// sha. The file is written too, because the daemon reads some of them.
-func (r *Repo) Commit(file, content string) string {
-	r.t.Helper()
-	writeFile(r.t, filepath.Join(r.Dir, file), content)
-	return r.CommitIn(r.Dir, file, content)
-}
-
 // CommitIn records a commit inside one of the repository's worktrees.
 func (r *Repo) CommitIn(worktree, file, content string) string {
 	r.t.Helper()
@@ -205,12 +197,6 @@ func (r *Repo) Checkout(name string) {
 		wt.Branch = name
 		wt.Head = repo.BranchHeads[name]
 	})
-}
-
-// Head is the main worktree's current commit sha.
-func (r *Repo) Head() string {
-	r.t.Helper()
-	return r.state(r.w.read()).Worktree(r.Dir).Head
 }
 
 // Worktrees lists every worktree path the repository knows, main included.
