@@ -225,6 +225,18 @@ export function setPermissionModeAccepted(
   }
 }
 
+/** The SetSessionPermissionMode refusal's arm. */
+export function setPermissionModeCause(
+  response: shimv1.SetSessionPermissionModeResponse,
+): string {
+  if (response.result.case !== "failure") {
+    throw new Error(
+      `SetSessionPermissionMode: expected a failure, got ${response.result.case ?? "an unset oneof"}`,
+    );
+  }
+  return response.result.value.kind.case ?? "unset";
+}
+
 /** The Hibernate error's kind. */
 export function hibernateKind(response: shimv1.HibernateResponse): string {
   if (response.result.case !== "error") {
