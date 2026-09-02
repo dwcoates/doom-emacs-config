@@ -33,6 +33,7 @@ import type {
   FeedTurnEndedInterrupted,
   FeedTurnErrorHeadline,
   FeedTurnErrorMessage,
+  FeedTurnErrorVendorUnmodeled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -154,9 +155,9 @@ export function drawFeedTurnEndedErrored(
     drawFeedTurnErrorHeadline(requireMessage(errored.headline, `${PATH}.errored.headline`)),
   );
 
-  const vendorType = unmodeledVendorType(error);
-  if (vendorType !== undefined) el.append(drawUnmodeledVendorType(vendorType));
-
+  if (error.case === "vendorUnmodeled") {
+    el.append(drawFeedTurnErrorVendorUnmodeled(error.value));
+  }
   if (errored.message !== undefined) {
     el.append(drawFeedTurnErrorMessage(errored.message));
   }
@@ -178,9 +179,8 @@ export function drawFeedTurnEndedErrored(
  * THE DAEMON'S HEADLINE, drawn verbatim.
  *
  * The producer composes it from the arm — it is the one place the cause is
- * turned into words — so this function states the sentence and never inspects,
- * appends to, or re-words it. The unmodeled arm's vendor type rides beside it
- * as its own element, never spliced into this one.
+ * turned into words, including the unmodeled arm's vendor type — so this
+ * function states the sentence and never inspects, appends to, or re-words it.
  * The field is REQUIRED: an errored row with no headline is a malformed view,
  * not a row to draw a stand-in sentence on.
  */
@@ -189,35 +189,6 @@ export function drawFeedTurnErrorHeadline(headline: FeedTurnErrorHeadline): HTML
   el.className = "turn-ended-cause";
   el.textContent = headline.text;
   return el;
-}
-
-/**
- * THE UNMODELED ARM'S OWN EVIDENCE: the vendor's type name.
- *
- * The arm carries it precisely because no sentence this end could write names
- * the failure — the vendor's own string is the whole of what is known. The
- * headline is still the daemon's and still drawn verbatim; this is a SECOND
- * element beside it, so a headline that already quotes the type is not edited
- * and a headline that does not still leaves the type on the row.
- */
-export function drawUnmodeledVendorType(type: string): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "turn-ended-vendor-type";
-  el.setAttribute("data-vendor-type", type);
-  el.textContent = type;
-  return el;
-}
-
-/**
- * The vendor type string, for the one arm that carries it.
- *
- * `undefined` for every other arm, and for an unmodeled arm whose type the
- * producer left empty — an empty element would state a name nobody gave.
- */
-function unmodeledVendorType(error: { case: string; value: unknown }): string | undefined {
-  if (error.case !== "vendorUnmodeled") return undefined;
-  const type = (error.value as { type?: string }).type;
-  return type !== undefined && type !== "" ? type : undefined;
 }
 
 /**
@@ -230,6 +201,25 @@ function unmodeledVendorType(error: { case: string; value: unknown }): string | 
 function retryWait(error: { case: string; value: unknown }): bigint | undefined | null {
   if (!TURN_ERROR_WAIT_ARMS.includes(error.case)) return null;
   return (error.value as { retryAfterMs?: bigint }).retryAfterMs;
+}
+
+/**
+ * THE VENDOR'S OWN TYPE NAME, drawn verbatim.
+ *
+ * The arm exists because the vendor named a cause this contract does not model,
+ * and its one field is "the vendor's type name, drawn verbatim"
+ * (feed.proto, FeedTurnErrorVendorUnmodeled). So it is STATED, not folded into
+ * a sentence: it is the only handle the reader has on what actually happened,
+ * and the daemon's headline can only say that the cause was unmodeled.
+ */
+export function drawFeedTurnErrorVendorUnmodeled(
+  unmodeled: FeedTurnErrorVendorUnmodeled,
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "turn-ended-vendor-type";
+  el.setAttribute("data-vendor-type", unmodeled.type);
+  el.textContent = unmodeled.type;
+  return el;
 }
 
 /** The vendor's own wording, when the record carried one. */

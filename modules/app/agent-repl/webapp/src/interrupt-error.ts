@@ -9,12 +9,21 @@
  * than in two tables that drift apart. Each site still builds its own refusal
  * element, because the chrome around the sentence is the site's.
  *
- * THE CROSS-CUTTING FOUR ARE ABOUT THE WORKSPACE, NOT THE STOP: an unknown
- * workspace, a ref whose dir disagrees with the registry's, a workspace handed
- * to a successor daemon, and one a joining daemon has not adopted yet. Two of
- * them carry the fact the reader needs to act on — the registry's dir and the
- * successor's address — so those are NAMED in the sentence rather than left in
- * a field nobody sees.
+ * THE CROSS-CUTTING FOUR ARE NOT WORDED HERE. An unknown workspace, a ref
+ * whose dir disagrees with the registry's, a workspace handed to a successor
+ * daemon and one a joining daemon has not adopted yet say the same thing on
+ * every per-workspace rpc, and they go through `crossCuttingSentence` — THE ONE
+ * REFUSAL HOOK (src/rpc/refuse.ts) — like every other call site's do.
+ *
+ * THAT DELEGATION IS LOAD-BEARING, NOT TIDINESS. This file used to spell those
+ * four out itself, in the same words, which made it the second implementation
+ * the one-hook rule exists to prevent: the hook is also what RAISES the
+ * page-wide "workspace moved" notice on `transferring_away`, so a stop refused
+ * with that arm drew a sentence beside the stop button and left the rest of the
+ * page looking live while nothing it showed could still be true. Whether the
+ * reader learned their workspace had moved depended on which button they
+ * happened to press. (Audit 1 item 18, ruled: any rpc's `transferringAway`
+ * raises the moved notice, quiesces, and cancels every stream.)
  *
  * `confirm_required` IS NOT A DEAD END, but only at the turn stop: the challenge
  * exists because interrupting a TURN also ends live detached agents, and the
@@ -24,6 +33,7 @@
  */
 import { InterruptErrorSchema, type InterruptError } from "../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { log } from "./log.js";
+import { crossCuttingSentence } from "./rpc/refuse.js";
 import { unreachableArm } from "./rpc/strict.js";
 
 /**
@@ -44,8 +54,14 @@ export type InterruptErrorKind = NonNullable<InterruptError["kind"]> & { case: s
  * Exhaustive over the oneof: an arm a newer daemon set is a malformed view, not
  * a refusal drawn with no wording — the reader would be told their stop failed
  * and nothing about why.
+ *
+ * THE SHARED HOOK GETS THE FIRST LOOK, and answering it also raises the
+ * page-wide move notice on `transferring_away`; what remains below is the
+ * stop's OWN vocabulary, which only this verb can phrase.
  */
 export function interruptErrorSentence(kind: InterruptErrorKind, path: string): string {
+  const shared = crossCuttingSentence(path, kind);
+  if (shared !== undefined) return shared;
   switch (kind.case) {
     case "confirmRequired": {
       const count = kind.value.liveAgentCount;
@@ -53,14 +69,6 @@ export function interruptErrorSentence(kind: InterruptErrorKind, path: string): 
         ? "1 live agent would also stop"
         : `${count} live agents would also stop`;
     }
-    case "unknownWorkspace":
-      return "the daemon does not know this workspace";
-    case "workspaceRefMismatch":
-      return `this workspace's directory disagrees with the registry's: ${kind.value.registryDir}`;
-    case "transferringAway":
-      return `this workspace moved to another daemon at ${kind.value.address}`;
-    case "notYetAdopted":
-      return "the daemon has not finished adopting this workspace yet";
     case "notDetachedWork":
       return "this row names no detached work to stop";
     case "noSession":

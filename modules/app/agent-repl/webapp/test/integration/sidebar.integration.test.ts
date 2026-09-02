@@ -10,11 +10,12 @@
  * divergence from the Emacs tab bar is a defect. Fake timers make that
  * assertable rather than a matter of watching it.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 import { startHarness, type Harness } from "./harness";
+import { PREFS_KEY } from "../../src/sidebar/sidebar";
 import { assertVocabCoversArms, RENDER_COLORS, mergeGlyph, rosterStatusColor } from "./vocab";
 import {
   ROSTER_MERGE_ARMS,
@@ -527,5 +528,163 @@ describe("row omission", () => {
     await harness.settle();
     // Assert
     expect(harness.$('[data-roster-row="ws-b"]')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE FORCED RESTART IS THE SAME VERB WITH A FLAG (audit 1, item 9)
+//
+// `RestartWorkspace{force}` — one rpc, two menu items. The flag is what the
+// two differ by, so it is what the assertions read.
+// ---------------------------------------------------------------------------
+
+describe("the forced restart", () => {
+  it("calls RestartWorkspace", async () => {
+    // Arrange
+    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
+    // Act
+    await harness.click('[data-roster-row="ws-target"] [data-verb="restartForce"]');
+    // Assert
+    expect(harness.fake.calls("restartWorkspace")).toHaveLength(1);
+  });
+
+  it("sets the force flag", async () => {
+    // Arrange
+    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
+    // Act
+    await harness.click('[data-roster-row="ws-target"] [data-verb="restartForce"]');
+    // Assert
+    const [request] = harness.fake.calls<{ force: boolean }>("restartWorkspace");
+    expect(request.force).toBe(true);
+  });
+
+  it("leaves the force flag off the plain restart", async () => {
+    // Arrange
+    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
+    // Act
+    await harness.click('[data-roster-row="ws-target"] [data-verb="restart"]');
+    // Assert
+    const [request] = harness.fake.calls<{ force: boolean }>("restartWorkspace");
+    expect(request.force).toBe(false);
+  });
+
+  it("echoes the row's own WorkspaceRef", async () => {
+    // Arrange
+    await withRoster({ rows: [rosterRow({ id: "ws-target" })] });
+    // Act
+    await harness.click('[data-roster-row="ws-target"] [data-verb="restartForce"]');
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("restartWorkspace");
+    expect(request.workspace?.id).toBe("ws-target");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R14: THE RAIL'S PREFERENCES SURVIVE A RELOAD (audit 1, item 16)
+//
+// "Nothing is persisted client-side except webview-local preferences
+// (grouping, folds, panel selection) in `localStorage` behind try/catch." A
+// fresh mount with a seeded store is what a reload looks like; a store that
+// throws costs the memory and nothing else.
+// ---------------------------------------------------------------------------
+
+describe("the remembered preferences", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** What the rail has written to its own key. */
+  const stored = (): Record<string, unknown> =>
+    JSON.parse(window.localStorage.getItem(PREFS_KEY) ?? "{}") as Record<string, unknown>;
+
+  it("stores the grouping the reader picked", async () => {
+    // Arrange
+    await withRoster({});
+    // Act
+    await harness.click('[data-grouping-pick="task"]');
+    // Assert
+    expect(stored().grouping).toBe("task");
+  });
+
+  it("renders the stored grouping on a fresh mount", async () => {
+    // Arrange: what a reload looks like.
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task" }));
+    // Act
+    await withRoster({});
+    // Assert
+    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
+  });
+
+  it("stores the fold the reader closed", async () => {
+    // Arrange
+    await withRoster({});
+    // Act
+    await harness.click("[data-section-fold]");
+    // Assert
+    expect(Object.values(stored().folded ?? {})).toContain(true);
+  });
+
+  it("draws a stored fold closed on a fresh mount", async () => {
+    // Arrange
+    await withRoster({});
+    await harness.click("[data-section-fold]");
+    const folded = stored().folded;
+    await harness.stop();
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify({ folded }));
+    // Act
+    await withRoster({});
+    // Assert
+    expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
+  });
+
+  it("takes the default grouping when nothing is stored", async () => {
+    // Arrange / Act
+    await withRoster({});
+    // Assert
+    expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
+  });
+
+  it("takes the default grouping when the stored value is not JSON", async () => {
+    // Arrange
+    window.localStorage.setItem(PREFS_KEY, "{not json");
+    // Act
+    await withRoster({});
+    // Assert
+    expect(harness.$('[data-grouping="repository"]')?.hidden).toBe(false);
+  });
+
+  it("still draws the rail when reading storage throws", async () => {
+    // Arrange
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("site data is disabled");
+    });
+    // Act
+    await withRoster({});
+    // Assert
+    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"]`)).not.toBeNull();
+  });
+
+  it("still switches grouping when writing storage throws", async () => {
+    // Arrange
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("site data is disabled");
+    });
+    await withRoster({});
+    // Act
+    await harness.click('[data-grouping-pick="task"]');
+    // Assert: the memory is lost, the rail is not.
+    expect(harness.$('[data-grouping="task"]')?.hidden).toBe(false);
+  });
+
+  it("still folds a section when writing storage throws", async () => {
+    // Arrange
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("site data is disabled");
+    });
+    await withRoster({});
+    // Act
+    await harness.click("[data-section-fold]");
+    // Assert
+    expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
   });
 });
