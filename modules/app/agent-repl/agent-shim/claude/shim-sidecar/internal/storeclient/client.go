@@ -155,9 +155,6 @@ func New(socket string, log *logging.Bound) *Client {
 	}
 }
 
-// Socket returns the store socket this client dials.
-func (c *Client) Socket() string { return c.socket }
-
 // Cursors recovers the sidecar's persisted file cursors. An empty fileID asks
 // for every cursor.
 //
