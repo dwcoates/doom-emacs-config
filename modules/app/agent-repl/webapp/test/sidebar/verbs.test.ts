@@ -136,6 +136,10 @@ describe("the menu", () => {
     const verbs = [...menu.querySelectorAll("[data-verb]")].map((el) =>
       el.getAttribute("data-verb"),
     );
+    // The verb hook sits on the control that ISSUES the request: the priority
+    // menu's five choices are five priority controls, and the two destructive
+    // verbs live on their confirmation's go button rather than on the entry
+    // that only reveals it.
     expect(verbs).toEqual([
       "open",
       "close",
@@ -143,7 +147,10 @@ describe("the menu", () => {
       "restart",
       "restartForce",
       "priority",
-      "assign",
+      "priority",
+      "priority",
+      "priority",
+      "priority",
       "kill",
       "nuke",
     ]);
@@ -155,14 +162,16 @@ describe("the menu", () => {
 
   it("keeps the priority levels folded until the entry is opened", () => {
     const menu = drawRowMenu(target());
-    const submenu = menu.querySelector("[data-verb='priority']")?.nextElementSibling;
+    const submenu = menu.querySelector("[data-verb='priority']")?.parentElement;
     expect((submenu as HTMLElement).hidden).toBe(true);
   });
 
   it("offers the four levels and the clear", () => {
     const menu = drawRowMenu(target());
-    const levels = [...menu.querySelectorAll("[data-priority]")].map((el) =>
-      el.getAttribute("data-priority"),
+    // The choice rides on the button's `value`: `data-priority` inside a row
+    // is the row's priority BADGE, and a row served none carries none.
+    const levels = [...menu.querySelectorAll<HTMLButtonElement>("[data-verb='priority']")].map(
+      (el) => el.value,
     );
     expect(levels).toEqual(["p05", "p1", "p2", "p3", "clear"]);
   });
@@ -187,18 +196,21 @@ describe("the two destructive verbs", () => {
     expect(menu.querySelector(".sb-confirm")).not.toBeNull();
   });
 
-  it("does not open a second confirmation over the first", async () => {
+  it("draws exactly one confirmation, revealed rather than stacked", async () => {
     const t = target();
     const menu = drawRowMenu(t);
-    await click(menu.querySelector("[data-verb='kill']") as Element);
-    await click(menu.querySelector("[data-verb='kill']") as Element);
-    expect(menu.querySelectorAll(".sb-confirm").length).toBe(1);
+    const entry = (menu.querySelector("[data-verb='kill']") as HTMLElement).closest(
+      ".sb-menu-row",
+    ) as HTMLElement;
+    await click(entry.querySelector(".sb-menu-item") as Element);
+    await click(entry.querySelector(".sb-menu-item") as Element);
+    expect(entry.querySelectorAll(".sb-confirm").length).toBe(1);
   });
 
-  it("keeps the nuke confirmation disabled until the name is typed back", () => {
+  it("keeps the nuke confirmation unarmed until the name is typed back", () => {
     const confirm = drawNukeConfirm(target());
     const go = confirm.querySelector(".sb-confirm-go") as HTMLButtonElement;
-    expect(go.disabled).toBe(true);
+    expect(go.classList.contains("armed")).toBe(false);
   });
 
   it("refuses a near-miss of the typed name", () => {
@@ -207,7 +219,7 @@ describe("the two destructive verbs", () => {
     const go = confirm.querySelector(".sb-confirm-go") as HTMLButtonElement;
     typed.value = "seve";
     typed.dispatchEvent(new Event("input"));
-    expect(go.disabled).toBe(true);
+    expect(go.classList.contains("armed")).toBe(false);
   });
 
   it("arms once the name matches exactly", () => {
@@ -216,7 +228,7 @@ describe("the two destructive verbs", () => {
     const go = confirm.querySelector(".sb-confirm-go") as HTMLButtonElement;
     typed.value = "seven";
     typed.dispatchEvent(new Event("input"));
-    expect(go.disabled).toBe(false);
+    expect(go.classList.contains("armed")).toBe(true);
   });
 
   it("says what a kill costs and what it spares", () => {

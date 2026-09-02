@@ -57,14 +57,19 @@ export function drawTopbarAccount(u: TopbarAccount, tc: TopbarContext): HTMLElem
       button.title = state.value.email;
       return button;
     case "loggedOut":
-      // THE LABEL IS THE WARNING, and the click is the remedy.
+      // THE LABEL IS THE WARNING, and the click is the remedy. The warning
+      // CLASS carries it for the eye: the chip is drawn in the warning
+      // register (brief: "logged out ... in the WARNING state — orange"), and
+      // the class is what the stylesheet paints from.
+      button.classList.add("topbar-account-warn");
       button.textContent = "logged out";
       button.title = "this session's account root has no login; click to log in";
       button.addEventListener("click", () => {
         log("info", "the reader opened the login from the account chip", {
           operation: "topbar.account-login-clicked",
         });
-        tc.openLogin();
+        // The chip is the call site: its refusal renders on the chip.
+        tc.openLogin(button);
       });
       return button;
     default: {
@@ -97,6 +102,28 @@ export function bindSessionReveal(
   });
 }
 
+/**
+ * Wire the TITLE's session-line reveal.
+ *
+ * The session line names the session the title names, and the title is present
+ * in every account state — a logged-out session still has one. So the title
+ * opens the same reveal the logged-in chip does: the account chip is the
+ * identity door, the title is the session's own.
+ */
+export function bindTitleSessionReveal(
+  title: HTMLElement,
+  line: TopbarSessionLine | undefined,
+  tc: TopbarContext,
+): void {
+  if (line === undefined) return;
+  asAnchor(title, "session");
+  const body = (): HTMLElement => drawTopbarSessionLine(line);
+  tc.reveals.register("session", "session", body);
+  title.addEventListener("click", () => {
+    tc.reveals.toggle("session", "session", body);
+  });
+}
+
 /** The session identity line, drawn verbatim. */
 export function drawTopbarSessionLine(u: TopbarSessionLine): HTMLElement {
   const element = document.createElement("div");
@@ -118,6 +145,9 @@ export function drawTopbarConnectivity(u: TopbarConnectivity): HTMLElement {
   const element = document.createElement("span");
   element.className = `topbar-connectivity ${toneClass(color)}`;
   element.setAttribute("data-tone", u.tone);
+  // The glyph rides an attribute as well as the text, so a reader of the DOM
+  // sees WHICH glyph was served rather than having to compare rendered text.
+  element.setAttribute("data-glyph", u.glyph);
   element.title = u.title;
   element.textContent = u.glyph;
   return element;

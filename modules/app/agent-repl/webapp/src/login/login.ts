@@ -45,8 +45,16 @@ export interface Handle {
 }
 
 export interface LoginHandle extends Handle {
-  /** Open (or join) the login and raise the overlay. */
-  open(): void;
+  /**
+   * Open (or join) the login and raise the overlay.
+   *
+   * CONTROL is the element that asked for it — the topbar's account chip. A
+   * refusal renders AT the clicked control, and the control that made this
+   * call belongs to another component, so it is handed in rather than guessed
+   * at. Without one the overlay's own header states the refusal, which is
+   * where it belongs when nothing else asked.
+   */
+  open(control?: HTMLElement): void;
 }
 
 export interface LoginOverlayDeps {
@@ -135,7 +143,7 @@ export function mountLoginOverlay(
     void closeLogin(ctx, header, hide);
   });
 
-  const start = async (): Promise<void> => {
+  const start = async (control?: HTMLElement): Promise<void> => {
     if (session !== null || opening) {
       // Per-account idempotent daemon-side, and idempotent here too: a second
       // click while one login is up must not build a second terminal over it.
@@ -146,7 +154,9 @@ export function mountLoginOverlay(
     }
     opening = true;
     try {
-      const configDir = await openLogin(ctx, header);
+      // The refusal goes to whatever made the call: the chip that was
+      // clicked, or the overlay's own header when nothing named itself.
+      const configDir = await openLogin(ctx, control ?? header);
       if (configDir === null) return;
       account.textContent = configDir;
       host.hidden = false;
@@ -175,8 +185,8 @@ export function mountLoginOverlay(
   };
 
   return {
-    open(): void {
-      void start();
+    open(control?: HTMLElement): void {
+      void start(control);
     },
     dispose(): void {
       log("debug", "disposing the login overlay", { operation: "login.dispose" });

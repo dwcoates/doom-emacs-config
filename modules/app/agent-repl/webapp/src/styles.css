@@ -2129,6 +2129,12 @@ pre {
 .queued-reason { margin-top: 0.3rem; font-size: 0.8rem; font-style: italic; }
 .queued-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .queued-actions button { cursor: pointer; font: inherit; }
+/* A release the holding arm is likely to refuse: offered, because the daemon
+   is the one that answers, but drawn back so it does not read as the ordinary
+   next step. Its title says which arm stands in the way. */
+.queued-action-unlikely { opacity: 0.6; }
+/* The command a context cut is running, as a token rather than as prose. */
+.queued-command { font-family: var(--mono, monospace); }
 
 /* --- the drain-lease bubble (render.ts LeaseHeldCard) ---------------------
    A prompt held by a SCHEDULED DAEMON BOUNCE, not by a running turn. It
@@ -4325,7 +4331,7 @@ body.draining #composer-input::placeholder {
 }
 #ws-sidebar .sb-menu-item:hover { background: var(--code-bg); }
 #ws-sidebar .sb-menu-item:disabled { color: var(--muted); cursor: default; }
-#ws-sidebar .sb-menu-destructive .sb-menu-item[data-verb="nuke"] { color: var(--err); }
+#ws-sidebar .sb-menu-destructive .sb-menu-item { color: var(--err); }
 #ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
 #ws-sidebar .sb-confirm-note { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.3rem; }
 #ws-sidebar .sb-confirm-name { width: 100%; margin-bottom: 0.3rem; }
@@ -4339,7 +4345,15 @@ body.draining #composer-input::placeholder {
   padding: 0.1rem 0.5rem;
   cursor: pointer;
 }
-#ws-sidebar .sb-confirm-go:disabled { border-color: var(--border); color: var(--muted); cursor: default; }
+/* Unarmed until the workspace's name is typed back: the nuke button recedes
+   to the ordinary border until the typing matches, and only then wears the
+   error hue in full. */
+#ws-sidebar .sb-confirm-go { border-color: var(--border); color: var(--muted); }
+#ws-sidebar .sb-confirm-go.armed,
+#ws-sidebar .sb-menu-row:not(.sb-menu-destructive) .sb-confirm-go {
+  border-color: var(--err);
+  color: var(--err);
+}
 
 /* A refusal is said AT THE CONTROL that made the call, in the rail's error
    hue, and never anywhere else. */
@@ -5150,7 +5164,8 @@ body.draining #composer-input::placeholder {
 /* ORANGE IS THE WARNING REGISTER. A logged-out root cannot run a turn, so the
    label IS the warning — but it is not an error either: nothing has failed,
    something is missing. */
-.topbar-account.arm-loggedOut {
+.topbar-account.arm-loggedOut,
+.topbar-account.topbar-account-warn {
   color: var(--thinking);
 }
 
