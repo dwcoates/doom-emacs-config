@@ -318,3 +318,12 @@ bounded streams, clock convention, validation/logging invariants) are in
 ## Landing 6 relay (2026-09-01, project lead)
 
 - No store.v1 or conversation.v1 change in landing 6.
+
+## Landing 7 relay (2026-09-02, project lead)
+
+Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
+- OpenAgentSessionFailure.unknown_agent (tag 5): a well-formed agent id that
+  names no book of this store is REFUSED with this arm instead of served
+  empty. Distinguish it from a real agent with no lines yet (that one still
+  serves an empty page). Log at the refusal site with `refusal_site`.
+- No sidecar change.
