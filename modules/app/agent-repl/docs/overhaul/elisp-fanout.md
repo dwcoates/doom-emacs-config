@@ -1006,3 +1006,48 @@ names; each brief owns every file listed for its constituent rows.
   workspace-status-export.el (the roster stream replaces; the
   create-or-update-workspace skill's status source dies) removed by API
   absence.
+
+## 17. Dead-code passes (programmatic; user rule) — carried into the final report
+
+Pass 1 (R-DEADCODE, opus-low — deviation; the rule now says sonnet-medium):
+DELETED wire-common `--encode-int64/--encode-uint32/--encode-bool`;
+wire-verbs `--encode-empty`; roster `agent-repl-roster-row-dir`,
+`agent-repl-roster-unsubscribe`; frontend `--frontend-live-webview-buffers`,
+`--frontend-parent-ws-name`, `--frontend-webview-workspace`; panels
+`--non-agent-panel-window-p`; history `--make-instantiation-from-plist`;
+session `--effective-model`, `--refresh-magit-status`; 15 orphaned tests.
+Pass 2 (R-DEADCODE-2, sonnet-medium): DELETED core.el `--active-inst`,
+`--diagnostic-fingerprint`, `--git-root`, `--grey-hex`, `--latch-settled-p`,
+`--log-on-transition`, `--non-agent-buffers`, `--reset-warn-once-state`,
+`--resolve-current-git-root`, `--user-message-for-error`; workspace.el
+`--folded-repo-keys`, `--main-worktree-dir`, `--reorder-workspace-next-to`,
+`--repo-label`, `--workspace-for-buffer`, `--ws-advise-kill-before`,
+`--ws-error`, `--ws-exists-p`, `--ws-frame-switch`, `--ws-known-projects`,
+`--ws-materialize-daemon-workspace`, `--ws-names-cache-usable-p`, `--ws-new`,
+`--ws-nil-name`, `--ws-protected-p`, `--ws-registered-dir-owner`,
+`--ws-repo-folded-p`, `--ws-run-switch-project-function`,
+`--ws-tombstoned-names`, `--ws-unregister-project`; host.el
+`agent-repl-host-session-id`; frontends/frontend.el the gui
+send/interrupt dispatchers, struct slots, declare-functions and registry
+entries (ruling b); prompts.el + test-prompts.el whole (`agent-repl--prompt`
+chain; zero production callers — one-shot prompt composition is the
+daemon's); one straggler test in test-core.el.
+KEPT WITH REASON (each pinned): `+dwc/magit-open-commit-in-github`,
+`+dwc/magit-copy-commit-link` (bound in magit.el's map!; test-magit.el);
+`agent-repl-install-commit-emoji-hook` (autoloaded interactive; the blessed
+commit-emoji hook's provisioning path — teamlead ruling a; test-emoji.el);
+`agent-repl-prompt-summary-attach-all` (manual recovery, declared in-file;
+test-prompt-summary.el); `agent-repl-link-code`, `agent-repl--eval-format-prompt`
+(/runtime-eval-code emacsclient entry points; test-commands.el,
+test-worktree.el); `agent-repl-refresh-webviews`, `agent-repl-frontend-close-panel`,
+`agent-repl-runtime-restart`, `agent-repl-tabbar-apply-row-count`,
+`agent-repl-restart` (interactive commands; own tests);
+`agent-repl-status-tab-color` (its test pins every-arm-has-a-colour);
+`agent-repl--prompt`… gone (see above); `agent-repl--message-has-emoji-prefix-p`
+(commit-emoji surface); `agent-repl--workspace-log-target-entry` (core.el;
+test-introspection helper behind 18+ log-routing assertions);
+`agent-repl-host-forget` (host.el; integration-suite teardown hygiene;
+test-host.el). Cosmetic residue: test-integration-composer.el:28
+`declare-function agent-repl--meta-wrap "prompts"` should name
+"agent-repl-core"; `:explain-config` in wire-common.el is a frozen proto
+enum arm and stays. Unused-lexical byte-compile: clean whole-module.
