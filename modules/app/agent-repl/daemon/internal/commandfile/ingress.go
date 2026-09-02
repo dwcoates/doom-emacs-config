@@ -166,7 +166,9 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 	var failures []error
 	for index, entry := range entries {
 		if err := i.apply(ctx, log, base, index, entry); err != nil {
-			log.Error(opEntry, "a command-file entry failed", dlog.Context{
+			// A refused entry is HANDLED — recorded here and retired to
+			// quarantine below — so it is a warning, not an unhandled error.
+			log.Warn(opEntry, "a command-file entry was refused", dlog.Context{
 				"index": index, "type": entry.Type, "cause": err.Error(),
 			})
 			failures = append(failures, fmt.Errorf("entry %d (%s): %w", index, entry.Type, err))
@@ -175,7 +177,22 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 		log.Debug(opEntry, "applied a command-file entry", dlog.Context{"index": index, "type": entry.Type})
 	}
 	if len(failures) > 0 {
-		return errors.Join(failures...)
+		// AN APPLY-TIME REFUSAL IS THE FILE ROUTE'S QUARANTINE (daemon.md,
+		// batch-1 triage: "file route: quarantine"). The rpc route answers a
+		// refusal to the caller who made it; a file has no caller to answer,
+		// so the refusal is recorded and the file is retired where a human can
+		// still read what was asked. Left in the claimed directory it would be
+		// invisible — neither applied, nor swept again, nor anywhere a person
+		// would look.
+		joined := errors.Join(failures...)
+		log.Warn(opQuarantine, "quarantining a command file whose entries were refused", dlog.Context{
+			"entries": len(entries), "refused": len(failures), "cause": joined.Error(),
+		})
+		if qErr := i.quarantine(claimed); qErr != nil {
+			log.Error(opQuarantine, "could not quarantine the command file", dlog.Context{"cause": qErr.Error()})
+			return errors.Join(joined, qErr)
+		}
+		return fmt.Errorf("apply %q: %w: %w", path, ErrQuarantined, joined)
 	}
 	log.Info(opApply, "applied a command file", dlog.Context{"entries": len(entries)})
 	return nil

@@ -379,7 +379,10 @@ func TestAFileRouteMergeOnAnUnmergeableWorkspaceIsQuarantined(t *testing.T) {
 	quarantined := filepath.Join(f.d.StateDir, "output", "quarantine", "workspace_commands_unmergeable.json")
 	f.d.AwaitFileExists(quarantined)
 	f.d.AwaitRunLogOperation("daemon.commandfile.quarantine")
-	f.d.ExpectWarnings("daemon.commandfile.quarantine")
+	// The refusal is RECORDED on the way to quarantine: the orchestrator's own
+	// refusal, the entry that carried it, and the file's retirement.
+	f.d.ExpectWarnings("daemon.commandfile.quarantine", "daemon.commandfile.entry",
+		"daemon.merge.enqueue")
 }
 
 func TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested(t *testing.T) {
