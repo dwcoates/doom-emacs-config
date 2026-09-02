@@ -164,13 +164,6 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	return entries
 }
 
-// Lost states that a detached run stopped being observable. It is called by the
-// staleness policy in the root package, never inferred here.
-func (h *ShellOutputHandler) Lost(ctx *Context, reason convert.LostReason) *storev1.StoreEntry {
-	at := attribute(ctx, ctx.BytesObserved)
-	return h.conv.BashLost(at, ctx.RunActivityID, string(h.seen), h.omitted, reason, h.read)
-}
-
 // rememberCoords records where this handler has read to, so a terminal the
 // READER concludes can be stated at a real file position rather than at the
 // zero value every such terminal would otherwise share.
