@@ -163,6 +163,18 @@ type observation struct {
 type ownerIndex struct {
 	byTask   map[string]observation
 	byOutput map[string]string // resolved output path -> task id
+	// backgroundedCalls remembers, by the SPAWNING CALL's activity id, that the
+	// spawn ran in the background.
+	//
+	// A BACKGROUNDED SUBAGENT IS SEEN TWICE, and only one of the two sightings
+	// names a task. Its transcript arrives as an `a*` task SPOOL, which is keyed
+	// by task id, AND as a `subagents/agent-<id>.jsonl` SIDECHAIN, which names
+	// no task at all — its only identity is the spawning call the meta file
+	// states. A backgrounded flag reachable only by task id therefore answered
+	// false for the sidechain, and the two planes' writes for ONE agent carried
+	// DIFFERENT top_level: the subagent itself from the spool, the session's
+	// main agent from the sidechain. This index is what makes the two agree.
+	backgroundedCalls map[string]bool
 	// conflicts records a task id two different spawns claimed. A conflicted
 	// task resolves to nothing: guessing between two claims is how one run's
 	// output lands in another run's card.
@@ -172,10 +184,11 @@ type ownerIndex struct {
 
 func newOwnerIndex(log *logging.Bound) *ownerIndex {
 	return &ownerIndex{
-		byTask:    map[string]observation{},
-		byOutput:  map[string]string{},
-		conflicts: map[string]bool{},
-		log:       log,
+		byTask:            map[string]observation{},
+		byOutput:          map[string]string{},
+		backgroundedCalls: map[string]bool{},
+		conflicts:         map[string]bool{},
+		log:               log,
 	}
 }
 
@@ -204,6 +217,9 @@ func (o *ownerIndex) observe(obs observation) {
 		return
 	}
 	o.byTask[obs.taskID] = obs
+	if obs.backgrounded {
+		o.backgroundedCalls[obs.activityID] = true
+	}
 	if obs.outputPath != "" {
 		o.byOutput[obs.outputPath] = obs.taskID
 	}
@@ -257,8 +273,27 @@ func (o *ownerIndex) activityFor(taskID string) string { return o.byTask[taskID]
 // when it named one.
 func (o *ownerIndex) outputFor(taskID string) string { return o.byTask[taskID].outputPath }
 
-// spawnBackgrounded reports whether a task's spawn ran in the background.
-func (o *ownerIndex) spawnBackgrounded(taskID string) bool { return o.byTask[taskID].backgrounded }
+// backgroundedFor reports whether the spawn behind a watched file ran in the
+// background, by whichever identity that file actually carries.
+//
+// A SPOOL NAMES A TASK; A SIDECHAIN TRANSCRIPT NAMES THE SPAWNING CALL. Both are
+// the SAME backgrounded subagent, and `top_level` must be the same identity on
+// both — the subagent itself, because its stream outlives the turn that spawned
+// it. Asking only by task id made the sidechain's writes name the session's main
+// agent instead, so one agent's two planes disagreed about where its work
+// belongs and no consumer could reconcile them.
+func (o *ownerIndex) backgroundedFor(target discover.Target) bool {
+	// AN OBSERVED SPAWN IS THE STRONGEST ANSWER, and only a spool's TaskID is a
+	// harness task id the launch named. A sidechain transcript's TaskID is its
+	// `agent-<id>` LOCATOR, which no launch ever mentions, so the lookup misses
+	// and the fallback below is what answers for it.
+	if obs, ok := o.byTask[target.TaskID]; ok {
+		return obs.backgrounded
+	}
+	// A sidechain transcript's AgentID is the `toolUseId` its meta file states,
+	// which IS the spawning call's activity id (the cross-plane minting rule).
+	return o.backgroundedCalls[target.AgentID]
+}
 
 // mainAgentFor returns the main agent whose work a file belongs to.
 //
