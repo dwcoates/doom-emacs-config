@@ -181,27 +181,21 @@ if opts.ShimMain != "" {
 Nothing else changes: `--fake` still gets passed by default (`opts.NoFake`
 false, unchanged), `AGENT_REPL_CLAUDE_BIN` still points at the fake `claude`
 (the e2e suite never exercises the login pty or the classifier — those stay
-out of scope, see B), the fake `git` is SKIPPED for e2e via `SkipFakeGit` (ruling 4: this
-suite uses REAL git), and
+out of scope, see B), the scripted fake `git` STAYS on `PATH` exactly as in
+`daemon/integration` (ruling 4 REVERSED: this suite mocks every external
+dependency, git included), and
 `AGENT_REPL_FORBID_VENDOR_CALLS=1` is already set unconditionally. `--fake`
 on the REAL shim selects its `src/fake` mocked vendor by prompt-text
 scenario name (`fake/registry.ts`) — this is the intended, documented way to
 drive the real shim without touching the vendor, not a harness invention.
 
-**Seam 3 (RULING 4) — a fourth `Opts` field, `SkipFakeGit bool`, same file.**
-
-The e2e suite uses REAL git (see B, "Real git"), so it must NOT get the
-scripted fake `git` on `PATH`. `StartDaemon`/`World` call `installFakeGit`
-unconditionally today; gate that call on `!opts.SkipFakeGit`. The zero value
-is `false`, i.e. install the fake exactly as today, so every existing
-`daemon/integration` call site is unaffected.
-
-```go
-	// SkipFakeGit omits the scripted fake `git` from PATH (default: false,
-	// install it, as today). The e2e suite sets this: it exercises the real
-	// git facts the daemon's AGENTS.md hands to "the project lead's suite".
-	SkipFakeGit bool
-```
+**Seam 3 — WITHDRAWN (`SkipFakeGit`).** An earlier ruling had this suite use
+real git; the USER REVERSED that. Every external dependency is mocked here,
+git included, so the scripted fake git stays installed exactly as
+`daemon/integration` installs it. `Opts.SkipFakeGit` must be REMOVED from the
+harness; if removing it is more churn than leaving it, it may remain but
+NOTHING may ever set it. `NewRealRepo` / `RealRepo` / any hermetic-git
+environment are removed from the e2e harness.
 
 This is the ONLY daemon-tree change this spec asks for. It is additive,
 covered by the "does not change `daemon/integration`'s own behavior" rule
@@ -217,7 +211,7 @@ value.
 | Binary | Built by | Source | Skip condition |
 |---|---|---|---|
 | `claude-repld` | `harness.MainAt` (via seam 1) | `daemon/cmd/claude-repld` | `go` on PATH (else the whole run fails hard — the daemon is not optional) |
-| real `git` | operator's `git` on `PATH` | n/a (fake git SKIPPED, ruling 4) | n/a |
+| fake `git` | `harness.MainAt` | `daemon/integration/fakegit/git` | same |
 | real shim bundle | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShim` | `agent-shim/claude/shim`, `node build.mjs` | `node` on PATH; `agent-shim/claude/shim/node_modules` present — **loud `t.Skip`, never an implicit `npm ci`** |
 | `shim-store` | new `e2e` build helper, modeled on the deleted `daemon/e2e`'s `buildShimStore` and on `shim-sidecar/integration/helpers_test.go`'s `storeBinary` | `agent-shim/shim-store` (`go build -o <bin> .`) | `go` on PATH (already required) |
 | `shim-sidecar` | same pattern | `agent-shim/claude/shim-sidecar` (`go build -o <bin> .`) | same |
@@ -400,43 +394,31 @@ never an ad hoc duration at the call site. This suite needs at minimum:
   about the hold/outage, so it gets its own explicit bound derived the same
   way, not the 5s default.
 
-### Real git (PROJECT-LEAD RULING 4)
+### Every external dependency is MOCKED (USER RULING, reverses ruling 4)
 
-This suite uses REAL git. The daemon's "no real git in tests" directive is
-scoped to the daemon's OWN unit and integration suites; the daemon's
-`AGENTS.md` explicitly hands the git facts to "the project lead's suite",
-which is THIS one. The facts this suite owns end to end:
+Only the systems WE OWN run for real in this suite: `claude-repld`, the
+shim, `shim-store`, `shim-sidecar`. Everything else is mocked, here exactly
+as everywhere else in the repo:
 
-- a two-parent `--no-ff` merge commit,
-- the landed range,
-- a conflicted index and `MERGE_HEAD`,
-- revert,
-- worktree prune,
-- porcelain markers,
-- `GIT_DIR` precedence,
-- git version compatibility.
+- **git** is the SCRIPTED FAKE GIT the daemon harness already installs. No
+  real `git`, no real repositories, no hermetic git environment, no
+  `NewRealRepo`. `Opts.SkipFakeGit` is never set.
+- **the vendor** is the fake SDK. `AGENT_REPL_FORBID_VENDOR_CALLS=1`.
+- **the network** is not used at all. `web-fetch` / `web-search` goldens are
+  driven as fake-SDK scenarios like every other scenario.
+- no real vendor binaries anywhere.
 
-Mechanics:
+The merge-queue area asserts merge behavior against scripted fake-git
+FIXTURES, exactly the way `daemon/integration`'s own merge tests do.
 
-- The scripted fake `git` is NOT installed (`Opts.SkipFakeGit = true`, seam
-  3). The real `git` on `PATH` is used.
-- Repositories are created fresh per test under the test's temp root by the
-  real `git`. Nothing reuses a repository across tests.
-- **Tests must not depend on the operator's global git config.** The harness
-  sets, for every git child process:
-  - `GIT_CONFIG_GLOBAL` to a temp file the harness writes (identity, and any
-    default the tests rely on such as `init.defaultBranch`),
-  - `GIT_CONFIG_SYSTEM` to `/dev/null` where supported,
-  - `HOME` to a temp dir, so nothing reads `~/.gitconfig`,
-  - `GIT_AUTHOR_*` / `GIT_COMMITTER_*` name, email, and a fixed date.
-- A loud skip if `git` is absent from `PATH`, same discipline as node. The
-  harness NEVER installs git.
-- Guard against the known `core.bare` hazard: the harness must not leak a
-  `GIT_DIR` from its own environment into git children. Unset `GIT_DIR`,
-  `GIT_WORK_TREE`, and `GIT_INDEX_FILE` explicitly before spawning.
+**The git-invocation surface is NOT this suite's.** The git facts —
+two-parent `--no-ff` merge commit, landed range, conflicted index and
+MERGE_HEAD, revert, worktree prune, porcelain markers, `GIT_DIR` precedence,
+version compatibility — are covered by the GIT-CLIENT LEAF's own tests. No
+e2e test asserts them.
 
-The merge-queue area (§C) asserts the git facts above against these real
-repositories, not against a scripted fixture world.
+**TESTS MUST BE FAST.** Anything that would take real wall-clock time
+because a real external tool executes is a SPEC ERROR, not a tradeoff.
 
 ### Harness helpers landed by overhaul/integration (a091a9b98)
 
@@ -448,13 +430,12 @@ They are merged into this branch; writers must know which one applies here.
   displaced = 1`) through `WithDB`, so it is independent of git entirely. The
   merge-queue area (§C, displaced turns) SHOULD use it rather than
   re-deriving the count.
-- **`(*Repo) SetDirty(worktreeDir string, dirty bool)`** (`repo.go`) — **NOT
-  USABLE IN THIS SUITE.** It mutates the scripted `fakegit.State`, and this
-  suite sets `Opts.SkipFakeGit = true` and uses REAL git (ruling 4). A test
-  here makes a worktree dirty by actually writing a file into the real
-  worktree and leaving it uncommitted, then asserting through real `git
-  status --porcelain`. Do NOT call `SetDirty` from an e2e test: the daemon
-  reads real git here, so mutating fake-git state would assert nothing.
+- **`(*Repo) SetDirty(worktreeDir string, dirty bool)`** (`repo.go`) —
+  USABLE, and the CORRECT way to make a worktree dirty here. It mutates the
+  scripted `fakegit.State`, which is precisely what this suite runs against
+  now that the real-git ruling is reversed. (An earlier revision of this
+  document marked it NOT USABLE; that applied only under the withdrawn
+  real-git ruling.)
 
 ### Grep gate
 
@@ -1046,11 +1027,11 @@ SPEC APPROVED. Dispositions, binding on every writer:
    reads `session.ts`'s `COMPACT_FAILED` scenario body rather than guessing.
    Not a contract ambiguity.
 
-5. **Real git — RULED: this suite uses REAL git.** See B, "Real git". The
-   daemon's no-real-git directive is scoped to the daemon's own unit and
-   integration suites; its `AGENTS.md` hands the git facts to this suite.
-   Fake git is skipped via the additive `SkipFakeGit` seam, so
-   `daemon/integration` is unaffected.
+5. **Real git — RULED, THEN REVERSED BY THE USER: this suite does NOT use
+   real git.** Only the systems we own run for real; every external
+   dependency is mocked, git included. See B, "Every external dependency is
+   MOCKED". The `SkipFakeGit` seam is withdrawn and nothing may set it; the
+   git facts belong to the git-client leaf's own tests.
 
 6. **`context-budget-warning` grounding — future housekeeping**, unchanged.
 

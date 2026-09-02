@@ -135,26 +135,6 @@ func requireNode(t *testing.T) string {
 	return nodeBin
 }
 
-var (
-	gitOnce sync.Once
-	gitBin  string
-	gitErr  error
-)
-
-// requireGit answers the real `git` binary on PATH, skipping the test loudly
-// if none is found. This suite uses REAL git (ruling 4) — see world_test.go's
-// "Real git" section.
-func requireGit(t *testing.T) string {
-	t.Helper()
-	gitOnce.Do(func() {
-		gitBin, gitErr = exec.LookPath("git")
-	})
-	if gitErr != nil {
-		t.Skip("e2e: git not found on PATH")
-	}
-	return gitBin
-}
-
 // shimBuildSHA is the fixed build identity every test's real shim bundle and
 // daemon agree on. src/main.ts refuses to start without SHIM_BUILD_SHA in its
 // spawn environment, and the daemon's stale-shim rollout check compares that
