@@ -109,40 +109,57 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	harness.ExpectNoPush(t, roster, harness.ProbeWindow, "re-selecting the current workspace is a success that changes no view")
 }
 
+// TestPerWorkspaceRpcRefusesAnUnknownWorkspace asserts the refusal IN BAND.
+// `CloseWorkspaceError.unknown_workspace` is a LANDED arm
+// (endpoint_close_workspace.proto), and a landed arm is never also a Connect
+// error — the response's `error` result IS the refusal.
+//
+// (Written originally against the unlanded-arm path, which answered
+// CodeNotFound with an `intended arm:` message. The arm landed with the
+// contract, so the assertion moved onto it; the same amendment already stands
+// on TestRegisterWorkspaceRefusesANonWorktree above.)
 func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
+	d.ExpectWarnings("daemon.refusal.unlanded_arm")
 	unknown := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
 
 	// Act
-	_, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: unknown}))
+	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: unknown}))
 
 	// Assert
-	if connectCode(err) != connect.CodeNotFound {
-		t.Fatalf("CloseWorkspace on an unknown workspace = %v (code %v), want CodeNotFound", err, connectCode(err))
+	if err != nil {
+		t.Fatalf("CloseWorkspace on an unknown workspace = transport error %v, want the in-band unknown_workspace arm", err)
 	}
-	if !namesIntendedArm(err, "CloseWorkspaceError.") {
-		t.Fatalf("CloseWorkspace refusal = %v, want it to name CloseWorkspaceError.<arm>", err)
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("CloseWorkspace on an unknown workspace = %v, want CloseWorkspaceError.unknown_workspace", resp.Msg)
 	}
-	d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
+// TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees pins the WorkspaceRef echo
+// ruling: the daemon keys on `id` and REFUSES a ref whose `dir` disagrees with
+// the registry. `workspace_ref_mismatch` is landed too, and its arm carries
+// the dir the registry actually holds, so the client can correct its echo.
 func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 	mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: t.TempDir()}
 
 	// Act
-	_, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: mismatched}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: mismatched}))
 
 	// Assert
-	if err == nil {
-		t.Fatal("CloseWorkspace with a mismatched ref dir = success, want a refusal")
+	if err != nil {
+		t.Fatalf("CloseWorkspace with a mismatched ref dir = transport error %v, want the in-band arm", err)
 	}
-	if !namesIntendedArm(err, "workspace_ref_mismatch") {
-		t.Fatalf("CloseWorkspace refusal = %v, want it to name the workspace_ref_mismatch arm", err)
+	arm := resp.Msg.GetError().GetWorkspaceRefMismatch()
+	if arm == nil {
+		t.Fatalf("CloseWorkspace with a mismatched ref dir = %v, want CloseWorkspaceError.workspace_ref_mismatch", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	if arm.GetRegistryDir() != f.ws.GetDir() {
+		t.Fatalf("workspace_ref_mismatch.registry_dir = %q, want the registry's dir %q", arm.GetRegistryDir(), f.ws.GetDir())
+	}
 }
 
 func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
