@@ -26,7 +26,7 @@
  * holding, and choosing an option on the user's behalf is the one outcome a
  * permission gate must never produce.
  */
-import { create } from "@bufbuild/protobuf";
+import { create, equals } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import { permissionId, questionId, toolCallActivityId } from "../convert/ids.js";
@@ -723,6 +723,28 @@ export class PermissionGate {
           const standing = scope.value.standing;
           if (standing === undefined) {
             LOGGER.log({ level: "warn", permission_id: askId }, "a standing allow carries no standing");
+            return "answer_mismatch";
+          }
+          // THE STANDING IS A TYPED ECHO TOKEN, VALIDATED LIKE ANY OTHER ECHO.
+          // The shim already holds the ask it offered, so a grant that is not
+          // BYTE-FOR-BYTE the offered standing -- altered rules, an extra
+          // set_mode nobody offered, or a standing where the vendor offered
+          // none at all -- is a consumer answering a question the shim is not
+          // holding. Accepting it would let a caller install permission rules
+          // and change the session's mode through a grant the vendor never
+          // proposed.
+          if (
+            pending.offeredStanding === undefined ||
+            !equals(conversationv1.AgentPermissionStandingSchema, pending.offeredStanding, standing)
+          ) {
+            LOGGER.log(
+              {
+                level: "warn",
+                permission_id: askId,
+                offered: pending.offeredStanding !== undefined,
+              },
+              "REFUSED a standing grant that is not the standing this ask offered",
+            );
             return "answer_mismatch";
           }
           const updates = fromStanding(standing);

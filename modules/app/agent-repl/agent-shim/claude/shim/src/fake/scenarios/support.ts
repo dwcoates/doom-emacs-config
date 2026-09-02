@@ -11,7 +11,7 @@
  * module that accumulated one-off emitters would become the place shapes drift
  * away from the corpus.
  */
-import type { PermissionResultLike } from "../../sdk/types.js";
+import type { PermissionResultLike, PermissionUpdateLike } from "../../sdk/types.js";
 import type { Scenario, ScenarioContext, ToolCall } from "../scenario.js";
 import { FAKE_REASONING_SIGNATURE } from "../vendor-files.js";
 
@@ -80,19 +80,64 @@ export function visibleThinking(text: string): {
 export async function askPermission(
   ctx: ScenarioContext,
   call: ToolCall,
-  extra: { title?: string; displayName?: string; description?: string; decisionReason?: string } = {},
+  extra: {
+    title?: string;
+    displayName?: string;
+    description?: string;
+    decisionReason?: string;
+    /**
+     * The standing the ask OFFERS, when the default single add-rule suggestion
+     * is not the shape under test (a `setMode` offer, for instance).
+     */
+    suggestions?: readonly PermissionUpdateLike[];
+    /**
+     * The agent the call was made UNDER, when it is not the main thread.
+     *
+     * The vendor sets `agentID` on a subagent's own gated call, and it is the
+     * only signal on this plane that says which agent raised the ask.
+     */
+    agentID?: string;
+  } = {},
 ): Promise<PermissionResultLike | null> {
+  // THE MODE DECIDES WHETHER THERE IS AN ASK AT ALL, and it is the VENDOR that
+  // applies it — the shim only relays the mode down. `bypassPermissions` runs
+  // the call without consulting anyone; `dontAsk` refuses it the same way a
+  // deny rule would, with a `system:permission_denied` and no `canUseTool`.
+  // A mock that asked in every mode would make the mode unobservable.
+  if (ctx.permissionMode === "bypassPermissions") {
+    ctx.log({ tool: call.name, permission_mode: ctx.permissionMode }, "fake gate BYPASSED; no ask was made");
+    return { behavior: "allow" };
+  }
+  if (ctx.permissionMode === "dontAsk") {
+    ctx.log(
+      { tool: call.name, permission_mode: ctx.permissionMode },
+      "fake gate REFUSED by the session's mode; no ask was made",
+    );
+    ctx.systemMessage("permission_denied", {
+      tool_name: call.name,
+      tool_use_id: call.toolUseId,
+      // NOT "classifier": that spelling is the one the converter reads as
+      // `undecidable`, and a mode refusal is an ordinary policy denial.
+      decision_reason_type: "mode",
+      decision_reason: "the session's permission mode is dont_ask",
+      message: "Error: denied by the session's permission mode",
+    });
+    return { behavior: "deny", message: "denied by the session's permission mode" };
+  }
   return ctx.canUseTool(call.name, call.input, {
     signal: new AbortController().signal,
     toolUseID: call.toolUseId,
     requestId: `req_perm_${call.toolUseId}`,
+    ...(extra.agentID === undefined ? {} : { agentID: extra.agentID }),
     suggestions: [
-      {
-        type: "addRules",
-        rules: [{ toolName: call.name, ruleContent: String(call.input.command ?? call.input.file_path ?? "") }],
-        behavior: "allow",
-        destination: "localSettings",
-      },
+      ...(extra.suggestions ?? [
+        {
+          type: "addRules",
+          rules: [{ toolName: call.name, ruleContent: String(call.input.command ?? call.input.file_path ?? "") }],
+          behavior: "allow",
+          destination: "localSettings",
+        },
+      ]),
     ],
     title: extra.title ?? `Claude wants to run ${call.name}`,
     displayName: extra.displayName ?? call.name,

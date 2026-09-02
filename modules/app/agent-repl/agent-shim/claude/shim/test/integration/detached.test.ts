@@ -17,6 +17,7 @@
  * from a wire value.
  */
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
@@ -28,6 +29,7 @@ import {
   resumeSession,
   startTurnRequest,
   startTurnRequest as turnFor,
+  readHistoryFirst,
   turnId,
   watchAgentRequest,
   workId,
@@ -37,6 +39,7 @@ import {
   detachForegroundAccepted,
   detachForegroundKind,
   entryFrame,
+  historyPage,
   sessionStarted,
   stopBashAccepted,
   stopBashKind,
@@ -44,13 +47,24 @@ import {
   watchAgentPage,
 } from "../integration-support/expect.js";
 import {
+  bashCompleted,
+  bashRowEntry,
+  bashStart,
+  bashUpdate,
   createStoreClient,
   seedBashLifecycle,
   seedDetachedAnnouncement,
   sidecarProducer,
+  writeEntries,
   writtenKeys,
 } from "../integration-support/store.js";
-import { awaitSpoolExit, findSubagentMetaByToolUseId, readTranscript } from "../integration-support/vendor.js";
+import {
+  awaitSpoolExit,
+  findSubagentMetaByToolUseId,
+  readSpools,
+  readTranscript,
+  spoolFilePath,
+} from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
 
@@ -98,20 +112,40 @@ async function awaitAnnouncement(
   return agentFrame.result.value;
 }
 
+/** The `AgentBash` a tailed activity entry carries. */
+function bashOf(frame: shimv1.WatchAgentResponse): conversationv1.AgentBash {
+  const agentFrame = entryFrame(watchAgentEntry(frame));
+  if (agentFrame?.result.case !== "update") throw new Error("expected an update frame");
+  const update = agentFrame.result.value.update;
+  if (update.case !== "activity" || update.value.item.case !== "bash") {
+    throw new Error("expected a bash activity");
+  }
+  return update.value.item.value;
+}
+
 describe("a detached shell's announcement", () => {
   test("!bash-detach announces detached_work with a readable output path", async () => {
     // The announcement is the consumer's open-a-stream obligation, and the
     // output path is how a surface offers the file when the stream is gone.
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream, true);
 
     expect(announced.work?.value).not.toBe("");
-    expect(announced.output?.path).not.toBe("");
     expect(announced.output?.readability.case).toBe("readable");
+    // THE PATH IS THE FILE THE VENDOR ACTUALLY WROTE, not merely a non-empty
+    // string: this is the offer a surface makes when the stream is gone, so a
+    // path that named nothing would be a broken offer nobody noticed. The
+    // spool is found by SCANNING (the vendor's task id never crosses the wire),
+    // and the announced path must be that file.
+    const spools = readSpools(shim.dirs, started.vendorSessionId);
+    expect(spools.length).toBeGreaterThan(0);
+    expect(spools.map((spool) => spoolFilePath(shim.dirs, started.vendorSessionId, spool.taskId))).toContain(
+      announced.output?.path,
+    );
     stream.close();
   });
 
@@ -135,7 +169,7 @@ describe("a detached shell's announcement", () => {
     // ONE HANDLE: the wire never carries the vendor's task id, so the work id
     // and the unit's own id are the same value and a consumer needs no mapping.
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
@@ -143,6 +177,23 @@ describe("a detached shell's announcement", () => {
 
     if (announced.origin.case !== "detached") throw new Error("expected the detached origin");
     expect(announced.work?.value).toBe(announced.origin.value.detachedFromId?.value);
+    // AND THE FILE PLANE AGREES. Both values above are the shim's own, so on
+    // their own they only say the shim was consistent with itself. The vendor's
+    // transcript carries the spawning call's `tool_use` block id, and THAT is
+    // the value the handle must be.
+    const toolUseIds = readTranscript(shim.dirs, started.vendorSessionId)
+      .filter((record) => record.type === "assistant")
+      .flatMap((record) => {
+        const message = record.message as { content?: unknown } | undefined;
+        const content = Array.isArray(message?.content) ? message.content : [];
+        return content
+          .filter((block): block is { type: string; id: string } => {
+            const typed = block as { type?: unknown; id?: unknown };
+            return typed.type === "tool_use" && typeof typed.id === "string";
+          })
+          .map((block) => block.id);
+      });
+    expect(toolUseIds).toContain(announced.work?.value);
     stream.close();
   });
 
@@ -278,7 +329,12 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     stream.close();
   });
 
-  test("an unknown work id closes the stream at the transport", async () => {
+  test("an unknown work id is refused NOT_FOUND, naming the work", async () => {
+    // INTERIM RULING (ledger, rebuild merge): `WatchBash` has no refusal arm of
+    // its own, so an unknown handle is a TRANSPORT refusal — pinned rather than
+    // left as "some throw", because a store outage, a cancelled call and a
+    // handle nobody minted all reach a caller as an exception and only the code
+    // tells them apart.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
@@ -288,8 +344,343 @@ describe("WatchBash serves the SIDECAR's rows", () => {
         options,
       ),
     );
+    const failure = await bash.nextOrEnd().then(
+      () => undefined,
+      (err: unknown) => ConnectError.from(err),
+    );
 
-    await expect(bash.next()).rejects.toThrow();
+    if (failure === undefined) throw new Error("the unknown work id was not refused");
+    expect(failure.code).toBe(Code.NotFound);
+    expect(failure.message).toContain("nobody");
+  });
+});
+
+describe("WatchBash and the rows it relays", () => {
+  test("it opens on an ANNOUNCED run whose rows do not exist yet", async () => {
+    // THE ANNOUNCEMENT IS A CONSUMER OBLIGATION: the daemon opens the stream
+    // the moment it sees one, which is necessarily before the sidecar has
+    // written a single row. The store answers `CodeNotFound` for a run it has
+    // never heard of, and the shim must tolerate that -- an open that failed
+    // here would make the eager-open rule impossible to obey, and the consumer
+    // would have to poll to find out when the stream became openable.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+
+    // Opened with NOTHING in the store for this run.
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+        options,
+      ),
+    );
+    // The sidecar's rows arrive afterwards, as they do in life.
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "sleep 1 && echo done",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["late\n"],
+        exitCode: 0,
+        topLevel: started.vendorSessionId,
+      },
+    );
+    const frames = await bash.drain();
+
+    const arms = frames.map((frame) => bashFrame(frame).result.case);
+    expect(arms[0]).toBe("start");
+    expect(arms.at(-1)).toBe("success");
+    stream.close();
+  });
+
+  test("it FOLLOWS: deltas and the terminal seeded after the open still arrive, in order", async () => {
+    // The same obligation stated as an ordering: the stream is opened first and
+    // the rows are written afterwards, so nothing here can be served from a
+    // snapshot taken at the open.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+        options,
+      ),
+    );
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "echo",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["one\n", "two\n"],
+        exitCode: 0,
+        topLevel: started.vendorSessionId,
+      },
+    );
+    const frames = await bash.drain();
+
+    expect(frames.map((frame) => bashFrame(frame).result.case)).toEqual([
+      "start",
+      "update",
+      "update",
+      "success",
+    ]);
+    // And the deltas arrived in the order they were written.
+    expect(
+      frames
+        .map(bashFrame)
+        .filter((frame) => frame.result.case === "update")
+        .map((frame) => (frame.result.case === "update" ? frame.result.value.newOutput : "")),
+    ).toEqual(["one\n", "two\n"]);
+    stream.close();
+  });
+
+  test("the terminal is served ONCE and ENDS the run's stream; a later delta is not served", async () => {
+    // A RUN'S STREAM ENDS AT ITS TERMINAL. The terminal is served exactly once
+    // and is the last thing on the stream — a second would have a consumer draw
+    // the run finishing twice, and anything after it would arrive on a stream
+    // the consumer has already closed.
+    //
+    // THE OBLIGATION THIS PUTS ON THE SIDECAR: a last chunk must be written
+    // BEFORE the terminal row, never after it. A delta written afterwards is
+    // durable in the record and reaches no watcher, which is asserted here so
+    // the ordering is a stated rule rather than a surprise.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    const store = createStoreClient(shim.dirs.storeSocket);
+    const producer = sidecarProducer(started.vendorSessionId);
+    // The terminal FIRST...
+    await writeEntries(store, producer, [
+      bashRowEntry({
+        run,
+        frame: bashStart("echo", 1_700_000_000_000),
+        writeId: `${run}-start`,
+        topLevel: started.vendorSessionId,
+      }),
+      bashRowEntry({
+        run,
+        frame: bashCompleted("echo", 0, "early\n"),
+        writeId: `${run}-terminal`,
+        topLevel: started.vendorSessionId,
+      }),
+    ]);
+    // ...and a delta after it.
+    await writeEntries(store, producer, [
+      bashRowEntry({
+        run,
+        frame: bashUpdate("trailing\n", 6),
+        writeId: `${run}-late`,
+        topLevel: started.vendorSessionId,
+      }),
+    ]);
+
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+        options,
+      ),
+    );
+    const frames = await bash.drain();
+
+    const arms = frames.map((frame) => bashFrame(frame).result.case);
+    expect(arms.filter((arm) => arm === "success").length).toBe(1);
+    expect(arms.at(-1)).toBe("success");
+    expect(arms).not.toContain("update");
+    expect(bash.isEnded()).toBe(true);
+    stream.close();
+  });
+});
+
+describe("what the PRODUCER states about a shell run", () => {
+  test("!bash-fail: a NON-ZERO exit is a completed run carrying the code", async () => {
+    // A command's own verdict on itself is not a failure of the CALL. Drawing
+    // `exit 3` as a failed tool would tell the user the shell broke, when what
+    // happened is that a grep found nothing.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-fail" }));
+    const settled = await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return (
+        update.case === "activity" &&
+        update.value.item.case === "bash" &&
+        update.value.item.value.result.case !== "start"
+      );
+    });
+
+    const bash = bashOf(settled);
+    if (bash.result.case !== "success") {
+      throw new Error("a non-zero exit was drawn as something other than a completed run");
+    }
+    const outcome = bash.result.value.outcome;
+    if (outcome.case !== "completed") throw new Error("the run did not settle completed");
+    expect(outcome.value.termination?.how.case).toBe("exited");
+    if (outcome.value.termination?.how.case === "exited") {
+      expect(outcome.value.termination.how.value.code).toBe(3);
+    }
+    stream.close();
+  });
+
+  test("!bash-timeout: the run MOVES rather than ends, and the receipt settles nothing", async () => {
+    // The vendor AUTO-BACKGROUNDS a timed-out command instead of killing it, so
+    // the foreground receipt is not a terminal: the run is still going, and its
+    // detached-work frame is what settles it. A receipt drawn as a terminal
+    // here would show the user a finished command that is still running.
+    //
+    // `AgentBashInterruptedByTimeout.timeout_ms` — the CONFIGURED limit, not
+    // the runtime — is asserted where its producer lives, on the converter, in
+    // test/convert/tools/bash.test.ts: reaching it end to end needs the
+    // sidecar's rows, which no integration harness runs.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-timeout" }));
+    const announced = await awaitAnnouncement(stream);
+    // Drive to the turn's end so every frame it will produce has been served.
+    await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
+
+    expect(announced.origin.case).toBe("detached");
+    const settledReceipts = stream.frames().filter((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return (
+        update.case === "activity" &&
+        update.value.item.case === "bash" &&
+        update.value.item.value.result.case !== "start"
+      );
+    });
+    expect(settledReceipts).toEqual([]);
+    stream.close();
+  });
+
+  test("termination is SET for a detached shell and UNSET for a foreground one", async () => {
+    // THE FACT EXISTS FOR EXACTLY ONE OF THE TWO PATHS. A detached shell's
+    // spool is terminated by the shell itself, so the sidecar reads an `EXIT=`
+    // line and states how it ended; a foreground call's result carries the
+    // output and no shell status at all. Stating it as absent for the
+    // foreground path is the honest shape — a synthesized `exited(0)` would be
+    // the shim inventing a status nothing reported.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash" }));
+    const foreground = await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      return (
+        update.case === "activity" &&
+        update.value.item.case === "bash" &&
+        update.value.item.value.result.case === "success" &&
+        update.value.item.value.result.value.outcome.case === "completed"
+      );
+    });
+    const foregroundBash = bashOf(foreground);
+    if (
+      foregroundBash.result.case !== "success" ||
+      foregroundBash.result.value.outcome.case !== "completed"
+    ) {
+      throw new Error("the foreground run did not settle completed");
+    }
+
+    expect(foregroundBash.result.value.outcome.value.termination).toBeUndefined();
+
+    // The detached path, whose rows are the SIDECAR's and are seeded here as
+    // everywhere else in this file.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!bash-detach" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "echo done",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["done\n"],
+        exitCode: 0,
+        topLevel: started.vendorSessionId,
+      },
+    );
+    const watch = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+        options,
+      ),
+    );
+    const terminal = (await watch.drain()).map(bashFrame).at(-1);
+
+    if (terminal?.result.case !== "success" || terminal.result.value.outcome.case !== "completed") {
+      throw new Error("the detached run did not settle completed");
+    }
+    expect(terminal.result.value.outcome.value.termination?.how.case).toBe("exited");
+    stream.close();
+  });
+
+  test("a run the vendor did not keep reports its output as NOT OBSERVED", async () => {
+    // A reconciled run is closed from the RECORD, not from a shell: nobody read
+    // its output, and `not_observed` says exactly that. An empty `text` form
+    // would claim the command printed nothing, which is a different and false
+    // statement about the run.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await first.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: true }),
+    );
+    await first.exited;
+    const store = createStoreClient(first.dirs.storeSocket);
+    await seedDetachedAnnouncement(store, sidecarProducer(started.vendorSessionId), {
+      work: "unobserved-run",
+      agent: started.vendorSessionId,
+      detachedFromId: "unobserved-run",
+      outputPath: "/nonexistent/unobserved.output",
+    });
+
+    const second = await spawnShim({ reuse: first.dirs });
+    await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
+    const bash = openStream((options) =>
+      second.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId("unobserved-run") }),
+        options,
+      ),
+    );
+    const terminal = (await bash.drain()).map(bashFrame).at(-1);
+
+    if (terminal?.result.case !== "success" || terminal.result.value.outcome.case !== "interrupted") {
+      throw new Error("the reconciled run was not closed with an interrupted terminal");
+    }
+    expect(terminal.result.value.outcome.value.output?.form.case).toBe("notObserved");
   });
 });
 
@@ -463,8 +854,29 @@ describe("subagents", () => {
       if (frame.frame.case !== "entry") continue;
       expect(entryFrame(watchAgentEntry(frame))?.agentId?.value).not.toBe(created);
     }
+    // ONE WATCHAGENT SERVES ONE BOOK — the PAGE as well as the tail. A repaint
+    // that folded the child's rows into the parent's page would put a
+    // subagent's work in the main conversation on every reload, which the tail
+    // assertion above cannot catch.
+    await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
     stream.close();
     child.close();
+    const parentPage = historyPage(await shim.clients.h1.readHistory(readHistoryFirst()));
+    expect(
+      parentPage.entries.map((entry) => entryFrame(entry)?.agentId?.value ?? ""),
+    ).not.toContain(created);
+    // And the child's OWN book is where they are.
+    const childPage = historyPage(
+      await shim.clients.h1.readHistory(readHistoryFirst({ target: agentId(created) })),
+    );
+    const childAgents = new Set(
+      childPage.entries.map((entry) => entryFrame(entry)?.agentId?.value ?? ""),
+    );
+    expect([...childAgents]).toEqual([created]);
   });
 
   test("the subagent's AgentId IS the spawning call's activity id", async () => {
@@ -618,9 +1030,28 @@ describe("DetachForeground", () => {
 
     detachForegroundAccepted(response);
     expect(announced.work?.value).toBe(unit);
-    if (announced.origin.case === "detached") {
-      expect(announced.origin.value.cause.case).toBe("byUser");
+    // UNCONDITIONAL: a guarded assertion passes when the origin is some OTHER
+    // arm, which is exactly the regression worth catching — the whole claim is
+    // that a confirmed Ctrl-B is announced as detached BY THE USER.
+    if (announced.origin.case !== "detached") {
+      throw new Error("the confirmed detachment was not announced with a detached origin");
     }
+    expect(announced.origin.value.cause.case).toBe("byUser");
+    // AND THE TURN ITSELF COMPLETES. `AgentSuccess.backgrounded` is the
+    // WHOLE-TURN arm — the vendor's `background_requested` terminal reason,
+    // where the agent's own run moved to the background — and Ctrl-B is not
+    // that: one CALL left the turn and the agent kept working, which is why the
+    // detachment is stated on the announcement above and the terminal is an
+    // ordinary completion. Asserting `backgrounded` here would demand the mock
+    // claim the whole turn had been backgrounded by a per-call detach.
+    const terminal = await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
+    const frame = entryFrame(watchAgentEntry(terminal));
+    if (frame?.result.case !== "success") throw new Error("the turn did not end AgentSuccess");
+    expect(frame.result.value.outcome.case).toBe("completed");
     stream.close();
   });
 
@@ -693,6 +1124,16 @@ describe("DetachForeground", () => {
 
     expect(detachForegroundKind(response)).toBe("alreadyConcluded");
     stream.close();
+  });
+
+  test("DetachForeground before StartSession is refused no_session", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, { unit: activityId("anything") }),
+    );
+
+    expect(detachForegroundKind(response)).toBe("noSession");
   });
 
   test("an unknown unit is refused unknown_unit", async () => {
@@ -858,6 +1299,10 @@ describe("a fan-wide cancel", () => {
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(turnFor({ turn: "t1", text: "!cancel-all" }));
+    // THE FAN IS EXACTLY THREE — two agents and a shell — and it is named as
+    // three because that is what `!cancel-all` establishes. A `>= 3` would pass
+    // on a scenario that announced four, which is a different fan than the one
+    // the assertions below are about.
     const announcements: string[] = [];
     await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
@@ -865,8 +1310,9 @@ describe("a fan-wide cancel", () => {
       if (agentFrame?.result.case === "detachedWork") {
         announcements.push(agentFrame.result.value.work?.value ?? "");
       }
-      return announcements.length >= 3;
+      return announcements.length === 3;
     });
+    expect(new Set(announcements).size).toBe(3);
 
     await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: true }),

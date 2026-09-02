@@ -374,7 +374,10 @@ describe("a permission through the gate", () => {
 
   it("echoes a standing grant back to the vendor as updatedPermissions", async () => {
     const { gate } = gateWith();
-    const pending = gate.canUseTool("Bash", {}, callOptions());
+    // The ask OFFERS the standing the decision below echoes: a grant is
+    // validated against the offer, so an ask with no suggestions can only
+    // produce a once-allow.
+    const pending = gate.canUseTool("Bash", {}, callOptions({ suggestions: [{ type: "addRules", destination: "session", behavior: "allow", rules: [{ toolName: "Bash" }] }] }));
     await Promise.resolve();
 
     gate.decidePermission(
@@ -404,7 +407,7 @@ describe("a permission through the gate", () => {
 
   it("restates a standing grant's mode change to the session", async () => {
     const { gate, modes } = gateWith();
-    void gate.canUseTool("Bash", {}, callOptions());
+    void gate.canUseTool("Bash", {}, callOptions({ suggestions: [{ type: "setMode", destination: "session", mode: "acceptEdits" }] }));
     await Promise.resolve();
 
     gate.decidePermission(
@@ -425,6 +428,63 @@ describe("a permission through the gate", () => {
     );
 
     expect(modes[0]?.mode.case).toBe("acceptEdits");
+  });
+
+  it("refuses a standing grant the ask never offered as answer_mismatch", async () => {
+    // THE STANDING IS AN ECHO TOKEN. An ask with no suggestions offered no
+    // standing at all, so a grant carrying one is an answer to a question the
+    // gate is not holding — and accepting it would install rules the vendor
+    // never proposed.
+    const { gate, modes } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions());
+    await Promise.resolve();
+
+    const outcome = gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+        decision: {
+          case: "allowed",
+          value: create(conversationv1.AgentPermissionAllowedSchema, {
+            scope: {
+              case: "standing",
+              value: create(conversationv1.AgentPermissionAllowedStandingSchema, {
+                standing: toStanding([{ type: "setMode", destination: "session", mode: "acceptEdits" }]),
+              }),
+            },
+          }),
+        },
+      }),
+    );
+
+    expect([outcome, modes.length]).toEqual(["answer_mismatch", 0]);
+  });
+
+  it("refuses a standing grant ALTERED from the offer as answer_mismatch", async () => {
+    // The offer is one add-rule; the grant appends a set_mode. A gate that
+    // accepted the difference would let a caller change the session's
+    // permission mode through a grant nobody offered.
+    const { gate, modes } = gateWith();
+    void gate.canUseTool("Bash", {}, callOptions({ suggestions: [{ type: "addRules", destination: "session", behavior: "allow", rules: [{ toolName: "Bash" }] }] }));
+    await Promise.resolve();
+
+    const outcome = gate.decidePermission(
+      create(conversationv1.AgentPermissionDecisionSchema, {
+        ask: create(conversationv1.AgentPermissionIdSchema, { value: "toolu_1" }),
+        decision: {
+          case: "allowed",
+          value: create(conversationv1.AgentPermissionAllowedSchema, {
+            scope: {
+              case: "standing",
+              value: create(conversationv1.AgentPermissionAllowedStandingSchema, {
+                standing: toStanding([{ type: "addRules", destination: "session", behavior: "allow", rules: [{ toolName: "Bash" }] }, { type: "setMode", destination: "session", mode: "acceptEdits" }]),
+              }),
+            },
+          }),
+        },
+      }),
+    );
+
+    expect([outcome, modes.length]).toEqual(["answer_mismatch", 0]);
   });
 
   it("denies with the user's own message", async () => {
