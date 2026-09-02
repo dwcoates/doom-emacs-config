@@ -60,12 +60,22 @@ func (v *verbs) Interrupt(ctx context.Context, ws ids.WorkspaceID, target Interr
 	running, live := v.deps.Freeness(ws)
 	shim, hasShim := v.deps.Shim(ws)
 	if !live || !hasShim {
+		if target.Turn {
+			v.deps.Merge.OnInterrupt(ctx, ws)
+		}
 		log.Debug(opInterrupt, "nothing is running", dlog.Context{"reason": "no live session"})
 		return InterruptOutcome{NothingRunning: true}, nil
 	}
 
 	switch {
 	case target.Turn:
+		// A workspace whose merge is queued raises the dequeue offer on an
+		// interrupt WHATEVER the turn is doing: the user interrupting a queued
+		// workspace is asking about the merge as much as about the turn, and
+		// an idle queued workspace is precisely the case where the turn has
+		// nothing to answer with. The offer is a no-op on a workspace with no
+		// queued merge.
+		v.deps.Merge.OnInterrupt(ctx, ws)
 		return v.interruptTurn(ctx, log, ws, shim, running, confirm)
 	case target.Detached != nil:
 		return v.interruptDetached(ctx, log, ws, shim, *target.Detached)
@@ -114,11 +124,6 @@ func (v *verbs) interruptTurn(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return InterruptOutcome{}, fmt.Errorf("interrupt %q: kill turn %q: %w", ws, *running.Turn, err)
 	}
-
-	// A workspace whose merge is queued raises the dequeue offer on an
-	// interrupt: the user interrupting a queued workspace is asking about the
-	// merge as much as about the turn.
-	v.deps.Merge.OnInterrupt(ctx, ws)
 
 	log.Info(opInterrupt, "interrupted the running turn", dlog.Context{
 		"turn": string(*running.Turn), "force": confirm, "live_agent_count": liveAgents,
