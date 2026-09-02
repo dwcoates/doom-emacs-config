@@ -70,11 +70,12 @@
 (defconst agent-repl-itest-verbs--ws "itest-verbs-ws"
   "The Doom workspace name every verb in this suite targets.")
 
-(defconst agent-repl-itest-verbs--dir "/tmp/itest-verbs-ws"
+(defconst agent-repl-itest-verbs--dir
+  (agent-repl-itest--fixture-dir "verbs-ws")
   "The workspace directory registered for that workspace.")
 
 (defconst agent-repl-itest-verbs--repo
-  '(:id "repo-itest" :dir "/tmp/itest-verbs-repo")
+  (list :id "repo-itest" :dir (agent-repl-itest--fixture-dir "verbs-repo"))
   "The RepositoryRef fixture, as it would arrive from the roster's sections.")
 
 (defmacro agent-repl-itest-verbs--with-workspace (daemon ref &rest body)
@@ -1071,7 +1072,7 @@ kind of blast-radius defect no unscoped assertion can catch."
         (should (equal (agent-repl-itest--body-field body 'pause 'repository 'id)
                        "repo-itest"))
         (should (equal (agent-repl-itest--body-field body 'pause 'repository 'dir)
-                       "/tmp/itest-verbs-repo"))))))
+                       (agent-repl-itest--fixture-dir "verbs-repo")))))))
 
 (ert-deftest agent-repl-itest-verbs-merge-queue-unknown-repository-is-reported ()
   "A scoped pause the daemon's registry cannot resolve is REFUSED by arm.
@@ -1123,7 +1124,7 @@ one-sided encoder would resume every repository after a scoped pause."
         (should (equal (agent-repl-itest--body-field body 'resume 'repository 'id)
                        "repo-itest"))
         (should (equal (agent-repl-itest--body-field body 'resume 'repository 'dir)
-                       "/tmp/itest-verbs-repo"))))))
+                       (agent-repl-itest--fixture-dir "verbs-repo")))))))
 
 ;;;; ---- Health rendering (audit finding 80) ----
 
@@ -1716,7 +1717,7 @@ report a workspace the daemon has never heard of as fine."
 ;; their own section so they merge cleanly beside concurrent edits above.
 
 (defconst agent-repl-itest-verbs--repo-protojson
-  '((id . "repo-itest") (dir . "/tmp/itest-verbs-repo"))
+  `((id . "repo-itest") (dir . ,(agent-repl-itest--fixture-dir "verbs-repo")))
   "`agent-repl-itest-verbs--repo' as protojson, for building roster pushes.")
 
 (cl-defun agent-repl-itest-verbs--roster-row (id dir &key closed name)
@@ -2076,9 +2077,9 @@ though the open row is present on the same roster."
       (ignore conn)
       (agent-repl-itest-verbs--with-roster
        daemon (list (agent-repl-itest-verbs--roster-row
-                     "itest-open-ws" "/tmp/itest-open-ws")
+                     "itest-open-ws" (agent-repl-itest--fixture-dir "itest-open-ws"))
                     (agent-repl-itest-verbs--roster-row
-                     "itest-closed-ws" "/tmp/itest-closed-ws" :closed t))
+                     "itest-closed-ws" (agent-repl-itest--fixture-dir "itest-closed-ws") :closed t))
         (let (offered)
           (cl-letf (((symbol-function 'completing-read)
                      (lambda (prompt candidates &rest _)
@@ -2094,7 +2095,7 @@ though the open row is present on the same roster."
             (should (equal (agent-repl-itest--body-field body 'workspace 'id)
                            "itest-closed-ws"))
             (should (equal (agent-repl-itest--body-field body 'workspace 'dir)
-                           "/tmp/itest-closed-ws"))))))))
+                           (agent-repl-itest--fixture-dir "itest-closed-ws")))))))))
 
 ;; audit-3 #54
 (ert-deftest agent-repl-itest-verbs-open-workspace-interactive-with-no-closed-rows-refuses-before-send ()
@@ -2106,7 +2107,7 @@ before send, prompting for nothing at all."
       (ignore conn)
       (agent-repl-itest-verbs--with-roster
        daemon (list (agent-repl-itest-verbs--roster-row
-                     "itest-open-ws" "/tmp/itest-open-ws"))
+                     "itest-open-ws" (agent-repl-itest--fixture-dir "itest-open-ws")))
         (cl-letf (((symbol-function 'completing-read)
                    (lambda (&rest _)
                      (error "agent-repl-itest: no closed row should prompt"))))
