@@ -382,12 +382,15 @@ describe("createFeedController: a malformed row", () => {
     expect(h.sink.reported).toEqual(["frameUndecodable"]);
   });
 
-  it("refuses a merge tab that arrived on a feed that is not a merge bubble", () => {
+  it("draws a merge tab that arrived on a feed that is not a merge bubble", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([mergeTabRow("t")]), "replace");
-    // The tab is not drawn as a row of its own, so nothing is placed for it.
-    expect(drawnIds(host)).toEqual([]);
+    // INSIDE a merge bubble the strip consumes the tab and this path is never
+    // reached; anywhere else the tab is still a row the daemon served, and
+    // dropping it would hide a phase of a real run (src/feed/merge/tab-row.ts).
+    expect(drawnIds(host)).toEqual(["t"]);
   });
+
 });
 
 describe("createFeedController: bubbles", () => {

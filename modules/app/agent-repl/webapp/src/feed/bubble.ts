@@ -138,7 +138,14 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   function drawHead(): void {
     const previous = headSlot.firstElementChild;
     if (previous !== null) stopTicking(previous);
-    headSlot.replaceChildren(opts.head(row, { ...opts.rc, row }));
+    const head = opts.head(row, { ...opts.rc, row });
+    headSlot.replaceChildren(head);
+    // THE HEAD'S STATE IS THE BUBBLE'S. The head states the arm (live, settled
+    // succeeded, …); the bubble is the element the feed hands upward, so it
+    // repeats what the head said rather than deciding anything of its own.
+    const state = head.getAttribute("data-state");
+    if (state === null) el.removeAttribute("data-state");
+    else el.setAttribute("data-state", state);
   }
 
   /** Show or hide the sub-feed, and say so on the element and the toggle. */

@@ -67,6 +67,7 @@ import { drawFeedUserPrompt } from "./rows/user-prompt.js";
 import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import { drawFeedSessionSeparation } from "./rows/separation.js";
+import { drawFeedMergeTabRow } from "./merge/tab-row.js";
 
 /** A bubble, as the controller holds it: an element plus its own lifecycle. */
 export interface BubbleLike extends Handle {
@@ -339,6 +340,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     state.body = bubble.element;
     state.dirty = false;
     element.append(bubble.element);
+    mirrorState(state);
   }
 
   /** Drop every row: the feed is being repainted from a fresh newest page. */
@@ -378,6 +380,7 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       // A bubble redraws its own head and keeps its sub-feed; replacing the
       // element here would tear down an open bubble on every push.
       state.bubble.update(state.row);
+      mirrorState(state);
       return;
     }
     let body: HTMLElement;
@@ -393,6 +396,26 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     }
     state.body = body;
     state.element.prepend(body);
+    mirrorState(state);
+  }
+
+  /**
+   * THE CARD'S STATE, REPEATED ON THE ROW CHROME.
+   *
+   * A card carries `data-state` with its own state/outcome arm (preamble §5).
+   * The chrome is what a reader — and every query that starts from a row —
+   * holds, so the arm is mirrored up onto the `<article>`: one row, one place
+   * to ask what state it is in. It is COPIED, never derived: the row chrome
+   * knows nothing about which arms exist and states only what the card stated.
+   */
+  function mirrorState(state: RowState): void {
+    const body = state.body;
+    const drawn = body?.getAttribute("data-state") ?? null;
+    if (drawn === null) {
+      state.element.removeAttribute("data-state");
+      return;
+    }
+    state.element.setAttribute("data-state", drawn);
   }
 
   /**
@@ -431,13 +454,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       case "commandRefused":
         return opts.renderers.commandRefused(arm.value, rc);
       case "mergeTab":
-        // Consumed by the merge body from the view's rows; never a row of its
-        // own. Reaching here means a merge tab arrived on a feed whose body is
-        // not the merge strip.
-        throw new MalformedView(
-          "FeedRow.row.merge_tab",
-          "a merge tab arrived on a feed that is not a merge bubble",
-        );
+        // INSIDE a merge bubble the strip consumes these and this path is never
+        // reached. On any other feed the tab is still a row the daemon served,
+        // and dropping it would hide a phase of a real run — so it draws as its
+        // own row through the same badge and body the strip uses.
+        return drawFeedMergeTabRow(row, arm.value, subfeed, rc);
       case "detachedSubagent":
         throw new MalformedView(
           "FeedRow.row.detached_subagent",
