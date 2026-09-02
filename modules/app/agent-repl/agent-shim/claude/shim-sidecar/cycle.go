@@ -83,6 +83,11 @@ const rpcTimeout = 30 * time.Second
 type watched struct {
 	target discover.Target
 	tailer *tail.Tailer
+	// ctx is the attribution the tailer hands the converter. It is kept here
+	// because ONE OF ITS FACTS IS NOT KNOWN AT WATCH TIME: whether the spawn
+	// behind this file was BACKGROUNDED is read off a launch in ANOTHER file,
+	// which the reader may not have reached yet. See refreshSpawnFacts.
+	ctx *tail.Context
 	// vanished records that the file has gone missing, so the disappearance is
 	// stated once rather than on every poll of a file that is still absent.
 	vanished bool
@@ -437,6 +442,7 @@ func (s *sidecar) reportResumed() {
 func (s *sidecar) rescan() {
 	s.requireCursors("rescan")
 	now := s.now()
+	s.refreshSpawnFacts()
 	for _, target := range s.disc.Scan() {
 		if _, ok := s.watchers[target.Path]; ok {
 			continue
@@ -473,6 +479,34 @@ func (s *sidecar) rescan() {
 			return
 		}
 		s.watch(resolved, identity, cursor, now)
+	}
+}
+
+// refreshSpawnFacts re-reads, for every watched file, the one attribution fact
+// that lives in ANOTHER file: whether the spawn behind it was backgrounded.
+//
+// DISCOVERY ORDER IS NOT CAUSAL ORDER. A subagent's sidechain transcript can be
+// discovered before the parent transcript's launch result has been read — on a
+// restart it usually is — and the flag was frozen at watch time, so that file's
+// records named the wrong top_level for the life of the process while the same
+// agent's task spool named the right one. Re-reading it every rescan is what
+// makes the two agree however the two files were discovered.
+//
+// IT ONLY EVER TURNS ON. The launch is the sole evidence either way, and once
+// observed it does not stop being true; unlearning it on a pass where the owner
+// index was momentarily silent would flip an agent's top_level mid-stream.
+func (s *sidecar) refreshSpawnFacts() {
+	for path, w := range s.watchers {
+		if w.ctx == nil || w.ctx.SpawnBackgrounded {
+			continue
+		}
+		if !s.owners.backgroundedFor(w.target) {
+			continue
+		}
+		w.ctx.SpawnBackgrounded = true
+		s.log.With(logging.Context{
+			Operation: "spawn-backgrounded", Path: path, TaskID: w.target.TaskID, AgentID: w.target.AgentID,
+		}).Log("the spawn behind this file is now known to have been backgrounded; its frames name the subagent itself as top_level")
 	}
 }
 
@@ -545,7 +579,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		Kind:              target.Kind,
 		AgentID:           s.bookFor(target),
 		MainAgentID:       s.owners.mainAgentFor(target),
-		SpawnBackgrounded: s.owners.spawnBackgrounded(target.TaskID),
+		SpawnBackgrounded: s.owners.backgroundedFor(target),
 		MetaPath:          target.MetaPath,
 		ConfigRoots:       s.disc.ConfigRoots(),
 		TaskID:            target.TaskID,
@@ -558,7 +592,7 @@ func (s *sidecar) watch(target discover.Target, identity string, cursor *storev1
 		tailer.Restore(cursor)
 		s.rewindOnce(target, identity, tailer)
 	}
-	s.watchers[target.Path] = &watched{target: target, tailer: tailer}
+	s.watchers[target.Path] = &watched{target: target, tailer: tailer, ctx: ctx}
 	s.trackDetached(target, now)
 	bound.With(logging.Context{Operation: "watch"}).Log("watching %s", target.Kind)
 	// A stop that arrived while this spool was held is NOT applied here, even

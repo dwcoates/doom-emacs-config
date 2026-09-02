@@ -281,3 +281,59 @@ func interruptedFor(batches []*storev1.EntryBatch, run string) *conversationv1.A
 	}
 	return out
 }
+
+func TestABackgroundedSpawnIsKnownByItsTaskIdForTheSpool(t *testing.T) {
+	// Arrange. A task SPOOL is keyed by task id, which is the identity its
+	// discovery target carries.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "a15", activityID: "toolu_spawn", backgrounded: true})
+
+	// Act.
+	got := index.backgroundedFor(spoolTarget("/private/tmp/a15.output", "a15"))
+
+	// Assert.
+	if !got {
+		t.Fatal("a backgrounded spawn is not reported for its own task spool")
+	}
+}
+
+func TestABackgroundedSpawnIsKnownByItsCallForTheSidechain(t *testing.T) {
+	// Arrange. THE SAME AGENT'S SIDECHAIN TRANSCRIPT NAMES NO TASK: its only
+	// identity is the spawning call its meta file states. A flag reachable only
+	// by task id answered false here, so the sidechain's frames named the
+	// session's main agent as top_level while the spool's named the subagent —
+	// one agent, two planes, two answers no consumer could reconcile.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "a15", activityID: "toolu_spawn", backgrounded: true})
+
+	// Act.
+	got := index.backgroundedFor(discover.Target{
+		// A sidechain's discovery TaskID is its `agent-<id>` LOCATOR, which no
+		// launch ever names — so the task lookup MUST miss and the call-id
+		// index is what answers.
+		Path: "/p/s/subagents/agent-a15.jsonl", AgentID: "toolu_spawn", SessionID: "s", TaskID: "a15locator",
+	})
+
+	// Assert.
+	if !got {
+		t.Fatal("a backgrounded spawn is not reported for the same agent's sidechain transcript")
+	}
+}
+
+func TestAForegroundSpawnIsNeverReportedAsBackgrounded(t *testing.T) {
+	// Arrange. A synchronous subagent's stream ends with the turn, so its work
+	// belongs to the session's main agent and marking it backgrounded would move
+	// every one of its frames into a top_level of its own.
+	index, _ := ownerIndexFor(t)
+	index.observe(observation{taskID: "a16", activityID: "toolu_sync", backgrounded: false})
+
+	// Act.
+	got := index.backgroundedFor(discover.Target{
+		Path: "/p/s/subagents/agent-a16.jsonl", AgentID: "toolu_sync", SessionID: "s", TaskID: "a16locator",
+	})
+
+	// Assert.
+	if got {
+		t.Fatal("a foreground spawn is reported as backgrounded")
+	}
+}
