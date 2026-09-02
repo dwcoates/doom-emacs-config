@@ -130,6 +130,20 @@ describe("the detail overlay", () => {
     );
   });
 
+  it("reads the tool clock's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the tool's start does not share the shared ticker's phase.
+    const host = openDetail(
+      strip(
+        warning("a", {
+          case: "detachedUnmodeled",
+          value: { toolName: { text: "runner" }, startedAtMs: BigInt(NOW - 4920) },
+        }),
+      ),
+    );
+    // Assert: five real seconds of running reads 5s, not the lagging 4s.
+    expect(openPanel(host)?.querySelector(".topbar-warning-clock")?.textContent).toBe("running 5s");
+  });
+
   it("draws a session fault's component and detail", () => {
     const host = openDetail(
       strip(
