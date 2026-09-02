@@ -399,6 +399,10 @@ func (s *feedSink) OnHistoryPage(_ ids.WorkspaceID, agent *conversationv1.AgentI
 
 type footerSink struct{ rec *recorder }
 
+func (s *footerSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
+	s.rec.emit(event{sink: "footer", method: "OnTurnOpened", detail: string(turn)})
+}
+
 func (s *footerSink) OnActivity(_ ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity) {
 	s.rec.emit(event{sink: "footer", method: "OnActivity", agent: agent.GetValue(), detail: act.GetActivityId().GetValue()})
 }

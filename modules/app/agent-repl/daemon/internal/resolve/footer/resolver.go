@@ -159,22 +159,46 @@ func (r *resolver) clockCell(s *wsState) *frontendv1.FooterClock {
 
 // ---- daemon-fact setters --------------------------------------------------
 
+// OnTurnOpened is the watcher handing over the turn-open edge. It raises
+// `thinking submitting` and starts the strip's clock. The ACT is not on this
+// edge — only the daemon's own caller knows a turn carries a /clear or a
+// compaction — so a turn already installed by SetTurn keeps its act rather
+// than being demoted to an ordinary prompt.
+func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.mutate(ws, "daemon.footer.on_turn_opened", "the footer took the turn-open edge",
+		dlog.Context{"turn_id": string(turn)}, func(s *wsState) {
+			act := ActPrompt
+			if s.turn != nil {
+				act = s.turn.Act
+			}
+			r.applyTurnStarted(s, &TurnStarted{At: r.opts.clock.Now(), Act: act})
+		})
+}
+
 // SetTurn installs the accepted turn.
 func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *TurnStarted) {
 	r.mutate(ws, "daemon.footer.set_turn", "the footer took the accepted turn",
 		dlog.Context{"in_flight": turn != nil}, func(s *wsState) {
-			s.turn = turn
-			if turn != nil {
-				s.turnEverRan = true
-				s.sawActivity = false
-				s.blocked = nil
-				s.interrupted = nil
-				s.compacting = turn.Act == ActCompact
-				s.retrying = nil
-				s.tok.reset()
-				r.cancelMomentary(s)
-			}
+			r.applyTurnStarted(s, turn)
 		})
+}
+
+// applyTurnStarted installs (or clears) the in-flight turn on an accumulation.
+// It is shared by the daemon-fact setter and the watcher's turn-open edge so
+// the two can never drift.
+func (r *resolver) applyTurnStarted(s *wsState, turn *TurnStarted) {
+	s.turn = turn
+	if turn == nil {
+		return
+	}
+	s.turnEverRan = true
+	s.sawActivity = false
+	s.blocked = nil
+	s.interrupted = nil
+	s.compacting = turn.Act == ActCompact
+	s.retrying = nil
+	s.tok.reset()
+	r.cancelMomentary(s)
 }
 
 // SetMerge installs the merge facts the footer draws.
