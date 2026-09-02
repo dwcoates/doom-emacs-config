@@ -225,6 +225,32 @@ export function setPermissionModeAccepted(
   }
 }
 
+/** The `SessionCold` a SetSessionModel refusal carries — the switch's cost. */
+export function setModelCold(
+  response: shimv1.SetSessionModelResponse,
+): conversationv1.SessionCold {
+  if (response.result.case !== "failure" || response.result.value.cause.case !== "cold") {
+    throw new Error(
+      `SetSessionModel: expected failure.cold, got ${response.result.case ?? "an unset oneof"}`,
+    );
+  }
+  const cold = response.result.value.cause.value;
+  if (cold === undefined) throw new Error("SetSessionModel: failure.cold carries no SessionCold");
+  return cold;
+}
+
+/** The SetSessionPermissionMode refusal's arm. */
+export function setPermissionModeCause(
+  response: shimv1.SetSessionPermissionModeResponse,
+): string {
+  if (response.result.case !== "failure") {
+    throw new Error(
+      `SetSessionPermissionMode: expected a failure, got ${response.result.case ?? "an unset oneof"}`,
+    );
+  }
+  return response.result.value.kind.case ?? "unset";
+}
+
 /** The Hibernate error's kind. */
 export function hibernateKind(response: shimv1.HibernateResponse): string {
   if (response.result.case !== "error") {

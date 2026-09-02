@@ -150,9 +150,16 @@ export function spoolFilePath(
 /**
  * Resolve once `file` exists.
  *
- * Watching the DIRECTORY rather than the file: a file that does not exist yet
- * cannot be watched, and the creation is exactly the event being waited for.
- * The existence check runs first, so a file already written never waits.
+ * LEVEL, THEN EDGE, THEN LEVEL AGAIN. The existence check runs first, so a file
+ * already written never waits; the DIRECTORY is watched rather than the file,
+ * because a file that does not exist yet cannot be watched and its creation is
+ * exactly the event being waited for; and the level is re-checked after the
+ * watcher is installed, closing the window between the two.
+ *
+ * The bounded re-drain beside the watcher is NOT a poll standing in for the
+ * event — it is the ruled backstop for an FSEvents notification that is never
+ * delivered at all (see `redrain.ts`). Without it a dropped edge does not fail,
+ * it hangs.
  */
 export async function awaitFile(file: string): Promise<void> {
   if (existsSync(file)) return;
@@ -246,7 +253,8 @@ export async function awaitSpoolExit(
     const redrain = new ReDrain(finish);
     // The directory event covers a spool being CREATED; the marker, though,
     // arrives as an APPEND to a spool that already exists, which a directory
-    // watch on macOS need not report at all — hence the re-drain.
+    // watch on macOS need not report at all — hence the re-drain, which
+    // re-reads the same level the missing edge would have announced.
     const watcher = watch(dir, finish);
     redrain.start();
     finish();

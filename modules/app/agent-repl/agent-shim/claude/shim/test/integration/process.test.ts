@@ -36,7 +36,11 @@ import {
   openStream,
   readHistoryFirst,
 } from "../integration-support/client.js";
-import { sessionStarted, sessionUpdate } from "../integration-support/expect.js";
+import {
+  sessionStarted,
+  sessionUpdate,
+  startSessionCause,
+} from "../integration-support/expect.js";
 import { workspaceRealPath } from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
@@ -181,20 +185,177 @@ describe("the spawn contract's argv", () => {
 });
 
 describe("the workspace lock", () => {
-  test("a second shim over one workspace refuses to start", async () => {
-    // Two shims over one workspace means two writers on one transcript. The
-    // second shim gets its OWN socket path, so the refusal can only come from
-    // the lock — a shared socket would refuse at the listener instead and prove
-    // nothing about the lock.
+  /** A second shim over the first's directories, on its own socket. */
+  async function secondShimOver(
+    first: Awaited<ReturnType<typeof spawnShim>>,
+  ): Promise<Awaited<ReturnType<typeof spawnShim>>> {
+    return spawnShim({
+      reuse: first.dirs,
+      argv: [
+        "--listen",
+        path.join(first.dirs.root, "shim-second.sock"),
+        "--store-socket",
+        first.dirs.storeSocket,
+        "--log-fd",
+        "3",
+        "--fake",
+      ],
+    });
+  }
+
+  test("a second shim over one workspace SERVES, because an inert shim owns nothing", async () => {
+    // THE PRELAUNCH RULE. A shim with no session excludes nobody, so the
+    // daemon can stand a replacement up beside the shim it is retiring. A
+    // startup-time workspace claim would wedge the newcomer behind a lock the
+    // live shim only drops when it dies.
     const first = await spawnShim();
-    const secondSocket = path.join(first.dirs.root, "shim-second.sock");
+    await first.clients.h1.startSession(freshSession());
+
+    const second = await secondShimOver(first);
+
+    // Serving: `spawnShim` resolves on the second process's OWN serving record.
+    expect(second.child.exitCode).toBeNull();
+  });
+
+  test("the inert second shim's StartSession is refused conversation_owned", async () => {
+    // The exclusion did not vanish, it MOVED: the claim is made where the
+    // conversation is, and the refusal names the lock that proved it.
+    const first = await spawnShim();
+    await first.clients.h1.startSession(freshSession());
+    const second = await secondShimOver(first);
+
+    const refused = await second.clients.h1.startSession(freshSession());
+
+    expect(startSessionCause(refused)).toBe("conversationOwned");
+  });
+
+  test("the refused shim stays inert and keeps serving", async () => {
+    // A refusal is not a death: the shim is still the daemon's to use once the
+    // conversation is free, and killing it would throw away a warm process.
+    const first = await spawnShim();
+    await first.clients.h1.startSession(freshSession());
+    const second = await secondShimOver(first);
+    await second.clients.h1.startSession(freshSession());
+
+    const again = await second.clients.h1.startSession(freshSession());
+
+    expect(startSessionCause(again)).toBe("conversationOwned");
+    expect(second.child.exitCode).toBeNull();
+  });
+
+  test("the refused shim released NOTHING it did not hold: the first shim still owns the lock", async () => {
+    // The session claim is taken before the workspace claim, so the refusal
+    // path hands one lock back. It must hand back only its OWN — a release that
+    // reached the incumbent's lock file would unlock a live conversation.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const second = await secondShimOver(first);
+    await second.clients.h1.startSession(freshSession());
+
+    const key = workspaceLockKey(workspaceRealPath(first.dirs));
+    expect(existsSync(path.join(first.dirs.lockDir, `workspace-${key}.lock`))).toBe(true);
+    // And the incumbent is unharmed: its session still answers.
+    const stillOwned = await first.clients.h1.startSession(freshSession());
+    expect(startSessionCause(stillOwned)).toBe("alreadyStarted");
+    expect(started.vendorSessionId).not.toBe("");
+  });
+
+  test("SIGTERM on an INERT shim exits 0 with no lock activity at all", async () => {
+    // An inert shim's stand-down has nothing to release, and a teardown that
+    // logged a release would mean it had been holding one.
+    const shim = await spawnShim();
+
+    const exit = await shim.standDown();
+
+    expect(exit.code).toBe(0);
+    const lockRecords = shim.log
+      .records()
+      .filter((record) => record.operation === "shim.session-lock.lifecycle");
+    expect(lockRecords).toEqual([]);
+  });
+
+  test("KillSession on an INERT shim is refused no_session and holds no lock", async () => {
+    // There is no session to kill, so the verb refuses; the point here is that
+    // the refusal path never touched a lock either.
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: false }),
+    );
+
+    expect(response.result.case).toBe("failure");
+    expect(readdirSync(shim.dirs.lockDir)).toEqual([]);
+  });
+
+  test("no lock file of either kind exists before StartSession", async () => {
+    // The whole inert contract in one assertion: the directory is empty.
+    const shim = await spawnShim();
+
+    expect(readdirSync(shim.dirs.lockDir)).toEqual([]);
+  });
+
+  test("AGENT_REPL_LOCK_DIR is honored: the workspace lock file appears there once a session exists", async () => {
+    // The lock directory is a CROSS-SYSTEM rendezvous (the daemon probes the
+    // workspace lock by path), so the override is what lets a test run private
+    // locks instead of contending with the developer's own running shim.
+    const shim = await spawnShim();
+
+    await shim.clients.h1.startSession(freshSession());
+
+    const key = workspaceLockKey(workspaceRealPath(shim.dirs));
+    expect(existsSync(path.join(shim.dirs.lockDir, `workspace-${key}.lock`))).toBe(true);
+  });
+
+  test("the session lock appears once StartSession has minted a vendor id", async () => {
+    // The session lock is keyed by the vendor session id, which does not exist
+    // until StartSession pre-mints it.
+    const shim = await spawnShim();
+
+    const before = readdirSync(shim.dirs.lockDir);
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const after = readdirSync(shim.dirs.lockDir);
+
+    expect(before.some((name) => name.startsWith("session-"))).toBe(false);
+    expect(after).toContain(`session-${started.vendorSessionId}.lock`);
+  });
+});
+
+describe("--listen over an existing socket file", () => {
+  test("a STALE socket file is unlinked and bound", async () => {
+    // SIGKILL leaves the file behind and `listen` on it fails EADDRINUSE
+    // forever after, so a shim that refused every existing file could never be
+    // restarted after a hard kill. "Stale" is a VERDICT, not an assumption: the
+    // probe dials it and only unlinks what refuses the connection.
+    const first = await spawnShim();
+    first.signal("SIGKILL");
+    await first.exited;
+    expect(existsSync(first.dirs.listen)).toBe(true);
+
+    const second = await spawnShim({ reuse: first.dirs });
+
+    // Serving on the very path the corpse left: `spawnShim` resolved on this
+    // process's own serving record.
+    const started = sessionStarted(await second.clients.h1.startSession(freshSession()));
+    expect(started.vendorSessionId).not.toBe("");
+    const unlinked = second.log
+      .records()
+      .find((record) => record.context.why === "stale predecessor");
+    expect(unlinked?.context.socket_path).toBe(first.dirs.listen);
+  });
+
+  test("a LIVE socket file is REFUSED, and the incumbent is untouched", async () => {
+    // The opposite verdict, and the reason the probe exists at all: unlinking a
+    // socket somebody is listening on would leave the incumbent serving a path
+    // nothing can reach, and this shim bound over the top of it.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
 
     const second = await spawnShim({
       reuse: first.dirs,
       awaitServing: false,
       argv: [
         "--listen",
-        secondSocket,
+        first.dirs.listen,
         "--store-socket",
         first.dirs.storeSocket,
         "--log-fd",
@@ -205,30 +366,12 @@ describe("the workspace lock", () => {
     const exit = await second.exited;
 
     expect(exit.code).not.toBe(0);
-    expect(second.stderr()).toMatch(/lock/i);
-  });
-
-  test("AGENT_REPL_LOCK_DIR is honored: the workspace lock file appears there", async () => {
-    // The lock directory is a CROSS-SYSTEM rendezvous (the daemon probes the
-    // workspace lock by path), so the override is what lets a test run private
-    // locks instead of contending with the developer's own running shim.
-    const shim = await spawnShim();
-
-    const key = workspaceLockKey(workspaceRealPath(shim.dirs));
-    expect(existsSync(path.join(shim.dirs.lockDir, `workspace-${key}.lock`))).toBe(true);
-  });
-
-  test("the session lock appears once StartSession has minted a vendor id", async () => {
-    // The session lock is NOT taken at startup: it is keyed by the vendor
-    // session id, which does not exist until StartSession pre-mints it.
-    const shim = await spawnShim();
-
-    const before = readdirSync(shim.dirs.lockDir);
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    const after = readdirSync(shim.dirs.lockDir);
-
-    expect(before.some((name) => name.startsWith("session-"))).toBe(false);
-    expect(after).toContain(`session-${started.vendorSessionId}.lock`);
+    expect(second.stderr()).toContain("live listener");
+    // THE INCUMBENT IS UNHARMED: its socket still answers and still holds its
+    // session, which a shim that had unlinked and rebound would have destroyed.
+    const still = await first.clients.h1.startSession(freshSession());
+    expect(startSessionCause(still)).toBe("alreadyStarted");
+    expect(started.vendorSessionId).not.toBe("");
   });
 });
 
