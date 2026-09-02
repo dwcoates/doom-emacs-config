@@ -703,3 +703,9 @@ every UX or contract gap you surfaced instead of improvising.
   for the re-adopt path — invented, not capture-grounded; marked. Dispatched
   remediation #4 (audit #2): agents S (shim-agents/audit-s) and T
   (shim-agents/audit-t) per shim-audit-2.md's split.
+- RULING (project lead, cross-system): the WORKSPACE lock moves from startup
+  into StartSession beside the session lock; an inert shim holds neither;
+  probe semantics unchanged; workspace conflict → StartSession
+  conversation_owned. Folded into remediation #4 agent S (owns main.ts lock
+  path + process.test); shim.md KERNEL LOCKS amended; "Process shell" startup
+  order above is superseded (locks are no longer taken before bind).
