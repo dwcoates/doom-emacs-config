@@ -1005,7 +1005,13 @@ push it to the back, not re-show or launch the agent."
      (selection
       (agent-repl--log ws "toggle: branch=send-selection")
       (deactivate-mark)
-      (agent-repl--send-to-agent selection "PROMPT_ORIGIN_PANEL_SELECTION"))
+      ;; The region IS the user's own words, sent by the user, so it
+      ;; travels under the origin every other user send uses.  There is no
+      ;; `PromptOrigin' for a panel selection, and naming one Emacs never
+      ;; spells is refused before a request is built
+      ;; (`agent-repl--input-origins').  Being explicit TEXT, the send
+      ;; leaves any unrelated composer draft alone (audit-3 #51).
+      (agent-repl--send-to-agent selection :user-sent))
      ;; `SPC o C' means "done with this workspace" whether or not its
      ;; view happens to be on screen.
      (always-close
