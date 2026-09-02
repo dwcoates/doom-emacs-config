@@ -231,7 +231,11 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	if !targetedParent {
 		t.Fatalf("git calls = %v, want a merge run inside the parent's worktree %q", d.Git.Calls(), parent.GetDir())
 	}
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// A clean landing into the parent's worktree (a passing test-all gate, no
+	// conflict) reaches none of internal/merge's WARN sites, and the parent's
+	// worktree is not this daemon's own checkout, so selfReload never fires
+	// either.
+	d.ExpectWarnings()
 }
 
 func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) {
@@ -360,7 +364,11 @@ func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
 		row := rosterRow(r, ws.GetId())
 		return row != nil && (row.GetMergeQueued() != nil || row.GetMerging() != nil || row.GetMerged() != nil)
 	})
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// The workspace was materialized through CreateWorkspace, so it carries
+	// real layout facts and the enqueue succeeds without internal/merge's
+	// no_layout_facts WARN; this repo is not the daemon's own checkout, so no
+	// test gate and no selfReload run either.
+	d.ExpectWarnings()
 }
 
 func TestCreateWorkspaceOneShotOpenPrRunsThePrPostPrompt(t *testing.T) {
@@ -428,7 +436,9 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 	if pre.GetOrigin() != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION {
 		t.Fatalf("the pre-prompt's origin = %v, want MERGE_BEFORE_ACTION", pre.GetOrigin())
 	}
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// Created through CreateWorkspace (real layout facts), so the enqueue and
+	// pre-prompt admission reach none of internal/merge's WARN sites.
+	d.ExpectWarnings()
 }
 
 // ---- create* helpers (prefixed create* so they cannot collide) ----

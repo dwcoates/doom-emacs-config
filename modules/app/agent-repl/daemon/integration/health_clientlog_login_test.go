@@ -42,7 +42,11 @@ func TestDaemonHealthWithAnOpenFaultIsUnhealthy(t *testing.T) {
 	// Arrange: the prompts directory the daemon booted with is taken away, the
 	// one fault a test can open without breaking the daemon's own boot.
 	d := newDaemon(t, harness.Opts{})
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// The test's own subject IS the daemon's loud failure: the missing brief
+	// is read (and the fault opened) inside RequestCommandSupport, which logs
+	// ERROR under daemon.workspace.request_command_support
+	// (internal/workspace/commandsupport.go).
+	d.ExpectWarnings("daemon.workspace.request_command_support")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	if err := os.RemoveAll(d.PromptsDir); err != nil {
@@ -92,7 +96,11 @@ func TestSessionHealthForALiveSessionIsHealthy(t *testing.T) {
 func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// A shim-reported diagnostics fault is routed to the topbar at DEBUG
+	// (internal/sessionwatcher/route.go, internal/resolve/topbar/resolver.go
+	// applyDiagnostics) and SessionHealth's own read logs nothing above DEBUG
+	// either: nothing here reaches a WARN or ERROR site.
+	f.d.ExpectWarnings()
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act: the shim reports itself unhealthy.
@@ -127,7 +135,11 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// unknown_workspace is a LANDED SessionHealthError arm
+	// (endpoint_session_health.proto): server.resolveRefLogging fills its Arm
+	// and answers it in band, so it is logged at DEBUG, never WARN
+	// (internal/server/refuse.go refuse()).
+	d.ExpectWarnings()
 
 	// Act
 	resp, err := d.Client().SessionHealth(d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{
@@ -253,7 +265,9 @@ func TestSendLoginInputResizeIsAccepted(t *testing.T) {
 func TestSendLoginInputWithNoLoginOpenIsRefused(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// no_login_open is answered through s.refuse (internal/server/login.go),
+	// which logs a landed arm at DEBUG, never WARN.
+	f.d.ExpectWarnings()
 
 	// Act
 	resp, err := f.d.Client().SendLoginInput(f.d.Ctx(), connect.NewRequest(&agentreplv1.SendLoginInputRequest{
@@ -348,7 +362,9 @@ func TestOpenInEditorRelaysThePushOntoTheHostStream(t *testing.T) {
 func TestOpenInEditorOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// unknown_workspace is a landed OpenInEditorError arm, answered in band at
+	// DEBUG by the same resolveRefLogging path SessionHealth uses.
+	d.ExpectWarnings()
 
 	// Act
 	resp, err := d.Client().OpenInEditor(d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
