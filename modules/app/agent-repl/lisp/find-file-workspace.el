@@ -47,6 +47,7 @@
 (declare-function agent-repl--path-canonical "core" (path))
 (declare-function agent-repl--agent-panel-buffer-p "core" (&optional buf))
 (declare-function agent-repl--log "core" (ws format &rest args))
+(declare-function agent-repl--info "core" (ws format &rest args))
 (declare-function agent-repl--warn "core" (ws format &rest args))
 (declare-function agent-repl-window--side-window-p "window" (win &optional ws))
 (declare-function agent-repl--ws-current-name "workspace" ())
@@ -132,7 +133,10 @@ outside the user's home directory."
               (raw (funcall agent-repl-find-file-workspace-root-function dir))
               (root (agent-repl--path-canonical raw)))
     (if (agent-repl--ffw-under-home-p root)
-        root
+        (progn
+          (agent-repl--info nil "find-file-workspace: root resolved file=%s root=%s"
+                            file root)
+          root)
       (agent-repl--log nil "find-file-workspace: root outside home file=%s root=%s"
                        file root)
       nil)))
@@ -226,9 +230,46 @@ which is the signal the caller falls back to ordinary display."
   (if (and (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
       (progn
         (agent-repl--ws-switch ws)
-        (agent-repl--ffw-place buffer))
+        (let ((win (agent-repl--ffw-place buffer)))
+          (agent-repl--info ws "find-file-workspace: placed ws=%s buffer=%s window=%S"
+                            ws (buffer-name buffer) win)
+          win))
     (agent-repl--log ws "find-file-workspace: ws not open, no placement ws=%s" ws)
     nil))
+
+(defvar agent-repl--ffw-refused (make-hash-table :test 'equal)
+  "Roots whose acquisition verb SIGNALLED, keyed by canonical git root.
+
+WHY THIS EXISTS.  Acquiring a workspace re-enters the display step:
+creating one switches to its project, which visits that project's most
+recent file, which reaches the advised display primitive again.  When
+the acquisition SUCCEEDS that re-entry is harmless — the workspace is
+then known and open, so the routing takes the switch-and-place branch
+and stops.  When it FAILS, the re-entry re-attempts the very acquisition
+that just failed, and the failure re-enters again: an unbounded retry
+loop that wedges Emacs, which is exactly the shape of the
+`void-function agent-repl--call-in-background-workspace' incident.
+
+A root recorded here therefore does NOT route at all: it falls straight
+through to ordinary display, so the user still gets the file.  The
+record is cleared the moment that root's workspace does become open (see
+`agent-repl--ffw-pending-fire'), so a fixed or later-arriving workspace
+routes normally again without any timer, retry budget, or sleep.
+`agent-repl-find-file-workspace-reset' clears it by hand.")
+
+(defun agent-repl--ffw-refused-p (root)
+  "Return non-nil when ROOT's acquisition verb has already been refused."
+  (and (gethash root agent-repl--ffw-refused) t))
+
+(defun agent-repl--ffw-refused-record (root)
+  "Record ROOT as an acquisition that signalled, so it is not retried."
+  (puthash root t agent-repl--ffw-refused))
+
+(defun agent-repl--ffw-refused-clear (root)
+  "Forget ROOT's recorded refusal, so it may route again."
+  (when (gethash root agent-repl--ffw-refused)
+    (agent-repl--info nil "find-file-workspace: refusal cleared root=%s" root)
+    (remhash root agent-repl--ffw-refused)))
 
 (defvar agent-repl--ffw-pending (make-hash-table :test 'equal)
   "Pending one-shot placements, keyed by canonical git root.
@@ -240,15 +281,15 @@ nothing here outlives the arrival it is waiting for.")
 
 (defun agent-repl--ffw-pending-register (root buffer)
   "Record BUFFER as the one-shot placement waiting on ROOT's tab."
-  (agent-repl--log nil "find-file-workspace: pending placement root=%s buffer=%s"
-                   root (buffer-name buffer))
+  (agent-repl--info nil "find-file-workspace: pending registered root=%s buffer=%s"
+                    root (buffer-name buffer))
   (puthash root buffer agent-repl--ffw-pending))
 
 (defun agent-repl--ffw-pending-drop (root reason)
   "Forget ROOT's pending placement, recording REASON."
   (when (gethash root agent-repl--ffw-pending)
-    (agent-repl--log nil "find-file-workspace: pending dropped root=%s reason=%s"
-                     root reason)
+    (agent-repl--info nil "find-file-workspace: pending dropped root=%s reason=%s"
+                      root reason)
     (remhash root agent-repl--ffw-pending)))
 
 (defun agent-repl--ffw-pending-fire (&rest _)
@@ -261,6 +302,12 @@ that never arrives simply leaves its entry pending.
 An entry whose buffer died is dropped rather than placed, and an entry
 fires exactly ONCE because it is removed before the placement runs."
   (maphash
+   (lambda (root _t)
+     (let ((ws (agent-repl--ws-name-for-dir root)))
+       (when (and ws (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
+         (agent-repl--ffw-refused-clear root))))
+   (copy-hash-table agent-repl--ffw-refused))
+  (maphash
    (lambda (root buffer)
      (let ((ws (agent-repl--ws-name-for-dir root)))
        (cond
@@ -268,13 +315,26 @@ fires exactly ONCE because it is removed before the placement runs."
          (agent-repl--ffw-pending-drop root "buffer-died"))
         ((and ws (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
          (remhash root agent-repl--ffw-pending)
-         (agent-repl--log ws "find-file-workspace: pending fired root=%s ws=%s"
-                          root ws)
+         (agent-repl--info ws "find-file-workspace: tab arrived root=%s ws=%s buffer=%s"
+                           root ws (buffer-name buffer))
          (agent-repl--ws-switch ws)
-         (agent-repl--ffw-place buffer)))))
+         (let ((win (agent-repl--ffw-place buffer)))
+           (agent-repl--info ws "find-file-workspace: placed root=%s ws=%s buffer=%s window=%S"
+                             root ws (buffer-name buffer) win))))))
    (copy-hash-table agent-repl--ffw-pending)))
 
 (add-hook 'agent-repl-roster-update-functions #'agent-repl--ffw-pending-fire)
+
+;;;###autoload
+(defun agent-repl-find-file-workspace-reset ()
+  "Forget every pending placement and every recorded acquisition refusal.
+The manual escape hatch for a root whose workspace never came up: after
+this, visiting a file under it routes again from scratch."
+  (interactive)
+  (clrhash agent-repl--ffw-pending)
+  (clrhash agent-repl--ffw-refused)
+  (agent-repl--info nil "find-file-workspace: reset pending and refusals")
+  (message "agent-repl: find-file routing reset"))
 
 (defun agent-repl--ffw-acquire (root buffer thunk)
   "Register BUFFER as ROOT's pending placement, then run THUNK to acquire it.
@@ -285,9 +345,11 @@ that ROOT's tab arrival will fire.  A REFUSAL — the verb signalling —
 drops the pending entry, is logged and messaged, and answers nil so the
 caller falls back to ordinary display."
   (agent-repl--ffw-pending-register root buffer)
+  (agent-repl--info nil "find-file-workspace: verb sent root=%s" root)
   (condition-case err
       (progn
         (funcall thunk)
+        (agent-repl--info nil "find-file-workspace: verb answered root=%s" root)
         (or (when-let* ((ws (agent-repl--ws-name-for-dir root)))
               (when (agent-repl--ffw-switch-and-place ws buffer)
                 (agent-repl--ffw-pending-drop root "placed-immediately")
@@ -295,6 +357,7 @@ caller falls back to ordinary display."
             'pending))
     (error
      (agent-repl--ffw-pending-drop root "verb-refused")
+     (agent-repl--ffw-refused-record root)
      (agent-repl--warn nil "find-file-workspace: verb refused root=%s error=%S"
                        root err)
      (message "agent-repl: could not open the workspace for %s; opening the file here"
@@ -314,16 +377,26 @@ the thing this routing exists to stop."
     (let ((ws (agent-repl--ws-name-for-dir root)))
       (cond
        ((and ws (agent-repl--ffw-already-here-p ws buffer))
-        (agent-repl--log ws "find-file-workspace: already current ws=%s file=%s"
-                         ws file)
+        (agent-repl--info ws "find-file-workspace: verb chosen root=%s ws=%s verb=none reason=already-current file=%s"
+                          root ws file)
         nil)
        ((and ws (agent-repl--ws-known-p ws) (agent-repl--ws-open-p ws))
+        (agent-repl--info ws "find-file-workspace: verb chosen root=%s ws=%s verb=switch buffer=%s"
+                          root ws (buffer-name buffer))
         (agent-repl--ffw-switch-and-place ws buffer))
+       ((agent-repl--ffw-refused-p root)
+        (agent-repl--info nil "find-file-workspace: verb chosen root=%s ws=%s verb=none reason=refused-earlier buffer=%s"
+                          root ws (buffer-name buffer))
+        nil)
        (ws
+        (agent-repl--info ws "find-file-workspace: verb chosen root=%s ws=%s verb=open buffer=%s"
+                          root ws (buffer-name buffer))
         (agent-repl--ffw-acquire
          root buffer
          (lambda () (funcall agent-repl-find-file-workspace-open-function ws))))
        (t
+        (agent-repl--info nil "find-file-workspace: verb chosen root=%s ws=nil verb=create buffer=%s"
+                          root (buffer-name buffer))
         (agent-repl--ffw-acquire
          root buffer
          (lambda () (funcall agent-repl-find-file-workspace-create-function root))))))))

@@ -107,11 +107,29 @@ list."
   "Kill BUF, tolerating a buffer already dead or never created.
 Called from core.el's own teardown paths as well as from the async-git
 settle below, which is why it lives at this layer rather than inside
-either caller."
+either caller.
+
+DETACHES BUF's PROCESS FIRST, and that detachment is the whole point.
+`kill-buffer' runs `kill_buffer_processes', which `delete-process's every
+process owning BUF, which delivers a NEW terminal status to that
+process's SENTINEL — from inside the kill.  A sentinel that reaches this
+helper (every one of ours does: the async-git settle, the async-gh
+completion, the prompt-summary settle) therefore re-enters itself, kills
+the same still-live buffer again, and recurses until Emacs is wedged with
+no Lisp error and no log line, because the recursion happens BEFORE the
+sentinel's own logging.  That is the `SPC .' hang: an unbounded
+Fkill_buffer -> Fdelete_process -> exec_sentinel -> Fkill_buffer stack.
+
+Clearing the sentinel and the filter makes that recursion UNREPRESENTABLE
+rather than merely guarded against: the re-delivered status has nowhere
+to go, for every caller of this helper at once, so no individual sentinel
+has to remember to defend itself.  The query flag is cleared for the same
+reason the detachment happens — the kill must not stop to ask."
   (when (and buf (buffer-live-p buf))
-    (let ((proc (get-buffer-process buf)))
-      (when proc
-        (set-process-query-on-exit-flag proc nil)))
+    (when-let ((proc (get-buffer-process buf)))
+      (set-process-query-on-exit-flag proc nil)
+      (set-process-sentinel proc #'ignore)
+      (set-process-filter proc #'ignore))
     (let ((kill-buffer-query-functions nil))
       (kill-buffer buf))))
 

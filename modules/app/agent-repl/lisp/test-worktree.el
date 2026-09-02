@@ -298,3 +298,79 @@ runs no `git worktree add' and names no branch."
 (provide 'test-worktree)
 
 ;;; test-worktree.el ends here
+
+;;;; ---- kill-buffer-safely detaches the buffer's process ----
+
+(ert-deftest agent-repl-test-worktree-kill-buffer-safely-detaches-the-sentinel ()
+  "The buffer's process loses its sentinel BEFORE the buffer is killed.
+`kill-buffer' deletes the buffer's process, which delivers a fresh
+terminal status to that sentinel from inside the kill; detaching first is
+what stops a sentinel that kills its own buffer from re-entering itself."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-kbs*"))
+        (order nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
+                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+                  ((symbol-function 'set-process-filter) #'ignore)
+                  ((symbol-function 'set-process-sentinel)
+                   (lambda (_p s) (push (cons 'sentinel s) order)))
+                  ((symbol-function 'kill-buffer)
+                   (lambda (_b) (push 'kill order))))
+          ;; Act
+          (agent-repl--kill-buffer-safely buf)
+          ;; Assert
+          (should (equal (nreverse order) '((sentinel . ignore) kill))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-worktree-kill-buffer-safely-detaches-the-filter ()
+  "The buffer's process also loses its filter, so no output lands mid-kill."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-kbs-filter*"))
+        (filter 'unset))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'fake-proc))
+                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+                  ((symbol-function 'set-process-sentinel) #'ignore)
+                  ((symbol-function 'set-process-filter)
+                   (lambda (_p f) (setq filter f)))
+                  ((symbol-function 'kill-buffer) #'ignore))
+          ;; Act
+          (agent-repl--kill-buffer-safely buf)
+          ;; Assert
+          (should (eq filter #'ignore)))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-worktree-kill-buffer-safely-terminates-a-self-killing-sentinel ()
+  "A sentinel that kills its own process buffer runs ONCE, not forever.
+Drives the exact recursion the hung Emacs sampled: killing the buffer
+re-delivers a terminal status to the process's sentinel, which kills the
+same buffer again.  With the detachment in place the re-delivery reaches
+`ignore' and the stack unwinds."
+  ;; Arrange
+  (let* ((buf (generate-new-buffer " *agent-repl-test-kbs-loop*"))
+         (installed nil)
+         (runs 0)
+         (sentinel nil))
+    (setq sentinel (lambda (&rest _)
+                     (cl-incf runs)
+                     (when (< runs 100)   ; a runaway is bounded, not hung
+                       (agent-repl--kill-buffer-safely buf))))
+    (setq installed sentinel)
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-process)
+                   (lambda (_b) (and (buffer-live-p buf) 'fake-proc)))
+                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+                  ((symbol-function 'set-process-filter) #'ignore)
+                  ((symbol-function 'set-process-sentinel)
+                   (lambda (_p s) (setq installed s)))
+                  ;; `kill_buffer_processes': the kill deletes the process,
+                  ;; which delivers a new terminal status to whatever
+                  ;; sentinel is installed at that moment.
+                  ((symbol-function 'kill-buffer)
+                   (lambda (_b) (funcall installed 'fake-proc "finished\n"))))
+          ;; Act
+          (funcall sentinel 'fake-proc "finished\n")
+          ;; Assert
+          (should (= runs 1)))
+      (kill-buffer buf))))
