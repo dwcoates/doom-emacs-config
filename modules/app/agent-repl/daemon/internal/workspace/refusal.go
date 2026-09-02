@@ -71,6 +71,8 @@ const (
 	// ArmModeNotServed is a permission mode outside what the topbar's picker
 	// served.
 	ArmModeNotServed = "mode_not_served"
+	// ArmNotInCatalog is a model outside what the topbar's selector served.
+	ArmNotInCatalog = "not_in_catalog"
 	// ArmPathEscapesWorkspace is an OpenInEditor path outside the workspace.
 	ArmPathEscapesWorkspace = "path_escapes_workspace"
 	// ArmBlankCommand is a RequestCommandSupport with no command named.

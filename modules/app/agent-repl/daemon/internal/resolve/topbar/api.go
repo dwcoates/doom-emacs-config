@@ -89,6 +89,10 @@ type Resolver interface {
 	// in the order it was served, reporting false when no picker has been
 	// installed. It is what a mode switch is validated against.
 	PermissionModes(ws ids.WorkspaceID) ([]string, bool)
+	// ModelCatalog answers exactly the model tokens the selector served, in
+	// the order served, reporting false before a session has stated one.
+	// SetModel validates against what was served here.
+	ModelCatalog(ws ids.WorkspaceID) ([]string, bool)
 	// SetAccount installs the account line read from the config root's
 	// .claude.json. An EMPTY email is the logged-out arm, which is a drawn
 	// warning rather than a blank label.

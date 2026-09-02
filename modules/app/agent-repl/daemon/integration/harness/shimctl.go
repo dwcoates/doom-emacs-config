@@ -414,6 +414,20 @@ func (s *ShimControl) ExpectSetSessionPermissionMode() *shimv1.SetSessionPermiss
 	return msg
 }
 
+// ExpectWatchAgentFor pops WatchAgent opens until one names the target. The
+// session's MAIN watch is opened at bring-up with an unset target, so a test
+// about a particular agent's watch has to look past it rather than assert on
+// whichever open happens to be oldest.
+func (s *ShimControl) ExpectWatchAgentFor(target string) *shimv1.WatchAgentRequest {
+	s.t.Helper()
+	for {
+		req := s.ExpectWatchAgent()
+		if req.GetTarget().GetValue() == target {
+			return req
+		}
+	}
+}
+
 // ExpectWatchAgent pops the next WatchAgent open.
 func (s *ShimControl) ExpectWatchAgent() *shimv1.WatchAgentRequest {
 	s.t.Helper()

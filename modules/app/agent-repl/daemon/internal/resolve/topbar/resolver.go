@@ -621,6 +621,24 @@ func (r *resolver) StatusFacts(ws ids.WorkspaceID) (StatusFacts, bool) {
 // picker has been installed, which is the honest answer for a workspace whose
 // session never stated one: a SetPermissionMode validated against a set nobody
 // served would be validated against nothing.
+// ModelCatalog answers exactly the model tokens the selector served, in the
+// order they were served, reporting false before a session has stated one. It
+// is what a model switch is validated against, for the same reason
+// PermissionModes is: the daemon accepts only what it offered.
+func (r *resolver) ModelCatalog(ws ids.WorkspaceID) ([]string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.stateLocked(ws)
+	if len(s.catalog) == 0 {
+		return nil, false
+	}
+	models := make([]string, 0, len(s.catalog))
+	for _, option := range s.catalog {
+		models = append(models, option.GetModel().GetName())
+	}
+	return models, true
+}
+
 func (r *resolver) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

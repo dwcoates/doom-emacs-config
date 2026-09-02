@@ -29,6 +29,19 @@ func (v *verbs) SetModel(ctx context.Context, ws ids.WorkspaceID, model string) 
 	if model == "" {
 		return refuse(log, "SetModel", ArmUnservedAnswer, "no model was named", false)
 	}
+	// THE CATALOG IS THE CONTRACT: the selector served a fixed set and the
+	// daemon accepts only what it offered, exactly as SetPermissionMode does
+	// with the picker. Forwarding an unoffered token would hand the vendor a
+	// model nobody chose.
+	served, ok := v.deps.Cards.Models(ws)
+	if !ok {
+		return refuse(log, "SetModel", ArmNotInCatalog,
+			fmt.Sprintf("workspace %q has served no model catalog", ws), false)
+	}
+	if !contains(served, model) {
+		return refuse(log, "SetModel", ArmNotInCatalog,
+			fmt.Sprintf("the model %q is not in the served catalog %v", model, served), false)
+	}
 	if err := v.deps.Queue.SubmitSessionAct(ctx, ws, promptqueue.Act{Kind: actSetModel, Value: model}); err != nil {
 		log.Error(opSetModel, "the model change was not accepted", dlog.Context{
 			"model": model, "cause": err.Error(),
