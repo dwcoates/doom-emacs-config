@@ -1010,3 +1010,46 @@ describe("the transcript backup", () => {
     stream.close();
   });
 });
+
+describe("a detached shell run's key spellings", () => {
+  test("the shim's bash rows are keyed bash:<run> and bash:<run>:terminal, with the VENDOR's run id", async () => {
+    // THE RUN ID IS THE BASH CALL'S OWN tool_use_id, which the vendor wrote
+    // into the transcript. The sidecar keys the same run off the same id from
+    // the file, so a shim that keyed by anything else would write a second
+    // lifecycle for one run instead of upserting onto the sidecar's.
+    //
+    // The `bash:<run>:<offset>` delta spelling has NO shim producer: every
+    // output delta comes from the sidecar tailing the spool, so it is asserted
+    // where it is minted (`src/store/keys.ts`'s own suite) and stated here
+    // rather than faked into existence.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    stream.close();
+
+    // The forced kill is what makes the shim — rather than an absent sidecar —
+    // write the run's terminal.
+    await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await shim.exited;
+
+    const bashKeys = writtenKeys(shim.store?.writes() ?? []).filter((key) =>
+      key.startsWith("bash:"),
+    );
+    expect(bashKeys.length).toBeGreaterThan(0);
+    const vendorIds = toolUseIds(readTranscript(shim.dirs, started.vendorSessionId));
+    expect(vendorIds.length).toBeGreaterThan(0);
+    for (const key of bashKeys) {
+      const rest = key.slice("bash:".length);
+      const run = rest.endsWith(":terminal") ? rest.slice(0, -":terminal".length) : rest;
+      // Not an offset row: the shim writes none.
+      expect(rest === run || rest === `${run}:terminal`).toBe(true);
+      expect(vendorIds).toContain(run);
+    }
+    expect(bashKeys.some((key) => key.endsWith(":terminal"))).toBe(true);
+  });
+});
