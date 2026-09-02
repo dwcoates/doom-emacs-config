@@ -40,6 +40,9 @@ type fakeDB struct {
 
 	mu sync.Mutex
 
+	// engagements counts the delivery-time engagement stamps.
+	engagements int
+
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	leases     map[ids.WorkspaceID]wsm.Lease
 	held       map[ids.TurnID]*wsm.HeldPrompt
@@ -67,6 +70,14 @@ func newFakeDB() *fakeDB {
 		turns:       map[ids.TurnID]*wsm.Turn{},
 		closedTurns: map[ids.TurnID]wsm.TurnClose{},
 	}
+}
+
+// TouchEngagement records the engagement stamp every delivery writes.
+func (d *fakeDB) TouchEngagement(_ context.Context, _ ids.WorkspaceID, _ time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.engagements++
+	return nil
 }
 
 func (d *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {

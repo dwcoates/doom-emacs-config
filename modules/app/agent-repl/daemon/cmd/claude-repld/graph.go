@@ -370,13 +370,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	drainController, err = drain.New(drain.Deps{
-		DB:         p.DB,
-		IdleCutoff: p.Opts.idleCutoff,
-		Stand:      fleet,
-		Freeness:   fleet.Freeness(),
-		Announcer:  pushes,
-		Exit:       orderlyExit(p.Exit),
-		Log:        p.Surfaces,
+		DB:           p.DB,
+		IdleCutoff:   p.Opts.idleCutoff,
+		Stand:        fleet,
+		Freeness:     fleet.Freeness(),
+		Announcer:    pushes,
+		LeaseChanged: queue.OnLeaseChanged,
+		Exit:         orderlyExit(p.Exit),
+		Log:          p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the drain controller: %w", err)

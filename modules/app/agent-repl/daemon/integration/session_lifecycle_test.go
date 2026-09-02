@@ -525,18 +525,39 @@ func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
 }
 
 func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
-	// Arrange
-	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
-	source := worktreeOfRepo(t, selfRepo, "close-merge-queued")
-	ws := harness.Register(t, d, source)
-	writeCommit(t, selfRepo, source, "feature.txt", "work\n")
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws})); err != nil {
-		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	// Arrange: a workspace the daemon CREATED, so it carries the merge layout
+	// facts an enqueue needs, with a second one ahead of it in its repo's queue
+	// so its own merge stays queued rather than running to a terminal.
+	repo := harness.NewRepo(t)
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
+	repoRef := mergeRepositoryRef(t, d, repo)
+	first := mergeCreateChild(t, d, repoRef, "ahead", "do the first thing", nil)
+	repo.ScriptConflict(repo.Dir, mergeBranchOf(t, first.ws), "conflict.txt")
+	second := mergeCreateChild(t, d, repoRef, "behind", "do the second thing", nil)
+
+	// The first merge parks on its scripted conflict and holds the repo lock,
+	// so the second one waits in the queue.
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: first.ws})); err != nil {
+		t.Fatalf("MergeWorkspace(first) = error %v, want the merge enqueued", err)
 	}
+	first.shim.ExpectStartTurn()
+	d.AwaitWorkspaceLogOperationCount(first.ws.GetDir(), harness.OpTurnOpened, 2)
+	first.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
+	host := d.WatchHost(first.ws)
+	awaitView(t, first, host, "the first merge parked", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetHost().GetExisting().GetLive().GetMergeParked() != nil
+	})
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: second.ws})); err != nil {
+		t.Fatalf("MergeWorkspace(second) = error %v, want the merge enqueued", err)
+	}
+	roster := d.WatchRoster()
+	awaitRoster(t, d, roster, "the second workspace's queued merge", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, second.ws.GetId())
+		return row.GetMergeQueued() != nil || row.GetMergeEnqueuing() != nil
+	})
 
 	// Act
-	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ws}))
+	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: second.ws}))
 
 	// Assert: the landed blocked arm, not a transport error.
 	if err != nil {
