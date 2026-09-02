@@ -361,3 +361,39 @@ describe("fast mode", () => {
     expect(pushes.push(fastMode(false))).toBe(true);
   });
 });
+
+describe("a consumer that goes away", () => {
+  it("ends the stream when the iterator's own return() is called directly", async () => {
+    const pushes = new SessionPushes(() => 1);
+    const iterator = pushes.subscribe()[Symbol.asyncIterator]();
+    await iterator.next();
+
+    const result = await iterator.return?.();
+
+    expect(result).toEqual({ value: undefined, done: true });
+    await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
+  });
+
+  it("also ends via a for-await break, which the runtime maps to return()", async () => {
+    const pushes = new SessionPushes(() => 1);
+
+    for await (const _ of pushes.subscribe()) {
+      break;
+    }
+
+    // The fault push after the break must not throw or hang the fan-out that
+    // lost this subscriber.
+    expect(() => pushes.fault(fault("after the consumer left"))).not.toThrow();
+  });
+});
+
+describe("the default clock", () => {
+  it("stamps a degraded window with a real wall-clock time when none is injected", () => {
+    const pushes = new SessionPushes();
+    const before = Date.now();
+
+    const window = pushes.openDegradedWindow("test", "no clock injected");
+
+    expect(Number(window.beganAtMs)).toBeGreaterThanOrEqual(before);
+  });
+});
