@@ -164,7 +164,7 @@ export function readTranscriptFacts(file: string): TranscriptFacts | undefined {
 }
 
 /** Why a continuation would be cold, or absence when it would be warm. */
-export type ColdReason = "lapsed" | "model_switch";
+type ColdReason = "lapsed" | "model_switch";
 
 /**
  * Judge the cache.

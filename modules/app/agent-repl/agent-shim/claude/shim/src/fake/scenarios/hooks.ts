@@ -16,7 +16,7 @@
  */
 import { conclude, scenario } from "./support.js";
 
-export const HOOK_SUCCESS = scenario({
+const HOOK_SUCCESS = scenario({
   name: "hook-success",
   prompt: "!hook-success",
   emits: "`hook_started` and `hook_response{outcome:\"success\"}` around a `Read`",
@@ -61,7 +61,7 @@ export const HOOK_SUCCESS = scenario({
   },
 });
 
-export const HOOK_BLOCKED = scenario({
+const HOOK_BLOCKED = scenario({
   name: "hook-blocked",
   prompt: "!hook-blocked",
   emits: "`hook_started` and `hook_response{outcome:\"error\"}` around an `Edit` the hook BLOCKS",
@@ -106,7 +106,7 @@ export const HOOK_BLOCKED = scenario({
   },
 });
 
-export const HOOK_FAILED = scenario({
+const HOOK_FAILED = scenario({
   name: "hook-failed",
   prompt: "!hook-failed",
   emits: "a `SessionStart` hook that FAILS without blocking anything: exit 1 on stderr",
@@ -145,7 +145,7 @@ export const HOOK_FAILED = scenario({
   },
 });
 
-export const HOOK_CANCELLED = scenario({
+const HOOK_CANCELLED = scenario({
   name: "hook-cancelled",
   prompt: "!hook-cancelled",
   emits: "`hook_started` and `hook_response{outcome:\"cancelled\"}` around an `Edit`",

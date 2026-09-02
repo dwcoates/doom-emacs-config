@@ -22,7 +22,7 @@ import { conversationv1 } from "../../proto.js";
 import { invalidArgument } from "../failures.js";
 
 /** The refusal every validator raises. Never returned — always thrown. */
-export function unsetField(path: string): ConnectError {
+function unsetField(path: string): ConnectError {
   return invalidArgument(`${path} is unset; the field is not optional and has no legal default`);
 }
 
@@ -38,7 +38,7 @@ export function unsetOneof(path: string): ConnectError {
  * and under the presence rule an empty id is a sentinel, not an absence. It is
  * refused for the same reason a missing message is.
  */
-export function emptyIdentity(path: string): ConnectError {
+function emptyIdentity(path: string): ConnectError {
   return invalidArgument(`${path} is empty; an identity is never the empty string`);
 }
 
@@ -121,7 +121,7 @@ export function validatePromptOrigin(value: conversationv1.PromptOrigin, path: s
 }
 
 /** `conversation.v1.UserContentBlock` — one arm per block kind. */
-export function validateUserContentBlock(
+function validateUserContentBlock(
   value: conversationv1.UserContentBlock,
   path: string,
 ): void {
@@ -152,7 +152,7 @@ export function validateUserSaid(value: conversationv1.UserSaid | undefined, pat
 }
 
 /** `conversation.v1.AgentAnswer` — a question answer or a permission decision. */
-export function validateAgentAnswer(value: conversationv1.AgentAnswer, path: string): void {
+function validateAgentAnswer(value: conversationv1.AgentAnswer, path: string): void {
   if (value.answer.case === undefined) throw unsetOneof(`${path}.answer`);
 }
 

@@ -72,7 +72,7 @@ export const HTTP2_PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const PREFACE_DECIDING_PREFIX = "PRI * HTTP/2.0";
 
 /** What the first bytes of a connection say about which server should take it. */
-export type SniffedProtocol = "h2" | "h1" | "need-more";
+type SniffedProtocol = "h2" | "h1" | "need-more";
 
 /**
  * Decide, from the bytes seen so far, which dialect a connection speaks.
@@ -133,7 +133,7 @@ export interface ShimServer {
 }
 
 /** What a probe of an existing socket path concluded. */
-export type SocketProbe = "free" | "stale" | "live";
+type SocketProbe = "free" | "stale" | "live";
 
 /**
  * Decide whether a socket path may be bound.
@@ -328,7 +328,7 @@ export async function serve(
  * `application/json` and is deliberately absent: it has a real status to
  * report, and committing to 200 before the handler ran would throw that away.
  */
-export const STREAMING_CONTENT_TYPES: ReadonlySet<string> = new Set([
+const STREAMING_CONTENT_TYPES: ReadonlySet<string> = new Set([
   "application/connect+proto",
   "application/connect+json",
   "application/grpc-web+proto",
@@ -351,10 +351,10 @@ export function isStreamingContentType(contentType: string | undefined): boolean
  * union of them has no callable signature at all. This names exactly the three
  * members this wrapper touches, which BOTH satisfy.
  */
-export interface StreamableRequest {
+interface StreamableRequest {
   readonly headers: Record<string, string | string[] | undefined>;
 }
-export interface StreamableResponse {
+interface StreamableResponse {
   readonly headersSent: boolean;
   // BOTH HEADER SHAPES. `writeHead` accepts an object or a flat array, the
   // adapter may use either, and a signature that admitted only one would let
@@ -372,7 +372,7 @@ type NodeHandler = (request: never, response: never) => void;
  * layer above. See the note at the top of this file for why a quiet stream is
  * otherwise indistinguishable from a refused one.
  */
-export function withEarlyStreamHeaders<H extends NodeHandler>(handler: H): H {
+function withEarlyStreamHeaders<H extends NodeHandler>(handler: H): H {
   const wrapped = (request: StreamableRequest, response: StreamableResponse): void => {
     flushStreamHead(request, response);
     (handler as unknown as (request: StreamableRequest, response: StreamableResponse) => void)(

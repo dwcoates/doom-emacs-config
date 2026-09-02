@@ -33,7 +33,7 @@ import { residueEntry, residueKind, vendorSpecificResidue } from "./residue.js";
 const LOGGER = bindLog({ component: "shim-convert-session", operation: "shim.convert.session" });
 
 /** One session fact as a row. */
-export function sessionEntry(
+function sessionEntry(
   context: FoldContext,
   vendorUuid: string,
   arm: string,
@@ -49,7 +49,7 @@ export function sessionEntry(
 }
 
 /** The upsert key a context cut takes: the vendor record that stated it. */
-export function contextCutUpsertKey(vendorUuid: string): string {
+function contextCutUpsertKey(vendorUuid: string): string {
   return `cut:${vendorUuid}`;
 }
 
@@ -127,7 +127,7 @@ export function compactionEntry(
 // ---------------------------------------------------------------------------
 
 /** One MCP server's health, as the session states it. */
-export function mcpServerUpdate(name: string, status: string): conversationv1.SessionUpdate {
+function mcpServerUpdate(name: string, status: string): conversationv1.SessionUpdate {
   const health: conversationv1.SessionMcpServer["health"] =
     status === "connected"
       ? { case: "connected", value: create(conversationv1.SessionMcpServerConnectedSchema, {}) }
@@ -176,7 +176,7 @@ export function fastModeUpdate(state: string, reason: string | undefined): conve
  * these: an unset status says "the vendor said something we do not model", and
  * defaulting to `allowed` would tell a user they have room they may not have.
  */
-export function rateLimitStatus(
+function rateLimitStatus(
   value: unknown,
 ): conversationv1.SessionRateLimitStatus["status"] {
   switch (value) {
@@ -199,7 +199,7 @@ export function rateLimitStatus(
 }
 
 /** Which window a status is about; the vendor's declared six-value vocabulary. */
-export function rateLimitType(value: unknown): conversationv1.SessionRateLimitType | undefined {
+function rateLimitType(value: unknown): conversationv1.SessionRateLimitType | undefined {
   const window: conversationv1.SessionRateLimitType["window"] | undefined =
     value === "five_hour"
       ? { case: "fiveHour", value: create(conversationv1.SessionRateLimitWindowFiveHourSchema, {}) }
@@ -244,13 +244,13 @@ export function rateLimitType(value: unknown): conversationv1.SessionRateLimitTy
 }
 
 /** The vendor's SECONDS as the unix millis the wire carries. */
-export function resetsAtMs(seconds: unknown): bigint | undefined {
+function resetsAtMs(seconds: unknown): bigint | undefined {
   if (typeof seconds !== "number" || !Number.isFinite(seconds)) return undefined;
   return BigInt(Math.trunc(seconds * 1_000));
 }
 
 /** The vendor's FRACTION (0–1) as the percent (0–100) the wire carries. */
-export function percentOf(fraction: unknown): number | undefined {
+function percentOf(fraction: unknown): number | undefined {
   if (typeof fraction !== "number" || !Number.isFinite(fraction)) return undefined;
   return fraction * 100;
 }
@@ -266,7 +266,7 @@ function text(value: unknown): string | undefined {
 }
 
 /** The overage side of the account, when the vendor reported it. */
-export function rateLimitOverage(
+function rateLimitOverage(
   info: Record<string, unknown>,
 ): conversationv1.SessionRateLimitOverage | undefined {
   const status = info.overageStatus;
@@ -293,7 +293,7 @@ export function rateLimitOverage(
  * EVERY OPTIONAL FIELD IS ABSENT WHEN THE VENDOR OMITTED IT. The conversions are
  * the two the proto names: seconds→millis, fraction→percent.
  */
-export function rateLimitStatusUpdate(
+function rateLimitStatusUpdate(
   info: Record<string, unknown> | undefined,
 ): conversationv1.SessionUpdate {
   const record = info ?? {};

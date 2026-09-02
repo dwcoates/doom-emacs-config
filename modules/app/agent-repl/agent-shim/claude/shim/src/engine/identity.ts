@@ -49,14 +49,14 @@ import { mainAgentId } from "../convert/ids.js";
 const LOGGER = bindLog({ component: "shim-engine-identity", operation: "shim.engine.identity" });
 
 /** The persisted identity record; the field names are the on-disk contract. */
-export interface AgentIdentityRecord {
+interface AgentIdentityRecord {
   readonly original_vendor_session_id: string;
   readonly workspace_key: string;
   readonly minted_at_ms: number;
 }
 
 /** The pointer a rotated vendor id leaves behind, so the files carry the link. */
-export interface VendorSessionLink {
+interface VendorSessionLink {
   readonly vendor_session_id: string;
   readonly original_vendor_session_id: string;
   readonly linked_at_ms: number;
