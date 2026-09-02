@@ -542,6 +542,230 @@ func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Roster status arms: each of the seven arms below is asserted ON ITS OWN,
+// never inside a disjunction with a sibling arm (audit-3 critique 23), driven
+// from the real cause internal/resolve/sidebar/status.go's sessionArm and
+// mergeArm read facts from.
+// ---------------------------------------------------------------------------
+
+// TestRosterRowIsSubmittingBeforeTheShimAcksTheTurn covers
+// RosterRowStatusSubmitting: the turn is accepted and the shim has not yet
+// produced any activity for it (internal/resolve/sidebar/status.go's
+// sessionArm, `s.turn != nil && !s.sawActivity`).
+func TestRosterRowIsSubmittingBeforeTheShimAcksTheTurn(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "ready before any turn", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetReady() != nil
+	})
+
+	// Act: StartTurn is visible in the roster before the fake shim has
+	// produced any activity for it.
+	resp := f.submit("do it", "k-submitting", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("SubmitPrompt = %v, want a minted TurnId", resp)
+	}
+	f.shim.ExpectStartTurn()
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "submitting before the first activity", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetSubmitting() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetSubmitting() == nil {
+		t.Fatalf("the roster row's status = %T before any activity, want submitting", row.GetStatus())
+	}
+}
+
+// TestRosterRowIsClearingWhileAClearRuns covers RosterRowStatusClearing: a
+// /clear submission is delivered as a real turn whose act is ActClear
+// (prompt_test.go's TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow
+// drives the same submission; this test asserts the roster's own arm for it).
+func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "ready before the clear", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetReady() != nil
+	})
+
+	// Act
+	resp := f.submit("/clear", "k-clearing", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	if resp.GetError() != nil {
+		t.Fatalf("SubmitPrompt(/clear) = %v, want a success", resp)
+	}
+	f.shim.ExpectStartTurn()
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "clearing while the cut runs", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetClearing() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetClearing() == nil {
+		t.Fatalf("the roster row's status = %T while /clear runs, want clearing", row.GetStatus())
+	}
+}
+
+// TestRosterRowIsCompactingWhileACompactRuns covers RosterRowStatusCompacting
+// driven by a /compact submission (ActCompact), the sibling cause of the
+// clearing test above.
+func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "ready before the compact", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetReady() != nil
+	})
+
+	// Act
+	resp := f.submit("/compact", "k-compacting", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	if resp.GetError() != nil {
+		t.Fatalf("SubmitPrompt(/compact) = %v, want a success", resp)
+	}
+	f.shim.ExpectStartTurn()
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "compacting while the cut runs", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetCompacting() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetCompacting() == nil {
+		t.Fatalf("the roster row's status = %T while /compact runs, want compacting", row.GetStatus())
+	}
+}
+
+// TestRosterRowIsInterruptedAfterTheAgentAcknowledgesAUserStop covers
+// RosterRowStatusInterrupted: the agent's own terminal frame acknowledges a
+// user stop (support_test.go's interruptedFrame), which closes the turn as
+// wsm.CloseKilled (internal/sessionwatcher/route.go's turnCloseOf) --
+// footer_topbar_test.go's TestFooterInterruptedStatusIsRetiredByADaemonSideDwell
+// drives the identical frame for the footer's own (transient) arm; the
+// roster's arm persists, so no dwell-wait is needed here.
+func TestRosterRowIsInterruptedAfterTheAgentAcknowledgesAUserStop(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	f.submit("do it", "k-interrupted", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	awaitRoster(t, f.d, roster, "submitting before the interrupt", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetSubmitting() != nil
+	})
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, interruptedFrame(mainAgent))
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "interrupted after the agent's acknowledgement", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetInterrupted() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetInterrupted() == nil {
+		t.Fatalf("the roster row's status = %T after the agent's interrupted terminal, want interrupted", row.GetStatus())
+	}
+}
+
+// TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen covers
+// RosterRowStatusDegraded: an open SessionDegradedWindow in the diagnostics
+// push (footer_topbar_test.go's TestTopbarDegradedWindowIsDrawnOpenThenClosed
+// drives the topbar's own reading of the identical push).
+func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "ready before the degraded window", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetReady() != nil
+	})
+
+	// Act
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
+			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
+			DegradedWindows: []*conversationv1.SessionDegradedWindow{{
+				Component: "converter",
+				Reason:    "backlogged",
+				BeganAtMs: 1_700_000_000_000,
+				Extent:    &conversationv1.SessionDegradedWindow_Open{Open: &conversationv1.SessionDegradedOpen{}},
+			}},
+		}},
+	})
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "degraded with the window open", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetDegraded() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetDegraded() == nil {
+		t.Fatalf("the roster row's status = %T with an open degraded window, want degraded", row.GetStatus())
+	}
+}
+
+// TestRosterRowIsVendorBlockedWhenTheQueryDies covers
+// RosterRowStatusVendorBlocked driven by SessionUpdate_QueryDied
+// (internal/resolve/sidebar/status_test.go's
+// TestRowIsVendorBlockedWhenTheQueryDied is the same fact at the unit level;
+// this is its integration-level, real-cause counterpart).
+func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "ready before the query dies", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetReady() != nil
+	})
+
+	// Act
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{}},
+	})
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "vendor_blocked after the query died", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetVendorBlocked() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetVendorBlocked() == nil {
+		t.Fatalf("the roster row's status = %T after the query died, want vendor_blocked", row.GetStatus())
+	}
+}
+
+// TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails covers
+// RosterRowStatusMergeFailed: a genuine (non-conflict) error that gives up
+// the run (internal/merge/run.go's emacsMethod, then abort() ->
+// internal/merge/terminal.go's StateFailed) -- as opposed to
+// merge_conflict/parked, which a scripted conflict or a test-gate escalation
+// produce instead (merge_test.go's own tests). The scripted git failure is
+// the harness's repo.ScriptFailure, landed this round for exactly this kind
+// of real, non-conflict git failure.
+func TestRosterRowIsMergeFailedWhenTheLandedRangeGitCommandFails(t *testing.T) {
+	// Arrange: a clean self-repo merge (mergeCleanRepo, merge_test.go) whose
+	// LandedRange git call (`rev-list`, internal/gitclient/gitclient.go) is
+	// scripted to fail after the no-ff merge itself lands cleanly.
+	f, d, repo, _ := mergeCleanRepo(t)
+	repo.ScriptFailure(repo.Dir, 1, "boom: rev-list exploded", "rev-list")
+	roster := d.WatchRoster()
+	d.ExpectWarnings("daemon.gitclient.landed_range", "daemon.merge.abort")
+
+	// Act
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+
+	// Assert
+	got := awaitRoster(t, d, roster, "merge_failed after the landed-range git command fails", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetMergeFailed() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetMergeFailed() == nil {
+		t.Fatalf("the roster row's status = %T after a genuine (non-conflict) merge failure, want merge_failed", row.GetStatus())
+	}
+}
+
 // bogusTask is a TaskRef naming no task the daemon ever minted.
 func bogusTask() *agentreplv1.TaskRef { return &agentreplv1.TaskRef{Id: "no-such-task"} }
 
