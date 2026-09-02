@@ -1,9 +1,12 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 )
+
+// exitMarker is the vendor's own spool terminator: a line-start,
+// newline-terminated `EXIT=<code>` as the last line of a batch.
+const exitMarker = "EXIT=0\n"
 
 // CRITIQUE 4 — a detached run read back through the REAL store's WatchBashRun.
 //
@@ -43,21 +46,25 @@ func TestABashRunReplaysThenFollowsOnOneStream(t *testing.T) {
 
 	// ...and the rest of the run appended while it follows.
 	spool.AppendRaw([]byte(after))
-	spool.AppendRaw([]byte("EXIT=0\n"))
+	spool.AppendRaw([]byte(exitMarker))
 	rows := drainBashRunToTerminal(t, fx.CallID, stream, first)
 
 	// Assert: the endpoint's ordering contract across the boundary, contiguous
 	// offsets throughout, and every byte of both phases in order.
 	requireBashReplayOrder(t, fx.CallID, rows)
 	joined := requireContiguousDeltas(t, fx.CallID, rows)
-	if !strings.Contains(joined, strings.TrimSpace(before)) {
-		t.Errorf("the replay phase lost the bytes written before the stream opened; the run read back as %q", joined)
-	}
-	if !strings.Contains(joined, strings.TrimSpace(after)) {
-		t.Errorf("the follow phase lost the bytes written while the stream was open; the run read back as %q", joined)
-	}
-	if strings.Index(joined, strings.TrimSpace(before)) > strings.Index(joined, strings.TrimSpace(after)) {
-		t.Errorf("the follow phase's bytes were delivered BEFORE the replay's; the run read back as %q", joined)
+	// EXACT EQUALITY, NOT CONTAINMENT. The three containment-and-index checks
+	// this replaced were all satisfied by a read-back that had also DUPLICATED a
+	// phase, dropped a newline, or interleaved bytes the run never wrote; the
+	// only statement worth making about a concatenated stream is that it IS the
+	// concatenation.
+	//
+	// The `EXIT=0` line is part of it. The marker settles the run's terminal, and
+	// the raw codec carries every byte of the spool through as output as well —
+	// AGENTS.md pins what the marker MEANS, not that it is withheld — so a
+	// consumer replaying this run sees the spool's bytes whole.
+	if want := before + after + exitMarker; joined != want {
+		t.Errorf("the run read back as %q, wanted exactly the spool's bytes in order, %q", joined, want)
 	}
 }
 

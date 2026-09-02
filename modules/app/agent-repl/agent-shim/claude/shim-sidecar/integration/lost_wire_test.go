@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -295,13 +294,11 @@ func TestBytesAppendedAfterAWentSilentVerdictStillLand(t *testing.T) {
 
 	// Assert: the later bytes reach the store.
 	awaitCursorInBatches(ctx, t, fake, fx.SpoolPath, spool.Offset())
-	var joined strings.Builder
-	for _, frame := range bashFramesForRun(fake.Entries(), fx.CallID) {
-		if u := frame.GetUpdate(); u != nil {
-			joined.WriteString(u.GetNewOutput())
-		}
-	}
-	if !strings.Contains(joined.String(), "and it spoke again after all") {
-		t.Fatalf("the bytes appended after the went_silent verdict were dropped; the deltas held %q", joined.String())
+	// EXACT EQUALITY of the joined deltas, which is also what proves the earlier
+	// bytes were not RE-EMITTED alongside the later ones: a containment check
+	// passed just as happily on a delta stream that had replayed the whole file.
+	joined := requireContiguousDeltas(t, fx.CallID, bashFramesForRun(fake.Entries(), fx.CallID))
+	if want := "before the silence\nand it spoke again after all\n"; joined != want {
+		t.Fatalf("the run's deltas joined to %q, wanted exactly the bytes written either side of the verdict, %q", joined, want)
 	}
 }
