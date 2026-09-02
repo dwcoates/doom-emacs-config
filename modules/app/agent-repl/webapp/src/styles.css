@@ -5749,3 +5749,136 @@ body.ungated #mode-select {
   min-height: 0;
   padding: 0.4rem;
 }
+/* ---- merge bubble (src/feed/merge) ---- */
+/* The head line: the ⇄ glyph, the branch line, the clock, the badge. The
+   bubble frame itself is the shared bubble chrome — this section styles only
+   what is inside it. */
+.merge-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.merge-head-props {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.merge-glyph { color: var(--blocked); }
+.merge-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.merge-clock,
+.merge-commit { color: var(--muted); font-variant-numeric: tabular-nums; }
+.merge-commit { font-family: var(--mono, monospace); }
+.merge-error { display: inline-flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.merge-summary { color: var(--err); overflow: hidden; text-overflow: ellipsis; }
+/* The badge says the merge's state as a whole and nothing else — no counts (R5). */
+.merge-badge {
+  font-size: 0.85em;
+  letter-spacing: 0.02em;
+}
+.merge-badge.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
+.merge-badge.is-succeeded { color: var(--ok); }
+.merge-badge.is-failed { color: var(--err); }
+.merge-badge.is-abandoned { color: var(--muted); }
+/* BREATHING, NOT BLINKING: a live thing should read as alive at a glance
+   without pulling the eye off whatever the reader is actually reading. */
+@keyframes merge-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* The tab strip: chronological, append-only, one button per tab. */
+.merge-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.25));
+}
+.merge-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.merge-tab:hover { background: rgba(128, 128, 128, 0.12); }
+.merge-tab.is-active {
+  border-color: var(--line, rgba(128, 128, 128, 0.35));
+  background: rgba(128, 128, 128, 0.16);
+}
+.merge-tab-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
+.merge-tab-glyph.is-parked { color: var(--async); }
+/* HOLLOWED OUT FOR DONE: a settled success should recede, not compete with
+   the live tab for attention. */
+.merge-tab-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
+.merge-tab-glyph.is-failed { color: var(--err); }
+.merge-tab-summary .merge-tab-failed {
+  padding: 0.25rem 0;
+  color: var(--err);
+}
+.merge-tab-panel { padding-top: 0.3rem; }
+
+/* The parked header: the standing line, the paused badge, the composer slot. */
+.merge-parked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.3rem 0;
+}
+.merge-parked-badge { color: var(--async); font-size: 0.85em; }
+.merge-parked-line { color: var(--muted); }
+.merge-parked .bubble-composer { flex-basis: 100%; }
+
+/* The queue snapshot. Rows are delimited by the ONE shared `.list-rows` rule. */
+.merge-queue-entry { padding: 0.15rem 0; }
+.merge-queue-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.1rem 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.merge-queue-line:hover { background: rgba(128, 128, 128, 0.1); }
+.merge-queue-entry[data-queue-place="current"] .merge-queue-line { font-weight: 600; }
+.merge-queue-here,
+.merge-queue-active { color: var(--muted); font-size: 0.85em; }
+.merge-queue-refusal { color: var(--err); font-size: 0.85em; }
+
+/* The test suites and their daemon-painted output. */
+.merge-suite { padding: 0.2rem 0; }
+.merge-suite-head { display: flex; align-items: baseline; gap: 0.4rem; }
+.merge-suite-glyph.is-live { color: var(--blocked); animation: merge-breathe 1.8s ease-in-out infinite; }
+.merge-suite-glyph.is-succeeded { color: var(--ok); opacity: 0.7; }
+.merge-suite-glyph.is-failed { color: var(--err); }
+/* The daemon caps the output; the client scrolls what it was given rather
+   than letting a suite grow the bubble without bound. */
+.merge-suite-output {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0.2rem 0 0;
+  padding: 0.3rem 0.4rem;
+  background: rgba(128, 128, 128, 0.08);
+  border-radius: 0.25rem;
+  white-space: pre-wrap;
+}
+
+/* The merge commit's narration lines. */
+.merge-line { padding: 0.1rem 0; color: var(--muted); }
