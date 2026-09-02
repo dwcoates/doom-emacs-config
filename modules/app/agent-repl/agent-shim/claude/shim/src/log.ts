@@ -128,7 +128,7 @@ function retireStderrMirror(cause: Error): void {
   try {
     writeDurable(runtime, Buffer.from(`${JSON.stringify(record)}\n`, "utf8"));
   } catch (err) {
-    runtime.poisoned = err instanceof Error ? err : new Error(String(err));
+    poisonSink(runtime, err instanceof Error ? err : new Error(String(err)));
   }
 }
 
@@ -182,11 +182,15 @@ function buildRecord(verbosity: ShimLogRecord["verbosity"], fields: LogFields, m
 /** The only pre-logger/sink-failure escape hatch. It must never persist. */
 export function emergencyStderr(message: string): void {
   const runtime = runtimeContext;
-  if (stderrMirror === "retired") return;
+  // NOT GATED ON THE MIRROR. The mirror is retired for ROUTINE records, which
+  // are a convenience copy of what fd 3 already holds; an emergency is the
+  // opposite case -- fd 3 is exactly what has failed, so this is the only
+  // channel the failure has left, and skipping it here would be the one place
+  // the shim swallowed an error outright.
+  //
   // A failure HERE is not the failure being reported: this is the escape hatch
-  // used while the real error is on its way to the caller, and letting a dead
-  // pipe throw over it would replace a surfaced error with a process death.
-  // The real error is rethrown by every caller, so nothing is swallowed.
+  // used while the real error is on its way out, and letting a dead pipe throw
+  // over it would replace a surfaced error with a process death.
   try {
     process.stderr.write(`${JSON.stringify({
     timestamp: logTimestamp(),
@@ -209,21 +213,60 @@ export function emergencyStderr(message: string): void {
   }
 }
 
+/**
+ * Who is told when the durable sink dies.
+ *
+ * Module-level because the logger is: `bindLog` is imported everywhere and
+ * there is one process-wide sink. The engine registers here at construction so
+ * a poisoning becomes a `SessionFault` and a degraded window on WatchSession.
+ */
+const poisonListeners = new Set<(cause: Error) => void>();
+
+/**
+ * Observe the durable sink dying. Returns the unsubscribe.
+ *
+ * Called at once with the cause if the sink is ALREADY poisoned, so a listener
+ * that registered late still learns of it — the fault is a standing condition,
+ * not an instant.
+ */
+export function onLogSinkPoisoned(listener: (cause: Error) => void): () => void {
+  poisonListeners.add(listener);
+  const already = runtimeContext?.poisoned;
+  if (already !== undefined) listener(already);
+  return () => poisonListeners.delete(listener);
+}
+
+/**
+ * Record the sink's death: loudly, durably where anything is still durable,
+ * and exactly ONCE.
+ *
+ * NOT FATAL, and that is the whole point (the EPIPE incident, 2026-08-10): a
+ * shim outlives its daemon by design, so a process that died because its log
+ * line could not be written would take a live turn with it. The failure is not
+ * swallowed either — it goes to the emergency stderr path and it becomes a
+ * SessionFault plus a standing degraded window, which is the loudest channel
+ * the shim has once its own log is gone.
+ */
+function poisonSink(runtime: RuntimeContext, failure: Error): void {
+  if (runtime.poisoned !== undefined) return;
+  runtime.poisoned = failure;
+  emergencyStderr(`shim log sink is POISONED and records are being lost: ${failure.message}`);
+  for (const listener of poisonListeners) listener(failure);
+}
+
 function emit(verbosity: ShimLogRecord["verbosity"], fields: LogFields, message: string): void {
   // Construct and serialize completely before either sink is touched: invalid records emit nowhere.
   const bytes = Buffer.from(`${JSON.stringify(buildRecord(verbosity, fields, message))}\n`, "utf8");
   const runtime = requireContext();
-  if (runtime.poisoned !== undefined) {
-    emergencyStderr(`shim log sink is poisoned: ${runtime.poisoned.message}`);
-    throw runtime.poisoned;
-  }
+  // A POISONED SINK LOSES RECORDS; IT DOES NOT END THE PROCESS. The loss was
+  // announced once, and is standing as a degraded window on WatchSession, so
+  // repeating it per record would only bury the announcement.
+  if (runtime.poisoned !== undefined) return;
   try {
     writeDurable(runtime, bytes);
   } catch (err) {
-    const failure = err instanceof Error ? err : new Error(String(err));
-    runtime.poisoned = failure;
-    emergencyStderr(`shim log sink failure: ${failure.message}`);
-    throw failure;
+    poisonSink(runtime, err instanceof Error ? err : new Error(String(err)));
+    return;
   }
   if (stderrMirror === "retired") return;
   if (verbosity === "normal" || process.env.AGENT_REPL_LOG_VERBOSE === "1") {
