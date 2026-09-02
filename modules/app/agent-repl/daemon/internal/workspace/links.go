@@ -21,18 +21,24 @@ func (v *verbs) OpenExternal(ctx context.Context, ws ids.WorkspaceID, link strin
 	}
 	parsed, err := url.Parse(link)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return refuse(log, "OpenExternal", ArmUnservedAnswer,
+		return refuse(log, "OpenExternal", ArmInvalidUrl,
 			fmt.Sprintf("%q is not an absolute url", link), false)
 	}
 	if v.deps.Browser == nil {
-		return refuse(log, "OpenExternal", ArmUnservedAnswer,
+		return refuse(log, "OpenExternal", ArmNoBrowserConfigured,
 			"this daemon has no external browser configured", false)
 	}
 	if err := v.deps.Browser.Open(ctx, link); err != nil {
-		log.Error(opOpenExternal, "the external browser did not open the link", dlog.Context{
+		// A launcher that would not run is a LANDED arm, not an internal
+		// error: OpenExternalError.launch_failed carries the launcher's own
+		// account of the failure in `detail`, so the click is answered rather
+		// than collapsed into CodeInternal.
+		log.Warn(opOpenExternal, "the external browser did not open the link", dlog.Context{
 			"url": link, "cause": err.Error(),
 		})
-		return fmt.Errorf("open external %q: %w", link, err)
+		return refuseWith(log, "OpenExternal", ArmLaunchFailed,
+			fmt.Sprintf("the external browser did not open %q: %v", link, err), false,
+			map[string]any{"detail": err.Error()})
 	}
 	log.Info(opOpenExternal, "opened a link externally", dlog.Context{"url": link})
 	return nil

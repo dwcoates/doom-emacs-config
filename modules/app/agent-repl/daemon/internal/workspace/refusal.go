@@ -91,6 +91,14 @@ const (
 	ArmSpawnFailed = "spawn_failed"
 	// ArmBriefMissing is a composed brief the prompts directory does not hold.
 	ArmBriefMissing = "brief_missing"
+	// ArmInvalidUrl is an OpenExternal link that is not an absolute url.
+	ArmInvalidUrl = "invalid_url"
+	// ArmNoBrowserConfigured is an OpenExternal on a daemon that resolved no
+	// external browser launcher at all.
+	ArmNoBrowserConfigured = "no_browser_configured"
+	// ArmLaunchFailed is an OpenExternal whose launcher would not run. It
+	// carries the launcher's own account of the failure as `detail`.
+	ArmLaunchFailed = "launch_failed"
 )
 
 // Refusal is a state the daemon must refuse for which the contract has no

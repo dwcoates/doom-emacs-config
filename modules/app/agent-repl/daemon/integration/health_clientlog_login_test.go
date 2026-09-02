@@ -854,13 +854,9 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	f.d.Browser.SetExitCode(1)
-	// internal/workspace/links.go wraps a launcher failure as an ORDINARY
-	// error (fmt.Errorf), never a workspace.Refusal, so it never reaches
-	// setArm at all: today's answer is server.fail's CodeInternal, logged at
-	// ERROR under both daemon.workspace.open_external (the verb's own
-	// account) and OpenExternal (the transport's fail() call), not the typed
-	// arm below.
-	f.d.ExpectWarnings("daemon.workspace.open_external", "OpenExternal")
+	// A launcher that will not run is recorded at WARN under the verb's own
+	// operation and then ANSWERED as launch_failed{detail}.
+	f.d.ExpectWarnings("daemon.workspace.open_external", "daemon.externalbrowser.open")
 
 	// Act
 	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
@@ -881,19 +877,31 @@ func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 	}
 }
 
-// TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured would
-// exercise OpenExternalError's no_browser_configured arm
-// (internal/workspace/links.go: "if v.deps.Browser == nil"), but no daemon
-// this harness can start ever has a nil Browser dependency to trigger it
-// with.
+// TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured exercises
+// OpenExternalError's no_browser_configured arm. The daemon is started with
+// `--no-browser`, which is the operator's explicit statement that this host
+// has no external browser: cmd/claude-repld/graph.go then leaves the Browser
+// dependency nil and internal/workspace/links.go refuses.
 func TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured(t *testing.T) {
-	t.Skip("unexpressible: cmd/claude-repld/graph.go always calls externalbrowser.New(...) to build the " +
-		"daemon's Browser dependency, and externalbrowser.New always resolves to a non-nil opener " +
-		"(AGENT_REPL_BROWSER_CMD when set, else DefaultBinary/openDefault when unset) — see " +
-		"internal/externalbrowser/externalbrowser.go newOpener. internal/workspace/verbs.deps.Browser is " +
-		"therefore never nil in any daemon StartDaemon can produce. Exercising this arm needs a production " +
-		"hook that lets the graph wire a nil Browser (e.g. an env or flag such as AGENT_REPL_NO_BROWSER=1 " +
-		"that skips externalbrowser.New entirely) — no such hook exists today.")
+	// Arrange
+	f := newRegistered(t, harness.Opts{ExtraArgs: []string{"--no-browser"}})
+	// The graph says so out loud at boot: a daemon that cannot open a link is
+	// not silently degraded.
+	f.d.ExpectWarnings("daemon.cmd.graph")
+
+	// Act
+	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+		Workspace: f.ws,
+		Url:       "https://example.invalid/report",
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenExternal(no browser) = error %v, want a success carrying error{no_browser_configured}", err)
+	}
+	if got := resp.Msg.GetError().GetNoBrowserConfigured(); got == nil {
+		t.Fatalf("OpenExternal(no browser) = %v, want error{no_browser_configured}", resp.Msg)
+	}
 }
 
 // ---------------------------------------------------------------------------
