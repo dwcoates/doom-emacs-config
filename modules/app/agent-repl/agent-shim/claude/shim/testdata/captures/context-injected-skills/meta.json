@@ -1,0 +1,28 @@
+{
+  "scenario": "context-injected-skills",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "List the skills available to you in this session, then list any deferred tools you have.",
+  "prompts": [
+    {
+      "text": "List the skills available to you in this session, then list any deferred tools you have.",
+      "resume": false
+    }
+  ],
+  "world": "context-injected-skills",
+  "cwd_init": null,
+  "vendor_session_id": "964434be-12d9-4526-b2cf-40112fc213a3",
+  "manual": null,
+  "expect": [
+    "attachment:skill_listing",
+    "attachment:deferred_tools_delta",
+    "attachment:agent_listing_delta"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-context-injected-skills-iOP159-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:48:33.553Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

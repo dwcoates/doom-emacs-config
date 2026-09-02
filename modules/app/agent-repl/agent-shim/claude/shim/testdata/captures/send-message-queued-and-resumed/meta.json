@@ -1,0 +1,29 @@
+{
+  "scenario": "send-message-queued-and-resumed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Spawn a named subagent called 'longhand' that counts slowly from 1 to 40, sleeping a second between numbers, and run it in the background. While it is still running, send it a message telling it to also report whether each number is even. After it finishes, send it a second message asking it for a one-line summary.",
+  "prompts": [
+    {
+      "text": "Spawn a named subagent called 'longhand' that counts slowly from 1 to 40, sleeping a second between numbers, and run it in the background. While it is still running, send it a message telling it to also report whether each number is even. After it finishes, send it a second message asking it for a one-line summary.",
+      "resume": false
+    }
+  ],
+  "world": "send-message-queued-and-resumed",
+  "cwd_init": null,
+  "vendor_session_id": "70648d16-a18d-43f1-acd9-53366c9f6aa3",
+  "manual": null,
+  "expect": [
+    "tool:Agent(background)",
+    "tool:SendMessage",
+    "tool_result:send_message(queued to live)",
+    "tool_result:send_message(resumedAgentId set)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-send-message-queued-and-resumed-5RHWEG-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:21:45.767Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

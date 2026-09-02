@@ -1,0 +1,34 @@
+{
+  "scenario": "ctrl-b-detach-of-foreground-work",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `bash long.sh` in the foreground and report its output.",
+  "prompts": [
+    {
+      "text": "Run `bash long.sh` in the foreground and report its output.",
+      "resume": false
+    }
+  ],
+  "world": "ctrl-b-detach-of-foreground-work",
+  "cwd_init": null,
+  "vendor_session_id": "18214eb2-1db0-453e-8505-ac9e9b24d932",
+  "manual": null,
+  "expect": [
+    "query.backgroundTasks(toolUseId) resolving true",
+    "task_started for the promoted item",
+    "task_updated with patch.is_backgrounded (the OPEN QUESTION: this is the candidate producer for a backgrounded AGENT; the capture settles it)",
+    "tool_result:bash with backgroundedByUser"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-ctrl-b-detach-of-foreground-work-ytoOgB-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:29:10.558Z",
+  "controls": [
+    {
+      "verb": "backgroundTasks",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}
