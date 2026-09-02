@@ -170,11 +170,6 @@ export function applyExpanded(sections: ArrayLike<Section>, keys: readonly strin
   });
 }
 
-/** The capped sections inside one rendered feed item, in document order. */
-export function sectionsIn(item: HTMLElement): HTMLElement[] {
-  return [...item.querySelectorAll<HTMLElement>(CAPPED_SELECTOR)];
-}
-
 /**
  * True when CARD owns SECTION directly — the section is not a capped box
  * belonging to a child rendered inside an open activity panel. Reveal
