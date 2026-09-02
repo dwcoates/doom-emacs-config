@@ -145,7 +145,9 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	if announced.Address != nil {
 		t.Fatalf("shutdown_announced.address = %q, want unset (a plain bounce, no successor)", announced.GetAddress())
 	}
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// An immediate shutdown with a valid reason logs only at INFO
+	// (internal/drain/controller.go opNow): no WARN/ERROR is reached.
+	d.ExpectWarnings()
 }
 
 // ---- Drain intake and exit ----
@@ -187,7 +189,10 @@ func TestDuringADrainNewPromptsAreHeldWithTheShutdownHold(t *testing.T) {
 	if held.GetShutdown().GetScheduleId() == "" {
 		t.Fatalf("held prompt's shutdown hold = %v, want a schedule id", held.GetShutdown())
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// The one submission held under the drain lease is the FIRST refusal the
+	// controller ever notes, which always fires its WARN immediately
+	// (internal/drain/refusals.go NoteRefusal: openedAt is zero).
+	f.d.ExpectWarnings("daemon.drain.refusal")
 }
 
 func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsTheVendor(t *testing.T) {
@@ -221,7 +226,10 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 	if code := f.d.AwaitExit(); code != 0 {
 		t.Fatalf("the daemon's exit code after a drained shutdown = %d, want an orderly 0", code)
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// No further submission is made once the drain fires (the turn's own
+	// terminal frame is pushed, never submitted), so NoteRefusal is never
+	// called and the orderly exit itself logs nothing above DEBUG.
+	f.d.ExpectWarnings()
 }
 
 // ---- Reload webapp (webapp-only rollout) ----
@@ -246,7 +254,10 @@ func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 	harness.AwaitView(t, d.Ctx(), host, "reload_webapp", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 		return r.GetReloadWebapp() != nil
 	})
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// A single-subsystem (webapp-only) landed range classifies cleanly and the
+	// harness's own fake deploy script succeeds, so rollout.Trigger
+	// (internal/rollout/trigger.go) never reaches its opClassify/opDeploy WARNs.
+	d.ExpectWarnings()
 }
 
 // ---- Handover ----
