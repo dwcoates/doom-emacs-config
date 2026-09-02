@@ -118,15 +118,22 @@ type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
 // AdoptFunc installs a client adopted from a surviving shim.
 type AdoptFunc func(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client) error
 
-// probeWorkspaceLock is the production probe: derive the path, take and
-// release the lock. Any error other than "held" is StateUnknown WITH the
-// error, because an unreadable lock is never reported as free.
-func probeWorkspaceLock(runDir, workspaceDir string) (sessionlock.State, error) {
-	path, err := sessionlock.WorkspaceLockPath(runDir, workspaceDir)
-	if err != nil {
-		return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
+// probeWorkspaceLock builds the production probe over log. Every probe result
+// — held, free, and could-not-tell — lands a record, because a lock probe is a
+// diagnosis-critical event and a silent one defeats the boot report. Any error
+// other than "held" is StateUnknown WITH the error, because an unreadable lock
+// is never reported as free.
+func probeWorkspaceLock(log dlog.Logger) ProbeFunc {
+	log = log.With(dlog.Context{"component": "daemon.boot.probe_workspace_lock"})
+	return func(runDir, workspaceDir string) (sessionlock.State, error) {
+		path, err := sessionlock.WorkspaceLockPath(runDir, workspaceDir)
+		if err != nil {
+			log.Error("daemon.boot.probe_workspace_lock", "could not derive the workspace lock path",
+				dlog.Context{"run_dir": runDir, "workspace_dir": workspaceDir, "error": err.Error()})
+			return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
+		}
+		return sessionlock.ProbeWithLog(log, path)
 	}
-	return sessionlock.Probe(path)
 }
 
 // New builds the boot sequence. Every collaborator is required: a boot that
@@ -153,7 +160,7 @@ func New(deps Deps) (Sequence, error) {
 	}
 	probe := deps.Probe
 	if probe == nil {
-		probe = probeWorkspaceLock
+		probe = probeWorkspaceLock(deps.Log.Global())
 	}
 	now := deps.Now
 	if now == nil {
