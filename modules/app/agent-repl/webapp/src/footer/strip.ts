@@ -313,17 +313,20 @@ export function drawFooterStatusActivity(
 ): HTMLElement {
   const path = `FooterStatus${statusCase}.activity`;
   const cell = document.createElement("div");
-  cell.className = "pfooter-cell pfooter-grow footer-activity";
 
   if (parts.activityRequired) requireMessage(parts.activity, path);
   const activity = parts.activity;
   if (activity === undefined) {
-    // The grabber notch lives inside the grow cell (the baseline look), so it
-    // is appended whether or not there is a line to draw.
+    // NO LINE, NO ACTIVITY CELL. `activity` is optional on most status arms and
+    // absence means draw nothing, so the grow cell stays (it owns the strip's
+    // slack, and the grabber notch lives in it) but wears no activity class:
+    // there is no activity here for a reader or a query to find.
+    cell.className = "pfooter-cell pfooter-grow footer-grabber";
     cell.appendChild(grabber());
     return cell;
   }
 
+  cell.className = "pfooter-cell pfooter-grow footer-activity";
   const kind = requireCase(activity.kind, `${path}.kind`);
   cell.setAttribute("data-arm", kind.case);
   cell.appendChild(drawActivityKind(kind, deps, `${path}.${kind.case}`));
