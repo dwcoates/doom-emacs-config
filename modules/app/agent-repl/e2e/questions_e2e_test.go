@@ -95,10 +95,10 @@ func newQuestionWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	return w, ws
 }
 
-// awaitFeedRow opens the workspace's feed fresh and answers the first row
+// qAwaitFeedRow opens the workspace's feed fresh and answers the first row
 // (from the already-served page, or from the watch stream if it has not
 // arrived yet) satisfying pred.
-func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func qAwaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
 	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -122,7 +122,7 @@ func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what str
 // reads firstQuestionText, still in its FeedQuestionOpen state.
 func awaitOpenQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, firstQuestionText string) *frontendv1.FeedRow {
 	t.Helper()
-	return awaitFeedRow(t, w, ws, "the \""+firstQuestionText+"\" question to open", func(row *frontendv1.FeedRow) bool {
+	return qAwaitFeedRow(t, w, ws, "the \""+firstQuestionText+"\" question to open", func(row *frontendv1.FeedRow) bool {
 		q := row.GetQuestion()
 		if q == nil || q.GetOpen() == nil {
 			return false
@@ -136,7 +136,7 @@ func awaitOpenQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, fir
 // carry a non-open state — either FeedQuestionAnswered or FeedQuestionExpired.
 func awaitSettledQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, id *frontendv1.FeedId) *frontendv1.FeedRow {
 	t.Helper()
-	return awaitFeedRow(t, w, ws, "question "+id.GetValue()+" to settle", func(row *frontendv1.FeedRow) bool {
+	return qAwaitFeedRow(t, w, ws, "question "+id.GetValue()+" to settle", func(row *frontendv1.FeedRow) bool {
 		if row.GetId().GetValue() != id.GetValue() {
 			return false
 		}
