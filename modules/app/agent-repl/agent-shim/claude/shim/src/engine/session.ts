@@ -949,7 +949,23 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return;
     }
     if (message.type === "conversation_reset") {
-      void rotate(message.new_conversation_id);
+      // `conversation_reset` SIGNALS a rotation; it does not name the id the
+      // session rotates to. Evidence, from the real /clear capture: this
+      // message's own `session_id` is still the OLD id, and its
+      // `new_conversation_id` is a third uuid NOTHING later uses -- no
+      // transcript is written under it, no init announces it, and no resume
+      // takes it. The id the session actually moves to is announced by the
+      // SECOND `system:init` that follows, and repeated by the next turn's
+      // init; the branch above performs the rotation when it arrives.
+      //
+      // Writing `new_conversation_id` as the new identity would publish a
+      // SessionIdentityRotated naming an id that does not exist, link the
+      // vendor id to nothing, and hand the daemon a resume handle the vendor
+      // would refuse.
+      LOGGER.log(
+        { previous: identity?.vendorSessionId ?? "", signalled: message.new_conversation_id },
+        "the vendor reset the conversation; awaiting the init that names the id it rotated to",
+      );
       return;
     }
     if (message.type === "system" && message.subtype === "status") {
