@@ -581,3 +581,12 @@ every UX or contract gap you surfaced instead of improvising.
   fan-wide-cancel, permission-mode-changed, model-changed, account-usage,
   bash-detached, subagent-detached, context-usage, mcp-server-healths,
   permission-undecidable-parked, permission-denied-by-user.
+- LEDGER: slow-down lifted (user go); project lead re-capturing the 12.
+  Running: engine (shim-agents/engine), fakes (shim-agents/fakes, resumed
+  twice after rate-limit/watchdog stalls), GOLDENS (new, shim-agents/goldens,
+  branch overhaul/shim-goldens off 691982ddf): commits the 55 stable
+  captures selectively under agent-shim/claude/shim/testdata/captures/ +
+  MANIFEST, converter golden suites through fold-harness, converter fixes
+  only in src/convert. Queued: scenario-script rebuild from captures (after
+  fakes merge + re-capture), fresh integration run, fable auditor #2,
+  sonnet-medium dead-code pass.
