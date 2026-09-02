@@ -773,11 +773,12 @@ func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
-	awaitFooter(t, f, footer, "the background chip for live detached work", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetBackground() != nil
-	})
+	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
+	// watcher's own record of it is the edge that says it changed. The footer's
+	// background chip cannot serve as the signal: a turn is in flight here, and
+	// thinking outranks background in the status tree.
+	awaitLiveWork(t, f, 1)
 
 	// Act
 	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -804,11 +805,12 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
-	awaitFooter(t, f, footer, "the background chip for live detached work", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetBackground() != nil
-	})
+	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
+	// watcher's own record of it is the edge that says it changed. The footer's
+	// background chip cannot serve as the signal: a turn is in flight here, and
+	// thinking outranks background in the status tree.
+	awaitLiveWork(t, f, 1)
 	first, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
 		Workspace: f.ws,
 		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},

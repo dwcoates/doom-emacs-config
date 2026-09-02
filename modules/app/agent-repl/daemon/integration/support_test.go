@@ -253,6 +253,24 @@ func detachedWorkFrame(agent string, work *conversationv1.AgentDetachedWork) *co
 	}
 }
 
+// awaitLiveWork waits until the workspace's watcher has recorded `want` live
+// detached items, which is the daemon-side fact the interrupt verbs read.
+func awaitLiveWork(t *testing.T, f *fixture, want int) {
+	t.Helper()
+	f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the live-work set", func(r harness.LogRecord) bool {
+		if r.Operation != "daemon.sessionwatcher.live_work" {
+			return false
+		}
+		total := 0
+		for _, key := range []string{"agents", "shells", "monitors"} {
+			if n, ok := r.Context[key].(float64); ok {
+				total += int(n)
+			}
+		}
+		return total == want
+	})
+}
+
 // mainAgent is the agent id the fake shim answers StartTurn with.
 const mainAgent = "main"
 

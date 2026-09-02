@@ -447,6 +447,8 @@ func (f *fakeSidebar) SetTurn(_ ids.WorkspaceID, turn *footer.TurnStarted) {
 	f.turns = append(f.turns, turn)
 }
 
+func (f *fakeSidebar) AckTurn(_ ids.WorkspaceID) {}
+
 func (f *fakeSidebar) SetTurnEnded(_ ids.WorkspaceID, how sessionwatcher.TurnClose) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
