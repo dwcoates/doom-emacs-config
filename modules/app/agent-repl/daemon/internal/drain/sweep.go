@@ -81,6 +81,14 @@ func (c *controller) hibernate(ctx context.Context, ws ids.WorkspaceID, fields d
 		if err := c.deps.DB.ReleaseLease(ctx, lease.ID); err != nil {
 			c.log.Warn(opSweep, "could not release the hibernation lease",
 				withCause(merge(fields, dlog.Context{"lease": string(lease.ID)}), err))
+			return
+		}
+		// TELLING THE QUEUE IS WHAT DRAINS THE INTAKE. A prompt that arrived
+		// inside the hibernation window is held against this lease, and the
+		// release alone changes a row the queue is not watching — so without
+		// this the prompt that should have REVIVED the session waits forever.
+		if c.deps.LeaseChanged != nil {
+			c.deps.LeaseChanged(ws)
 		}
 	}()
 

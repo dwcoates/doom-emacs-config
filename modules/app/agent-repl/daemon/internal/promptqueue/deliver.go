@@ -49,6 +49,7 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	}
 	watcher.OnTurnOpened(sub.WS, success.GetPrompt(), success.GetPage())
 
+	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the shim", dlog.Context{
 		"agent": success.GetPrompt().GetAgent().GetValue(),
 	})
@@ -73,8 +74,25 @@ func (q *queue) deliverToAgent(ctx context.Context, sub Submission, sender Sende
 		})
 		return Disposition{}, fmt.Errorf("prompt agent %q on %q: %w", agent.GetValue(), sub.WS, err)
 	}
+	q.touchEngagement(ctx, sub.WS, log)
 	log.Info(opDeliver, "delivered the prompt to the addressed agent", dlog.Context{"agent": agent.GetValue()})
 	return Disposition{Delivered: true}, nil
+}
+
+// touchEngagement records that the user just engaged this session. IT IS WHAT
+// THE IDLE SWEEP MEASURES: without it every session's engagement stands still
+// at whatever the record was created with, so an actively used workspace is
+// hibernated out from under its user — and a session revived BY a prompt is
+// hibernated again before the prompt's own turn has run.
+//
+// A failure to record it is a warning, never the submission's failure: the
+// prompt was delivered, and the worst a lost stamp costs is one early
+// hibernation.
+func (q *queue) touchEngagement(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+	if err := q.deps.DB.TouchEngagement(ctx, ws, q.deps.Now()); err != nil {
+		log.Warn(opDeliver, "could not record the session's engagement",
+			dlog.Context{"cause": err.Error()})
+	}
 }
 
 // mirrorAccepted draws an accepted prompt's user_prompt row. The sentinel

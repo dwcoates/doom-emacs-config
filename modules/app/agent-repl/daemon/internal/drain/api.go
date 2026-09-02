@@ -75,6 +75,11 @@ type Deps struct {
 	Announcer Announcer
 	// Exit performs the daemon's orderly exit once the drain is quiet.
 	Exit ExitFunc
+	// LeaseChanged tells the prompt queue that a workspace's lease set changed,
+	// so the holds taken against the departed lease are re-evaluated. Without
+	// it a prompt held during a hibernation stays held forever: the release
+	// changes a row the queue is not watching. Nil means nothing is told.
+	LeaseChanged func(ws ids.WorkspaceID)
 	// Clock is the controller's view of time, injected so a schedule's deadline
 	// and the sweep's cadence are assertable without a real one.
 	Clock Clock
