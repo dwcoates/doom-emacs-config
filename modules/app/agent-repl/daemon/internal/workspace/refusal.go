@@ -82,6 +82,8 @@ const (
 	ArmPathEscapesWorkspace = "path_escapes_workspace"
 	// ArmBlankCommand is a RequestCommandSupport with no command named.
 	ArmBlankCommand = "blank_command"
+	// ArmSpawnFailed is a bring-up whose shim process would not come up.
+	ArmSpawnFailed = "spawn_failed"
 	// ArmBriefMissing is a composed brief the prompts directory does not hold.
 	ArmBriefMissing = "brief_missing"
 )
