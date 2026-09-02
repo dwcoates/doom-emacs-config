@@ -569,6 +569,11 @@ export const TURN_ERROR_ARMS = [
   "modelNotFound",
   "oauthOrgNotAllowed",
   "maxOutputTokens",
+  "maxTurns",
+  "maxBudget",
+  "executionError",
+  "turnFailed",
+  "stopHookPrevented",
 ] as const;
 export type TurnErrorArm = (typeof TURN_ERROR_ARMS)[number];
 
@@ -601,7 +606,18 @@ export const TURN_ERROR_HEADLINES: Record<TurnErrorArm, string> = {
   modelNotFound: "that model does not exist",
   oauthOrgNotAllowed: "this organization is not allowed",
   maxOutputTokens: "refused outright at the output ceiling",
+  maxTurns: "the run reached the turn ceiling",
+  maxBudget: "the run reached its budget",
+  executionError: "the run broke while executing",
+  turnFailed: "the turn ended abnormally",
+  stopHookPrevented: "a Stop hook forbade the stop",
 };
+
+/** The vendor conversation the run's own terminals name as their context. */
+const VENDOR_FAILURE_CONTEXT = {
+  vendorSessionId: "vendor-session-1",
+  requestId: "req-1",
+} as const;
 
 type TurnEndedValue = Extract<RowArm, { case: "turnEnded" }>["value"];
 type TurnEndedOutcome = NonNullable<TurnEndedValue["outcome"]>;
@@ -611,6 +627,14 @@ const turnErrorValue = (arm: TurnErrorArm, retryAfterMs?: bigint) => {
     return { case: arm, value: { retryAfterMs: retryAfterMs ?? 30_000n } };
   }
   if (arm === "vendorUnmodeled") return { case: arm, value: { type: "vendor_teapot" } };
+  // The run's own terminals import failure.proto's evidence messages, so they
+  // carry the vendor context rather than being empty (Landing 8).
+  if (arm === "turnFailed") {
+    return { case: arm, value: { vendor: VENDOR_FAILURE_CONTEXT, stopReason: "structured_output_retry_exhausted" } };
+  }
+  if (arm === "maxTurns" || arm === "maxBudget" || arm === "executionError") {
+    return { case: arm, value: { vendor: VENDOR_FAILURE_CONTEXT } };
+  }
   return { case: arm, value: {} };
 };
 
@@ -768,8 +792,17 @@ export function questionRow(state: QuestionState, overrides?: Partial<RowInit>):
 
 // ---- FeedSessionSeparation ------------------------------------------------
 
-export const SEPARATION_ARMS = ["cleared", "compacted", "worktreeEntered", "worktreeLeft"] as const;
+export const SEPARATION_ARMS = [
+  "cleared",
+  "compacted",
+  "worktreeEntered",
+  "worktreeLeft",
+  "compactionFailed",
+] as const;
 export type SeparationArm = (typeof SEPARATION_ARMS)[number];
+
+/** The producer's account of a compaction that did not happen, echoed verbatim. */
+export const COMPACTION_FAILED_ERROR = "the summarizing request was refused";
 
 /** The path the worktree divider's link opens; the suites echo it verbatim. */
 export const WORKTREE_PATH = "/repo/wt";
@@ -800,6 +833,8 @@ const separationKind = (arm: SeparationArm): SeparationKind => {
         case: "worktreeLeft",
         value: { outcome: { case: "kept", value: { path: { text: WORKTREE_PATH } } } },
       };
+    case "compactionFailed":
+      return { case: "compactionFailed", value: { error: COMPACTION_FAILED_ERROR } };
   }
 };
 
@@ -810,7 +845,9 @@ export const separationRow = (arm: SeparationArm, overrides?: Partial<RowInit>):
       value: {
         label: { text: `separation: ${arm}` },
         kind: separationKind(arm),
-        tokens: { beforeText: "180k", afterText: "12k" },
+        // A compaction that did not happen cut nothing: `tokens` is UNSET on
+        // that arm, as the schema states.
+        tokens: arm === "compactionFailed" ? undefined : { beforeText: "180k", afterText: "12k" },
       },
     },
     overrides,

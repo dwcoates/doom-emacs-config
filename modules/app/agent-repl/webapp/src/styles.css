@@ -3916,6 +3916,9 @@ body.draining #composer-input::placeholder {
 .sep-accent-cleared { background: var(--clear-divider); }
 .sep-accent-compacted { background: var(--compact-rule); }
 .sep-accent-worktree { background: var(--init); }
+/* The compaction that did not happen takes the FAILURE accent: it sits in the
+   slot the compacted divider would have taken, and must not read as one. */
+.sep-accent-compaction-failed { background: var(--err); }
 .sep-label {
   text-align: center;
   color: var(--muted);
@@ -3923,6 +3926,7 @@ body.draining #composer-input::placeholder {
 }
 .sep-tokens { color: var(--muted); }
 .sep-compacted,
+.sep-compaction-failed,
 .sep-worktree {
   width: var(--agent-bubble-cap);
   margin-left: auto;
@@ -3940,6 +3944,9 @@ body.draining #composer-input::placeholder {
 /* The cold read is a WARNING on a compaction that happened, not a failure of
    it, so it takes the warning register rather than the error one. */
 .sep-cold-read { color: var(--thinking); }
+/* The producer's account of a compaction that failed, in the error register. */
+.sep-compaction-failed { color: var(--err); text-align: center; }
+
 /* A removed worktree that took work with it says so LOUDLY. */
 .sep-discarded { color: var(--err); }
 
