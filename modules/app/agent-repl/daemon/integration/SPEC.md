@@ -618,15 +618,12 @@ a spec edit and never a rationalization in the suite.
     still in force. The hook owed: a boot-time read of `DrainSchedule()` after
     `drain.New` in `cmd/claude-repld/graph.go` that republishes a standing
     schedule before the server serves. The test asserting the contract is RED.
-  - A FEED WATCH TOKEN CANNOT BE EXPIRED ON PURPOSE. `token_expired`
-    (`feed.ErrTokenExpired`) fires only when a token's pinned start falls out
-    of the retained publication log, and `feed.Deps.TailRetention` -- the knob
-    that would make that reachable -- is never set: `cmd/claude-repld/graph.go`
-    builds `feed.Deps` without it, so retention is fixed at
-    `DefaultTailRetention` (4096) and no flag or environment variable reaches
-    it. The hook owed: a `--feed-tail-retention` flag (or the equivalent
-    environment knob) wired into that one `feed.New` call. Until it exists the
-    arm is untestable at this level and no test pretends otherwise.
+  - A FEED WATCH TOKEN CAN NOW BE EXPIRED ON PURPOSE. `token_expired`
+    (`feed.ErrTokenExpired`) fires when a token's pinned start falls out of the
+    retained publication log, and `feed.Deps.TailRetention` is now set from
+    `--feed-tail-retention` / `$AGENT_REPL_FEED_TAIL_RETENTION` in
+    `cmd/claude-repld/graph.go`. The suite compresses the retention to one row
+    and asserts the refusal.
 
 - A CORRUPT `creation_jobs` ROW IS SWALLOWED. `internal/merge/recover.go`'s
   `recoverAdmitted` folds ANY `layoutFor` error -- a genuine

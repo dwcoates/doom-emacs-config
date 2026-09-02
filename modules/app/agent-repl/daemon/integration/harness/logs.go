@@ -255,6 +255,14 @@ func ClientLogPath(ws *workspacev1.WorkspaceRef) string {
 	return WorkspaceLogPath(ws.GetDir(), "webapp")
 }
 
+// AwaitWorkspaceLogRecord waits for a record satisfying the predicate in one
+// workspace's own daemon sink. It exists for the assertions that key on a
+// record's CONTEXT rather than only on its operation.
+func (d *Daemon) AwaitWorkspaceLogRecord(workspaceDir, what string, pred func(LogRecord) bool) LogRecord {
+	d.t.Helper()
+	return d.AwaitLogRecord(WorkspaceLogPath(workspaceDir, "daemon"), what, pred)
+}
+
 // AwaitWorkspaceLogOperationCount waits until a workspace's own log sink holds
 // at least `n` records under `operation`.
 //
