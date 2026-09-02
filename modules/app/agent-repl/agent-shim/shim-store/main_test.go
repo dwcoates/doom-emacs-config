@@ -4,147 +4,307 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"agentrepl/shim-store/internal/logging"
+	"agentrepl/shim-store/internal/pprofsurface"
+	"agentrepl/shim-store/internal/server"
 )
 
-func TestOpenLoggerReturnsBootstrapErrorBeforePersistentSinkExists(t *testing.T) {
+func TestMain(m *testing.M) {
+	// Nothing in this process reaches a vendor, and the suite states so rather
+	// than relying on that remaining true.
+	if err := os.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1"); err != nil {
+		panic(err)
+	}
+	os.Exit(m.Run())
+}
+
+// storeRecords decodes the canonical JSONL a logger wrote.
+func storeRecords(t *testing.T, sink *bytes.Buffer) []storeLogRecord {
+	t.Helper()
+	return decodeStoreRecords(t, sink)
+}
+
+func hasOperation(records []storeLogRecord, operation string) bool {
+	for _, rec := range records {
+		if rec.Operation == operation {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSocketDefaultFallsBackToTheCacheDir(t *testing.T) {
+	// Arrange.
+	t.Setenv(server.EnvSocket, "")
+
+	// Act.
+	got := socketDefault("/cache/agent-repl")
+
+	// Assert.
+	if want := filepath.Join("/cache/agent-repl", "sock", "store.sock"); got != want {
+		t.Fatalf("socketDefault = %q, want %q", got, want)
+	}
+}
+
+func TestSocketDefaultPrefersTheEnvironment(t *testing.T) {
+	// Arrange. A test harness points every participant at a private store
+	// through this variable rather than editing command lines.
+	t.Setenv(server.EnvSocket, "/private/store.sock")
+
+	// Act.
+	got := socketDefault("/cache/agent-repl")
+
+	// Assert.
+	if got != "/private/store.sock" {
+		t.Fatalf("socketDefault = %q, want the environment's value", got)
+	}
+}
+
+func TestDefaultCacheDirHonorsXdgCacheHome(t *testing.T) {
+	// Arrange.
+	t.Setenv("XDG_CACHE_HOME", "/xdg")
+
+	// Act.
+	got := defaultCacheDir()
+
+	// Assert.
+	if want := filepath.Join("/xdg", "agent-repl"); got != want {
+		t.Fatalf("defaultCacheDir = %q, want %q", got, want)
+	}
+}
+
+func TestRunWithLoggerOpensThePprofSurfaceBeforeTheDatabase(t *testing.T) {
+	// Arrange. The database path is a DIRECTORY, so db.Open must fail — which
+	// makes the profiling record's presence proof that the surface was already
+	// bound when the wedged open happened.
+	root := t.TempDir()
+	unopenable := filepath.Join(root, "events.db")
+	if err := os.Mkdir(unopenable, 0o755); err != nil {
+		t.Fatalf("stage an unopenable database: %v", err)
+	}
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+
+	// Act.
+	err := runWithLogger(shortSocketPath(t), unopenable, storePprofSock(t), 0, log)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("runWithLogger = nil, want the database open to fail")
+	}
+	if !hasOperation(storeRecords(t, sink), "store.pprof.enabled") {
+		t.Fatalf("records = %+v, want the pprof surface recorded before the database failed", storeRecords(t, sink))
+	}
+}
+
+func TestRunWithLoggerRefusesAnUnsafePprofAddressBeforeTouchingTheDatabase(t *testing.T) {
+	// Arrange. A wildcard bind would publish the store's stacks and heap.
+	root := t.TempDir()
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+
+	// Act.
+	err := runWithLogger(shortSocketPath(t), filepath.Join(root, "events.db"), "0.0.0.0:6061", 0, log)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("runWithLogger = nil, want the wildcard bind refused")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "events.db")); statErr == nil {
+		t.Fatal("the database was created despite the refused profiling surface")
+	}
+}
+
+func TestOpenLoggerReturnsABootstrapErrorBeforeThePersistentSinkExists(t *testing.T) {
+	// Arrange.
 	parent := t.TempDir()
 	blocked := filepath.Join(parent, "blocked")
 	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
-		t.Fatal(err)
+		t.Fatalf("stage a non-directory: %v", err)
 	}
 
+	// Act.
 	_, _, err := openLogger(filepath.Join(parent, "store.sock"), filepath.Join(parent, "events.db"), filepath.Join(blocked, "store.log"))
+
+	// Assert.
 	if err == nil {
 		t.Fatal("openLogger succeeded with a non-directory parent")
 	}
 	if !isBootstrapError(err) {
-		t.Fatalf("error %T = %v, want bootstrap error", err, err)
+		t.Fatalf("error %T = %v, want a bootstrap error", err, err)
 	}
+}
+
+func TestOpenLoggerCreatesTheDurableSink(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	logPath := filepath.Join(root, "log", "shim-store.log")
+
+	// Act.
+	log, closeLog, err := openLogger(filepath.Join(root, "sock", "store.sock"), filepath.Join(root, "store", "events.db"), logPath)
+	if err != nil {
+		t.Fatalf("openLogger = %v, want nil", err)
+	}
+	defer closeLog()
+	log.Log(logging.Fields{Operation: "test"}, "hello")
+
+	// Assert.
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	if !strings.Contains(string(body), `"operation":"test"`) {
+		t.Fatalf("log = %q, want the record persisted", body)
+	}
+}
+
+func TestOpenLoggerLeavesTheDatabaseDirectoryToTheDatabase(t *testing.T) {
+	// Arrange. Creating the --db parent here would make an unopenable database
+	// a BOOTSTRAP failure, ahead of the profiling surface that exists to make
+	// exactly that failure diagnosable.
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "store", "events.db")
+
+	// Act.
+	_, closeLog, err := openLogger(filepath.Join(root, "sock", "store.sock"), dbPath, filepath.Join(root, "log", "shim-store.log"))
+	if err != nil {
+		t.Fatalf("openLogger = %v, want nil", err)
+	}
+	defer closeLog()
+
+	// Assert.
+	if _, statErr := os.Stat(filepath.Dir(dbPath)); !os.IsNotExist(statErr) {
+		t.Fatalf("stat %q = %v, want the database directory left uncreated", filepath.Dir(dbPath), statErr)
+	}
+}
+
+func TestHoldPprofForDiagnosisReturnsWhenTheFailedBootIsProfiled(t *testing.T) {
+	// Arrange. The surface outlives the boot failure it exists to explain.
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+	surface, err := pprofsurface.Open("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("opening the surface: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- surface.Serve() }()
+	defer func() {
+		if closeErr := surface.Close(); closeErr != nil {
+			t.Errorf("close surface: %v", closeErr)
+		}
+		if serveErr := <-served; serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			t.Errorf("serve: %v", serveErr)
+		}
+	}()
+
+	// Act. The profile request is the signal; nothing waits on elapsed time.
+	response, err := http.Get("http://" + surface.Address() + pprofsurface.Path)
+	if err != nil {
+		t.Fatalf("GET the profiling index: %v", err)
+	}
+	response.Body.Close()
+	holdPprofForDiagnosis(surface, log)
+
+	// Assert.
+	if !strings.Contains(sink.String(), "the failed boot was profiled") {
+		t.Fatalf("log = %q, want the profiled-then-exiting record", sink.String())
+	}
+}
+
+func TestHoldPprofForDiagnosisHoldsNothingWhenTheSurfaceIsOff(t *testing.T) {
+	// Arrange. Off is the shipped state, and an ordinary failed boot may not
+	// pay a grace for a surface nobody asked for.
+	sink := &bytes.Buffer{}
+	log := logging.New(sink, &bytes.Buffer{}, true)
+
+	// Act.
+	holdPprofForDiagnosis(nil, log)
+
+	// Assert.
+	if strings.Contains(sink.String(), "holding the profiling surface open") {
+		t.Fatalf("log = %q, want no hold recorded", sink.String())
+	}
+}
+
+func TestReportFatalWritesABootstrapFailureAsJSON(t *testing.T) {
+	// Arrange. This is the one path that may report before the logger exists.
 	var stderr bytes.Buffer
-	reportFatal(err, &stderr)
+
+	// Act.
+	reportFatal(bootstrapError{errors.New("opening log: permission denied")}, &stderr)
+
+	// Assert.
 	var record map[string]any
-	if decodeErr := json.Unmarshal(stderr.Bytes(), &record); decodeErr != nil {
-		t.Fatalf("bootstrap failure is not JSON: %v: %q", decodeErr, stderr.String())
+	if err := json.Unmarshal(stderr.Bytes(), &record); err != nil {
+		t.Fatalf("bootstrap failure is not JSON: %v: %q", err, stderr.String())
 	}
 	if record["operation"] != "store.bootstrap" || record["level"] != "error" {
-		t.Fatalf("bootstrap failure record = %#v", record)
+		t.Fatalf("record = %#v, want the store.bootstrap error record", record)
 	}
-	stderr.Reset()
+}
+
+func TestReportFatalStaysSilentForAPostBootstrapFailure(t *testing.T) {
+	// Arrange. Everything after bootstrap already reached the canonical log.
+	var stderr bytes.Buffer
+
+	// Act.
 	reportFatal(errors.New("runtime failure"), &stderr)
+
+	// Assert.
 	if stderr.Len() != 0 {
-		t.Fatalf("post-bootstrap failure bypassed canonical logger: %q", stderr.String())
+		t.Fatalf("stderr = %q, want nothing: the canonical logger owns this failure", stderr.String())
 	}
 }
 
-func TestRunHealthCheckAlwaysWritesExactlyOneResult(t *testing.T) {
-	// Arrange: the probe's protocol was deleted, so every invocation is now a
-	// client failure — but doctor still parses exactly one Result object from
-	// stdout, and that contract is what this asserts.
-	root := t.TempDir()
-	var stdout, stderr bytes.Buffer
+func TestLogProcessExitNamesACleanExit(t *testing.T) {
+	// Arrange.
+	var file, stderr bytes.Buffer
+	log := logging.New(&file, &stderr, false).With(logging.Fields{Component: "store"})
+	var err error
 
-	// Act
-	exitCode := runHealthCheck(filepath.Join(root, "missing.sock"), filepath.Join(root, "shim-store.log"), "doctor-123", time.Second, &stdout, &stderr)
+	// Act.
+	logProcessExit(log, &err)
 
-	// Assert
-	if exitCode != 17 {
-		t.Fatalf("runHealthCheck exit = %d, want 17", exitCode)
-	}
-	if strings.Count(stdout.String(), "\n") != 1 {
-		t.Fatalf("stdout must contain exactly one JSON object: %q", stdout.String())
-	}
-	var result struct {
-		RequestID    string `json:"request_id"`
-		FailureClass string `json:"failure_class"`
-		Healthy      bool   `json:"healthy"`
-		Reason       string `json:"reason"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		t.Fatalf("stdout is not Result JSON: %v: %q", err, stdout.String())
-	}
-	if result.RequestID != "doctor-123" || result.FailureClass != "client_failure" || result.Healthy {
-		t.Fatalf("Result = %+v, want a correlated client_failure", result)
-	}
-	if !strings.Contains(result.Reason, "no health rpc") {
-		t.Fatalf("reason = %q, want it to name the deleted protocol", result.Reason)
+	// Assert.
+	record := decodeStoreRecords(t, &file)[0]
+	if record.Operation != "exit" || record.Level != "info" || record.Message != "shim-store exiting cleanly" {
+		t.Fatalf("record = %#v, want a clean exit trace", record)
 	}
 }
 
-func TestRunHealthCheckWritesResultWhenLoggerBootstrapFails(t *testing.T) {
-	root := t.TempDir()
-	blocked := filepath.Join(root, "blocked")
-	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	exitCode := runHealthCheck(filepath.Join(root, "missing.sock"), filepath.Join(blocked, "shim-store.log"), "doctor-123", time.Second, &stdout, &stderr)
-	if exitCode != 17 {
-		t.Fatalf("runHealthCheck exit = %d, want 17", exitCode)
-	}
-	var result struct {
-		RequestID    string `json:"request_id"`
-		FailureClass string `json:"failure_class"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		t.Fatalf("logger bootstrap failure omitted Result JSON: %v: %q", err, stdout.String())
-	}
-	if result.RequestID != "doctor-123" || result.FailureClass != "client_failure" {
-		t.Fatalf("Result = %+v, want correlated client_failure", result)
-	}
-}
+func TestLogProcessExitNamesAFailedExit(t *testing.T) {
+	// Arrange.
+	var file, stderr bytes.Buffer
+	log := logging.New(&file, &stderr, false).With(logging.Fields{Component: "store"})
+	err := errors.New("accept failed")
 
-func TestLogProcessExitNamesCleanOrErrorExit(t *testing.T) {
-	// Arrange
-	for _, tc := range []struct {
-		name        string
-		err         error
-		wantLevel   string
-		wantMessage string
-	}{
-		{name: "clean", err: nil, wantLevel: "info", wantMessage: "shim-store exiting cleanly"},
-		{name: "error", err: errors.New("accept failed"), wantLevel: "error", wantMessage: "shim-store exiting: accept failed"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var file, stderr bytes.Buffer
-			log := logging.New(&file, &stderr, false).With(logging.Fields{Component: "store"})
+	// Act.
+	logProcessExit(log, &err)
 
-			// Act
-			logProcessExit(log, &tc.err)
-
-			// Assert
-			var record struct {
-				Level     string `json:"level"`
-				Operation string `json:"operation"`
-				Message   string `json:"message"`
-			}
-			if err := json.Unmarshal(file.Bytes(), &record); err != nil {
-				t.Fatalf("exit trace is not JSON: %v: %q", err, file.String())
-			}
-			if record.Operation != "exit" || record.Level != tc.wantLevel || record.Message != tc.wantMessage {
-				t.Fatalf("exit trace = %#v, want operation=exit level=%q message=%q", record, tc.wantLevel, tc.wantMessage)
-			}
-		})
+	// Assert.
+	record := decodeStoreRecords(t, &file)[0]
+	if record.Level != "error" || record.Message != "shim-store exiting: accept failed" {
+		t.Fatalf("record = %#v, want the failure named in the exit trace", record)
 	}
 }
 
 // TestLogProcessExitLogsThenRepanics proves the exit trace narrates a panic
-// without recovering it: logProcessExit must remain deferred directly (not
+// without recovering it: logProcessExit must stay deferred directly (not
 // wrapped) for its own recover() to observe the panic, so this drives it
-// through a real deferred panic rather than calling it as a plain function.
+// through a real deferred panic rather than a plain call.
 func TestLogProcessExitLogsThenRepanics(t *testing.T) {
-	// Arrange
+	// Arrange.
 	var file, stderr bytes.Buffer
 	log := logging.New(&file, &stderr, false).With(logging.Fields{Component: "store"})
 	var recovered any
 
-	// Act
+	// Act.
 	func() {
 		defer func() { recovered = recover() }()
 		func() {
@@ -154,54 +314,12 @@ func TestLogProcessExitLogsThenRepanics(t *testing.T) {
 		}()
 	}()
 
-	// Assert
+	// Assert.
 	if recovered != "invariant violated" {
 		t.Fatalf("re-panicked value = %v, want the original panic to survive the trace", recovered)
 	}
-	var record struct {
-		Level   string `json:"level"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(file.Bytes(), &record); err != nil {
-		t.Fatalf("panic exit trace is not JSON: %v: %q", err, file.String())
-	}
+	record := decodeStoreRecords(t, &file)[0]
 	if record.Level != "error" || record.Message != "shim-store exiting: panic: invariant violated" {
-		t.Fatalf("panic exit trace = %#v", record)
-	}
-}
-
-func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
-	var file, stderr bytes.Buffer
-	log := logging.New(&file, &stderr, false).With(logging.Fields{
-		Component:    "store",
-		DatabasePath: "/tmp/events.db",
-		Socket:       "/tmp/store.sock",
-	})
-	want := errors.New("accept failed")
-
-	err := runLogged(log, "serve", func() error { return want })
-	if !errors.Is(err, want) {
-		t.Fatalf("runLogged error = %v, want %v", err, want)
-	}
-	for sink, got := range map[string]string{"file": file.String(), "stderr": stderr.String()} {
-		if count := strings.Count(got, "runtime operation failed: accept failed"); count != 1 {
-			t.Fatalf("%s error record count = %d, output=%q", sink, count, got)
-		}
-		var record struct {
-			Operation string         `json:"operation"`
-			Level     string         `json:"level"`
-			Context   map[string]any `json:"context"`
-		}
-		if err := json.Unmarshal([]byte(got), &record); err != nil {
-			t.Fatalf("%s record is not JSON: %v", sink, err)
-		}
-		if record.Operation != "serve" || record.Context["db"] != "/tmp/events.db" || record.Context["socket"] != "/tmp/store.sock" {
-			t.Fatalf("%s missing canonical context: %#v", sink, record)
-		}
-		// Both callers end the process; an omitted level would persist as info
-		// and hide a fatal serve failure from every warning sweep.
-		if record.Level != "error" {
-			t.Fatalf("%s runtime-failure level = %q, want error", sink, record.Level)
-		}
+		t.Fatalf("record = %#v, want the panic narrated", record)
 	}
 }

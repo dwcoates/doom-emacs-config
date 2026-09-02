@@ -1,5 +1,17 @@
 package handler
 
+// transcript.go — the session transcript: the record of one conversation as the
+// harness wrote it to disk.
+//
+// IT IS THE ONLY PRODUCER OF A CONVERSATION'S CONTENT. The live SDK stream is
+// first to know and owns turn LIFECYCLE, but what the vendor itself recorded is
+// what this reads back — so content becomes durable a beat after it is spoken,
+// and that cost is accepted.
+//
+// A stop_hook_summary is NOT a turn boundary and is never read as one: it is
+// written after the turn's result and can be delayed past the next accepted
+// prompt, so only the stream plane owns turn lifecycle.
+
 import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
@@ -7,32 +19,28 @@ import (
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// SessionTranscriptHandler reads a session transcript: the record of one
-// conversation as the harness wrote it to disk.
-//
-// IT IS THE ONLY PRODUCER OF A CONVERSATION'S CONTENT, and that is a deliberate
-// consequence of the lineage model rather than a division of labour. A message
-// must state its parent, and the live SDK stream carries no parent pointer, so
-// the shim cannot write one; only the file the CLI itself wrote has the chain.
-// The cost, accepted: content becomes durable a beat after it is spoken.
-//
-// A stop_hook_summary is NOT a turn boundary and is never read as one. It is
-// written after the turn's result and can be delayed past the next accepted
-// prompt, so only the live shim's stream plane owns turn lifecycle.
+// SessionTranscriptHandler reads a session transcript.
 type SessionTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
+	// obs is the reader's callbacks, adopted one at a time and installed on the
+	// converter once, at construction: a converter has exactly one observer, and
+	// two independent adoptions must not overwrite each other.
+	obs *seamObserver
 }
 
 // NewSessionTranscriptHandler builds a handler with its own converter.
 func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 	log.With(logging.Context{Operation: "transcript-handler-new"}).LogVerbose("constructing session transcript handler")
-	return &SessionTranscriptHandler{conv: convert.New(log), log: log}
+	obs := &seamObserver{}
+	conv := convert.New(log)
+	conv.SetObserver(obs)
+	return &SessionTranscriptHandler{conv: conv, log: log, obs: obs}
 }
 
 // Handle implements tail.Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
-	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 
 	// A compaction boundary at the very end of a batch is UNSETTLED: its summary
@@ -42,65 +50,65 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	originalCount := len(frames)
 	frames = frames[:h.holdCount(frames, ctx)]
 	if len(frames) != originalCount {
-		h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
-			Log("deferred compact boundary frames=%d processed=%d held_deliveries=%d held_offset=%d",
-				originalCount, len(frames), ctx.HeldDeliveries, ctx.HeldOffset)
+		h.log.With(handleCtx("hold", ctx)).
+			With(logging.Context{Offset: logging.Off(ctx.HeldOffset)}).
+			Log("deferred the trailing compaction boundary: frames=%d processed=%d held_deliveries=%d",
+				originalCount, len(frames), ctx.HeldDeliveries)
 	}
 
-	var out []*storev1.StoreEntry
-	for i, frame := range frames {
-		at := attribute(ctx, frame.Offset)
-		if frame.ParseErr != nil {
-			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID, Level: "warn"}).
-				Log("parse failure at offset=%d; the record is stored whole with no path to a page: %v", frame.Offset, frame.ParseErr)
-			out = append(out, convert.UnparsedEntry(at, frame.Raw, frame.ParseErr))
-			continue
-		}
-		out = append(out, h.conv.Line(frame.Obj, at, lookahead(frames, i+1))...)
-	}
-	logUnconverted(h.log, ctx, out)
-	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).
+	out := convertFrames(h.conv, h.log, frames, ctx)
+	h.log.With(handleCtx("transcript-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
 }
 
-// lookahead returns the decoded record that FOLLOWS a frame in the file, or nil
-// past the end of the batch. It exists for one record: a compaction boundary,
-// whose summary the harness writes as the following line.
-func lookahead(frames []tail.Frame, i int) map[string]any {
-	if i < 0 || i >= len(frames) {
-		return nil
+// convertFrames runs the converter over a batch, turning an unreadable line into
+// durable evidence rather than a silent drop.
+func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
+	var out []*storev1.StoreEntry
+	for i, frame := range frames {
+		at := attribute(ctx, frame.Offset)
+		if frame.ParseErr != nil {
+			log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
+				Log("parse failure; the record is stored whole with no path to a page: %v", frame.ParseErr)
+			unparsed := convert.UnparsedEntry(at, frame.Raw, frame.ParseErr)
+			logResidue(log, ctx, frame.Offset, []*storev1.StoreEntry{unparsed})
+			out = append(out, unparsed)
+			continue
+		}
+		converted := conv.Line(frame.Obj, at, lookahead(frames, i+1))
+		logResidue(log, ctx, frame.Offset, converted)
+		out = append(out, converted...)
 	}
-	return frames[i].Obj
+	return out
 }
 
 // maxHoldDeliveries is the SILENCE BOUND on a held compaction boundary: how many
 // further deliveries the handler waits for a summary that never arrives before
 // converting the boundary without one.
 //
-// It is ONE. The two lines are written about a millisecond apart against a poll
-// interval three orders of magnitude longer, so a single further scan is already
-// an enormous margin over the gap being covered. Every additional scan of
-// holding only delays the truncation render for the sessions that genuinely stop
-// at a boundary, and buys nothing for the ones that do not.
+// IT IS ONE, and the hold is bounded to exactly one redelivery by ruling. The two
+// lines are written about a millisecond apart against a poll interval three
+// orders of magnitude longer, so a single further scan is already an enormous
+// margin over the gap being covered. Every additional scan of holding only delays
+// the cut for the sessions that genuinely stop at a boundary.
 const maxHoldDeliveries = 1
 
 // holdCount returns how many frames may be converted NOW, and records on ctx
 // whatever it deferred.
 //
-// It defers exactly one frame, the batch's last, and only when that frame is a
-// compaction boundary — the sole record in a transcript whose meaning depends on
-// a line that may not be written yet. Everything else is settled by its own
-// bytes and is converted the moment it is read.
+// It defers exactly one frame, the batch's LAST, and only when that frame is a
+// compaction boundary — the sole record whose meaning depends on a line that may
+// not be written yet. Everything else is settled by its own bytes.
 //
-// A deferral is only ever taken when the READER promises to hand the frame back
-// (ctx.Redelivers). A handler given one standalone batch has no next delivery,
-// so holding there would drop the compaction silently; that caller gets the
+// A DEFERRAL IS ONLY EVER TAKEN WHEN THE READER PROMISES TO HAND THE FRAME BACK
+// (ctx.Redelivers). A handler given one standalone batch has no next delivery, so
+// holding there would drop the compaction silently; that caller gets the
 // summary-less conversion, loud log and all.
 func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) int {
 	n := len(frames)
-	// What was deferred LAST delivery. Both fields are rewritten below on every
-	// call, so a stale hold can never outlive the batch that took it.
+	// What was deferred LAST delivery. Both fields are rewritten on every call,
+	// so a stale hold can never outlive the batch that took it.
 	heldOffset, heldFor := ctx.HeldOffset, ctx.HeldDeliveries
 	ctx.HeldOffset, ctx.HeldDeliveries = 0, 0
 	if n == 0 || !ctx.Redelivers {
@@ -117,7 +125,9 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 	}
 	if heldOffset == last.Offset && heldFor >= maxHoldDeliveries {
 		// Held once already and the file still says nothing after it. Stop
-		// waiting: the caller converts it without a summary, loudly.
+		// waiting: the boundary converts without a summary, loudly.
+		h.log.With(handleWarn("hold", ctx)).With(logging.Context{Offset: logging.Off(last.Offset)}).
+			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it without one", heldFor)
 		return n
 	}
 	if heldOffset == last.Offset {

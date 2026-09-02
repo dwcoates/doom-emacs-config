@@ -1,71 +1,62 @@
 package convert
 
-// journal.go — a workflow's own record of its steps.
+// journal.go — WORKFLOW IS KICKED THIS WAVE.
 //
-// A workflow journal is the OUTPUT of detached work, not a conversation of its
-// own: the run has a card in the feed and its journal is what accumulates into
-// that card. So each record becomes a DetachedWorkProgressed delta on the run's
-// message, and the terminal record ends it.
+// The vocabulary stays in the contract and the files are still discovered and
+// cursor-tailed — nothing on disk is ever dropped — but no workflow FEATURE is
+// implemented, so every journal record converts to residue rather than to an
+// AgentWorkflow frame nobody consumes yet. Filing them as `unknown` would say
+// "we do not model this", which is false; the model exists and the FEATURE does
+// not. So they are vendor_specific: understood, deliberately not carried, and the
+// follow-up they ask for is the workflow wave itself.
 
 import (
-	"strings"
-
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
-// JournalRecord converts one workflow-journal object into the progress it adds
-// to the run's card.
+// JournalRecord converts one workflow-journal object.
 //
-// A record whose type this reader does not know is stored unconverted rather
-// than rendered as a blank step: a step that shows nothing is worse than a step
-// a later schema can still recover, because only one of the two is reversible.
-func (c *Converter) JournalRecord(record map[string]any, at Attribution, taskID string) []*storev1.StoreEntry {
-	if taskID == "" {
-		// Without the run's identity there is no card to append to, and there is
-		// no arm for a progress record that names no work.
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
-			Log("journal record at offset=%d has no run identity; stored unconverted", at.Offset)
-		return []*storev1.StoreEntry{UnknownEntry(at, str(record["type"]), "type", record)}
-	}
+// A journal holds exactly two record shapes — {started, key, agentId} and
+// {result, key, agentId, result} — and nothing run-scoped: NOTHING IN A JOURNAL
+// EVER SAYS THE RUN FINISHED, which is why no terminal is minted from one.
+func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID string) []*storev1.StoreEntry {
+	at.RecordUUID = str(record["uuid"])
 	kind := str(record["type"])
 	switch kind {
 	case "started", "result":
-		return []*storev1.StoreEntry{DetachedProgress(at, taskID, journalLine(kind, record))}
+		c.log.With(at.ctxFor("journal-record")).With(logging.Context{BookAgentID: str(record["agentId"])}).
+			LogVerbose("workflow journal %s record for run=%s held as residue (workflow is kicked this wave)", kind, runID)
+		return []*storev1.StoreEntry{VendorSpecificEntry(at, "workflow_journal/"+kind, record)}
 	default:
-		c.log.With(logging.Context{Operation: "journal-record", Path: at.Path, Session: at.SessionID, Level: "warn"}).
-			Log("journal record type=%q at offset=%d is not modeled; stored unconverted", kind, at.Offset)
+		c.log.With(at.ctxWarn("journal-record")).
+			Log("workflow journal record type=%q is not one of the two journal shapes; stored as unknown residue", kind)
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
 
-// journalLine renders one journal record as the line it contributes to the run's
-// output.
+// workflowAgentTranscriptKind is the DECLARED disposition of a record read from
+// a workflow's per-agent transcript (`wf_<id>/agent-<id>.jsonl`).
 //
-// THE RENDERING IS LOSSY AND THAT IS A KNOWN COST. DetachedWorkProgressed
-// carries a string, because output is what a card shows — so a journal record's
-// structure does not survive into the store. See the gap note on partially
-// convertible records: an Entry can carry an external half OR an unconverted
-// half, so there is nowhere to put the verbatim record alongside its rendering.
-func journalLine(kind string, record map[string]any) string {
-	var b strings.Builder
-	b.WriteString(kind)
-	if key := str(record["key"]); key != "" {
-		b.WriteString(" ")
-		b.WriteString(key)
-	}
-	switch result := record["result"].(type) {
-	case string:
-		if result != "" {
-			b.WriteString(": ")
-			b.WriteString(result)
-		}
-	case map[string]any:
-		if status := str(result["status"]); status != "" {
-			b.WriteString(": ")
-			b.WriteString(status)
-		}
-	}
-	b.WriteString("\n")
-	return b.String()
+// IT IS DECLARED, NOT A CLASSIFICATION FAILURE. These files hold ordinary
+// TRANSCRIPT records — assistant, user, system — not the two journal shapes, so
+// running them through JournalRecord filed every one of them as `unknown`:
+// "we parsed this and do not model it", which is false twice over. The shapes
+// ARE modeled; what is missing is the workflow FEATURE, and `unknown` is the
+// query built to find real modelling gaps. The day workflow ingestion lands,
+// every one of these rows is findable by this kind.
+const workflowAgentTranscriptKind = "workflow/agent_transcript"
+
+// WorkflowAgentRecord converts one record of a workflow's PER-AGENT transcript
+// as declared workflow residue.
+//
+// WORKFLOW IS KICKED, so nothing here is converted into a feed row and nothing
+// reaches a page. The bytes land whole, keyed by the vendor's own record uuid
+// where it has one, so the stream plane's copy of the same record collapses onto
+// the same row rather than standing beside it.
+func (c *Converter) WorkflowAgentRecord(record map[string]any, at Attribution) []*storev1.StoreEntry {
+	at.RecordUUID = str(record["uuid"])
+	c.log.With(at.ctxFor("workflow-agent-record")).
+		LogVerbose("workflow per-agent transcript record type=%q held as declared residue (workflow is kicked this wave)", str(record["type"]))
+	return []*storev1.StoreEntry{VendorSpecificEntry(at, workflowAgentTranscriptKind, record)}
 }

@@ -1,42 +1,50 @@
-// Package db owns the shim-store SQLite database: the schema, WAL
-// configuration, schema_meta versioning, and the transactional ingest / replay
-// operations. It knows nothing about vendors; it extracts only the envelope
-// columns needed to index otherwise-opaque payload blobs.
+// Package db owns the shim-store SQLite database: the four-table schema, its
+// nuke-never-migrate lifecycle, the transactional WriteBatch routing, and the
+// indexed reads the store serves.
 //
-// WHAT IT PERSISTS IS store.v1.StoreEntry. The `entry` and `unconverted`
-// tables below still carry the retired record's addressing — a per-session
-// `seq`, a `top_level_message_id` owner — and StoreEntry supplies none of it,
-// so record persistence is REFUSED rather than guessed at (see
-// ErrRecordPersistenceUnreconciled in ingest.go). The `cursor` table is
-// unaffected: store.v1.CursorState is field-for-field the retired
-// agentshim.v1.CursorState, so the sidecar's reader position still commits.
+// WHAT IT PERSISTS IS store.v1.StoreEntry, and it opens that envelope EXACTLY
+// far enough to route it — which table the write touches, which book a page
+// line belongs to, and which lifecycle row a terminal closes. The frame itself
+// stays a serialized blob: the activity vocabulary is conversation CONTENT, and
+// unpacking it here would drag every conversation.v1 change into DDL.
 //
-// The schema is left standing rather than dropped because the store is nuked
-// and recreated, never migrated: the shape the reconciled read and write paths
-// will need is a design decision, and replacing this DDL with a guess would put
-// a second unreviewed schema on disk.
+// TWO ORDERINGS, AND THEY ARE NOT THE SAME ORDERING.
+//   - `position` is FIRST-INSERT order. It is the page order and it is what a
+//     StoreItemPointer encodes, so a unit that settles mid-walk cannot teleport
+//     across a continuation and a pointer stays valid across every upsert of
+//     the row it names.
+//   - `write_seq` is a GLOBAL monotonic write ordinal, bumped on every insert
+//     AND every upsert. It is the watch pin, it never reaches the wire, and it
+//     is what makes an upsert of an OLD row stream to a live watcher at its
+//     ORIGINAL pointer.
 package db
 
 import (
+	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"agentrepl/shim-store/internal/logging"
 	_ "modernc.org/sqlite"
 )
 
-// SchemaVersion is the current schema_meta version. Bump it and append a step
-// to migrationSteps for any schema change.
+// SchemaVersion is the shape this binary creates. A database stamped at any
+// other value is DROPPED and recreated.
 //
-// BACK TO 1, AND THE LINEAGE RESTARTS HERE. The old `event` table held the
-// retired `Event` envelope, and every row of it is gone with the store that
-// held them — the database this binary opens is empty by design. There is
-// therefore no version-3 database to migrate FROM, so carrying its numbering
-// forward would claim a continuity that does not exist. A database still
-// stamped at the old lineage is refused loudly by migrate() rather than read.
-const SchemaVersion = 1
+// IT IS NOT A MIGRATION LINEAGE. There is no ALTER anywhere in this package
+// and there never will be: the store is nuked, never migrated, so the version
+// answers exactly one question — "did this binary create what is on disk?" —
+// and the only remedy for "no" is to recreate it.
+const SchemaVersion = 5
+
+// nowMillis is the store's wall clock in unix millis.
+func nowMillis() int64 { return time.Now().UnixMilli() }
 
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
@@ -46,17 +54,22 @@ type DB struct {
 	// at warn. Non-positive disables the reporting entirely, which only an
 	// explicit Options caller can ask for.
 	slowQuery time.Duration
+	// now is the clock every written timestamp is taken from. Injectable so a
+	// test can assert an exact instant without sleeping for one.
+	now func() int64
 }
 
 // Options are the injectable knobs Open resolves from the environment.
 type Options struct {
 	// SlowQuery is the slow-query threshold; non-positive disables reporting.
 	SlowQuery time.Duration
+	// Now overrides the wall clock. Zero value means time.Now.
+	Now func() int64
 }
 
-// Open opens (creating if absent) the event database at path with WAL enabled
-// and runs migrations to SchemaVersion. path may be an on-disk file; callers
-// running tests pass a temp-dir path so WAL is genuinely exercised.
+// Open opens (creating if absent) the store database at path with WAL enabled
+// and brings it to SchemaVersion, dropping whatever is there if it does not
+// already match.
 //
 // The slow-query threshold is resolved from the environment here. A malformed
 // value aborts the open rather than running the shipped default underneath an
@@ -65,7 +78,8 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 	slowQuery, err := SlowQueryFromEnv()
 	if err != nil {
 		if log != nil {
-			log.Log(logging.Fields{Operation: "open", DatabasePath: path, Level: "error"}, "slow-query threshold rejected: %v", err)
+			log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+				"slow-query threshold rejected: %v", err)
 		}
 		return nil, err
 	}
@@ -79,25 +93,30 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 	if log == nil {
 		panic("shim-store db: nil logger")
 	}
-	log.LogVerbose(logging.Fields{Operation: "open", DatabasePath: path, Table: "schema_meta"}, "opening SQLite database")
+	log.LogVerbose(logging.Fields{Operation: "store.db.open", DatabasePath: path}, "opening SQLite database")
+
+	// THE LAYER THAT OWNS THE FILE OWNS ITS DIRECTORY. Nothing upstream may
+	// create it: doing so would move an unwritable --db path's failure ahead of
+	// the profiling surface the boot order opens first, exactly so a wedged or
+	// doomed database step stays diagnosable.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+			"creating the database directory failed: %v", err)
+		return nil, storagef(err, "creating the directory for %q", path)
+	}
+
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
-	// concurrent readers during live-tail; NORMAL sync is durable under WAL;
+	// concurrent readers during a live tail; NORMAL sync is durable under WAL;
 	// busy_timeout guards the brief window a checkpoint holds the writer.
 	//
-	// _txlock=immediate makes Begin() issue BEGIN IMMEDIATE, which is what
-	// actually makes busy_timeout apply to Ingest. Ingest reads (SELECT
-	// MAX(seq)) before it writes, so under the DEFERRED default the
-	// transaction takes a WAL READ snapshot and only later tries to upgrade to
-	// a writer — and SQLite refuses to run the busy handler for an upgrade:
-	//   - another connection committed since the snapshot -> SQLITE_BUSY_SNAPSHOT
-	//     (517), returned immediately because retrying can never succeed;
-	//   - a writer holds the lock at upgrade time -> SQLITE_BUSY (5), returned
-	//     immediately because waiting mid-upgrade would deadlock.
-	// One store process serves every live shim on its own goroutine and pooled
-	// connection, so those collisions are routine — and a rejected batch is
-	// PERMANENT loss (the shim's store-client drops it: no spill, no retry).
-	// Taking the write lock at BEGIN removes the upgrade entirely: contenders
-	// queue on busy_timeout instead of erroring.
+	// _txlock=immediate makes every Begin() issue BEGIN IMMEDIATE. Both the
+	// write path and the read path need it: WriteBatch reads (MAX(write_seq),
+	// the write_id probe) before it writes, and OpenPage must take its watch
+	// pin in the SAME snapshot as the page it answers with. Under the DEFERRED
+	// default such a transaction takes a WAL READ snapshot and only later tries
+	// to upgrade to a writer — and SQLite refuses to run the busy handler for
+	// an upgrade, so a contending writer is an immediate SQLITE_BUSY rather
+	// than a wait. Taking the lock at BEGIN removes the upgrade entirely.
 	dsn := "file:" + path + "?" + url.Values{
 		"_pragma": {
 			"journal_mode(WAL)",
@@ -108,186 +127,364 @@ func OpenWithOptions(path string, log *logging.Logger, opts Options) (*DB, error
 		"_txlock": {"immediate"},
 	}.Encode()
 
-	sqldb, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		log.Log(logging.Fields{Operation: "open", DatabasePath: path, Level: "error"}, "opening SQLite connection failed: %v", err)
-		return nil, fmt.Errorf("shim-store db: opening %q: %w", path, err)
+	clock := opts.Now
+	if clock == nil {
+		clock = nowMillis
 	}
-	if err := sqldb.Ping(); err != nil {
-		sqldb.Close()
-		log.Log(logging.Fields{Operation: "ping", DatabasePath: path, Level: "error"}, "SQLite ping failed: %v", err)
-		return nil, fmt.Errorf("shim-store db: pinging %q: %w", path, err)
+
+	d, err := openAt(dsn, path, log, opts, clock)
+	if err == nil {
+		return finishOpen(d, log, path, opts)
 	}
-	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery}
-	if err := d.migrate(); err != nil {
-		sqldb.Close()
-		log.Log(logging.Fields{Operation: "migrate", DatabasePath: path, Table: "schema_meta", Level: "error"}, "schema migration failed: %v", err)
+
+	// THE FILE IS IN THE WAY, SO IT GOES. A --db path this binary cannot even
+	// read as a database is the SAME situation as a schema this binary did not
+	// create, and the store answers it the same way: the store holds a cache of
+	// what the vendor and the shim already know how to produce again, so a file
+	// worth nothing costs a remove to be rid of. Refusing to boot instead would
+	// wedge the service permanently on a truncated file or a half-written copy —
+	// an outage that needs a human with a shell, in exchange for preserving
+	// bytes nobody can read.
+	//
+	// ONLY ONCE, AND ONLY FOR THAT. A second failure after a clean recreate is a
+	// real problem — an unwritable directory, a full disk — and is returned.
+	//
+	// AND ONLY FOR A REGULAR FILE. Unlinking whatever happens to sit at an
+	// operator-supplied path is how a service deletes somebody's data: a
+	// directory at --db is a misconfiguration to report, not a database to
+	// replace, and removing it would silently destroy whatever it contained.
+	// The mode is proved before anything is removed, exactly as the listener
+	// proves a socket's mode before reclaiming it.
+	if !isRegularFile(path) {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: err.Error()},
+			"the database path cannot be opened and is not a regular file, so it will not be replaced: %v", err)
 		return nil, err
 	}
-	log.Log(logging.Fields{Operation: "open", DatabasePath: path, Table: "entry"},
-		"SQLite database ready slow_query_threshold_ms=%d", opts.SlowQuery.Milliseconds())
+	log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn", ErrorCause: err.Error()},
+		"the database file cannot be read by this binary (%v) — removing it and its WAL siblings and recreating; the store is nuked, never migrated", err)
+	if removeErr := removeDatabaseFiles(path); removeErr != nil {
+		log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path, Level: "error", ErrorCause: removeErr.Error()},
+			"removing the unreadable database failed: %v", removeErr)
+		return nil, removeErr
+	}
+	d, err = openAt(dsn, path, log, opts, clock)
+	if err != nil {
+		return nil, err
+	}
+	return finishOpen(d, log, path, opts)
+}
+
+// finishOpen records the ready state. It is the one exit both the first attempt
+// and the post-nuke attempt take.
+func finishOpen(d *DB, log *logging.Logger, path string, opts Options) (*DB, error) {
+	log.Log(logging.Fields{Operation: "store.db.open", DatabasePath: path},
+		"SQLite database ready schema_version=%d slow_query_threshold_ms=%d", SchemaVersion, opts.SlowQuery.Milliseconds())
 	return d, nil
+}
+
+// openAt opens the handle and brings it to SchemaVersion, closing the handle if
+// either step fails so the caller may remove the file underneath it.
+func openAt(dsn, path string, log *logging.Logger, opts Options, clock func() int64) (*DB, error) {
+	sqldb, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, storagef(err, "opening %q", path)
+	}
+	if err := sqldb.Ping(); err != nil {
+		sqldb.Close() //nolint:errcheck // the open already failed
+		return nil, storagef(err, "pinging %q", path)
+	}
+	d := &DB{sql: sqldb, log: log, slowQuery: opts.SlowQuery, now: clock}
+	if err := d.ensureSchema(context.Background(), path); err != nil {
+		sqldb.Close() //nolint:errcheck // the open already failed
+		return nil, err
+	}
+	return d, nil
+}
+
+// isRegularFile reports whether the path is an ordinary file this store may
+// replace. A directory, a device, a symlink to either — anything that is not a
+// plain file — is somebody else's, and is never removed.
+func isRegularFile(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// removeDatabaseFiles removes the database and the two WAL siblings SQLite
+// keeps beside it.
+//
+// THE SIBLINGS MUST GO TOO. A -wal or -shm left behind belongs to the file that
+// was just deleted, and SQLite opening a fresh database next to a stale WAL is
+// how a "recreated" store comes up carrying fragments of the one it replaced.
+func removeDatabaseFiles(path string) error {
+	for _, name := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return storagef(err, "removing the unreadable database file %q", name)
+		}
+	}
+	return nil
 }
 
 // Close closes the underlying handle.
 func (d *DB) Close() error {
-	d.log.LogVerbose(logging.Fields{Operation: "close"}, "closing SQLite database")
+	d.log.LogVerbose(logging.Fields{Operation: "store.db.close"}, "closing SQLite database")
 	if err := d.sql.Close(); err != nil {
-		d.log.Log(logging.Fields{Operation: "close", Level: "error"}, "closing SQLite database failed: %v", err)
-		return err
+		d.log.Log(logging.Fields{Operation: "store.db.close", Level: "error", ErrorCause: err.Error()},
+			"closing SQLite database failed: %v", err)
+		return storagef(err, "closing the database")
 	}
-	d.log.Log(logging.Fields{Operation: "close"}, "SQLite database closed")
+	d.log.Log(logging.Fields{Operation: "store.db.close"}, "SQLite database closed")
 	return nil
 }
 
-// baseDDL is the version-1 shape, and stays frozen at it forever. Every later
-// change is a numbered step in migrationSteps instead, because a database
-// created by an older binary already HAS these objects and would never see an
-// edit made here — writing the new shape into the CREATE TABLE would give
-// fresh and migrated databases two different schemas.
-// NO WRITER REACHES THE TWO RECORD TABLES ANY MORE. `entry` and `unconverted`
-// were shaped around the retired record's two halves: `entry` held records with
-// an external half, keyed (session_id, seq) and paged by top_level_message_id;
-// `unconverted` held the residue with no external half at all, deliberately
-// unreachable from every read. store.v1's StoreEntry supplies none of those
-// columns — it names no session, carries no position, and states its book as a
-// conversation.v1.AgentId — so ingest refuses record writes and both tables
-// stay empty until the shape they should take is decided.
+// schemaDDL is the WHOLE schema, and it is the only DDL in this package.
 //
-// The `cursor` table is the one that is still live, and it is unchanged.
-const baseDDL = `
-CREATE TABLE IF NOT EXISTS entry (
-  session_id           TEXT    NOT NULL,
-  seq                  INTEGER NOT NULL,
+// NO `IF NOT EXISTS` ANYWHERE, on purpose: this statement only ever runs
+// against a database that was just emptied, and a CREATE that silently
+// tolerated an existing object is exactly how two binaries end up believing
+// they share a shape they do not.
+const schemaDDL = `
+CREATE TABLE entry (
+  position             INTEGER PRIMARY KEY AUTOINCREMENT,
+  upsert_key           TEXT    NOT NULL UNIQUE,
+  write_id             TEXT    NOT NULL UNIQUE,
+  write_seq            INTEGER NOT NULL,
   plane                INTEGER NOT NULL,
   kind                 TEXT    NOT NULL,
-  write_id             TEXT,
-  top_level_message_id TEXT,
-  produced_at          INTEGER NOT NULL,
-  payload              BLOB    NOT NULL,
-  PRIMARY KEY (session_id, seq)
+  book_agent_id        TEXT,
+  run_id               TEXT,
+  top_level            TEXT,
+  frame                BLOB    NOT NULL,
+  first_inserted_at_ms INTEGER NOT NULL,
+  last_written_at_ms   INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS entry_write_id
-  ON entry(session_id, write_id) WHERE write_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS entry_message_page
-  ON entry(session_id, seq DESC) WHERE top_level_message_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS entry_message_owner
-  ON entry(session_id, top_level_message_id, seq) WHERE top_level_message_id IS NOT NULL;
-CREATE TABLE IF NOT EXISTS unconverted (
-  id        INTEGER PRIMARY KEY,
-  producer  TEXT    NOT NULL,
-  write_id  TEXT,
-  kind      TEXT    NOT NULL,
-  stored_at INTEGER NOT NULL,
-  payload   BLOB    NOT NULL
+CREATE INDEX entry_book_position  ON entry(book_agent_id, position);
+CREATE INDEX entry_book_write_seq ON entry(book_agent_id, write_seq);
+CREATE INDEX entry_write_seq      ON entry(write_seq);
+CREATE INDEX entry_run_position  ON entry(run_id, position);
+CREATE INDEX entry_run_write_seq ON entry(run_id, write_seq);
+
+CREATE TABLE agent (
+  agent_id              TEXT PRIMARY KEY,
+  spawned_by_agent      TEXT,
+  spawned_by_workflow   TEXT,
+  description           TEXT,
+  prompt_text           TEXT,
+  subagent_type         TEXT,
+  requested_name        TEXT,
+  requested_model       TEXT,
+  spawn_depth           INTEGER,
+  working_dir           TEXT,
+  transcript_suppressed INTEGER,
+  isolation             TEXT,
+  forked_from_caller    INTEGER,
+  started_at_ms         INTEGER NOT NULL,
+  ended_at_ms           INTEGER,
+  terminal              BLOB
 );
-CREATE UNIQUE INDEX IF NOT EXISTS unconverted_write_id
-  ON unconverted(producer, write_id) WHERE write_id IS NOT NULL;
-CREATE TABLE IF NOT EXISTS cursor (
-  file_id    TEXT PRIMARY KEY,
-  path       TEXT    NOT NULL,
-  offset     INTEGER NOT NULL,
-  carry      BLOB,
-  updated_at INTEGER NOT NULL
+CREATE INDEX agent_live ON agent(ended_at_ms);
+
+CREATE TABLE workflow (
+  run_agent_id  TEXT PRIMARY KEY,
+  spawner_agent TEXT,
+  origin_unit   TEXT,
+  name          TEXT,
+  script        BLOB,
+  resumed_from  TEXT,
+  placement     TEXT,
+  started_at_ms INTEGER NOT NULL,
+  ended_at_ms   INTEGER,
+  terminal      BLOB
 );
-CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
+CREATE INDEX workflow_live ON workflow(ended_at_ms);
+
+-- detached_work holds THE JOIN AND NOTHING ELSE.
+--
+-- The announcement itself is a PAGE LINE of the announcing agent's book, and
+-- that page line is the one copy of what was announced: the spool path, the
+-- readability, the detach cause, the timeout. Unpacking any of it here as well
+-- would give the same fact two homes that can disagree, and the store would be
+-- re-deriving conversation content it is not entitled to interpret. What is
+-- left is exactly what the store itself filters and joins on: the handle, the
+-- kind, the origin unit a terminal closes the row through, the announcing
+-- agent, and the terminal columns.
+CREATE TABLE detached_work (
+  work_id         TEXT PRIMARY KEY,
+  kind            TEXT NOT NULL,
+  origin_unit     TEXT,
+  owner_agent     TEXT,
+  announced_at_ms INTEGER NOT NULL,
+  ended_at_ms     INTEGER,
+  terminal        BLOB
+);
+CREATE INDEX detached_work_origin ON detached_work(origin_unit);
+CREATE INDEX detached_work_live   ON detached_work(ended_at_ms);
+
+CREATE TABLE cursor (
+  file_id       TEXT PRIMARY KEY,
+  path          TEXT    NOT NULL,
+  offset        INTEGER NOT NULL,
+  carry         BLOB,
+  updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE write_ledger (
+  write_id      TEXT    PRIMARY KEY,
+  upsert_key    TEXT    NOT NULL,
+  write_seq     INTEGER NOT NULL,
+  applied_at_ms INTEGER NOT NULL
+);
+CREATE INDEX write_ledger_upsert_key ON write_ledger(upsert_key);
+
+CREATE TABLE schema_meta (version INTEGER NOT NULL);
 `
 
-// migrationStep is one ordered forward migration. `to` is the schema_meta
-// version the database carries once `ddl` has been applied; steps run in slice
-// order and each one commits atomically with its own version stamp, so an
-// interrupted upgrade resumes at exactly the step it did not finish.
-type migrationStep struct {
-	to     int
-	name   string
-	ddl    string
-	reason string
-}
+// schemaTables is the exact table set schemaDDL produces, sorted. It is
+// compared against what is on disk so a database carrying the RIGHT version
+// stamp on the WRONG shape — a half-applied create, a hand-edited file, a
+// binary that crashed between DROP and CREATE — is nuked rather than trusted.
+var schemaTables = []string{"agent", "cursor", "detached_work", "entry", "schema_meta", "workflow", "write_ledger"}
 
-// migrationSteps carries every forward migration past baseDDL, in order.
+// ensureSchema brings the database to SchemaVersion by the only means this
+// package has: dropping everything and recreating it.
 //
-// EMPTY, because the lineage restarts at the base shape (see SchemaVersion).
-// The three steps that used to live here migrated the retired `event` table,
-// and there is no database carrying it left to migrate. The mechanism stays:
-// the next schema change appends a step here and bumps SchemaVersion, and
-// migrate() refuses a bump that ships without one.
-var migrationSteps []migrationStep
-
-// migrate brings the database to SchemaVersion, loud-logging the transition.
-//
-// The base schema is applied first (it is IF NOT EXISTS throughout, so it is a
-// no-op on an existing database), then every registered step whose target is
-// above the recorded version runs in order. A database with no schema_meta row
-// is a FRESH one: it is stamped at the base version and then walks the same
-// steps as an upgrade, so a fresh database and a migrated one converge on
-// byte-identical schemas rather than on two shapes that merely look alike.
-func (d *DB) migrate() error {
-	d.log.LogVerbose(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "checking schema target_version=%d", SchemaVersion)
-	if _, err := d.sql.Exec(baseDDL); err != nil {
-		return fmt.Errorf("shim-store db: applying schema: %w", err)
+// THERE IS NO MIGRATION AND THERE IS NO BACKFILL. The store holds a cache of
+// what the vendor and the shim already know how to produce again, so a shape
+// this binary did not create is worth exactly nothing and costs a DROP to be
+// rid of. Writing an ALTER here would be the first half of a compatibility
+// surface the whole design exists to not have.
+func (d *DB) ensureSchema(ctx context.Context, path string) error {
+	current, tables, err := d.inspectSchema(ctx)
+	if err != nil {
+		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
+			"reading the on-disk schema failed: %v", err)
+		return err
 	}
-	var version int
-	row := d.sql.QueryRow(`SELECT version FROM schema_meta LIMIT 1`)
-	switch err := row.Scan(&version); err {
-	case sql.ErrNoRows:
-		const baseVersion = 1
-		if _, err := d.sql.Exec(`INSERT INTO schema_meta(version) VALUES (?)`, baseVersion); err != nil {
-			return fmt.Errorf("shim-store db: seeding schema_meta: %w", err)
-		}
-		version = baseVersion
-		d.log.Log(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "schema initialized at version=%d", version)
-	case nil:
-		if version > SchemaVersion {
-			// Either a newer binary wrote it, or it is a database from the
-			// retired `event` lineage. Both are refused for the same reason:
-			// this binary cannot state what shape those rows are in, and
-			// reading them anyway is the dual-read path the rewrite removed.
-			return fmt.Errorf("shim-store db: on-disk schema version %d is not this binary's %d — refusing to read a schema this binary did not create", version, SchemaVersion)
-		}
-	default:
-		return fmt.Errorf("shim-store db: reading schema_meta: %w", err)
-	}
-	if version == SchemaVersion {
-		d.log.LogVerbose(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "schema already current version=%d", version)
+	if current == SchemaVersion && slicesEqual(tables, schemaTables) {
+		d.log.LogVerbose(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
+			"schema already current version=%d", current)
 		return nil
 	}
-	for _, step := range migrationSteps {
-		if step.to <= version {
-			continue
-		}
-		if err := d.applyMigration(version, step); err != nil {
-			return err
-		}
-		version = step.to
+	// AN EMPTY FILE IS A FIRST CREATE, NOT A NUKE. Every fresh store — every
+	// launch on a new machine, every test process — arrives here with no
+	// tables at all, and warning about it would bury the one case that
+	// genuinely deserves the weight: a shape this binary did not create being
+	// DROPPED with whatever was in it.
+	if len(tables) == 0 {
+		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
+			"no schema on disk; creating it at version=%d tables=%v", SchemaVersion, schemaTables)
+	} else {
+		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "warn"},
+			"on-disk schema does not match this binary (found version=%d tables=%v, want version=%d tables=%v) — dropping and recreating; the store is nuked, never migrated",
+			current, tables, SchemaVersion, schemaTables)
 	}
-	// A gap between the last registered step and SchemaVersion means a bump
-	// shipped without its migration. That is a loud error, never a silent
-	// stamp: stamping would claim a shape the database does not have.
-	if version != SchemaVersion {
-		return fmt.Errorf("shim-store db: schema version %d needs migration to %d, but no migration is registered", version, SchemaVersion)
+	if err := d.nukeAndCreate(ctx, tables); err != nil {
+		d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta", Level: "error", ErrorCause: err.Error()},
+			"recreating the schema failed: %v", err)
+		return err
+	}
+	d.log.Log(logging.Fields{Operation: "store.db.schema", DatabasePath: path, Table: "schema_meta"},
+		"schema recreated at version=%d", SchemaVersion)
+	return nil
+}
+
+// inspectSchema reports the stamped version (0 when there is none) and the
+// user tables present, sorted.
+func (d *DB) inspectSchema(ctx context.Context) (int, []string, error) {
+	rows, err := d.sql.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
+	if err != nil {
+		return 0, nil, storagef(err, "listing tables")
+	}
+	var tables []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close() //nolint:errcheck // the scan already failed
+			return 0, nil, storagef(err, "scanning a table name")
+		}
+		tables = append(tables, name)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close() //nolint:errcheck // the iteration already failed
+		return 0, nil, storagef(err, "iterating table names")
+	}
+	if err := rows.Close(); err != nil {
+		return 0, nil, storagef(err, "closing the table listing")
+	}
+	sort.Strings(tables)
+
+	if !contains(tables, "schema_meta") {
+		return 0, tables, nil
+	}
+	var version int
+	switch err := d.sql.QueryRowContext(ctx, `SELECT version FROM schema_meta LIMIT 1`).Scan(&version); {
+	case err == nil:
+		return version, tables, nil
+	case errors.Is(err, sql.ErrNoRows):
+		// The table exists and claims nothing. Unstamped is not current.
+		return 0, tables, nil
+	default:
+		// A `schema_meta` whose shape this binary cannot even read is exactly
+		// the case the nuke exists for, so it is reported as version 0 rather
+		// than failing the open.
+		return 0, tables, nil
+	}
+}
+
+// nukeAndCreate drops every user table and applies schemaDDL, stamping the
+// version in the SAME transaction so the schema and the claim about it can
+// never disagree.
+func (d *DB) nukeAndCreate(ctx context.Context, existing []string) error {
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return storagef(err, "begin schema recreation")
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
+
+	for _, table := range existing {
+		if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS "`+strings.ReplaceAll(table, `"`, `""`)+`"`); err != nil {
+			return storagef(err, "dropping table %q", table)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, schemaDDL); err != nil {
+		return storagef(err, "creating the schema")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_meta(version) VALUES (?)`, SchemaVersion); err != nil {
+		return storagef(err, "stamping schema version %d", SchemaVersion)
+	}
+	if err := tx.Commit(); err != nil {
+		return storagef(err, "committing schema recreation")
 	}
 	return nil
 }
 
-// applyMigration runs one step and stamps its version in the SAME transaction,
-// so the schema change and the claim that it happened can never disagree.
-func (d *DB) applyMigration(from int, step migrationStep) error {
-	d.log.Log(logging.Fields{Operation: "migrate", Table: "schema_meta", Transaction: "BEGIN IMMEDIATE"},
-		"migrating schema %d -> %d (%s): %s", from, step.to, step.name, step.reason)
-	tx, err := d.sql.Begin()
-	if err != nil {
-		return fmt.Errorf("shim-store db: begin migration %d -> %d (%s): %w", from, step.to, step.name, err)
+func contains(haystack []string, needle string) bool {
+	for _, value := range haystack {
+		if value == needle {
+			return true
+		}
 	}
-	defer tx.Rollback() //nolint:errcheck // no-op after a successful Commit
-	if _, err := tx.Exec(step.ddl); err != nil {
-		return fmt.Errorf("shim-store db: applying migration %d -> %d (%s): %w", from, step.to, step.name, err)
+	return false
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	if _, err := tx.Exec(`UPDATE schema_meta SET version = ?`, step.to); err != nil {
-		return fmt.Errorf("shim-store db: stamping migration %d -> %d (%s): %w", from, step.to, step.name, err)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("shim-store db: committing migration %d -> %d (%s): %w", from, step.to, step.name, err)
-	}
-	d.log.Log(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "schema migrated to version=%d (%s)", step.to, step.name)
-	return nil
+	return true
+}
+
+// queryError records one database failure exactly once, at its owning layer,
+// and hands the caller an ErrStorage.
+func (d *DB) queryError(operation, table string, fields logging.Fields, err error) error {
+	fields.Operation = operation
+	fields.Table = table
+	fields.Level = "error"
+	fields.ErrorCause = err.Error()
+	d.log.Log(fields, "database statement failed: %v", err)
+	return err
 }
