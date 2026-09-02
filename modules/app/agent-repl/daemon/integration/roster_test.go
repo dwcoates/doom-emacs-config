@@ -402,7 +402,7 @@ func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.kill")
 	f.shim.ExpectStartSession()
@@ -433,7 +433,7 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, the shim death the test drives.
-	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.spawn",
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
 		"daemon.workspace.bring_up", "daemon.workspace.open")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death"})
 	roster := f.d.WatchRoster()
