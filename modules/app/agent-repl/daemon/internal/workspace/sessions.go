@@ -363,7 +363,18 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	if started == nil {
 		// The session is parked behind a standing cold gate. The client stays
 		// up: the gate's answer re-opens through it.
+		//
+		// THE LINK IS RESTATED HERE because no watcher opens on this path and
+		// nothing else would. Bring-up gated on the shim's first healthy
+		// diagnostics, so the link IS serving — and without saying so the
+		// surfaces keep drawing the DEAD link of whatever shim died before this
+		// one, which outranks the gate in the footer's status tree and hides
+		// the very thing the user has to answer.
+		f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
+		f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
+		f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
 		f.remember(ws, &live{client: client})
+		f.publishHost(ws)
 		return nil
 	}
 
