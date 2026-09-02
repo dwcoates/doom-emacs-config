@@ -177,6 +177,13 @@ export function drawFeedToolCallInput(
   path: string,
 ): HTMLElement {
   const form = drawInputForm(u.form, path);
+  // THE FORM THE DAEMON STATED, on the element that wears its treatment. An
+  // UNSET form carries no attribute at all: absence is the fourth state, and a
+  // sentinel value would make plain text look like a form nobody served.
+  if (u.form.case !== undefined) {
+    form.element.setAttribute("data-input-form", u.form.case);
+    form.element.classList.add(`tool-input-${u.form.case}`);
+  }
   log("debug", "drawing a tool call input line", {
     operation: "feed.cards.tool-call.input",
     context: {
@@ -420,7 +427,12 @@ export function drawFeedToolCallReturned(
     head.appendChild(drawFeedToolCallRuntime(u.runtime, `${path}.runtime`));
   }
 
+  // The output FORM is a fact about the card, and the `none` arm draws nothing
+  // at all — so the arm is stated on the card rather than inferred from whether
+  // an output element happens to be there.
+  card.setAttribute("data-output-form", form.case);
   const body = [...drawForm(form, rc, path, verdict.case === "failed")];
+  for (const element of body) element.setAttribute("data-output-body", "");
   if (u.diagnostics !== undefined) {
     body.push(drawFeedToolCallDiagnostics(u.diagnostics, `${path}.diagnostics`));
   }

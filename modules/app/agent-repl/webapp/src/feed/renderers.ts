@@ -282,7 +282,6 @@ export function arrangeSubfeedRows(host: HTMLElement, view: SubfeedView): void {
   const placed = new Map<string, HTMLElement>();
   const top: HTMLElement[] = [];
   for (const row of view.rows()) {
-    if (row.row.case === "mergeTab") continue; // the merge body's, never a row of its own
     const el = view.drawRow(row);
     if (row.id !== undefined) placed.set(row.id.value, el);
     const parent = row.parent?.row;

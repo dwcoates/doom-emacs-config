@@ -46,7 +46,7 @@ import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 
 /** Where the page's clock starts: just after the fixtures' own timestamps. */
-const HARNESS_EPOCH_MS = 10_000;
+export const HARNESS_EPOCH_MS = 10_000;
 
 /** How many drain rounds `settle()` gives the DOM before it calls it a fault. */
 const SETTLE_ROUND_CAP = 60;
@@ -284,6 +284,27 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
    * "the markup stopped changing across two consecutive drains" waits for the
    * observable thing a test asserts on, and never sleeps a fixed interval.
    */
+  /**
+   * The markup, with THE CLOCKS MASKED.
+   *
+   * `shouldAdvanceTime` is on, so real seconds pass while `settle()` drains —
+   * and a page holding a ticking row (a permission's "waiting 0s", a tool
+   * call's "quiet for N", a cold gate's lapse) rewrites that one string every
+   * real second. Under load a drain round can take longer than the gap between
+   * two ticks, and a settle that compares raw markup then never sees four quiet
+   * rounds in a row and fails a page that is in fact idle.
+   *
+   * Every such element marks itself `data-ticking` (src/feed/ticking.ts), so
+   * their text is blanked in the comparison and nowhere else: a test that
+   * asserts a clock moved still reads the live DOM, and any OTHER change — a
+   * redraw, a new row, an attribute — still counts as the DOM moving.
+   */
+  const quietMarkup = (): string => {
+    const clone = document.body.cloneNode(true) as HTMLElement;
+    for (const clock of clone.querySelectorAll("[data-ticking]")) clock.textContent = "";
+    return clone.innerHTML;
+  };
+
   const settle = async (): Promise<void> => {
     let previous = "";
     let stable = 0;
@@ -291,7 +312,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       await vi.advanceTimersByTimeAsync(0);
       await yieldToIo();
       for (let flush = 0; flush < 5; flush += 1) await Promise.resolve();
-      const current = document.body.innerHTML;
+      const current = quietMarkup();
       // An unanswered request is a change that has not happened YET, so a
       // quiet DOM with one outstanding is not settled — it is early.
       stable = current === previous && inFlight.count === 0 ? stable + 1 : 0;

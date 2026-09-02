@@ -91,10 +91,13 @@ describe("arrangeSubfeedRows", () => {
     expect(host.children).toHaveLength(1);
   });
 
-  it("skips merge tabs, which are the merge body's and not rows of their own", () => {
+  it("lays out a merge tab like any other row when the body is not the strip", () => {
     const host = document.createElement("div");
+    // The MERGE body consumes its tabs itself and never reaches this arranger;
+    // the default body draws whatever the daemon served rather than dropping a
+    // row (src/feed/merge/tab-row.ts).
     arrangeSubfeedRows(host, viewOf([mergeTabRow("t1"), responseRow("a")]));
-    expect([...host.children].map((el) => el.getAttribute("data-feed-row"))).toEqual(["a"]);
+    expect([...host.children].map((el) => el.getAttribute("data-feed-row"))).toEqual(["t1", "a"]);
   });
 
   it("drops a row that stopped being in the feed, deletion being omission", () => {

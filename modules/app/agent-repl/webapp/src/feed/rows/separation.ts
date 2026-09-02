@@ -72,6 +72,7 @@ export function drawFeedSessionSeparation(
   const el = document.createElement("div");
   el.className = "separation";
   el.setAttribute("data-arm", kind.case);
+  el.setAttribute("data-state", kind.case);
 
   const rule = document.createElement("div");
   rule.className = `sep-rule ${ACCENTS[kind.case]}`;
