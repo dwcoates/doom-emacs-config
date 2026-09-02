@@ -842,8 +842,8 @@ type harness struct {
 	startedSessions []ids.WorkspaceID
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
-	// displaced is the turn CaptureDisplaced answers with, nil for none.
-	displaced *ids.TurnID
+	// displaced is what CaptureDisplaced answers with, nil for none.
+	displaced *Displaced
 	// parkedTurns answers ParkedRoute, consumed in order.
 	parkedTurns []ids.TurnID
 	// parkedSaid records what guidance was delivered.
@@ -961,9 +961,9 @@ func (h *harness) deps() Deps {
 			h.turnCloses = h.turnCloses[1:]
 			return close, nil
 		},
-		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (ids.TurnID, bool, error) {
+		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (Displaced, bool, error) {
 			if h.displaced == nil {
-				return "", false, nil
+				return Displaced{}, false, nil
 			}
 			return *h.displaced, true, nil
 		},
