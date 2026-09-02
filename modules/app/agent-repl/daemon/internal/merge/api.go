@@ -149,6 +149,12 @@ type Deps struct {
 	// StartSession starts a session for a workspace that has none, under the
 	// lease, because a configured prompt needs one (revival-is-implicit).
 	StartSession StartSessionFunc
+	// PublishRegistry republishes the roster's DURABLE half. A landed merge
+	// stamps merged_at and closes the workspace in the registry, and the
+	// roster's `recently_merged` section is composed from exactly those
+	// facts: without a republish the row stays where it was until some other
+	// verb happens to refresh the registry. Nil means no roster is wired.
+	PublishRegistry func(context.Context) error
 	// PublishHost recomposes and republishes one workspace's HOST view. The
 	// composer gate on it is a function of the merge's own state -- merging,
 	// parked, or neither -- and the server cannot see a lease taken, parked

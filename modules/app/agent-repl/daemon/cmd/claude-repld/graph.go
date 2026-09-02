@@ -384,7 +384,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	ownership := workspace.NewOwnership(rolloutController)
 	mergeOrchestrator, err := merge.New(merge.Deps{
-		PublishHost:      relay.PublishHostWorkspace,
+		PublishHost: relay.PublishHostWorkspace,
+		// The verbs own the roster's durable half and are built AFTER the
+		// orchestrator, so the republish reads them out of the forwarder.
+		PublishRegistry: func(ctx context.Context) error {
+			verbs, ok := verbsRef.verbs()
+			if !ok {
+				return fmt.Errorf("claude-repld: a merge landed before the workspace verbs existed")
+			}
+			return verbs.PublishRegistry(ctx)
+		},
 		DB:               p.DB,
 		Git:              git,
 		Queue:            queue,
