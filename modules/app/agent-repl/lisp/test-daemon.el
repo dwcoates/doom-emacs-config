@@ -36,6 +36,21 @@
 (defvar agent-repl-test-daemon--build-runs nil
   "Build-script invocations, newest first: the argv following the shell.")
 
+(defvar agent-repl-test-daemon--build-defer nil
+  "When non-nil the stubbed build does NOT settle; the test settles it.")
+
+(defvar agent-repl-test-daemon--build-exits nil
+  "Pending build sentinels, newest first: the ON-EXIT the stub captured.")
+
+(defvar agent-repl-test-daemon--mtimes nil
+  "Alist of PATH to mtime the stubbed mtime probe answers; absent means missing.")
+
+(defvar agent-repl-test-daemon--source-files nil
+  "Alist of DIR to the file list the stubbed source scan answers.")
+
+(defvar agent-repl-test-daemon--idle-timers nil
+  "Captured `run-with-idle-timer' calls, newest first: `(SECONDS . FUNCTION)'.")
+
 (defvar agent-repl-test-daemon--spawns nil
   "Daemon spawns, newest first: `(ARGV . ENVIRONMENT)'.")
 
@@ -88,6 +103,11 @@
   `(let ((agent-repl-test-daemon--address nil)
          (agent-repl-test-daemon--build-exit 0)
          (agent-repl-test-daemon--build-runs nil)
+         (agent-repl-test-daemon--build-defer nil)
+         (agent-repl-test-daemon--build-exits nil)
+         (agent-repl-test-daemon--mtimes nil)
+         (agent-repl-test-daemon--source-files nil)
+         (agent-repl-test-daemon--idle-timers nil)
          (agent-repl-test-daemon--spawns nil)
          (agent-repl-test-daemon--existing-paths t)
          (agent-repl-test-daemon--health-answer
@@ -105,6 +125,16 @@
          (agent-repl--frontend-daemon-process nil)
          (agent-repl-daemon-build-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
+         (agent-repl-daemon--build-state nil)
+         (agent-repl-daemon--build-duration nil)
+         (agent-repl-daemon--build-status-timer nil)
+         (agent-repl-daemon--build-in-flight nil)
+         (agent-repl-daemon--build-process nil)
+         (agent-repl-daemon--build-continuations nil)
+         (agent-repl-daemon--build-started nil)
+         (agent-repl-daemon--build-labels nil)
+         (agent-repl-daemon--build-target-names nil)
+         (agent-repl-daemon--startup-timer nil)
          (agent-repl-daemon--boot-timer nil)
          (agent-repl-daemon--boot-deadline nil)
          (agent-repl-daemon--boot-continuation nil)
@@ -112,9 +142,24 @@
      (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
                 (lambda () agent-repl-test-daemon--address))
                ((symbol-function 'agent-repl--frontend-run-build-script)
-                (lambda (args)
+                (lambda (args on-exit)
                   (push args agent-repl-test-daemon--build-runs)
-                  agent-repl-test-daemon--build-exit))
+                  (push on-exit agent-repl-test-daemon--build-exits)
+                  ;; The default is to settle SYNCHRONOUSLY, which keeps the
+                  ;; cold-start scenarios deterministic; a test that cares
+                  ;; about the window while a build runs defers instead.
+                  (unless agent-repl-test-daemon--build-defer
+                    (funcall on-exit agent-repl-test-daemon--build-exit))
+                  'the-build-process))
+               ((symbol-function 'agent-repl--frontend-file-mtime)
+                (lambda (path) (cdr (assoc path agent-repl-test-daemon--mtimes))))
+               ((symbol-function 'agent-repl--frontend-source-files)
+                (lambda (dir _regexp)
+                  (cdr (assoc dir agent-repl-test-daemon--source-files))))
+               ((symbol-function 'run-with-idle-timer)
+                (lambda (seconds _repeat function &rest _args)
+                  (push (cons seconds function) agent-repl-test-daemon--idle-timers)
+                  (timer-create)))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda (argv environment)
                   (push (cons argv environment) agent-repl-test-daemon--spawns)
@@ -382,7 +427,10 @@ path asks."
     (should (= (length agent-repl-test-daemon--build-runs) 1))))
 
 (ert-deftest agent-repl-test-daemon-successful-build-clears-a-standing-failure ()
-  "A build that works takes the failure segment down."
+  "A build that works takes the failure segment down.
+The segment then carries the short-lived \"built in N.Ns\" note, which is
+the same segment reporting the new state — what must be gone is the
+FAILURE, and it is gone from both the state and the text."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil
@@ -391,7 +439,8 @@ path asks."
     ;; Act
     (agent-repl-daemon-ensure)
     ;; Assert
-    (should (null agent-repl-daemon-mode-line-segment))))
+    (should (null agent-repl-daemon-build-failure))
+    (should-not (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))))
 
 (ert-deftest agent-repl-test-daemon-missing-build-script-is-a-failure ()
   "An absent script is the installation being broken, not a run that failed."
@@ -789,11 +838,21 @@ stubbed too, which is the only external thing about this branch."
 
 ;;;; ---- The build's target selection ----
 
+(defun agent-repl-test-daemon--artifact (target)
+  "Return TARGET's artifact path from the build spec."
+  (plist-get (cdr (assoc target agent-repl-daemon--build-target-specs)) :artifact))
+
+(defun agent-repl-test-daemon--mark-fresh (&rest targets)
+  "Give each of TARGETS an artifact newer than every source the scan reports."
+  (dolist (target (or targets agent-repl-daemon--default-build-targets))
+    (push (cons (agent-repl-test-daemon--artifact target) 100.0)
+          agent-repl-test-daemon--mtimes)))
+
 (ert-deftest agent-repl-test-daemon-build-passes-its-targets-to-the-script ()
   "A targeted build names its targets; the script still owns staleness."
   (agent-repl-test-daemon--with-harness
     ;; Arrange / Act
-    (agent-repl-daemon--build '("store" "sidecar"))
+    (agent-repl-daemon--build '("store" "sidecar") #'ignore)
     ;; Assert
     (should (equal (car agent-repl-test-daemon--build-runs)
                    (list agent-repl-daemon-build-script "store" "sidecar")))))
@@ -801,18 +860,196 @@ stubbed too, which is the only external thing about this branch."
 (ert-deftest agent-repl-test-daemon-build-answers-nil-on-success ()
   "Nil IS success; a detail string IS the failure."
   (agent-repl-test-daemon--with-harness
-    ;; Arrange / Act / Assert
-    (should (null (agent-repl-daemon--build)))))
+    ;; Arrange
+    (let ((answers nil))
+      ;; Act
+      (agent-repl-daemon--build nil (lambda (detail) (push detail answers)))
+      ;; Assert
+      (should (equal answers '(nil))))))
 
 (ert-deftest agent-repl-test-daemon-build-answers-a-detail-on-failure ()
   "The failure detail names the exit code and where the output is."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--build-exit 3)
-    ;; Act
-    (let ((detail (agent-repl-daemon--build)))
+    (let ((answers nil))
+      ;; Act
+      (agent-repl-daemon--build nil (lambda (detail) (push detail answers)))
       ;; Assert
-      (should (string-search "exit 3" detail)))))
+      (should (string-search "exit 3" (car answers))))))
+
+;;;; ---- The elisp staleness pre-check ----
+
+(ert-deftest agent-repl-test-daemon-fresh-tree-spawns-no-build ()
+  "Nothing stale means no subprocess at all: the script's own startup is the cost."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--mark-fresh)
+    ;; Act
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Assert
+    (should (null agent-repl-test-daemon--build-runs))))
+
+(ert-deftest agent-repl-test-daemon-fresh-tree-still-answers-success ()
+  "A skipped build is a SUCCEEDED build as far as the caller is concerned."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--mark-fresh)
+    (let ((answers 'unset))
+      ;; Act
+      (agent-repl-daemon--build nil (lambda (detail) (setq answers detail)))
+      ;; Assert
+      (should (null answers)))))
+
+(ert-deftest agent-repl-test-daemon-missing-artifact-is-stale ()
+  "An artifact that is not there cannot be fresh."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--mark-fresh "shim" "webapp")
+    ;; Act / Assert: `daemon' has no artifact mtime, so it alone is stale.
+    (should (equal (agent-repl-daemon--stale-targets nil) '("daemon")))))
+
+(ert-deftest agent-repl-test-daemon-newer-source-is-stale ()
+  "A source newer than the artifact is exactly what a rebuild is for."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--mark-fresh)
+    (let ((spec (cdr (assoc "webapp" agent-repl-daemon--build-target-specs))))
+      (push (cons (car (plist-get spec :sources)) '("/webapp/src/app.ts"))
+            agent-repl-test-daemon--source-files)
+      (push (cons "/webapp/src/app.ts" 200.0) agent-repl-test-daemon--mtimes))
+    ;; Act / Assert
+    (should (equal (agent-repl-daemon--stale-targets nil) '("webapp")))))
+
+(ert-deftest agent-repl-test-daemon-stale-tree-spawns-exactly-one-build ()
+  "A stale tree spawns the script ONCE, whatever the stale count."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange / Act
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Assert
+    (should (= (length agent-repl-test-daemon--build-runs) 1))))
+
+(ert-deftest agent-repl-test-daemon-unknown-target-is-treated-as-stale ()
+  "A target the spec cannot reason about is never silently skipped."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange / Act / Assert
+    (should (equal (agent-repl-daemon--stale-targets '("no-such-target"))
+                   '("no-such-target")))))
+
+;;;; ---- Concurrent builds coalesce ----
+
+(ert-deftest agent-repl-test-daemon-second-build-request-spawns-nothing ()
+  "A request arriving mid-build joins it; two scripts at once would race."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--build-defer t)
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Act
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Assert
+    (should (= (length agent-repl-test-daemon--build-runs) 1))))
+
+(ert-deftest agent-repl-test-daemon-coalesced-requests-both-settle ()
+  "Both callers are answered by the one build they share."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--build-defer t)
+    (let ((answers nil))
+      (agent-repl-daemon--build nil (lambda (d) (push (cons :first d) answers)))
+      (agent-repl-daemon--build nil (lambda (d) (push (cons :second d) answers)))
+      ;; Act
+      (funcall (car agent-repl-test-daemon--build-exits) 0)
+      ;; Assert
+      (should (equal answers '((:second . nil) (:first . nil)))))))
+
+;;;; ---- The mode-line status segment ----
+
+(ert-deftest agent-repl-test-daemon-segment-says-building-while-the-build-runs ()
+  "The user is told WHY the editor is busy, in the mode line and not the echo area."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--build-defer t)
+    ;; Act
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment
+                   "building agent-repl stack…"))))
+
+(ert-deftest agent-repl-test-daemon-segment-reports-the-build-duration ()
+  "A finished build says how long it took, for a short while."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--build-defer t)
+    (agent-repl-daemon--build nil #'ignore)
+    (setq agent-repl-daemon--build-started (- (float-time) 2.0))
+    ;; Act
+    (funcall (car agent-repl-test-daemon--build-exits) 0)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment
+                   "agent-repl stack built in 2.0s"))))
+
+(ert-deftest agent-repl-test-daemon-segment-failure-outranks-the-duration ()
+  "A failed build reports the failure, never a duration."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil
+          agent-repl-test-daemon--build-exit 2)
+    ;; Act
+    (agent-repl-daemon-ensure)
+    ;; Assert
+    (should (equal agent-repl-daemon-mode-line-segment "daemon: build failed"))))
+
+(ert-deftest agent-repl-test-daemon-built-status-schedules-its-own-clearing ()
+  "The \"built\" note is a note, not a permanent fixture."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange / Act
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Assert
+    (should (eq (cdr (car agent-repl-test-daemon--timers))
+                #'agent-repl-daemon--clear-build-status))))
+
+(ert-deftest agent-repl-test-daemon-clearing-the-status-empties-the-segment ()
+  "Once the window passes the mode line goes back to whatever else lives there."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon--build nil #'ignore)
+    ;; Act
+    (agent-repl-daemon--clear-build-status)
+    ;; Assert
+    (should (null agent-repl-daemon-mode-line-segment))))
+
+(ert-deftest agent-repl-test-daemon-a-second-build-cancels-the-pending-clear ()
+  "The earlier build's clear timer must not wipe the later build's status."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-daemon--build nil #'ignore)
+    (let ((cancelled nil))
+      (cl-letf (((symbol-function 'cancel-timer)
+                 (lambda (timer) (push timer cancelled))))
+        ;; Act
+        (agent-repl-daemon--set-build-status 'building nil))
+      ;; Assert
+      (should (= (length cancelled) 1)))))
+
+;;;; ---- Startup scheduling ----
+
+(ert-deftest agent-repl-test-daemon-startup-schedules-the-ensure-on-an-idle-timer ()
+  "THE FRAME PAINTS FIRST: cold start is armed, never run, from the startup hook."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange / Act
+    (agent-repl-daemon-schedule-ensure)
+    ;; Assert
+    (should (equal (car agent-repl-test-daemon--idle-timers)
+                   (cons agent-repl-daemon-startup-idle-seconds
+                         #'agent-repl-daemon-ensure)))))
+
+(ert-deftest agent-repl-test-daemon-startup-scheduling-runs-no-build ()
+  "Scheduling costs nothing: nothing is probed and nothing is spawned."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange / Act
+    (agent-repl-daemon-schedule-ensure)
+    ;; Assert
+    (should (null agent-repl-test-daemon--build-runs))))
 
 (provide 'test-daemon)
 

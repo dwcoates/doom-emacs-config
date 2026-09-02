@@ -28,9 +28,12 @@
 ;; The listen address is the daemon's own choice, published by writing
 ;; `daemon.addr' — which is also the readiness signal this file waits on.
 ;;
-;; NO SLEEPS.  The boot wait is a timer poll whose tick is a named
-;; function; nothing here blocks the main thread except the build, which
-;; is a `call-process' by nature.
+;; NO SLEEPS AND NO BLOCKING.  The boot wait is a timer poll whose tick is
+;; a named function, and the build is an ASYNCHRONOUS `make-process' whose
+;; sentinel carries the continuation.  Nothing in this file blocks the
+;; main thread, because the frame must paint before any of it runs:
+;; `agent-repl-daemon-schedule-ensure' defers the whole cold start onto an
+;; idle timer, so the command loop reaches its first redisplay first.
 
 ;;; Code:
 
@@ -102,6 +105,22 @@ It decides staleness itself; this file never second-guesses it."
   :type 'string
   :group 'agent-repl)
 
+(defcustom agent-repl-daemon-build-status-display-seconds 4.0
+  "Seconds the \"stack built in N.Ns\" mode-line status stays up.
+A completed build is worth SAYING and not worth keeping: the segment
+clears itself after this many seconds so the mode line goes back to
+whatever else lives there."
+  :type 'number
+  :group 'agent-repl)
+
+(defcustom agent-repl-daemon-startup-idle-seconds 0
+  "Idle seconds `agent-repl-daemon-schedule-ensure' waits before the ensure.
+Zero is not \"immediately\": an idle timer runs only once the command loop
+has gone idle, which is AFTER the first redisplay.  That is the whole
+point — the frame paints before the stack build is even considered."
+  :type 'number
+  :group 'agent-repl)
+
 (defcustom agent-repl-daemon-command
   (list (expand-file-name "daemon/bin/claude-repld" agent-repl--frontend-root))
   "The argv used to start the daemon.
@@ -144,8 +163,44 @@ successful build.  There is NO automatic retry — the interactive
 `agent-repl-frontend-daemon-ensure' is the retry.")
 
 (defvar agent-repl-daemon-mode-line-segment nil
-  "The `global-mode-string' segment naming a failed daemon build, or nil.")
+  "The `global-mode-string' segment reporting the stack build, or nil.
+Three states, in precedence order: a standing failure, a build that is
+running right now, and a build that just finished (shown for
+`agent-repl-daemon-build-status-display-seconds' and then cleared).")
 (put 'agent-repl-daemon-mode-line-segment 'risky-local-variable t)
+
+(defvar agent-repl-daemon--build-state nil
+  "`building', `built', or nil — what the status segment is reporting.")
+
+(defvar agent-repl-daemon--build-duration nil
+  "Wall seconds the last successful build took, or nil.")
+
+(defvar agent-repl-daemon--build-status-timer nil
+  "Timer that clears the post-build status segment, or nil.")
+
+(defvar agent-repl-daemon--build-in-flight nil
+  "Non-nil while a build subprocess is running.
+This is the coalescing guard: a second build request while one is under
+way joins that build rather than starting a rival one.")
+
+(defvar agent-repl-daemon--build-process nil
+  "The running build process, or nil.  Kept for introspection only.")
+
+(defvar agent-repl-daemon--build-continuations nil
+  "Continuations waiting on the running build, oldest first.
+Each is called with nil on success, or the failure detail string.")
+
+(defvar agent-repl-daemon--build-started nil
+  "`float-time' the running build started at, or nil.")
+
+(defvar agent-repl-daemon--build-labels nil
+  "`(RUNNING-LABEL . DONE-LABEL)' naming what the running build covers.")
+
+(defvar agent-repl-daemon--build-target-names nil
+  "The TARGETS argument the running build was asked for, for the log.")
+
+(defvar agent-repl-daemon--startup-timer nil
+  "The idle timer the startup hook scheduled the ensure on, or nil.")
 
 (defvar agent-repl-daemon--boot-timer nil
   "The pending `daemon.addr' boot poll timer, or nil.")
@@ -176,14 +231,44 @@ which is the one thing this file exists to prevent.")
 ;; registered in `agent-repl--external-boundary-functions', so a test that
 ;; reaches one unstubbed fails loudly rather than shelling out.
 
-(defun agent-repl--frontend-run-build-script (args)
-  "External-boundary wrapper: run the build shell with ARGS, return its exit code.
-ARGS is the argument list following the interpreter.  Output is captured
-into `agent-repl-daemon-build-buffer'."
-  (apply #'call-process ;; ALLOW-EXTERNAL-BOUNDARY
-         agent-repl-daemon-build-shell nil
-         agent-repl-daemon-build-buffer nil
-         args))
+(defun agent-repl--frontend-run-build-script (args on-exit)
+  "External-boundary wrapper: run the build shell with ARGS asynchronously.
+ARGS is the argument list following the interpreter.  Output — stdout and
+stderr alike — is captured into `agent-repl-daemon-build-buffer'.
+ON-EXIT is called from the process sentinel with the integer exit code
+once the process is no longer live.  Returns the process.
+
+ASYNCHRONOUS BY CONTRACT.  Its predecessor was a `call-process', which
+froze Emacs for the whole build — including before the very first
+redisplay, so a startup after any touched source showed no frame at all
+until the stack finished building."
+  (make-process ;; ALLOW-EXTERNAL-BOUNDARY
+   :name "agent-repl-build-frontend"
+   :buffer (get-buffer-create agent-repl-daemon-build-buffer)
+   :command (cons agent-repl-daemon-build-shell args)
+   :connection-type 'pipe
+   :noquery t
+   :sentinel
+   (lambda (process _event)
+     (unless (process-live-p process)
+       (funcall on-exit (process-exit-status process))))))
+
+(defun agent-repl--frontend-file-mtime (path)
+  "External-boundary wrapper: PATH's mtime as a float, or nil when absent."
+  (let ((attributes (file-attributes path))) ;; ALLOW-EXTERNAL-BOUNDARY
+    (and attributes (float-time (file-attribute-modification-time attributes)))))
+
+(defun agent-repl--frontend-source-files (dir regexp)
+  "External-boundary wrapper: DIR's source files matching REGEXP, recursively.
+REGEXP nil means every file.  `node_modules', `dist' and `bin' are never
+descended into: they hold artifacts, not sources, and an artifact newer
+than itself would make every tree permanently stale."
+  (when (file-directory-p dir) ;; ALLOW-EXTERNAL-BOUNDARY
+    (directory-files-recursively
+     dir (or regexp "") nil
+     (lambda (subdir)
+       (not (member (file-name-nondirectory (directory-file-name subdir))
+                    '("node_modules" "dist" "bin")))))))
 
 (defun agent-repl--frontend-spawn-daemon (argv environment)
   "External-boundary wrapper: spawn ARGV under ENVIRONMENT, return the process.
@@ -204,16 +289,56 @@ ENVIRONMENT is a complete `process-environment' value, which is how
 ;;;; ---- The mode-line segment ----
 
 (defun agent-repl-daemon--refresh-segment ()
-  "Recompute `agent-repl-daemon-mode-line-segment' from the build state."
+  "Recompute `agent-repl-daemon-mode-line-segment' from the build state.
+Precedence: a standing failure outranks a running build, which outranks
+the short-lived \"just built\" note."
   (setq agent-repl-daemon-mode-line-segment
-        (and agent-repl-daemon-build-failure "daemon: build failed"))
+        (cond
+         (agent-repl-daemon-build-failure "daemon: build failed")
+         ((eq agent-repl-daemon--build-state 'building)
+          "building agent-repl stack\u2026")
+         ((and (eq agent-repl-daemon--build-state 'built)
+               agent-repl-daemon--build-duration)
+          (format "agent-repl stack built in %.1fs"
+                  agent-repl-daemon--build-duration))))
   (agent-repl--log nil "elisp.daemon.segment segment=%S"
                    agent-repl-daemon-mode-line-segment)
   (force-mode-line-update t)
+  ;; THE TAB-BAR CAVEAT (status.el): the tab-bar caches its render by string
+  ;; equality, so a segment change that the mode line picks up can still
+  ;; leave a tab-bar-hosted `global-mode-string' showing the old text.  Only
+  ;; reached when a tab-bar is actually up.
+  (when (and (bound-and-true-p tab-bar-mode)
+             (fboundp 'agent-repl--force-tab-bar-redraw))
+    (agent-repl--force-tab-bar-redraw))
   agent-repl-daemon-mode-line-segment)
 
+(defun agent-repl-daemon--clear-build-status ()
+  "Take the post-build status note down and repaint."
+  (setq agent-repl-daemon--build-status-timer nil
+        agent-repl-daemon--build-state nil
+        agent-repl-daemon--build-duration nil)
+  (agent-repl--log nil "elisp.daemon.build-status-cleared")
+  (agent-repl-daemon--refresh-segment))
+
+(defun agent-repl-daemon--set-build-status (state duration)
+  "Report STATE (`building', `built' or nil) with DURATION in the mode line.
+A `built' status schedules its own clearing; any pending clear timer is
+cancelled first so two builds in a row cannot have the earlier one's
+timer wipe the later one's status."
+  (when (timerp agent-repl-daemon--build-status-timer)
+    (cancel-timer agent-repl-daemon--build-status-timer))
+  (setq agent-repl-daemon--build-status-timer nil
+        agent-repl-daemon--build-state state
+        agent-repl-daemon--build-duration duration)
+  (when (eq state 'built)
+    (setq agent-repl-daemon--build-status-timer
+          (run-with-timer agent-repl-daemon-build-status-display-seconds nil
+                          #'agent-repl-daemon--clear-build-status)))
+  (agent-repl-daemon--refresh-segment))
+
 (defun agent-repl-daemon-install-segment ()
-  "Add the build-failure segment to `global-mode-string', once."
+  "Add the build-status segment to `global-mode-string', once."
   (let ((current (if (listp global-mode-string)
                      global-mode-string
                    (list global-mode-string))))
@@ -225,39 +350,179 @@ ENVIRONMENT is a complete `process-environment' value, which is how
 
 ;;;; ---- The build ----
 
-(defun agent-repl-daemon--build (&optional targets)
-  "Run the build script for TARGETS; nil on success, the failure detail else.
+(defconst agent-repl-daemon--default-build-targets '("shim" "webapp" "daemon")
+  "The targets `bin/build-frontend.sh' builds when given none.
+Mirrors the script's own default set; the elisp pre-check has to know
+which artifacts a default run would cover in order to decide whether one
+is worth starting at all.")
+
+(defconst agent-repl-daemon--go-source-regexp "\\(?:\\.go\\|go\\.mod\\|go\\.sum\\)\\'"
+  "Which files under a Go module count as its sources.")
+
+(defconst agent-repl-daemon--build-target-specs
+  (let ((root agent-repl--frontend-root)
+        (cache-bin (expand-file-name "~/.cache/agent-repl/bin")))
+    (cl-flet ((at (relative) (expand-file-name relative root)))
+      (list
+       (list "shim"
+             :artifact (at "agent-shim/claude/shim/dist/main.js")
+             :sources (list (at "agent-shim/claude/shim/src"))
+             :files (list (at "agent-shim/claude/shim/package.json")
+                          (at "agent-shim/claude/shim/tsconfig.json")
+                          (at "agent-shim/claude/shim/build.mjs")))
+       (list "webapp"
+             :artifact (at "webapp/dist/index.html")
+             :sources (list (at "webapp/src"))
+             :files (list (at "webapp/package.json")
+                          (at "webapp/tsconfig.json")
+                          (at "webapp/vite.config.ts")))
+       (list "daemon"
+             :artifact (at "daemon/bin/claude-repld")
+             :sources (list (at "daemon"))
+             :match agent-repl-daemon--go-source-regexp)
+       (list "store"
+             :artifact (expand-file-name "shim-store" cache-bin)
+             :sources (list (at "agent-shim/shim-store") (at "agent-shim/wire")
+                            (at "agent-shim/logging/go") (at "proto/gen/go"))
+             :match agent-repl-daemon--go-source-regexp)
+       (list "sidecar"
+             :artifact (expand-file-name "shim-claude-sidecar" cache-bin)
+             :sources (list (at "agent-shim/claude/shim-sidecar") (at "agent-shim/wire")
+                            (at "agent-shim/logging/go") (at "proto/gen/go"))
+             :match agent-repl-daemon--go-source-regexp))))
+  "Per-target artifact and source set, mirroring `bin/build-frontend.sh'.
+
+WHY A SECOND COPY OF THE STALENESS QUESTION.  The script owns staleness
+and remains the authority INSIDE a build — it still re-decides every
+target and skips the fresh ones.  This spec only answers the cheaper
+question the script cannot answer without being started: is starting it
+worth a subprocess at all?  On a fresh tree the script costs seconds of
+`npm'/`go' startup to conclude nothing changed, and Emacs used to pay
+that on every boot.")
+
+(defun agent-repl-daemon--target-stale-p (spec)
+  "Return non-nil when SPEC's artifact is missing or older than its sources."
+  (let* ((plist (cdr spec))
+         (artifact (plist-get plist :artifact))
+         (artifact-mtime (agent-repl--frontend-file-mtime artifact)))
+    (if (null artifact-mtime)
+        t
+      (let ((newest 0)
+            (sources (append (plist-get plist :files)
+                             (apply #'append
+                                    (mapcar (lambda (dir)
+                                              (agent-repl--frontend-source-files
+                                               dir (plist-get plist :match)))
+                                            (plist-get plist :sources))))))
+        (dolist (file sources)
+          (let ((mtime (agent-repl--frontend-file-mtime file)))
+            (when (and mtime (> mtime newest))
+              (setq newest mtime))))
+        ;; `>=' and not `>': the script uses the same comparison, and a
+        ;; source written in the same second as the artifact is a source the
+        ;; build may not have seen.
+        (>= newest artifact-mtime)))))
+
+(defun agent-repl-daemon--stale-targets (targets)
+  "Return the subset of TARGETS needing a build; nil for TARGETS's default set.
+An UNKNOWN target name is reported stale: a target this spec cannot
+reason about must never be silently skipped."
+  (seq-filter
+   (lambda (name)
+     (let ((spec (assoc name agent-repl-daemon--build-target-specs)))
+       (if (null spec)
+           (progn
+             (agent-repl--warn nil "elisp.daemon.build-target-unknown target=%S" name)
+             t)
+         (agent-repl-daemon--target-stale-p spec))))
+   (or targets agent-repl-daemon--default-build-targets)))
+
+(defun agent-repl-daemon--build-finished (exit-code)
+  "Settle the running build with EXIT-CODE and answer every waiting caller."
+  (let* ((duration (- (float-time) (or agent-repl-daemon--build-started (float-time))))
+         (output (with-current-buffer (get-buffer-create agent-repl-daemon-build-buffer)
+                   (string-trim-right (buffer-string))))
+         (labels agent-repl-daemon--build-labels)
+         (targets agent-repl-daemon--build-target-names)
+         (continuations (nreverse agent-repl-daemon--build-continuations))
+         (detail (unless (eq exit-code 0)
+                   (format "build failed (exit %s) — see %s"
+                           exit-code agent-repl-daemon-build-buffer))))
+    (setq agent-repl-daemon--build-in-flight nil
+          agent-repl-daemon--build-process nil
+          agent-repl-daemon--build-continuations nil
+          agent-repl-daemon--build-started nil
+          agent-repl-daemon--build-labels nil
+          agent-repl-daemon--build-target-names nil)
+    (agent-repl--info nil "elisp.daemon.build script=%S targets=%S exit=%S output=%s"
+                      agent-repl-daemon-build-script (or targets 'default) exit-code
+                      (if (string-empty-p output) "<empty>" output))
+    (if detail
+        (agent-repl-daemon--set-build-status nil nil)
+      (agent-repl--backend-phase nil "%s built (%.1fs)" (cdr labels) duration)
+      (agent-repl-daemon--set-build-status 'built duration))
+    (dolist (continuation continuations)
+      (funcall continuation detail))))
+
+(defun agent-repl-daemon--build (targets continuation)
+  "Build TARGETS if stale, then call CONTINUATION with nil or a failure detail.
 TARGETS is a list of build-script target names, or nil for the script's
 own default set (the whole stack).
-The script owns staleness — it rebuilds only what changed — so this runs
-unconditionally before a start and costs nothing when nothing moved.  A
-failure is SURFACED and not retried: the capture buffer is shown, the
+
+ASYNCHRONOUS.  CONTINUATION runs from the build process's sentinel, and
+SYNCHRONOUSLY on the two paths that start no process at all: a missing
+script, and a tree where nothing is stale.
+
+COALESCING.  A request arriving while a build runs joins that build
+instead of starting a second one; both continuations settle together.
+
+A failure is SURFACED and not retried: the capture buffer is shown, the
 mode-line segment is raised, and the interactive ensure is the retry."
-  (if (not (agent-repl--frontend-artifact-exists-p agent-repl-daemon-build-script))
+  (let* ((running-label (if targets (string-join targets "/") "the stack"))
+         (done-label (if targets (string-join targets "/") "stack")))
+    (cond
+     ((not (agent-repl--frontend-artifact-exists-p agent-repl-daemon-build-script))
       (let ((detail (format "build script not found: %s" agent-repl-daemon-build-script)))
         (agent-repl--error nil "elisp.daemon.build-script-missing script=%S"
                            agent-repl-daemon-build-script)
-        detail)
-    (with-current-buffer (get-buffer-create agent-repl-daemon-build-buffer)
-      (erase-buffer))
-    (agent-repl--backend-phase nil "rebuilding %s if stale..."
-                               (if targets (string-join targets "/") "the stack"))
-    (let* ((started (float-time))
-           (exit-code (agent-repl--frontend-run-build-script
-                       (cons agent-repl-daemon-build-script targets)))
-           (output (with-current-buffer (get-buffer-create agent-repl-daemon-build-buffer)
-                     (string-trim-right (buffer-string)))))
-      (agent-repl--info nil "elisp.daemon.build script=%S targets=%S exit=%S output=%s"
-                        agent-repl-daemon-build-script (or targets 'default) exit-code
-                        (if (string-empty-p output) "<empty>" output))
-      (if (eq exit-code 0)
-          (progn
-            (agent-repl--backend-phase nil "%s built (%.1fs)"
-                                       (if targets (string-join targets "/") "stack")
-                                       (- (float-time) started))
-            nil)
-        (format "build failed (exit %s) — see %s"
-                exit-code agent-repl-daemon-build-buffer)))))
+        (funcall continuation detail)))
+     (agent-repl-daemon--build-in-flight
+      (agent-repl--info nil "elisp.daemon.build-coalesced targets=%S"
+                        (or targets 'default))
+      (push continuation agent-repl-daemon--build-continuations))
+     ((null (agent-repl-daemon--stale-targets targets))
+      ;; Nothing moved, so nothing is spawned: the script's own check would
+      ;; reach the same verdict, after paying a subprocess to do it.
+      (agent-repl--info nil "elisp.daemon.build-skipped-fresh targets=%S"
+                        (or targets 'default))
+      (funcall continuation nil))
+     (t
+      (with-current-buffer (get-buffer-create agent-repl-daemon-build-buffer)
+        (erase-buffer))
+      (agent-repl--backend-phase nil "rebuilding %s if stale..." running-label)
+      (setq agent-repl-daemon--build-in-flight t
+            agent-repl-daemon--build-continuations (list continuation)
+            agent-repl-daemon--build-started (float-time)
+            agent-repl-daemon--build-labels (cons running-label done-label)
+            agent-repl-daemon--build-target-names targets)
+      (agent-repl-daemon--set-build-status 'building nil)
+      ;; A signal out of the spawn must not leave the in-flight guard raised:
+      ;; a stuck guard would coalesce every later build onto a process that
+      ;; never existed.  The signal itself is re-raised, never swallowed.
+      (let ((process (condition-case err
+                         (agent-repl--frontend-run-build-script
+                          (cons agent-repl-daemon-build-script targets)
+                          #'agent-repl-daemon--build-finished)
+                       (error
+                        (setq agent-repl-daemon--build-in-flight nil
+                              agent-repl-daemon--build-continuations nil)
+                        (agent-repl-daemon--set-build-status nil nil)
+                        (agent-repl--error nil "elisp.daemon.build-spawn-failed error=%S" err)
+                        (signal (car err) (cdr err))))))
+        ;; Only when the build is still running: a stub (or a process that
+        ;; exited before this returned) may already have settled it.
+        (when agent-repl-daemon--build-in-flight
+          (setq agent-repl-daemon--build-process process)))))))
 
 (defun agent-repl-daemon--report-build-failure (detail)
   "Surface build failure DETAIL: the buffer, a WARNING, an echo, the segment."
@@ -502,17 +767,20 @@ is stated on the spawn rather than assumed."
 
 (defun agent-repl-daemon--build-and-start (on-ready)
   "Build, start a daemon, wait for its address, and link to it.
-ON-READY receives the connection, or nil."
-  (let ((failure (agent-repl-daemon--build)))
-    (if failure
-        (progn
-          (agent-repl-daemon--report-build-failure failure)
-          (agent-repl-daemon--settle on-ready nil))
-      (agent-repl-daemon--clear-build-failure)
-      (if (null (agent-repl-daemon--start))
-          (agent-repl-daemon--settle on-ready nil)
-        (agent-repl-daemon--await-address
-         (lambda (address)
+ON-READY receives the connection, or nil.  The build is asynchronous, so
+everything after it lives in the continuation."
+  (agent-repl-daemon--build
+   nil
+   (lambda (failure)
+     (if failure
+         (progn
+           (agent-repl-daemon--report-build-failure failure)
+           (agent-repl-daemon--settle on-ready nil))
+       (agent-repl-daemon--clear-build-failure)
+       (if (null (agent-repl-daemon--start))
+           (agent-repl-daemon--settle on-ready nil)
+         (agent-repl-daemon--await-address
+          (lambda (address)
            (if (null address)
                (agent-repl-daemon--settle on-ready nil)
              ;; STATE whose daemon this is on the own-spawn path too.  The
@@ -521,8 +789,8 @@ ON-READY receives the connection, or nil."
              ;; `foreign-adopted' would say the session attached to someone
              ;; else's daemon every single time it started its own.
              (agent-repl-daemon--report-provenance address)
-             (agent-repl--info nil "elisp.daemon.linking address=%S" address)
-             (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))))))))
+              (agent-repl--info nil "elisp.daemon.linking address=%S" address)
+              (agent-repl-daemon--settle on-ready (agent-repl-link-connect))))))))))
 
 (defun agent-repl-daemon--begin (on-ready)
   "Take the cold-start decision for `agent-repl-daemon-ensure'.
@@ -546,6 +814,21 @@ WHOLE decision, signals included."
          (agent-repl--warn nil "elisp.daemon.stale-addr address=%S detail=%S"
                            address detail)
          (agent-repl-daemon--build-and-start on-ready))))))
+
+(defun agent-repl-daemon-schedule-ensure ()
+  "Schedule `agent-repl-daemon-ensure' on an idle timer and return the timer.
+THE FRAME PAINTS FIRST.  This is what the startup hook registers, and the
+whole reason it exists: `emacs-startup-hook' runs BEFORE Doom's UI init
+and before the first redisplay, so anything it does synchronously — even
+deciding whether a build is needed — happens while there is no frame on
+screen.  An idle timer cannot run until the command loop is idle, which
+is after that first redisplay."
+  (setq agent-repl-daemon--startup-timer
+        (run-with-idle-timer agent-repl-daemon-startup-idle-seconds nil
+                             #'agent-repl-daemon-ensure))
+  (agent-repl--info nil "elisp.daemon.ensure-scheduled idle=%s"
+                    agent-repl-daemon-startup-idle-seconds)
+  agent-repl-daemon--startup-timer)
 
 (defun agent-repl-daemon-ensure (&optional on-ready)
   "Make sure a daemon is serving, adopting one wherever one answers.
