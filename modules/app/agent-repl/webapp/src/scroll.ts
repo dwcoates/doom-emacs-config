@@ -8,10 +8,8 @@
  * pointer is in its left- or right-most gutter (EDGE_PX wide). Anywhere
  * else over the section the wheel is redirected to the feed, so
  * scrolling past a section is the default and scrolling the section
- * itself is the deliberate act.
- *
- * installEdgeScroll is the only DOM-facing piece; every decision it
- * makes lives in the pure helpers above it.
+ * itself is the deliberate act. The pure helpers below decide; a DOM-facing
+ * caller wires the decision to real events and elements.
  *
  * The feed's own tail-following metric (isPinnedToBottom) lives here too:
  * it is the other half of the same question of who owns the scroll
@@ -21,21 +19,6 @@ import { ancestorMatching } from "./dom.js";
 
 /** Width of the left/right gutters that arm a section's own scrolling. */
 export const EDGE_PX = 32;
-
-/** Class marking the whole section whose gutters are lit while armed. */
-export const ZONE_CLASS = "scroll-zone";
-
-/** Class marking the armed scroll box itself, which carries the cursor. */
-export const BOX_CLASS = "scroll-zone-box";
-
-/**
- * Classes of the feed's sections: the bordered blocks that hold scroll
- * boxes. A tool card holds up to three (input, progress, output); a
- * permission card holds its preview; a response bubble holds its own
- * height-capped body, and naming the bubble here is what puts the lit
- * gutters on the bubble's edges rather than inset at its body's.
- */
-export const SECTION_CLASSES = ["tool-card", "permission", "bubble"];
 
 /** Slack below which the feed still counts as parked at its tail. */
 export const PIN_PX = 40;
@@ -544,62 +527,3 @@ export function sectionFor<T extends { parentElement: T | null }>(
   return box;
 }
 
-const domMetrics = (el: HTMLElement): ScrollMetrics => ({
-  scrollHeight: el.scrollHeight,
-  clientHeight: el.clientHeight,
-  overflowY: getComputedStyle(el).overflowY,
-});
-
-/**
- * Arm edge-gated scrolling on `feed`: a wheel over a section's middle
- * scrolls the feed, a wheel over its gutters scrolls the section.
- * Hovering a gutter marks the enclosing section `.scroll-zone` and the
- * scroll box `.scroll-zone-box`, so the armed state is visible before
- * the wheel turns — the bars on the section, the cursor on the box.
- */
-export function installEdgeScroll(feed: HTMLElement, edgePx: number = EDGE_PX): void {
-  const scrollerUnder = (target: EventTarget | null): HTMLElement | null =>
-    innerScrollerAt(target instanceof HTMLElement ? target : null, feed, domMetrics);
-
-  feed.addEventListener(
-    "wheel",
-    (e: WheelEvent) => {
-      const scroller = scrollerUnder(e.target);
-      const delta = wheelAction({
-        scroller: scroller ? scroller.getBoundingClientRect() : null,
-        clientX: e.clientX,
-        deltaY: e.deltaY,
-        deltaMode: e.deltaMode,
-        feedScrollable: feed.scrollHeight - feed.clientHeight > 1,
-        feedHeight: feed.clientHeight,
-        edgePx,
-      });
-      if (delta === null) return;
-      e.preventDefault();
-      // NOT through TailFollow, and deliberately so: this IS the reader's own
-      // wheel, merely redirected off a section onto the feed. The owner reads
-      // it as the gesture it is — up ends the follow, back to the tail resumes
-      // it — which is exactly the treatment a wheel on the feed itself gets.
-      feed.scrollTop += delta;
-    },
-    { capture: true, passive: false },
-  );
-
-  const isSection = (el: HTMLElement): boolean =>
-    SECTION_CLASSES.some((cls) => el.classList.contains(cls));
-
-  let armedBox: HTMLElement | null = null;
-  let armedSection: HTMLElement | null = null;
-  feed.addEventListener("pointermove", (e: PointerEvent) => {
-    const scroller = scrollerUnder(e.target);
-    const hit =
-      scroller && inEdgeZone(scroller.getBoundingClientRect(), e.clientX, edgePx) ? scroller : null;
-    if (hit === armedBox) return;
-    armedBox?.classList.remove(BOX_CLASS);
-    armedSection?.classList.remove(ZONE_CLASS);
-    armedBox = hit;
-    armedSection = hit ? sectionFor(hit, feed, isSection) : null;
-    armedBox?.classList.add(BOX_CLASS);
-    armedSection?.classList.add(ZONE_CLASS);
-  });
-}
