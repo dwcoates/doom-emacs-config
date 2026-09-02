@@ -38,6 +38,20 @@ const CAUSE_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   launchFailed: { detail: "no such file" },
 };
 
+
+/**
+ * The refusal a click left at the link.
+ *
+ * It is the shared `.refusal[data-arm]` ELEMENT the one refusal hook draws,
+ * not a class on the anchor: the sentence carries the arm's own facts (a
+ * registry dir, a successor's address) and an anchor whose text is a url has
+ * nowhere to put them. A detached anchor hosts it inside itself; in a page it
+ * lands as the anchor's next sibling.
+ */
+function refusalAt(anchor: HTMLElement): HTMLElement | null {
+  return anchor.querySelector<HTMLElement>(".refusal");
+}
+
 /**
  * A context whose two link verbs answer ARM and record their requests.
  *
@@ -204,7 +218,7 @@ describe("renderExternalLink: the click", () => {
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     click(a);
     await settle();
-    expect(a.classList.contains("refusal")).toBe(false);
+    expect(refusalAt(a)).toBeNull();
   });
 
   it("draws the refusal AT THE LINK on an error arm", async () => {
@@ -215,7 +229,7 @@ describe("renderExternalLink: the click", () => {
     click(a);
     await settle();
     // ASSERT
-    expect(a.getAttribute("data-arm")).toBe("invalidUrl");
+    expect(refusalAt(a)?.getAttribute("data-arm")).toBe("invalidUrl");
   });
 
   it.each(oneofArms(OpenExternalErrorSchema, "cause"))(
@@ -225,7 +239,11 @@ describe("renderExternalLink: the click", () => {
       const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
       click(a);
       await settle();
-      expect([a.getAttribute("data-arm"), a.title === ""]).toEqual([arm, false]);
+      const refusal = refusalAt(a);
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([
+        arm,
+        false,
+      ]);
     },
   );
 
@@ -234,7 +252,7 @@ describe("renderExternalLink: the click", () => {
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     click(a);
     await settle();
-    expect(a.title).toContain("127.0.0.1:7777");
+    expect(refusalAt(a)?.textContent).toContain("127.0.0.1:7777");
   });
 
   it("carries the launcher's own detail", async () => {
@@ -242,7 +260,7 @@ describe("renderExternalLink: the click", () => {
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     click(a);
     await settle();
-    expect(a.title).toContain("no such file");
+    expect(refusalAt(a)?.textContent).toContain("no such file");
   });
 
   it("marks the refusal with the shared class the suite targets", async () => {
@@ -250,15 +268,15 @@ describe("renderExternalLink: the click", () => {
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     click(a);
     await settle();
-    expect(a.classList.contains("refusal")).toBe(true);
+    expect(refusalAt(a)).not.toBeNull();
   });
 
-  it("puts the refusal's sentence on the hover", async () => {
+  it("draws the refusal's sentence as its text", async () => {
     const { ctx } = harness("error");
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     click(a);
     await settle();
-    expect(a.title).not.toBe("");
+    expect(refusalAt(a)?.textContent).not.toBe("");
   });
 
   it("warns on a refusal", async () => {
@@ -275,20 +293,22 @@ describe("renderExternalLink: the click", () => {
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
     click(a);
     await settle();
-    expect(a.classList.contains("refusal")).toBe(true);
+    expect(refusalAt(a)?.getAttribute("data-arm")).toBe("transport");
   });
 
   it("clears a previous refusal when the link is clicked again", async () => {
     // ARRANGE: the daemon refused once; a retry must not look pre-failed.
     const { ctx, external } = harness("success");
     const a = renderExternalLink(ctx, { text: "docs", url: "https://example.test" });
-    a.classList.add("refusal");
-    a.setAttribute("data-arm", "invalidUrl");
+    const stale = document.createElement("span");
+    stale.className = "refusal";
+    stale.setAttribute("data-arm", "invalidUrl");
+    a.appendChild(stale);
     // ACT
     click(a);
     await settle();
     // ASSERT
-    expect([a.classList.contains("refusal"), external.length]).toEqual([false, 1]);
+    expect([refusalAt(a) !== null, external.length]).toEqual([false, 1]);
   });
 
   const ignored: ReadonlyArray<[string, MouseEventInit]> = [
@@ -423,7 +443,7 @@ describe("renderEditorLink", () => {
     const a = renderEditorLink(ctx, { text: "x", path: "/w/x" });
     click(a);
     await settle();
-    expect(a.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
+    expect(refusalAt(a)?.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
   });
 
   it.each(oneofArms(OpenInEditorErrorSchema, "cause"))(
@@ -433,7 +453,11 @@ describe("renderEditorLink", () => {
       const a = renderEditorLink(ctx, { text: "x", path: "/w/x" });
       click(a);
       await settle();
-      expect([a.getAttribute("data-arm"), a.title === ""]).toEqual([arm, false]);
+      const refusal = refusalAt(a);
+      expect([refusal?.getAttribute("data-arm"), refusal?.textContent === ""]).toEqual([
+        arm,
+        false,
+      ]);
     },
   );
 
@@ -442,7 +466,7 @@ describe("renderEditorLink", () => {
     const a = renderEditorLink(ctx, { text: "x", path: "/elsewhere" });
     click(a);
     await settle();
-    expect(a.title).toContain("outside this workspace");
+    expect(refusalAt(a)?.textContent).toContain("outside this workspace");
   });
 
   it("warns on a refusal", async () => {
@@ -459,7 +483,7 @@ describe("renderEditorLink", () => {
     const a = renderEditorLink(ctx, { text: "x", path: "/w/x" });
     click(a);
     await settle();
-    expect(a.classList.contains("refusal")).toBe(true);
+    expect(refusalAt(a)?.getAttribute("data-arm")).toBe("transport");
   });
 
   it("leaves a modified click to the platform", async () => {

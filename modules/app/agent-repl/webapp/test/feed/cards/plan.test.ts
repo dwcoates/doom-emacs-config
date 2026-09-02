@@ -186,7 +186,9 @@ describe("drawFeedPlan", () => {
     const anchor = el.querySelector<HTMLAnchorElement>(".plan-edit a");
     anchor?.click();
     await settle();
-    expect(anchor?.getAttribute("data-arm")).toBe("pathEscapesWorkspace");
+    expect(
+      anchor?.parentElement?.querySelector(".refusal")?.getAttribute("data-arm"),
+    ).toBe("pathEscapesWorkspace");
   });
 
   it("draws the failed reason verbatim", () => {
