@@ -28,7 +28,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_close_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_close_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVQ2xvc2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFkNsb3NlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFUNsb3NlV29ya3NwYWNlU3VjY2VzcyKGAwoTQ2xvc2VXb3Jrc3BhY2VFcnJvchI2CgdibG9ja2VkGAEgASgLMiMuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlQmxvY2tlZEgAEkkKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyMC5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSIXChVDbG9zZVdvcmtzcGFjZUJsb2NrZWQiIAoeQ2xvc2VXb3Jrc3BhY2VVbmtub3duV29ya3NwYWNlIjoKIkNsb3NlV29ya3NwYWNlV29ya3NwYWNlUmVmTWlzbWF0Y2gSFAoMcmVnaXN0cnlfZGlyGAEgASgJIjEKHkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheRIPCgdhZGRyZXNzGAEgASgJIh0KG0Nsb3NlV29ya3NwYWNlTm90WWV0QWRvcHRlZEIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CithZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xvc2Vfd29ya3NwYWNlLnByb3RvEgxhZ2VudHJlcGwudjEiRgoVQ2xvc2VXb3Jrc3BhY2VSZXF1ZXN0Ei0KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYijgEKFkNsb3NlV29ya3NwYWNlUmVzcG9uc2USNgoHc3VjY2VzcxgBIAEoCzIjLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZVN1Y2Nlc3NIABIyCgVlcnJvchgCIAEoCzIhLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IhcKFUNsb3NlV29ya3NwYWNlU3VjY2VzcyKGAwoTQ2xvc2VXb3Jrc3BhY2VFcnJvchI2CgdibG9ja2VkGAEgASgLMiMuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlQmxvY2tlZEgAEkkKEXVua25vd25fd29ya3NwYWNlGAIgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVW5rbm93bldvcmtzcGFjZUgAElIKFndvcmtzcGFjZV9yZWZfbWlzbWF0Y2gYAyABKAsyMC5hZ2VudHJlcGwudjEuQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaEgAEkkKEXRyYW5zZmVycmluZ19hd2F5GAQgASgLMiwuYWdlbnRyZXBsLnYxLkNsb3NlV29ya3NwYWNlVHJhbnNmZXJyaW5nQXdheUgAEkQKD25vdF95ZXRfYWRvcHRlZBgFIAEoCzIpLmFnZW50cmVwbC52MS5DbG9zZVdvcmtzcGFjZU5vdFlldEFkb3B0ZWRIAEIHCgVjYXVzZSJ/ChVDbG9zZVdvcmtzcGFjZUJsb2NrZWQSFgoOdHVybl9pbl9mbGlnaHQYASABKAgSEQoJbGl2ZV93b3JrGAIgASgNEhQKDGhlbGRfcHJvbXB0cxgDIAEoDRIUCgxtZXJnZV9xdWV1ZWQYBCABKAgSDwoHc3VtbWFyeRgFIAEoCSIgCh5DbG9zZVdvcmtzcGFjZVVua25vd25Xb3Jrc3BhY2UiOgoiQ2xvc2VXb3Jrc3BhY2VXb3Jrc3BhY2VSZWZNaXNtYXRjaBIUCgxyZWdpc3RyeV9kaXIYASABKAkiMQoeQ2xvc2VXb3Jrc3BhY2VUcmFuc2ZlcnJpbmdBd2F5Eg8KB2FkZHJlc3MYASABKAkiHQobQ2xvc2VXb3Jrc3BhY2VOb3RZZXRBZG9wdGVkQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.CloseWorkspaceRequest
@@ -157,9 +157,48 @@ export const CloseWorkspaceErrorSchema: GenMessage<CloseWorkspaceError> = /*@__P
   messageDesc(file_agentrepl_v1_endpoint_close_workspace, 3);
 
 /**
+ * WHY the close is blocked — the same evidence the footer's close-blocked
+ * state draws, so a caller with no footer (a test, a log line, the host's
+ * own message) can still say why. (Landing 7, 2026-09-02.)
+ *
  * @generated from message agentrepl.v1.CloseWorkspaceBlocked
  */
 export type CloseWorkspaceBlocked = Message<"agentrepl.v1.CloseWorkspaceBlocked"> & {
+  /**
+   * The main thread has a turn in flight.
+   *
+   * @generated from field: bool turn_in_flight = 1;
+   */
+  turnInFlight: boolean;
+
+  /**
+   * Detached items live now (subagents, runs, tasks).
+   *
+   * @generated from field: uint32 live_work = 2;
+   */
+  liveWork: number;
+
+  /**
+   * Held prompts in the tray — undelivered user intent.
+   *
+   * @generated from field: uint32 held_prompts = 3;
+   */
+  heldPrompts: number;
+
+  /**
+   * The workspace is queued for, or inside, a merge.
+   *
+   * @generated from field: bool merge_queued = 4;
+   */
+  mergeQueued: boolean;
+
+  /**
+   * The daemon's composed sentence over the fields above — the footer's
+   * activity line, verbatim.
+   *
+   * @generated from field: string summary = 5;
+   */
+  summary: string;
 };
 
 /**
