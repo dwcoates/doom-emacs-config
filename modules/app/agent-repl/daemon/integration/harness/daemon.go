@@ -113,6 +113,20 @@ type Opts struct {
 	// example HandoverChainTimeout) with a one-line reason at the call site —
 	// never to an ad hoc duration.
 	Timeout time.Duration
+	// ShimNode overrides --node (default: the built fake shim). The e2e
+	// suite passes a real `node` binary here so the daemon spawns the real
+	// TypeScript shim instead of the fake-shim Go stand-in.
+	ShimNode string
+	// ShimMain overrides --shim-main (default: a one-line placeholder
+	// module). The e2e suite passes the real shim bundle, built from source
+	// with `--fake` support baked in.
+	ShimMain string
+	// StoreSocket overrides the store socket path threaded through
+	// --store-socket to every shim this daemon spawns (default: a fresh path
+	// nothing listens on, as today). The e2e suite passes the socket of a
+	// REAL running shim-store, so shims spawned by this daemon persist and
+	// read real events.
+	StoreSocket string
 }
 
 // Daemon is one running claude-repld process and the client dialed to it.
@@ -223,7 +237,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		WebappDir:          NewFakeWebappDist(t, filepath.Join(root, "dist")),
 		DefaultConfigDir:   NewConfigRoot(t, filepath.Join(root, "config-default"), accountEmail(opts.DefaultAccountEmail, "default@example.invalid")),
 		MultiRepoConfigDir: NewConfigRoot(t, filepath.Join(root, "config-multi"), accountEmail(opts.MultiRepoAccountEmail, "multi@example.invalid")),
-		StoreSocket:        filepath.Join(sockRoot, "store.sock"),
+		StoreSocket:        opts.StoreSocket,
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Deploy:             NewFakeDeployScript(t, filepath.Join(root, "bin")),
 		t:                  t,
@@ -235,6 +249,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		if err := os.MkdirAll(d.StateDir, 0o755); err != nil {
 			t.Fatalf("harness: mkdir state root: %v", err)
 		}
+	}
+	if d.StoreSocket == "" {
+		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
 	// The warning sweep is UNCONDITIONAL: every daemon sweeps its logs at test
 	// end with an empty expected set, so a test that never calls ExpectWarnings
@@ -248,6 +265,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	}
 	mainJS := filepath.Join(root, "main.js")
 	writeFile(t, mainJS, "// placeholder shim module\n")
+	if opts.ShimMain != "" {
+		mainJS = opts.ShimMain
+	}
 	fakeBin := filepath.Join(root, "bin")
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
@@ -274,9 +294,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	t.Cleanup(cancel)
 	d.ctx = ctx
 
+	node := opts.ShimNode
+	if node == "" {
+		node = FakeShimBinary(t)
+	}
 	args := []string{
 		"--state-dir", d.StateDir,
-		"--node", FakeShimBinary(t),
+		"--node", node,
 		"--shim-main", mainJS,
 		"--webapp-dist", d.WebappDir,
 		"--store-socket", d.StoreSocket,

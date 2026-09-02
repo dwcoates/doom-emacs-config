@@ -75,6 +75,21 @@ var (
 //
 //	func TestMain(m *testing.M) { os.Exit(harness.Main(m)) }
 func Main(m *testing.M) int {
+	module, err := moduleRoot()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "harness:", err)
+		return 1
+	}
+	return MainAt(m, module)
+}
+
+// MainAt is Main, except the daemon module root is given explicitly instead
+// of discovered by walking up from the working directory. A suite outside the
+// claude-repld module (agentrepl/e2e) cannot use the cwd-walk — its own
+// go.mod would be found first, since the walk stops at the nearest one — so
+// it resolves its own relative path to daemon/ and calls this instead of
+// Main.
+func MainAt(m *testing.M, module string) int {
 	dir, err := os.MkdirTemp("", "agent-repl-integration-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "harness: temp dir:", err)
@@ -82,11 +97,6 @@ func Main(m *testing.M) int {
 	}
 	defer os.RemoveAll(dir)
 
-	module, err := moduleRoot()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "harness:", err)
-		return 1
-	}
 	daemonBinary = filepath.Join(dir, "claude-repld")
 	fakeshimBinary = filepath.Join(dir, "fakeshim")
 	// The scripted `git`. It is built under its real name because it is placed
