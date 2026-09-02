@@ -124,10 +124,17 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 	// second page provably exists regardless of what the page size is.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-walk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
 	const n = harness.FeedPageSize + walkPageMargin
 	for i := 0; i < n; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
+	// Sync: the pushes are asynchronous, so the walk waits for the LAST row to
+	// land -- a page taken mid-ingest would be a page over however many rows
+	// happened to have arrived.
+	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+	})
 
 	// Act
 	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
