@@ -19,7 +19,44 @@
  * is still catching up, and the caller schedules the next frame while so.
  */
 
-import type { StoreState } from "./store.js";
+/**
+ * The ONLY fields this module reads off a feed item. The conversation model
+ * that used to define them (`store.ts`) went with the hand-decoded transport,
+ * and the reveal never needed more than this: a block's identity, its arrived
+ * text, and whether the producer closed it. Declaring the shape here keeps the
+ * pacing logic independent of whichever view type the caller is animating.
+ */
+export interface RevealBlock {
+  kind: "text" | "thinking";
+  /**
+   * The block's PLACE in the feed: the reveal cursor is tracked by it, so it
+   * must be opened once and never moved, or the type-out restarts under the
+   * reader.
+   */
+  blockId: string;
+  text: string;
+  done: boolean;
+}
+
+/** Any other feed item: opaque to the reveal, passed through untouched. */
+export interface RevealOpaqueItem {
+  kind: string;
+}
+
+export type RevealItem = RevealBlock | RevealOpaqueItem;
+
+/** The feed state the reveal paces: an ordered item list, and nothing else. */
+export interface RevealState {
+  items: RevealItem[];
+}
+
+/**
+ * Whether an item is one the reveal animates. Kind alone decides, exactly as
+ * the discriminated union it replaces did.
+ */
+function isRevealBlock(item: RevealItem): item is RevealBlock {
+  return item.kind === "text" || item.kind === "thinking";
+}
 
 /** Monotonic millisecond clock the reveal paces against (`performance.now`). */
 export interface RevealClock {
@@ -111,14 +148,14 @@ export class SmoothReveal {
    * animated) passes through untouched — real `done` and all — so a settled
    * feed renders from the genuine store state, not a copy.
    */
-  reveal(state: StoreState): { state: StoreState; pending: boolean } {
+  reveal(state: RevealState): { state: RevealState; pending: boolean } {
     const now = this.clock.now();
     const live = new Set<string>();
     let pending = false;
     let changed = false;
     const lastIndex = state.items.length - 1;
     const items = state.items.map((item, index) => {
-      if (item.kind !== "text" && item.kind !== "thinking") return item;
+      if (!isRevealBlock(item)) return item;
       const id = item.blockId;
       live.add(id);
       const full = item.text.length;
@@ -170,10 +207,10 @@ export class SmoothReveal {
    * grows one of those blocks — only growth beyond what is already on screen
    * then animates.
    */
-  markShown(state: StoreState): void {
+  markShown(state: RevealState): void {
     const now = this.clock.now();
     for (const item of state.items) {
-      if (item.kind === "text" || item.kind === "thinking") {
+      if (isRevealBlock(item)) {
         this.tracks.set(item.blockId, { revealed: item.text.length, last: now });
       }
     }

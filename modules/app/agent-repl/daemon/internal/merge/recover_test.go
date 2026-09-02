@@ -1,0 +1,290 @@
+package merge
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// TestRecoverReEnqueuesWaitingMergesInOrder covers the durable queue's whole
+// point: a bounce brings back exactly what was waiting, in the order it waited.
+func TestRecoverReEnqueuesWaitingMergesInOrder(t *testing.T) {
+	// Arrange: three merges queued before the restart.
+	h := newHarness(t)
+	order := []ids.WorkspaceID{"ws-1", "ws-2", "ws-3"}
+	h.register("ws-2", "ws-two")
+	h.register("ws-3", "ws-three")
+	for _, ws := range order {
+		enqueueWorkspace(t, h, ws)
+	}
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	for i, entry := range entries {
+		if entry.Workspace != order[i] {
+			t.Fatalf("after recovery the queue is %+v, want %v", entries, order)
+		}
+	}
+}
+
+// TestRecoverPublishesAWaitingMergesFacts covers what a user sees after a
+// bounce: their merge is still queued and still says where it sits.
+func TestRecoverPublishesAWaitingMergesFacts(t *testing.T) {
+	// Arrange: a queued merge and a fresh orchestrator over the same store.
+	h := newHarness(t)
+	enqueue(t, h)
+	fresh, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+
+	// Act.
+	if err := fresh.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	facts, ok := fresh.Facts(theWorkspace)
+	if !ok || facts.State != StateQueued || facts.QueuePosition != 1 {
+		t.Fatalf("the recovered facts are %+v (present=%v), want queued at position 1", facts, ok)
+	}
+}
+
+// TestRecoverResumesAnInFlightMergeOverACleanTarget covers the resumable case:
+// nothing of the interrupted merge is half applied, so it can run again.
+func TestRecoverResumesAnInFlightMergeOverACleanTarget(t *testing.T) {
+	// Arrange: a merge that was admitted and whose lease survived the restart.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.git.clean = true
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 1 || entries[0].State != wsm.MergeQueued {
+		t.Fatalf("the recovered entry is %+v, want it waiting again", entries)
+	}
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateQueued {
+		t.Fatalf("the merge is %q, want it queued for another run", facts.State)
+	}
+}
+
+// TestRecoverReleasesTheStuckLease covers the invariant a stuck lease would
+// break: a lease nobody holds and nobody releases refuses that workspace's every
+// prompt forever.
+func TestRecoverReleasesTheStuckLease(t *testing.T) {
+	// Arrange: a merge whose lease survived the restart.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	if _, held, _ := h.db.Lease(context.Background(), theWorkspace); held {
+		t.Fatal("a merge lease survived recovery")
+	}
+}
+
+// TestRecoverLoudlyFailsAnUncleanTarget covers the unresumable case: the daemon
+// does not know what the dead run staged, and guessing would land a tree nobody
+// reviewed.
+func TestRecoverLoudlyFailsAnUncleanTarget(t *testing.T) {
+	// Arrange: an interrupted merge over a dirty target.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.git.clean = false
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	facts, _ := h.o.Facts(theWorkspace)
+	if facts.State != StateFailed {
+		t.Fatalf("the merge is %q, want it failed loudly", facts.State)
+	}
+	if !strings.Contains(facts.Detail, "restart") {
+		t.Fatalf("the failure reads %q, want it to name the restart", facts.Detail)
+	}
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 0 {
+		t.Fatalf("a loudly failed merge is still queued: %+v", entries)
+	}
+}
+
+// TestRecoverLoudlyFailsWhenTheTargetCannotBeInspected covers the other
+// unresumable case: "could not tell" is never read as resumable.
+func TestRecoverLoudlyFailsWhenTheTargetCannotBeInspected(t *testing.T) {
+	// Arrange: a target git cannot answer for.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.git.cleanErr = errors.New("the target is gone")
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
+		t.Fatalf("the merge is %q, want it failed loudly", facts.State)
+	}
+}
+
+// TestRecoverLoudlyFailsWhenTheGeometryIsGone covers a workspace whose creation
+// job no longer resolves: there is nothing left to resume into.
+func TestRecoverLoudlyFailsWhenTheGeometryIsGone(t *testing.T) {
+	// Arrange: an interrupted merge whose geometry was forgotten.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.db.mu.Lock()
+	delete(h.db.jobs, theWorkspace)
+	h.db.mu.Unlock()
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	if facts, _ := h.o.Facts(theWorkspace); facts.State != StateFailed {
+		t.Fatalf("the merge is %q, want it failed loudly", facts.State)
+	}
+}
+
+// TestRecoverNeverLeavesAMergeInFlight covers the whole file's invariant: after
+// recovery nothing is admitted-but-unowned.
+func TestRecoverNeverLeavesAMergeInFlight(t *testing.T) {
+	// Arrange: one resumable and one unresumable merge, in two repositories.
+	h := newHarness(t)
+	h.register("ws-2", "ws-two")
+	enqueue(t, h)
+	enqueueWorkspace(t, h, "ws-2")
+	interruptMerge(t, h)
+	h.git.clean = false
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	queues, _ := h.db.AllMergeQueues(context.Background())
+	for repo, entries := range queues {
+		for _, entry := range entries {
+			if entry.State == wsm.MergeAdmitted {
+				t.Fatalf("%s in %s is still admitted after recovery", entry.Workspace, repo)
+			}
+		}
+	}
+}
+
+// TestLastTabIsWhereAResumePicksUp covers what the ledger reconstructs: the tab
+// a merge reached, which is all a replay needs and all it holds.
+func TestLastTabIsWhereAResumePicksUp(t *testing.T) {
+	// Arrange: a ledger whose last interval is the tests tab.
+	h := newHarness(t)
+	lease := wsm.NewLeaseID()
+	if err := h.db.OpenMergeLedger(context.Background(), theWorkspace, lease); err != nil {
+		t.Fatalf("opening the ledger: %v", err)
+	}
+	for _, kind := range []string{TabMerge, TabTests} {
+		if err := h.db.RecordTabInterval(context.Background(), lease, wsm.TabInterval{Round: 1, Kind: kind}); err != nil {
+			t.Fatalf("recording %s: %v", kind, err)
+		}
+	}
+
+	// Act.
+	got := h.o.lastTab(context.Background(), theWorkspace)
+
+	// Assert.
+	if got != TabTests {
+		t.Fatalf("the last tab is %q, want %q", got, TabTests)
+	}
+}
+
+// TestLastTabDefaultsToTheQueue covers a merge with no ledger yet: it never
+// reached a phase, so the queue is where it resumes.
+func TestLastTabDefaultsToTheQueue(t *testing.T) {
+	// Arrange: a workspace with no ledger.
+	h := newHarness(t)
+
+	// Act.
+	got := h.o.lastTab(context.Background(), theWorkspace)
+
+	// Assert.
+	if got != TabQueue {
+		t.Fatalf("the last tab is %q, want %q", got, TabQueue)
+	}
+}
+
+// enqueueWorkspace queues one named workspace's merge.
+func enqueueWorkspace(t *testing.T, h *harness, ws ids.WorkspaceID) {
+	t.Helper()
+	if err := h.o.Enqueue(context.Background(), ws); err != nil {
+		t.Fatalf("enqueueing %s: %v", ws, err)
+	}
+}
+
+// interruptMerge leaves the store looking the way a daemon that died mid-merge
+// leaves it: the entry admitted and the lease still held.
+func interruptMerge(t *testing.T, h *harness) {
+	t.Helper()
+	if err := h.db.AdmitMerge(context.Background(), h.repoKey(), theWorkspace); err != nil {
+		t.Fatalf("admitting: %v", err)
+	}
+	if _, err := h.db.AcquireLease(context.Background(), theWorkspace, wsm.HolderMerge, wsm.PolicyRefuse); err != nil {
+		t.Fatalf("taking the lease: %v", err)
+	}
+}
+
+// TestRecoverRefusesACorruptCreationJobRatherThanFailingTheMerge covers the
+// corrupt-refuses-load ruling: a creation_jobs row that will not decode is
+// state corruption, so the recovery FAILS THE BOOT instead of downgrading it
+// into the ordinary "the geometry is gone" outcome and serving on.
+func TestRecoverRefusesACorruptCreationJobRatherThanFailingTheMerge(t *testing.T) {
+	// Arrange: an interrupted merge whose creation_jobs row will not decode.
+	h := newHarness(t)
+	enqueue(t, h)
+	interruptMerge(t, h)
+	h.db.mu.Lock()
+	h.db.jobDecodeErrs[theWorkspace] = &wsm.DecodeError{
+		Table: "creation_jobs", Row: string(theWorkspace), Field: "actions_before",
+		Err: errors.New("not valid json"),
+	}
+	h.db.mu.Unlock()
+
+	// Act.
+	err := h.o.Recover(context.Background())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Recover over a corrupt creation_jobs row = nil, want a loud refusal")
+	}
+	var decodeErr *wsm.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("Recover error = %v, want it to carry the *wsm.DecodeError", err)
+	}
+}

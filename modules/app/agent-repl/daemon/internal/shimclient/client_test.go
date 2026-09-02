@@ -3,775 +3,551 @@ package shimclient
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
+	"io"
+	"os/exec"
+	"syscall"
 	"testing"
 	"time"
 
-	protocolv1 "agentrepl/proto/protocol/v1"
-	"agentrepl/wire"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	shimv1 "agentrepl/proto/shim/v1"
+
+	"connectrpc.com/connect"
 
 	"claude-repld/internal/dlog"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
+	"claude-repld/internal/ids"
 )
 
-// ---------------------------------------------------------------------------
-// Test doubles for the injected sinks.
-// ---------------------------------------------------------------------------
-
-type memSeqStore struct {
-	mu sync.Mutex
-	m  map[string]uint64
+// newBareClient builds a client with no process and no connection, for the
+// pieces that need neither.
+func newBareClient() *client {
+	return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), "/tmp/unused.sock", defaultBackoff, nil)
 }
 
-func newMemSeqStore() *memSeqStore { return &memSeqStore{m: map[string]uint64{}} }
-
-func (s *memSeqStore) LastSeq(id string) uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.m[id]
-}
-
-func (s *memSeqStore) SetLastSeq(id string, seq uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.m[id] = seq
-}
-
-// chanState / chanFrame capture routed events on buffered channels so tests
-// synchronize on delivery instead of sleeping.
-type chanState struct {
-	ch  chan *protocolv1.Event
-	err error
-}
-
-func newChanState() *chanState { return &chanState{ch: make(chan *protocolv1.Event, 256)} }
-func (s *chanState) Apply(ev *protocolv1.Event) error {
-	s.ch <- ev
-	return s.err
-}
-
-type chanTurnClaims struct {
-	ch  chan *protocolv1.Event
-	err error
-}
-
-func newChanTurnClaims() *chanTurnClaims {
-	return &chanTurnClaims{ch: make(chan *protocolv1.Event, 256)}
-}
-
-func (s *chanTurnClaims) ApplyTurnClaimBridge(ev *protocolv1.Event) error {
-	s.ch <- ev
-	return s.err
-}
-
-type chanFrame struct {
-	ch  chan *protocolv1.Event
-	err error
-}
-
-func newChanFrame() *chanFrame { return &chanFrame{ch: make(chan *protocolv1.Event, 256)} }
-func (f *chanFrame) Consume(ev *protocolv1.Event) error {
-	f.ch <- ev
-	return f.err
-}
-
-type chanDegraded struct {
-	ds        chan *protocolv1.DegradedState
-	degraded  chan string
-	recovered chan struct{}
-	// disposition is the verdict this fake reporter hands back, which is what
-	// the client's own relay record takes its severity from.
-	disposition Disposition
-}
-
-func newChanDegraded() *chanDegraded {
-	return &chanDegraded{
-		ds:        make(chan *protocolv1.DegradedState, 16),
-		degraded:  make(chan string, 16),
-		recovered: make(chan struct{}, 16),
-	}
-}
-
-func (d *chanDegraded) Degraded(_ string, _ *protocolv1.Event, ds *protocolv1.DegradedState) Disposition {
-	d.ds <- ds
-	return d.disposition
-}
-func (d *chanDegraded) ConnectionDegraded(_, reason string) { d.degraded <- reason }
-func (d *chanDegraded) ConnectionRecovered(_ string)        { d.recovered <- struct{}{} }
-
-// funcPerm adapts a func to PermissionHandler.
-type funcPerm func(sessionID string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse
-
-func (f funcPerm) HandlePermission(id string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse {
-	return f(id, req)
-}
-
-// harness bundles the doubles and builds a Config with test-friendly tunables.
-type harness struct {
-	seq    *memSeqStore
-	state  *chanState
-	claims *chanTurnClaims
-	frame  *chanFrame
-	deg    *chanDegraded
-	perm   PermissionHandler
-}
-
-func newHarness() *harness {
-	return &harness{
-		seq:    newMemSeqStore(),
-		state:  newChanState(),
-		claims: newChanTurnClaims(),
-		frame:  newChanFrame(),
-		deg:    newChanDegraded(),
-		perm: funcPerm(func(_ string, req *protocolv1.PermissionRequest) *protocolv1.PermissionResponse {
-			return &protocolv1.PermissionResponse{RequestId: req.GetRequestId(), Decision: protocolv1.PermissionDecision_PERMISSION_DECISION_ALLOW}
-		}),
-	}
-}
-
-func shimclientTestLogf(t *testing.T) dlog.Logf {
-	t.Helper()
-	return func(format string, args ...any) { t.Logf("[shimclient] "+format, args...) }
-}
-
-func (h *harness) config(t *testing.T, sessionID, path string) Config {
-	t.Helper()
-	return Config{
-		SessionID:         sessionID,
-		Source:            dialSource{path: path},
-		DaemonVersion:     "test-daemon",
-		ProtocolVersion:   "1",
-		SeqStore:          h.seq,
-		StateSink:         h.state,
-		TurnClaims:        h.claims,
-		FrameSink:         h.frame,
-		Degraded:          h.deg,
-		Permissions:       h.perm,
-		Logf:              shimclientTestLogf(t),
-		HeartbeatInterval: time.Hour, // no spurious heartbeats unless a test wants them
-		HeartbeatTimeout:  time.Hour,
-		AckTimeout:        2 * time.Second,
-		BackoffMin:        5 * time.Millisecond,
-		BackoffMax:        20 * time.Millisecond,
-	}
-}
-
-// dialSource adapts the fake shim peer (which LISTENS) to the ConnSource the
-// client now takes. Production is the other way round — shims dial the daemon
-// and its listener reads the identifying ShimHello — so this does the same two
-// steps against the fake: connect, then consume the opening hello. Everything
-// downstream of the handshake is byte-for-byte what production sees.
-type dialSource struct{ path string }
-
-func (d dialSource) Next(ctx context.Context, _ string) (net.Conn, *protocolv1.ShimHello, error) {
-	var dl net.Dialer
-	conn, err := dl.DialContext(ctx, "unix", d.path)
-	if err != nil {
-		return nil, nil, err
-	}
-	payload, err := wire.ReadFrame(conn)
-	if err != nil {
-		conn.Close()
-		return nil, nil, err
-	}
-	var env anypb.Any
-	if err := proto.Unmarshal(payload, &env); err != nil {
-		conn.Close()
-		return nil, nil, err
-	}
-	msg, err := env.UnmarshalNew()
-	if err != nil {
-		conn.Close()
-		return nil, nil, err
-	}
-	hello, ok := msg.(*protocolv1.ShimHello)
-	if !ok {
-		conn.Close()
-		return nil, nil, fmt.Errorf("fake shim opened with %T, want ShimHello", msg)
-	}
-	return conn, hello, nil
-}
-
-// ---------------------------------------------------------------------------
-// Fake shim peer: an in-test UDS listener speaking the protocol.
-// ---------------------------------------------------------------------------
-
-func startFakeShim(t *testing.T, handler func(conn net.Conn)) string {
-	t.Helper()
-	// A SHORT temp dir, not t.TempDir(): macOS caps a unix socket path at 104
-	// bytes and t.TempDir() embeds the test name, so a descriptive name alone
-	// used to fail the bind with "invalid argument".
-	dir, err := os.MkdirTemp("/tmp", "sc")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	path := filepath.Join(dir, "s")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("listen on %s: %v", path, err)
-	}
-	t.Cleanup(func() { ln.Close() })
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go handler(conn)
-		}
-	}()
-	return path
-}
-
-// mustWriteMsg is the FAKE SHIM's encoder, and it stays hand-rolled on
-// purpose rather than calling wire.WriteAny.
-//
-// Every production site now shares one encoder, so a regression in it would
-// move both ends of these tests together and stay invisible. Keeping the test
-// peer independent means these tests interop a real client against a separately
-// written implementation of the convention — the only place that cross-check
-// exists, since wire's own byte-identity test is the only other one.
-func mustWriteMsg(t *testing.T, conn net.Conn, msg proto.Message) {
-	t.Helper()
-	env, err := anypb.New(msg)
-	if err != nil {
-		t.Fatalf("anypb.New(%T): %v", msg, err)
-	}
-	b, err := proto.Marshal(env)
-	if err != nil {
-		t.Fatalf("marshal frame: %v", err)
-	}
-	if err := wire.WriteFrame(conn, b); err != nil {
-		t.Fatalf("write frame: %v", err)
-	}
-}
-
-// fakeServerHandshake runs the SHIM side of the whole bring-up gate — hello,
-// the daemon's hello, and the ShimReady that closes it — and returns the
-// DaemonHello, whose from_seq is the daemon's resume position.
-//
-// Acking is what makes this a usable session: nothing else releases
-// AwaitReady, so a fake that skipped it would hang every caller.
-func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string, turnInFlight bool) *protocolv1.DaemonHello {
-	t.Helper()
-	mustWriteMsg(t, conn, &protocolv1.ShimHello{
-		SessionId:       sessionID,
-		Vendor:          "claude",
-		ShimVersion:     "test-shim",
-		ProtocolVersion: protoVer,
-		TurnInFlight:    turnInFlight,
-	})
-	m, err := wire.ReadAny(conn)
-	if err != nil {
-		t.Fatalf("shim reading DaemonHello: %v", err)
-	}
-	dh, ok := m.(*protocolv1.DaemonHello)
-	if !ok {
-		t.Fatalf("shim expected DaemonHello, got %T", m)
-	}
-	mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: sessionID, FromSeq: dh.GetFromSeq()})
-	return dh
-}
-
-// recvEvent waits for one event on ch or fails.
-func recvEvent(t *testing.T, ch chan *protocolv1.Event) *protocolv1.Event {
-	t.Helper()
-	select {
-	case ev := <-ch:
-		return ev
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for an event")
-		return nil
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-func TestHandshakeHappyPath(t *testing.T) {
-	// Arrange
-	h := newHarness()
-	gotHello := make(chan *protocolv1.DaemonHello, 1)
-	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &protocolv1.ShimHello{
-			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
-			ProtocolVersion: "1", TurnInFlight: true,
-		})
-		m, err := wire.ReadAny(conn)
-		if err != nil {
-			t.Errorf("read DaemonHello: %v", err)
-			return
-		}
-		dh, ok := m.(*protocolv1.DaemonHello)
-		if !ok {
-			t.Errorf("expected DaemonHello, got %T", m)
-			return
-		}
-		gotHello <- dh
-		mustWriteMsg(t, conn, &protocolv1.ShimReady{SessionId: "sess-1", FromSeq: dh.GetFromSeq()})
-		// Hold the connection open.
-		_, _ = wire.ReadAny(conn)
-	})
-
-	cfg := h.config(t, "sess-1", path)
-	connected := make(chan *protocolv1.ShimHello, 1)
-	cfg.OnConnected = func(hello *protocolv1.ShimHello) bool { connected <- hello; return false }
-	c := New(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.Run(ctx) }()
-
-	// Act
-	var hello *protocolv1.ShimHello
-	select {
-	case hello = <-connected:
-	case <-time.After(2 * time.Second):
-		t.Fatal("never connected")
-	}
-
-	// Assert
-	dh := <-gotHello
-	if dh.GetProtocolVersion() != "1" || dh.GetDaemonVersion() != "test-daemon" {
-		t.Fatalf("DaemonHello mismatch: %+v", dh)
-	}
-	if dh.GetFromSeq() != 0 {
-		t.Fatalf("DaemonHello from_seq = %d, want 0 for a session never consumed", dh.GetFromSeq())
-	}
-	if !hello.GetTurnInFlight() {
-		t.Fatal("OnConnected should carry turn_in_flight=true")
-	}
-
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("Run returned non-nil on cancel: %v", err)
-	}
-}
-
-func TestHandshakeVersionMismatchIsTerminal(t *testing.T) {
-	// Arrange: shim announces an incompatible protocol version.
-	h := newHarness()
-	path := startFakeShim(t, func(conn net.Conn) {
-		mustWriteMsg(t, conn, &protocolv1.ShimHello{
-			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
-			ProtocolVersion: "99",
-		})
-		_, _ = wire.ReadAny(conn)
-	})
-	cfg := h.config(t, "sess-1", path)
-	c := New(cfg)
-
-	// Act: Run returns quickly because a version mismatch is not retryable.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	err := c.Run(ctx)
-
-	// Assert
-	if !errors.Is(err, ErrVersionMismatch) {
-		t.Fatalf("want ErrVersionMismatch, got %v", err)
-	}
-}
-
-func TestReconnectAndResumeMidStream(t *testing.T) {
-	// Arrange: first connection serves seq 1..3 then drops; the daemon must
-	// reconnect to the LIVE shim and resume Subscribe from_seq=3.
-	h := newHarness()
-	var attempt int
-	var mu sync.Mutex
-	secondSubFrom := make(chan uint64, 1)
-	path := startFakeShim(t, func(conn net.Conn) {
-		mu.Lock()
-		attempt++
-		n := attempt
-		mu.Unlock()
-		dh := fakeServerHandshake(t, conn, "sess-1", "1", false)
-		if n == 1 {
-			for seq := uint64(1); seq <= 3; seq++ {
-				mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
-			}
-			// Drop the connection; the unix stream delivers the three frames
-			// before EOF, so the daemon consumes them and then reconnects.
-			conn.Close()
-			return
-		}
-		// Second connection: report the resumed from_seq and serve 4..5.
-		secondSubFrom <- dh.GetFromSeq()
-		for seq := uint64(4); seq <= 5; seq++ {
-			mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
-		}
-		_, _ = wire.ReadAny(conn)
-	})
-
-	c := New(h.config(t, "sess-1", path))
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.Run(ctx) }()
-
-	// Act / Assert: five TurnEnded events arrive in order across the reconnect.
-	for want := uint64(1); want <= 3; want++ {
-		if got := recvEvent(t, h.state.ch).GetSeq(); got != want {
-			t.Fatalf("pre-drop seq: got %d want %d", got, want)
-		}
-	}
-	select {
-	case from := <-secondSubFrom:
-		if from != 3 {
-			t.Fatalf("resume from_seq: got %d want 3", from)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("never reconnected")
-	}
-	for want := uint64(4); want <= 5; want++ {
-		if got := recvEvent(t, h.state.ch).GetSeq(); got != want {
-			t.Fatalf("post-reconnect seq: got %d want %d", got, want)
-		}
-	}
-	if last := h.seq.LastSeq("sess-1"); last != 5 {
-		t.Fatalf("seq store: got %d want 5", last)
-	}
-
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("Run returned non-nil: %v", err)
-	}
-}
-
-func TestReconnectUsesVolatileCursorWhileDurableTurnCursorIsPinned(t *testing.T) {
-	h := newHarness()
-	var attempt int
-	var mu sync.Mutex
-	secondFrom := make(chan uint64, 1)
-	path := startFakeShim(t, func(conn net.Conn) {
-		mu.Lock()
-		attempt++
-		n := attempt
-		mu.Unlock()
-		dh := fakeServerHandshake(t, conn, "agent-session", "1", n == 2)
-		if n == 1 {
-			mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 1, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, Payload: &protocolv1.Event_SessionStarted{SessionStarted: &protocolv1.SessionStarted{VendorSessionId: "vendor-session"}}})
-			mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 2, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnStarted{TurnStarted: &protocolv1.TurnStarted{TurnId: "turn"}}})
-			mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 3, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_Vendor{Vendor: &anypb.Any{}}})
-			conn.Close()
-			return
-		}
-		secondFrom <- dh.GetFromSeq()
-		mustWriteMsg(t, conn, &protocolv1.Event{SessionId: "vendor-session", Seq: 4, Class: protocolv1.EventClass_EVENT_CLASS_PERSISTENT, RequestId: "turn", Payload: &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{TurnId: "turn"}}})
-		_, _ = wire.ReadAny(conn)
-	})
-	c := New(h.config(t, "agent-session", path))
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.Run(ctx) }()
-	if got := recvEvent(t, h.state.ch).GetSeq(); got != 1 {
-		t.Fatalf("session start seq = %d", got)
-	}
-	if got := recvEvent(t, h.state.ch).GetSeq(); got != 2 {
-		t.Fatalf("turn start seq = %d", got)
-	}
-	if got := recvEvent(t, h.frame.ch).GetSeq(); got != 3 {
-		t.Fatalf("response seq = %d", got)
-	}
-	if got := h.seq.LastSeq("agent-session"); got != 1 {
-		t.Fatalf("durable cursor before reconnect = %d, want 1", got)
-	}
-	select {
-	case got := <-secondFrom:
-		if got != 3 {
-			t.Fatalf("transport reconnect from_seq = %d, want volatile cursor 3", got)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("transport reconnect did not occur")
-	}
-	if got := recvEvent(t, h.state.ch).GetSeq(); got != 4 {
-		t.Fatalf("turn end seq = %d", got)
-	}
-	if got := h.seq.LastSeq("agent-session"); got != 4 {
-		t.Fatalf("durable cursor after terminal commit = %d, want 4", got)
-	}
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("Run returned non-nil: %v", err)
-	}
-}
-
-func TestHeartbeatMissSurfacesDegraded(t *testing.T) {
-	// Arrange: shim completes the handshake then goes silent (no heartbeats).
-	h := newHarness()
-	path := startFakeShim(t, func(conn net.Conn) {
-		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		_, _ = wire.ReadAny(conn) // block; never send anything else
-	})
-	cfg := h.config(t, "sess-1", path)
-	cfg.HeartbeatInterval = time.Hour
-	cfg.HeartbeatTimeout = 40 * time.Millisecond
-	c := New(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.Run(ctx) }()
-
-	// Act / Assert: the missed-heartbeat window opens a degraded report.
-	select {
-	case reason := <-h.deg.degraded:
-		if reason == "" {
-			t.Fatal("degraded reason should be non-empty")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("never surfaced connection-degraded")
-	}
-
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("Run returned non-nil: %v", err)
-	}
-}
-
-// silentThenTalkativeShim is a shim that handshakes, goes silent until resume
-// is closed, and then sends one Heartbeat. It is how the degrade and recovery
-// EDGES are arranged without a sleep anywhere: the test closes resume, and the
-// frame that closes the degraded window is the shim's answer to that close.
-func silentThenTalkativeShim(t *testing.T, sessionID string, resume <-chan struct{}) func(net.Conn) {
-	t.Helper()
-	return func(conn net.Conn) {
-		_ = fakeServerHandshake(t, conn, sessionID, "1", false)
-		<-resume
-		mustWriteMsg(t, conn, &protocolv1.ConnectionHeartbeat{SentAtMs: time.Now().UnixMilli()})
-		_, _ = wire.ReadAny(conn) // block; the connection outlives the test's asserts
-	}
-}
-
-func TestHeartbeatRecoveryIsReportedWhenTrafficResumes(t *testing.T) {
-	// Arrange — a shim that goes silent long enough to degrade the link and
-	// then speaks again. A latch you can enter but never watch leave is its own
-	// defect, so the closing edge is a contract of its own.
-	h := newHarness()
-	resume := make(chan struct{})
-	path := startFakeShim(t, silentThenTalkativeShim(t, "sess-1", resume))
-	cfg := h.config(t, "sess-1", path)
-	cfg.HeartbeatInterval = time.Hour
-	cfg.HeartbeatTimeout = 40 * time.Millisecond
-	c := New(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.Run(ctx) }()
-	select {
-	case <-h.deg.degraded:
-	case <-time.After(2 * time.Second):
-		t.Fatal("never surfaced connection-degraded, so there is no window to recover from")
-	}
-
-	// Act — inbound traffic resumes.
-	close(resume)
-
-	// Assert.
-	select {
-	case <-h.deg.recovered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("never surfaced connection-recovered; the degraded window opened and never closed")
-	}
-
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("Run returned non-nil: %v", err)
-	}
-}
-
-func TestHeartbeatDegradeIsReportedOnceAcrossTheSilentWindow(t *testing.T) {
-	// Arrange — the same silence, held until the monitor has necessarily ticked
-	// again: the recovery report cannot come from the tick that degraded, so its
-	// arrival PROVES a further tick observed the same silence and then the
-	// resumed traffic. That is what makes "exactly one degrade" an assertion
-	// about the latch rather than about how long the test waited.
-	h := newHarness()
-	resume := make(chan struct{})
-	path := startFakeShim(t, silentThenTalkativeShim(t, "sess-1", resume))
-	cfg := h.config(t, "sess-1", path)
-	cfg.HeartbeatInterval = time.Hour
-	cfg.HeartbeatTimeout = 40 * time.Millisecond
-	c := New(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() { errCh <- c.Run(ctx) }()
-	select {
-	case <-h.deg.degraded:
-	case <-time.After(2 * time.Second):
-		t.Fatal("never surfaced connection-degraded")
+// TestOccupyRefusesASecondHolder asserts the occupancy guard admits one holder
+// and names the current one in the refusal.
+func TestOccupyRefusesASecondHolder(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	if _, err := c.Occupy("merge"); err != nil {
+		t.Fatalf("first Occupy() error = %v", err)
 	}
 
 	// Act.
-	close(resume)
-	select {
-	case <-h.deg.recovered:
-	case <-time.After(2 * time.Second):
-		t.Fatal("never surfaced connection-recovered")
-	}
+	_, err := c.Occupy("drain")
 
-	// Assert — no second degrade was reported by the ticks in between.
-	if extra := len(h.deg.degraded); extra != 0 {
-		t.Fatalf("degraded reports after the first = %d, want 0 — a mute shim must be reported on the EDGE, not on every tick", extra)
+	// Assert.
+	var occupied *OccupiedError
+	if !errors.As(err, &occupied) {
+		t.Fatalf("Occupy() error = %v, want *OccupiedError", err)
 	}
-
-	cancel()
-	if err := <-errCh; err != nil {
-		t.Fatalf("Run returned non-nil: %v", err)
+	if occupied.Holder != "merge" || occupied.Requested != "drain" {
+		t.Fatalf("refusal = %+v, want merge holding and drain refused", occupied)
 	}
 }
 
-// persistentTurnEnd builds a PERSISTENT TurnEnded event at seq.
-func persistentTurnEnd(session string, seq uint64) *protocolv1.Event {
-	return &protocolv1.Event{
-		SessionId: session,
-		Seq:       seq,
-		Plane:     protocolv1.Plane_PLANE_STREAM,
-		Class:     protocolv1.EventClass_EVENT_CLASS_PERSISTENT,
-		Payload:   &protocolv1.Event_TurnEnded{TurnEnded: &protocolv1.TurnEnded{StopReason: "end_turn"}},
+// TestOccupyAdmitsTheNextHolderAfterRelease asserts the release function frees
+// the guard.
+func TestOccupyAdmitsTheNextHolderAfterRelease(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	release, err := c.Occupy("merge")
+	if err != nil {
+		t.Fatalf("first Occupy() error = %v", err)
+	}
+
+	// Act.
+	release()
+	_, err = c.Occupy("drain")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Occupy() after release error = %v, want nil", err)
 	}
 }
 
-// --- readiness latch ---------------------------------------------------------
-//
-// Bring-up is asynchronous: the daemon spawns the shim and starts connecting in
-// a goroutine, so for a few hundred milliseconds there is no connection and
-// every control send fails with ErrNotConnected. AwaitReady lets a caller wait
-// for the connection EVENT rather than guess a duration.
-
-func TestAwaitReadyBlocksUntilConnected(t *testing.T) {
-	// Arrange: a client that has never connected.
-	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
-
-	// Act: waiting must not return while there is no connection.
-	done := make(chan error, 1)
-	go func() { done <- c.AwaitReady(context.Background()) }()
-	select {
-	case err := <-done:
-		t.Fatalf("AwaitReady returned %v before any connection existed", err)
-	case <-time.After(20 * time.Millisecond):
+// TestOccupyReleaseIsIdempotent asserts a doubled release cannot hand the
+// guard away twice.
+func TestOccupyReleaseIsIdempotent(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	release, err := c.Occupy("merge")
+	if err != nil {
+		t.Fatalf("Occupy() error = %v", err)
+	}
+	release()
+	if _, err := c.Occupy("drain"); err != nil {
+		t.Fatalf("second Occupy() error = %v", err)
 	}
 
-	// Act: publish a connection AND the shim's ack, exactly as the attach path
-	// and the gate's closing frame do.
-	c.mu.Lock()
-	c.active = &activeConn{}
-	c.wired = true
-	c.markReadyLocked()
-	c.mu.Unlock()
+	// Act: the first holder's stale release must not evict the second.
+	release()
+	_, err = c.Occupy("rollout")
 
-	// Assert
+	// Assert.
+	var occupied *OccupiedError
+	if !errors.As(err, &occupied) {
+		t.Fatalf("Occupy() error = %v, want *OccupiedError", err)
+	}
+	if occupied.Holder != "drain" {
+		t.Fatalf("holder = %q, want \"drain\"", occupied.Holder)
+	}
+}
+
+// TestOccupyRefusesAnEmptyHolder asserts an unnamed holder cannot take the
+// guard.
+func TestOccupyRefusesAnEmptyHolder(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+
+	// Act.
+	_, err := c.Occupy("")
+
+	// Assert.
+	var invalidErr *InvalidRequestError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("Occupy(\"\") error = %v, want *InvalidRequestError", err)
+	}
+}
+
+// TestKillReapsAndAttributes asserts a supervised stop is decoded, attributed,
+// and never misread as a crash.
+func TestKillReapsAndAttributes(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	record := sink.record(t)
+
+	// Act.
+	attr := KillAttribution{Actor: "workspace.kill", Reason: "user closed the workspace"}
+	if err := client.Kill(attr); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	// Assert.
+	info := <-client.Exited()
+	if info.PID != record.PID {
+		t.Fatalf("exit pid = %d, want %d", info.PID, record.PID)
+	}
+	if info.Attribution == nil || info.Attribution.Actor != "workspace.kill" {
+		t.Fatalf("attribution = %+v, want workspace.kill", info.Attribution)
+	}
+	if info.Signal != syscall.SIGTERM.String() {
+		t.Fatalf("signal = %q, want %q", info.Signal, syscall.SIGTERM.String())
+	}
+}
+
+// TestKillEscalatesToSigkill asserts a shim that ignores SIGTERM is killed
+// after the bounded grace.
+func TestKillEscalatesToSigkill(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIgnoreTerm)
+	client := spawnReady(t, f, spec, WithKillGrace(50*time.Millisecond))
+	_ = sink.record(t)
+
+	// Act.
+	if err := client.Kill(KillAttribution{Actor: "drain", Reason: "shutdown"}); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+
+	// Assert.
+	info := <-client.Exited()
+	if info.Signal != syscall.SIGKILL.String() {
+		t.Fatalf("signal = %q, want %q", info.Signal, syscall.SIGKILL.String())
+	}
+}
+
+// TestKillFinalCloseOfExited asserts Exited yields exactly one record and then
+// closes.
+func TestKillFinalCloseOfExited(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	if err := client.Kill(KillAttribution{Actor: "test", Reason: "one record"}); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+	<-client.Exited()
+
+	// Act.
+	_, open := <-client.Exited()
+
+	// Assert.
+	if open {
+		t.Fatal("Exited() yielded a second record; it must close after one")
+	}
+}
+
+// TestCrashPublishesDeadWithoutAttribution asserts a death nobody asked for is
+// reported as a crash, with the stderr ring as evidence.
+func TestCrashPublishesDeadWithoutAttribution(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	record := sink.record(t)
+
+	// Act: the shim dies on its own.
+	if err := syscall.Kill(record.PID, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill the child: %v", err)
+	}
+
+	// Assert.
+	info := <-client.Exited()
+	if info.Attribution != nil {
+		t.Fatalf("attribution = %+v, want nil for a crash", info.Attribution)
+	}
+}
+
+// TestRedialStopsOnDeath asserts the link goes dead and the connectivity feed
+// ends when the process is gone — the evidence decides, never a retry count.
+func TestRedialStopsOnDeath(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	record := sink.record(t)
+	if got := collectStates(t, client, 2); got[0] != LinkDialing || got[1] != LinkConnected {
+		t.Fatalf("states = %v, want dialing then connected", got)
+	}
+
+	// Act.
+	if err := syscall.Kill(record.PID, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill the child: %v", err)
+	}
+
+	// Assert.
+	if got := collectStates(t, client, 1); got[0] != LinkDead {
+		t.Fatalf("state = %v, want dead", got[0])
+	}
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("AwaitReady: %v", err)
+	case _, open := <-client.Connectivity():
+		if open {
+			t.Fatal("a state arrived after dead; redialing did not stop")
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("AwaitReady did not return after the connection was published")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the connectivity feed did not close after dead")
 	}
 }
 
-func TestShimReadyRetirementNeverPublishesReadiness(t *testing.T) {
-	// A stale-build transition is decided synchronously at the ShimReady
-	// boundary. The source generation must remain unusable even though the shim
-	// sent the frame that ordinarily closes the bring-up gate.
-	retirementObserved := make(chan struct{}, 1)
-	c := New(Config{
-		SessionID: "s1",
-		Logf:      shimclientTestLogf(t),
-		OnConnected: func(*protocolv1.ShimHello) bool {
-			retirementObserved <- struct{}{}
-			return true
-		},
-	})
-	ac := &activeConn{hello: &protocolv1.ShimHello{SessionId: "s1"}}
-	c.mu.Lock()
-	c.active = ac
-	c.mu.Unlock()
+// TestRedialAfterDroppedConnection asserts a broken link to a STILL-RUNNING
+// shim is redialed, and the transitions say so.
+func TestRedialAfterDroppedConnection(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	if got := collectStates(t, client, 2); got[0] != LinkDialing || got[1] != LinkConnected {
+		t.Fatalf("states = %v, want dialing then connected", got)
+	}
 
-	c.dispatchShimReady(ac, &protocolv1.ShimReady{SessionId: "s1"})
+	// Act: the producer ends the session stream while the process lives on.
+	f.dropSessions()
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+
+	// Assert.
+	got := collectStates(t, client, 2)
+	if got[0] != LinkRedialing || got[1] != LinkConnected {
+		t.Fatalf("states = %v, want redialing then connected", got)
+	}
+}
+
+// TestDetachLeavesTheProcessRunning asserts the handover's transfer: the
+// client stops supervising and the shim keeps serving.
+func TestDetachLeavesTheProcessRunning(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	record := sink.record(t)
+
+	// Act.
+	client.Detach()
+
+	// Assert.
+	if !alive(record.PID) {
+		t.Fatalf("pid %d is gone; Detach must leave the process running", record.PID)
+	}
+	if err := client.Kill(KillAttribution{Actor: "test", Reason: "after detach"}); !errors.Is(err, ErrDetached) {
+		t.Fatalf("Kill() after Detach error = %v, want ErrDetached", err)
+	}
+	_ = syscall.Kill(record.PID, syscall.SIGKILL)
+}
+
+// TestDetachEndsTheConnectivityFeed asserts a detached client publishes no
+// further link states.
+func TestDetachEndsTheConnectivityFeed(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+	client := spawnReady(t, f, spec)
+	record := sink.record(t)
+	_ = collectStates(t, client, 2)
+
+	// Act.
+	client.Detach()
+
+	// Assert.
 	select {
-	case <-retirementObserved:
-	default:
-		t.Fatal("the pre-readiness transition did not run")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := c.AwaitReady(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("AwaitReady after retirement = %v, want deadline while source readiness remains withheld", err)
-	}
-}
-
-func TestAwaitReadyReturnsImmediatelyWhenAlreadyConnected(t *testing.T) {
-	// Arrange
-	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
-	c.mu.Lock()
-	c.active = &activeConn{}
-	c.wired = true
-	c.markReadyLocked()
-	c.mu.Unlock()
-
-	// Act / Assert: an already-usable connection must not make callers wait.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := c.AwaitReady(ctx); err != nil {
-		t.Fatalf("AwaitReady: %v", err)
-	}
-}
-
-func TestAwaitReadyBlocksAgainAfterDisconnect(t *testing.T) {
-	// Arrange: connect, then drop — the reconnect window a workspace already
-	// in byWS can sit in, where a send would otherwise sail through on a latch
-	// left closed by the dead connection.
-	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
-	ac := &activeConn{}
-	c.mu.Lock()
-	c.active = ac
-	c.wired = true
-	c.markReadyLocked()
-	c.mu.Unlock()
-
-	c.mu.Lock()
-	c.active = nil
-	c.wired = false
-	c.markNotReadyLocked()
-	c.mu.Unlock()
-
-	// Act / Assert: waiting must block again, not return stale readiness.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
-	defer cancel()
-	if err := c.AwaitReady(ctx); err == nil {
-		t.Fatal("AwaitReady returned ready while disconnected")
-	}
-}
-
-func TestAwaitReadyFailsOnContextExpiry(t *testing.T) {
-	// Arrange: a shim that never comes up.
-	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
-
-	// Act
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	err := c.AwaitReady(ctx)
-
-	// Assert: the bound is a FAILURE bound, surfaced loudly and naming the session.
-	if err == nil {
-		t.Fatal("AwaitReady must fail when the shim never connects")
-	}
-	if !strings.Contains(err.Error(), "s1") {
-		t.Fatalf("err = %v, want it to name the session", err)
-	}
-}
-
-func TestNewRejectsMissingLogger(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("New accepted missing Config.Logf")
+	case _, open := <-client.Connectivity():
+		if open {
+			t.Fatal("a state arrived after Detach")
 		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the connectivity feed did not close after Detach")
+	}
+	_ = syscall.Kill(record.PID, syscall.SIGKILL)
+}
+
+// TestUnaryVerbReachesTheShim asserts a valid request is forwarded 1:1.
+func TestUnaryVerbReachesTheShim(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.StartTurn(context.Background(), validStartTurnRequest())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("StartTurn() error = %v", err)
+	}
+	if got := f.count("StartTurn"); got != 1 {
+		t.Fatalf("StartTurn calls = %d, want 1", got)
+	}
+}
+
+// TestInvalidRequestNeverReachesTheShim asserts base-function validation
+// refuses before the wire.
+func TestInvalidRequestNeverReachesTheShim(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.StartTurn(context.Background(), &shimv1.StartTurnRequest{})
+
+	// Assert.
+	var invalidErr *InvalidRequestError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("StartTurn() error = %v, want *InvalidRequestError", err)
+	}
+	if got := f.count("StartTurn"); got != 0 {
+		t.Fatalf("StartTurn calls = %d, want 0", got)
+	}
+}
+
+// TestRefusedStreamOpenIsAnError asserts a refused watch is an ERROR from the
+// call, never a stream that fails later.
+func TestRefusedStreamOpenIsAnError(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.watchAgentRefusal = connect.NewError(connect.CodeFailedPrecondition, errors.New("no such agent"))
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	stream, err := client.WatchAgent(context.Background(), &shimv1.WatchAgentRequest{PageSize: DefaultPageSize})
+
+	// Assert.
+	var refused *StreamOpenError
+	if !errors.As(err, &refused) {
+		t.Fatalf("WatchAgent() error = %v, want *StreamOpenError", err)
+	}
+	if stream != nil {
+		t.Fatal("WatchAgent() returned a stream alongside the refusal")
+	}
+}
+
+// TestStreamRecvEOFOnlyOnProducerEnd asserts Recv reports io.EOF exactly when
+// the producer ended the stream, leaving the meaning to the consumer.
+func TestStreamRecvEOFOnlyOnProducerEnd(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	f.watchAgentFrames = []*shimv1.WatchAgentResponse{{
+		Frame: &shimv1.WatchAgentResponse_Page{Page: &conversationv1.HistoryPage{}},
+	}}
+	client := adoptReady(t, f, dir, uds)
+	stream, err := client.WatchAgent(context.Background(), &shimv1.WatchAgentRequest{PageSize: DefaultPageSize})
+	if err != nil {
+		t.Fatalf("WatchAgent() error = %v", err)
+	}
+	t.Cleanup(stream.Close)
+
+	// Act.
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("first Recv() error = %v, want the opening page", err)
+	}
+	_, err = stream.Recv()
+
+	// Assert.
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("second Recv() error = %v, want io.EOF", err)
+	}
+}
+
+// TestWatchBashValidatesItsHandle asserts the bash watch's own argument is
+// validated like every request body.
+func TestWatchBashValidatesItsHandle(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	// Act.
+	_, err := client.WatchBash(context.Background(), &conversationv1.DetachedWorkId{})
+
+	// Assert.
+	var invalidErr *InvalidRequestError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("WatchBash() error = %v, want *InvalidRequestError", err)
+	}
+	if got := f.count("WatchBash"); got != 0 {
+		t.Fatalf("WatchBash calls = %d, want 0", got)
+	}
+}
+
+// TestSessionStreamRaisesOnAnUnsetPush asserts an unset non-optional field on
+// a pushed frame is raised loudly rather than folded into a zero value.
+func TestSessionStreamRaisesOnAnUnsetPush(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds)
+
+	type opened struct {
+		stream Stream[*shimv1.WatchSessionResponse]
+		err    error
+	}
+	done := make(chan opened, 1)
+	go func() {
+		s, err := client.WatchSession(context.Background())
+		done <- opened{stream: s, err: err}
 	}()
-	New(Config{SessionID: "s1"})
+	waitForSessionOpen(t, f)
+	f.push(healthyUpdate())
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("WatchSession() error = %v", r.err)
+	}
+	t.Cleanup(r.stream.Close)
+	if _, err := r.stream.Recv(); err != nil {
+		t.Fatalf("first Recv() error = %v, want the opening frame", err)
+	}
+
+	// Act: an update-less frame is illegal on this stream.
+	f.push(nil)
+	_, err := r.stream.Recv()
+
+	// Assert.
+	var invalidErr *InvalidRequestError
+	if !errors.As(err, &invalidErr) {
+		t.Fatalf("Recv() error = %v, want *InvalidRequestError", err)
+	}
+}
+
+// TestAdoptedDeathIsWitnessedByTheWorkspaceLock asserts an adopted shim — one
+// with no child process to reap — is declared dead only on EVIDENCE: the
+// socket is gone AND the workspace lock reads free.
+func TestAdoptedDeathIsWitnessedByTheWorkspaceLock(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	client := adoptReady(t, f, dir, uds, WithLockProbe(func(string) (bool, error) { return true, nil }))
+	if got := collectStates(t, client, 2); got[0] != LinkDialing || got[1] != LinkConnected {
+		t.Fatalf("states = %v, want dialing then connected", got)
+	}
+
+	// Act: the shim's socket goes away under a client that never spawned it.
+	f.stop()
+
+	// Assert.
+	got := collectStates(t, client, 2)
+	if got[0] != LinkRedialing || got[1] != LinkDead {
+		t.Fatalf("states = %v, want redialing then dead", got)
+	}
+	info := <-client.Exited()
+	if info.Attribution != nil {
+		t.Fatalf("attribution = %+v, want nil: nobody asked for this stop", info.Attribution)
+	}
+}
+
+// TestAdoptedDeathIsNotConcludedWhileTheLockIsHeld asserts a held lock is not
+// death: the client keeps redialing.
+func TestAdoptedDeathIsNotConcludedWhileTheLockIsHeld(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return false, nil }
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true while the lock is held")
+	}
+}
+
+// TestAdoptedDeathIsNotConcludedFromAnUnreadableLock asserts a probe that
+// could not tell is never read as death.
+func TestAdoptedDeathIsNotConcludedFromAnUnreadableLock(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return false, errors.New("permission denied") }
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true from a probe that could not tell")
+	}
+}
+
+// TestAdoptedDeathNeedsTheSocketToBeGone asserts a link break that is not the
+// socket disappearing is never death, however free the lock reads.
+func TestAdoptedDeathNeedsTheSocketToBeGone(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return true, nil }
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(io.ErrUnexpectedEOF)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true without the socket being gone")
+	}
+}
+
+// TestSpawnedClientNeverWitnessesDeathFromTheLock asserts a SPAWNED shim's
+// death comes from its exit, never from a lock probe: the reaper is the only
+// authority when a child exists.
+func TestSpawnedClientNeverWitnessesDeathFromTheLock(t *testing.T) {
+	// Arrange.
+	c := newBareClient()
+	c.lockProbe = func(ids.WorkspaceID) (bool, error) { return true, nil }
+	c.cmd = &exec.Cmd{}
+
+	// Act.
+	witnessed := c.witnessAdoptedDeath(syscall.ECONNREFUSED)
+
+	// Assert.
+	if witnessed {
+		t.Fatal("witnessAdoptedDeath() = true for a spawned shim")
+	}
 }

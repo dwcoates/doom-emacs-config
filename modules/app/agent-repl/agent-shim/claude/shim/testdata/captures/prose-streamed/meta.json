@@ -1,0 +1,36 @@
+{
+  "scenario": "prose-streamed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Think carefully, then explain in three clearly separated paragraphs what a write-ahead log is, why it makes a crash-consistent database possible, and what it costs. Use no tools.",
+  "prompts": [
+    {
+      "text": "Think carefully, then explain in three clearly separated paragraphs what a write-ahead log is, why it makes a crash-consistent database possible, and what it costs. Use no tools.",
+      "resume": false
+    }
+  ],
+  "world": "conversation-history",
+  "cwd_init": null,
+  "vendor_session_id": "f89f093c-8390-4e9e-8d76-2a92519c7cb9",
+  "manual": null,
+  "expect": [
+    "stream_event:message_start",
+    "stream_event:content_block_start:thinking",
+    "stream_event:content_block_delta:thinking_delta",
+    "stream_event:content_block_delta:signature_delta",
+    "stream_event:content_block_start:text",
+    "stream_event:content_block_delta:text_delta",
+    "stream_event:content_block_stop",
+    "stream_event:message_delta",
+    "stream_event:message_stop",
+    "assistant",
+    "result:success"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-TcFrqH-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:18:46.594Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

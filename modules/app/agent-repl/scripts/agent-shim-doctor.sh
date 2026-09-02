@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # agent-shim-doctor.sh — read-only diagnostics for the agent-shim ecosystem
-# (§12 of design-agent-shim-architecture.md; see scripts/AGENTS.md).
+# (see scripts/AGENTS.md; the store's contract is docs/overhaul/store.md).
 #
 # Reports connectivity + liveness across the shim ecosystem's UDS sockets,
 # launchd services, log files, and the store DB. Every check prints exactly
@@ -23,10 +23,17 @@
 # with AGENT_REPL_STATE_ROOT (used by the unit dry-run to point at a fabricated
 # temp dir so the real cache is never touched).
 #
-# Store health uses the installed shim-store one-shot client.  Its JSON response
-# is retained verbatim in the doctor result metadata, rather than reimplementing
-# the correlated HealthCheck protocol in shell.  Tests may explicitly override
-# the binary with AGENT_REPL_DOCTOR_SHIM_STORE_BIN.
+# Store health has NO verb: store.v1 deliberately defines none, so there is no
+# one-shot client to invoke. The doctor instead probes the store's real Connect
+# endpoints directly over its UNIX domain socket with curl -- GetLiveWork and
+# GetSidecarCursors, both pure reads that mutate nothing. A healthy store
+# answers HTTP 200 with a JSON body whose single top-level key is `success`
+# (an empty success serializes as {"success":{}}). A `failure` key, a non-200
+# status, a refused connection, a missing socket, a timeout and a malformed
+# body are each a distinct failure class with its own hint. Every probe sends
+# an X-Agent-Repl-Request-Id header and reports that id plus its latency.
+# Tests override the per-probe deadline with
+# AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT (seconds).
 #
 # Usage:
 #   agent-shim-doctor.sh [--json] [--deep-integrity]
@@ -47,8 +54,8 @@ STORE_DB="$STATE_ROOT/store/events.db"
 
 STORE_SOCK="$SOCK_DIR/store.sock"
 FRONTEND_SOCK="$SOCK_DIR/daemon-frontend.sock"
-STORE_HEALTH_CLIENT="${AGENT_REPL_DOCTOR_SHIM_STORE_BIN:-$STATE_ROOT/bin/shim-store}"
-STORE_HEALTH_TIMEOUT="${AGENT_REPL_DOCTOR_STORE_HEALTH_TIMEOUT:-2s}"
+# Per-probe deadline in whole seconds, handed to curl --max-time.
+STORE_PROBE_TIMEOUT="${AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT:-2}"
 
 STORE_LABEL="com.agentrepl.shim-store"
 SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
@@ -125,74 +132,192 @@ check_store_socket_present() {
   fi
 }
 
-check_store_socket_connectable() {
-  local request_id output exit_code failure_class hint instrumentation
-  request_id="doctor-$(date +%s)-$$-$RANDOM"
-  instrumentation="{\"client\":\"$(json_escape "$STORE_HEALTH_CLIENT")\",\"socket\":\"$(json_escape "$STORE_SOCK")\",\"request_id\":\"$request_id\",\"timeout\":\"$(json_escape "$STORE_HEALTH_TIMEOUT")\""
+# store_probe_metadata REQUEST_ID LATENCY_MS RPC HEALTHY FAILURE_CLASS REASON HTTP_STATUS
+# Emits the doctor result metadata for one Connect probe. HTTP_STATUS is a bare
+# JSON number, or the literal null when no response ever arrived.
+store_probe_metadata() {
+  printf '{"request_id":"%s","latency_ms":%s,"component":"shim-store","rpc":"%s","healthy":%s,"failure_class":"%s","reason":"%s","http_status":%s}' \
+    "$(json_escape "$1")" "$2" "$(json_escape "$3")" "$4" \
+    "$(json_escape "$5")" "$(json_escape "$6")" "$7"
+}
 
-  if [ ! -x "$STORE_HEALTH_CLIENT" ]; then
-    record "store-socket-connectable" "FAIL" \
-      "store health client unavailable at $STORE_HEALTH_CLIENT (request_id=$request_id)" \
-      "install shim-store at $STATE_ROOT/bin/shim-store before running doctor" \
-      "{\"request_id\":\"$request_id\",\"latency_ms\":0,\"component\":\"shim-store-client\",\"healthy\":false,\"failure_class\":\"client_unavailable\",\"reason\":\"health client is not executable\"}" \
-      "${instrumentation}}"
+# store_probe_body_key FILE — reads a Connect JSON response body and prints the
+# response's single top-level key on the first line ("success" or "failure";
+# "?multi" when the object carries more than one key) and, on the second line,
+# that arm's `detail` string when it has one.
+#
+# Exit 0  the body is a JSON object and the key was printed.
+# Exit 3  the body is not a JSON object (malformed or a JSON non-object).
+store_probe_body_key() {
+  python3 - "$1" <<'PY'
+import json, sys
+
+try:
+    with open(sys.argv[1]) as fh:
+        doc = json.load(fh)
+except Exception:
+    sys.exit(3)
+if not isinstance(doc, dict):
+    sys.exit(3)
+keys = list(doc)
+if len(keys) != 1:
+    print("?multi")
+    print("")
+    sys.exit(0)
+key = keys[0]
+arm = doc[key]
+detail = arm.get("detail", "") if isinstance(arm, dict) else ""
+print(key)
+print(detail if isinstance(detail, str) else "")
+PY
+}
+
+# check_store_connect_rpc RPC CHECK_SUFFIX — probe one store.v1.ShimStore
+# endpoint over the store's UDS. STRICTLY READ-ONLY: both probed rpcs are pure
+# reads and the request body is the empty message, so the probe can never
+# mutate store state.
+check_store_connect_rpc() {
+  local rpc="$1"
+  local name="store-connect-$2"
+  local procedure="store.v1.ShimStore/$rpc"
+  local request_id url body err out rc http_status latency_ms
+  local failure_class reason hint key detail instr http_status_json
+
+  request_id="doctor-$(date +%s)-$$-$RANDOM"
+  url="http://store/$procedure"
+  instr="{\"rpc\":\"$(json_escape "$procedure")\",\"socket\":\"$(json_escape "$STORE_SOCK")\",\"request_id\":\"$request_id\",\"timeout_s\":$STORE_PROBE_TIMEOUT"
+
+  # The probe needs curl to speak the UDS and python3 to classify the body.
+  # Their absence is an honest SKIP, never a pass and never a silent
+  # alternative classification.
+  if ! command -v curl >/dev/null 2>&1; then
+    record "$name" "SKIP" \
+      "curl not installed; cannot probe $procedure over $STORE_SOCK (request_id=$request_id)" \
+      "install curl to enable the store Connect probes" \
+      "$(store_probe_metadata "$request_id" 0 "$procedure" false "prober_unavailable" "curl is not installed" null)" \
+      "$instr}"
+    return 0
+  fi
+  if ! command -v python3 >/dev/null 2>&1; then
+    record "$name" "SKIP" \
+      "python3 not installed; cannot classify the $procedure response body (request_id=$request_id)" \
+      "install python3 to enable the store Connect probes" \
+      "$(store_probe_metadata "$request_id" 0 "$procedure" false "prober_unavailable" "python3 is not installed" null)" \
+      "$instr}"
     return 0
   fi
 
-  if output="$("$STORE_HEALTH_CLIENT" -health-check -socket "$STORE_SOCK" -log "$LOG_DIR/shim-store.log" -health-request-id "$request_id" -health-timeout "$STORE_HEALTH_TIMEOUT")"; then
-    exit_code=0
-  else
-    exit_code=$?
+  if [ ! -S "$STORE_SOCK" ]; then
+    record "$name" "FAIL" \
+      "no store socket at $STORE_SOCK; $procedure unreachable (request_id=$request_id)" \
+      "shim-store is not serving; check '$STORE_LABEL' via launchctl or (re)run install.sh --with-agent-shim-services" \
+      "$(store_probe_metadata "$request_id" 0 "$procedure" false "missing_socket" "the store socket does not exist" null)" \
+      "$instr,\"curl_exit\":null}"
+    return 0
   fi
-  instrumentation="${instrumentation},\"exit_code\":$exit_code}"
 
-  case "$exit_code" in
-    0)
-      record "store-socket-connectable" "PASS" \
-        "store health check passed (request_id=$request_id; response=$output)" \
-        "" "$output" "$instrumentation"
-      return 0
+  body="$(mktemp "${TMPDIR:-/tmp}/agent-shim-doctor-body.XXXXXX")"
+  err="$(mktemp "${TMPDIR:-/tmp}/agent-shim-doctor-err.XXXXXX")"
+  set +e
+  out="$(curl --silent --show-error --max-time "$STORE_PROBE_TIMEOUT" \
+    --unix-socket "$STORE_SOCK" \
+    -H 'Content-Type: application/json' \
+    -H "X-Agent-Repl-Request-Id: $request_id" \
+    -X POST "$url" -d '{}' \
+    -o "$body" -w '%{http_code} %{time_total}' 2>"$err")"
+  rc=$?
+  set -e
+  http_status="${out%% *}"
+  latency_ms="$(awk -v t="${out##* }" 'BEGIN { if (t == "") t = 0; printf "%d", t * 1000 }')"
+  # curl reports 000 when no response line ever arrived; that is not a JSON
+  # number, so the metadata carries null for it rather than an invalid literal.
+  case "$http_status" in
+    [1-9][0-9][0-9]) http_status_json="$http_status" ;;
+    *) http_status="000"; http_status_json="null" ;;
+  esac
+  instr="$instr,\"curl_exit\":$rc,\"http_status\":\"$(json_escape "$http_status")\",\"latency_ms\":$latency_ms}"
+  reason="$(head -c 300 "$err" | tr '\n\t' '  ')"
+  [ -n "$reason" ] || reason="curl exited $rc"
+
+  if [ "$rc" -ne 0 ]; then
+    case "$rc" in
+      7)
+        failure_class="connection_refused"
+        hint="the socket exists but nothing is accepting on it; '$STORE_LABEL' is down, wedged, or left a stale socket file — inspect it and $LOG_DIR/shim-store.log"
+        ;;
+      28)
+        failure_class="timeout"
+        hint="shim-store did not answer $procedure within ${STORE_PROBE_TIMEOUT}s; inspect '$STORE_LABEL' responsiveness and $LOG_DIR/shim-store.log"
+        ;;
+      *)
+        failure_class="transport_failure"
+        hint="curl could not complete the Connect request (exit $rc); inspect $STORE_SOCK ownership and '$STORE_LABEL'"
+        ;;
+    esac
+    record "$name" "FAIL" \
+      "$procedure probe failed with $failure_class (request_id=$request_id; curl_exit=$rc; latency_ms=$latency_ms; reason=$reason)" \
+      "$hint" \
+      "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "$failure_class" "$reason" null)" \
+      "$instr"
+    rm -f "$body" "$err"
+    return 0
+  fi
+
+  if [ "$http_status" != "200" ]; then
+    reason="$(head -c 300 "$body" | tr '\n\t' '  ')"
+    [ -n "$reason" ] || reason="empty body"
+    record "$name" "FAIL" \
+      "$procedure answered HTTP $http_status (request_id=$request_id; latency_ms=$latency_ms; body=$reason)" \
+      "a served Connect endpoint answers 200 even when the store REFUSES the call; HTTP $http_status means the request never reached a handler — inspect '$STORE_LABEL' and $LOG_DIR/shim-store.log" \
+      "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "http_status" "$reason" "$http_status_json")" \
+      "$instr"
+    rm -f "$body" "$err"
+    return 0
+  fi
+
+  set +e
+  out="$(store_probe_body_key "$body")"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    reason="$(head -c 300 "$body" | tr '\n\t' '  ')"
+    [ -n "$reason" ] || reason="empty body"
+    record "$name" "FAIL" \
+      "$procedure answered HTTP 200 with a body that is not a JSON object (request_id=$request_id; latency_ms=$latency_ms; body=$reason)" \
+      "the store answered something that is not a Connect JSON response; inspect '$STORE_LABEL' and $LOG_DIR/shim-store.log for a protocol fault" \
+      "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "malformed_response" "$reason" "$http_status_json")" \
+      "$instr"
+    rm -f "$body" "$err"
+    return 0
+  fi
+  key="$(printf '%s\n' "$out" | sed -n '1p')"
+  detail="$(printf '%s\n' "$out" | sed -n '2p')"
+  rm -f "$body" "$err"
+
+  case "$key" in
+    success)
+      record "$name" "PASS" \
+        "$procedure answered success (request_id=$request_id; latency_ms=$latency_ms)" \
+        "" \
+        "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" true "" "store answered the success arm" "$http_status_json")" \
+        "$instr"
       ;;
-    10)
-      failure_class="missing_socket"
-      hint="shim-store socket is absent; start '$STORE_LABEL' and confirm $STORE_SOCK is created"
-      ;;
-    11)
-      failure_class="connect_failure"
-      hint="shim-store could not accept the health connection; inspect '$STORE_LABEL' liveness and its log"
-      ;;
-    12)
-      failure_class="write_failure"
-      hint="the store health request could not be written; inspect '$STORE_LABEL' and socket ownership"
-      ;;
-    13)
-      failure_class="timeout"
-      hint="shim-store did not answer before $STORE_HEALTH_TIMEOUT; inspect '$STORE_LABEL' responsiveness and logs"
-      ;;
-    14)
-      failure_class="decode_failure"
-      hint="shim-store returned an invalid health response; inspect '$STORE_LABEL' protocol logs"
-      ;;
-    15)
-      failure_class="mismatched_request_id"
-      hint="shim-store returned a health response for another request; inspect protocol correlation in '$STORE_LABEL'"
-      ;;
-    16)
-      failure_class="unhealthy_response"
-      hint="shim-store reported itself unhealthy; inspect its health reason and service log"
-      ;;
-    17)
-      failure_class="client_failure"
-      hint="the owned shim-store health client failed before completing the protocol probe; inspect its reason and canonical log"
+    failure)
+      [ -n "$detail" ] || detail="the store returned the failure arm with no detail"
+      record "$name" "FAIL" \
+        "$procedure answered the failure arm (request_id=$request_id; latency_ms=$latency_ms; detail=$detail)" \
+        "the store is serving but REFUSED this read; its detail names the cause — inspect $LOG_DIR/shim-store.log for the matching refusal record" \
+        "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "failure_arm" "$detail" "$http_status_json")" \
+        "$instr"
       ;;
     *)
-      failure_class="unexpected_exit"
-      hint="shim-store health client exited unexpectedly; inspect the client and '$STORE_LABEL' logs"
+      record "$name" "FAIL" \
+        "$procedure answered HTTP 200 with an unrecognized response shape (request_id=$request_id; latency_ms=$latency_ms; top_level_key=$key)" \
+        "every store.v1 response is a oneof of success|failure; a body shaped otherwise means the doctor and the store disagree on the contract — inspect '$STORE_LABEL' and its build" \
+        "$(store_probe_metadata "$request_id" "$latency_ms" "$procedure" false "unexpected_body" "top-level key was $key" "$http_status_json")" \
+        "$instr"
       ;;
   esac
-  record "store-socket-connectable" "FAIL" \
-    "store health check failed with $failure_class (request_id=$request_id; exit_code=$exit_code; response=$output)" \
-    "$hint" "$output" "$instrumentation"
 }
 
 check_frontend_socket_present() {
@@ -328,7 +453,7 @@ render_text() {
   echo
   for i in "${!R_NAME[@]}"; do
     status="${R_STATUS[$i]}"
-    printf '[%s] %-28s %s\n' "$status" "${R_NAME[$i]}" "${R_DETAIL[$i]}"
+    printf '[%s] %-34s %s\n' "$status" "${R_NAME[$i]}" "${R_DETAIL[$i]}"
     if [ "$status" != "PASS" ] && [ -n "${R_HINT[$i]}" ]; then
       printf '        hint: %s\n' "${R_HINT[$i]}"
     fi
@@ -375,7 +500,7 @@ while [ $# -gt 0 ]; do
     --json) JSON=1 ;;
     --deep-integrity) DEEP_INTEGRITY=1 ;;
     -h|--help)
-      sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+      awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0"
       exit 0
       ;;
     *)
@@ -389,7 +514,8 @@ done
 # --- Run ----------------------------------------------------------------
 
 check_store_socket_present
-check_store_socket_connectable
+check_store_connect_rpc GetLiveWork get-live-work
+check_store_connect_rpc GetSidecarCursors get-sidecar-cursors
 check_launchd_service "$STORE_LABEL"
 check_launchd_service "$SIDECAR_LABEL"
 check_frontend_socket_present

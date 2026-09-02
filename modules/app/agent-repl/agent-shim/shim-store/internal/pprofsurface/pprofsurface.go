@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,12 @@ type Surface struct {
 	address  string
 	listener net.Listener
 	server   *http.Server
+	// served is CLOSED once this surface has answered its first request. A
+	// closed channel is readable forever, so a caller waiting on it cannot
+	// miss the signal — which is what lets a doomed boot hold the surface open
+	// until it has actually been profiled rather than for a hopeful interval.
+	served     chan struct{}
+	serverOnce sync.Once
 }
 
 // Open binds the profiling surface described by addr.
@@ -113,16 +120,35 @@ func openTCP(addr string) (*Surface, error) {
 }
 
 func newSurface(network, address string, listener net.Listener) *Surface {
-	return &Surface{
+	s := &Surface{
 		network:  network,
 		address:  address,
 		listener: listener,
-		// A private mux, never http.DefaultServeMux: importing net/http/pprof
-		// registers on the default mux as a side effect, and a process that
-		// serves anything else off that mux would publish profiles it never
-		// mounted.
-		server: &http.Server{Handler: Handler(), ReadHeaderTimeout: 10 * time.Second},
+		served:   make(chan struct{}),
 	}
+	// A private mux, never http.DefaultServeMux: importing net/http/pprof
+	// registers on the default mux as a side effect, and a process that
+	// serves anything else off that mux would publish profiles it never
+	// mounted.
+	s.server = &http.Server{Handler: s.recordServed(Handler()), ReadHeaderTimeout: 10 * time.Second}
+	return s
+}
+
+// recordServed closes the served channel after the first answered request.
+func (s *Surface) recordServed(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		s.serverOnce.Do(func() { close(s.served) })
+	})
+}
+
+// Served is closed once the surface has answered a request. An unopened
+// surface never serves anything, so it reports a channel that never closes.
+func (s *Surface) Served() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.served
 }
 
 // Handler is the profiling mux: index, cmdline, profile, symbol and trace, plus

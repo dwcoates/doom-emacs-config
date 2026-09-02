@@ -1,0 +1,419 @@
+package workspace
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/wsm"
+)
+
+// UngatedPermissionModes are the permission modes that DISABLE the consent
+// gate: the agent acts with no permission card reaching any decider at all. A
+// creation asking for one of them without the consent flag is REFUSED — the
+// gate is the user's, and it is never dropped by inference.
+//
+// `auto` is deliberately NOT one of them (ruled): it KEEPS a gate, with a
+// classifier deciding each ask instead of the user, so it needs no creation
+// consent.
+//
+// The spellings are the vendor's own, in both the camel-case form the CLI uses
+// and the snake-case form the mode oneof's arm names spell, because a mode
+// reaches the daemon as a bare string.
+var UngatedPermissionModes = map[string]bool{
+	"bypassPermissions": true,
+	"bypass":            true,
+	"dontAsk":           true,
+	"dont_ask":          true,
+}
+
+// The merge-layout origins, which name the verb that recorded the geometry.
+const (
+	// OriginCreateStandard is the ordinary creation form.
+	OriginCreateStandard = "workspace.create.standard"
+	// OriginCreateOneShot is the one-shot creation form.
+	OriginCreateOneShot = "workspace.create.one_shot"
+)
+
+// Create materializes a new workspace and brings its session up.
+//
+// The order is the ruled one and is not negotiable:
+//
+//  1. validate the form, including the ungated-mode consent check;
+//  2. derive the slug (supplied name, else the initial prompt by the naming
+//     rule), the branch, the worktree directory and the resolved base ref;
+//  3. record the CREATION JOB — merge geometry, configured actions, one-shot
+//     finish and consent — BEFORE anything is materialized, so a crash leaves
+//     evidence of what was being built rather than an unexplained worktree;
+//  4. materialize the worktree through git;
+//  5. REGISTER only once the worktree exists;
+//  6. bring the session up, forking the parent's transcript first when asked;
+//  7. submit the initial prompt through the QUEUE, with origin
+//     WORKSPACE_CREATED, only after the session is up.
+func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, error) {
+	global := v.deps.Log.Global().With(dlog.Context{"repo_dir": spec.RepoDir, "one_shot": spec.OneShot})
+
+	if err := v.validateCreate(global, spec); err != nil {
+		return wsm.Workspace{}, err
+	}
+
+	repoDir, err := normalizeDir(spec.RepoDir)
+	if err != nil {
+		global.Error(opCreate, "the repository directory cannot be normalized", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create: repository %q: %w", spec.RepoDir, err)
+	}
+
+	// The workspace id is minted HERE, before anything is named: it is the
+	// creation job's key, and it is also what an unnamed, promptless create is
+	// named after — there is nothing else to derive a name from, and the
+	// naming rule never invents free text.
+	workspaceID := wsm.NewWorkspaceID()
+
+	branch, err := v.branchFor(global, spec, workspaceID)
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	worktreeDir, err := WorktreeDir(repoDir, branch)
+	if err != nil {
+		global.Error(opCreate, "could not derive the worktree directory", dlog.Context{
+			"branch": branch, "cause": err.Error(),
+		})
+		return wsm.Workspace{}, fmt.Errorf("create %q: worktree directory: %w", branch, err)
+	}
+
+	defaultBranch, err := v.deps.Git.DefaultBranch(ctx, repoDir)
+	if err != nil {
+		global.Error(opCreate, "could not resolve the repository default branch", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create %q: default branch: %w", branch, err)
+	}
+	baseRef := spec.BaseRef
+	if baseRef == "" {
+		baseRef = defaultBranch
+	}
+	// A base ref that does not resolve is REFUSED before anything is recorded
+	// or materialized: git would otherwise fail halfway through `worktree add`
+	// and leave the creation job standing for a workspace that cannot exist.
+	if _, err := v.deps.Git.ResolveRef(ctx, repoDir, baseRef); err != nil {
+		// The arm spells `ref`, so the ref TRAVELS AS THE FIELD and not only
+		// inside the sentence: a client rendering the arm names the bad ref.
+		return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmBaseRefUnresolved,
+			fmt.Sprintf("the base ref %q does not resolve in %q: %v", baseRef, repoDir, err), false,
+			map[string]any{"ref": baseRef})
+	}
+
+	parent := spec.parentWorkspace()
+	targetDir, err := v.mergeTargetDir(ctx, repoDir, parent)
+	if err != nil {
+		global.Error(opCreate, "could not resolve the merge target directory", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create %q: merge target: %w", branch, err)
+	}
+
+	origin := OriginCreateStandard
+	if spec.OneShot {
+		origin = OriginCreateOneShot
+	}
+	job := wsm.CreationJob{
+		// The pre-minted workspace id lets the geometry be recorded BEFORE
+		// materialization; registration mints the registry's own id, and the
+		// job is re-keyed onto it below.
+		Workspace: workspaceID,
+		Layout: wsm.MergeLayout{
+			SourceBranch: branch,
+			SourceDir:    worktreeDir,
+			TargetDir:    targetDir,
+			Origin:       origin,
+		},
+		Actions:              spec.MergeActions,
+		BaseRef:              baseRef,
+		Materialized:         false,
+		OneShot:              spec.OneShot,
+		Finish:               finishOrigin(spec.Finish),
+		InitialPrompt:        spec.InitialPrompt,
+		ConsentedUngatedMode: spec.ConsentedUngatedMode,
+		CreatedAt:            v.now(),
+	}
+	if err := v.deps.DB.PutCreationJob(ctx, job); err != nil {
+		global.Error(opCreate, "could not record the creation job", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create %q: record the creation job: %w", branch, err)
+	}
+	global.Debug(opCreate, "recorded the creation job before materialization", dlog.Context{
+		"branch": branch, "worktree_dir": worktreeDir, "target_dir": targetDir,
+		"base_ref": baseRef, "finish": finishOrigin(spec.Finish),
+		"parent": parentID(parent),
+	})
+
+	if err := v.deps.Git.CreateWorktree(ctx, repoDir, branch, baseRef, worktreeDir); err != nil {
+		global.Error(opCreate, "could not materialize the worktree", dlog.Context{
+			"branch": branch, "worktree_dir": worktreeDir, "cause": err.Error(),
+		})
+		return wsm.Workspace{}, fmt.Errorf("create %q: materialize %q: %w", branch, worktreeDir, err)
+	}
+
+	record, err := v.Register(ctx, worktreeDir, wsm.RegisterFacts{
+		Name:          branch,
+		Branch:        branch,
+		ParentBranch:  baseRef,
+		Parent:        (*wsm.WorkspaceID)(parent),
+		RepoDir:       repoDir,
+		DefaultBranch: defaultBranch,
+	})
+	if err != nil {
+		return wsm.Workspace{}, fmt.Errorf("create %q: register: %w", branch, err)
+	}
+
+	job.Workspace = record.ID
+	job.Materialized = true
+	if err := v.deps.DB.PutCreationJob(ctx, job); err != nil {
+		global.Error(opCreate, "could not re-key the creation job onto the registered id", dlog.Context{
+			"workspace": string(record.ID), "cause": err.Error(),
+		})
+		return wsm.Workspace{}, fmt.Errorf("create %q: record the materialized creation job: %w", branch, err)
+	}
+
+	log, err := v.deps.Log.Workspace(record.Dir)
+	if err != nil {
+		global.Error(opCreate, "could not resolve the workspace log sink", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create %q: resolve log sink: %w", branch, err)
+	}
+	log = log.With(dlog.Context{"workspace": string(record.ID)})
+
+	if spec.Priority != nil {
+		if err := v.deps.DB.SetPriority(ctx, record.ID, spec.Priority); err != nil {
+			log.Error(opCreate, "could not record the creation priority", dlog.Context{"cause": err.Error()})
+			return wsm.Workspace{}, fmt.Errorf("create %q: priority: %w", branch, err)
+		}
+	}
+
+	// The spawn facts the fleet reads at bring-up. The model and permission
+	// mode are recorded HERE, before any session exists, because
+	// StartSession(fresh) carries them and nothing else knows what the user
+	// asked for.
+	session := wsm.Session{
+		Workspace:      record.ID,
+		ConfigDir:      v.deps.Accounts.ConfigDirFor(record.Dir),
+		Model:          spec.Model,
+		PermissionMode: spec.PermissionMode,
+		StartedAt:      v.now(),
+	}
+	if spec.ForkFrom != nil {
+		vendorSessionID, err := v.forkTranscript(ctx, log, *spec.ForkFrom, record, session.ConfigDir)
+		if err != nil {
+			return wsm.Workspace{}, err
+		}
+		// A fork RESUMES the ported conversation; it never starts a fresh one.
+		session.VendorSessionID = vendorSessionID
+	}
+	if err := v.deps.DB.PutSession(ctx, session); err != nil {
+		log.Error(opCreate, "could not record the spawn facts", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create %q: record the spawn facts: %w", branch, err)
+	}
+
+	if err := v.deps.Sessions.Start(ctx, record.ID); err != nil {
+		log.Error(opCreate, "the session did not come up", dlog.Context{"cause": err.Error()})
+		return wsm.Workspace{}, fmt.Errorf("create %q: start the session: %w", branch, err)
+	}
+
+	if err := v.submitInitialPrompt(ctx, log, record, spec); err != nil {
+		return wsm.Workspace{}, err
+	}
+
+	log.Info(opCreate, "created the workspace", dlog.Context{
+		"branch": branch, "dir": record.Dir, "one_shot": spec.OneShot,
+	})
+	v.republishRegistry(ctx, log, opCreate)
+	return record, nil
+}
+
+// validateCreate refuses the forms that cannot be built, before anything is
+// minted or written.
+func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
+	if spec.OneShot && spec.Finish == nil {
+		return refuse(log, "CreateWorkspace", ArmFinishRequired,
+			"a one-shot creation must name a finish action", false)
+	}
+	if !spec.OneShot && spec.Finish != nil {
+		return refuse(log, "CreateWorkspace", ArmFinishNotOneShot,
+			"a finish action belongs only to the one-shot form", false)
+	}
+	if spec.OneShot && strings.TrimSpace(spec.InitialPrompt) == "" {
+		return refuse(log, "CreateWorkspace", ArmNoSlug,
+			"a one-shot creation must carry the prompt it runs", false)
+	}
+	if UngatedPermissionModes[spec.PermissionMode] && spec.ConsentedUngatedMode != spec.PermissionMode {
+		return refuse(log, "CreateWorkspace", ArmUngatedWithoutConsent,
+			fmt.Sprintf("permission mode %q disables the consent gate and no consent was recorded", spec.PermissionMode), false)
+	}
+	return nil
+}
+
+// branchFor derives the workspace's branch, which is also its name: the
+// supplied name when there is one, else the slug the naming rule derives from
+// the initial prompt, prefixed by the configured workspace prefix.
+//
+// A supplied name that already carries a prefix component is taken as it
+// stands; the prefix is applied only to a name this daemon derived.
+func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec, minted wsm.WorkspaceID) (string, error) {
+	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
+		if strings.Contains(supplied, "/") {
+			return supplied, nil
+		}
+		return Name(Prefix(), supplied), nil
+	}
+	// An initial prompt is OPTIONAL on the standard form: an unset one is an
+	// empty workspace, which is a legal create. With no prompt there is no
+	// text to derive a slug from, so the branch is named after the workspace's
+	// own minted id rather than refused.
+	if strings.TrimSpace(spec.InitialPrompt) == "" {
+		branch := Name(Prefix(), UnnamedSlugPrefix+string(minted))
+		log.Debug(opCreate, "named the branch after the minted workspace id", dlog.Context{"branch": branch})
+		return branch, nil
+	}
+	slug, err := Slug(spec.InitialPrompt)
+	if err != nil {
+		return "", refuse(log, "CreateWorkspace", ArmNoSlug,
+			"no name was supplied and no slug can be derived from the initial prompt", false)
+	}
+	branch := Name(Prefix(), slug)
+	log.Debug(opCreate, "derived the branch from the initial prompt", dlog.Context{"branch": branch})
+	return branch, nil
+}
+
+// mergeTargetDir answers where this workspace's merge will land: the PARENT
+// workspace's worktree when it was cut from one, otherwise the repository's
+// main worktree. It is recorded at creation and never inferred later.
+func (v *verbs) mergeTargetDir(ctx context.Context, repoDir string, parent *ids.WorkspaceID) (string, error) {
+	if parent == nil {
+		return repoDir, nil
+	}
+	record, err := v.deps.DB.Workspace(ctx, *parent)
+	if err != nil {
+		return "", fmt.Errorf("parent workspace %q: %w", *parent, err)
+	}
+	return record.Dir, nil
+}
+
+// parentID spells a parent for the record, empty when the create was spawned
+// from no workspace.
+func parentID(parent *ids.WorkspaceID) string {
+	if parent == nil {
+		return ""
+	}
+	return string(*parent)
+}
+
+// parentWorkspace answers the workspace this create was spawned from, nil when
+// it was spawned from none. A fork names its parent by construction, so a spec
+// carrying only ForkFrom still has one.
+func (s CreateSpec) parentWorkspace() *ids.WorkspaceID {
+	if s.Parent != nil {
+		return s.Parent
+	}
+	return s.ForkFrom
+}
+
+// forkTranscript ports the parent's conversation into the CHILD's config root
+// before any session starts, which is what makes the forked workspace
+// resumable. It answers the vendor session id the child resumes.
+//
+// THE CHILD NEVER RESUMES THE PARENT'S OWN ID. shim.v1 StartSession has no
+// fork arm, and a vendor session id is single-occupancy: the shim takes
+// session-<vendor session id>.lock inside StartSession, so a child resuming a
+// live parent's id would block on that lock forever. The daemon mints a fresh
+// id, files the copy under it, and resumes that. The conversation's CONTENT is
+// untouched -- its original main-agent id included -- and the parent keeps its
+// own conversation, which is the whole point of a fork.
+func (v *verbs) forkTranscript(ctx context.Context, log dlog.Logger, parent ids.WorkspaceID, child wsm.Workspace, childConfigDir string) (string, error) {
+	parentRecord, err := v.deps.DB.Workspace(ctx, parent)
+	if err != nil {
+		return "", fmt.Errorf("fork from %q: %w", parent, err)
+	}
+	parentSession, ok, err := v.deps.DB.Session(ctx, parent)
+	if err != nil {
+		return "", fmt.Errorf("fork from %q: read the parent session: %w", parent, err)
+	}
+	if !ok || parentSession.VendorSessionID == "" {
+		return "", refuse(log, "CreateWorkspace", ArmForkParentHasNoConversation,
+			fmt.Sprintf("workspace %q has no conversation to fork", parent), false)
+	}
+	transcript, err := v.deps.Accounts.FindTranscript(ctx, parentRecord.Dir, parentSession.VendorSessionID)
+	if err != nil {
+		log.Error(opCreate, "could not locate the parent transcript", dlog.Context{
+			"parent": string(parent), "cause": err.Error(),
+		})
+		return "", fmt.Errorf("fork from %q: locate the transcript: %w", parent, err)
+	}
+	forked := wsm.NewVendorSessionID()
+	if err := v.deps.Accounts.PortTranscript(ctx, transcript.Path, childConfigDir, child.Dir, forked); err != nil {
+		log.Error(opCreate, "could not port the parent transcript", dlog.Context{
+			"parent": string(parent), "transcript": transcript.Path,
+			"from_config_dir": transcript.ConfigDir, "cause": err.Error(),
+		})
+		return "", fmt.Errorf("fork from %q: port the transcript: %w", parent, err)
+	}
+	log.Debug(opCreate, "ported the parent transcript into the child config root under a fresh vendor session id", dlog.Context{
+		"parent": string(parent), "config_dir": childConfigDir,
+		"parent_vendor_session_id": parentSession.VendorSessionID,
+		"child_vendor_session_id":  forked,
+	})
+	return forked, nil
+}
+
+// submitInitialPrompt sends the workspace's first message down the ONE delivery
+// path, with origin WORKSPACE_CREATED. A one-shot prompt is DECORATED first:
+// the autonomous preamble, the user's words, and the success-gated wrap-up.
+func (v *verbs) submitInitialPrompt(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec) error {
+	if strings.TrimSpace(spec.InitialPrompt) == "" {
+		log.Debug(opCreate, "created without an initial prompt", nil)
+		return nil
+	}
+	text := spec.InitialPrompt
+	if spec.OneShot {
+		decorated, err := v.decorateOneShot(text, spec.Finish)
+		if err != nil {
+			log.Error(opCreate, "could not compose the one-shot prompt", dlog.Context{"cause": err.Error()})
+			return refuse(log, "CreateWorkspace", ArmBriefMissing, err.Error(), false)
+		}
+		text = decorated
+	}
+
+	turn := wsm.NewTurnID()
+	said := SaidText(text)
+	if err := v.deps.DB.PutTurn(ctx, wsm.Turn{
+		ID:        turn,
+		Workspace: record.ID,
+		Text:      text,
+		Origin:    conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED.String(),
+		StartedAt: v.now(),
+	}); err != nil {
+		log.Error(opCreate, "could not record the initial turn", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("create %q: record the initial turn: %w", record.Name, err)
+	}
+	disposition, err := v.deps.Queue.Submit(ctx, promptSubmission(record.ID, turn, said))
+	if err != nil {
+		log.Error(opCreate, "the initial prompt was not accepted", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("create %q: submit the initial prompt: %w", record.Name, err)
+	}
+	log.Debug(opCreate, "submitted the initial prompt", dlog.Context{
+		"turn": string(turn), "delivered": disposition.Delivered, "refused_arm": disposition.RefusedArm,
+	})
+	return nil
+}
+
+// SaidText composes the one canonical prompt form from plain text. It is
+// exported because the command-file ingress composes prompts the same way, and
+// two spellings of "the user said this" would drift.
+func SaidText(text string) *conversationv1.UserSaid {
+	return &conversationv1.UserSaid{
+		Content: &conversationv1.UserContent{
+			Blocks: []*conversationv1.UserContentBlock{{
+				Block: &conversationv1.UserContentBlock_Text{
+					Text: &conversationv1.TextBlock{Text: text},
+				},
+			}},
+		},
+	}
+}

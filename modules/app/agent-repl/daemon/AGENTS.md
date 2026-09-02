@@ -1,147 +1,231 @@
-# daemon/
+# daemon/ — the rebuilt agent-repl daemon (Go)
 
-## Session-controller vocabulary
+Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
+`integration/SPEC.md` is the integration suite's specification;
+`ERROR-ARMS.md` is the ledger of refusal arms not yet landed in the contract.
 
-A **session controller** is the daemon's in-memory control object for one
-workspace's current agent-repl session. `sessioncontroller.Manager` owns the
-fleet, keyed by absolute workspace path in `Manager.byWS`; each
-`sessionController` value binds that workspace to exactly one agent-repl
-session ID and owns its shim client, event consumer, cancellation boundary,
-bring-up state, and other connection-local bookkeeping. A durable registry
-record says a session exists. A session controller says this daemon instance
-currently owns the live route used to operate the session.
+## Build and test
 
-A session controller is **live** precisely when the current
-`sessioncontroller.Manager` has a `Manager.byWS[workspace]` entry. This fact is
-daemon-local and deliberately does not survive a daemon restart. It does not
-mean the shim has completed its handshake, the route is `wired`, or an agent
-turn is active: a live session controller may still be bringing up or
-reconnecting. `Manager.Live` reports this map-membership fact; send paths
-additionally wait for the session controller's readiness gate.
+- `go build ./... && go vet ./... && go test ./...` from this directory.
+- Integration suite: `TMPDIR=/tmp go test -tags integration ./integration/... -timeout 180s`
+  (a real daemon subprocess against a fake shim.v1 server, fake git repos and a
+  temp state root; the fake shim binary is `integration/fakeshim`).
+  `TMPDIR=/tmp` IS REQUIRED on macOS: `t.TempDir()` otherwise roots the state
+  under `/var/folders/...`, and `<state>/sock/<workspace-id>.sock` then exceeds
+  the 103-byte unix socket path limit, so the daemon refuses the state root at
+  boot before anything else runs.
+- Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1`. No test
+  ever calls the vendor.
+- **Wait bounds are TIGHT, on purpose.** Every wait the harness performs is
+  bounded, never a `time.Sleep`. Teamlead run 8 measured 443 passing tests at
+  a 0.2s median and 1.7s max wall time each, so a wait that only ever needs to
+  observe ORDINARY daemon behavior does not need anywhere near 30s to prove
+  itself — and a red test that DOES time out should burn seconds, not 30 of
+  them, or a run with a double-digit number of reds turns into a five-minute
+  wait for nothing new.
 
-A **matching live session controller** is stronger: the workspace entry must
-exist and its `sessionController.sessionID` must equal the session ID announced
-by the shim. A `turn handshake has no matching live session controller` error
-therefore means the shim handshook while the current daemon either had no
-session controller for that workspace or had already assigned the workspace to
-a different session. Never interpret that error as merely "the session is not
-thinking" or infer session-controller liveness from persisted session fields.
+  | bound | value | where | reason |
+  | --- | --- | --- | --- |
+  | `harness.DefaultTimeout` | 5s | every `harness.Daemon`'s context, unless overridden | ~3x run 8's observed 1.7s max; the shared budget for one daemon process's whole test |
+  | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s (3x default) | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
+  | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event; 500ms is long enough for a push that IS coming to have arrived |
+  | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
+  | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
+
+  A wait that needs longer than `DefaultTimeout` gets one of the rows above —
+  never a bigger default. Package `-timeout 180s` leaves margin over the
+  measured ~139s full-suite wall time with today's known reds (each now
+  costing ~5s instead of ~30s) plus build/link time; it existed only as Go's
+  implicit 10-minute default before this bound table, which let a run with
+  many reds run needlessly long.
+
+## Command line (binding spellings; Go's flag package accepts one or two dashes)
+
+Emacs launches `daemon/bin/claude-repld` with NO argv — state comes from the
+environment. Every flag is optional.
+
+| flag | meaning | default |
+| --- | --- | --- |
+| `--state-dir <dir>` | the state root | `$AGENT_REPL_STATE_DIR`, else `~/.claude-emacs` |
+| `--fake` | force the shim's offline scripted SDK (`--fake`) onto every session, and the `-fake` classifier | off |
+| `--joining <addr>` | start as the blue-green SUCCESSOR of the incumbent at `<addr>`: bind a fresh port, own no workspace, write `daemon.addr` only once every workspace is adopted | absent = incumbent |
+| `--store-socket <uds>` | the store socket passed to every shim | `$AGENT_REPL_STORE_SOCKET`, else `~/.cache/agent-repl/sock/store.sock` |
+| `--shim-main <path>` | the shim entry (`agent-shim/claude/shim/dist/main.js`) | resolved from the checkout the binary was deployed from |
+| `--node <bin>` | the node binary that runs the shim | `node` on PATH |
+| `--webapp-dist <dir>` | the webapp's built assets to serve at `/` | `webapp/dist` in the checkout |
+| `--prompts-dir <dir>` | the prompts directory | `$AGENT_REPL_PROMPTS_DIR`, else `modules/app/agent-repl/prompts` in the checkout |
+| `--default-config-dir <dir>` | the default account root | the CLI's default (`~/.claude`) |
+| `--multi-repo-config-dir <dir>` | the account root for workspaces under `$MULTI_REPO_ROOT` | unset = the default root |
+| `--idle-cutoff <duration>` | hibernate a session idle this long | the keep-alive idle cutoff |
+| `--pprof <unix path or 127.0.0.1:port>` | opt-in local profiling surface, opened BEFORE any dependency; a wildcard or routable bind is refused, not opened | off |
+| `--no-browser` | this daemon has NO external browser: `OpenExternal` answers `no_browser_configured` and nothing is launched. Without it the browser is still absent on a host where neither `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists | off |
+| `--feed-tail-retention <rows>` | how many published rows one feed retains for a tail's replay, which is what makes WatchFeed's `token_expired` refusal reachable | `$AGENT_REPL_FEED_TAIL_RETENTION`, else the resolver's `DefaultTailRetention` (4096) |
+| `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
+
+## Run and boot order (binding; `cmd/claude-repld`)
+
+`run` performs exactly this sequence, and every step's failure is fatal:
+
+1. the four environment contracts, with `--fake` and `--state-dir` applied over
+   them;
+2. the state root's layout — every directory created, then the socket path
+   budget checked, so an overlong root is refused here rather than at the first
+   shim spawn;
+3. the log surfaces; the run log's open failure is a BOOT FATAL, because a
+   daemon that cannot write its own narrative cannot report what it then does
+   wrong;
+4. `--pprof`, BEFORE any dependency, so a boot wedged on one is still
+   diagnosable through it;
+5. the ONE loopback listener, bound FIRST as the boot-exclusivity claim (an
+   exclusive kernel lock on `daemon.lock` beside `daemon.addr`); an UNFLAGGED
+   second daemon loses there and exits without touching the incumbent's
+   listener or its advertisement;
+6. `daemon.addr`, written atomically by an incumbent; a `--joining` successor
+   DEFERS it and instead writes `joining.addr` where the incumbent that spawned
+   it is waiting, and `daemon.addr` is written only once every workspace is
+   adopted (the rollout's `WriteDaemonAddr` hook);
+7. the state client — `wsm.Open`, or `wsm.OpenReadOnly` for a joining daemon,
+   which owns no workspace and must not be a second writer. That handle is
+   PROMOTED IN PLACE (`wsm.DB.Promote`) at the successor's first adoption:
+   adopting a workspace is the moment it starts writing that workspace's rows,
+   and the incumbent stopped writing them at its transfer notice, so the
+   one-writer invariant holds across the swap;
+8. the component graph, then `boot.Sequence.Run`: adopt the shims whose
+   workspace lock is still held (never kill-and-restart), reconcile the intent
+   manifest (all four dispositions persisted as faults), restore the holds
+   all-or-nothing, close the orphaned turns of the CLIENT-LESS workspaces in one
+   transaction each (an adopted workspace's in-flight turns are re-opened by its
+   sessionwatcher instead), recover the in-flight merges, and — for a successor
+   — `rollout.Controller.Join`;
+9. `server.New` behind `server.H2C` on the claimed listener;
+10. an orderly exit on SIGINT/SIGTERM: the advertisement is withdrawn, the
+    streams are closed, and the state client and the log sinks are closed.
+
+A lock probe that could NOT TELL is never read as free: such a workspace is
+neither adopted nor orphan-closed, and the boot report names it.
+
+## Environment (process contracts and test knobs)
+
+| variable | scope | meaning |
+| --- | --- | --- |
+| `AGENT_REPL_STATE_DIR` | contract | the one state root shared with Emacs, skills and tests |
+| `AGENT_REPL_FAKE` | contract | the whole stack's fake mode: shims spawn with `--fake` and the classifier is scripted. `--fake` overrides it; the flag can only turn it ON |
+| `AGENT_REPL_FORBID_VENDOR_CALLS` | contract | every vendor exec site refuses (classifier, login pty with the default binary, shim spawn without `--fake`) |
+| `AGENT_REPL_OWNED=1` | contract | propagated into every shim so vendor hooks recognize our processes |
+| (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only) set/overridden; the store socket rides argv — never a curated allowlist |
+| `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
+| `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
+| `AGENT_REPL_SELF_REPO_DIR` | test only | overrides the daemon's own-checkout identity for the merge-method split; the self-reload trigger stays ON (test safety comes from `AGENT_REPL_DEPLOY_SCRIPT` naming a fake deploy script, so landed range → rollout trigger → deploy is assertable end to end) |
+| `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON |
+| `AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS` | test only | compresses the idle cutoff |
+| `AGENT_REPL_FEED_TAIL_RETENTION` | test only | compresses the feed's tail retention (a whole number of rows). It BEATS `--feed-tail-retention`. A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
+| `AGENT_REPL_HOLDOUT_WARN_EVERY` | test only | compresses the rollout's never-free holdout warning cadence (a Go duration; the default is ten minutes). A malformed or non-positive value is a BOOT REFUSAL, never a fall-through to the default |
+| `AGENT_REPL_LOCK_DIR` | test only | overrides `~/.cache/agent-repl/run` for the kernel-lock probes (the fake shim honors it too) |
+| `AGENT_REPL_BROWSER_CMD` | operator/test | the external browser launcher command for OpenExternal |
+| `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary for the login pty and the real classifier (a fake script in tests) |
+| `AGENT_REPL_DEPLOY_SCRIPT` | test only | overrides `bin/deploy-all.sh` for the self-reload trigger |
+| `AGENT_REPL_TEST_ALL_SCRIPT` | test only | overrides `bin/test-all.sh` for the merge test gate (invoked as `bash <script> --suites <a,b>` in the merge TARGET worktree; exit 0 = pass; per-suite state parsed from the script's own `<suite>: passed in <N>s` / `<suite> failed after <N>s with exit code <rc>` lines; output archived under `<state>/merge-logs/`) |
+| `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory (the `--prompts-dir` flag beats it) |
+| `SHIM_BUILD_SHA` | operator/test | the bundle sha every shim spawn is stamped with. In production it is read from the shim's own build stamp, `agent-shim/claude/shim/dist/.built-sha` beneath the resolved checkout; this variable answers only when that stamp does NOT exist (a checkout that has not built the shim, and every test harness, whose fake shim has no bundle). A present-but-blank stamp is a refusal, never a fall-through. With neither source the daemon REFUSES TO BOOT, naming both — an unstamped spawn cannot be checked for staleness. It has no flag |
+| `AGENT_REPL_CHECKOUT` | operator | the agent-repl module root (`modules/app/agent-repl`) the binary was deployed from. It is resolved without this: the executable's own ancestors are walked first, and the path this daemon's source was COMPILED from answers when the binary was built outside the tree (`go build -o <tmp>`, which every test harness does). `--shim-main`, `--webapp-dist` and `--prompts-dir` default beneath it; `proto/vocab/` (the render colors and paint classes) and `daemon/bin/.built-sha` are read from it and have NO flag |
+
+## The `-fake` classifier (deterministic)
+
+A held prompt whose first word is `stop` or `abort` (the explicit-interrupt
+fast path, also without `--fake`) or whose text contains `[interject]` is
+classified `interject`; every other prompt is `hold_for_turn_end`.
+
+## Kernel locks (shim-held; the daemon only probes)
+
+`~/.cache/agent-repl/run/workspace-<md5hex(clean abs dir)[:8]>.lock` (probed
+with `open + flock(LOCK_EX|LOCK_NB)`, released at once) and
+`session-<vendor session id>.lock` (never probed by the daemon).
+
+BOTH ARE TAKEN INSIDE `StartSession`, before the SDK is touched, and released
+together on a kill or a stand-down (project-lead ruling). Nothing is locked at
+the shim's startup, which is what lets the rollout's relaunch engine PRELAUNCH
+an inert shim beside a live one: an inert shim holds neither lock. A workspace
+another shim already holds answers `StartSessionFailure.conversation_owned`,
+which the daemon relays as an intended arm (ERROR-ARMS.md).
+
+## State root layout
+
+See ARCHITECTURE.md "State root layout": `daemon.addr`, `wsm.db`,
+`logs/daemon.run.log`, the per-workspace sink targets in `logs/`,
+`sock/<workspace-id>.sock`, `intent/manifest.json`,
+`output/workspace_commands_*.json`, `merge-logs/`.
+
+## Wiring (wave 3: the graph is complete)
+
+`cmd/claude-repld`'s `buildGraph` builds every component and returns the
+server's and the boot sequence's dependencies, the LATE BINDINGS and the
+background loops. `graph.go`'s `unwired` list is EMPTY: every Deps field has a
+landed producer. The list stays so a future dependency with no producer is
+declared there and fails the boot loudly, naming it, rather than being filled
+with a stand-in at the composition root.
+
+Two edges point backwards and are closed with FORWARDERS in
+`cmd/claude-repld/forward.go`, bound by `run` immediately after `server.New`
+and before anything is served: the rollout's and the drain's pushes
+(`WorkspacePusher`, `ParticipantSource`, the announcers) and the workspace
+verbs' `HostRelay` (`srv.Relay()`). The merge orchestrator's guidance route and
+the queue's parked route read the orchestrator out of a forwarder for the same
+reason. The background loops — the drain sweep and the command-file ingress —
+start after the bindings, because each of them can push.
+
+The one collaborator with NO PRODUCER is the feed's image origin: nothing in
+the daemon serves an image reference as a fetchable `src`, so the resolver is
+wired with `feed.UnproducedImageResolver`, which refuses loudly and names the
+missing producer. `/todos` and `/mcp` have no producer either, and `/agents`
+and `/help` are ruled unproduced: `server.Panels` answers `/context` (the
+topbar resolver's context tree) and `/status` (the daemon's build stamp plus
+the resolver's spliced account/model/mode facts) and fails loudly for every
+other recognized panel command.
+
+## Deploy chain
+
+`bin/deploy-all.sh` is the ONE chain, in the order proto → bindings → shim →
+webapp → daemon → store/sidecar; its step 5 evaluates
+`(agent-repl-runtime-restart-await)` in `lisp/services.el` via emacsclient (the
+old `agent-repl-frontend-daemon-restart-await` is dead), and
+`bin/build-frontend.sh` builds `daemon/bin/claude-repld` from
+`./cmd/claude-repld`. The rollout invokes the same chain with `--no-bounce` and
+never a second build path. `agent-shim/wire` is DELETED: nothing in the rebuilt
+daemon imports it, and its `bin/test-all.sh` roster entry is gone.
 
 ## Logging
 
-- The daemon owns one canonical JSON logging API in `internal/dlog`, divided
-  between normal and verbose emission functions. New or changed daemon code
-  uses that API only.
-- Workspace-bound records persist through the canonical
-  `<workspace>/.claude/emacs/daemon.log` symlink. The daemon's global service
-  log is only for events that are conceptually unrelated to every workspace
-  and agent session. Difficulty resolving a known workspace is an invariant
-  violation, never a reason to write its record globally.
-- Every new or materially changed nontrivial function logs its entry. Every
-  meaningful branch that selects a different nontrivial block, call, state
-  transition, or outcome logs its selection.
-- The daemon's normal helper persists and emits to the terminal. The verbose
-  helper always persists and gates terminal output through the daemon's
-  established verbose setting.
-- THE DURABLE SINK IS AUTHORITATIVE AND SYNCHRONOUS; THE TERMINAL IS A MIRROR
-  AND IS NOT. Every logger's terminal is the one shared `dlog.TerminalSink` the
-  daemon builds at boot, which queues the line and returns. In production the
-  terminal is a pty Emacs drains, so a synchronous terminal write blocks for as
-  long as Emacs is busy — and it used to block holding the durable sink's
-  mutex, which put every other emitter, and therefore every frontend command's
-  ack, behind Emacs's own startup. Never wire a logger's terminal straight to
-  `os.Stderr` again; the only exceptions are the documented bootstrap-fatal and
-  sink-emergency paths. The mirror drops nothing, reorders nothing, and reports
-  a write failure to the next emitter rather than swallowing it.
-- Each error is logged exactly once by its owning layer with session, workspace,
-  operation, resolved inputs, branch outcome, and cause. Error-path tests assert
-  the canonical record and its context.
-- Frequent or hot diagnostics use the verbose helper. Do not bypass logging.
-  Direct diagnostic output through `fmt`, `log`, `slog`, or an ad hoc logger is
-  forbidden except a documented pre-logger bootstrap failure or logger-sink
-  emergency path.
+Only `internal/dlog`. Every logical branch logs (DEBUG ordinary, WARN
+warnings, ERROR errors) with `operation = daemon.<package>.<verb>` and
+structured context, per `../logging-contract.md`. Workspace-bound records
+go to `<workspace>/.claude/emacs/daemon.log`; failing to resolve the
+workspace is an invariant violation, never a global write. That canonical path
+is a SYMLINK, and its target is minted under `<state>/logs/`, never the OS temp
+dir — the state root owns the daemon's durable logs.
 
-## Telemetry
+## Conventions
 
-- Every completed frontend command emits one record at
-  `daemon.frontend.command-latency`. Its context carries `command` (the
-  `FrontendCommand` oneof field name), `client_kind`, `workspace`,
-  `queue_depth` (commands in flight daemon-wide at receipt, including this
-  one), `duration_ms` (receipt through ack enqueue — what the client waits
-  out), `processing_ms` (the dispatch's share), `threshold_ms`,
-  `ack_deadline_ms`, and `ok`. `request_id` is in its own top-level field.
-- A fast command is `debug`/`verbose`. An ack at or past
-  `AGENT_REPL_FRONTEND_ACK_WARN_MS` (default 2s, a fifth of the client's 10s
-  ack deadline) is `warn`/`normal`, so a slow ack is visible without verbose
-  mode and before the client's own deadline expires. A malformed value aborts
-  boot.
-- The completion record is written from a DEFERRED settle on the command's
-  ticket (`internal/frontend/ticket.go`), so it happens on every exit from the
-  dispatch — success, nack, connection-teardown drain, or a panic unwinding out
-  of a handler (which still propagates). The same settle releases the in-flight
-  gauge, so `queue_depth` cannot leak past a non-local exit. Settling is
-  idempotent: exactly one completion record per received command.
-- A command still IN FLIGHT past the client's ack deadline emits
-  `daemon.frontend.command-overdue` at `warn`/`normal` — a separate operation,
-  so a census of completions is never inflated by one. It carries `command`,
-  `client_kind`, `workspace`, `queue_depth`, `elapsed_ms`, `ack_deadline_ms`
-  and `threshold_ms`, and deliberately omits `ok` and `processing_ms`: an
-  unfinished command has neither. It does not release the gauge, and the
-  command's own completion record still follows when it finishes. This is how a
-  wedged bring-up is visible while it is wedged rather than only in retrospect,
-  or not at all if the daemon exits first.
-- A command that names a workspace is workspace-owned; only the genuinely
-  workspace-less commands reach the global service log. An `open_workspace`
-  record therefore lands in THAT WORKSPACE's `daemon.log`, never in
-  `~/.claude-emacs/claude-repld.log` — a completion census run against the
-  global log alone will always appear to be missing every workspace command.
-- `-pprof` (default `AGENT_REPL_PPROF_ADDR`) opens the OPT-IN Go profiling
-  surface: a unix socket path, or an explicitly loopback `host:port`. Empty is
-  OFF and is the default — there is no always-on listener, and a wildcard or
-  routable bind is refused at construction. The decision is recorded either way
-  (`daemon.pprof.disabled` / `daemon.pprof.enabled`); the enabled record is
-  `warn` and names the resolved `network`, `address` and `url`, which is the
-  only place a port-0 bind's chosen port appears.
+Table-driven tests, Arrange/Act/Assert, one test file per source file, one
+edge case per test, no `time.Sleep` for synchronization. GIT IS NEVER CALLED
+DURING TESTING (user directive): every package above the git client tests
+against a fake `gitclient.Git`; the integration harness scripts every git
+fact (commits, conflicts, landed ranges, worktree lists) as fixture data;
+the git-client leaf's own tests exercise its one spawn point against a
+scripted fake `git` executable placed first on PATH (recording argv/env,
+answering from a fixture table); the merge test gate is a scripted fake
+script in tests. No `git init`, no temp repositories, anywhere in tests. Unlanded refusal
+arms are answered at the transport as `intended arm: <Rpc>Error.<arm>: …`,
+logged at WARNING under `daemon.refusal.unlanded_arm`, and recorded in
+`ERROR-ARMS.md`.
 
-## Verification
+## Coverage deliberately not attainable under the no-git-in-tests directive
 
-- Non-interactive agents run under a permission classifier that blocks
-  compound shell chains such as `cd modules/app/agent-repl/daemon && go
-  test ./...`. Every command documented below is a single, standalone
-  invocation runnable from the repository root, with no `cd` and no `&&`:
-  - `go -C modules/app/agent-repl/daemon test ./...` — canonical unit test
-    invocation.
-  - `go -C modules/app/agent-repl/daemon vet ./...` — vet.
-  - `make -C modules/app/agent-repl/daemon coverage` — the module-rooted
-    form of `make coverage` below.
-  - `go -C modules/app/agent-repl/daemon test ./internal/sessioncontroller/
-    -run XXX -bench BenchmarkReplayDrain` — the shim-bring-up drain: one
-    realistic replayed transcript through the consumer sinks over a real SSM,
-    state database and durable log sink. Reports `events/s` and `ms/event`.
-  - `go -C modules/app/agent-repl/daemon test ./internal/registry/ -run XXX
-    -bench BenchmarkCursorWrite` — the per-event durable `last_seq` advance
-    against a steady-state registry. Reports `writes/s` and `ms/write`.
-  - Both are the standing guard on bring-up latency. A change to the consumer
-    sinks, the state-database writes, or the registry's write path runs them
-    and reports the before/after.
-  - `go -C modules/app/agent-repl/daemon test ./internal/frontend/ -run XXX
-    -bench BenchmarkRosterPublish` — one editor-global roster publication at
-    fleet scale (16 workspaces, 4 connected clients) through validation,
-    retention, per-client fan-out and its canonical log record. It is the
-    standing guard on publication latency: a startup issues one publication per
-    restored workspace and blocks on each ack. A change to roster validation,
-    frontend delivery, or the daemon's logging sinks runs it and reports the
-    before/after.
-- `make coverage` runs all `cmd`, `e2e`, and `internal` packages with
-  `-coverpkg=./...` and reports `go tool cover -func` output.
-- `modules/app/agent-repl/bin/test-all.sh` (from the repository root) runs
-  every tracked suite across the module.
-- Maintain at least 90% statement coverage. Until the measured daemon baseline
-  reaches that target, never reduce it, report the gap explicitly, and add
-  focused tests for every critical branch and every error path changed.
-- `modules/app/agent-repl/bin/report-logging-density.sh daemon` reports
-  source-line and canonical-call counts as a rough review aid. It is not
-  semantic logging coverage, so directly audit all critical branches and
-  errors even when the ratio rises.
-- `modules/app/agent-repl/bin/test-all.sh --record` records suite timings to
-  `modules/app/agent-repl/test_time.csv` for spotting timing regressions.
+The git client's tests pin argv, env scrubbing, `-C` selection and output
+parsing against a scripted fake `git`; they can no longer prove git's OWN
+behavior: that a `--no-ff` merge yields a two-parent commit, that the
+landed range equals the source branch, that a conflicted merge leaves
+unmerged index entries and MERGE_HEAD, that a revert removes the content
+in one commit, that `worktree prune` clears a stale registration, the
+exact `status --porcelain` markers, that git honors GIT_DIR over `-C`, and
+real-git version compatibility (`rev-list --no-commit-header` needs
+git >= 2.33). Those are e2e facts now (the project lead's suite).

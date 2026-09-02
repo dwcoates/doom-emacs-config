@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
-# Focused harness for the doctor's store-health client integration and bounded
-# large-database integrity policy. All fixtures remain below $TMP.
+# Focused harness for agent-shim-doctor.sh's store Connect probes and its
+# bounded large-database integrity policy. All fixtures remain below $TMP.
+#
+# The store probe is exercised against fake-store-fixture.py — a scripted
+# Connect server on a temporary UNIX socket. Nothing here builds or runs the
+# real shim-store binary, so the harness stays deterministic and independent
+# of the Go modules being rewritten alongside it.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 DOCTOR="$SCRIPT_DIR/agent-shim-doctor.sh"
-STORE_MODULE="$SCRIPT_DIR/../agent-shim/shim-store"
+FAKE_STORE="$SCRIPT_DIR/fake-store-fixture.py"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-doctor-test.XXXXXX")"
-LIVE_PID=""
+FAKE_PID=""
 
 cleanup() {
-  if [ -n "$LIVE_PID" ]; then
-    kill "$LIVE_PID" 2>/dev/null || true
-    wait "$LIVE_PID" 2>/dev/null || true
+  if [ -n "$FAKE_PID" ]; then
+    kill "$FAKE_PID" 2>/dev/null || true
+    wait "$FAKE_PID" 2>/dev/null || true
   fi
   rm -rf "$TMP"
 }
@@ -22,8 +27,20 @@ trap cleanup EXIT HUP INT TERM
 STATE="$TMP/state"
 BIN="$TMP/bin"
 CALLS="$TMP/sqlite-calls"
-HEALTH_CALLS="$TMP/health-calls"
+STORE_CALLS="$TMP/store-calls"
+READY_FIFO="$TMP/ready.fifo"
 mkdir -p "$STATE/store" "$STATE/sock" "$STATE/log" "$BIN"
+
+STORE_SOCK="$STATE/sock/store.sock"
+# The probe deadline the doctor is given, and the delay the "slow" fixture
+# holds the response for. The gap is what the timeout case asserts.
+PROBE_TIMEOUT=1
+SLOW_SECONDS=5
+
+# curl and python3 must be reachable through the pinned PATH the doctor runs
+# under, otherwise its honest SKIP branches would mask the probe assertions.
+TOOL_DIRS="$(dirname "$(command -v curl)"):$(dirname "$(command -v python3)")"
+DOCTOR_PATH="$BIN:$TOOL_DIRS:/usr/bin:/bin"
 
 # A sparse file exercises the size gate without consuming the represented disk.
 truncate -s 2048 "$STATE/store/events.db"
@@ -39,225 +56,211 @@ esac
 EOF
 chmod +x "$BIN/sqlite3"
 
-# Deterministic CLI-contract fixture for doctor-side exit classification.
-# The real correlated wire protocol is exercised against a local shim-store
-# process below.
-cat >"$BIN/shim-store" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
 
-request_id=""
-socket=""
-timeout=""
-log=""
-health_check=0
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -health-check) health_check=1; shift ;;
-    -socket) socket="$2"; shift 2 ;;
-    -log) log="$2"; shift 2 ;;
-    -health-request-id) request_id="$2"; shift 2 ;;
-    -health-timeout) timeout="$2"; shift 2 ;;
-    *) exit 2 ;;
-  esac
-done
-[ "$health_check" -eq 1 ] && [ -n "$socket" ] && [ -n "$log" ] && [ -n "$request_id" ] && [ -n "$timeout" ] || exit 2
-printf '%s|%s|%s|%s|%s\n' "$health_check" "$socket" "$log" "$request_id" "$timeout" >>"$DOCTOR_STORE_HEALTH_CALLS"
-
-case "${DOCTOR_HEALTH_FIXTURE:?}" in
-  healthy) class=""; healthy=true; reason="ready"; exit_code=0 ;;
-  missing_socket) class="missing_socket"; healthy=false; reason="socket missing"; exit_code=10 ;;
-  connect_failure) class="connect_failure"; healthy=false; reason="dial rejected"; exit_code=11 ;;
-  write_failure) class="write_failure"; healthy=false; reason="write rejected"; exit_code=12 ;;
-  timeout) class="timeout"; healthy=false; reason="deadline exceeded"; exit_code=13 ;;
-  decode_failure) class="decode_failure"; healthy=false; reason="invalid response"; exit_code=14 ;;
-  mismatched_request_id) class="mismatched_request_id"; healthy=false; reason="response id differs"; exit_code=15 ;;
-  unhealthy_response) class="unhealthy_response"; healthy=false; reason="store draining"; exit_code=16 ;;
-  client_failure) class="client_failure"; healthy=false; reason="client invariant failed"; exit_code=17 ;;
-  unexpected_exit) class="unexpected_exit"; healthy=false; reason="unknown exit"; exit_code=18 ;;
-  *) exit 2 ;;
-esac
-printf '{"request_id":"%s","latency_ms":17,"component":"shim-store","healthy":%s,"failure_class":"%s","reason":"%s"}\n' \
-  "$request_id" "$healthy" "$class" "$reason"
-exit "$exit_code"
-EOF
-chmod +x "$BIN/shim-store"
-
-run_doctor_json() {
-  local fixture="$1"
-  set +e
-  DOCTOR_HEALTH_FIXTURE="$fixture" \
-  DOCTOR_SQLITE_CALLS="$CALLS" \
-  DOCTOR_STORE_HEALTH_CALLS="$HEALTH_CALLS" \
-  AGENT_REPL_STATE_ROOT="$STATE" \
-  AGENT_REPL_DOCTOR_SHIM_STORE_BIN="$BIN/shim-store" \
-  AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 \
-  PATH="$BIN:/usr/bin:/bin" \
-  "$DOCTOR" --json
-  local rc=$?
-  set -e
-  [ "$rc" -eq 1 ] || {
-    printf 'FAIL: fixture %s exit=%s, want 1 from unrelated missing-service checks\n' "$fixture" "$rc" >&2
-    exit 1
+# start_fake_store MODE — bring up the scripted Connect server and block until
+# it is accepting. The FIFO write in the fixture completes only after
+# bind+listen, so this read IS the readiness signal; there is no sleep-poll.
+start_fake_store() {
+  rm -f "$READY_FIFO" "$STORE_SOCK"
+  mkfifo "$READY_FIFO"
+  python3 "$FAKE_STORE" "$STORE_SOCK" "$1" "$READY_FIFO" "$STORE_CALLS" "$SLOW_SECONDS" \
+    >"$TMP/fake-store.out" 2>"$TMP/fake-store.err" &
+  FAKE_PID=$!
+  read -r -t 20 _ <"$READY_FIFO" || {
+    cat "$TMP/fake-store.err" >&2
+    fail "fake store ($1) never signalled readiness"
   }
+}
+
+stop_fake_store() {
+  [ -n "$FAKE_PID" ] || return 0
+  kill "$FAKE_PID" 2>/dev/null || true
+  wait "$FAKE_PID" 2>/dev/null || true
+  FAKE_PID=""
+  rm -f "$STORE_SOCK"
+}
+
+# A bound-then-closed socket file: the path is a real socket, so the doctor's
+# presence check passes, but connect() gets ECONNREFUSED.
+make_refusing_socket() {
+  rm -f "$STORE_SOCK"
+  SOCKET_PATH="$STORE_SOCK" python3 -c '
+import os, socket
+p = os.environ["SOCKET_PATH"]
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(p)
+s.close()
+'
+  [ -S "$STORE_SOCK" ] || fail "refusing-socket fixture did not create a socket file"
+}
+
+# run_doctor [extra doctor args...] — always exits 1 here, because the
+# fabricated state root has no daemon frontend socket and no loaded launchd
+# services. The store assertions are made on the emitted records.
+run_doctor() {
+  local rc
+  set +e
+  DOCTOR_OUT="$(DOCTOR_SQLITE_CALLS="$CALLS" \
+    AGENT_REPL_STATE_ROOT="$STATE" \
+    AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT="$PROBE_TIMEOUT" \
+    AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 \
+    PATH="$DOCTOR_PATH" \
+    "$DOCTOR" "$@" 2>"$TMP/doctor.err")"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] || fail "doctor exit=$rc, want 1 from the unrelated missing-service checks"
 }
 
 assert_valid_json() {
-  JSON_INPUT="$1" python3 -c 'import json, os; json.loads(os.environ["JSON_INPUT"])' || {
-    printf 'FAIL: doctor emitted invalid JSON: %s\n' "$1" >&2
-    exit 1
-  }
+  JSON_INPUT="$1" python3 -c 'import json, os; json.loads(os.environ["JSON_INPUT"])' ||
+    fail "doctor emitted invalid JSON: $1"
 }
 
-# Build the actual owned client and run it against an actual shim-store server.
-# The socket is the readiness latch: the server creates it only after bind has
-# succeeded, so the client never races a duration-based startup guess.
-(cd "$STORE_MODULE" && go build -o "$BIN/shim-store-real" .)
-"$BIN/shim-store-real" \
-  -socket "$STATE/sock/store.sock" \
-  -db "$STATE/store/live-events.db" \
-  -log "$STATE/log/shim-store.log" \
-  >"$TMP/live-store.out" 2>"$TMP/live-store.err" &
-LIVE_PID=$!
-READY_DEADLINE=$((SECONDS + 10))
-while [ ! -S "$STATE/sock/store.sock" ]; do
-  if ! kill -0 "$LIVE_PID" 2>/dev/null; then
-    printf 'FAIL: local shim-store exited before readiness\n' >&2
-    exit 1
-  fi
-  if [ "$SECONDS" -ge "$READY_DEADLINE" ]; then
-    printf 'FAIL: local shim-store did not create its readiness socket\n' >&2
-    exit 1
-  fi
-  sleep 0.01
-done
+# assert_probe_status STATUS — both store-connect records carry STATUS, and
+# there are exactly two of them (one per probed rpc).
+assert_probe_status() {
+  local want="$1" matches n
+  # `|| true` is load-bearing: under `set -o pipefail` a zero-match grep would
+  # otherwise abort the harness here, before this helper's own assertion could
+  # report which status was actually emitted.
+  matches="$(printf '%s\n' "$DOCTOR_OUT" | grep -o "\"check\":\"store-connect-[a-z-]*\",\"status\":\"$want\"" || true)"
+  n="$(printf '%s' "$matches" | grep -c . || true)"
+  [ "$n" -eq 2 ] ||
+    fail "expected 2 store-connect records with status $want, got $n: $DOCTOR_OUT"
+}
 
-set +e
-OUT_REAL="$(DOCTOR_SQLITE_CALLS="$CALLS" AGENT_REPL_STATE_ROOT="$STATE" AGENT_REPL_DOCTOR_SHIM_STORE_BIN="$BIN/shim-store-real" AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 PATH="$BIN:/usr/bin:/bin" "$DOCTOR" --json 2>"$TMP/live-doctor.err")"
-RC=$?
-set -e
-[ "$RC" -eq 1 ] || {
-  printf 'FAIL: real protocol doctor exit=%s, want 1 from unrelated missing-service checks\n' "$RC" >&2
-  exit 1
+assert_probe_class() {
+  printf '%s\n' "$DOCTOR_OUT" | grep -q "\"failure_class\":\"$1\"" ||
+    fail "probe lost its exact failure class $1: $DOCTOR_OUT"
 }
-assert_valid_json "$OUT_REAL"
-printf '%s\n' "$OUT_REAL" | grep -Eq '"check":"store-socket-connectable","status":"PASS".*"component":"shim-store","healthy":true' || {
-  printf 'FAIL: real correlated HealthCheck did not pass: %s\n' "$OUT_REAL" >&2
-  exit 1
-}
-grep -q 'health PASS' "$STATE/log/shim-store.log" || {
-  printf 'FAIL: real server did not log the correlated health response\n' >&2
-  exit 1
-}
-kill "$LIVE_PID"
-wait "$LIVE_PID" 2>/dev/null || true
-LIVE_PID=""
 
-OUT="$(run_doctor_json healthy)"
-assert_valid_json "$OUT"
-printf '%s\n' "$OUT" | grep -q '"check":"store-socket-connectable","status":"PASS"' || {
-  printf 'FAIL: healthy store health did not pass: %s\n' "$OUT" >&2
-  exit 1
-}
-HEALTH_RECORD_COUNT="$(printf '%s\n' "$OUT" | grep -o '"check":"store-socket-connectable"' | wc -l | tr -d ' ')"
-[ "$HEALTH_RECORD_COUNT" -eq 1 ] || {
-  printf 'FAIL: healthy store health emitted %s records, want exactly one: %s\n' "$HEALTH_RECORD_COUNT" "$OUT" >&2
-  exit 1
-}
-if printf '%s\n' "$OUT" | grep -q '"check":"store-socket-connectable","status":"FAIL"'; then
-  printf 'FAIL: healthy store health fell through into a failure record: %s\n' "$OUT" >&2
-  exit 1
+# ---- healthy: a success arm on both probed endpoints -------------------
+
+start_fake_store healthy
+run_doctor --json
+stop_fake_store
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status PASS
+printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-live-work","status":"PASS"' ||
+  fail "GetLiveWork probe did not pass: $DOCTOR_OUT"
+printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-get-sidecar-cursors","status":"PASS"' ||
+  fail "GetSidecarCursors probe did not pass: $DOCTOR_OUT"
+if printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-connect-[a-z-]*","status":"FAIL"'; then
+  fail "a healthy store fell through into a failure record: $DOCTOR_OUT"
 fi
-printf '%s\n' "$OUT" | grep -Eq '"metadata":\{"request_id":"doctor-[^"]+","latency_ms":17,"component":"shim-store","healthy":true,"failure_class":"","reason":"ready"\}' || {
-  printf 'FAIL: healthy response metadata was not retained verbatim: %s\n' "$OUT" >&2
-  exit 1
-}
-grep -Eq '^1\|.*/sock/store\.sock\|.*/log/shim-store\.log\|doctor-[^|]+\|2s$' "$HEALTH_CALLS" || {
-  printf 'FAIL: doctor did not use the complete health client contract\n' >&2
-  exit 1
-}
-OUT_BOUNDED="$OUT"
+printf '%s\n' "$DOCTOR_OUT" | grep -Eq '"request_id":"doctor-[^"]+","latency_ms":[0-9]+,"component":"shim-store","rpc":"store\.v1\.ShimStore/GetLiveWork","healthy":true' ||
+  fail "healthy probe metadata lost its request id, latency, or rpc: $DOCTOR_OUT"
+OUT_BOUNDED="$DOCTOR_OUT"
 
-for fixture in missing_socket connect_failure write_failure timeout decode_failure mismatched_request_id unhealthy_response; do
-  OUT="$(run_doctor_json "$fixture")"
-  assert_valid_json "$OUT"
-  printf '%s\n' "$OUT" | grep -q '"check":"store-socket-connectable","status":"FAIL"' || {
-    printf 'FAIL: %s did not fail store health: %s\n' "$fixture" "$OUT" >&2
-    exit 1
-  }
-  printf '%s\n' "$OUT" | grep -q "\"failure_class\":\"$fixture\"" || {
-    printf 'FAIL: %s lost its exact failure class: %s\n' "$fixture" "$OUT" >&2
-    exit 1
-  }
-done
+# The store saw both procedures, each carrying the doctor's correlation header
+# and the empty-message request body.
+grep -q '^/store\.v1\.ShimStore/GetLiveWork	doctor-' "$STORE_CALLS" ||
+  fail "the store never received a correlated GetLiveWork request: $(cat "$STORE_CALLS")"
+grep -q '^/store\.v1\.ShimStore/GetSidecarCursors	doctor-' "$STORE_CALLS" ||
+  fail "the store never received a correlated GetSidecarCursors request: $(cat "$STORE_CALLS")"
+grep -q '	{}$' "$STORE_CALLS" ||
+  fail "the probe did not send the empty request message: $(cat "$STORE_CALLS")"
 
-OUT="$(run_doctor_json client_failure)"
-assert_valid_json "$OUT"
-printf '%s\n' "$OUT" | grep -q '"failure_class":"client_failure"' || {
-  printf 'FAIL: client failure lost its exact classification: %s\n' "$OUT" >&2
-  exit 1
-}
+# ---- failure arm: served, but the store refuses the read ---------------
 
-OUT="$(run_doctor_json unexpected_exit)"
-assert_valid_json "$OUT"
-printf '%s\n' "$OUT" | grep -q '"failure_class":"unexpected_exit"' || {
-  printf 'FAIL: unexpected helper exit lost its explicit classification: %s\n' "$OUT" >&2
-  exit 1
-}
+start_fake_store failure
+run_doctor --json
+stop_fake_store
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status FAIL
+assert_probe_class failure_arm
+printf '%s\n' "$DOCTOR_OUT" | grep -q 'database is locked' ||
+  fail "the failure arm's detail was not retained: $DOCTOR_OUT"
 
+# ---- non-200: the request never reached a handler ----------------------
+
+start_fake_store non200
+run_doctor --json
+stop_fake_store
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status FAIL
+assert_probe_class http_status
+printf '%s\n' "$DOCTOR_OUT" | grep -q '"http_status":503' ||
+  fail "the non-200 status was not reported: $DOCTOR_OUT"
+
+# ---- malformed body: HTTP 200 that is not a Connect response -----------
+
+start_fake_store malformed
+run_doctor --json
+stop_fake_store
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status FAIL
+assert_probe_class malformed_response
+
+# ---- refused connection: the socket exists, nothing accepts ------------
+
+make_refusing_socket
+run_doctor --json
+rm -f "$STORE_SOCK"
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status FAIL
+assert_probe_class connection_refused
+printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-socket-present","status":"PASS"' ||
+  fail "the refusing-socket fixture should still satisfy the presence check: $DOCTOR_OUT"
+
+# ---- missing socket: nothing to probe at all ---------------------------
+
+rm -f "$STORE_SOCK"
+run_doctor --json
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status FAIL
+assert_probe_class missing_socket
+printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-socket-present","status":"FAIL"' ||
+  fail "a missing socket must also fail the presence check: $DOCTOR_OUT"
+
+# ---- timeout: the store accepts but never answers in time --------------
+
+start_fake_store slow
+run_doctor --json
+stop_fake_store
+assert_valid_json "$DOCTOR_OUT"
+assert_probe_status FAIL
+assert_probe_class timeout
+
+# ---- text rendering keeps the class, the hint and the correlation ------
+
+start_fake_store failure
 set +e
-OUT_UNAVAILABLE="$(DOCTOR_SQLITE_CALLS="$CALLS" AGENT_REPL_STATE_ROOT="$STATE" AGENT_REPL_DOCTOR_SHIM_STORE_BIN="$BIN/not-installed" AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 PATH="$BIN:/usr/bin:/bin" "$DOCTOR" --json)"
-RC=$?
+OUT_TEXT="$(DOCTOR_SQLITE_CALLS="$CALLS" \
+  AGENT_REPL_STATE_ROOT="$STATE" \
+  AGENT_REPL_DOCTOR_STORE_PROBE_TIMEOUT="$PROBE_TIMEOUT" \
+  AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 \
+  PATH="$DOCTOR_PATH" \
+  "$DOCTOR" 2>/dev/null)"
 set -e
-[ "$RC" -eq 1 ] || {
-  printf 'FAIL: unavailable helper exit=%s, want 1\n' "$RC" >&2
-  exit 1
-}
-assert_valid_json "$OUT_UNAVAILABLE"
-printf '%s\n' "$OUT_UNAVAILABLE" | grep -q '"failure_class":"client_unavailable"' || {
-  printf 'FAIL: unavailable helper lost its explicit classification: %s\n' "$OUT_UNAVAILABLE" >&2
-  exit 1
-}
+stop_fake_store
+printf '%s\n' "$OUT_TEXT" | grep -q 'answered the failure arm' ||
+  fail "text output did not report the failure arm: $OUT_TEXT"
+printf '%s\n' "$OUT_TEXT" | grep -q 'detail=database is locked' ||
+  fail "text output did not retain the store's detail: $OUT_TEXT"
+printf '%s\n' "$OUT_TEXT" | grep -q 'hint: the store is serving but REFUSED this read' ||
+  fail "text output did not render the failure-arm hint: $OUT_TEXT"
 
-OUT_TEXT="$(DOCTOR_HEALTH_FIXTURE=timeout DOCTOR_SQLITE_CALLS="$CALLS" DOCTOR_STORE_HEALTH_CALLS="$HEALTH_CALLS" AGENT_REPL_STATE_ROOT="$STATE" AGENT_REPL_DOCTOR_SHIM_STORE_BIN="$BIN/shim-store" AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 PATH="$BIN:/usr/bin:/bin" "$DOCTOR" 2>/dev/null || true)"
-printf '%s\n' "$OUT_TEXT" | grep -q 'store health check failed with timeout' || {
-  printf 'FAIL: text output did not report the exact failure class: %s\n' "$OUT_TEXT" >&2
-  exit 1
-}
-printf '%s\n' "$OUT_TEXT" | grep -q 'deadline exceeded' || {
-  printf 'FAIL: text output did not retain the helper reason: %s\n' "$OUT_TEXT" >&2
-  exit 1
-}
+# ---- bounded integrity policy (unchanged behavior) ---------------------
 
-OUT="$OUT_BOUNDED"
-printf '%s\n' "$OUT" | grep -q '"check":"store-db-openable","status":"PASS"' || {
-  printf 'FAIL: missing openable PASS: %s\n' "$OUT" >&2
-  exit 1
-}
-printf '%s\n' "$OUT" | grep -q '"check":"store-db-integrity","status":"SKIP"' || {
-  printf 'FAIL: missing oversized integrity SKIP: %s\n' "$OUT" >&2
-  exit 1
-}
+printf '%s\n' "$OUT_BOUNDED" | grep -q '"check":"store-db-openable","status":"PASS"' ||
+  fail "missing openable PASS: $OUT_BOUNDED"
+printf '%s\n' "$OUT_BOUNDED" | grep -q '"check":"store-db-integrity","status":"SKIP"' ||
+  fail "missing oversized integrity SKIP: $OUT_BOUNDED"
 if grep -q 'integrity_check' "$CALLS"; then
-  printf 'FAIL: bounded run executed the deep integrity scan\n' >&2
-  exit 1
+  fail "the bounded run executed the deep integrity scan"
 fi
 
-set +e
-OUT_DEEP="$(DOCTOR_HEALTH_FIXTURE=healthy DOCTOR_SQLITE_CALLS="$CALLS" DOCTOR_STORE_HEALTH_CALLS="$HEALTH_CALLS" AGENT_REPL_STATE_ROOT="$STATE" AGENT_REPL_DOCTOR_SHIM_STORE_BIN="$BIN/shim-store" AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES=1024 PATH="$BIN:/usr/bin:/bin" "$DOCTOR" --json --deep-integrity)"
-RC=$?
-set -e
-[ "$RC" -eq 1 ] || {
-  printf 'FAIL: deep run exit=%s, want 1 from missing services\n' "$RC" >&2
-  exit 1
-}
-printf '%s\n' "$OUT_DEEP" | grep -q '"check":"store-db-integrity","status":"PASS"' || {
-  printf 'FAIL: deep integrity did not pass: %s\n' "$OUT_DEEP" >&2
-  exit 1
-}
-grep -q 'integrity_check' "$CALLS" || {
-  printf 'FAIL: --deep-integrity did not execute PRAGMA integrity_check\n' >&2
-  exit 1
-}
+start_fake_store healthy
+run_doctor --json --deep-integrity
+stop_fake_store
+printf '%s\n' "$DOCTOR_OUT" | grep -q '"check":"store-db-integrity","status":"PASS"' ||
+  fail "deep integrity did not pass: $DOCTOR_OUT"
+grep -q 'integrity_check' "$CALLS" ||
+  fail "--deep-integrity did not execute PRAGMA integrity_check"
 
-printf 'PASS: doctor uses correlated store-health results and bounds integrity scans\n'
+printf 'PASS: doctor probes the store Connect endpoints and bounds integrity scans\n'

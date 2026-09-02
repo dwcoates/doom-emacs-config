@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeApiUsage } from "../src/api-usage.js";
+import { InvalidModeledUsageError, normalizeApiUsage } from "../src/api-usage.js";
 
 /**
  * THE SHIM DERIVES NOTHING FROM THE COUNTERS IT VALIDATES.
@@ -46,6 +46,37 @@ describe("normalizeApiUsage carries vendor counters and derives nothing", () => 
   it("exposes no total prompt input", () => {
     // Arrange + Act + Assert — summing the three buckets is a derivation too.
     expect(Object.keys(usage)).not.toContain("totalPromptInputTokens");
+  });
+});
+
+describe("normalizeApiUsage refuses a shape it cannot carry faithfully", () => {
+  it("rejects a non-object usage block, naming the field path", () => {
+    // Arrange + Act
+    let thrown: unknown;
+    try {
+      normalizeApiUsage("not an object");
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(InvalidModeledUsageError);
+    expect((thrown as InvalidModeledUsageError).fieldPath).toBe("usage");
+    expect((thrown as InvalidModeledUsageError).message).toContain("must be an object");
+  });
+
+  it("rejects a required counter that is missing", () => {
+    // Arrange + Act
+    let thrown: unknown;
+    try {
+      normalizeApiUsage({ output_tokens: 20 });
+    } catch (err) {
+      thrown = err;
+    }
+
+    // Assert
+    expect(thrown).toBeInstanceOf(InvalidModeledUsageError);
+    expect((thrown as InvalidModeledUsageError).fieldPath).toBe("usage.input_tokens");
   });
 });
 
