@@ -47,6 +47,15 @@ export interface AssistantOptions {
   readonly effort?: string;
   /** Suppress the transcript lines (a message the vendor streams but never records). */
   readonly skipTranscript?: boolean;
+  /**
+   * Stamp the message with a specific instant instead of the mock's clock.
+   *
+   * FOR SCENARIOS THAT DELIBERATELY LIE ABOUT WHEN, and only about when — the
+   * cold-context gate reads the LAST ASSISTANT LINE's `timestamp` and `usage`
+   * together, so an old session cannot be seeded by back-dating some other
+   * record beside a freshly-stamped assistant line.
+   */
+  readonly timestamp?: string;
 }
 
 /** Who a sidechain message belongs to. */
