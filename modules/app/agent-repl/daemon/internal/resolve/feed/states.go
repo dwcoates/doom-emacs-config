@@ -131,6 +131,19 @@ type permissionState struct {
 	card *frontendv1.FeedPermission
 	// turn is the turn the card belongs to.
 	turn *conversationv1.TurnId
+	// agent is who asked. THE ANSWER VERB NEEDS IT: an answer is delivered to
+	// the agent that is blocked, and the client sends only the ask's identity.
+	agent *conversationv1.AgentId
+}
+
+// questionState is what the daemon SERVED for one question ask, which is what
+// an answer is echoed against.
+type questionState struct {
+	// agent is who asked; the answer is delivered back to it.
+	agent *conversationv1.AgentId
+	// batch is the batch as served, so an answer naming a question the batch
+	// never carried is refused rather than forwarded.
+	batch *conversationv1.AgentQuestionBatch
 }
 
 // subagentState is one bubble's carried facts across its frames.

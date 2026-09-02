@@ -116,6 +116,14 @@ type Fleet struct {
 	mu        sync.RWMutex
 	sessions  map[ids.WorkspaceID]*live
 	coldGates map[ids.WorkspaceID]ServedColdGate
+	// lastCold is the shim's own cold facts for a parked workspace, kept whole
+	// so the relaunch engine's cold arm carries what the shim stated rather
+	// than a reconstruction of it.
+	lastCold map[ids.WorkspaceID]*conversationv1.SessionCold
+	// generation counts the shims this daemon has spawned per workspace, which
+	// is what makes a prelaunched shim's socket path distinct from the running
+	// one's.
+	generation map[ids.WorkspaceID]int
 }
 
 // NewFleet builds the session fleet.
@@ -145,12 +153,14 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		now = time.Now
 	}
 	return &Fleet{
-		deps:      deps,
-		probe:     probe,
-		watch:     watch,
-		now:       now,
-		sessions:  map[ids.WorkspaceID]*live{},
-		coldGates: map[ids.WorkspaceID]ServedColdGate{},
+		deps:       deps,
+		probe:      probe,
+		watch:      watch,
+		now:        now,
+		sessions:   map[ids.WorkspaceID]*live{},
+		coldGates:  map[ids.WorkspaceID]ServedColdGate{},
+		lastCold:   map[ids.WorkspaceID]*conversationv1.SessionCold{},
+		generation: map[ids.WorkspaceID]int{},
 	}, nil
 }
 
@@ -435,6 +445,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 
 	f.mu.Lock()
 	f.coldGates[ws] = ServedColdGate{VendorSessionID: vendorSessionID, Models: models, Scopes: scopes}
+	f.lastCold[ws] = cold
 	f.mu.Unlock()
 
 	ref := feedid.Ref{
@@ -500,6 +511,7 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	session, ok := f.sessions[ws]
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
+	delete(f.lastCold, ws)
 	f.mu.Unlock()
 	if !ok {
 		return nil

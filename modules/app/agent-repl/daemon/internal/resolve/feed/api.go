@@ -119,6 +119,18 @@ type Resolver interface {
 	// client. Reports false when the row carries no standing offer.
 	StandingFor(ws ids.WorkspaceID, id *frontendv1.FeedId) (*conversationv1.AgentPermissionStanding, bool)
 
+	// ServedPermission answers what the daemon SERVED for one permission ask:
+	// the agent blocked on it and the standing token the vendor offered, nil
+	// when none was. False means this workspace drew no such ask.
+	//
+	// A client sends back only the ask's identity, so the agent an answer must
+	// be delivered to lives nowhere else.
+	ServedPermission(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentPermissionStanding, bool)
+	// ServedQuestion answers what the daemon SERVED for one question ask: the
+	// agent blocked on it and the batch as served, so an answer naming a
+	// question the batch never carried is refused rather than forwarded.
+	ServedQuestion(ws ids.WorkspaceID, ask string) (*conversationv1.AgentId, *conversationv1.AgentQuestionBatch, bool)
+
 	// RaiseColdGate draws the STANDING cold-context gate from the shim's cold
 	// facts: the raw counts and instants the CLIENT formats and ticks, plus the
 	// summarizers and compaction scopes the daemon will accept back. While
