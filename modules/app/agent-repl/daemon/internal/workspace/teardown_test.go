@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -188,5 +189,30 @@ func TestNukeRefusesAnUnregisteredRepository(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("Nuke() = nil error, want the unregistered repository surfaced")
+	}
+}
+
+// TestNukeAnswersGitFailedWithGitsOwnAccount covers the arm the contract spells
+// for a destruction git would not perform: the caller learns what could not be
+// destroyed, not merely that something went wrong.
+func TestNukeAnswersGitFailedWithGitsOwnAccount(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.git.nukeErr = errors.New("fatal: unable to remove worktree")
+
+	// Act.
+	err := f.verbs.Nuke(context.Background(), "w1")
+
+	// Assert.
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Nuke() = %v, want a *Refusal naming git_failed", err)
+	}
+	if refusal.Arm != ArmGitFailed {
+		t.Fatalf("refusal arm = %q, want %q", refusal.Arm, ArmGitFailed)
+	}
+	if !strings.Contains(refusal.Reason, "unable to remove worktree") {
+		t.Fatalf("refusal reason = %q, want git's own account", refusal.Reason)
 	}
 }

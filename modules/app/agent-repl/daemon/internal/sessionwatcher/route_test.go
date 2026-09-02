@@ -428,9 +428,12 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "diagnostics is the topbar's and the health reporter's",
+			// The ROSTER reads it too: an open degraded window is what the
+			// row's `degraded` arm is made of, and the dot and the topbar must
+			// not disagree about one push.
+			name:   "diagnostics is the topbar's, the roster's and the health reporter's",
 			update: diagnosticsUpdate(),
-			want:   []string{"topbar.OnSessionUpdate", "lifecycle.OnSessionDiagnostics"},
+			want:   []string{"topbar.OnSessionUpdate", "sidebar.OnSessionUpdate", "lifecycle.OnSessionDiagnostics"},
 		},
 		{
 			name:   "context usage is the topbar's",

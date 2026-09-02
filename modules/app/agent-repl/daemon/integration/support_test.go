@@ -73,6 +73,24 @@ func newOpened(t *testing.T, opts harness.Opts) *fixture {
 	return f
 }
 
+// newOpenedWorktree is newOpened for a workspace on a WORKTREE of its
+// repository rather than on the repository root. It exists for the tests whose
+// subject is destructive git — a workspace at the repository root is one whose
+// removal takes the repository with it, which no later git command survives.
+func newOpenedWorktree(t *testing.T, opts harness.Opts, name string) *fixture {
+	t.Helper()
+	d := harness.StartDaemon(t, opts)
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, name)
+	ws := harness.Register(t, d, dir)
+	d.WatchWorkspaceLogs(dir)
+	f := &fixture{d: d, repo: repo, ws: ws, t: t}
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	f.web = f.d.WatchWeb(f.ws)
+	return f
+}
+
 // open sends OpenWorkspace and attaches to the spawned fake shim.
 func (f *fixture) open() {
 	f.t.Helper()

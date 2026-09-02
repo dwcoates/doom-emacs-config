@@ -43,14 +43,17 @@ type fakeDB struct {
 
 	workspaces map[ids.WorkspaceID]wsm.Workspace
 	jobs       map[ids.WorkspaceID]wsm.CreationJob
-	sessions   map[ids.WorkspaceID]wsm.Session
-	leases     map[ids.WorkspaceID]wsm.Lease
-	turns      map[ids.WorkspaceID][]wsm.Turn
-	ledger     map[ids.WorkspaceID][]wsm.MergeLedgerEntry
-	queues     map[wsm.RepoKey][]wsm.MergeQueueEntry
-	paused     map[wsm.RepoKey]bool
-	repos      []wsm.Repository
-	seq        int
+	// jobDecodeErrs makes one workspace's creation_jobs row undecodable, which
+	// is the corruption the boot must refuse rather than absorb.
+	jobDecodeErrs map[ids.WorkspaceID]error
+	sessions      map[ids.WorkspaceID]wsm.Session
+	leases        map[ids.WorkspaceID]wsm.Lease
+	turns         map[ids.WorkspaceID][]wsm.Turn
+	ledger        map[ids.WorkspaceID][]wsm.MergeLedgerEntry
+	queues        map[wsm.RepoKey][]wsm.MergeQueueEntry
+	paused        map[wsm.RepoKey]bool
+	repos         []wsm.Repository
+	seq           int
 
 	// mergedAt, closed and releasedLeases are what the teardown's ordering is
 	// asserted against.
@@ -65,17 +68,18 @@ type fakeDB struct {
 
 func newFakeDB() *fakeDB {
 	return &fakeDB{
-		workspaces: map[ids.WorkspaceID]wsm.Workspace{},
-		jobs:       map[ids.WorkspaceID]wsm.CreationJob{},
-		sessions:   map[ids.WorkspaceID]wsm.Session{},
-		leases:     map[ids.WorkspaceID]wsm.Lease{},
-		turns:      map[ids.WorkspaceID][]wsm.Turn{},
-		ledger:     map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
-		queues:     map[wsm.RepoKey][]wsm.MergeQueueEntry{},
-		paused:     map[wsm.RepoKey]bool{},
-		mergedAt:   map[ids.WorkspaceID]time.Time{},
-		closed:     map[ids.WorkspaceID]bool{},
-		policies:   map[wsm.LeaseID]wsm.LeasePolicy{},
+		workspaces:    map[ids.WorkspaceID]wsm.Workspace{},
+		jobs:          map[ids.WorkspaceID]wsm.CreationJob{},
+		jobDecodeErrs: map[ids.WorkspaceID]error{},
+		sessions:      map[ids.WorkspaceID]wsm.Session{},
+		leases:        map[ids.WorkspaceID]wsm.Lease{},
+		turns:         map[ids.WorkspaceID][]wsm.Turn{},
+		ledger:        map[ids.WorkspaceID][]wsm.MergeLedgerEntry{},
+		queues:        map[wsm.RepoKey][]wsm.MergeQueueEntry{},
+		paused:        map[wsm.RepoKey]bool{},
+		mergedAt:      map[ids.WorkspaceID]time.Time{},
+		closed:        map[ids.WorkspaceID]bool{},
+		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 	}
 }
 
@@ -92,6 +96,9 @@ func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace
 func (f *fakeDB) CreationJob(_ context.Context, id ids.WorkspaceID) (wsm.CreationJob, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err, corrupt := f.jobDecodeErrs[id]; corrupt {
+		return wsm.CreationJob{}, false, err
+	}
 	job, ok := f.jobs[id]
 	return job, ok, nil
 }
@@ -648,6 +655,28 @@ func (f *fakeFeed) heads() []string {
 	return out
 }
 
+// lastMergeErrorArm names the error arm of the last head row that carried one.
+func (f *fakeFeed) lastMergeErrorArm() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	arm := ""
+	for _, row := range f.rows {
+		err := row.Row.GetActivity().GetMerge().GetError()
+		if err == nil {
+			continue
+		}
+		switch err.GetReason().(type) {
+		case *frontendv1.FeedMergeError_Failed:
+			arm = "failed"
+		case *frontendv1.FeedMergeError_Abandoned:
+			arm = "abandoned"
+		default:
+			arm = "unset"
+		}
+	}
+	return arm
+}
+
 // tabKindOf names a tab row's kind arm.
 func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 	switch tab.GetKind().(type) {
@@ -813,8 +842,8 @@ type harness struct {
 	startedSessions []ids.WorkspaceID
 	// occupancyReleases counts the occupancy guards dropped.
 	occupancyReleases int
-	// displaced is the turn CaptureDisplaced answers with, nil for none.
-	displaced *ids.TurnID
+	// displaced is what CaptureDisplaced answers with, nil for none.
+	displaced *Displaced
 	// parkedTurns answers ParkedRoute, consumed in order.
 	parkedTurns []ids.TurnID
 	// parkedSaid records what guidance was delivered.
@@ -932,9 +961,9 @@ func (h *harness) deps() Deps {
 			h.turnCloses = h.turnCloses[1:]
 			return close, nil
 		},
-		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (ids.TurnID, bool, error) {
+		CaptureDisplaced: func(context.Context, ids.WorkspaceID) (Displaced, bool, error) {
 			if h.displaced == nil {
-				return "", false, nil
+				return Displaced{}, false, nil
 			}
 			return *h.displaced, true, nil
 		},

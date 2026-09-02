@@ -24,7 +24,7 @@ func TestOpenSinkLinksToAnExternalTarget(t *testing.T) {
 	dir, id := newWorkspace(t)
 
 	// Act.
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestOpenSinkDisplacesAWorkspaceProvidedRegularFile(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestOpenSinkReplacesAForeignSymlink(t *testing.T) {
 	}
 
 	// Act.
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestOpenSinkReplacesAForeignSymlink(t *testing.T) {
 func TestSinkWriteAppends(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestSinkWriteAppends(t *testing.T) {
 func TestSinkTruncatesInPlaceAtTheCap(t *testing.T) {
 	// Arrange: put the sink just under the cap without writing 64 MiB.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestSinkTruncatesInPlaceAtTheCap(t *testing.T) {
 func TestSinkRefusesToTruncateAnInodeItNoLongerOwns(t *testing.T) {
 	// Arrange: the workspace redirects the canonical link elsewhere.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestSinkRefusesToTruncateAnInodeItNoLongerOwns(t *testing.T) {
 func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestSinkPoisonIsWorkspaceAttributed(t *testing.T) {
 func TestSinkRefusesEveryRecordOncePoisoned(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "daemon", "")
+	s, err := openSink(t.TempDir(), dir, id, "daemon", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestSinkScanSeesWritesTheDaemonNeverMade(t *testing.T) {
 	// Arrange: the shim writes straight to the same inode through fd 3, so the
 	// daemon's own byte count is only a lower bound.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "shim", "")
+	s, err := openSink(t.TempDir(), dir, id, "shim", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestSinkScanSeesWritesTheDaemonNeverMade(t *testing.T) {
 func TestSinkScanLeavesAnUnderCapTargetAlone(t *testing.T) {
 	// Arrange.
 	dir, id := newWorkspace(t)
-	s, err := openSink(dir, id, "shim", "")
+	s, err := openSink(t.TempDir(), dir, id, "shim", "")
 	if err != nil {
 		t.Fatalf("openSink: %v", err)
 	}
@@ -365,5 +365,38 @@ func TestReplaceLinkIsAtomicOverAnExistingLink(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".daemon.log.") {
 			t.Fatalf("temporary link %q was left behind", e.Name())
 		}
+	}
+}
+
+// TestCreateTargetMintsUnderTheGivenLogsDirectory pins WHERE a durable sink's
+// target lives: the state root's logs directory, never the OS temp dir. A
+// target under TMPDIR is swept by the operating system, differs per launcher,
+// and leaves one orphan per run in a directory nothing owns.
+func TestCreateTargetMintsUnderTheGivenLogsDirectory(t *testing.T) {
+	// Arrange.
+	logsDir := filepath.Join(t.TempDir(), "logs")
+
+	// Act.
+	target, err := createTarget(logsDir, "ws-abc", "daemon")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("createTarget: %v", err)
+	}
+	if filepath.Dir(target) != logsDir {
+		t.Fatalf("target = %q, want it minted under %q", target, logsDir)
+	}
+}
+
+// TestCreateTargetRefusesWithNoLogsDirectory covers the invariant's other side:
+// an unresolved logs directory is a loud failure, never a silent fall back to
+// the OS temp dir.
+func TestCreateTargetRefusesWithNoLogsDirectory(t *testing.T) {
+	// Arrange, Act.
+	_, err := createTarget("", "ws-abc", "daemon")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("createTarget with no logs directory = nil, want a loud refusal")
 	}
 }

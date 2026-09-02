@@ -302,11 +302,17 @@ func TestAFailedConclusionSurfacesTheGitFailure(t *testing.T) {
 	enqueue(t, h)
 
 	// Act.
-	err := h.admit(context.Background())
+	_ = h.admit(context.Background())
 
-	// Assert.
-	if err == nil {
-		t.Fatal("a refused conclusion landed the merge anyway")
+	// Assert: the failure is the MERGE's, stated on its own facts. The pump's
+	// return is no longer where it surfaces: one merge ending badly must not
+	// stop the queue behind it, so the run's terminal is the report.
+	facts, _ := h.o.Facts(theWorkspace)
+	if facts.State != StateFailed {
+		t.Fatalf("the merge is %q after a refused conclusion, want it failed", facts.State)
+	}
+	if !strings.Contains(facts.Detail, "nothing to commit") {
+		t.Fatalf("the merge's detail = %q, want git's own account of the refusal", facts.Detail)
 	}
 }
 

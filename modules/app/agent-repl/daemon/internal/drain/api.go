@@ -35,6 +35,13 @@ type Controller interface {
 	Cancel(ctx context.Context) error
 	// Current reports the schedule in force, nil when none is.
 	Current(ctx context.Context) (*wsm.DrainSchedule, error)
+	// Republish re-arms and re-announces a schedule that OUTLIVED the process
+	// that put it in force. The daemon topic replays only this process's own
+	// latest value, so without this a client reconnecting after a bounce would
+	// silently lose a shutdown still standing. It is the boot's call, made
+	// once the push surface exists and before anything is served; nothing
+	// scheduled is not a refusal here — the boot simply has nothing to say.
+	Republish(ctx context.Context) error
 	// ShutdownNow announces an immediate shutdown and exits once the in-flight
 	// writes are done. It is UpdateShutdownSchedule{now}.
 	ShutdownNow(ctx context.Context, reason *agentreplv1.DrainReason) error

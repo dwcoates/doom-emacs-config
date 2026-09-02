@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"connectrpc.com/connect"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/feedid"
@@ -520,4 +522,42 @@ func TestInterruptTurnWithOnlyALiveShellRaisesNoChallenge(t *testing.T) {
 	if !outcome.Turn {
 		t.Fatalf("outcome = %+v, want the interrupted-turn arm", outcome)
 	}
+}
+
+// TestInterruptTurnAnswersShimRefusedForATransportFailure covers the
+// fallthrough: the shim would not perform the kill and the failure carried no
+// arm at all, so the caller gets the contract's relay arm rather than a raw
+// transport error it cannot act on.
+func TestInterruptTurnAnswersShimRefusedForATransportFailure(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = connect.NewError(connect.CodeInternal, errors.New("the vendor refused the kill"))
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	refusal := asRefusal(t, err, ArmShimRefused)
+	if refusal.Reason != "the vendor refused the kill" {
+		t.Fatalf("shim_refused detail = %q, want the shim's own words", refusal.Reason)
+	}
+}
+
+// TestInterruptTurnAnswersShimRefusedForAFailureWithNoArm covers the other half
+// of the fallthrough: a typed KillTurnFailure whose kind oneof is unset names
+// no landed arm, so it relays as shim_refused instead of an unlanded arm.
+func TestInterruptTurnAnswersShimRefusedForAFailureWithNoArm(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	runningTurn(f, 0)
+	f.shim.killTurnErr = &ShimRefusal{Verb: "KillTurn", Arm: ArmShimUnspecified, Detail: "no cause was named"}
+
+	// Act.
+	_, err := f.verbs.Interrupt(context.Background(), "w1", InterruptTarget{Turn: true}, false)
+
+	// Assert.
+	asRefusal(t, err, ArmShimRefused)
 }
