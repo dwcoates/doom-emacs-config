@@ -28,8 +28,7 @@ import {
   type PersistEntry,
   type Persistence,
 } from "../store/persistence.js";
-import { detachedWorkId, storeItemPointerValue, toolCallActivityId } from "../convert/ids.js";
-import { stoppedBashTerminal } from "../store/reconcile.js";
+import { detachedWorkId, storeItemPointerValue } from "../convert/ids.js";
 import {
   detachForegroundDetached,
   detachForegroundRefused,
@@ -106,6 +105,16 @@ export interface SessionContext {
    * retires the registration, however the stream ended.
    */
   bashWatcherOpened(work: conversationv1.DetachedWorkId): () => void;
+  /**
+   * Write the `interrupted.by_user` terminal for every SHELL run in `entries`.
+   *
+   * THE ACT WAS OURS, SO THE RECORD IS OURS. A detached shell's rows are the
+   * sidecar's, but the spool's `EXIT=` line read alone says only what code it
+   * exited with — that a user asked for the stop is known here and nowhere
+   * else. Subagents are untouched: their terminals come from the vendor's own
+   * `task_notification`, which does state `stopped`.
+   */
+  concludeStoppedRuns(entries: readonly LiveWorkEntry[]): void;
   /**
    * Report that the record plane could not be reached.
    *
@@ -497,6 +506,11 @@ export class TurnEngine {
       await query.interrupt();
       for (const entry of spawned) await query.stopTask(entry.taskId);
     }
+    // A SUBAGENT'S TERMINAL ARRIVES ON ITS OWN, in the `task_notification` the
+    // stop provokes; A SHELL'S DOES NOT, because no vendor message states that
+    // a shell run was stopped. Every item this kill named concludes, or the
+    // consumer is left watching work that will never end.
+    this.session.concludeStoppedRuns(spawned);
     this.session.setOpenTurn(undefined);
     const killed = create(conversationv1.TurnKilledSchema, {
       how:
@@ -545,6 +559,7 @@ export class TurnEngine {
     if (query !== undefined) {
       for (const entry of spawned) await query.stopTask(entry.taskId);
     }
+    this.session.concludeStoppedRuns(spawned);
     LOGGER.log(
       { turn_id: turnId, stopped: spawned.length },
       "killed the live work a closed turn left running",
@@ -799,21 +814,7 @@ export class TurnEngine {
     // this shim knows a user asked for the kill, which is what
     // `interrupted.by_user` states. The row shares the run's terminal upsert
     // key, so a sidecar row for the same run supersedes rather than duplicates.
-    const identity = this.session.identity();
-    if (identity !== undefined) {
-      this.session.persistence.write([
-        stoppedBashTerminal(
-          identity.agentId,
-          toolCallActivityId(work.value),
-          create(conversationv1.AgentBashCommandSchema, { line: entry.description }),
-        ),
-      ]);
-    } else {
-      LOGGER.log(
-        { level: "warn", work_id: work.value },
-        "stopped a detached shell run with no session identity; its terminal row cannot be keyed to an agent",
-      );
-    }
+    this.session.concludeStoppedRuns([entry]);
     LOGGER.log({ work_id: work.value }, "stopped a detached shell run");
     return stopBashStopped();
   }

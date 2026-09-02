@@ -1897,6 +1897,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         settle();
       };
     },
+    concludeStoppedRuns: (entries) => {
+      concludeStoppedRuns(entries);
+    },
     bashWatcherOpened: (work) => {
       let settle: () => void = () => undefined;
       const entry: OpenBashWatcher = {
@@ -2220,7 +2223,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         );
         continue;
       }
-      if (entry.taskType !== undefined && entry.taskType !== "bash") continue;
+      // THE SAME RULE THE FOLD USES (`settlesAsSubagent`): `task_started`
+      // states `local_agent` for a spawned agent and `local_bash` for a shell,
+      // and an UNSTATED kind is an agent. Only a stated non-agent kind is a
+      // shell run, and only a shell run's terminal is ours to write.
+      if (entry.taskType === undefined || entry.taskType === "" || entry.taskType === "local_agent") {
+        continue;
+      }
       closing.push(
         stoppedBashTerminal(
           agent,
