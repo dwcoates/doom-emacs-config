@@ -42,7 +42,6 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
-import type { StoreClient } from "./client.js";
 import {
   producerId,
   writeId,

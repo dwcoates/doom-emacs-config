@@ -32,7 +32,7 @@ import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
-import { bashUpsertKey, terminalUpsertKey } from "../store/keys.js";
+import { terminalUpsertKey } from "../store/keys.js";
 import type { AgentPageSession, PersistEntry, Persistence } from "../store/persistence.js";
 import {
   announceLiveWork,

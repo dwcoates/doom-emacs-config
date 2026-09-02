@@ -46,7 +46,6 @@ import {
 } from "../integration-support/store.js";
 import {
   awaitFile,
-  readJsonl,
   readSpools,
   projectDir,
   readSubagentMeta,

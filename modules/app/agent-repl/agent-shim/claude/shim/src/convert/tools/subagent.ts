@@ -36,7 +36,7 @@ import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { prose, settledAt, startedAt } from "../entries.js";
 import { subagentId } from "../ids.js";
-import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
+import type { PendingCall, ToolConverter } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, num, obj, str, uint } from "./support.js";
 
 const LOGGER = bindLog({ component: "shim-convert-subagent", operation: "shim.convert.subagent" });
