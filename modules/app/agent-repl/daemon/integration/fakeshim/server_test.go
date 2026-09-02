@@ -82,3 +82,63 @@ func TestBashStartFallsBackToABareStart(t *testing.T) {
 		t.Fatalf("bashStart = %v, want a start arm", got)
 	}
 }
+
+// openAsk is the pushed frame that opens one permission ask.
+func openAsk(id, gated string) *conversationv1.AgentFrame {
+	return &conversationv1.AgentFrame{
+		AgentId: &conversationv1.AgentId{Value: MainAgentID},
+		Result: &conversationv1.AgentFrame_Update{Update: &conversationv1.AgentUpdate{
+			Update: &conversationv1.AgentUpdate_Permission{Permission: &conversationv1.AgentPermission{
+				Id:        &conversationv1.AgentPermissionId{Value: id},
+				GatedCall: &conversationv1.AgentActivityId{Value: gated},
+				Result: &conversationv1.AgentPermission_Start{
+					Start: &conversationv1.AgentPermissionStart{}},
+			}},
+		}},
+	}
+}
+
+// TestSettlePermissionPublishesADenialsSettleFrame covers the decision the
+// daemon draws the answered card from: the fake must put the ask's own settle
+// frame on the agent's stream, as the real shim does.
+func TestSettlePermissionPublishesADenialsSettleFrame(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+	srv.rememberPushedPermission(MainAgentID, openAsk("perm-1", "act-1"))
+	_, stream := srv.agents.subscribe()
+
+	// Act
+	if !srv.settlePermission(&conversationv1.AgentPermissionDecision{
+		Ask:      &conversationv1.AgentPermissionId{Value: "perm-1"},
+		Decision: &conversationv1.AgentPermissionDecision_Denied{Denied: &conversationv1.AgentPermissionDeniedByUser{Message: "no"}},
+	}) {
+		t.Fatal("settlePermission = false, want the remembered ask settled")
+	}
+
+	// Assert
+	frame := (<-stream).frame.GetUpdate().GetPermission()
+	if frame.GetSuccess().GetDenied().GetUser().GetMessage() != "no" {
+		t.Fatalf("settle frame = %v, want a user denial carrying the reason", frame)
+	}
+	if frame.GetGatedCall().GetValue() != "act-1" {
+		t.Fatalf("settle frame gated_call = %v, want the ask's own", frame.GetGatedCall())
+	}
+}
+
+// TestSettlePermissionRefusesAnAskItWasNeverToldAbout is the other edge: an
+// unknown ask settles nothing rather than inventing a frame.
+func TestSettlePermissionRefusesAnAskItWasNeverToldAbout(t *testing.T) {
+	// Arrange
+	srv := newServer(NewRecorder(), Profile{}, nil)
+
+	// Act
+	settled := srv.settlePermission(&conversationv1.AgentPermissionDecision{
+		Ask:      &conversationv1.AgentPermissionId{Value: "perm-nope"},
+		Decision: &conversationv1.AgentPermissionDecision_Denied{Denied: &conversationv1.AgentPermissionDeniedByUser{}},
+	})
+
+	// Assert
+	if settled {
+		t.Fatal("settlePermission = true for an ask the fake never opened, want false")
+	}
+}
