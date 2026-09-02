@@ -98,6 +98,12 @@ type Refusal struct {
 	// NotFound marks an unknown-id refusal, which answers CodeNotFound rather
 	// than CodeFailedPrecondition.
 	NotFound bool
+	// Fields are the intended arm message's OWN field values, keyed by proto
+	// field name. An arm that carries evidence — CreateWorkspaceBaseRefUnresolved's
+	// `ref`, for one — gets that evidence rather than only the sentence: the
+	// transport copies this map onto the arm it sets, so a field the refusal
+	// states is a field the client reads.
+	Fields map[string]any
 }
 
 // Error renders the exact message ERROR-ARMS.md prescribes.
@@ -110,11 +116,25 @@ func (r *Refusal) Error() string {
 }
 
 // WithRpc names the rpc a shared refusal surfaced under. It returns a copy, so
-// two handlers naming the same shared refusal cannot overwrite each other.
+// two handlers naming the same shared refusal cannot overwrite each other. The
+// arm's field values are copied too, so the rename never drops the evidence.
 func (r *Refusal) WithRpc(rpc string) *Refusal {
 	out := *r
 	out.Rpc = rpc
+	out.Fields = cloneFields(r.Fields)
 	return &out
+}
+
+// cloneFields copies an arm's field values, so no two refusals share a map.
+func cloneFields(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // AsRefusal reports whether err is one of these refusals, which is how the
@@ -130,12 +150,23 @@ func AsRefusal(err error) (*Refusal, bool) {
 // refuse records the intended arm at WARNING and returns it. Every refusal
 // site in this package goes through here, so the log and the ledger agree.
 func refuse(log dlog.Logger, rpc, arm, reason string, notFound bool) *Refusal {
-	r := &Refusal{Rpc: rpc, Arm: arm, Reason: reason, NotFound: notFound}
-	log.Warn(opRefusal, r.Error(), dlog.Context{
+	return refuseWith(log, rpc, arm, reason, notFound, nil)
+}
+
+// refuseWith is refuse for an arm that carries its OWN fields as evidence. A
+// sentence is not a field: an arm spelling `ref` wants the ref, and a client
+// reading the arm rather than the prose would otherwise get an empty string.
+func refuseWith(log dlog.Logger, rpc, arm, reason string, notFound bool, fields map[string]any) *Refusal {
+	r := &Refusal{Rpc: rpc, Arm: arm, Reason: reason, NotFound: notFound, Fields: cloneFields(fields)}
+	ctx := dlog.Context{
 		"rpc":       rpc,
 		"arm":       arm,
 		"reason":    reason,
 		"not_found": notFound,
-	})
+	}
+	for name, value := range r.Fields {
+		ctx["arm_"+name] = value
+	}
+	log.Warn(opRefusal, r.Error(), ctx)
 	return r
 }

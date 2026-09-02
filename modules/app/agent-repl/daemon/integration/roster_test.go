@@ -8,6 +8,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
 
@@ -113,10 +114,10 @@ func TestRosterOrdersRowsByPriority(t *testing.T) {
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
-	refs := map[string]string{}
+	refs := map[string]*workspacev1.WorkspaceRef{}
 	for _, name := range []string{"p05", "p1", "p2", "p3", "plain"} {
 		wt := worktreeOf(t, repo, name)
-		refs[name] = harness.Register(t, d, wt).GetId()
+		refs[name] = harness.Register(t, d, wt)
 	}
 	priorities := map[string]*agentreplv1.WorkspacePriority{
 		"p05": {Level: &agentreplv1.WorkspacePriority_P05{P05: &agentreplv1.WorkspacePriorityP05{}}},
@@ -130,18 +131,28 @@ func TestRosterOrdersRowsByPriority(t *testing.T) {
 		setPriority(t, d, refs[name], p)
 	}
 
-	// Assert
-	want := []string{refs["p05"], refs["p1"], refs["p2"], refs["p3"], refs["plain"]}
+	// Assert. The predicate waits for the BADGES as well as the order: these
+	// five names sort into the wanted order alphabetically too, so an order
+	// check alone is satisfied by the roster from before any priority was set.
+	want := []string{refs["p05"].GetId(), refs["p1"].GetId(), refs["p2"].GetId(), refs["p3"].GetId(), refs["plain"].GetId()}
 	got := awaitRoster(t, d, roster, "the priority ordering P05 < P1 < P2 < P3 < unprioritized", func(r *frontendv1.WorkspaceRoster) bool {
-		return sameOrder(repoRowIDs(r), want)
+		if !sameOrder(repoRowIDs(r), want) {
+			return false
+		}
+		for name := range priorities {
+			if rosterRow(r, refs[name].GetId()).GetPriority().GetLabel() == "" {
+				return false
+			}
+		}
+		return true
 	})
 	for name := range priorities {
-		row := rosterRow(got, refs[name])
+		row := rosterRow(got, refs[name].GetId())
 		if row.GetPriority().GetLabel() == "" {
 			t.Fatalf("row %s carries no priority badge label, want the level's label", name)
 		}
 	}
-	if row := rosterRow(got, refs["plain"]); row.GetPriority() != nil {
+	if row := rosterRow(got, refs["plain"].GetId()); row.GetPriority() != nil {
 		t.Fatalf("the unprioritized row carries a badge %v, want none", row.GetPriority())
 	}
 }
@@ -150,7 +161,7 @@ func TestClearingAPriorityRemovesTheBadge(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
-	setPriority(t, f.d, f.ws.GetId(), &agentreplv1.WorkspacePriority{
+	setPriority(t, f.d, f.ws, &agentreplv1.WorkspacePriority{
 		Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}},
 	})
 	awaitRoster(t, f.d, roster, "the badge", func(r *frontendv1.WorkspaceRoster) bool {
@@ -159,7 +170,7 @@ func TestClearingAPriorityRemovesTheBadge(t *testing.T) {
 	})
 
 	// Act
-	setPriority(t, f.d, f.ws.GetId(), nil)
+	setPriority(t, f.d, f.ws, nil)
 
 	// Assert
 	awaitRoster(t, f.d, roster, "the badge removed", func(r *frontendv1.WorkspaceRoster) bool {
@@ -330,19 +341,28 @@ func TestUnassigningReturnsTheRowToTheRepositoryGrouping(t *testing.T) {
 	})
 }
 
+// TestCreateTaskRefusesABlankTitle asserts the refusal IN BAND.
+// `CreateTaskError.blank_title` is a LANDED arm, spelled for exactly this
+// condition ("The title is blank once trimmed"), so the refusal is the
+// response's `error` result and not a Connect error.
+//
+// endpoint_create_task.proto also carries the boilerplate line that a blank
+// string is InvalidArgument — the same sentence appears in 35 endpoint files.
+// The specific arm decides over the generic header: an arm minted for this
+// condition is not an arm with no producer.
 func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
+	d.ExpectWarnings("daemon.refusal.unlanded_arm")
 
 	// Act
-	_, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "   "}))
+	resp, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "   "}))
 
 	// Assert
-	if err == nil {
-		t.Fatal("CreateTask with a blank title = success, want a refusal")
+	if err != nil {
+		t.Fatalf("CreateTask with a blank title = transport error %v, want the in-band blank_title arm", err)
 	}
-	if !namesIntendedArm(err, "CreateTaskError.") {
-		t.Fatalf("CreateTask refusal = %v, want it to name CreateTaskError.<arm>", err)
+	if resp.Msg.GetError().GetBlankTitle() == nil {
+		t.Fatalf("CreateTask with a blank title = %v, want CreateTaskError.blank_title", resp.Msg)
 	}
-	d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }

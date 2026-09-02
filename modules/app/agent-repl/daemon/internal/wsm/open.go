@@ -227,8 +227,18 @@ func (s *store) write(ctx context.Context, op string, fields dlog.Context, fn fu
 
 // read runs fn against the handle and logs a failed load at ERROR. Reads are
 // all-or-nothing: fn returns the whole result or an error, never a partial one.
+//
+// A LOOKUP THAT FINDS NOTHING IS AN ANSWER, not a failure. ErrNotFound is what
+// every per-workspace rpc's unknown-workspace refusal is built from, so
+// recording it at ERROR would put an error line on an ordinary refusal path
+// and drown the reads that really did break. The error is returned unchanged
+// either way — only the level the record carries differs.
 func (s *store) read(ctx context.Context, op string, fields dlog.Context, fn func(context.Context) error) error {
 	if err := fn(ctx); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.log.Debug(op, "the read found no such record", withError(fields, err))
+			return err
+		}
 		s.log.Error(op, "refused the read", withError(fields, err))
 		return err
 	}
