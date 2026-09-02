@@ -490,8 +490,9 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     openBashRun(
       work: conversationv1.DetachedWorkId,
+      stillLive?: () => boolean,
     ): Promise<AsyncIterable<conversationv1.AgentBash>> {
-      return reader.openBashRun(work);
+      return reader.openBashRun(work, stillLive);
     },
 
     onFault(listener: (fault: conversationv1.SessionFault) => void): () => void {

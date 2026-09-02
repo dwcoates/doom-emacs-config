@@ -41,6 +41,7 @@ import {
   closingSubagentTerminal,
   findBashStart,
   findUnit,
+  stoppedBashTerminal,
 } from "../store/reconcile.js";
 import type {
   CanUseToolLike,
@@ -79,7 +80,7 @@ import {
 } from "./compaction.js";
 import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, type TranscriptFacts } from "./cold.js";
 import { ForegroundUnitTable } from "./foreground.js";
-import { LiveWorkTable } from "./detached.js";
+import { LiveWorkTable, type LiveWorkEntry } from "./detached.js";
 import {
   createAgentIdentityStore,
   mintVendorSessionId,
@@ -165,6 +166,13 @@ export interface EngineDeps {
 interface OpenWatcher {
   readonly agent: conversationv1.AgentId;
   readonly page: AgentPageSession;
+  /** Resolves when the handler's stream has finished, however it finished. */
+  readonly ended: Promise<void>;
+}
+
+/** One open `WatchBash` stream, held so the teardown can wait for its terminal. */
+interface OpenBashWatcher {
+  readonly work: conversationv1.DetachedWorkId;
   /** Resolves when the handler's stream has finished, however it finished. */
   readonly ended: Promise<void>;
 }
@@ -275,6 +283,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let lostRowsAtStandDown = 0;
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
   const watchers = new Set<OpenWatcher>();
+  /** Every open `WatchBash` stream, so the teardown can wait for its terminal. */
+  const bashWatchers = new Set<OpenBashWatcher>();
 
   // THE RECORD PLANE'S FAULTS ARE THE SESSION'S. `Persistence` raises a
   // store_unreachable fault and opens a degraded window when the store stops
@@ -1887,6 +1897,20 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         settle();
       };
     },
+    bashWatcherOpened: (work) => {
+      let settle: () => void = () => undefined;
+      const entry: OpenBashWatcher = {
+        work,
+        ended: new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      bashWatchers.add(entry);
+      return () => {
+        bashWatchers.delete(entry);
+        settle();
+      };
+    },
   };
   const turns = new TurnEngine(context);
 
@@ -2140,6 +2164,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           );
         }
       }
+      concludeStoppedRuns(live.all());
     }
     open = undefined;
     prompts?.close();
@@ -2160,9 +2185,77 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     await concludeWatchers();
+    await concludeBashWatchers();
     pushes.standDown();
     releaseLock?.();
     releaseLock = undefined;
+  }
+
+  /**
+   * Write the interrupted terminal for every shell run this teardown stopped.
+   *
+   * THE ACT WAS OURS, SO THE RECORD IS OURS. A detached shell's rows are
+   * normally the sidecar's, read off the spool — but a run stopped as the
+   * session dies may have no sidecar left to read the spool's `EXIT=` line, and
+   * "every started thing eventually gets a terminal row" is unconditional.
+   * Re-writing the same upsert key is absorbed, so a sidecar that does see the
+   * line later cannot produce a second, conflicting terminal.
+   *
+   * A SUBAGENT IS NOT A SHELL: its terminal is the spawn unit's, written where
+   * subagent terminals are written, so only shell work is closed here.
+   */
+  function concludeStoppedRuns(entries: readonly LiveWorkEntry[]): void {
+    const agent = identity?.agentId;
+    if (agent === undefined) return;
+    const closing: PersistEntry[] = [];
+    for (const entry of entries) {
+      const handle = entry.toolUseId;
+      if (handle === undefined || handle === "") {
+        // Tracked for liveness, addressable by nobody: there is no unit to
+        // settle, and inventing one would put work on a stream that never
+        // announced it.
+        LOGGER.log(
+          { level: "warn", task_id: entry.taskId },
+          "a stopped detached item names no originating call; it has no unit to settle",
+        );
+        continue;
+      }
+      if (entry.taskType !== undefined && entry.taskType !== "bash") continue;
+      closing.push(
+        stoppedBashTerminal(
+          agent,
+          toolCallActivityId(handle),
+          create(conversationv1.AgentBashCommandSchema, { line: entry.description }),
+        ),
+      );
+    }
+    if (closing.length === 0) return;
+    deps.persistence.write(closing);
+    LOGGER.log({ closed: closing.length }, "closed the shell runs this teardown stopped, as interrupted by the user");
+  }
+
+  /**
+   * Wait for every open `WatchBash` stream to end.
+   *
+   * A bash stream concludes ITSELF once the terminal row reaches it — the store
+   * ends `WatchBashRun` after a terminal — so there is nothing to conclude
+   * here, only something to WAIT FOR. Exiting the process first would cut the
+   * stream exactly where its terminal was owed, which a consumer reads as a
+   * transport failure rather than as the interrupted arm it was promised.
+   */
+  async function concludeBashWatchers(): Promise<void> {
+    const open = [...bashWatchers];
+    if (open.length === 0) return;
+    await Promise.all(
+      open.map((entry) =>
+        withBudget(
+          entry.ended,
+          WATCHER_CONCLUSION_BUDGET_MS,
+          `the WatchBash stream on ${entry.work.value} did not end within its conclusion budget`,
+        ),
+      ),
+    );
+    bashWatchers.clear();
   }
 
   /**
