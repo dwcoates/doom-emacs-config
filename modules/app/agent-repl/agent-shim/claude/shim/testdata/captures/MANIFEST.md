@@ -128,3 +128,23 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `web-search` | 2026-09-01 | `hook`, `thinking`, `webSearch`, `response` → `success.completed` | single turn | 76 KB |
 | `worktree-enter-exit-kept-and-removed` | 2026-09-01 | `hook`, `thinking`, `response`, `skillUse`, `read`, `bash`, `write` → `success.completed` | residue `vendor_specific/system/vcs_state_changed` | 664 KB |
 | `write-created-and-updated` | 2026-09-01 | `hook`, `thinking`, `read`, `write`, `response` → `success.completed` | single turn | 92 KB |
+
+## `e2ecleanup/fakesdk-ext` additions (test tooling, not new captures)
+
+The daemon/e2e event-fabrication inventory
+(`docs/overhaul/reports/E2E-EVENT-INVENTORY.md`'s "Consolidated PROPOSED
+fake-SDK additions") asked for several new scenarios and scenario options so
+`daemon/e2e` can drive the real fake SDK instead of hand-fabricating
+`protocolv1.Event{...}` records. None of these is a NEW capture directory —
+each is graded against the grounding named below, or marked ungrounded.
+
+- **`!slash-shape-a` / `!slash-shape-a-unnamed`** (`src/fake/scenarios/session.ts`).
+  UNGROUNDED, INVENTED: no capture in this manifest exercises the CLI's own
+  slash-command bookkeeping as a raw `user`-typed transcript record (the
+  nearest real artifact, `vendor-answered-slash-commands`, is the VENDOR
+  answering the slash command itself — a different record, already covered by
+  `!slash`). The shape is instead built from `machinery_e2e_test.go`'s
+  `machineryContent`/`unnamed` constants, which the daemon/e2e suite has
+  exercised as real vendor transcript bytes since before this fake-SDK
+  addition existed. Retires: `machinery_e2e_test.go`'s and
+  `slashdurability_e2e_test.go`'s hand-fabricated Shape-A call sites.

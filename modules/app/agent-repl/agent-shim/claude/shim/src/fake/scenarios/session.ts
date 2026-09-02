@@ -69,6 +69,65 @@ const SLASH_LOCAL = scenario({
   },
 });
 
+/**
+ * "Shape A": the CLI's own slash-command bookkeeping, recorded as a raw
+ * `user`-typed transcript record (never a content-block array — the corpus's
+ * own local-command records carry a plain string).
+ */
+function slashShapeAContent(name: string): string {
+  return `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>\n<command-args></command-args>`;
+}
+
+const SLASH_SHAPE_A = scenario({
+  name: "slash-shape-a",
+  prompt: "!slash-shape-a [command]",
+  emits:
+    "NOTHING on the stream — this is a FILE-PLANE-ONLY shape. It writes a \"user\"-typed `TranscriptLine` whose " +
+    "content is the CLI's own slash-command bookkeeping (`<command-message>{name}</command-message>\\n` " +
+    "`<command-name>/{name}</command-name>\\n<command-args></command-args>`), parameterized by command name",
+  writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
+  arms: "none in this converter — this record is what the DAEMON's own history classifier reads directly off the transcript; the shim ships it unclassified",
+  run(ctx) {
+    const name = ctx.args === "" ? "compact" : ctx.args;
+    ctx.log({ turn: ctx.turn, branch: "slash-shape-a", command: name }, "fake Shape-A slash-command bookkeeping turn");
+    // A KNOB, not a fixed value: `ctx.newUuid()` is deterministic in the test
+    // harness, so a caller can name exactly which `promptId` this record will
+    // carry without the scenario hard-coding one.
+    ctx.files.transcript.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: slashShapeAContent(name) },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    conclude(ctx, `Recorded the Shape-A bookkeeping for /${name}.`);
+  },
+});
+
+const SLASH_SHAPE_A_UNNAMED = scenario({
+  name: "slash-shape-a-unnamed",
+  prompt: "!slash-shape-a-unnamed",
+  emits:
+    "NOTHING on the stream — the same FILE-PLANE-ONLY \"user\"-typed record, but the WITHHELD-UNNAMED shape: only " +
+    "`<local-command-stdout>...</local-command-stdout>`, with no `<command-name>` element at all",
+  writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
+  arms: "none in this converter — a record naming no command, which is the negative `slash-shape-a` exists to prove",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "slash-shape-a-unnamed" }, "fake Shape-A withheld-unnamed bookkeeping turn");
+    ctx.files.transcript.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: {
+        role: "user",
+        content: "<local-command-stdout>total 4\ndrwxr-xr-x</local-command-stdout>",
+      },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    conclude(ctx, "Recorded the withheld-unnamed bookkeeping.");
+  },
+});
+
 const CONTEXT_USAGE_DRIFT = scenario({
   name: "context-usage-drift",
   prompt: "!context-usage-drift",
@@ -602,6 +661,8 @@ const COLD_SEED = scenario({
 export const SESSION_SCENARIOS = [
   ROTATE,
   SLASH_LOCAL,
+  SLASH_SHAPE_A,
+  SLASH_SHAPE_A_UNNAMED,
   CONTEXT_USAGE_DRIFT,
   MODEL_FALLBACK,
   FAST_ON,
