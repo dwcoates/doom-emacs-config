@@ -92,6 +92,13 @@ func (d *Daemon) AwaitWorkspaceLogOperation(workspaceDir, operation string) LogR
 	})
 }
 
+// ReadLog reads every record from an arbitrary log file. It exists for the one
+// test that must read a PREVIOUS runtime's own log target: the canonical run
+// log is a symlink each runtime relinks onto its own file, so an incumbent's
+// records are reachable only through the target resolved before its successor
+// booted.
+func ReadLog(t *testing.T, path string) []LogRecord { return readLog(t, path) }
+
 func readLog(t *testing.T, path string) []LogRecord {
 	t.Helper()
 	f, err := os.Open(path)

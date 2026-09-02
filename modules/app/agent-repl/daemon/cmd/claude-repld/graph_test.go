@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestResolveShimBuildSHAPrecedence covers each source the shim build sha can
@@ -80,5 +81,57 @@ func TestResolveShimBuildSHAWithABlankStampRefuses(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "is empty") {
 		t.Fatalf("refusal = %q, want it to name the empty stamp", err)
+	}
+}
+
+func TestAnUnsetHoldoutWarnCadenceLeavesTheDefaultToTheController(t *testing.T) {
+	// Arrange.
+	t.Setenv(HoldoutWarnEnv, "")
+
+	// Act.
+	got, err := resolveHoldoutWarnEvery()
+
+	// Assert.
+	if err != nil || got != 0 {
+		t.Fatalf("resolveHoldoutWarnEvery() = (%v, %v), want (0, nil) so the controller's default stands", got, err)
+	}
+}
+
+func TestTheHoldoutWarnCadenceComesFromTheEnvironment(t *testing.T) {
+	// Arrange.
+	t.Setenv(HoldoutWarnEnv, "250ms")
+
+	// Act.
+	got, err := resolveHoldoutWarnEvery()
+
+	// Assert.
+	if err != nil || got != 250*time.Millisecond {
+		t.Fatalf("resolveHoldoutWarnEvery() = (%v, %v), want 250ms", got, err)
+	}
+}
+
+func TestAMalformedHoldoutWarnCadenceIsRefused(t *testing.T) {
+	// Arrange.
+	t.Setenv(HoldoutWarnEnv, "soon")
+
+	// Act.
+	_, err := resolveHoldoutWarnEvery()
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveHoldoutWarnEvery() accepted a malformed cadence; a silent test knob makes its suite lie")
+	}
+}
+
+func TestANonPositiveHoldoutWarnCadenceIsRefused(t *testing.T) {
+	// Arrange.
+	t.Setenv(HoldoutWarnEnv, "0s")
+
+	// Act.
+	_, err := resolveHoldoutWarnEvery()
+
+	// Assert.
+	if err == nil {
+		t.Fatal("resolveHoldoutWarnEvery() accepted a non-positive cadence")
 	}
 }

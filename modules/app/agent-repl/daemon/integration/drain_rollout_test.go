@@ -497,24 +497,56 @@ func TestABusyWorkspaceIsNotTransferredUntilItsTurnEndsThenItsHeldIntakeDrainsIn
 // first half: a workspace that never falls free leaves both daemons up
 // forever, naming the holdout in a periodic WARN
 // (internal/rollout/handover.go awaitFreeForever, operation
-// daemon.rollout.transfer).
-//
-// It is UNEXPRESSIBLE inside a bounded test today. The cadence is
-// rollout.Deps.HoldoutWarnEvery, which defaults to
-// rollout.DefaultHoldoutWarnEvery = 10 minutes
-// (internal/rollout/controller.go) and is READ FROM A REAL CLOCK
-// (rollout.Deps.Clock, defaulted to the system clock); cmd/claude-repld/graph.go
-// never sets HoldoutWarnEvery or Clock from a flag or an environment variable
-// when it builds the rollout controller, so nothing lets a test compress the
-// wait. Confirmed by grep: `grep -rn "HoldoutWarnEvery" cmd/` and
-// `grep -rn "rollout.Deps{" cmd/claude-repld/graph.go` show no call site
-// setting either field outside the production default.
+// daemon.rollout.transfer). The production cadence is ten minutes; the
+// AGENT_REPL_HOLDOUT_WARN_EVERY test knob compresses it so the warning is
+// observable inside a bounded window.
 func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
-	t.Skip("needs a boot-wired knob for rollout.Deps.HoldoutWarnEvery (and/or an injectable Clock) — " +
-		"internal/rollout/controller.go's DefaultHoldoutWarnEvery is 10 minutes and cmd/claude-repld/graph.go " +
-		"sets neither HoldoutWarnEvery nor Clock from a flag or env when it builds the rollout controller, " +
-		"so a test cannot force the never-free periodic WARN daemon.rollout.transfer " +
-		"(internal/rollout/handover.go awaitFreeForever) to fire inside a bounded window")
+	// Arrange: a daemon whose holdout cadence is milliseconds, with a
+	// workspace held busy by a turn that never concludes.
+	selfRepo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, selfRepo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	d := harness.StartDaemon(t, harness.Opts{
+		SelfRepo: selfRepo.Dir,
+		ExtraEnv: []string{
+			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
+		},
+	})
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	f.shim.ExpectWatchSession()
+	host := d.WatchHost(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	if got := f.submit("forever", "k-holdout-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
+		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
+	}
+	f.shim.ExpectStartTurn()
+	// THE INCUMBENT'S OWN RUN LOG. The run log is restart-scoped: the
+	// successor's boot rotates the incumbent's file into slot 1 while the
+	// incumbent goes on writing through the same descriptor, so the holdout
+	// warnings land in daemon.run.log.1 rather than the canonical path.
+	incumbentLog := d.RunLogPath() + ".1"
+
+	// Act: hand over while the turn is still in flight, and never end it.
+	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+
+	// Assert: the holdout is named in a periodic warning that repeats.
+	second := d.AwaitLogRecord(incumbentLog, "the second holdout warning", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.rollout.transfer" && strings.ToLower(r.Level) == "warn" &&
+			r.Context["workspace"] == f.ws.GetId() && numeric(r.Context["warnings"]) >= 2
+	})
+	if got := second.Context["cadence"]; got != "25ms" {
+		t.Fatalf("the holdout warning's cadence = %v, want the 25ms the knob set", got)
+	}
+	d.ExpectWarnings("daemon.rollout.transfer")
+}
+
+// numeric reads a JSON-decoded log context number, which arrives as float64.
+func numeric(v any) float64 {
+	f, _ := v.(float64)
+	return f
 }
 
 func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
