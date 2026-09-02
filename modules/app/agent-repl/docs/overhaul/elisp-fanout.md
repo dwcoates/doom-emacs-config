@@ -426,6 +426,18 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - R-AUDIT3-PROD follow-up MERGED (4ba5884f5): panels.el region-selection
   send uses `:user-sent`; test pins the origin is in the closed vocabulary.
   Only R-SUITE-3 in flight; worktrees left: suite3.
+- R-SUITE-3 MERGED (27a206d64): all 58 audit-3 findings pinned (109
+  tests; six sonnet-medium offloads, one per suite, reviewed by the
+  implementer). RULINGS on its two open items: (a) audit-3 #29 second
+  half — `agent-repl-verbs--fault-lines` and the standing-fault rendering
+  print the fault KIND beside the detail (the kind is the class, the
+  detail supplements it) → closing fix; (b) audit-3 #30 dispute —
+  daemon-link's guard wins: a `transferring_away` naming an address other
+  than the standing successor is logged ERROR
+  (`elisp.link.successor-address-changed`) and not dialed; host.el's
+  "stale handover" docstring is corrected to say so; the pinned observed
+  behavior stands. Slug corrections (#58 `shutdown-schedule-refused`, #48
+  `--fire-metaprompt-read`) accepted.
 
 ## 1. Module map (final tree of lisp/)
 
