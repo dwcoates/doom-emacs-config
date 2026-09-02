@@ -623,3 +623,9 @@ every UX or contract gap you surfaced instead of improvising.
   UpdateAgentFailure refusal of a busy subagent is the ONE producer and stays
   typed and named; the compaction writer stays graded against the corpus
   fixture and marked synthetic until a longer-history capture is approved.
+- DIRECTIVE (user, via project lead): the project pauses once every lead has
+  resolved. Shim finishes its recorded queue — remediation #2 merges,
+  integration rerun, scenario rebuild from the 69 goldens, auditor #2 loop,
+  sonnet-medium dead-code pass, final report with both dead-code lists and
+  the capture-checklist answers — then parks: no dispatch after the report,
+  STOP-shim.md rewritten to the resumption state, lead stays resident.
