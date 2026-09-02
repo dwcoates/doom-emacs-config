@@ -362,6 +362,17 @@ func TestFooterNotificationOutranksRateLimitedAndContextBudget(t *testing.T) {
 			UtilizationPercent: f64Ptr(92),
 		}},
 	})
+	// THE MESSAGE RIDES THE START ARM — the success states only the vendor's
+	// delivery outcome — so the notification the footer draws is the start's.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("notify-1"),
+		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
+			State: &conversationv1.AgentPushNotification_Start{Start: &conversationv1.AgentPushNotificationStart{
+				Message:   "the branch is ready for review",
+				StartedAt: startedAt(1_700_000_000_000),
+			}},
+		}},
+	}))
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
 		ActivityId: activityID("notify-1"),
 		Item: &conversationv1.AgentActivity_PushNotification{PushNotification: &conversationv1.AgentPushNotification{
