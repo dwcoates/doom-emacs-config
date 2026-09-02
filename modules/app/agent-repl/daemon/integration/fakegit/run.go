@@ -231,6 +231,17 @@ func worktree(s *State, repo *Repo, subject []string) Result {
 		repo.RemoveWorktree(dir)
 		return Result{}
 
+	case len(subject) >= 2 && subject[1] == "list":
+		// git lists the MAIN worktree first, and the daemon reads exactly
+		// that order, so the fixture keeps it: Worktrees[0] is the main one.
+		var b strings.Builder
+		for _, wt := range repo.Worktrees {
+			b.WriteString("worktree " + wt.Dir + "\n")
+			b.WriteString("HEAD " + wt.Head + "\n")
+			b.WriteString("branch refs/heads/" + wt.Branch + "\n\n")
+		}
+		return Result{Stdout: b.String()}
+
 	case len(subject) >= 2 && subject[1] == "prune":
 		kept := repo.Worktrees[:0]
 		for i, wt := range repo.Worktrees {
