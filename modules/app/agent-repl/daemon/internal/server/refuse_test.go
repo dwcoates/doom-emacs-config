@@ -159,3 +159,66 @@ func TestUnlandedArmUsesNotFoundForAnUnknownID(t *testing.T) {
 		t.Fatalf("code = %q, want not_found", got)
 	}
 }
+
+// TestAsRefusalCarriesTheVerbsArmFields pins that an arm's OWN evidence
+// survives the normalization: base_ref_unresolved spells `ref`, and a client
+// reading the arm must get the ref rather than an empty string beside prose.
+func TestAsRefusalCarriesTheVerbsArmFields(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := &workspace.Refusal{
+		Arm:    workspace.ArmBaseRefUnresolved,
+		Reason: "the base ref does not resolve",
+		Fields: map[string]any{"ref": "origin/nope"},
+	}
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+
+	// Assert.
+	if !ok {
+		t.Fatal("the workspace refusal was not normalized")
+	}
+	if got.Fields["ref"] != "origin/nope" {
+		t.Fatalf("Fields = %v, want the arm's ref value", got.Fields)
+	}
+}
+
+// TestAsRefusalDoesNotMutateTheVerbsFieldMap pins that the transport's shared
+// text/detail values are not written back into the component's own map.
+func TestAsRefusalDoesNotMutateTheVerbsFieldMap(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	fields := map[string]any{"ref": "origin/nope"}
+	err := &workspace.Refusal{Arm: workspace.ArmBaseRefUnresolved, Reason: "nope", Fields: fields}
+
+	// Act.
+	if _, ok := surface.asRefusal(err); !ok {
+		t.Fatal("the workspace refusal was not normalized")
+	}
+
+	// Assert.
+	if len(fields) != 1 {
+		t.Fatalf("the verb's own field map = %v, want it untouched", fields)
+	}
+}
+
+// TestSetArmFillsTheBaseRefUnresolvedRef pins the whole path end to end: the
+// arm the wire carries names the ref.
+func TestSetArmFillsTheBaseRefUnresolvedRef(t *testing.T) {
+	// Arrange.
+	resp := &agentreplv1.CreateWorkspaceResponse{}
+
+	// Act.
+	ok := setResponseError(resp, workspace.ArmBaseRefUnresolved, map[string]any{"ref": "origin/nope"})
+
+	// Assert.
+	if !ok {
+		t.Fatal("setResponseError refused the landed base_ref_unresolved arm")
+	}
+	if got := resp.GetError().GetBaseRefUnresolved().GetRef(); got != "origin/nope" {
+		t.Fatalf("base_ref_unresolved.ref = %q, want origin/nope", got)
+	}
+}

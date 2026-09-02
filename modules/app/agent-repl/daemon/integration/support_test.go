@@ -366,29 +366,20 @@ func writeCommit(t *testing.T, repo *harness.Repo, worktree, file, content strin
 	return repo.CommitIn(worktree, file, content)
 }
 
-// setPriority sets or clears a workspace's priority.
-func setPriority(t *testing.T, d *harness.Daemon, id string, p *agentreplv1.WorkspacePriority) {
+// setPriority sets or clears a workspace's priority. It takes the FULL ref the
+// daemon minted, because the daemon refuses a ref whose dir disagrees with the
+// registry: rebuilding one from the id alone means guessing the dir.
+//
+// (This helper previously looked the dir up in a package-level cache that
+// NOTHING EVER WROTE TO, so every caller fataled with "no registered directory
+// recorded for workspace". The cache is gone; harness.Register already answers
+// the ref with the dir on it.)
+func setPriority(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef, p *agentreplv1.WorkspacePriority) {
 	t.Helper()
-	req := &agentreplv1.SetWorkspacePriorityRequest{
-		Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: workspaceDir(t, d, id)},
-		Priority:  p,
-	}
+	req := &agentreplv1.SetWorkspacePriorityRequest{Workspace: ws, Priority: p}
 	if _, err := d.Client().SetWorkspacePriority(d.Ctx(), connect.NewRequest(req)); err != nil {
-		t.Fatalf("SetWorkspacePriority(%s) = error %v, want a success", id, err)
+		t.Fatalf("SetWorkspacePriority(%s) = error %v, want a success", ws.GetId(), err)
 	}
-}
-
-// workspaceDirs caches the directory each registered workspace id was minted
-// from, so a ref can be rebuilt with the dir the daemon insists on.
-var workspaceDirs = map[string]string{}
-
-func workspaceDir(t *testing.T, d *harness.Daemon, id string) string {
-	t.Helper()
-	if dir, ok := workspaceDirs[id]; ok {
-		return dir
-	}
-	t.Fatalf("no registered directory recorded for workspace %s", id)
-	return ""
 }
 
 // repoRowIDs lists the workspace ids under the repository grouping, in order.
