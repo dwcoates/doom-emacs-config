@@ -1314,3 +1314,22 @@ its own file only when >1 endpoint needs it.
 - SubmitPromptError.turn_already_open is RETIRED (tag 8 reserved); delete promptqueue.ErrTurnAlreadyOpen and the server mapping.
 - /status uses the EXISTING SubmitPromptCommandPanel.status arm (tag 1); resolve the thin panel into StatusPanelView rows. AnswerQuestionError's ask_not_standing/unserved_value split already exists; drop the Refusal.NotFound workaround in favor of the two arms.
 - Watch* refusals stay transport-closed by ruling; record them as such, not as unlanded arms.
+
+## Ruling relay: shim relaunch vs the workspace lock (2026-09-02, project lead)
+
+- CONFLICT FOUND at integration: the rollout's SHIM RELAUNCH prelaunches an
+  inert shim beside the live one, but the kickoff contract had the shim take
+  `workspace-<hash>.lock` (flock LOCK_EX) at STARTUP, so the prelaunched
+  process blocked in flock and never listened.
+- RULING (a): the workspace lock means "this conversation is owned"; an inert
+  prelaunched shim owns no conversation and holds nothing, so the SHIM takes
+  `workspace-<hash>.lock` inside StartSession, beside the session lock. The
+  daemon's pre-spawn probe semantics are unchanged (a held lock still means a
+  live shim owns the conversation; the rollout transfer still waits on it).
+  The shim lead lands the change.
+- RECORDED OVERRIDE (daemon lead, interim): until the shim lead confirms, the
+  relaunch engine runs SEQUENTIALLY — at freeness: hold intake
+  (restart-pending), stand down and reap the old shim (the reap is the gate),
+  then launch the new shim and StartSession(resume), then drain intake. The
+  flip back to prelaunch-then-wait is one site in the relaunch engine plus
+  the harness fake shim taking the lock at StartSession.
