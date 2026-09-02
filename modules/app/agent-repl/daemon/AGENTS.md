@@ -127,7 +127,8 @@ which the daemon relays as an intended arm (ERROR-ARMS.md).
 ## State root layout
 
 See ARCHITECTURE.md "State root layout": `daemon.addr`, `wsm.db`,
-`logs/daemon.run.log`, `sock/<workspace-id>.sock`, `intent/manifest.json`,
+`logs/daemon.run.log`, the per-workspace sink targets in `logs/`,
+`sock/<workspace-id>.sock`, `intent/manifest.json`,
 `output/workspace_commands_*.json`, `merge-logs/`.
 
 ## Wiring (wave 3: the graph is complete)
@@ -174,7 +175,9 @@ Only `internal/dlog`. Every logical branch logs (DEBUG ordinary, WARN
 warnings, ERROR errors) with `operation = daemon.<package>.<verb>` and
 structured context, per `../logging-contract.md`. Workspace-bound records
 go to `<workspace>/.claude/emacs/daemon.log`; failing to resolve the
-workspace is an invariant violation, never a global write.
+workspace is an invariant violation, never a global write. That canonical path
+is a SYMLINK, and its target is minted under `<state>/logs/`, never the OS temp
+dir — the state root owns the daemon's durable logs.
 
 ## Conventions
 
