@@ -534,15 +534,23 @@ export const COLD_SEED = scenario({
   emits:
     "an ordinary turn whose TRANSCRIPT RECORDS are stamped TWO HOURS IN THE PAST, so the next resume of this " +
     "session trips the shim's own cold-context detection",
-  writes: "assistant and system lines carrying a two-hour-old `timestamp`",
+  writes: "the ASSISTANT line (with its usage) and the turn_duration line, both carrying a two-hour-old `timestamp`",
   arms: "SessionColdLapsed on the NEXT resume — this scenario only seeds the condition",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "cold-seed" }, "fake cold-context seeding turn");
     const twoHoursAgo = new Date(ctx.nowMs() - 2 * 60 * 60 * 1_000).toISOString();
-    ctx.assistant([{ type: "text", text: "An answer from two hours ago." }], { stopReason: "end_turn" });
-    // The stamp the cold gate reads. Written directly rather than through
-    // `assistant`, because the scenario is deliberately lying about WHEN, and
-    // only about when — every other field is the ordinary one.
+    // THE LINE THE COLD GATE ACTUALLY READS is the last ASSISTANT line: its
+    // `message.usage` is the context size and its `timestamp` is the request
+    // instant, read from the same record. Back-dating only the turn_duration
+    // line left a freshly-stamped assistant line as the newest one, so the gate
+    // saw a session seconds old and never lapsed.
+    ctx.assistant([{ type: "text", text: "An answer from two hours ago." }], {
+      stopReason: "end_turn",
+      timestamp: twoHoursAgo,
+    });
+    // Back-dated too, so nothing in the file contradicts it. Written directly
+    // rather than through a helper because the scenario is deliberately lying
+    // about WHEN, and only about when — every other field is the ordinary one.
     ctx.files.transcript.append({
       type: "system",
       subtype: "turn_duration",
