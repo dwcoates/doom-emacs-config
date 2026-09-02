@@ -345,25 +345,19 @@ func TestAnswerHeldOfferKeepKeepsTheQueuedMerge(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Evict / dequeue / abandon: the THREE DISTINCT ENDS a queued merge can meet
-// before it ever runs (internal/merge/queue.go's own doc comment on Evict:
-// "evict is the operator's, dequeue is the user's answer to the interrupt
-// offer, and abandon is the merge's own give-up"). frontend/v1/feed.proto's
-// FeedMergeError carries only `failed` and `abandoned` -- no per-cause arm --
-// so the three are NOT distinguishable on the wire; that is a known stale
-// shape escalated to landing 7. These tests assert exactly what today's
-// protos and production code CAN express, invent no arm, and edit no proto.
+// The FOUR DISTINCT ENDS a queued merge can meet before it ever runs: the
+// user's own evict, the user's release of the dequeue offer, the workspace
+// being killed or nuked under it, and a restart that cannot put it back on its
+// queue.
 //
-// A DEEPER GAP the tests below expose (beyond the proto's own limitation):
-// grepping internal/merge, `dropQueued`'s only two callers are Evict and the
-// dequeue release, and neither its own call nor the `publishAbandoned` /
-// `forget` helpers underneath it ever construct or push a `FeedMergeError`
-// (frontend/v1's FeedMergeAbandoned has NO producer anywhere in internal/,
-// confirmed by grep). Both `forget` and its callers DO reach the footer and
-// the roster (`Footer.SetMerge` / `Sidebar.SetMerge` to `MergeFacts{State:
-// "none"}`), so the footer-leaving-merging and roster-arm assertions below
-// are expected GREEN; the feed-bubble assertion is expected RED, because the
-// bubble is silently forgotten rather than ever told it ended.
+// frontend/v1/feed.proto's FeedMergeError carries only `failed` and
+// `abandoned` -- no per-cause arm -- so the four are NOT distinguishable by
+// arm. Landing 7's `FeedMergeAbandoned.summary` is where the cause lives
+// instead: one resolved sentence per cause, composed in internal/merge from
+// the AbandonCause the dropping site names, drawn as the collapsed line
+// exactly as `FeedMergeFailed.summary` is. These tests assert the arm and the
+// surfaces here, and the sentence itself where the cause is the point; the
+// per-cause sentences are pinned as a set in internal/merge's own suite.
 // ---------------------------------------------------------------------------
 
 func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavingMerging(t *testing.T) {
@@ -479,15 +473,38 @@ func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 	}
 }
 
-func TestAnAbandonedQueuedMergeHasNoReachableCause(t *testing.T) {
-	t.Skip("unexpressible: internal/merge/queue.go documents THREE distinct ends " +
-		"(evict, dequeue, abandon) but grepping internal/merge finds `dropQueued` " +
-		"has only TWO callers -- Evict (the operator's) and the dequeue release " +
-		"(the user's) -- and no third call site exists anywhere that raises a " +
-		"queued merge's OWN give-up. There is no RPC, shim frame, or harness hook " +
-		"that reaches a self-abandon distinct from the other two, so this cause " +
-		"cannot be constructed as a black-box scenario without inventing a " +
-		"production call site this suite is not permitted to add")
+// TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause is the
+// third end, reachable at last. CloseWorkspace refuses outright while a merge
+// is queued, so KillWorkspace is the one door such a workspace leaves through,
+// and the abandoned terminal it draws is the ONLY place the wire can say why:
+// FeedMergeError has one `abandoned` arm for every end, so the cause lives in
+// FeedMergeAbandoned.summary and nowhere else.
+func TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testing.T) {
+	// Arrange
+	_, behind, _, _ := mergeBlockedQueueFixture(t)
+	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the kill abandons, a KillSession the fake shim answers by exiting, a session fault the kill opens, the shim death and severed link the kill drives.
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
+		"daemon.merge.drop_queued", "daemon.merge.merge_tab", "daemon.health.open_fault",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.sessionwatcher.link_fault",
+		"daemon.workspace.kill", "daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+	root := behind.watchRootFeed()
+
+	// Act
+	if _, err := behind.d.Client().KillWorkspace(behind.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{
+		Workspace: behind.ws,
+	})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+
+	// Assert
+	mergeRow := awaitRow(t, behind, root, "the killed workspace's abandoned merge terminal", func(row *frontendv1.FeedRow) bool {
+		return row.GetActivity().GetMerge().GetError().GetAbandoned() != nil
+	})
+	abandoned := mergeRow.GetActivity().GetMerge().GetError().GetAbandoned()
+	want := "the workspace was closed while this merge was waiting in the queue"
+	if abandoned.GetSummary() != want {
+		t.Fatalf("the killed workspace's merge summary = %q, want %q", abandoned.GetSummary(), want)
+	}
 }
 
 // ---------------------------------------------------------------------------

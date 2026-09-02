@@ -688,3 +688,86 @@ func TestOneMergesFailureDoesNotStopTheQueueBehindIt(t *testing.T) {
 		t.Fatalf("pumpOnce after a merge that ended on its own terminal = %v, want no queue-level error", err)
 	}
 }
+
+// TestEveryAbandonCauseResolvesItsOwnSentence pins the cause vocabulary: the
+// wire has ONE abandoned arm for all four ends, so a cause with no sentence of
+// its own would be an end a reader cannot tell from any other.
+func TestEveryAbandonCauseResolvesItsOwnSentence(t *testing.T) {
+	// Arrange.
+	tests := []struct {
+		name  string
+		cause AbandonCause
+		want  string
+	}{
+		{"user drop", CauseUserDrop, "the operator evicted this merge from the queue"},
+		{"user dequeue", CauseUserDequeue, "the user released this merge's queue slot"},
+		{"workspace closed", CauseWorkspaceClosed, "the workspace was closed while this merge was waiting in the queue"},
+		{"daemon shutdown", CauseDaemonShutdown, "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back"},
+	}
+	seen := map[string]AbandonCause{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got, declared := tt.cause.summary()
+
+			// Assert.
+			if !declared || got != tt.want {
+				t.Fatalf("%s.summary() = %q, %v, want %q declared", tt.cause, got, declared, tt.want)
+			}
+			if other, clash := seen[got]; clash {
+				t.Fatalf("%s draws the same sentence as %s, so the two ends read alike", tt.cause, other)
+			}
+			seen[got] = tt.cause
+		})
+	}
+}
+
+// TestClosingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause is the
+// workspace-close producer: a merge whose workspace is torn down can never
+// run, and the bubble says so rather than simply stopping.
+func TestClosingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act.
+	h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
+
+	// Assert.
+	if got := h.feed.lastAbandonedSummary(); got != "the workspace was closed while this merge was waiting in the queue" {
+		t.Fatalf("the closed workspace's merge summary = %q, want the close's own cause", got)
+	}
+}
+
+// TestClosingAWorkspaceTakesItsMergeOffTheQueue covers the other half of the
+// same close: a merge left queued behind a workspace that is gone would hold
+// the repository's queue against a workspace nobody can merge.
+func TestClosingAWorkspaceTakesItsMergeOffTheQueue(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act.
+	h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
+
+	// Assert.
+	entries, _ := h.db.MergeQueue(context.Background(), h.repoKey())
+	if len(entries) != 0 {
+		t.Fatalf("the queue after the close is %+v, want it empty", entries)
+	}
+}
+
+// TestClosingAWorkspaceWithNoQueuedMergeAbandonsNothing is the no-op edge: the
+// teardown verbs call this for every workspace, and most have no merge at all.
+func TestClosingAWorkspaceWithNoQueuedMergeAbandonsNothing(t *testing.T) {
+	// Arrange: a registered workspace that never enqueued a merge.
+	h := newHarness(t)
+
+	// Act.
+	h.o.OnWorkspaceClosed(context.Background(), theWorkspace)
+
+	// Assert.
+	if got := h.feed.lastMergeErrorArm(); got != "" {
+		t.Fatalf("a close with no queued merge drew the %q terminal, want no terminal at all", got)
+	}
+}

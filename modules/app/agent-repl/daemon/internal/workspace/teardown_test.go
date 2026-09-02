@@ -216,3 +216,40 @@ func TestNukeAnswersGitFailedWithGitsOwnAccount(t *testing.T) {
 		t.Fatalf("refusal reason = %q, want git's own account", refusal.Reason)
 	}
 }
+
+// TestKillAbandonsTheWorkspacesWaitingMerge covers the one door a queued
+// merge's workspace can leave through: Close refuses while a merge is queued,
+// but Kill never blocks, so the merge has to be told the workspace is gone.
+func TestKillAbandonsTheWorkspacesWaitingMerge(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Kill(context.Background(), "w1"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.closed) != 1 || f.merge.closed[0] != "w1" {
+		t.Fatalf("merges told of the close = %v, want exactly the killed workspace", f.merge.closed)
+	}
+}
+
+// TestNukeAbandonsTheWorkspacesWaitingMerge is the same for the nuke, which
+// destroys the very worktree the merge would have run against.
+func TestNukeAbandonsTheWorkspacesWaitingMerge(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Nuke(context.Background(), "w1"); err != nil {
+		t.Fatalf("Nuke: %v", err)
+	}
+
+	// Assert.
+	if len(f.merge.closed) != 1 || f.merge.closed[0] != "w1" {
+		t.Fatalf("merges told of the nuke = %v, want exactly the nuked workspace", f.merge.closed)
+	}
+}
