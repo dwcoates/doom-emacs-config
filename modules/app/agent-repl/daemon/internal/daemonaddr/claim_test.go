@@ -26,6 +26,18 @@ func mustBind(t *testing.T, addrPath string) Claim {
 	return c
 }
 
+// readAddrFile reads daemon.addr's advertised address directly, without
+// going through any production parsing helper, for tests that verify
+// Publish's on-disk side effect rather than a reader's own behavior.
+func readAddrFile(t *testing.T, addrPath string) string {
+	t.Helper()
+	raw, err := os.ReadFile(addrPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", addrPath, err)
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 func TestBindListensOnLoopback(t *testing.T) {
 	// Arrange, Act.
 	c := mustBind(t, newAddrPath(t))
@@ -110,10 +122,7 @@ func TestALosingBindLeavesTheIncumbentsAdvertisementAlone(t *testing.T) {
 	}
 
 	// Assert.
-	got, err := Read(addrPath)
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
+	got := readAddrFile(t, addrPath)
 	if got != incumbent.Address() {
 		t.Fatalf("daemon.addr = %q, want the incumbent's %q", got, incumbent.Address())
 	}
@@ -156,10 +165,7 @@ func TestPublishReplacesAStaleAdvertisement(t *testing.T) {
 	}
 
 	// Assert.
-	got, err := Read(addrPath)
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
+	got := readAddrFile(t, addrPath)
 	if got != c.Address() {
 		t.Fatalf("daemon.addr = %q, want %q", got, c.Address())
 	}
@@ -316,67 +322,6 @@ func TestBindRefusesAnOutOfRangePort(t *testing.T) {
 		})
 	}
 }
-
-func TestReadReturnsThePublishedAddress(t *testing.T) {
-	// Arrange.
-	addrPath := newAddrPath(t)
-	c := mustBind(t, addrPath)
-	if err := c.Publish(); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-
-	// Act.
-	got, err := Read(addrPath)
-
-	// Assert: the trailing newline is not part of the address.
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if got != c.Address() {
-		t.Fatalf("Read = %q, want %q", got, c.Address())
-	}
-}
-
-func TestReadRefusesAnAbsentOrUnusableFile(t *testing.T) {
-	tests := []struct {
-		name     string
-		contents *string
-	}{
-		{name: "missing", contents: nil},
-		{name: "empty", contents: strPtr("")},
-		{name: "whitespace", contents: strPtr("\n \n")},
-		{name: "no port", contents: strPtr("127.0.0.1\n")},
-		{name: "non-numeric port", contents: strPtr("127.0.0.1:http\n")},
-		{name: "no host", contents: strPtr(":8080\n")},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			addrPath := newAddrPath(t)
-			if err := os.MkdirAll(filepath.Dir(addrPath), 0o755); err != nil {
-				t.Fatalf("mkdir: %v", err)
-			}
-			if tc.contents != nil {
-				if err := os.WriteFile(addrPath, []byte(*tc.contents), 0o644); err != nil {
-					t.Fatalf("write: %v", err)
-				}
-			}
-
-			// Act.
-			got, err := Read(addrPath)
-
-			// Assert: never an empty address reported as success.
-			if err == nil {
-				t.Fatalf("Read returned %q, want an error", got)
-			}
-			if got != "" {
-				t.Fatalf("Read returned %q alongside its error", got)
-			}
-		})
-	}
-}
-
-func strPtr(s string) *string { return &s }
 
 // TestAJoiningBindDoesNotTakeTheBootClaim covers the successor's whole
 // premise: the INCUMBENT holds the claim for as long as it serves, so a
