@@ -42,6 +42,15 @@ export const ASK_USER_QUESTION_TOOL = "AskUserQuestion";
 /** How a joined multi-select answer is spelled, in both directions. */
 export const ANSWER_JOIN = ", ";
 
+/**
+ * How many denied calls are remembered.
+ *
+ * The memory exists only for the `tool_result` that arrives immediately after
+ * a denial, so it has to outlive one message and nothing more; the bound is
+ * what keeps it from becoming a second history of the session.
+ */
+export const DENIED_MEMORY = 256;
+
 // ---------------------------------------------------------------------------
 // permission mode, both ways
 // ---------------------------------------------------------------------------
@@ -467,6 +476,45 @@ export class PermissionGate {
       : this.openPermission(toolName, options);
   };
 
+  /**
+   * Calls this gate denied, newest last, under a bound.
+   *
+   * Bounded because it exists only to be consulted by the tool_result that
+   * arrives immediately after the denial; the store is the history of the
+   * session and this must never become a second one.
+   */
+  private readonly denied: string[] = [];
+  private readonly deniedSet = new Set<string>();
+
+  /**
+   * Remember a denial the gate did not make.
+   *
+   * The vendor's own `permission_denied` records -- a policy rule, or the
+   * classifier failing to decide -- never reach an ask here, so the engine
+   * relays them from the fold's output. One memory rather than two, because
+   * `deniedCall` answers one question and its answer must not depend on which
+   * half of the shim happened to see the denial.
+   */
+  noteVendorDenial(toolUseId: string): void {
+    this.noteDenied(toolUseId);
+  }
+
+  /** Remember a denial, evicting the oldest once the bound is reached. */
+  private noteDenied(toolUseId: string): void {
+    if (toolUseId === "" || this.deniedSet.has(toolUseId)) return;
+    this.denied.push(toolUseId);
+    this.deniedSet.add(toolUseId);
+    while (this.denied.length > DENIED_MEMORY) {
+      const evicted = this.denied.shift();
+      if (evicted !== undefined) this.deniedSet.delete(evicted);
+    }
+  }
+
+  /** Did this gate deny that call — the fold's `deniedCall`. */
+  deniedCall(toolUseId: string): boolean {
+    return this.deniedSet.has(toolUseId);
+  }
+
   /** What kind of ask, if any, is open on a call — the fold's `pendingAsk`. */
   pendingAsk(toolUseId: string): { kind: "permission" | "question" } | undefined {
     const pending = this.pendingByToolUse.get(toolUseId);
@@ -734,6 +782,12 @@ export class PermissionGate {
     pending: PendingPermission,
     decision: conversationv1.AgentPermissionSuccess["decision"],
   ): void {
+    // A DENIED TOOL NEVER STARTS, and the vendor still emits a `tool_result`
+    // for it -- the deny message IS the result the model sees. Remembering the
+    // denial is what lets the fold tell that result apart from a call that ran
+    // and failed; the stream carries no `toolDenialKind`, so this is the only
+    // signal on this plane.
+    if (decision.case === "denied") this.noteDenied(pending.toolUseId);
     const id = permissionId(pending.toolUseId);
     this.deps.persist([
       this.entry(pending.agentId, permissionUpsertKey(id), pending.toolUseId, "agent_frame.update.permission.success", {

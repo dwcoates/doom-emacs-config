@@ -96,6 +96,20 @@ export function convertUserRecord(
       );
       continue;
     }
+    // A DENIED TOOL NEVER STARTS, so nothing settles here. The vendor emits a
+    // `tool_result` for it because the deny message IS the result the model
+    // sees, but folding that into an activity would put a unit in the feed for
+    // work that never happened -- and the permission frame has already said,
+    // in full, what became of the call. The registry entry is consumed so the
+    // call does not stay open forever.
+    if (context.deniedCall(toolUseId)) {
+      registry.take(toolUseId);
+      LOGGER.log(
+        { tool_use_id: toolUseId, uuid: message.uuid },
+        "a denied call's tool_result settles nothing: the tool never ran, and its permission frame is the account",
+      );
+      continue;
+    }
     const outcome: ToolOutcome = {
       content: toolResultContent(block.content),
       isError: block.is_error === true,

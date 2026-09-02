@@ -781,6 +781,42 @@ describe("permission", () => {
     expect(undecidable.detail).toBe("the classifier could not reach a verdict");
   });
 
+  it("settles NOTHING from a denied call's tool_result", () => {
+    // A denied tool never ran. The vendor still emits a tool_result for it --
+    // the deny message IS the result the model sees -- and folding that into an
+    // activity would put a settled unit in the feed for work that never
+    // happened, when the permission frame has already given the whole account.
+    const fold = createFold();
+    const denied = foldContext({ deniedCall: (toolUseId) => toolUseId === "toolu_d" });
+    fold.onSdkMessage(
+      assistant("msg-denied", [
+        { type: "tool_use", id: "toolu_d", name: "Bash", input: { command: "rm -rf /" } },
+      ]),
+      denied,
+    );
+
+    const output = fold.onSdkMessage(toolResult("toolu_d", { stdout: "" }, true), denied);
+
+    expect(output.entries).toHaveLength(0);
+  });
+
+  it("still settles a call the shim did NOT deny", () => {
+    // The suppression is about denial, not about errors: a call that ran and
+    // failed settles exactly as it always did.
+    const fold = createFold();
+    const allowed = foldContext({ deniedCall: () => false });
+    fold.onSdkMessage(
+      assistant("msg-ok", [
+        { type: "tool_use", id: "toolu_ok", name: "Bash", input: { command: "false" } },
+      ]),
+      allowed,
+    );
+
+    const output = fold.onSdkMessage(toolResult("toolu_ok", { stdout: "" }, true), allowed);
+
+    expect(output.entries.length).toBeGreaterThan(0);
+  });
+
   it("produces nothing when the ENGINE's gate is already holding that ask", () => {
     const fold = createFold();
 

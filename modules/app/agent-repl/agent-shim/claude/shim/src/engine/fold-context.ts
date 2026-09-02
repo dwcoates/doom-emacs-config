@@ -46,6 +46,22 @@ export interface FoldContext {
    * no open ask (the `denied.by_policy` producer).
    */
   pendingAsk(toolUseId: string): { kind: "permission" | "question" } | undefined;
+  /**
+   * Was this call DENIED, so that its result settles nothing?
+   *
+   * A DENIED TOOL NEVER STARTS. The vendor still emits a `tool_result` for it
+   * -- the deny message IS the result the model sees -- but that result is the
+   * denial being relayed, not the call having run, and folding it into an
+   * activity would put a unit in the feed for work that never happened. The
+   * transcript marks such a result `toolDenialKind`; the STREAM carries no such
+   * field, so the shim's own knowledge of what it denied is the only signal
+   * available on this plane.
+   *
+   * Answered from two places: the engine's gate, for the asks it settled as
+   * denied, and the fold's own registry, for the policy and undecidable
+   * denials that never had an open ask.
+   */
+  deniedCall(toolUseId: string): boolean;
   /** A live task, by vendor task id: the call it belongs to, and its agent when known. */
   liveTask(taskId: string): { toolUseId: string; agentId?: conversationv1.AgentId } | undefined;
   /**
