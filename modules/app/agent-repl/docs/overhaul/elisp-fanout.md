@@ -438,6 +438,14 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   "stale handover" docstring is corrected to say so; the pinned observed
   behavior stands. Slug corrections (#58 `shutdown-schedule-refused`, #48
   `--fire-metaprompt-read`) accepted.
+- RUN at 27a206d64 (after R-SUITE-3): connect 30/32, link 44/44, host
+  88/90, roster 67/71, daemon 29/30, verbs 97/99, composer 74/74;
+  all-suite 3490/3501 (same 11). #29 fault-kind → R-CLOSE (running).
+  The other ten → R-RED-3A (elisp-agents/red3a: connect on-open ×2, host
+  redial-awaiting-acceptance, daemon own-adoption-logged) and R-RED-3B
+  (elisp-agents/red3b: roster reopen / banner-activates / rename ×2,
+  verbs merge-queue pause+resume resolve repository from the roster).
+  Running: close, red3a, red3b (cap).
 
 ## 1. Module map (final tree of lisp/)
 
