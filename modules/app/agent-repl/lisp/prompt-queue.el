@@ -59,20 +59,24 @@
 (declare-function agent-repl-input-clear-attachments "agent-repl-input" (ws))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-link-up-p "agent-repl-daemon-link" ())
+(declare-function agent-repl-link-primary "agent-repl-daemon-link" ())
+(declare-function agent-repl-host-conn "agent-repl-host" (ws))
+(declare-function agent-repl-connect-connection-alive-p "agent-repl-connect" (conn))
 
 ;; Defined by W2-B (roster.el).  Declared, never defined here: `add-hook'
 ;; auto-vivifies the variable, so registering on it at load time is safe
 ;; whichever module loads first.
 (defvar agent-repl-roster-finish-functions)
 (defvar agent-repl-link-up-functions)
+(defvar agent-repl-link-promote-functions)
 
 ;;;; ---- State -----------------------------------------------------------
 
 (defvar agent-repl--prompt-queue (make-hash-table :test 'equal)
   "Workspace name -> ordered list of held entries, oldest first.
 Each entry is the plist `(:id ID :kind KIND :said SAID :origin ORIGIN
-:raw RAW :idempotency-key KEY :queued-at SECONDS)'.  KIND is `:deferred' or `:outage' and
-names WHICH EDGE releases the entry; SAID is the fully composed
+:raw RAW :idempotency-key KEY :queued-at SECONDS)'.  KIND is `:deferred'
+or `:outage' and names WHICH EDGE releases the entry; SAID is the fully composed
 `UserSaid' the composer already built, so a drain re-composes nothing and
 cannot decorate a prompt twice.")
 
@@ -137,16 +141,43 @@ The daemon would refuse the submission, and a refused held prompt has lost
 its place in the user's order for nothing.  Every other arm sends: the
 daemon starts or revives the session implicitly.")
 
+(defun agent-repl--prompt-queue-conn (ws)
+  "Return the connection a drain for WS would submit on, or nil.
+The SAME resolution the composer's submit uses, deliberately: the gate has
+to judge the connection the send would actually take, not a different
+one."
+  (or (and (fboundp 'agent-repl-host-conn) (agent-repl-host-conn ws))
+      (and (fboundp 'agent-repl-link-primary) (agent-repl-link-primary))))
+
+(defun agent-repl--prompt-queue-live-conn-p (ws)
+  "Return non-nil when WS's send connection exists and is still ALIVE.
+`agent-repl-link-up-p' answers for the LINK, which is a different fact
+from this workspace's own connection: a handover leaves the old
+connection closed while the link stands, and submitting a held prompt on
+a closed connection would lose it for a send that cannot happen."
+  (let ((conn (agent-repl--prompt-queue-conn ws)))
+    (cond
+     ((null conn)
+      (agent-repl--warn ws "elisp.prompt-queue.no-conn ws=%s -- entries stay queued" ws)
+      nil)
+     ((not (agent-repl-connect-connection-alive-p conn))
+      (agent-repl--warn ws "elisp.prompt-queue.dead-conn ws=%s -- entries stay queued" ws)
+      nil)
+     (t t))))
+
 (defun agent-repl-prompt-queue-deliverable-p (ws)
   "Return non-nil when a held prompt for WS may be sent right now.
-Both facts must hold: the daemon link is up, and WS's composer gate is
-not one of the refusing arms."
+THREE facts must hold: the daemon link is up, WS's own send connection is
+alive, and WS's composer gate is not one of the refusing arms.  When any
+of them fails the held entries stay queued -- a drain never drops what it
+did not send."
   (let* ((link-up (and (agent-repl-link-up-p) t))
-         (gate (and link-up (agent-repl-host-composer-gate ws)))
+         (live (and link-up (agent-repl--prompt-queue-live-conn-p ws)))
+         (gate (and live (agent-repl-host-composer-gate ws)))
          (blocked (and gate (memq gate agent-repl--prompt-queue-blocked-gates) t))
-         (result (and link-up (not blocked))))
-    (agent-repl--log ws "elisp.prompt-queue.gate ws=%s link-up=%s gate=%S deliverable=%s"
-                     ws link-up gate result)
+         (result (and live (not blocked) t)))
+    (agent-repl--log ws "elisp.prompt-queue.gate ws=%s link-up=%s live=%s gate=%S deliverable=%s"
+                     ws link-up (and live t) gate result)
     result))
 
 ;;;; ---- Offering ---------------------------------------------------------
@@ -279,7 +310,17 @@ deferral was asked for."
       (agent-repl-prompt-queue-drain ws :outage))))
 
 (add-hook 'agent-repl-roster-finish-functions #'agent-repl--prompt-queue-on-finish)
+(defun agent-repl--prompt-queue-on-link-promote (&optional _old _new)
+  "Release every OUTAGE-held prompt on the PROMOTION edge.
+The same release as link-up, on the other edge that ends an outage.  A
+handover never brings the link down, so link-up never fires for it, yet a
+prompt refused with `transferring_away' or `not_yet_adopted' is held
+exactly until the successor owns the workspace -- and the promotion is
+that moment."
+  (agent-repl--prompt-queue-on-link-up))
+
 (add-hook 'agent-repl-link-up-functions #'agent-repl--prompt-queue-on-link-up)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl--prompt-queue-on-link-promote)
 
 (provide 'prompt-queue)
 
