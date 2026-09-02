@@ -238,7 +238,7 @@ describe("mounting the rail", () => {
     await settle();
     timers.run();
     expect(
-      host.querySelector("[data-roster-row='ws-1']")?.getAttribute("data-blink"),
+      host.querySelector("[data-roster-row='ws-1'] .sb-attn")?.getAttribute("data-blink"),
     ).toBe("off");
   });
 

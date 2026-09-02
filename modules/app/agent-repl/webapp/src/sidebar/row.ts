@@ -78,8 +78,13 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     },
   });
 
+  // THE ROW CARRIES ITS OWN TONE. The status mark repeats it on the dot, but
+  // the semantic color of a workspace belongs to the whole row: the hook
+  // contract targets `[data-roster-row]` for `tone-<color>`, so the class is
+  // set here, from the same one vocabulary table the mark reads.
+  const mark = rosterArmMark(status.case);
   const ws = document.createElement("div");
-  ws.className = "ws";
+  ws.className = `ws ${mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
   ws.setAttribute("data-arm", status.case);
   if (current) ws.setAttribute("data-current", "true");
@@ -115,7 +120,9 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
     const marker = drawRosterRowAttention(u.attention, `${path}.attention`);
     ws.setAttribute("data-attention", "");
     line.appendChild(marker);
-    sc.attention.mark(workspace.id, ws);
+    // The MARKER blinks, not the row: `data-blink` belongs to the element the
+    // cadence paints, which is the one the hook contract points at.
+    sc.attention.mark(workspace.id, marker);
   }
   if (u.priority !== undefined) {
     line.appendChild(drawRosterRowPriorityBadge(u.priority, `${path}.priority`));
@@ -124,8 +131,13 @@ export function drawRosterRow(u: RosterRow, sc: SidebarContext, path: string): H
   line.appendChild(
     drawRosterRowWhen(requireMessage(u.when, `${path}.when`), sc, `${path}.when`),
   );
-  line.appendChild(drawMenuControl(ws, { sc, workspace, name }));
+  const target: VerbTarget = { sc, workspace, name };
+  line.appendChild(drawMenuControl(ws, target));
   ws.appendChild(line);
+  // THE MENU IS ALWAYS DRAWN, hidden until it is asked for. Building it lazily
+  // made the row's verbs exist only after a click, which is a different DOM
+  // than the contract describes; the reveal is now visibility alone.
+  ws.appendChild(drawRowMenu(target));
 
   ws.appendChild(
     drawRosterRowDetail(requireMessage(u.detail, `${path}.detail`), `${path}.detail`),
@@ -385,15 +397,10 @@ function drawMenuControl(ws: HTMLElement, target: VerbTarget): HTMLElement {
  * stylesheet caps its height and scrolls it if the rail is short.
  */
 export function toggleRowMenu(ws: HTMLElement, target: VerbTarget): void {
-  const open = ws.querySelector(":scope > .sb-menu");
-  if (open !== null) {
-    open.remove();
-    return;
-  }
-  const menu = drawRowMenu(target);
-  const line = ws.querySelector(":scope > .row");
-  if (line === null) ws.appendChild(menu);
-  else line.after(menu);
+  void target;
+  const menu = ws.querySelector<HTMLElement>(":scope > .sb-menu");
+  if (menu === null) return;
+  menu.hidden = !menu.hidden;
 }
 
 /** The row click: SelectWorkspace, echoed, idempotent, and nothing else. */

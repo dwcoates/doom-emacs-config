@@ -58,10 +58,15 @@ describe("the new-task control", () => {
     expect((host.querySelector(".sb-task-form") as HTMLElement).hidden).toBe(true);
   });
 
-  it("opens the form on the control the suite targets", async () => {
+  it("opens the form on its disclosure", async () => {
     const host = drawCreateTaskControl(sidebarContext());
-    await click(host.querySelector("[data-task-create]") as Element);
+    await click(host.querySelector(".sb-add") as Element);
     expect((host.querySelector(".sb-task-form") as HTMLElement).hidden).toBe(false);
+  });
+
+  it("puts the create hook on the control that issues the request", () => {
+    const host = drawCreateTaskControl(sidebarContext());
+    expect(host.querySelector("[data-task-create]")?.className).toBe("sb-form-go");
   });
 
   it("sends nothing for a blank title, because the contract forbids one", async () => {
