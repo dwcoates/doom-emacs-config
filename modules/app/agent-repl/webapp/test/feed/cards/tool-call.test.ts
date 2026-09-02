@@ -277,6 +277,17 @@ describe("the running state", () => {
     el.remove();
   });
 
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the beat does not share the shared ticker's phase.
+    vi.setSystemTime(11_920);
+    const el = drawFeedSimpleToolCall(
+      card({ outcome: { case: "running", value: { lastProgress: { atMs: 7000n } } } }),
+      rowContext(),
+    );
+    // Assert: five real seconds of silence reads 5s, not the lagging 4s.
+    expect(el.querySelector(".tool-quiet")?.textContent).toBe("quiet for 5s");
+  });
+
   it("stops ticking once the card has left the document", () => {
     vi.setSystemTime(10_000);
     const el = drawFeedSimpleToolCall(
