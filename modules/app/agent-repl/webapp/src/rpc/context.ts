@@ -7,16 +7,25 @@
  * workspace to address, a clock to tick on, and somewhere to report its own
  * machinery failing.
  *
- * WHY THE CLIENT IS REPLACEABLE RATHER THAN FIXED. WatchWebWorkspace's
- * `transferred` push hands the page a NEW daemon to adopt; every standing
- * stream must move to it and every subsequent verb must go there. Making that
- * one mutation on the context — instead of tearing the page down — is what
- * keeps a rollout invisible to the user. `onClientReplaced` is how a holder of
- * something client-derived (a stream registry, a cached call) re-derives it.
+ * THE CLIENT IS FIXED FOR THE LIFE OF THE PAGE. WatchWebWorkspace's
+ * `transferred` push does NOT hand this page a new daemon to adopt: a
+ * successor on another loopback port is a different ORIGIN, so re-pointing the
+ * webview is the HOST's job (it reloads the view at the new address) and this
+ * page's job is to stop talking. There is deliberately no way to swap the
+ * client here — the machinery for it would be machinery for a handover this
+ * end never performs.
+ *
+ * WHICH IS WHY THE CONTEXT CAN GO QUIET instead. `quiesce()` is that stop,
+ * made structural rather than hoped for: `callUnary` refuses locally while it
+ * holds, and every registered stream cancels itself through `onQuiesced` with
+ * no reconnect. A page that merely stopped drawing would still be firing verbs
+ * at a daemon that has handed the workspace away, and every one of them would
+ * come back as a refusal the user did nothing to cause.
  */
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { Ticker } from "../clock.js";
 import type { FailureSink } from "../failure/sink.js";
+import { log } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 
 export interface AppContext {
@@ -33,10 +42,25 @@ export interface AppContext {
    * runs composer-less: the root composer is host-native (Emacs).
    */
   readonly composerEnabled: boolean;
-  /** Adopt a new daemon; every registered stream reopens on it. */
-  replaceClient(next: AgentReplClient): void;
-  /** Run FN after each replacement. Returns its unsubscriber. */
-  onClientReplaced(fn: () => void): () => void;
+  /**
+   * Stop talking to this daemon. Idempotent, and one-way: nothing lifts it,
+   * because nothing on this page can give the workspace a daemon back.
+   *
+   * Every subsequent `callUnary` refuses locally and every registered stream
+   * cancels itself, so nothing this page holds keeps addressing a daemon that
+   * has released the workspace.
+   */
+  quiesce(): void;
+  /** Whether the page has gone quiet. */
+  isQuiesced(): boolean;
+  /**
+   * Run FN the first time the page goes quiet. Returns its unsubscriber.
+   *
+   * This is the STREAM REGISTRY's half of quiescing: `watchStream` subscribes
+   * each handle here, so "cancel every registered stream" is one call rather
+   * than a list every caller has to remember to keep.
+   */
+  onQuiesced(fn: () => void): () => void;
 }
 
 export interface AppContextInit {
@@ -49,25 +73,40 @@ export interface AppContextInit {
 
 /** Build the context main.ts hands to every mount. */
 export function createAppContext(init: AppContextInit): AppContext {
-  let client = init.client;
-  const listeners = new Set<() => void>();
+  let quiesced = false;
+  const quietListeners = new Set<() => void>();
   return {
-    get client(): AgentReplClient {
-      return client;
-    },
+    client: init.client,
     workspace: init.workspace,
     ticker: init.ticker,
     failures: init.failures,
     composerEnabled: init.composerEnabled,
-    replaceClient(next: AgentReplClient): void {
-      client = next;
-      // A copy, because a listener may unsubscribe itself while reopening.
-      for (const fn of [...listeners]) fn();
+    quiesce(): void {
+      if (quiesced) return;
+      quiesced = true;
+      // No workspace fields on the record: `bindLogContext` already carries
+      // this page's workspace on every line, and restating half of that pair
+      // is what the logger's own field validation refuses.
+      log("info", "the page is going quiet; nothing more will be sent on this client", {
+        operation: "rpc.context-quiesce",
+      });
+      // A copy: a listener cancelling its stream unsubscribes itself here.
+      for (const fn of [...quietListeners]) fn();
     },
-    onClientReplaced(fn: () => void): () => void {
-      listeners.add(fn);
+    isQuiesced(): boolean {
+      return quiesced;
+    },
+    onQuiesced(fn: () => void): () => void {
+      // A subscriber arriving AFTER the page went quiet is told at once, or a
+      // stream opened during the window would stand forever waiting for an
+      // event that has already happened.
+      if (quiesced) {
+        fn();
+        return () => undefined;
+      }
+      quietListeners.add(fn);
       return () => {
-        listeners.delete(fn);
+        quietListeners.delete(fn);
       };
     },
   };

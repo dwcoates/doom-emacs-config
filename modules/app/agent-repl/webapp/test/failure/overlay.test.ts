@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { FailureKindSchema } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -277,5 +277,76 @@ describe("mountFailureOverlay: the card's shape", () => {
     const overlay = mountFailureOverlay(host);
     overlay.report(staleBundle("x"));
     expect(cards()[0].getAttribute("role")).toBe("status");
+  });
+});
+
+
+describe("mountFailureOverlay: suppress", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const NOW = 1_700_000_000_000;
+
+  it("withholds the card while the announced window stands", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const overlay = mountFailureOverlay(host);
+    // ACT
+    overlay.suppress("daemonUnreachable", NOW + 8000);
+    overlay.report(daemonUnreachable(1006, "gone"));
+    // ASSERT
+    expect(arms()).toEqual([]);
+  });
+
+  it("draws normally once the window has expired, since an overrun outage is news", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const overlay = mountFailureOverlay(host);
+    overlay.suppress("daemonUnreachable", NOW + 8000);
+    // ACT
+    vi.setSystemTime(NOW + 8001);
+    overlay.report(daemonUnreachable(1006, "gone"));
+    // ASSERT
+    expect(arms()).toEqual(["daemonUnreachable"]);
+  });
+
+  it("takes down a card already standing for the arm it starts suppressing", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const overlay = mountFailureOverlay(host);
+    overlay.report(daemonUnreachable(1006, "gone"));
+    // ACT
+    overlay.suppress("daemonUnreachable", NOW + 8000);
+    // ASSERT
+    expect(arms()).toEqual([]);
+  });
+
+  it("suppresses only the arm it names", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const overlay = mountFailureOverlay(host);
+    overlay.suppress("daemonUnreachable", NOW + 8000);
+    // ACT
+    overlay.report(bootFailed("no shell"));
+    // ASSERT
+    expect(arms()).toEqual(["bootFailed"]);
+  });
+
+  it("clears the suppression on retract, so an early recovery is not muted on", () => {
+    // ARRANGE
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const overlay = mountFailureOverlay(host);
+    overlay.suppress("daemonUnreachable", NOW + 8000);
+    // ACT
+    overlay.retract("daemonUnreachable");
+    overlay.report(daemonUnreachable(1006, "gone"));
+    // ASSERT
+    expect(arms()).toEqual(["daemonUnreachable"]);
   });
 });

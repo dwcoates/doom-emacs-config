@@ -24,6 +24,14 @@
  * This module enforces nothing about which: a caller that never retracts gets
  * a standing card, which is the correct outcome for those two.
  *
+ * SUPPRESSION IS FOR ANNOUNCED FAILURES ONLY. When the daemon says "I am
+ * restarting and will be back in 8 s", the streams dying is the announcement
+ * coming true, not news — so `suppress(arm, untilMs)` holds that arm's card
+ * back for exactly the window the daemon named. The report is STILL LOGGED, so
+ * nothing is erased; only the alarm is withheld, and only until the instant the
+ * daemon itself gave. A report after expiry draws normally, which is the whole
+ * point: an outage that overran its announcement is news again.
+ *
  * BLUE, FROM THE SHARED VOCABULARY. Every client-local arm is on the
  * `client_local` side, which `render-colors.json#failure_sides` paints blue
  * beside `machinery`: both mean the route to a working session is broken and
@@ -52,7 +60,11 @@ export interface Handle {
 }
 
 /** The overlay is the app's FailureSink and owns its own host. */
-export type FailureOverlayHandle = FailureSink & Handle;
+export type FailureOverlayHandle = FailureSink &
+  Handle & {
+    /** Hold ARM's card back until UNTILMS. The overlay always implements it. */
+    suppress(arm: ClientFailureArm, untilMs: number): void;
+  };
 
 /**
  * The sentence each arm's card leads with.
@@ -121,6 +133,8 @@ function evidenceRows(kind: FailureKind): ReadonlyArray<readonly [string, string
 export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
   log("debug", "mounting the failure overlay", { operation: "failure-overlay.mount" });
   const cards = new Map<ClientFailureArm, HTMLElement>();
+  /** Per arm, the instant its suppression window ends. */
+  const suppressedUntil = new Map<ClientFailureArm, number>();
 
   const redraw = (): void => {
     host.replaceChildren(...cards.values());
@@ -142,6 +156,17 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
         });
         return;
       }
+      const until = suppressedUntil.get(arm);
+      if (until !== undefined && Date.now() < until) {
+        // LOGGED, NOT DRAWN. The failure is real and the record of it must
+        // survive; what is withheld is the alarm, for the window the daemon
+        // itself named.
+        log("info", `the ${arm} failure card is suppressed for an announced outage`, {
+          operation: "failure-overlay.suppressed",
+          context: { arm, until_ms: until },
+        });
+        return;
+      }
       const replacing = cards.has(arm);
       log(replacing ? "debug" : "error", `${replacing ? "replacing" : "filing"} the ${arm} failure card`, {
         operation: replacing ? "failure-overlay.replace" : "failure-overlay.report",
@@ -151,7 +176,23 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
       redraw();
     },
 
+    suppress(arm: ClientFailureArm, untilMs: number): void {
+      log("info", `suppressing the ${arm} failure card until an announced instant`, {
+        operation: "failure-overlay.suppress",
+        context: { arm, until_ms: untilMs },
+      });
+      suppressedUntil.set(arm, untilMs);
+      // A card already standing for this arm belongs to the moments BEFORE the
+      // announcement was read; the window it is now inside says it is expected,
+      // so it comes down with the rest.
+      if (cards.delete(arm)) redraw();
+    },
+
     retract(arm: ClientFailureArm): void {
+      // Retracting is the filer saying the condition is over, which ends any
+      // window it was inside: a link that came back early must not stay muted
+      // for the remainder of an outage that did not happen.
+      suppressedUntil.delete(arm);
       if (!cards.delete(arm)) return;
       log("info", `retracting the ${arm} failure card`, {
         operation: "failure-overlay.retract",
@@ -163,6 +204,7 @@ export function mountFailureOverlay(host: HTMLElement): FailureOverlayHandle {
     dispose(): void {
       log("debug", "disposing the failure overlay", { operation: "failure-overlay.dispose" });
       cards.clear();
+      suppressedUntil.clear();
       host.replaceChildren();
       host.removeAttribute("data-empty");
     },

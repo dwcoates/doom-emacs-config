@@ -5380,3 +5380,372 @@ body.ungated #mode-select {
   font-size: 0.75rem;
   margin-bottom: 0.35em;
 }
+
+/* ---- lifecycle banners (src/lifecycle) --------------------------------- */
+
+/* THE STANDING NOTICE that this page's daemon is going away — a scheduled
+   drain, an announced restart, or a workspace that has already moved. All
+   three are the same sentence at three distances, so they share one host and
+   one look, ported from the old drain banner: the merge/bounce amber the app
+   already uses for coordinated daemon work, OUTLINED rather than filled.
+
+   Deliberately not an alarm. A pending bounce is an announcement, and painting
+   it in the failure overlay's register would spend the reader's attention on a
+   routine restart. */
+#drain-banner:empty { display: none; }
+
+.lifecycle-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--merge-card);
+  color: var(--fg);
+  border: 1px solid var(--merge-border);
+  border-radius: 8px;
+  padding: 0.4rem 0.75rem;
+  margin: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+/* THE MOVED NOTICE IS TERMINAL: this page will never update again, and the
+   host is about to reload the view at the successor's address. Dimmed and
+   italic rather than amber — nothing here is pending, so the amber that means
+   "something is about to happen" would be a lie by the time it is read. */
+.lifecycle-banner.lifecycle-moved {
+  border-style: dashed;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ---- topbar (src/topbar) ------------------------------------------------ */
+
+/* THE STRIP. Left tight, center flexing, right tight — the flank groups never
+   spread, and all free width goes to the title. `position: relative` makes the
+   host the positioning context for the reveal layer, which is why the reveals
+   can be placed in the host's own coordinates. */
+[data-component="topbar"] {
+  position: relative;
+}
+
+.topbar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: var(--topbar-h);
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.topbar-left,
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+}
+/* The one element that flexes. Ellipsis-clipped rather than wrapping: the
+   strip is one line high by definition, and the whole title is in the
+   tooltip. */
+.topbar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  color: var(--tool-title);
+}
+
+/* The account chip, ported from #account: quiet text that only shows its
+   border on hover, so the topbar stays still during an ordinary turn. */
+.topbar-account {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar-account:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--border);
+}
+/* ORANGE IS THE WARNING REGISTER. A logged-out root cannot run a turn, so the
+   label IS the warning — but it is not an error either: nothing has failed,
+   something is missing. */
+.topbar-account.arm-loggedOut {
+  color: var(--thinking);
+}
+
+.topbar-session-line {
+  padding: 0.35rem 0.6rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The connectivity glyph is a different CHARACTER per state and those
+   characters do not share an advance width; boxed and centered so a state
+   change moves the mark and nothing else. */
+.topbar-connectivity {
+  display: inline-block;
+  width: 1.25em;
+  text-align: center;
+}
+
+/* The three right-hand controls share one quiet button treatment, so a reader
+   learns the affordance once. */
+.topbar-model-button,
+.topbar-mode-button,
+.topbar-context-figure,
+.topbar-warning-chip {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.15rem 0.45rem;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.topbar-model-button:hover,
+.topbar-mode-button:hover,
+.topbar-context-figure:hover,
+.topbar-warning-chip:hover {
+  color: var(--fg);
+  border-color: var(--border);
+}
+/* An unset selection reads as an invitation, not as a value. */
+.topbar-model-button[data-unselected] {
+  font-style: italic;
+  opacity: 0.7;
+}
+/* THE CONTEXT FIGURE IS THE ONE COLORED NUMBER in the strip; `.tone-yellow`
+   carries the color, this rule carries the weight and the fixed digits that
+   keep the strip from twitching as the figure grows. */
+.topbar-context-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-warnings {
+  display: inline-flex;
+  justify-content: flex-end;
+  /* min-, not a hard width: a chip that outgrew its slot must overflow rather
+     than be clipped, because a half-drawn warning control is worse than a
+     shifted one. */
+  min-width: 3.2rem;
+}
+.topbar-warning-chip {
+  color: var(--thinking);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.topbar-warning-mark {
+  font-size: 0.9em;
+}
+.topbar-warning-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* THE REVEAL LAYER. Absolutely positioned inside the topbar's box; `left`,
+   `top` and `max-height` are set by the clamp, so this rule carries only what
+   is true of every reveal. `pointer-events: none` on the layer with `auto` on
+   the panel keeps the empty layer from swallowing clicks on the strip beneath
+   it. */
+.topbar-reveal-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+.topbar-reveal {
+  position: absolute;
+  pointer-events: auto;
+  min-width: 12rem;
+  max-width: min(90vw, 32rem);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);
+  font-size: 0.85rem;
+}
+
+/* Menu rows: full-width buttons that light on hover, delimited by the shared
+   `.list-rows` rule rather than borders of their own. */
+.topbar-model-option,
+.topbar-mode-option,
+.topbar-warning-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+.topbar-model-option:hover,
+.topbar-mode-option:hover,
+.topbar-warning-row:hover {
+  background: var(--border);
+}
+.topbar-model-description {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+.topbar-model-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+/* Capability tags are FACTS, not controls: dim, small, and deliberately
+   unclickable, because this wave offers no way to set any of them. */
+.topbar-model-tag {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  font-size: 0.75em;
+  opacity: 0.8;
+}
+
+/* The token breakdown: label left, count right, share after it. Tabular
+   figures so the column of counts lines up. */
+.token-breakdown-section + .token-breakdown-section {
+  border-top: 1px solid var(--border);
+}
+.token-breakdown-heading {
+  padding: 0.35rem 0.7rem 0.15rem;
+  color: var(--muted);
+  font-size: 0.8em;
+  text-transform: lowercase;
+}
+.token-breakdown-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.7rem;
+}
+.token-breakdown-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+}
+.token-breakdown-row[data-emphasized] .token-breakdown-label {
+  color: var(--fg);
+  font-weight: 600;
+}
+.token-breakdown-tokens {
+  font-variant-numeric: tabular-nums;
+}
+.token-breakdown-share {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5rem;
+  text-align: right;
+}
+
+.topbar-warning-detail {
+  padding: 0.35rem 0;
+}
+/* The way back to the list. A chevron rather than a word so it reads as
+   navigation at a glance. */
+.topbar-warning-back {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.7rem;
+}
+.topbar-warning-back:hover {
+  color: var(--fg);
+}
+.topbar-warning-body {
+  padding: 0.25rem 0.7rem 0.5rem;
+}
+.topbar-warning-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+.topbar-warning-detail-line,
+.topbar-warning-clock,
+.topbar-warning-span {
+  color: var(--muted);
+  font-size: 0.95em;
+}
+
+/* ---- login overlay (src/login) ----------------------------------------- */
+
+/* Modal in practice: there is nothing useful to do in the session this is
+   fixing until it is done. Ported from #login-overlay / #login-panel. */
+[data-component="login-overlay"] {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0.55);
+}
+[data-component="login-overlay"][hidden] {
+  display: none;
+}
+
+.login-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(96vw, 1100px);
+  height: min(80vh, 640px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #11151c;
+  overflow: hidden;
+}
+.login-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.login-title {
+  color: var(--fg);
+}
+/* The account being logged INTO — the guard against the two-account split
+   going wrong in the one place it matters most. */
+.login-account {
+  color: var(--muted);
+}
+.login-close {
+  margin-left: auto;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+}
+.login-close:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+}
+/* The pty's own viewport. xterm sizes itself to this box, and the column count
+   it reports is what keeps the ~350-character OAuth URL on one line. */
+.login-term {
+  flex: 1;
+  min-height: 0;
+  padding: 0.4rem;
+}
