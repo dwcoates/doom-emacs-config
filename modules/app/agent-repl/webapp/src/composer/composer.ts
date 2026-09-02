@@ -36,6 +36,7 @@ import {
   SubmitPromptResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type {
+  SubmitPromptBubbleRefused,
   SubmitPromptError,
   SubmitPromptRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -433,11 +434,39 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return "this prompt was already submitted — the earlier one stands";
     case "noSession":
       return "this workspace has no session to prompt — your text is kept";
+    case "bubbleRefused":
+      return bubbleRefusedSentence(reason.value);
     default: {
       const other: { case: string } = reason;
       return unreachableArm("SubmitPromptError.reason", other.case);
     }
   }
+}
+
+/**
+ * The SHIM's refusal of a bubble-addressed prompt, relayed by the daemon
+ * (landing 7).
+ *
+ * KEYED ON `kind`, not on `detail`: the two kinds are different waits — one
+ * says this agent kind has no route at all, the other says its own turn is
+ * running right now — and the words say which. `detail` is the shim's own
+ * account, drawn after the stem when it sent one and never switched on.
+ */
+function bubbleRefusedSentence(refused: SubmitPromptBubbleRefused): string {
+  const kind = requireCase(refused.kind, "SubmitPromptBubbleRefused.kind");
+  const stem = ((): string => {
+    switch (kind.case) {
+      case "notDeliverable":
+        return "that agent cannot be prompted directly — your text is kept";
+      case "agentBusy":
+        return "that agent's turn is already running — resubmit once it settles";
+      default: {
+        const other: { case: string } = kind;
+        return unreachableArm("SubmitPromptBubbleRefused.kind", other.case);
+      }
+    }
+  })();
+  return refused.detail === "" ? stem : `${stem} (${refused.detail})`;
 }
 
 function clearRefusal(root: HTMLElement): void {
