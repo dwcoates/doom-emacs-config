@@ -74,6 +74,17 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 	}
 	fields := dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)}
 
+	// A LEASE EXCLUDES EVERYONE BUT ITS HOLDER. The merge orchestrator holds
+	// the lease precisely so it can drive the session, and its own briefs --
+	// the conflict repair, the test repair, the configured before/after
+	// actions, the displaced turn's resume -- carry merge origins. Refusing
+	// those against the merge's own lease deadlocks the merge: it submits the
+	// brief it is waiting on and is told a merge is in flight.
+	if lease.Holder == wsm.HolderMerge && mergeOrigin(sub.Origin) {
+		log.Debug(opSubmit, "the lease holder's own submission takes the ordinary path", fields)
+		return Disposition{}, false, nil
+	}
+
 	switch lease.Policy {
 	case wsm.PolicyRefuse:
 		log.Warn(opSubmit, "the submission is refused: a merge is in flight", fields)
@@ -171,6 +182,20 @@ func merged(base, extra dlog.Context) dlog.Context {
 }
 
 // holderName renders a lease holder for a log record.
+// mergeOrigin reports whether an origin is one the merge orchestrator submits
+// under. They are exactly conversation.v1 PromptOrigin's merge arms.
+func mergeOrigin(origin conversationv1.PromptOrigin) bool {
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME:
+		return true
+	}
+	return false
+}
+
 func holderName(h wsm.LeaseHolder) string {
 	switch h {
 	case wsm.HolderMerge:

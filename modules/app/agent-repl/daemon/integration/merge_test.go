@@ -71,7 +71,10 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 	behind = mergeCreateChild(t, d, repoRef, "behind", "behind work", nil)
 
 	frontBranch := mergeBranchOf(t, front.ws)
-	repo.ScriptConflict(front.ws.GetDir(), frontBranch, "conflict.txt")
+	// THE CONFLICT IS SCRIPTED WHERE THE MERGE RUNS: the merge is performed
+	// in the TARGET worktree, and a top-level child targets the repository's
+	// main worktree, never its own.
+	repo.ScriptConflict(repo.Dir, frontBranch, "conflict.txt")
 
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(front) = error %v, want the merge enqueued", err)
@@ -111,13 +114,10 @@ func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterA
 	}
 
 	// Assert: the merge bubble's queue tab, on its own sub-feed.
-	root := behind.watchRootFeed()
-	mergeRow := awaitRow(t, behind, root, "the behind workspace's merge bubble", func(row *frontendv1.FeedRow) bool {
+	mergeRow := behind.awaitRowInFeed(nil, "the behind workspace's merge bubble", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
-	_, token := behind.openFeed(mergeRow.GetId())
-	sub := behind.d.WatchFeed(token)
-	tabRow := awaitRow(t, behind, sub, "the queue tab", func(row *frontendv1.FeedRow) bool {
+	tabRow := behind.awaitRowInFeed(mergeRow.GetId(), "the queue tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetQueue() != nil
 	})
 	if tabRow.GetMergeTab().GetQueue().GetQueue().GetCurrent() == nil {
@@ -335,7 +335,7 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -392,7 +392,7 @@ func TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal(t *test
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -458,9 +458,7 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 	}
 
 	// Assert: the tests tab settled successfully at some point along the way.
-	_, token := f.openFeed(mergeRow.GetId())
-	sub := f.d.WatchFeed(token)
-	testsRow := awaitRow(t, f, sub, "the settled tests tab", func(row *frontendv1.FeedRow) bool {
+	testsRow := f.awaitRowInFeed(mergeRow.GetId(), "the settled tests tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetTests().GetSettled() != nil
 	})
 	if testsRow.GetMergeTab().GetTests().GetSettled().GetSucceeded() == nil {
@@ -654,7 +652,7 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -700,7 +698,7 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
