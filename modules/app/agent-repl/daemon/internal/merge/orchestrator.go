@@ -192,6 +192,17 @@ func (o *orchestrator) publish(ws ids.WorkspaceID, facts MergeFacts) {
 	o.mu.Unlock()
 	o.deps.Footer.SetMerge(ws, facts)
 	o.deps.Sidebar.SetMerge(ws, facts)
+	o.publishHost(ws)
+}
+
+// publishHost republishes the workspace's host view when a surface is wired.
+// Every merge state change moves the host composer's gate, and `publish` and
+// `forget` are the only two places a merge's state changes.
+func (o *orchestrator) publishHost(ws ids.WorkspaceID) {
+	if o.deps.PublishHost == nil {
+		return
+	}
+	o.deps.PublishHost(ws)
 }
 
 // forget drops a workspace's facts entirely — the abandon path, where the merge
@@ -202,6 +213,7 @@ func (o *orchestrator) forget(ws ids.WorkspaceID) {
 	o.mu.Unlock()
 	o.deps.Footer.SetMerge(ws, MergeFacts{State: "none"})
 	o.deps.Sidebar.SetMerge(ws, MergeFacts{State: "none"})
+	o.publishHost(ws)
 }
 
 // runFor addresses one workspace's in-flight run.

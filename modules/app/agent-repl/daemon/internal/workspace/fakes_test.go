@@ -491,6 +491,12 @@ type fakeHost struct {
 	editorOpens []editorOpen
 	reloads     []ids.WorkspaceID
 	notes       []hostNote
+	// hostPublishes records every host-state republish the verbs asked for.
+	hostPublishes []ids.WorkspaceID
+}
+
+func (h *fakeHost) PublishHostWorkspace(ws ids.WorkspaceID) {
+	h.hostPublishes = append(h.hostPublishes, ws)
 }
 
 type editorOpen struct {

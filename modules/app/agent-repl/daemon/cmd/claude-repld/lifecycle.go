@@ -19,7 +19,17 @@ import (
 type lifecycleSink struct {
 	queue promptqueue.Queue
 	verbs *verbsForwarder
+	relay *relayForwarder
 	log   dlog.Logger
+}
+
+// OnLinkChanged republishes the workspace's HOST view: `shim_attached` is part
+// of it, and the server cannot see a link edge for itself.
+func (s *lifecycleSink) OnLinkChanged(ws ids.WorkspaceID, attached bool) {
+	s.log.Debug("daemon.cmd.lifecycle", "the shim link's attachment changed", dlog.Context{
+		"workspace": string(ws), "attached": attached,
+	})
+	s.relay.PublishHostWorkspace(ws)
 }
 
 // OnTurnEnded pops the queue and releases a hold-for-turn-end.
