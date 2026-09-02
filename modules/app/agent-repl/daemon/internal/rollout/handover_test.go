@@ -413,3 +413,50 @@ func TestANeverFreeWorkspaceIsNeverInterruptedToHurryIt(t *testing.T) {
 		t.Fatalf("kill calls while waiting = %d, want none: nothing is interrupted to hurry a holdout", killed)
 	}
 }
+
+// TestTheManifestNamesAWorkspaceWithNoShimAsNoSession covers the write site of
+// the bounce accounting: a workspace registered and never opened has no
+// process to preserve, so calling its entry `preserve` would make its free
+// lock read on the successor as a session that silently died — a fault raised
+// on the most ordinary handover there is.
+func TestTheManifestNamesAWorkspaceWithNoShimAsNoSession(t *testing.T) {
+	// Arrange: a registered workspace whose session record carries no shim pid.
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+	if err := h.db.SetShimPID(context.Background(), ws, nil); err != nil {
+		t.Fatalf("SetShimPID: %v", err)
+	}
+
+	// Act
+	m := h.c.manifest(context.Background(), "127.0.0.1:1", []wsm.Workspace{{ID: ws, Dir: dir}},
+		map[ids.WorkspaceID]Participants{})
+
+	// Assert
+	if len(m.Sessions) != 1 {
+		t.Fatalf("manifest sessions = %d, want the workspace's entry (it arms the rendezvous)", len(m.Sessions))
+	}
+	if got := m.Sessions[0].Intent; got != IntentNoSession {
+		t.Fatalf("intent = %s, want %s", got, IntentNoSession)
+	}
+}
+
+// TestTheManifestNamesAWorkspaceWithALiveShimAsPreserve is the other side: a
+// running shim IS handed over alive, and its free lock on the successor is the
+// genuine evidence that it died.
+func TestTheManifestNamesAWorkspaceWithALiveShimAsPreserve(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, dir := h.workspace(t)
+
+	// Act
+	m := h.c.manifest(context.Background(), "127.0.0.1:1", []wsm.Workspace{{ID: ws, Dir: dir}},
+		map[ids.WorkspaceID]Participants{})
+
+	// Assert
+	if len(m.Sessions) != 1 || m.Sessions[0].Intent != IntentPreserve {
+		t.Fatalf("manifest sessions = %+v, want one preserve entry", m.Sessions)
+	}
+	if m.Sessions[0].ShimPID == 0 {
+		t.Fatalf("shim pid = 0, want the running shim's pid on a preserve entry")
+	}
+}
