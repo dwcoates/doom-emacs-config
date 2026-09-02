@@ -182,12 +182,13 @@ func sidecarDir(transcriptPath string) string {
 
 // PortTranscript implements Resolver: a COPY into the child's root, for a fork.
 // The parent keeps its own conversation, which is the whole point of a fork.
-func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir string) error {
+func (r *resolver) PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) error {
 	return r.transfer(ctx, transferSpec{
 		operation:  "daemon.account.port_transcript",
 		source:     transcriptPath,
 		destRoot:   childConfigDir,
 		destCWD:    childWorkspaceDir,
+		destID:     childVendorSessionID,
 		removeSrc:  false,
 		verbMoving: "copying",
 	})
@@ -209,10 +210,14 @@ func (r *resolver) MoveTranscript(ctx context.Context, transcriptPath, toConfigD
 
 // transferSpec is one transcript transfer's inputs.
 type transferSpec struct {
-	operation  string
-	source     string
-	destRoot   string
-	destCWD    string
+	operation string
+	source    string
+	destRoot  string
+	destCWD   string
+	// destID renames the transcript on the way: the destination is
+	// `<destID>.jsonl` (and its sidecar `<destID>/`). Empty keeps the
+	// source's own name, which every transfer but a fork wants.
+	destID     string
 	removeSrc  bool
 	verbMoving string
 }
@@ -239,7 +244,11 @@ func (r *resolver) transfer(ctx context.Context, spec transferSpec) error {
 	}
 
 	destDir := ProjectDir(spec.destRoot, spec.destCWD)
-	dest := filepath.Join(destDir, filepath.Base(spec.source))
+	destName := filepath.Base(spec.source)
+	if spec.destID != "" {
+		destName = spec.destID + transcriptExt
+	}
+	dest := filepath.Join(destDir, destName)
 	logCtx := dlog.Context{
 		"source":      spec.source,
 		"destination": dest,
