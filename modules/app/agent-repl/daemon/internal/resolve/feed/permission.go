@@ -74,7 +74,14 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		// A DENIED CALL NEVER RAN, so its own card says denied rather than
 		// sitting running forever waiting on a tool that will not start.
 		if denied, ok := frame.Success.GetDecision().(*conversationv1.AgentPermissionSuccess_Denied); ok {
-			r.markCallDenied(s, p.GetGatedCall().GetValue(), denialWord(denied.Denied))
+			// The unit is joined by id: `gated_call` when the frame names one,
+			// and otherwise the permission's OWN id, which the shim mints as
+			// the gated unit's AgentActivityId.
+			gated := p.GetGatedCall().GetValue()
+			if gated == "" {
+				gated = p.GetId().GetValue()
+			}
+			r.markCallDenied(s, gated, denialWord(denied.Denied))
 		}
 	case *conversationv1.AgentPermission_Failure:
 		card.State = &frontendv1.FeedPermission_Abandoned{Abandoned: &frontendv1.FeedPermissionAbandoned{
