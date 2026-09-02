@@ -783,6 +783,124 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 }
 
 // ---------------------------------------------------------------------------
+// Self-reload only for the self repo: internal/merge/run.go splits on TWO
+// distinct booleans -- `emacsRepo` (SameRepo: same underlying repository,
+// which is what selects between the Emacs method and the other-repo method)
+// and `selfCheckout` (same && the literal directory IS this daemon's own
+// checkout, "which is what SELECTS THE METHOD" per run.go's own comment on
+// emacsRepo -- the self-reload's OWN gate additionally requires
+// selfCheckout). The two tests below are the two ways of being "half right":
+// the Emacs method running in the same repository but NOT the literal
+// checkout (a sibling worktree), and the other-repo method entirely (a
+// completely different repository). Neither half alone triggers the deploy.
+// ---------------------------------------------------------------------------
+
+func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeploy(t *testing.T) {
+	// Arrange: a self-repo daemon, a top-level PARENT workspace (this
+	// daemon's own checkout), and a CHILD nested under it whose merge lands
+	// into the PARENT's worktree -- a sibling of the self checkout, same
+	// underlying repository (emacsRepo=true: the Emacs method runs a real
+	// `git merge`), but NOT the literal self-checkout directory
+	// (selfCheckout=false: internal/merge/terminal.go's selfReload comment:
+	// "A sibling worktree of the same repository is excluded").
+	repo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path}})
+	repoRef := mergeRepositoryRef(t, d, repo)
+	parent := mergeCreateChild(t, d, repoRef, "sibling7a-parent", "the parent work", nil)
+
+	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repoRef,
+		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Name: strPtr("sibling7a-child")}},
+		Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: parent.ws},
+	}))
+	if err != nil || childResp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(child) = (%v, %v), want a success", childResp, err)
+	}
+	child := childResp.Msg.GetSuccess().GetWorkspace()
+	childShim := d.Shim(child)
+	childShim.ExpectStartSession()
+	childShim.ExpectStartTurn()
+	childShim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("sibling7a-child-initial")))
+	// A commit that WOULD classify into this daemon's own subsystem, so
+	// nothing but the literal-checkout gate is what keeps the deploy off.
+	writeCommit(t, repo, child.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
+
+	// Act
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
+		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
+	}
+	roster := d.WatchRoster()
+	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, child.GetId())
+		return row != nil && row.GetMerged() != nil
+	})
+
+	// Assert: the Emacs method DID run -- a real `git merge` targeted the
+	// parent's worktree, never the daemon's own checkout directory.
+	targetedParent := false
+	for _, c := range d.Git.Calls() {
+		if createArgsContain(c.Args, "merge") && createGitDir(c.Args) == parent.ws.GetDir() {
+			targetedParent = true
+		}
+	}
+	if !targetedParent {
+		t.Fatalf("git calls = %v, want a merge run inside the parent's worktree %q", d.Git.Calls(), parent.ws.GetDir())
+	}
+
+	// Assert: the deploy never fires -- the target was a SIBLING worktree of
+	// the self repo, not the daemon's own checkout.
+	if got := len(d.Deploy.Invocations()); got != 0 {
+		t.Fatalf("deploy script invocations = %d, want 0: a sibling worktree of the self repo is not the self checkout", got)
+	}
+}
+
+func TestOneShotSelfMergeOnANonSelfRepoNeverTriggersTheDeploy(t *testing.T) {
+	// Arrange: a daemon whose self repo is a DISTINCT repository from the
+	// one-shot's own -- the other-repo method entirely (emacsRepo=false),
+	// the opposite half of the split from the sibling-worktree test above.
+	selfRepo := harness.NewRepo(t) // distinct identity; never the merge target.
+	repo := harness.NewRepo(t)
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
+	repository := createRepositoryRef(t, d, repo)
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: repository,
+		Form: &agentreplv1.CreateWorkspaceRequest_OneShot{OneShot: &agentreplv1.CreateWorkspaceOneShot{
+			Prompt: said("ship the fix"),
+			Finish: &agentreplv1.CreateWorkspaceOneShot_SelfMerge{SelfMerge: &agentreplv1.CreateWorkspaceOneShotSelfMerge{}},
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CreateWorkspace(one_shot, self_merge) = (%v, %v), want a success", resp, err)
+	}
+	ws := resp.Msg.GetSuccess().GetWorkspace()
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+	shim.ExpectStartTurn()
+	roster := d.WatchRoster()
+
+	// Act: the turn concludes successfully, firing the one-shot's own
+	// self-merge finish action.
+	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: the merge lands (the other-repo method has nothing between the
+	// two configured prompts, so a clean run with neither reaches "merged"
+	// straight away).
+	awaitRoster(t, d, roster, "the one-shot's self-merge landed", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, ws.GetId())
+		return row != nil && row.GetMerged() != nil
+	})
+
+	// Assert: the deploy never fires -- the merge target is not this
+	// daemon's self repo at all.
+	if got := len(d.Deploy.Invocations()); got != 0 {
+		t.Fatalf("deploy script invocations = %d, want 0: the merge target is not this daemon's self repo", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The non-Emacs-repo method: only pre/post prompts, never the Emacs-only
 // merge/conflicts/tests/fixes tabs.
 // ---------------------------------------------------------------------------
