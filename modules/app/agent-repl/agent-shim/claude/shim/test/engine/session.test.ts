@@ -72,7 +72,15 @@ function assistantLine(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 function harness(
-  options: { nowMs?: number; lockThrows?: boolean; keepaliveIntervalMs?: number } = {},
+  options: {
+    nowMs?: number;
+    lockThrows?: boolean;
+    keepaliveIntervalMs?: number;
+    /** What every scripted query answers `backgroundTasks` with. */
+    backgroundTasks?: boolean;
+    /** Make `backgroundTasks` reject, so the fail-open path is exercised. */
+    backgroundTasksThrows?: boolean;
+  } = {},
 ): Harness {
   const stateDir = scratch();
   const configDir = scratch();
@@ -90,6 +98,10 @@ function harness(
     fold,
     createQuery: (spec) => {
       const query = new ScriptedQuery();
+      if (options.backgroundTasks === true) query.backgroundTaskAnswer = true;
+      if (options.backgroundTasksThrows === true) {
+        query.backgroundTasks = () => Promise.reject(new Error("the vendor cannot answer"));
+      }
       queries.push({ spec, query });
       return Promise.resolve(query);
     },
@@ -1320,6 +1332,41 @@ describe("GetLiveWork reconciliation", () => {
     await started(h);
 
     expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(true);
+  });
+
+  it("RE-ADOPTS work the vendor still holds, asked directly rather than waited for", async () => {
+    // The live table is built from messages the shim has already seen, and at
+    // StartSession it has seen almost none: a revived process announces its
+    // surviving tasks on its own schedule, after the init this reconciliation
+    // follows. Judging survival off that table alone swept up work the vendor
+    // still had.
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
+  });
+
+  it("treats work the vendor could not be ASKED about as surviving", async () => {
+    // A vendor that cannot answer is not a vendor that said "gone": closing the
+    // run would write a terminal over something that may still be producing.
+    const h = harness({ backgroundTasksThrows: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+
+    expect(h.persistence.buffered.some((entry) => entry.upsertKey === "bash:b01:terminal")).toBe(false);
   });
 
   it("closes work the record cannot describe rather than leaving it open", async () => {
