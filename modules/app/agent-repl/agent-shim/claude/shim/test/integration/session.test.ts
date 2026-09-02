@@ -9,8 +9,12 @@
  * than silently paid.
  */
 import { create } from "@bufbuild/protobuf";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
+import { workspaceLockKey } from "../../src/locks.js";
+import { agentIdPath } from "../../src/engine/identity.js";
 import { cleanupShims, ITEST_BUILD_SHA, spawnShim } from "../integration-support/harness.js";
 import {
   freshSession,
@@ -28,7 +32,13 @@ import {
   model as modelNamed,
   DEFAULT_MODEL,
 } from "../integration-support/client.js";
-import { createStoreClient, seedBashLifecycle, sidecarProducer } from "../integration-support/store.js";
+import {
+  createStoreClient,
+  pageLineOf,
+  seedBashLifecycle,
+  sidecarProducer,
+  writtenEntries,
+} from "../integration-support/store.js";
 import {
   hibernateAcked,
   hibernateKind,
@@ -40,6 +50,7 @@ import {
   setModelAccepted,
   setModelCause,
   setPermissionModeAccepted,
+  setPermissionModeCause,
   startSessionCause,
   startSessionCold,
   turnStarted,
@@ -47,14 +58,26 @@ import {
   watchAgentPage,
   entryUpdateArm,
   bashFrame,
+  entryFrame,
 } from "../integration-support/expect.js";
 import {
   awaitFile,
   readTranscript,
   sessionTranscriptPath,
+  workspaceRealPath,
 } from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
+
+/** The `AgentContextCut` a page entry carries, when it carries one. */
+function contextCutOf(
+  entry: conversationv1.HistoryEntryAt,
+): conversationv1.ContextCut | null {
+  const inner = entry.entry?.entry;
+  if (inner?.case !== "agentFrame" || inner.value.result.case !== "update") return null;
+  const update = inner.value.result.value.update;
+  return update.case === "contextCut" ? update.value : null;
+}
 
 /** Open the session watch and consume its opening frames up to `arm`. */
 function watchSession(shim: Awaited<ReturnType<typeof spawnShim>>) {
@@ -280,9 +303,14 @@ describe("SetSessionModel", () => {
         settled = true;
         return response;
       });
-    // The turn is still open, so the call must not have resolved. Asserted by
-    // racing it against an rpc that DOES resolve now — no timer involved.
-    await shim.clients.h1.startSession(freshSession());
+    // THE PROOF IS AN EVENT ABOUT THIS CALL, not a race against an unrelated
+    // one. An rpc that happens to resolve first says nothing about whether the
+    // engine ever SAW the setModel — it could have been refused at the
+    // transport and the assertion would still pass. The shim records every
+    // verb it enters, so this waits for the engine's own "serving
+    // SetSessionModel" record: after that record the call is demonstrably
+    // inside the engine, and still unsettled.
+    await shim.log.record((record) => record.context.rpc === "SetSessionModel");
     expect(settled).toBe(false);
 
     // End the turn; only now may the model change land.
@@ -376,6 +404,19 @@ describe("the cold gate", () => {
 
     const cuts = page.entries.filter((entry) => entryUpdateArm(entry) === "contextCut");
     expect(cuts.length).toBeGreaterThan(0);
+    // THE ARM, NOT MERELY THE PRESENCE. A `context_cleared` or a
+    // `compaction_failed` is also a context_cut, and both would mean the
+    // remediation did something other than what was asked for.
+    const compacted = cuts
+      .map((entry) => contextCutOf(entry))
+      .filter((cut) => cut?.cut.case === "compacted");
+    expect(compacted.length).toBeGreaterThan(0);
+    const cut = compacted[0]!.cut;
+    if (cut.case !== "compacted") throw new Error("expected a compacted cut");
+    expect(cut.value.summary?.markdown).not.toBe("");
+    expect(cut.value.tokens?.tokensBefore ?? 0n).toBeGreaterThan(
+      cut.value.tokens?.tokensAfter ?? 0n,
+    );
     watch.close();
   });
 
@@ -411,12 +452,26 @@ describe("identity rotation", () => {
     watch.close();
   });
 
-  test("the main AgentId is UNCHANGED across a rotation", async () => {
+  test("the main AgentId is UNCHANGED across a rotation, judged against agent-id.json", async () => {
     // The main AgentId is the conversation's ORIGINAL vendor session id, and
     // rotation changes only the RESUME HANDLE. An AgentId that rotated would
     // split one conversation's book in two.
+    //
+    // GRADED AGAINST THE FILE PLANE. Comparing the id before the rotation with
+    // the id after it compares two values the same shim minted, and a shim
+    // that had rotated BOTH consistently would pass. `agent-id.json` is the
+    // independent statement of what the AgentId is, and it is what a
+    // file-only reader would resolve the book by.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
+    const persisted = (
+      JSON.parse(
+        readFileSync(
+          agentIdPath(shim.dirs.stateDir, workspaceLockKey(workspaceRealPath(shim.dirs))),
+          "utf8",
+        ),
+      ) as { original_vendor_session_id: string }
+    ).original_vendor_session_id;
     const before = turnStarted(
       await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" })),
     );
@@ -426,7 +481,19 @@ describe("identity rotation", () => {
       await shim.clients.h1.startTurn(startTurnRequest({ turn: "t3", text: "!md" })),
     );
 
-    expect(after.agent?.value).toBe(before.agent?.value);
+    expect(before.agent?.value).toBe(persisted);
+    expect(after.agent?.value).toBe(persisted);
+    // And the file did not move either: the rotation wrote a LINK, not a new
+    // identity.
+    const stillPersisted = (
+      JSON.parse(
+        readFileSync(
+          agentIdPath(shim.dirs.stateDir, workspaceLockKey(workspaceRealPath(shim.dirs))),
+          "utf8",
+        ),
+      ) as { original_vendor_session_id: string }
+    ).original_vendor_session_id;
+    expect(stillPersisted).toBe(persisted);
   });
 });
 
@@ -684,13 +751,21 @@ describe("compaction, as the vendor does it", () => {
     expect(sessionUpdate(compacting).update.case).toBe("compacting");
     const entry = watchAgentEntry(cut);
     expect(entryUpdateArm(entry)).toBe("contextCut");
+    // AND IT COMPACTED. A cut that carried no summary, or that claimed to have
+    // grown the context, would be a compaction that did not happen.
+    const compacted = contextCutOf(entry)?.cut;
+    if (compacted?.case !== "compacted") throw new Error("expected a compacted cut");
+    expect(compacted.value.summary?.markdown).not.toBe("");
+    expect(compacted.value.tokens?.tokensBefore ?? 0n).toBeGreaterThan(
+      compacted.value.tokens?.tokensAfter ?? 0n,
+    );
     watch.close();
     agent.close();
   });
 
   test("!compact-failed produces a compaction_failed context_cut and no boundary", async () => {
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
@@ -706,6 +781,17 @@ describe("compaction, as the vendor does it", () => {
     });
 
     expect(entryUpdateArm(watchAgentEntry(cut))).toBe("contextCut");
+    // NO BOUNDARY. A failed compaction cut nothing, so the transcript has no
+    // `compact_boundary` line and the cut carries the vendor's error rather
+    // than a summary — the two halves of "nothing was discarded".
+    const failed = contextCutOf(watchAgentEntry(cut))?.cut;
+    if (failed?.case !== "compactionFailed") throw new Error("expected compaction_failed");
+    expect(failed.value.error).not.toBe("");
+    expect(
+      readTranscript(shim.dirs, started.vendorSessionId).some(
+        (record) => record.type === "system" && record.subtype === "compact_boundary",
+      ),
+    ).toBe(false);
     agent.close();
   });
 });
@@ -833,9 +919,16 @@ describe("Hibernate", () => {
     expect(hibernateKind(response)).toBe("turnInFlight");
   });
 
-  test("an idle session acks, having compacted the transcript", async () => {
+  test("an idle session acks, having compacted the transcript (SYNTHETIC compaction fixture)", async () => {
     // The daemon stands the shim down only AFTER the ack, so revival never pays
     // a cold context — which is only true if the compaction really happened.
+    //
+    // GRADED AGAINST THE SYNTHETIC FIXTURE, NOT AGAINST A CAPTURE. The shim
+    // writes the compacted transcript itself and the compaction helper is
+    // synthetic BY RULING — no capture grounds the summarizer — so what this
+    // asserts is that the shim wrote the `compact_boundary` line its own
+    // fixture produces, at the ruled path. It does not assert that a real
+    // vendor's boundary looks like this one.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
@@ -969,11 +1062,450 @@ describe("KillSession", () => {
 
     // THE TERMINAL, AND NOT A CUT STREAM. `drain` resolves only on the
     // producer's own conclusion; the process going first would reject here.
-    const terminal = (await bash.drain()).map(bashFrame).at(-1);
+    const frames = (await bash.drain()).map(bashFrame);
+    const terminal = frames.at(-1);
     expect(terminal?.result.case).toBe("success");
-    if (terminal?.result.case === "success") {
+    if (terminal?.result.case !== "success") throw new Error("expected a terminal");
+    // THE INTERRUPTED ARM AND NOT A FAILURE. A run stopped because the session
+    // was killed did not fail; reporting `failed` would tell the user their
+    // command broke when the shim stopped it.
+    expect(terminal.result.value.outcome.case).toBe("interrupted");
+    // AND THE TERMINAL CAME FIRST. `drain` above already resolved on the
+    // producer's own conclusion, so the process may only be observed gone
+    // after it — awaiting the exit here proves the ordering rather than
+    // assuming it.
+    const exit = await shim.exited;
+    expect(exit.code).toBe(0);
+    agent.close();
+  });
+});
+
+
+describe("rotation, against the session's own facts", () => {
+  test("identity_rotated.new is the POST-CLEAR init id, and new_conversation_id is never adopted", async () => {
+    // OBSERVED (capture identity-rotation-clear): the reset message carries a
+    // `new_conversation_id` that NOTHING later uses, and the id the session
+    // actually rotates to is the session_id of the SECOND `system:init`. A
+    // shim that adopted the reset's own new_conversation_id would hand the
+    // daemon a resume handle that resumes nothing.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const watch = watchSession(shim);
+    await watch.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!rotate" }));
+    const rotated = sessionUpdate(
+      await watch.until((frame) => sessionUpdate(frame).update.case === "identityRotated"),
+    );
+
+    if (rotated.update.case !== "identityRotated") throw new Error("expected identity_rotated");
+    const announced = rotated.update.value.vendorSessionId;
+    // THE FILE PLANE AGREES: a transcript exists under the announced id, and
+    // its own `sessionId` field is that id — which is what makes it the init's
+    // session_id rather than the discarded new_conversation_id.
+    await awaitFile(sessionTranscriptPath(shim.dirs, announced));
+    const records = readTranscript(shim.dirs, announced);
+    expect(records.length).toBeGreaterThan(0);
+    expect(new Set(records.map((record) => record.sessionId))).toEqual(new Set([announced]));
+    expect(announced).not.toBe(started.vendorSessionId);
+    watch.close();
+  });
+
+  test("a resume BY THE ROTATED id still reports the ORIGINAL AgentId", async () => {
+    // The rotated id is a RESUME HANDLE; the AgentId is the conversation. A
+    // resume that adopted the handle as the identity would start a second book
+    // for one conversation, and everything before the rotation would become
+    // unreachable under the name the consumer holds.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const before = turnStarted(
+      await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!rotate" })),
+    );
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    const rotatedTo = readdirSync(
+      join(first.dirs.stateDir, "shim", workspaceLockKey(workspaceRealPath(first.dirs)), "vendor-id"),
+    )[0]!.replace(/\.json$/, "");
+    expect(rotatedTo).not.toBe(started.vendorSessionId);
+
+    const second = await spawnShim({ reuse: first.dirs });
+    await second.clients.h1.startSession(resumeSession(rotatedTo, remediationPay()));
+    const after = turnStarted(
+      await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" })),
+    );
+
+    expect(after.agent?.value).toBe(started.vendorSessionId);
+    expect(before.agent?.value).toBe(started.vendorSessionId);
+    // And the NEW turn's rows land on the ORIGINAL book, not on the handle's.
+    // THE STORE IS THE FIRST SPAWN'S: a reused directory set shares one fake
+    // store, and the second handle never started one of its own.
+    const books = new Set(
+      writtenEntries(first.store?.writes() ?? [])
+        .map((entry) => pageLineOf(entry)?.pageAgentId?.value)
+        .filter((book): book is string => book !== undefined && book !== ""),
+    );
+    expect([...books]).toEqual([started.vendorSessionId]);
+  });
+});
+
+describe("host shutdown as a turn's cause", () => {
+  // TWO PATHS, ONE CAUSE. A turn cut short because the HOST went away is not a
+  // user interrupt: the user asked for nothing, and drawing the two alike tells
+  // them they stopped work they never touched.
+  //
+  // ASSERTED ON THE RECORD, NOT ON A STREAM. The terminal is written as the
+  // session is torn down, and the very same teardown concludes every open
+  // WatchAgent — so a reader waiting on the stream is racing the stream's own
+  // conclusion. The store's inbox is where the frame durably is.
+  /** The turn terminal the shim wrote for `agent`, if it wrote one. */
+  function writtenTerminal(
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    agent: string,
+  ): conversationv1.AgentFrame | null {
+    for (const entry of writtenEntries(shim.store?.writes() ?? [])) {
+      if (!entry.upsertKey.startsWith(`terminal:${agent}:`)) continue;
+      const item = pageLineOf(entry)?.agentItem?.item;
+      if (item?.case === "agentFrame") return item.value;
+    }
+    return null;
+  }
+
+  test("SIGTERM mid-turn concludes it interrupted by host_shutdown", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+
+    const exit = await shim.standDown();
+
+    expect(exit.code).toBe(0);
+    const frame = writtenTerminal(shim, started.vendorSessionId);
+    if (frame?.result.case !== "success") throw new Error("no turn terminal was recorded");
+    expect(frame.result.value.outcome.case).toBe("interrupted");
+    if (frame.result.value.outcome.case !== "interrupted") throw new Error("expected interrupted");
+    expect(frame.result.value.outcome.value.cause.case).toBe("hostShutdown");
+  });
+
+  test("KillSession force mid-turn concludes it interrupted by host_shutdown", async () => {
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+
+    await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await shim.exited;
+
+    const frame = writtenTerminal(shim, started.vendorSessionId);
+    if (frame?.result.case !== "success") throw new Error("no turn terminal was recorded");
+    if (frame.result.value.outcome.case !== "interrupted") throw new Error("expected interrupted");
+    // THE SAME CAUSE AS SIGTERM: KillSession{force} IS the host standing the
+    // session down, and it is the path SIGTERM itself takes.
+    expect(frame.result.value.outcome.value.cause.case).toBe("hostShutdown");
+  });
+});
+
+describe("context usage at the turn boundary", () => {
+  test("an ORDINARY turn pushes context_usage when it ends", async () => {
+    // Not only the drifting scenario: the push is unconditional at every turn
+    // end, so a topbar's figure is never one turn stale. Subscribed BEFORE the
+    // turn and keyed on a frame that arrives AFTER the turn's result, so the
+    // opening push cannot be mistaken for the turn-end one.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+    await watch.until((frame) => sessionUpdate(frame).update.case === "contextUsage");
+    const agent = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await agent.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const result = entryFrame(watchAgentEntry(frame))?.result;
+      return result?.case === "success" || result?.case === "failure";
+    });
+    const pushed = await watch.until(
+      (frame) => sessionUpdate(frame).update.case === "contextUsage",
+    );
+
+    const update = sessionUpdate(pushed);
+    if (update.update.case !== "contextUsage") throw new Error("expected context_usage");
+    expect(update.update.value.maxTokens).toBeGreaterThan(0n);
+    expect(update.update.value.model).not.toBe("");
+    watch.close();
+    agent.close();
+  });
+});
+
+describe("turn_in_flight, on both messages that carry it", () => {
+  test("SessionStarted.turn_in_flight names the turn a killed shim left open", async () => {
+    // A shim SIGKILLed mid-turn leaves a turn nothing concluded. The revived
+    // shim must say so on StartSession, because the daemon's whole reattach
+    // decision turns on whether there is work in flight.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const agent = openStream((options) =>
+      first.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await agent.next();
+    await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    agent.close();
+    first.signal("SIGKILL");
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    const revived = sessionStarted(
+      await second.clients.h1.startSession(resumeSession(started.vendorSessionId, remediationPay())),
+    );
+
+    // The detached run outlived the shim, so the revived session reports it as
+    // live work rather than pretending the conversation is idle.
+    expect(revived.liveWork.length).toBeGreaterThan(0);
+  });
+
+  test("SessionLive.turn_in_flight names the open turn when KillSession refuses", async () => {
+    // The refusal exists so the daemon can tell the user what forcing would
+    // destroy, and "a turn" with no name is not something a user can decide on.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "held-turn", text: "!hold" }));
+
+    const response = await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: false }),
+    );
+
+    expect(killSessionCause(response)).toBe("live");
+    expect(killSessionLive(response).turnInFlight?.value).toBe("held-turn");
+  });
+});
+
+describe("KillSession force across TWO turns", () => {
+  test("every live item from both turns is named, and each concludes interrupted", async () => {
+    // Liveness is a SESSION fact, not a turn fact: an item detached in turn one
+    // is still running during turn two, and a forced kill that named only the
+    // current turn's work would silently destroy the rest.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const agent = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await agent.next();
+
+    const runs: string[] = [];
+    for (const turn of ["t1", "t2"]) {
+      await shim.clients.h1.startTurn(startTurnRequest({ turn, text: "!bash-detach-live" }));
+      const announced = await agent.until((frame) => {
+        if (frame.frame.case !== "entry") return false;
+        const result = entryFrame(watchAgentEntry(frame))?.result;
+        if (result?.case !== "detachedWork") return false;
+        return !runs.includes(result.value.work?.value ?? "");
+      });
+      const result = entryFrame(watchAgentEntry(announced))?.result;
+      if (result?.case !== "detachedWork") throw new Error("expected a detached announcement");
+      runs.push(result.value.work?.value ?? "");
+    }
+    expect(new Set(runs).size).toBe(2);
+
+    // Seeded as everywhere else: no integration harness runs a sidecar, so each
+    // run's START row has no other producer, and each is left UNTERMINATED.
+    const store = createStoreClient(shim.dirs.storeSocket);
+    const watches = [];
+    for (const [index, run] of runs.entries()) {
+      await seedBashLifecycle(store, sidecarProducer(started.vendorSessionId), {
+        run,
+        work: run,
+        command: `sleep 10000${String(index)}`,
+        startedAtMs: 1_700_000_000_000 + index,
+        chunks: ["running\n"],
+        exitCode: null,
+        topLevel: started.vendorSessionId,
+      });
+      const bash = openStream((options) =>
+        shim.clients.h1.watchBash(
+          create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
+          options,
+        ),
+      );
+      await bash.next();
+      watches.push(bash);
+    }
+
+    const response = await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: true }),
+    );
+
+    const killed = sessionKilled(response);
+    if (killed.how.case !== "forced") throw new Error("expected a forced kill");
+    const stopped = killed.how.value.stoppedWork.map((id) => id.value);
+    for (const run of runs) expect(stopped).toContain(run);
+    // EACH stream concludes interrupted, and BEFORE the process goes.
+    for (const bash of watches) {
+      const terminal = (await bash.drain()).map(bashFrame).at(-1);
+      if (terminal?.result.case !== "success") throw new Error("expected a terminal");
       expect(terminal.result.value.outcome.case).toBe("interrupted");
     }
+    const exit = await shim.exited;
+    expect(exit.code).toBe(0);
     agent.close();
+  });
+});
+
+describe("Hibernate and revival", () => {
+  test("a shim killed AFTER the ack revives without paying a cold context", async () => {
+    // THE WHOLE POINT OF HIBERNATE. The daemon stands the shim down only after
+    // the ack, and the ack means the transcript was compacted — so the revival
+    // is a warm resume with NO remediation, and the first page carries the cut
+    // the hibernation performed.
+    //
+    // GRADED AGAINST THE SYNTHETIC COMPACTION FIXTURE: the summarizer is
+    // synthetic by ruling, so what is asserted is the shim's own compaction
+    // being visible in the feed, not a vendor's.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
+    hibernateAcked(await first.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})));
+    // STOOD DOWN, NOT SIGKILLED. The ack says the compaction happened; the
+    // graceful stand-down is what the daemon does next, and it is the half
+    // that guarantees the rows describing the compaction actually landed.
+    expect((await first.standDown()).code).toBe(0);
+
+    const second = await spawnShim({ reuse: first.dirs });
+    const response = await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
+
+    // NOT COLD, and no remediation was named: the hibernation already paid.
+    const revived = sessionStarted(response);
+    expect(revived.vendorSessionId).not.toBe("");
+    const watch = openStream((options) =>
+      second.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    const page = watchAgentPage(await watch.next());
+    const cuts = page.entries
+      .map((entry) => contextCutOf(entry))
+      .filter((cut): cut is conversationv1.ContextCut => cut !== null);
+    expect(cuts.some((cut) => cut.cut.case === "compacted")).toBe(true);
+    watch.close();
+  });
+
+  test("Hibernate before any turn refuses compaction_failed, naming the missing transcript", async () => {
+    // There is nothing to compact, and acking would tell the daemon a cold
+    // revival had been prevented when nothing was done at all.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {}));
+
+    expect(hibernateKind(response)).toBe("compactionFailed");
+  });
+});
+
+describe("the arms every verb declares before a session exists", () => {
+  // ONE TEST PER ARM. Each is a different sentence to the daemon, and a single
+  // "it refuses" assertion would pass on a shim that answered them all alike.
+  test("Hibernate with no session refuses no_session", async () => {
+    const shim = await spawnShim();
+
+    expect(
+      hibernateKind(await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {}))),
+    ).toBe("noSession");
+  });
+
+  test("KillSession with no session refuses no_session", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: false }),
+    );
+
+    expect(killSessionCause(response)).toBe("noSession");
+  });
+
+  test("SetSessionModel with no session refuses no_session", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, { model: modelNamed("fake-sonnet-5") }),
+    );
+
+    expect(setModelCause(response)).toBe("noSession");
+  });
+
+  test("SetSessionPermissionMode with no session refuses no_session", async () => {
+    const shim = await spawnShim();
+
+    const response = await shim.clients.h1.setSessionPermissionMode(
+      create(shimv1.SetSessionPermissionModeRequestSchema, {
+        permissionMode: permissionMode("acceptEdits"),
+      }),
+    );
+
+    expect(setPermissionModeCause(response)).toBe("noSession");
+  });
+
+  // DECLARED WITH NO PRODUCER. `KillSession{query_refused_to_end}` has no site
+  // in the engine: teardown DELIBERATELY swallows a refused vendor interrupt
+  // and continues, because a session that cannot be torn down cleanly must
+  // still be torn down. Reaching the arm would mean making that failure fatal,
+  // which is a contract change and not a test's to make.
+  test.todo(
+    "KillSession{query_refused_to_end} — no engine site produces it; teardown logs a refused interrupt at warn and continues by design",
+  );
+});
+
+describe("the vendor refusing a CONTROL call", () => {
+  // The shim relays these rather than owning them: the vendor said no, and a
+  // shim that reported success would leave the daemon showing a model or a
+  // mode the session is not actually in.
+  test("SetSessionModel answers vendor_refused when the vendor rejects setModel", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "set_model" } });
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: modelNamed("fake-sonnet-5"),
+        coldThresholdTokens: 1_000_000n,
+      }),
+    );
+
+    expect(setModelCause(response)).toBe("vendorRefused");
+  });
+
+  test("SetSessionPermissionMode answers vendor_refused when the vendor rejects it", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "set_permission_mode" } });
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.setSessionPermissionMode(
+      create(shimv1.SetSessionPermissionModeRequestSchema, {
+        permissionMode: permissionMode("acceptEdits"),
+      }),
+    );
+
+    expect(setPermissionModeCause(response)).toBe("vendorRefused");
+  });
+
+  test("StartSession answers vendor_start_failed when the vendor cannot be started", async () => {
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start" } });
+
+    const response = await shim.clients.h1.startSession(freshSession());
+
+    expect(startSessionCause(response)).toBe("vendorStartFailed");
+  });
+
+  test("a shim whose vendor refused to start is still SERVING", async () => {
+    // The refusal is a SESSION failure, not a process one: the shim is still
+    // the daemon's to use. Probed with a verb that mints no second identity —
+    // a second `fresh` StartSession would ask this shim to become a DIFFERENT
+    // conversation, which the record plane refuses by design.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start" } });
+    await shim.clients.h1.startSession(freshSession());
+
+    const response = await shim.clients.h1.killSession(
+      create(shimv1.KillSessionRequestSchema, { force: false }),
+    );
+
+    expect(killSessionCause(response)).toBe("noSession");
+    expect(shim.child.exitCode).toBeNull();
   });
 });

@@ -101,7 +101,7 @@ means the daemon and this build disagree about the contract.
     relocation safe.
   - `AGENT_REPL_FORBID_VENDOR_CALLS` — the guard (see below).
   - `AGENT_REPL_FAKE_TURN_GATE`, `AGENT_REPL_FAKE_TURN_GATE_TEXT`,
-    `AGENT_REPL_FAKE_SPOOL_ROOT` — `--fake` only.
+    `AGENT_REPL_FAKE_SPOOL_ROOT`, `AGENT_REPL_FAKE_REFUSE` — `--fake` only.
 - **Startup order**: parse argv → resolve env → configure the log on fd 3 →
   bind the UDS → serve. **NO LOCK IS TAKEN AT STARTUP.** A shim that has served
   but has no session is **INERT** and holds neither kernel lock, which is what
@@ -121,6 +121,20 @@ means the daemon and this build disagree about the contract.
   must not end a live turn.
 - **`--version`** prints `claude-shim <version>` and exits before any socket,
   lock, log fd or SDK import. It is a dependency-free smoke of the bundle.
+
+## Mock levers that are NOT prompts
+
+Some shim.v1 refusals are the shim relaying a vendor that said no to a CONTROL
+CALL, so no prompt can reach them. `AGENT_REPL_FAKE_REFUSE` names those verbs,
+comma-separated:
+
+| Value | What the mocked vendor does | The arm it makes reachable |
+| --- | --- | --- |
+| `start` | `createFakeQuery` throws before any message | `StartSession{vendor_start_failed}` |
+| `set_model` | `setModel()` rejects | `SetSessionModel{vendor_refused}` |
+| `set_permission_mode` | `setPermissionMode()` rejects | `SetSessionPermissionMode{vendor_refused}` |
+
+An unrecognized verb is a refusal to start, never a silently ignored knob.
 
 ## Mocked vendor: prompt → scenario table
 

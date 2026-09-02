@@ -123,6 +123,43 @@ export const TURN_GATE_TEXT_ENV = "AGENT_REPL_FAKE_TURN_GATE_TEXT";
 /** Roots the spool tree; the default matches the vendor's `/tmp/claude-<uid>`. */
 export const SPOOL_ROOT_ENV = "AGENT_REPL_FAKE_SPOOL_ROOT";
 
+/**
+ * The control verbs the mocked vendor REFUSES, comma-separated.
+ *
+ * Several shim.v1 refusals are the shim faithfully relaying a vendor that said
+ * no — `SetSessionModel{vendor_refused}`, `SetSessionPermissionMode
+ * {vendor_refused}`, `StartSession{vendor_start_failed}` — and a mock whose
+ * control verbs always succeed leaves every one of those branches asserted
+ * nowhere. There is no scenario prompt that could reach them: they are answers
+ * to CONTROL CALLS, not to a turn, so the lever has to be an environment knob
+ * the whole process reads rather than a prompt.
+ *
+ * Recognized verbs: `start` (createFakeQuery itself throws), `set_model`,
+ * `set_permission_mode`. Anything else is a refusal to start rather than a
+ * silently ignored knob.
+ */
+export const REFUSE_ENV = "AGENT_REPL_FAKE_REFUSE";
+
+/** The control verbs {@link REFUSE_ENV} may name. */
+const REFUSABLE = new Set(["start", "set_model", "set_permission_mode"]);
+
+/** Which control verbs this process was told to refuse. */
+export function refusedVerbs(env: NodeJS.ProcessEnv = process.env): ReadonlySet<string> {
+  const raw = env[REFUSE_ENV] ?? "";
+  const named = raw
+    .split(",")
+    .map((verb) => verb.trim())
+    .filter((verb) => verb !== "");
+  for (const verb of named) {
+    if (!REFUSABLE.has(verb)) {
+      throw new Error(
+        `${REFUSE_ENV}: ${JSON.stringify(verb)} is not a refusable control verb (expected one of ${[...REFUSABLE].join(", ")})`,
+      );
+    }
+  }
+  return new Set(named);
+}
+
 function awaitTurnGate(text: string): Promise<void> {
   const path = process.env[TURN_GATE_PATH_ENV] ?? "";
   const gateText = process.env[TURN_GATE_TEXT_ENV] ?? "";
@@ -234,6 +271,12 @@ export function createFakeQuery(
   canUseTool: CanUseToolLike,
   opts: FakeQueryOpts,
 ): QueryLike {
+  const refuse = refusedVerbs();
+  if (refuse.has("start")) {
+    // The vendor could not be started at all. StartSession turns this into
+    // `vendor_start_failed`, which is otherwise unreachable behind `--fake`.
+    throw new Error("the mocked vendor was told to refuse to start");
+  }
   const cwd = opts.cwd ?? process.cwd();
   const configDir =
     opts.configDir ?? process.env.CLAUDE_CONFIG_DIR ?? `${process.env.HOME ?? ""}/.claude`;
@@ -1019,6 +1062,9 @@ export function createFakeQuery(
     },
 
     setPermissionMode: async (mode: PermissionModeLike): Promise<void> => {
+      if (refuse.has("set_permission_mode")) {
+        throw new Error("the mocked vendor refused the permission mode change");
+      }
       LOGGER.log(
         { claude_session_id: sessionUuid, previous_permission_mode: permissionMode, permission_mode: mode },
         "fake vendor permission mode changed",
@@ -1030,6 +1076,9 @@ export function createFakeQuery(
     },
 
     setModel: async (next?: string): Promise<void> => {
+      if (refuse.has("set_model")) {
+        throw new Error("the mocked vendor refused the model change");
+      }
       const resolved = next ?? FAKE_DEFAULT_MODEL;
       LOGGER.log(
         { claude_session_id: sessionUuid, previous_model: model, model: resolved },
