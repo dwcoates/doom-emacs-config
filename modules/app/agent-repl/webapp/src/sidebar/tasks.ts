@@ -25,7 +25,7 @@ import type { CreateTaskError } from "../../../proto/gen/ts/agentrepl/v1/endpoin
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
-import { runVerb } from "./verbs.js";
+import { fireVerb } from "./verbs.js";
 
 /** The three changes `UpdateTask` accepts, as this end names them. */
 export type TaskChange =
@@ -144,7 +144,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
       operation: "sidebar.tasks.create",
       context: { length: title.length },
     });
-    void runVerb(submit, {
+    fireVerb(submit, {
       sc,
       rpc: "CreateTask",
       call: (client) => client.createTask(buildCreateTaskRequest(title)),

@@ -35,7 +35,7 @@ import {
   drawTypedRefusal,
   drawUnreadableRefusal,
   type SentenceTable,
-} from "../topbar/refuse.js";
+} from "../rpc/refuse.js";
 import { connectLoginLink, type LoginLink } from "./link.js";
 import { xtermFactory, type LoginTerminalView, type TerminalFactory } from "./terminal.js";
 

@@ -14,7 +14,6 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   COLD_GATE_COPY,
   drawFeedColdGate,
-  formatTokens,
   scopeLabel,
 } from "../../../src/feed/asks/cold-gate.js";
 import { armsOf } from "../arms.js";
@@ -77,23 +76,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
-});
-
-describe("formatTokens", () => {
-  const cases = [
-    { n: 0, want: "0" },
-    { n: 999, want: "999" },
-    { n: 1000, want: "1.0k" },
-    { n: 12_345, want: "12k" },
-    { n: 182_000, want: "182k" },
-    { n: 1_234_567, want: "1.2M" },
-  ] as const;
-
-  for (const c of cases) {
-    it(`formats ${c.n} as ${c.want}`, () => {
-      expect(formatTokens(c.n)).toBe(c.want);
-    });
-  }
 });
 
 describe("scopeLabel", () => {
@@ -309,21 +291,21 @@ describe("answering the gate", () => {
 
 describe("a refused gate answer", () => {
   const causes = [
-    { arm: "unknownWorkspace", cause: { case: "unknownWorkspace", value: {} }, text: "unknown workspace" },
+    { arm: "unknownWorkspace", cause: { case: "unknownWorkspace", value: {} }, text: "the daemon does not know this workspace" },
     {
       arm: "workspaceRefMismatch",
       cause: { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
-      text: "workspace ref mismatch — registry says /elsewhere",
+      text: "this workspace's directory disagrees with the registry's: /elsewhere",
     },
     {
       arm: "transferringAway",
       cause: { case: "transferringAway", value: { address: "127.0.0.1:9931" } },
-      text: "this workspace is transferring to 127.0.0.1:9931",
+      text: "this workspace moved to another daemon at 127.0.0.1:9931",
     },
     {
       arm: "notYetAdopted",
       cause: { case: "notYetAdopted", value: {} },
-      text: "the new daemon has not adopted this workspace yet",
+      text: "the daemon has not finished adopting this workspace yet",
     },
     {
       arm: "noColdGate",

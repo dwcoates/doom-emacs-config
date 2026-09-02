@@ -37,6 +37,7 @@ import { frameUndecodable } from "../failure/sink.js";
 import { interruptErrorSentence, logInterruptRefusal } from "../interrupt-error.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
+import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -134,7 +135,7 @@ function interruptControl(ctx: AppContext, spec: ControlSpec): HTMLElement {
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    void issue(ctx, spec, wrapper, false);
+    void guardMalformed(ctx, "footer.stop", issue(ctx, spec, wrapper, false));
   });
   return wrapper;
 }
@@ -291,7 +292,7 @@ function drawConfirm(
   confirm.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    void issue(ctx, spec, wrapper, true);
+    void guardMalformed(ctx, "footer.stop-confirm", issue(ctx, spec, wrapper, true));
   });
   wrapper.appendChild(confirm);
 }

@@ -17,6 +17,21 @@
  * the element its own previous draw produced.
  */
 import type { AppContext } from "../rpc/context.js";
+import { drawFeedCommandPanel } from "../panels/panels.js";
+import { drawFeedCommandRefused } from "../panels/refused.js";
+import { drawFeedArtifact } from "./cards/artifact.js";
+import { drawFeedFindings } from "./cards/findings.js";
+import { drawFeedHook } from "./cards/hook.js";
+import { drawFeedPlan } from "./cards/plan.js";
+import { drawFeedResponse } from "./cards/response.js";
+import { drawFeedShell } from "./cards/shell.js";
+import { drawFeedSkill } from "./cards/skill.js";
+import { drawFeedSimpleToolCall } from "./cards/tool-call.js";
+import { drawFeedColdGate } from "./asks/cold-gate.js";
+import { drawFeedPermission } from "./asks/permission.js";
+import { drawFeedQuestion } from "./asks/question.js";
+import { drawFeedMerge } from "./merge/merge.js";
+import { mergeBubbleBody } from "./merge/merge-body.js";
 import type { Handle } from "../failure/overlay.js";
 import { log } from "../log.js";
 import type {
@@ -123,6 +138,47 @@ export type BubbleBodyRenderer = (
 
 /** A per-bubble composer, mounted into SLOT and addressed to FEED. */
 export type ComposerFactory = (host: HTMLElement, feed: FeedId) => Handle;
+
+/**
+ * THE REGISTRY: every row renderer this build has, assembled once.
+ *
+ * WHY IT IS ASSEMBLED HERE rather than imported by the feed. The feed core is
+ * the mechanism (pages, the tail, upserts, bubbles, reveal) and the cards are
+ * the drawings; the feed importing all fifteen would put the mechanism above
+ * every card in the import graph and make the seam unusable — a card could not
+ * be tested, or replaced, without the whole feed behind it. So the seam is a
+ * plain record, this function is the ONE place it is filled in, and both
+ * `main.ts` and the integration harness call exactly this. A key added to
+ * `RowRenderers` and not here does not compile.
+ *
+ * CTX is taken (and not yet read) because the seam belongs to the page, not to
+ * a row: every renderer is handed its own `RowContext` at draw time. Taking it
+ * keeps the call site honest — the registry is built once per page, after the
+ * context exists — and leaves room for a renderer that needs a page-level fact
+ * without changing every caller.
+ */
+export function createRowRenderers(_ctx: AppContext): RowRenderers {
+  log("debug", "assembling the feed's row renderers", {
+    operation: "feed.renderers.assemble",
+  });
+  return {
+    response: drawFeedResponse,
+    simpleToolCall: drawFeedSimpleToolCall,
+    hook: drawFeedHook,
+    skill: drawFeedSkill,
+    artifact: drawFeedArtifact,
+    plan: drawFeedPlan,
+    findings: drawFeedFindings,
+    shell: drawFeedShell,
+    permission: drawFeedPermission,
+    question: drawFeedQuestion,
+    coldGate: drawFeedColdGate,
+    mergeHead: drawFeedMerge,
+    commandPanel: drawFeedCommandPanel,
+    commandRefused: drawFeedCommandRefused,
+    mergeBody: mergeBubbleBody,
+  };
+}
 
 /**
  * The arm a oneof selected, as a plain string.
