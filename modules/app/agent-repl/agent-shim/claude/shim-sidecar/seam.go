@@ -29,7 +29,7 @@ import (
 // spawning call's tool result and reports the task it opened; the reader is what
 // turns that into a spool's owner.
 type taskObserverSink interface {
-	SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string))
+	SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool))
 }
 
 // lostTerminalSink is implemented by a handler that can mint a detached run's

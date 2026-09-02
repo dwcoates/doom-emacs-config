@@ -382,7 +382,7 @@ record MEANS.
   `SessionID`, `Path`, `Kind`, `TaskID`, `SpoolDir`, `RunID`, `RunActivityID`.
 - FOUR OPTIONAL interfaces, adopted by adding a method. All take plain function
   and string arguments so neither package imports the other:
-  - `SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string))` —
+  - `SetTaskObserver(func(taskID, toolUseID, agentID, outputPath string, backgrounded bool))` —
     the converter reports each spawn it reads off a tool result; the reader
     turns it into a spool's owner. ONE CALL PER OBSERVATION, never a map two
     packages share.
