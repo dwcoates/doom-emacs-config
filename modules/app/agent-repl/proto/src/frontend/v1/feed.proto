@@ -1714,8 +1714,13 @@ message FeedMergeError {
 message FeedMergeFailed {
   string summary = 1;
 }
-// Taken off the queue before it ever reached the front.
-message FeedMergeAbandoned {}
+// Taken off the queue before it ever reached the front; a resolved sentence
+// for the collapsed line, as `failed` carries — the cause (user pause and
+// drop, workspace closed, daemon shutdown) otherwise survives only in the
+// daemon's log. (summary: landing 7, 2026-09-02.)
+message FeedMergeAbandoned {
+  string summary = 1;
+}
 
 // The ▸/▾ state. UI preference the daemon holds; see the roster's fold.
 message FeedMergeFold {

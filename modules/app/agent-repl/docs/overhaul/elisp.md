@@ -500,3 +500,14 @@ These are not host-natured; elisp is the plumbing that reaches them.
 - SubmitPromptSuccess.command_acted is a third non-turn success arm ("answered, nothing to await"); the composer clears. SubmitPromptError.duplicate_submission is a refusal that keeps the text and states the key was already accepted.
 - SubmitPromptError.turn_already_open is retired; the decoder's arm table drops it.
 - UpdateMergeQueueError.unknown_repository for the operator merge-queue verbs.
+
+## Landing 7 relay (2026-09-02, project lead)
+
+Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
+- SubmitPromptError.bubble_refused{detail, kind}: the host's submit error
+  path names the kind (not_deliverable | agent_busy) and echoes `detail`.
+- CloseWorkspaceBlocked now carries fields; the host command still keys off
+  the footer's close-blocked state for its message and may use `summary`
+  for the echo-area line.
+- FeedMergeAbandoned.summary: render on the collapsed merge line as the
+  failed summary is rendered.
