@@ -296,6 +296,40 @@ func (w *watcher) routeActivityLocked(agent *conversationv1.AgentId, act *conver
 		w.sinks.Topbar.OnActivity(w.ws, agent, act)
 	}
 	w.reapEndedMonitorLocked(act)
+	w.watchSpawnedSubagentLocked(act)
+}
+
+// watchSpawnedSubagentLocked opens the WatchAgent stream a SYNC subagent's own
+// work arrives on. A subagent's frames are addressed to the created agent and
+// draw on that agent's sub-feed, and the only way they ever reach the daemon
+// is a watch opened for it — so the spawn's start frame opens one eagerly,
+// exactly as a detached announcement does. The watch is NOT live work: an
+// in-turn subagent is the turn's own progress, and counting it would make the
+// workspace unfree for the whole spawn.
+func (w *watcher) watchSpawnedSubagentLocked(act *conversationv1.AgentActivity) {
+	start := act.GetSubagent().GetStart()
+	if start == nil {
+		return
+	}
+	created := start.GetCreatedAgentId()
+	if created.GetValue() == "" {
+		w.log.Error("daemon.sessionwatcher.subagent_unaddressable", "a subagent spawn named no created agent to watch", dlog.Context{
+			"activity_id": act.GetActivityId().GetValue(),
+		})
+		return
+	}
+	if _, ok := w.agents[created.GetValue()]; ok {
+		w.log.Debug("daemon.sessionwatcher.subagent_watch_repeat", "the spawned subagent is already watched", dlog.Context{
+			"agent_id": created.GetValue(),
+		})
+		return
+	}
+	entry := &agentWatch{id: created}
+	w.agents[created.GetValue()] = entry
+	w.log.Debug("daemon.sessionwatcher.subagent_watch", "watching a spawned subagent's own stream", dlog.Context{
+		"agent_id": created.GetValue(), "activity_id": act.GetActivityId().GetValue(),
+	})
+	w.openAgentStreamLocked(entry)
 }
 
 // routeTerminalLocked routes how one agent's stream ended, and reaps the watch
