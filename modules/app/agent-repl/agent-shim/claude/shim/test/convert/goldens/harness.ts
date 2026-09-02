@@ -237,6 +237,10 @@ export function goldenContext(scenario: string, overrides: GoldenOverrides = {})
     keepalive: overrides.keepalive ?? false,
     nowMs: () => 1_000,
     pendingAsk: (toolUseId: string) => asks.get(toolUseId),
+    // The golden harness replays a capture with no shim gate behind it, so no
+    // call is ever denied by this shim; the vendor's own denial records in the
+    // capture are folded exactly as they were recorded.
+    deniedCall: () => false,
     liveTask: () => undefined,
     subagentFor: (toolUseId: string) => books.get(toolUseId),
     mcpServerNames: () => overrides.mcpServerNames ?? [],
