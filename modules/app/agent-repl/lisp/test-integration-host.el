@@ -2475,12 +2475,9 @@ still pass every existing test."
   "A standing fault's KIND, not only its detail, must reach the health buffer.
 proto `HostFault': \"`detail' SUPPLEMENTS the typed kind, never replaces
 it.\"  `agent-repl-session-health''s own \"standing host faults\" rendering
-prints `detail' alone today.
-
-KNOWN PRODUCTION GAP -- this test currently FAILS BY DESIGN, in the same
-spirit as this file's `agent-repl-itest-host-unfocused-notification-click-selects-the-tab':
-the kind is decoded correctly (see the sibling test above) but nothing
-renders it, so a doctor reading only the health buffer cannot tell a
+prints the kind beside the detail (audit-3 #29 ruling), through the one
+shared `agent-repl-verbs--fault-line' formatter the daemon and session
+verdicts also use, so a doctor reading only the health buffer can tell a
 `shim_died' fault from a `bounce_unknown' one."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon

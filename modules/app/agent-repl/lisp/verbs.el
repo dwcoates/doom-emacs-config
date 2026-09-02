@@ -576,12 +576,24 @@ is the daemon-wide switch and is omitted from the encoding."
     (dolist (line lines) (insert line "\n")))
   (display-buffer agent-repl-verbs-health-buffer))
 
+(defun agent-repl-verbs--fault-line (fault indent)
+  "Render FAULT as one line, prefixed by INDENT.
+THE KIND IS THE FAULT CLASS; the detail SUPPLEMENTS it, never replaces it
+(HostFault, DaemonFault and SessionFault all say so), so both are
+printed.  Every family renders through this ONE formatter so a doctor
+reads the same shape whichever stream the fault came from.  A fault with
+no kind arm is a contract breach the decoder refuses, so reaching here
+without one is loud rather than silently detail-only."
+  (let ((kind (plist-get (plist-get fault :kind) :arm))
+        (detail (plist-get fault :detail)))
+    (if kind
+        (format "%s- %s: %s" indent (substring (symbol-name kind) 1) detail)
+      (agent-repl--error nil "elisp.verbs.fault-without-kind detail=%S" detail)
+      (format "%s- unknown-kind: %s" indent detail))))
+
 (defun agent-repl-verbs--fault-lines (faults)
-  "Return one rendered line per fault in FAULTS.
-The dynamic detail is printed verbatim: it SUPPLEMENTS the typed kind
-rather than replacing it, and the kind oneof lands with its first derived
-arms, so today the detail is the whole of what a fault says."
-  (mapcar (lambda (fault) (format "  - %s" (plist-get fault :detail))) faults))
+  "Return one rendered line per fault in FAULTS."
+  (mapcar (lambda (fault) (agent-repl-verbs--fault-line fault "  ")) faults))
 
 (defun agent-repl-verbs--render-verdict (title verdict extra)
   "Render VERDICT under TITLE into the health buffer, followed by EXTRA lines.
@@ -622,7 +634,7 @@ and a doctor reading only the pull would miss them."
          (standing (agent-repl-host-faults ws))
          (extra (when standing
                   (cons (format "  standing host faults (%d):" (length standing))
-                        (mapcar (lambda (f) (format "    - %s" (plist-get f :detail)))
+                        (mapcar (lambda (f) (agent-repl-verbs--fault-line f "    "))
                                 standing)))))
     (agent-repl-verbs--send
      #'agent-repl-rpc-session-health (agent-repl-verbs--conn ws)
