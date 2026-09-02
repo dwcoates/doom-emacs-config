@@ -2209,3 +2209,66 @@ describe("account usage, pushed on the account-usage interval", () => {
     expect(available?.sevenDayOpus).toBeUndefined();
   });
 });
+
+/**
+ * reportStoreUnreachable (ReadHistory's store_unavailable path) and
+ * concludeStoppedRuns (StopBash's write of the interrupted terminal).
+ */
+describe("ReadHistory reports a store outage", () => {
+  it("calls reportStoreUnreachable when the store answers store_unavailable", async () => {
+    const h = harness();
+    await started(h);
+    h.persistence.readError = new (await import("../../src/store/persistence.js")).PersistenceError(
+      "store_unavailable",
+      "the store is down",
+    );
+    const before = h.engine.pushes.faultCount;
+
+    const response = await h.engine.readHistory(
+      create(shimv1.ReadHistoryRequestSchema, {
+        pageSize: 5,
+        position: {
+          case: "after",
+          value: create(conversationv1.HistoryPointerSchema, { value: "p-1" }),
+        },
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("storeUnavailable");
+    expect(h.engine.pushes.faultCount).toBe(before + 1);
+  });
+});
+
+describe("StopBash writes the interrupted terminal (concludeStoppedRuns)", () => {
+  it("closes a live shell run the shim itself stopped", async () => {
+    const h = harness();
+    await started(h);
+    await h.engine.onSdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "toolu_1",
+      task_type: "local_bash",
+      description: "sleep 600",
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: h.queries[0]?.spec.binding.kind === "fresh" ? h.queries[0].spec.binding.sessionId : "",
+    } as never);
+
+    const response = await h.engine.stopBash(
+      create(shimv1.StopBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "toolu_1" }),
+      }),
+    );
+
+    expect(response.result.case).toBe("success");
+    const wrote = h.persistence.buffered.some((entry) => {
+      if (entry.item.kind !== "bash_run") return false;
+      const result = entry.item.frame.result;
+      if (result.case !== "success") return false;
+      return result.value.outcome.case === "interrupted";
+    });
+    expect(wrote).toBe(true);
+  });
+});
