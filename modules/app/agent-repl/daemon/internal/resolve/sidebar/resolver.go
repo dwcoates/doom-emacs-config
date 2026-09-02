@@ -467,13 +467,26 @@ func terminalOutcome(success *conversationv1.AgentSuccess, failure *conversation
 }
 
 // vendorBlocked reports whether a failure is the VENDOR's or the ACCOUNT's
-// rather than agent-repl's. Only these two arms are: an account-level block and
-// a refill breaker are both "the vendor will not serve this account right now",
-// which is what the roster's vendor_blocked dot says. Every other failure is a
-// run that failed, not a session that cannot proceed.
+// rather than agent-repl's, which is what the roster's vendor_blocked dot says
+// and what render-colors resolves PURPLE.
+//
+// The first two arms are "the vendor will not serve this account right now".
+// The four below them are the run's OWN terminals, whose failure.proto evidence
+// messages (FailureVendorMaxTurns, FailureVendorMaxBudget,
+// FailureVendorExecutionError, FailureVendorTurnFailed) each state that they
+// resolve the workspace PURPLE — landing 8, which gave them a wire path.
+// stop_hook_prevented is deliberately NOT here: its evidence message is
+// FeedTurnErrorStopHookPrevented, not a FailureVendor* one, because a Stop hook
+// is the user's own configuration rather than the vendor refusing. Every other
+// failure is a run that failed, not a session that cannot proceed.
 func vendorBlocked(failure *conversationv1.AgentFailure) bool {
 	switch failure.GetFailure().(type) {
-	case *conversationv1.AgentFailure_BlockingLimit, *conversationv1.AgentFailure_RapidRefillBreaker:
+	case *conversationv1.AgentFailure_BlockingLimit,
+		*conversationv1.AgentFailure_RapidRefillBreaker,
+		*conversationv1.AgentFailure_MaxTurns,
+		*conversationv1.AgentFailure_BudgetExhausted,
+		*conversationv1.AgentFailure_ExecutionError,
+		*conversationv1.AgentFailure_StructuredOutputRetryExhausted:
 		return true
 	default:
 		return false
