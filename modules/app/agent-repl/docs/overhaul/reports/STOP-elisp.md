@@ -1,112 +1,105 @@
-# STOPPING POINT — EMACS (elisp) overhaul (2026-08-31, wind-down directive)
+# STOPPING POINT — EMACS (elisp) overhaul (2026-09-02, project pause)
 
-Branch `overhaul/elisp`; STOP tip is the commit that adds this file (its
-parent 798760ff6 is the last code commit). Zero agent worktrees remain under
+Branch `overhaul/elisp`; STOP tip is the commit that adds this file (its parent
+05c49d574 is the last code/ledger commit). Zero agent worktrees under
 ~/.config/doom-overhaul/elisp-agents; no agents running; nothing queued for
-dispatch. The live ledger is docs/overhaul/elisp-fanout.md §0c (compaction
-rule included); the audit record is reports/elisp-suite-audit-1.md.
+dispatch (parked per the user's pause directive). The live ledger is
+docs/overhaul/elisp-fanout.md §0c (every ruling of this session is recorded
+there in dispatch order); §17 carries the dead-code lists; the audit records are
+reports/elisp-suite-audit-{1,2,3}.md.
 
-## Merged inventory (all green at unit level, load-errors=nil)
+## Board at 05c49d574 (2026-09-02 00:47, all standalone runs)
 
-Foundation → landings 1–5 merged (last: 081dbbba8; vocab reconciled at
-f1132d3a7, files identical to integration). Waves, all merged, worktrees
-removed: connect+rpc; wire-common/host/roster/verbs; dead-code pre-pass
-(+notes.el, agent-repl--error/--fatal split); W2-A (daemon-link, host,
-daemon cold start, services, notifications); W2-B (roster, status, popup,
-workspace, session, frontend, webview-recovery, open-progress, panels,
-window); W2-C (input composer, commands, verbs, worktree slimming, doctor);
-integration suite + Go fake daemon (testsupport/fakedaemon; raw-body
-recording, /_fake/gate, headers flushed on accept); R-DAEMON; R-ARMS +
-R-LOGOP; R-VERBS (+ log-routing reversal); R-SUITE-1 (all 92 audit findings
-pinned); remediation-1 (R-ACCEPT stream-acceptance-on-headers, R-QUESTION,
-R-STREAMCLOSE, host refusal handler + redial-and-reload); R-NOTIFY
-(notification policy, blink cadence, R-CLICK activation, :unknown gate,
-landing-5 merge-queue repository scope).
+- connect 32/32, link 44/44, host 90/90, roster 71/71, daemon 30/30,
+  verbs 99/99, composer 74/74 — every integration suite green standalone.
+- All-suite `lisp/test-agent-repl.el`: 3517/3518. ONE SURVIVING RED, order/
+  load-dependent only: `agent-repl-itest-link-bounce-indicator-clears-once-
+  reconnected` (test-integration-link.el:1193; audit-3 #10) timed out
+  "waiting for 1 subscriber(s) on the daemon stream" after 132 s in the
+  all-suite order; green standalone. First candidate cause: the bounce
+  reconnect's quiet window plus a prior scenario's daemon.addr state in the
+  shared fixture; second: the same `--await-subscribers` before acceptance
+  shape R-STABILITY fixed elsewhere. Owner at resume: a small opus-low brief.
+- test-helpers load of config.el: zero load errors. Fake daemon
+  (lisp/testsupport/fakedaemon): go build + go test ok, offline.
+- Landing 6 merged (93e071ef0) and adapted (command_acted,
+  duplicate_submission, turn_already_open retired, unknown_repository).
 
-Unit suites at the tip (last verified counts): core 400, wire-common 67,
-wire-host 104, wire-roster 48, wire-verbs 237, connect 71, rpc 23,
-daemon-link 68, host 94, roster 36, status 229, workspace 266, session 15,
-frontend 86, webview-recovery 16, open-progress 33, panels 221, window 58,
-notes 17, notifications 83, verbs 82, input 62, commands 50, worktree 38,
-prompt-queue 30, prompt-summary 25, history 127, clipboard-image 15,
-keybindings 18, config 23, magit 63, emoji 75, frontends 29, test-helpers
-31, render-colors 18 — all green. Go fake daemon build+test green offline.
+## What this session landed (3d3ea3a2c → 05c49d574, 153 commits)
 
-## Integration board at 798760ff6 (per-suite; each red's cause/owner)
+R-VERBS-SUITE, R-HANDOVER, R-ROSTER, R-COMPOSER, R-POLISH (the STOP queue);
+R-STABILITY (+R-LOGFORGET); R-DEADCODE (opus-low — DEVIATION from the later
+amended rule) and R-DEADCODE-2 (sonnet-medium); audit 2 → R-SUITE-2 +
+R-AUDIT2-PROD; R-REGRESS (per-workspace log link repaired on the reuse path);
+R-LANDING6; audit 3 → R-SUITE-3 + R-AUDIT3-PROD (+ panel-selection origin) +
+R-CLOSE + R-RED-3A/3B. Production defects found by the audits and fixed:
+roster re-subscribe on promotion; SubmitPrompt handover arms held and
+replayed under the same key; hook containment; dead-conn drain refusal; rename
+re-keys host state and the standing stream follows the rename; input buffer
+named at creation; explicit-text sends keep the composer draft; reopened rows
+revive tombstones; restart sequencing; cold-start provenance log; fault kind
+rendered; log-link repair; `:project-dir` on roster-opened tabs; magit GitHub
+URL builder.
 
-- connect 21/21 GREEN.
-- link 20/26. 6 red, all R-HANDOVER: dual attach on an announced address,
-  handover hooks, bounce reconnect once addr returns, down/up/handover log
-  pins, old-stream-close promotion, and audit #11 (drain cause text must
-  name the DrainReason carried by scheduled_drain/immediate).
-- host 40/51. 11 red: the transferred family ×7 (adopt on successor /
-  ordering / cancel / resubscribe / conn update / real-link path / adopt
-  error keeps old stream) → R-HANDOVER; register-error on-done nil (#33),
-  standing faults exposure + health buffer (#30 pair), webview URL
-  carries-only-workspace-and-dir (#38) → R-POLISH.
-- roster 34/47. 13 red → R-ROSTER: the finish-edge family (fires on
-  running→settled, not running→running or settled→settled; the four
-  reactions observable: banner "Agent ready: <name>" (#52), echo, magit
-  refresh, deferred drain), walk order (two repo sections, children
-  depth-first, task view ignored), row rename keeps the workspace,
-  roster-missing-repository refused, roster-without-current no-op.
-- daemon 14/15. 1 red → R-POLISH: #90 default command path + no argv.
-- verbs 29/61. 32 red → R-VERBS-SUITE (suite-side, DIAGNOSED): R-SUITE-1
-  repaired the pre-existing tests to the PRE-R-VERBS convention — they pass
-  ready-made oneof plists to verbs that take bare keywords and wrap
-  internally (create refuses "unknown creation form (:arm :standard …)";
-  set-priority double-wraps). Fix: re-repair the suite's verb calls to the
-  landed signatures (bare form arm + keyword facts; bare level keyword;
-  flat actions), then triage the ~21 timeout-class failures that remain
-  (log-ack and teardown assertions). The two landing-5 scoped merge-queue
-  tests should go green with the call repair (the encoder landed with
-  R-NOTIFY).
-- composer 37/42. 5 red → R-COMPOSER (input.el production gaps): attached
-  image as ImageBlock{path} + media type on the wire (2), success-turn
-  posthooks, transport-failure defer path, #66 outage drain reusing the
-  failed attempt's idempotency key (ruled: same key).
+## Rulings made by the teamlead this session (all in §0c; review at resume)
 
-## Queued briefs for resume, in dispatch order (all cancelled for the pause)
+- Hook containment: a consumer's error inside link up/down/handover/promote
+  runs is logged ERROR and the rest still run (never swallowed silently).
+- Promote hook `agent-repl-link-promote-functions` (OLD NEW); roster and the
+  prompt-queue drain register on it.
+- Connect finding: a server-streaming REFUSAL arrives as HTTP 200 + error end
+  frame; ON-OPEN legitimately fires once before it; "subscribed" is keyed on
+  acceptance AND the close outcome.
+- `agent-repl-install-commit-emoji-hook` stays (interactive provisioning of a
+  blessed feature; no install.sh exists) — the 2026-08-29 removal targets the
+  AUTO-installer.
+- Frontend gui send/interrupt plumbing (leaf in deleted frontend-client.el)
+  deleted; the composer is host-native; Emacs calls no interrupt rpc.
+- Panels region-selection send uses `:user-sent` (no panel-selection
+  PromptOrigin exists; existing UX kept).
+- Audit-3 #51: only a composer-sourced send erases the composer.
+- Audit-3 #30: daemon-link's guard wins — a `transferring_away` naming an
+  address other than the standing successor is logged ERROR, not dialed.
+- Audit-3 #41: the finish-edge banner passes ACTIVATE nil (the backend's
+  workspace-activation default).
+- `not_yet_adopted` retry paced by `agent-repl-host-handover-retry-delay`
+  (implementation-detail override of "retry on acceptance"; the acceptance
+  path stays for the no-successor case).
+- The webview buffer name stays a lookup key; naming.title renames the INPUT
+  buffer.
 
-1. R-VERBS-SUITE — the diagnosed suite-side call repair + timeout triage.
-2. R-HANDOVER — link+host transferred family per §7 FINAL HANDOVER
-   SEQUENCE (adopt at the announced address, conn update, webview reload,
-   page self-adopts, promotion), plus #11 drain-cause text and #52 banner
-   format.
-3. R-ROSTER — finish-edge semantics + reactions wiring + walk order +
-   rename + the two roster validation pins.
-4. R-COMPOSER — the five input.el gaps (#66 per the ruling).
-5. R-POLISH — daemon #90; host #33/#30/#38.
-6. Adversarial audit 2 (fable, fresh context) once the board is green;
-   then the loop per TEAMLEAD.md.
+## Toss-ups for the user (project lead relays)
 
-## Open questions / decisions parked
+- #51: should an explicit-text command send (update-pr, explain, rebase)
+  leave the composer draft alone (ruled yes) or clear it as before?
+- Should a PromptOrigin exist for the panels region-selection send (today
+  `:user-sent`)? Proto change if yes.
+- Should the daemon-side workspace rename be surfaced to the user at all
+  (today: tab and buffers rename silently)?
+- Interrupt placement / InterruptAllAgents (RESUME-MASTER's item; Emacs
+  calls no interrupt rpc today).
+- The commit-emoji hook installer: keep as an interactive command (ruled) or
+  move provisioning into an install.sh that does not exist yet?
 
-- R-NOTIFY's surfaced fixture-hook decision: how the harness installs the
-  fake notifier/effects consumer (its final commit "the new attention
-  scenarios restore the consumer they test", 10a107963, carries the
-  current answer; revisit when R-ROSTER touches the same harness hooks).
-- Q4 (HeldPrompt accept) and Q5 (capture run) remain the project lead's;
-  neither blocks Emacs work. Q1 /agents+/help panels: daemon does not
-  recognize them; Emacs already treats command_refused as "answered".
-- The create-or-update-workspace skill's `status` verb lost its
-  workspace-status.json source (recorded follow-up outside the wave).
+## Follow-ups recorded (not dispatched; resume queue in order)
 
-## UX gaps filled from the API (standing; also in the ledger)
+1. The surviving all-suite red above (link bounce indicator, order-dependent).
+2. test-roster's `--with-editor` stub writes `:project-dir` itself and masked a
+   gap; decide whether the stub should stop (touches every test in the file).
+3. Cosmetic: test-integration-composer.el:28 `declare-function
+   agent-repl--meta-wrap "prompts"` should name "agent-repl-core".
+4. A suite-wide `agent-repl--prompt-queue` cleanup helper (cross-test residue).
+5. Adversarial audit 4 (fable, fresh context) → loop per TEAMLEAD.md, then a
+   sonnet-medium dead-code rescan over everything landed since R-DEADCODE-2.
+6. The create-or-update-workspace skill's `status` verb lost its
+   workspace-status.json source (outside the wave).
 
-Tab set = closed=false rows in roster walk order; merged/closed/killed rows
-carry closed=true (ruled). Finish edge = running {submitting thinking
-clearing compacting permission} → settled {ready done interrupted
-idle-async}. Tab-name collision → "name·repo label". Composer on
-none/terminal/unknown SENDS (ruled). Foreign daemon adopted, never killed
-(ruled). Drain indicator = global-mode-string segment. Notes keyed per
-workspace name. transcripts.el / ai-title.el / workspace-status-export.el
-removed by API absence. Buffer titles: naming.title > slug > roster row
-name. Deferred queue: explicit deferral drains on the finish edge, outage
-queue on link-up, same-key resend.
+## Standing facts
 
-## Worktrees / state
-
-None left. AGENT_REPL_FORBID_VENDOR_CALLS=1 on every test invocation; no
-real vendor call anywhere; nothing deployed, nothing hot-loaded, nothing
-pushed.
+Tabs = closed=false rows in roster walk order; finish edge running→settled;
+composer on none/terminal/unknown sends; foreign daemon adopted, never killed;
+drain indicator = global-mode-string segment; HostWorkspaceTransferred is
+empty — the successor address is always WatchDaemon's announcement; the
+webview reloads at the successor and self-adopts; Ctrl-B detach shows and
+refuses honestly. AGENT_REPL_FORBID_VENDOR_CALLS=1 on every test invocation;
+no real git in tests; nothing deployed, hot-loaded or pushed.
