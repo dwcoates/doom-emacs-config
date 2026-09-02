@@ -97,6 +97,7 @@ than a silently ignored instruction.
 | `POST /_fake/push` | `{stream, workspace_id?, message, snapshot?}` | Deliver `message` (protojson of the stream's response type) to every matching open subscriber. `snapshot: true` also stores it, so later subscribers receive it on subscribe. |
 | `POST /_fake/end` | `{stream, workspace_id?, error?: {code, message}, abort?}` | End matching streams. With `error`, the end frame carries that Connect error. With `abort`, the TCP connection is dropped and **no end frame is written at all**. |
 | `POST /_fake/gate` | `{method, release?}` | Withhold one method's ANSWER until released. For a UNARY method the answer is the response; for one of Emacs's THREE STREAMS (`WatchHostWorkspace`, `WatchDaemon`, `WatchWorkspaceRoster`) the answer is its ACCEPTANCE — the response header block — so a gated stream is dialled but unaccepted and lists no subscriber. The request is still recorded and validated either way. `release: true` lets every held call answer and disarms the gate. Unknown method (a webapp-only stream included) → 400; releasing a gate nobody armed → 400. |
+| `POST /_fake/reset` | `{}` | Return the fake to its start-of-process state WITHOUT restarting it: drop the recording, the scripted table, the stored snapshots and every armed gate, and end every standing stream with a clean end frame. An armed gate is CLOSED rather than forgotten, so a call the previous test left held answers instead of hanging. This is what lets ONE fake serve a whole suite — the elisp harness resets between scenarios instead of paying a process boot per test. Answers with what it cleared: `{calls, scripts, snapshots, gates, ended}`. |
 | `GET /_fake/calls` | — | The recorded requests in order: `[{method, body, raw?, headers?}]`. `body` is the request's protojson re-marshalled from the decoded message; `raw` is the request EXACTLY as the client wrote it; `headers` are its request headers, canonically named. `[]` when nothing has been called. |
 | `GET /_fake/subscribers` | — | Open streams: `[{id, stream, workspace_id?}]`. |
 | `POST /_fake/exit` | — | Answer, then exit orderly (removing `daemon.addr`). |
@@ -176,7 +177,9 @@ A suite drives one instance like this:
    and production logs (what Emacs did about it).
 7. `/_fake/end` when the scenario is about an ending; otherwise cancel from
    the Emacs side, which is the graceful close.
-8. `/_fake/exit`, or kill the process, at teardown.
+8. `/_fake/reset` at the START of the next scenario — the elisp harness does
+   this for you, and also waits for the subscribers to drain before clearing
+   once more; `/_fake/exit`, or kill the process, once the whole run ends.
 
 **Handover** scenarios run two instances: the second one's start rewrites
 `daemon.addr`, the first announces `shutdown_announced{address}` naming the
