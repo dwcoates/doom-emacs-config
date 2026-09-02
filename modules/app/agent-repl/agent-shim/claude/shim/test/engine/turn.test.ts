@@ -9,6 +9,7 @@
  * prompt that was never recorded.
  */
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { PersistenceError } from "../../src/store/persistence.js";
@@ -666,6 +667,28 @@ describe("WatchAgent", () => {
         }
       })(),
     ).rejects.toThrow(/no such book/);
+  });
+
+  it("closes the store's own unknown_agent refusal with Code.NotFound", async () => {
+    // Landing 7: the store refuses a well-formed id naming no book; the shim
+    // relays that as NotFound rather than as an internal error.
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("unknown_agent", "no book under that id");
+
+    const error = await (async () => {
+      try {
+        for await (const _ of h.turns.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          // the open is refused before anything is yielded
+        }
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
+
+    expect(error instanceof ConnectError ? error.code : undefined).toBe(Code.NotFound);
   });
 });
 

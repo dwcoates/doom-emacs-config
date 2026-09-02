@@ -157,6 +157,7 @@ type TypedReadFailure = {
   readonly detail: string;
   readonly kind:
     | { readonly case: "invalidRequest" }
+    | { readonly case: "unknownAgent" }
     | { readonly case: "stalePointer" }
     | { readonly case: "storageFailure" }
     | { readonly case: undefined };
@@ -168,6 +169,9 @@ type TypedReadFailure = {
  * THE ARM DECIDES, never the detail:
  *   - `stale_pointer` → `stale_pointer`. The caller's mark names no line of
  *     this book; it re-reads from the floor.
+ *   - `unknown_agent` → `unknown_agent`. The store's own refusal of a
+ *     well-formed agent id that names no book (landing 7): the record plane,
+ *     not the shim, is what knows whether a book exists.
  *   - `invalid_request` → `unknown_agent`. The store validates the book before
  *     anything else, so on a read the only request the shim can malform is the
  *     agent id — page_size and the pointer are minted by this process. Reported
@@ -180,6 +184,7 @@ export function readFailure(failure: TypedReadFailure): PersistenceError {
   switch (failure.kind.case) {
     case "stalePointer":
       return new PersistenceError("stale_pointer", failure.detail);
+    case "unknownAgent":
     case "invalidRequest":
       return new PersistenceError("unknown_agent", failure.detail);
     case "storageFailure":
