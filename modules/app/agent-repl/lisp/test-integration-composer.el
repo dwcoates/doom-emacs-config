@@ -591,6 +591,18 @@ submit that still carried the first image would resend it twice."
               (should (equal (agent-repl-itest-composer--image-paths
                               (agent-repl-itest-composer--submit-body daemon 0))
                              (list image)))
+              ;; THE CLEARING IS A CONSEQUENCE OF THE ANSWER, NOT OF THE
+              ;; REQUEST LANDING.  `--await-call' proves only that the
+              ;; daemon recorded the submit; input.el empties the
+              ;; attachment list in the success callback, which runs when
+              ;; the answer arrives.  A second send issued on the strength
+              ;; of the recorded call alone races that callback and
+              ;; sometimes re-sends the very image this test exists to
+              ;; prove is gone -- so the wait is for the observable
+              ;; consequence, not for the request.
+              (agent-repl-itest--wait-until
+               (lambda () (null (buffer-local-value 'agent-repl-input-attachments buf)))
+               nil "the first send's attachments to clear")
               ;; Act: second send, nothing newly attached.
               (with-current-buffer buf (insert "and this"))
               (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
