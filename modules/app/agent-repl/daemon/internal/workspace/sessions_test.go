@@ -886,3 +886,36 @@ func TestHealthAnswersNotServingForAGateParkedSession(t *testing.T) {
 		t.Fatalf("Health() = (%v, %v), want the session to exist and not be serving", exists, serving)
 	}
 }
+
+// TestStopTellsTheViewsTheLinkIsDead pins the edge the roster's `dead` arm
+// rests on. Stop closes the watcher BEFORE it kills the process, so the
+// client's own LinkDead publish has nobody left to route it: whether the views
+// ever heard the death would otherwise depend on the exit landing before the
+// close, which is a race the stop itself can settle.
+func TestStopTellsTheViewsTheLinkIsDead(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.links.links = nil
+
+	// Act
+	if err := f.fleet.Stop(context.Background(), ws.ID, true); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// Assert
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkDead, shimclient.LinkDead, shimclient.LinkDead,
+	}
+	if len(f.links.links) != len(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is dead", f.links.links)
+	}
+	for i, got := range f.links.links {
+		if got != want[i] {
+			t.Fatalf("OnLink call %d = %v, want %v", i, got, want[i])
+		}
+	}
+}
