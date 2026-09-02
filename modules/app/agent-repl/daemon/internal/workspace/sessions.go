@@ -705,6 +705,15 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	}); err != nil {
 		return fmt.Errorf("stop session for %q: kill the shim: %w", ws, err)
 	}
+	// THE VIEWS ARE TOLD HERE, not left to the connectivity feed. The watcher
+	// was closed above, so the client's own LinkDead publish has nobody left
+	// to route it: whether the views ever saw the death would otherwise depend
+	// on the exit landing before the close, which is a race the stop itself
+	// can settle. Kill has already passed the reap gate, so the process is
+	// gone by the time this runs.
+	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkDead)
+	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
+	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
 	return nil
 }
 
