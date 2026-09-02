@@ -348,6 +348,7 @@ func (p *process) apply(line []byte) Reply {
 		if agent == "" {
 			agent = f.GetAgentId().GetValue()
 		}
+		p.srv.rememberPushedBash(f)
 		p.srv.agents.publish(agentFrame{agent: agent, frame: f})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
@@ -356,6 +357,7 @@ func (p *process) apply(line []byte) Reply {
 		if err := proto.Unmarshal(payload, b); err != nil {
 			return Reply{Error: fmt.Sprintf("fakeshim: decode bash frame: %v", err)}
 		}
+		p.srv.rememberBashStart(cmd.Work, b)
 		p.srv.bashes.publish(bashFrame{work: cmd.Work, bash: b})
 		return Reply{OK: true, Count: p.srv.bashes.count()}
 
