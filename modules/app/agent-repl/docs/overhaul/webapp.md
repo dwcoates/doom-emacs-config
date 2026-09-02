@@ -436,3 +436,9 @@ One file per drawn component; each file's header comment is its spec.
 - Every agentrepl.v1 refusal is typed; refusal rendering and arm-coverage guards cover the new arms (cross-cutting four on every per-workspace rpc; per-rpc arms).
 - DaemonFault/SessionFault/HostFault kinds are typed; the failure overlay and footer fault rows draw by arm.
 - FooterAllowance.status is a typed oneof; color by arm from render-colors.json.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- SubmitPromptSuccess.command_acted: a recognized act with no turn; the composer clears its text and draws nothing (the effect arrives on the topbar/footer streams). SubmitPromptError.duplicate_submission: refusal at the composer, text preserved, worded as "already submitted".
+- SubmitPromptError.turn_already_open is retired; remove its sentence and arm guard (schema-driven enumeration should already drop it).
+- UpdateMergeQueueError.unknown_repository: refusal at the merge-queue control.

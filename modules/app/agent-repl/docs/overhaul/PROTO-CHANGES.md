@@ -171,6 +171,33 @@ OWN ACCORD:
   retirement of any landed-but-unused arms; FeedPermissionArguments' wire
   source.
 
+## Landing 6 — overhaul/integration (2026-09-01; protos d46e601e7)
+
+OWN ACCORD (all plain-data arms with a real refusal/answer site, the
+"derived at the wave" class; raised by the daemon's wave-3 wiring):
+- SubmitPromptSuccess.command_acted (empty) — a recognized session act that
+  mints no turn (/model <arg>, the picker path) had no success arm.
+- SubmitPromptError.duplicate_submission (empty) — the client-minted
+  idempotency_key was already accepted for the workspace.
+- UpdateMergeQueueError.unknown_repository (empty) — pause/resume named a
+  RepositoryRef the registry does not hold.
+- RETIRED SubmitPromptError.turn_already_open (tag 8 reserved) — no producer
+  anywhere: a busy subagent is refused by the SHIM (UpdateAgentFailure) and
+  relayed; the daemon never judges a subagent's turn.
+
+ALREADY LANDED, no change (proposals answered by reading the contract):
+- SubmitPromptCommandPanel.status exists (tag 1); the thin /status panel has
+  its wire home. AnswerQuestionError already splits ask_not_standing (5) from
+  unserved_value (6).
+
+RULED, no change:
+- Watch* rpcs carry no <Rpc>Error by design; a refused open (unknown or
+  unowned workspace, unknown/expired FeedWatchToken, no login pty) closes at
+  the transport per the refused-open convention. The daemon's ERROR-ARMS
+  records these as transport-closed, not unlanded.
+- OpenWorkspaceTranscriptMissing.searched_paths stays a bare list this wave;
+  the webapp renders the count. A composed sentence is deferred.
+
 ## Explicitly NOT changed (rulings recorded instead)
 
 - WatchAgentSession / WatchFeed refusals: no failure frame — a refused open

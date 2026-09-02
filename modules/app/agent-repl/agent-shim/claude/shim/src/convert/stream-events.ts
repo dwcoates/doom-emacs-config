@@ -61,6 +61,23 @@ export interface BlockState {
   nextIndex: number;
   /** The thinking block currently streaming, for the token-estimate relay. */
   openThinking?: conversationv1.AgentActivityId;
+  /**
+   * The VENDOR'S OWN index of the block currently open on the stream.
+   *
+   * WHY THIS EXISTS: with `includePartialMessages` the vendor emits ONE
+   * `assistant` line PER BLOCK, and it arrives BEFORE that block's
+   * `content_block_stop` — the line RESTATES the block the stream is streaming
+   * rather than continuing past it. Allocating that line a fresh index made
+   * every streamed response's terminal land on a different unit than its start
+   * (`msg:0` streamed, `msg:1` settled) and made usage — which rides index 0
+   * alone — never attach to anything at all. Observed in every streamed
+   * capture; `prose-streamed` is the smallest.
+   *
+   * Unset when no block is open, which is the un-streamed case (a subagent's
+   * forwarded lines, a replayed transcript message) where the line carries all
+   * of its own blocks and numbering them from the counter is right.
+   */
+  openBlockIndex?: number;
   /** Whether this response's usage has already been attached to a unit. */
   usageAttached: boolean;
 }
@@ -74,6 +91,7 @@ function beginMessage(state: BlockState, messageId: string): void {
   state.messageId = messageId;
   state.nextIndex = 0;
   state.openThinking = undefined;
+  state.openBlockIndex = undefined;
   state.usageAttached = false;
 }
 
@@ -225,8 +243,10 @@ export function convertStreamEvent(
         return [];
       }
       // Keep the counter ahead of the stream's own numbering, so an assistant
-      // line arriving later for this message continues rather than repeats.
+      // line for a block the stream never opened continues rather than repeats.
       state.nextIndex = Math.max(state.nextIndex, index + 1);
+      // THE BLOCK THE NEXT ASSISTANT LINE IS ABOUT, until the vendor closes it.
+      state.openBlockIndex = index;
       const activityId = blockActivityId(messageId, index);
       const kind = event.content_block?.type;
       if (kind === "text") {
@@ -332,9 +352,15 @@ export function convertStreamEvent(
     }
 
     case "content_block_stop":
-    case "message_delta":
       // The assistant message settles every block with the whole text and the
       // stop reason; a terminal built here would be a second, thinner copy.
+      // The block is no longer open, so a later assistant line for this message
+      // is about a block the stream did not announce and takes a fresh index.
+      state.openBlockIndex = undefined;
+      LOGGER.logVerbose({ event_type: event.type }, "consumed; the assistant message settles blocks");
+      return [];
+
+    case "message_delta":
       LOGGER.logVerbose({ event_type: event.type }, "consumed; the assistant message settles blocks");
       return [];
 
@@ -343,6 +369,7 @@ export function convertStreamEvent(
       state.messageId = undefined;
       state.nextIndex = 0;
       state.openThinking = undefined;
+      state.openBlockIndex = undefined;
       state.usageAttached = false;
       return [];
 
@@ -485,8 +512,14 @@ export function convertAssistantMessage(
   const usage = tokenUsage(api.usage);
   const entries: PersistEntry[] = [];
 
+  // A LINE THAT RESTATES AN OPEN STREAMED BLOCK IS THAT BLOCK, not a new one.
+  const streamed = state.messageId === messageId ? state.openBlockIndex : undefined;
+  let offset = 0;
+
   for (const block of blocks) {
-    const index = nextIndexFor(state, messageId);
+    const index =
+      streamed === undefined ? nextIndexFor(state, messageId) : streamed + offset;
+    offset += 1;
     // USAGE RIDES THE FIRST BLOCK'S UNIT AND NO OTHER.
     const envelope =
       index === 0 && !state.usageAttached && usage !== undefined ? { usage } : {};

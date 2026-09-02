@@ -1,0 +1,28 @@
+{
+  "scenario": "turn-stop-max-structured-output-retries",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Answer with a structured output that satisfies the session's output schema. The schema requires an integer property `impossible` that is at once >= 10 and <= 5. Do your best and keep trying.",
+  "prompts": [
+    {
+      "text": "Answer with a structured output that satisfies the session's output schema. The schema requires an integer property `impossible` that is at once >= 10 and <= 5. Do your best and keep trying.",
+      "resume": false
+    }
+  ],
+  "world": "turn-stop-max-structured-output-retries",
+  "cwd_init": null,
+  "vendor_session_id": "525f2813-3b27-41dd-a3dc-dcb13cbd526c",
+  "manual": null,
+  "expect": [
+    "result:error_max_structured_output_retries",
+    "result.terminal_reason \"structured_output_retry_exhausted\"",
+    "the vendor's retry attempts visible in the stream"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-turn-stop-max-structured-output-retries-XYZeWr-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:40:13.116Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
