@@ -243,6 +243,15 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"holds_restored": report.HoldsRestored,
 	})
 
+	// THE WATCHERS CLOSE BEFORE THE STATE CLIENT. Deferred here, after
+	// `defer db.Close()`, so it runs FIRST: a session watcher's sinks read the
+	// state client off the watcher's own goroutine, and the orderly exit that
+	// closed the store under one would leave a turn end being handled with a
+	// refused read on a path that owes no error at all.
+	if built.CloseWatchers != nil {
+		defer built.CloseWatchers()
+	}
+
 	srv, err := h.Server(built.Server)
 	if err != nil {
 		return fmt.Errorf("claude-repld: build the server: %w", err)

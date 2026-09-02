@@ -729,6 +729,29 @@ func (f *Fleet) Shim(ws ids.WorkspaceID) (Shim, bool) {
 	return &shimAdapter{client: session.client}, true
 }
 
+// CloseWatchers closes every live session's watcher and JOINS whatever sink
+// work each of them still had in flight. It KILLS NOTHING -- a watcher's close
+// ends watching, never the session -- and it is the daemon's teardown step
+// before the state client is closed: a watcher's sinks read that client, and a
+// turn end being handled while the store closes under it is a refused read on
+// a path that owes no error at all.
+func (f *Fleet) CloseWatchers() {
+	f.mu.Lock()
+	watchers := make([]sessionwatcher.Watcher, 0, len(f.sessions))
+	for _, session := range f.sessions {
+		if session.watcher != nil {
+			watchers = append(watchers, session.watcher)
+		}
+	}
+	f.mu.Unlock()
+	for _, w := range watchers {
+		if err := w.Close(); err != nil {
+			f.deps.Log.Global().Error("daemon.workspace.close_watchers",
+				"a session watcher could not be closed", dlog.Context{"error": err.Error()})
+		}
+	}
+}
+
 // remember records a workspace's live session.
 func (f *Fleet) remember(ws ids.WorkspaceID, session *live) {
 	f.mu.Lock()
