@@ -66,6 +66,55 @@ describe("a skill invocation", () => {
   });
 });
 
+describe("a PARAMETERIZED skill invocation", () => {
+  it("names the skill from the prompt's first argument", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!skill create-or-update-workspace merge"]);
+    const call = toolUses(driven)[0] as { input: { skill: string } };
+
+    // Assert
+    expect(call.input.skill).toBe("create-or-update-workspace");
+  });
+
+  it("passes the rest of the prompt as the skill's args", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!skill create-or-update-workspace merge"]);
+    const call = toolUses(driven)[0] as { input: { args: string } };
+
+    // Assert
+    expect(call.input.args).toBe("merge");
+  });
+
+  it("rejoins a MULTI-WORD args string", async () => {
+    // Arrange + Act. `create feat/thing` is two tokens once split on
+    // whitespace; the scenario must rejoin them rather than keeping only one.
+    const driven = await driveScenario(["!skill create-or-update-workspace create feat/thing"]);
+    const call = toolUses(driven)[0] as { input: { args: string } };
+
+    // Assert
+    expect(call.input.args).toBe("create feat/thing");
+  });
+
+  it("acknowledges under the named skill, not the default", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!skill create-or-update-workspace merge"]);
+    const ack = toolUseResults(driven.transcript())[0] as { commandName: string };
+
+    // Assert
+    expect(ack.commandName).toBe("create-or-update-workspace");
+  });
+
+  it("derives the document body from the named skill", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!skill create-or-update-workspace merge"]);
+    const meta = recordsOfType(driven.transcript(), "user").find((l) => l.isMeta === true);
+    const text = ((meta?.message as { content: { text: string }[] }).content[0] as { text: string }).text;
+
+    // Assert
+    expect(text).toContain("/w/s/.claude/skills/create-or-update-workspace");
+  });
+});
+
 describe("injected memory", () => {
   it("puts the attachment on the STREAM as well as in the transcript", async () => {
     // Attachments were modelled as a file-plane fact only, which left the

@@ -278,6 +278,74 @@ const SUBAGENT_DETACHED_LIVE = scenario({
   },
 });
 
+const SUBAGENT_DETACHED_UTTERANCE = scenario({
+  name: "subagent-detached-utterance",
+  prompt: "!subagent-detached-utterance",
+  emits:
+    "a detached `Agent` left LIVE after the turn ends, whose only post-turn activity is ONE ordinary sidechain " +
+    "assistant text line — a mid-flight utterance with `IsSidechain`/`AgentId`/`SourceToolUseId` set and NO " +
+    "completion. Nothing here ever finishes the agent",
+  writes: "the agent's `.meta.json` and `agent-<id>.jsonl` (the utterance lands there too), its spool, and the main transcript's lines",
+  arms:
+    "AgentSubagent detached_work left live; the utterance itself proves the router keeps a live subagent's prose " +
+    "OUT of the top-level feed rather than adding a new arm",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "subagent-detached-utterance" }, "fake mid-flight detached-subagent utterance turn");
+    const description = "A sweep that talks while it works";
+    const agentPrompt = "Sweep and narrate as you go.";
+    const call = ctx.toolUse("Agent", {
+      description,
+      prompt: agentPrompt,
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    });
+    const agentId = ctx.mintAgentTaskId();
+    ctx.startTask({ taskId: agentId, toolUseId: call.toolUseId, kind: "local_agent", description });
+    ctx.announceLiveTasks();
+    const writer = ctx.files.subagent(agentId);
+    writer.writeMeta({
+      agentType: "general-purpose",
+      description,
+      toolUseId: call.toolUseId,
+      spawnDepth: 1,
+    });
+    writer.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: agentPrompt },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    ctx.toolResult(call, `Async agent launched successfully.\nagentId: ${agentId}`, {
+      isAsync: true,
+      status: "async_launched",
+      agentId,
+      description,
+      prompt: agentPrompt,
+      outputFile: ctx.files.spoolPathFor(agentId),
+      canReadOutputFile: true,
+    });
+    conclude(ctx, "Dispatched a narrating agent to the background.");
+    // The utterance lands AFTER the turn ended, which is what detached means.
+    // NO completion follows: the agent stays live, and this is its only
+    // post-turn activity.
+    await ctx.tick();
+    ctx.assistant([{ type: "text", text: "Still sweeping; found something interesting." }], {
+      agent: {
+        agentId,
+        parentToolUseId: call.toolUseId,
+        subagentType: "general-purpose",
+        taskDescription: description,
+      },
+      model: "fake-sonnet-5",
+    });
+    // ONE spool write, capturing everything written to the agent's own
+    // transcript so far (commission + utterance) — appending more than once
+    // would duplicate bytes, since a spool append is raw and never a diff.
+    ctx.files.spool(agentId).append(writer.read());
+  },
+});
+
 const SUBAGENT_FAILED = scenario({
   name: "subagent-failed",
   prompt: "!subagent-failed",
@@ -406,10 +474,67 @@ const CANCEL_ALL = scenario({
   },
 });
 
+const USAGE_HISTORICAL = scenario({
+  name: "usage-historical",
+  prompt: "!usage-historical",
+  emits:
+    "prose only on the main stream. The historical usage record itself is written ONLY to a NESTED subagent's " +
+    "own transcript file (spawnDepth 2), as a FILE-plane assistant record with NO paired STREAM-plane " +
+    "`message_start` — the historical case that must retain usage without inventing a generation duration. " +
+    "UNGROUNDED, INVENTED: no capture carries a file-plane-only historical usage record with nested-subagent " +
+    "attribution and this sub-field set",
+  writes: "the nested subagent's `agent-<id>.meta.json` and `agent-<id>.jsonl` carrying one untimed assistant record, plus the main turn's ordinary lines",
+  arms: "ungrounded — see MANIFEST.md; the usage sub-fields (cache_creation split, server_tool_use, service_tier, speed, inference_geo) are the ones a session-usage aggregation would need to attribute to an untimed nested actor",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "usage-historical" }, "fake INVENTED nested-subagent historical-usage turn");
+    const agentId = ctx.mintAgentTaskId();
+    const writer = ctx.files.subagent(agentId);
+    // `spawnDepth: 2` is what makes this agent NESTED — a subagent of a
+    // subagent — rather than an ordinary top-level one.
+    writer.writeMeta({
+      agentType: "general-purpose",
+      description: "a nested subagent's historical response",
+      toolUseId: ctx.mintToolUseId(),
+      spawnDepth: 2,
+    });
+    writer.append({
+      type: "assistant",
+      message: {
+        id: ctx.mintMessageId(),
+        model: "fake-opus-4-8",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "text", text: "historical response" }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        stop_details: null,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 200,
+          cache_read_input_tokens: 800,
+          cache_creation_input_tokens: 75,
+          cache_creation: { ephemeral_5m_input_tokens: 25, ephemeral_1h_input_tokens: 50 },
+          server_tool_use: { web_search_requests: 2, web_fetch_requests: 3 },
+          service_tier: "priority",
+          speed: "fast",
+          inference_geo: "us-east-1",
+        },
+        diagnostics: null,
+      },
+      requestId: `req_fake_historical_${String(ctx.turn)}`,
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    conclude(ctx, `Wrote a historical usage record for nested subagent ${agentId}.`);
+  },
+});
+
 export const SUBAGENT_SCENARIOS = [
   SUBAGENT_SYNC,
   SUBAGENT_DETACHED,
   SUBAGENT_DETACHED_LIVE,
+  SUBAGENT_DETACHED_UTTERANCE,
   SUBAGENT_FAILED,
   CANCEL_ALL,
+  USAGE_HISTORICAL,
 ];

@@ -193,6 +193,52 @@ describe("detached shells", () => {
   });
 });
 
+describe("explicit poll/retrieval of a detached shell", () => {
+  // UNGROUNDED, INVENTED (testdata/captures/MANIFEST.md): no capture ever
+  // calls `TaskOutput`, only lists it in `init.tools`.
+  it("issues THREE TaskOutput calls: two RUNNING and one terminal", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-detach-poll"]);
+    const polls = toolUses(driven).filter((t) => (t as { name: string }).name === "TaskOutput");
+
+    // Assert
+    expect(polls).toHaveLength(3);
+  });
+
+  it("grows the reported output across the RUNNING polls", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-detach-poll"]);
+    const results = toolUseResults(driven.transcript()).filter(
+      (r) => (r as { task?: { status?: string } }).task?.status === "RUNNING",
+    ) as { task: { output: string } }[];
+
+    // Assert
+    expect(results.map((r) => r.task.output)).toEqual(["compiling\n", "compiling\nlinking\n"]);
+  });
+
+  it("reports the terminal poll with a completed status and an exit code", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-detach-poll"]);
+    const results = toolUseResults(driven.transcript()) as { task?: Record<string, unknown> }[];
+    const terminal = results.find((r) => r.task?.status === "COMPLETED");
+
+    // Assert
+    expect({ exitCode: terminal?.task?.exitCode, exitCodeSet: terminal?.task?.exitCodeSet }).toEqual({
+      exitCode: 0,
+      exitCodeSet: true,
+    });
+  });
+
+  it("still terminates the spool with EXIT=0, same as an ordinary detach", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!bash-detach-poll"]);
+    const taskId = String(ofType(driven, "system", "task_started")[0]?.task_id);
+
+    // Assert
+    expect(driven.spool(taskId)).toBe("compiling\nlinking\ndone\nEXIT=0\n");
+  });
+});
+
 describe("Ctrl-B", () => {
   /**
    * Drive `!ctrl-b` all the way through its detach.
