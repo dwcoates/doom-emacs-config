@@ -72,3 +72,8 @@ Implementer-chosen UX (integration remediation, sidebar/tray; all currently at o
 Open questions (integration audit 1, feed reconnect):
 - A bubble sub-feed whose tail dies and whose re-OpenFeed is refused has no clicked control to draw at: (a) draw the refusal at the expand toggle as if clicked; (b) collapse the bubble and draw nothing; (c) report it through the failure sink as machinery (implementer's pick). The bubble reopen path still re-echoes its dead token (src/feed/bubble.ts) pending this answer; the root feed was fixed to re-OpenFeed.
 - A root-feed OpenFeed refused with a terminal arm (unknown_workspace) now retries on the stream's backoff and files daemon_unreachable each round: (a) keep (visible; not_yet_adopted retries correctly); (b) retry only not_yet_adopted and file a client-local failure for the rest (needs an arm the contract does not obviously carry).
+
+Open questions (integration audit 2):
+- Where a refused sub-feed REOPEN draws (no click to mark): (a) nothing, keep backing off as the root feed does (current); (b) mark the toggle with a refusal the next successful reopen clears; (c) the topbar warning strip.
+- A footer jump whose target is drawn nowhere: (a) silent, reader stays put (current); (b) transient note on the jump row; (c) disable the row when the daemon knows the row is not addressable.
+- Markdown links in response prose are plain text today (renderExternalLink has two call sites: tool-call links output and the artifact card); routing prose links through OpenExternal would be a production addition.
