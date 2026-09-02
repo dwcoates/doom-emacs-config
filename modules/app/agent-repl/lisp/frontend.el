@@ -70,7 +70,7 @@
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 (declare-function agent-repl--panels-visible-p "agent-repl-panels" ())
-(declare-function agent-repl--call-in-background-workspace "agent-repl-worktree" (ws fn))
+(declare-function agent-repl--call-in-background-workspace "workspace" (ws fn))
 (declare-function agent-repl--hide-panels "agent-repl-panels" ())
 (declare-function agent-repl--ensure-input-buffer "agent-repl-panels" (ws))
 (declare-function agent-repl--clear-main-area-for-panels "agent-repl-panels" ())

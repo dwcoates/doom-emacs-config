@@ -80,6 +80,11 @@
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
 (declare-function agent-repl--sidebar-push "sidebar" (&optional force))
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
+(declare-function doom-fallback-buffer "ext:doom" ())
+(declare-function agent-repl--foreign-owned-buffer-p "agent-repl-core" (buf ws))
+;; Defined by core.el, which loads first; declared special here so this file
+;; byte-compiles standalone and the binding below is a dynamic one.
+(defvar agent-repl--eager-open-in-progress)
 (defvar persp-nil-name)
 (defvar persp-names-cache)
 (defvar persp-mode)
@@ -1304,6 +1309,130 @@ Callers must use this function instead of calling `+workspace-switch'
 directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace-switch)
     (apply '+workspace-switch ws args)))
+
+;;;; ---- Transient activation of a background workspace --------------------
+
+(defun agent-repl--restore-focus (orig-persp orig-window orig-buffer)
+  "Restore perspective to ORIG-PERSP and select ORIG-WINDOW / ORIG-BUFFER.
+Helper for `agent-repl--with-preserved-focus' — kept as a separate defun
+so the restoration logic is observable in tests via `cl-letf' and the
+macro body stays small.
+
+Each restore step is a no-op when the corresponding state has not
+drifted from its captured value, so a body that did not change focus
+does not pay for redundant switch / `select-window' / `set-buffer'
+calls.  A failure in the switch back is RECORDED and not re-signaled:
+the macro's job is best-effort focus restoration, and a body that
+already succeeded must not be turned into a failure by the unwind."
+  (when (and orig-persp
+             (not (equal orig-persp (agent-repl--ws-current-name))))
+    (condition-case err
+        (agent-repl--ws-switch orig-persp)
+      (error
+       (agent-repl--warn nil "restore-focus: switch back to %s failed err=%S"
+                         orig-persp err))))
+  (when (and (window-live-p orig-window)
+             (not (eq orig-window (selected-window))))
+    (select-window orig-window 'norecord))
+  (when (and (buffer-live-p orig-buffer)
+             (not (eq orig-buffer (current-buffer))))
+    (set-buffer orig-buffer)))
+
+(defmacro agent-repl--with-preserved-focus (&rest body)
+  "Run BODY while preserving the caller's active workspace + window + buffer.
+Captures `(agent-repl--ws-current-name)', `(selected-window)', and
+`(current-buffer)' before BODY runs, then restores all three afterward
+through an `unwind-protect' even when BODY signals.
+
+Used to wrap the side effects of building a workspace in the background
+so any internal focus change stays invisible to the user.  Restoration
+delegates to `agent-repl--restore-focus' so tests can observe the
+contract by stubbing that defun."
+  (declare (indent 0) (debug t))
+  (let ((orig-persp-sym (make-symbol "orig-persp"))
+        (orig-window-sym (make-symbol "orig-window"))
+        (orig-buffer-sym (make-symbol "orig-buffer")))
+    `(let ((,orig-persp-sym (agent-repl--ws-current-name))
+           (,orig-window-sym (selected-window))
+           (,orig-buffer-sym (current-buffer)))
+       (unwind-protect
+           (progn ,@body)
+         (agent-repl--restore-focus
+          ,orig-persp-sym ,orig-window-sym ,orig-buffer-sym)))))
+
+(defun agent-repl--clean-frame-foreign-windows (ws)
+  "Delete frame windows whose buffer is owned by a workspace other than WS.
+A window is foreign iff `agent-repl--foreign-owned-buffer-p' says its
+buffer belongs to a DIFFERENT workspace.  Buffers with no owning
+workspace (files, dashboard, scratch, fallback) are workspace-agnostic
+and are left alone.
+
+Strips `no-delete-other-windows' and dedication from foreign windows
+first, so a prior workspace's agent-repl panel windows — which carry
+both — can be torn down.  When EVERY frame window is foreign, all but
+one are deleted and that one's buffer is swapped to the Doom fallback
+buffer, so WS starts from a clean single-window layout instead of
+inheriting the previous workspace's window configuration."
+  (let* ((fallback (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))
+         (all (window-list nil 'nomini))
+         (foreign (cl-remove-if-not
+                   (lambda (w)
+                     (agent-repl--foreign-owned-buffer-p (window-buffer w) ws))
+                   all))
+         (any-native (< (length foreign) (length all))))
+    (if (null foreign)
+        (agent-repl--log ws "clean-frame-foreign-windows: ws=%s no foreign windows total=%d"
+                         ws (length all))
+      (agent-repl--log ws "clean-frame-foreign-windows: ws=%s removing=%d total=%d"
+                       ws (length foreign) (length all))
+      (dolist (win foreign)
+        (set-window-parameter win 'no-delete-other-windows nil)
+        (set-window-dedicated-p win nil))
+      (cond
+       (any-native
+        (dolist (win foreign)
+          (ignore-errors (delete-window win))))
+       (t
+        (dolist (win (cdr foreign))
+          (ignore-errors (delete-window win)))
+        (when (and fallback (car foreign) (window-live-p (car foreign)))
+          (set-window-buffer (car foreign) fallback)))))))
+
+(defun agent-repl--call-in-background-workspace (ws fn)
+  "Call FN with WS transiently activated, then restore the caller's focus.
+
+THE single anchor every \"do this IN WS's perspective, whoever is looking
+at whatever\" caller goes through — today the gui frontend's webview
+mount and pre-creation (frontend.el).
+
+Anchoring on WS rather than on the caller's timing is what makes a
+mis-mount unrepresentable instead of merely unlikely: the switch-in
+happens at the moment FN runs, so no amount of user switching in between
+can land WS's panels in someone else's frame.
+
+The switch-in is skipped when WS is ALREADY current, and
+`agent-repl--restore-focus' then restores nothing, so the anchor costs
+the foreground path no perspective traffic at all.
+
+`agent-repl--eager-open-in-progress' is bound around the whole dance so
+the activation-reactive hooks that must not fire for a background
+workspace are suppressed — see that variable's docstring.  Those hooks
+only run on a real activation, so the binding is inert when WS is
+already current.
+
+Activating WS is NOT by itself enough to give FN a frame of WS's own:
+activating a perspective that has never saved a window configuration
+leaves the frame showing the PREVIOUS workspace's windows, and FN would
+build into them.  `agent-repl--clean-frame-foreign-windows' therefore
+runs before FN — even when WS was already current, since the invariant
+FN depends on is about the FRAME's contents, not about whether a switch
+happened."
+  (let ((agent-repl--eager-open-in-progress t))
+    (agent-repl--with-preserved-focus
+      (unless (equal ws (agent-repl--ws-current-name))
+        (agent-repl--ws-switch ws))
+      (agent-repl--clean-frame-foreign-windows ws)
+      (funcall fn))))
 
 (defun agent-repl--ws-repaint-sidebar (ws reason)
   "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.
