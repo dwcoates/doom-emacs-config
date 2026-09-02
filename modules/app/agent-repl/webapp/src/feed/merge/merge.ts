@@ -23,7 +23,7 @@
  * the generic merge glyph with a warning rather than failing the row: the head
  * is the only thing standing between the reader and a merge they cannot see.
  */
-import { formatElapsed } from "../../duration.js";
+import { formatElapsed, formatTickedElapsed } from "../../duration.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
@@ -180,7 +180,7 @@ function drawLiveClock(runtime: FeedMergeRuntime, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "merge-clock";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatElapsed(nowMs - startedMs);
+    el.textContent = formatTickedElapsed(nowMs - startedMs);
   });
   return el;
 }

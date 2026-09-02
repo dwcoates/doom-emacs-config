@@ -97,6 +97,13 @@ describe("drawFeedMerge: the clock", () => {
     expect(el.querySelector(".merge-clock")?.textContent).toBe("1m 7s");
   });
 
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the live clock's start does not share the ticker's phase.
+    const el = draw(mergeHead({ case: "update" }, { startedAtMs: 1_000_000n - 4920n }));
+    // Assert: five real seconds waited reads 5s, not the lagging 4s.
+    expect(el.querySelector(".merge-clock")?.textContent).toBe("5s");
+  });
+
   it("shows the span that ran, stopped, once it settled", () => {
     const el = draw(mergeHead({ case: "success", endedAtMs: 65_000n, commit: "c" }));
     vi.advanceTimersByTime(5000);
