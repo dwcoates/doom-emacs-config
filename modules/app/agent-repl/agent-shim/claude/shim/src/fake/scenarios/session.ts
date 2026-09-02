@@ -69,6 +69,65 @@ const SLASH_LOCAL = scenario({
   },
 });
 
+/**
+ * "Shape A": the CLI's own slash-command bookkeeping, recorded as a raw
+ * `user`-typed transcript record (never a content-block array — the corpus's
+ * own local-command records carry a plain string).
+ */
+function slashShapeAContent(name: string): string {
+  return `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>\n<command-args></command-args>`;
+}
+
+const SLASH_SHAPE_A = scenario({
+  name: "slash-shape-a",
+  prompt: "!slash-shape-a [command]",
+  emits:
+    "NOTHING on the stream — this is a FILE-PLANE-ONLY shape. It writes a \"user\"-typed `TranscriptLine` whose " +
+    "content is the CLI's own slash-command bookkeeping (`<command-message>{name}</command-message>\\n` " +
+    "`<command-name>/{name}</command-name>\\n<command-args></command-args>`), parameterized by command name",
+  writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
+  arms: "none in this converter — this record is what the DAEMON's own history classifier reads directly off the transcript; the shim ships it unclassified",
+  run(ctx) {
+    const name = ctx.args === "" ? "compact" : ctx.args;
+    ctx.log({ turn: ctx.turn, branch: "slash-shape-a", command: name }, "fake Shape-A slash-command bookkeeping turn");
+    // A KNOB, not a fixed value: `ctx.newUuid()` is deterministic in the test
+    // harness, so a caller can name exactly which `promptId` this record will
+    // carry without the scenario hard-coding one.
+    ctx.files.transcript.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: { role: "user", content: slashShapeAContent(name) },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    conclude(ctx, `Recorded the Shape-A bookkeeping for /${name}.`);
+  },
+});
+
+const SLASH_SHAPE_A_UNNAMED = scenario({
+  name: "slash-shape-a-unnamed",
+  prompt: "!slash-shape-a-unnamed",
+  emits:
+    "NOTHING on the stream — the same FILE-PLANE-ONLY \"user\"-typed record, but the WITHHELD-UNNAMED shape: only " +
+    "`<local-command-stdout>...</local-command-stdout>`, with no `<command-name>` element at all",
+  writes: "one `user` transcript line carrying a fresh `promptId`, then the ordinary prompt line and the turn record",
+  arms: "none in this converter — a record naming no command, which is the negative `slash-shape-a` exists to prove",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "slash-shape-a-unnamed" }, "fake Shape-A withheld-unnamed bookkeeping turn");
+    ctx.files.transcript.append({
+      promptId: ctx.newUuid(),
+      type: "user",
+      message: {
+        role: "user",
+        content: "<local-command-stdout>total 4\ndrwxr-xr-x</local-command-stdout>",
+      },
+      uuid: ctx.newUuid(),
+      timestamp: ctx.nowIso(),
+    });
+    conclude(ctx, "Recorded the withheld-unnamed bookkeeping.");
+  },
+});
+
 const CONTEXT_USAGE_DRIFT = scenario({
   name: "context-usage-drift",
   prompt: "!context-usage-drift",
@@ -399,17 +458,43 @@ const TOKENS_REMINDER = scenario({
   },
 });
 
+const CONTEXT_BUDGET_WARNING = scenario({
+  name: "context-budget-warning",
+  prompt: "!context-budget-warning",
+  emits:
+    "prose only, plus a `context_budget_warning` ATTACHMENT (`{type: \"context_budget_warning\", content}`), the " +
+    "shape `convertAttachment` already recognizes (`test/convert/attachments.test.ts`). UNGROUNDED, INVENTED: no " +
+    "capture — not even the one literally NAMED `context-budget-warning` (MANIFEST evidence gap; excluded from " +
+    "golden-conformance) — carries a record of this spelling. `!context-tip` and `!tokens-reminder` stay exactly " +
+    "as landing 5 ruled them (a generic CLI tip and the one observed token-count reminder, neither the budget " +
+    "warning); this is a SEPARATE, separately-named producer added only so the converter's arm has a fake-SDK " +
+    "path to drive it from, pending a grounding capture (orchestrator ruling, pending the project lead's)",
+  writes: "a `context_budget_warning` attachment line",
+  arms: "AgentUpdate.update=contextBudgetWarning(ContextBudgetWarning) — UNGROUNDED, invented; see MANIFEST.md",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "context-budget-warning" }, "fake INVENTED context-budget-warning turn");
+    ctx.attachment({
+      type: "context_budget_warning",
+      content: "The conversation is approaching its context window budget.",
+    });
+    conclude(ctx, "The CLI warned that the context budget is filling.");
+  },
+});
+
 const COMPACT = scenario({
   name: "compact",
-  prompt: "!compact",
+  prompt: "!compact [summary]",
   emits:
     "a compaction: `status{compacting}`, a `compact_boundary` carrying the full corpus `compact_metadata` " +
     "(trigger, pre/post tokens, duration, the preserved segment AND the preserved-messages uuid list), then " +
-    "`status{compact_result:\"success\"}`",
+    "`status{compact_result:\"success\"}`. `ContextCompacted.Summary` is derived from the assistant prose that " +
+    "follows the boundary (`settleCompaction`), so a caller names its own distinctive summary as the prompt's " +
+    "argument instead of the fixed default",
   writes: "a `system:compact_boundary` line whose `logicalParentUuid` names the preserved head, plus a summary user line",
   arms: "SessionCompacting + AgentUpdate.context_cut(ContextCompacted) with trigger=requested",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "compact" }, "fake compaction turn");
+    const summary = ctx.args === "" ? "Compacted the conversation." : ctx.args;
+    ctx.log({ turn: ctx.turn, branch: "compact", summary }, "fake compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     const head = ctx.files.transcript.chainHead ?? ctx.newUuid();
     ctx.emit({
@@ -445,7 +530,7 @@ const COMPACT = scenario({
       timestamp: ctx.nowIso(),
     });
     ctx.systemMessage("status", { status: null, compact_result: "success" });
-    conclude(ctx, "Compacted the conversation.");
+    conclude(ctx, summary);
   },
 });
 
@@ -602,6 +687,8 @@ const COLD_SEED = scenario({
 export const SESSION_SCENARIOS = [
   ROTATE,
   SLASH_LOCAL,
+  SLASH_SHAPE_A,
+  SLASH_SHAPE_A_UNNAMED,
   CONTEXT_USAGE_DRIFT,
   MODEL_FALLBACK,
   FAST_ON,
@@ -621,6 +708,7 @@ export const SESSION_SCENARIOS = [
   RATE_LIMIT_SEVEN_DAY,
   CONTEXT_TIP,
   TOKENS_REMINDER,
+  CONTEXT_BUDGET_WARNING,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,

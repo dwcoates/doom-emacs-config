@@ -128,3 +128,90 @@ in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
 | `web-search` | 2026-09-01 | `hook`, `thinking`, `webSearch`, `response` → `success.completed` | single turn | 76 KB |
 | `worktree-enter-exit-kept-and-removed` | 2026-09-01 | `hook`, `thinking`, `response`, `skillUse`, `read`, `bash`, `write` → `success.completed` | residue `vendor_specific/system/vcs_state_changed` | 664 KB |
 | `write-created-and-updated` | 2026-09-01 | `hook`, `thinking`, `read`, `write`, `response` → `success.completed` | single turn | 92 KB |
+
+## `e2ecleanup/fakesdk-ext` additions (test tooling, not new captures)
+
+The daemon/e2e event-fabrication inventory
+(`docs/overhaul/reports/E2E-EVENT-INVENTORY.md`'s "Consolidated PROPOSED
+fake-SDK additions") asked for several new scenarios and scenario options so
+`daemon/e2e` can drive the real fake SDK instead of hand-fabricating
+`protocolv1.Event{...}` records. None of these is a NEW capture directory —
+each is graded against the grounding named below, or marked ungrounded.
+
+- **`!slash-shape-a` / `!slash-shape-a-unnamed`** (`src/fake/scenarios/session.ts`).
+  UNGROUNDED, INVENTED: no capture in this manifest exercises the CLI's own
+  slash-command bookkeeping as a raw `user`-typed transcript record (the
+  nearest real artifact, `vendor-answered-slash-commands`, is the VENDOR
+  answering the slash command itself — a different record, already covered by
+  `!slash`). The shape is instead built from `machinery_e2e_test.go`'s
+  `machineryContent`/`unnamed` constants, which the daemon/e2e suite has
+  exercised as real vendor transcript bytes since before this fake-SDK
+  addition existed. Retires: `machinery_e2e_test.go`'s and
+  `slashdurability_e2e_test.go`'s hand-fabricated Shape-A call sites.
+
+- **`!compact [summary]`'s summary override** (`src/fake/scenarios/session.ts`).
+  GROUNDED: `compaction-directed` (this manifest, above) is the golden for the
+  whole `!compact` shape; `ContextCompacted.Summary`'s DERIVATION (the
+  assistant prose immediately following the boundary) is unchanged, only the
+  fixed conclusion string is now the prompt's own argument when one is given.
+  Retires every `sidecarCompactEvent(..., summary)` call site across
+  `clearcompact_e2e_test.go`, `phaseword_e2e_test.go`, `revive_e2e_test.go`,
+  `revivalhold_e2e_test.go` and `slashdurability_e2e_test.go`.
+
+- **`!context-budget-warning`** (`src/fake/scenarios/session.ts`). UNGROUNDED,
+  INVENTED, ORCHESTRATOR RULING (pending the project lead's): no capture in
+  this manifest — including the one literally NAMED `context-budget-warning`,
+  which the "Evidence gaps" section above and `golden-conformance.test.ts`'s
+  own `EXCLUDED` entry both record as holding no budget-warning record of any
+  kind — carries this record. `!context-tip` and `!tokens-reminder` are
+  UNCHANGED and still land 5's ruling (a generic `/goal` tip and the one
+  observed `total_tokens_reminder`, neither the budget warning): this is a
+  SEPARATE, separately-named producer, added only so the converter's
+  ALREADY-BUILT `context_budget_warning` arm
+  (`test/convert/attachments.test.ts`) has a fake-SDK path to drive it from,
+  pending a real grounding capture.
+
+- **`!skill [skill-name] [args]` parameterization** (`src/fake/scenarios/skills.ts`).
+  GROUNDED: `skill-invocation` (this manifest, above) remains the golden for
+  the SHAPE (tool_use → `{success, commandName, allowedTools}` ack → isMeta
+  document) — unchanged. Only the fixed `"fake-skill"` name/args/document body
+  are now derived from the prompt's own argument (first token = skill name,
+  rest = args; the document body is templated on the name), so a caller can
+  name e.g. `create-or-update-workspace` with args `merge`. Retires
+  `mergewindow_e2e_test.go`'s `mergeSkillCallLine` fabrication.
+
+- **`!bash-detach-poll`** (`src/fake/scenarios/shell.ts`). UNGROUNDED,
+  INVENTED: `TaskOutput` is a declared vendor tool (every capture's
+  `init.tools` lists it), but NO capture ever calls it — every recorded
+  backgrounded run was checked by re-reading its spool path, never by an
+  explicit retrieval call. The poll's `toolUseResult` shape
+  (`retrievalStatus`/`task{taskId,taskType,status,description,output,
+  exitCode,exitCodeSet}`) mirrors the daemon/e2e Go harness's own invented
+  `bashTaskOutcome`, since no vendor recording exists to spell it from. Note:
+  `TaskOutput` is not in `src/convert/tools/registry.ts`, so these tool_use/
+  tool_result pairs fold to `AgentUnmodeled` in the current converter — this
+  addition is test-tooling only and does not add a converter arm. Retires
+  `detachedworksettle_e2e_test.go`'s and `detachedspooloffset_e2e_test.go`'s
+  explicit-poll fabrication.
+
+- **`!subagent-detached-utterance`** (`src/fake/scenarios/subagents.ts`).
+  GROUNDED in shape: `subagent-detached` (this manifest, above) remains the
+  golden for the detach/completion machinery; this scenario reuses the same
+  launch shape but stops after ONE ordinary sidechain assistant text line and
+  never completes the agent — no capture records a live subagent's mid-flight
+  utterance in isolation (every capture with a detached subagent runs it to
+  completion), so the utterance's OWN placement (post-turn, no terminal) is
+  invented from the family's established pattern rather than a specific
+  recording. Retires `subagentrouting_e2e_test.go`'s `sidechainResponseLine`
+  fabrication.
+
+- **`!usage-historical`** (`src/fake/scenarios/subagents.ts`). UNGROUNDED,
+  INVENTED (per the inventory's own step 2b instruction): no capture in this
+  manifest carries a FILE-plane-only historical usage record — one with no
+  paired STREAM-plane `message_start` — attributed to a NESTED (spawnDepth 2)
+  subagent id, carrying `cache_creation`'s ephemeral 5m/1h split,
+  `server_tool_use` counts, `service_tier`, `speed` and `inference_geo`. The
+  field VALUES mirror `sidecarAssistantUsageEvent`
+  (`tokenutilization_e2e_test.go`), the daemon/e2e harness's own invented
+  fixture, since no vendor recording exists to ground them from. Retires
+  `tokenutilization_e2e_test.go`'s `sidecarAssistantUsageEvent` call sites.
