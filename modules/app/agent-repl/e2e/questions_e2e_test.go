@@ -95,29 +95,6 @@ func newQuestionWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	return w, ws
 }
 
-// awaitFeedRow opens the workspace's feed fresh and answers the first row
-// (from the already-served page, or from the watch stream if it has not
-// arrived yet) satisfying pred.
-func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
-	t.Helper()
-	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed: %v", err)
-	}
-	success := opened.Msg.GetSuccess()
-	if success == nil {
-		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
-	}
-	for _, row := range success.GetPage().GetSuccess().GetRows() {
-		if pred(row) {
-			return row
-		}
-	}
-	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
-	defer stream.Close()
-	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
-}
-
 // awaitOpenQuestion waits for a FeedQuestion row whose batch's first question
 // reads firstQuestionText, still in its FeedQuestionOpen state.
 func awaitOpenQuestion(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, firstQuestionText string) *frontendv1.FeedRow {
