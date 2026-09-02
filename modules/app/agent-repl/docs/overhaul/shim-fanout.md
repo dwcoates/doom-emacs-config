@@ -664,3 +664,6 @@ every UX or contract gap you surfaced instead of improvising.
   no content, usage carrier, detached causes, SourceCoordinates unification;
   engine hand-over levers (parking foreground bash; !cold-seed assistant
   stamp); then every remaining integration failure.
+- LEDGER: integration run #4 on 1768697c7: 180 passed / 16 failed / 1 todo
+  in 184 s (detached 8, turn 4, session 3, gate 1); relayed to the rebuild
+  agent as its baseline.
