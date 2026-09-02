@@ -220,9 +220,16 @@ describe("drawFooterSubStatus: the word is the arm, lowercase, with spaces", () 
 // ---- the activity cell -----------------------------------------------------
 
 describe("drawFooterStatusActivity", () => {
-  it("draws no arm attribute when the arm legitimately has no activity", () => {
+  it("draws no activity cell at all when the arm legitimately has none", () => {
     const { row } = drawStrip({ status: status("idle", {}) });
-    expect(row.querySelector(".footer-activity")?.hasAttribute("data-arm")).toBe(false);
+    // Absence means draw nothing: the grow cell stays (it owns the strip's
+    // slack and the grabber notch) but is not an activity cell.
+    expect(row.querySelector(".footer-activity")).toBeNull();
+  });
+
+  it("still keeps the grow cell that owns the strip's slack", () => {
+    const { row } = drawStrip({ status: status("idle", {}) });
+    expect(row.querySelector(".pfooter-grow")).not.toBeNull();
   });
 
   it("refuses a WAITING push with no activity — the schema requires one", () => {
