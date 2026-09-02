@@ -621,6 +621,29 @@ describe("residue", () => {
     stream.close();
   });
 
+  test("a residue row is keyed residue:<the vendor record's own uuid>", async () => {
+    // THE RULED SPELLING (landing 5), not merely the `residue:` prefix. The key
+    // exists so the sidecar's row and the shim's row for the SAME transcript
+    // line collide on one key and the store absorbs the second; a different
+    // spelling on either plane would make one record appear twice.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!residue");
+
+    const residueKeys = writtenKeys(shim.store?.writes() ?? []).filter((key) =>
+      key.startsWith("residue:"),
+    );
+    const attachmentUuids = readTranscript(shim.dirs, started.vendorSessionId)
+      .filter((record) => record.type === "attachment")
+      .map((record) => String(record.uuid));
+
+    expect(attachmentUuids.length).toBeGreaterThan(0);
+    for (const uuid of attachmentUuids) expect(residueKeys).toContain(`residue:${uuid}`);
+    stream.close();
+  });
+
   test("!away-summary lands as system/away_summary residue", async () => {
     // A system record's residue kind is `system/<subtype>`; no conversation.v1
     // arm models the vendor's recap, and inventing one would put prose nobody
