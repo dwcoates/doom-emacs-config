@@ -90,7 +90,8 @@ neither adopted nor orphan-closed, and the boot report names it.
 | `AGENT_REPL_CLAUDE_BIN` | test only | the `claude` binary for the login pty and the real classifier (a fake script in tests) |
 | `AGENT_REPL_DEPLOY_SCRIPT` | test only | overrides `bin/deploy-all.sh` for the self-reload trigger |
 | `AGENT_REPL_TEST_ALL_SCRIPT` | test only | overrides `bin/test-all.sh` for the merge test gate (invoked as `bash <script> --suites <a,b>` in the merge TARGET worktree; exit 0 = pass; per-suite state parsed from the script's own `<suite>: passed in <N>s` / `<suite> failed after <N>s with exit code <rc>` lines; output archived under `<state>/merge-logs/`) |
-| `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory |
+| `AGENT_REPL_PROMPTS_DIR` | operator | the prompts directory (the `--prompts-dir` flag beats it) |
+| `AGENT_REPL_CHECKOUT` | operator | the agent-repl module root (`modules/app/agent-repl`) the binary was deployed from. It is resolved without this: the executable's own ancestors are walked first, and the path this daemon's source was COMPILED from answers when the binary was built outside the tree (`go build -o <tmp>`, which every test harness does). `--shim-main`, `--webapp-dist` and `--prompts-dir` default beneath it; `proto/vocab/` (the render colors and paint classes) and `daemon/bin/.built-sha` are read from it and have NO flag |
 
 ## The `-fake` classifier (deterministic)
 
@@ -110,18 +111,30 @@ See ARCHITECTURE.md "State root layout": `daemon.addr`, `wsm.db`,
 `logs/daemon.run.log`, `sock/<workspace-id>.sock`, `intent/manifest.json`,
 `output/workspace_commands_*.json`, `merge-logs/`.
 
-## Not yet wired (wave 3)
+## Wiring (wave 3: the graph is complete)
 
-`cmd/claude-repld` runs its whole boot spine, but `buildGraph` REFUSES rather
-than substituting: `graph.go`'s `unwired` list names every Deps field with no
-landed source (the rollout's shim fleet and handover halves, an AwaitFree
-freeness answer, `workspace.Deps.Cards` and `Ownership`, a
-`workspace.Deps.EvictLogSink` field that does not exist, the command panels,
-the merge orchestrator's turn waiter / displaced capture / occupancy /
-revival-start hooks, the feed's image resolver, and the checkout-path
-resolution the `--shim-main` / `--webapp-dist` / `--prompts-dir` defaults need).
-The daemon exits naming all of them; nothing here improvises a stand-in,
-because cmd is the composition root and holds no policy.
+`cmd/claude-repld`'s `buildGraph` builds every component and returns the
+server's and the boot sequence's dependencies, the LATE BINDINGS and the
+background loops. `graph.go`'s `unwired` list is EMPTY: every Deps field has a
+landed producer. The list stays so a future dependency with no producer is
+declared there and fails the boot loudly, naming it, rather than being filled
+with a stand-in at the composition root.
+
+Two edges point backwards and are closed with FORWARDERS in
+`cmd/claude-repld/forward.go`, bound by `run` immediately after `server.New`
+and before anything is served: the rollout's and the drain's pushes
+(`WorkspacePusher`, `ParticipantSource`, the announcers) and the workspace
+verbs' `HostRelay` (`srv.Relay()`). The merge orchestrator's guidance route and
+the queue's parked route read the orchestrator out of a forwarder for the same
+reason. The background loops — the drain sweep and the command-file ingress —
+start after the bindings, because each of them can push.
+
+The one collaborator with NO PRODUCER is the feed's image origin: nothing in
+the daemon serves an image reference as a fetchable `src`, so the resolver is
+wired with `feed.UnproducedImageResolver`, which refuses loudly and names the
+missing producer. `/todos` and `/mcp` (and `/status`, `/agents`, `/help`) have
+no producer either: `server.Panels` answers `/context` and fails loudly for
+every other recognized panel command.
 
 ## Deploy chain
 
