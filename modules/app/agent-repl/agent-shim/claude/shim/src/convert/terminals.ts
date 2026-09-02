@@ -55,8 +55,6 @@ function apiFailureKind(
   httpStatus: number | undefined,
   vendorError: string | undefined,
 ): conversationv1.ApiRequestFailed["kind"] {
-  const empty = <T>(schema: T): T => schema;
-  void empty;
   switch (vendorError) {
     case "authentication_failed":
       return {
