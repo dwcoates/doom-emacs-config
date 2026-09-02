@@ -22,6 +22,11 @@ func (v *verbs) Kill(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
+	// A WAITING MERGE ENDS WITH THE WORKSPACE. Close refuses outright while a
+	// merge is queued, but Kill never blocks on what is running, so this is the
+	// one door a queued merge's workspace can leave through — and a merge left
+	// on the queue behind it would wait forever on a workspace that is gone.
+	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
 	return v.kill(ctx, log, ws)
 }
 
@@ -80,6 +85,10 @@ func (v *verbs) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
+
+	// The waiting merge goes first, for the same reason Kill drops it: the
+	// nuke destroys the very worktree the merge would have run against.
+	v.deps.Merge.OnWorkspaceClosed(ctx, ws)
 
 	if v.deps.Sessions.Live(ws) {
 		if err := v.kill(ctx, log, ws); err != nil {

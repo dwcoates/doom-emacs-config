@@ -472,9 +472,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			d, ok, err := fleet.CaptureDisplaced(ctx, ws)
 			return merge.Displaced{Turn: d.Turn, Text: d.Text}, ok, err
 		},
-		ParkedRoute: guidanceRoute(fleet, mergeRef),
-		Rollout:     rolloutController,
-		Log:         p.Surfaces,
+		PauseAfterCapture: capturePause(p.Surfaces.Global()),
+		ParkedRoute:       guidanceRoute(fleet, mergeRef),
+		Rollout:           rolloutController,
+		Log:               p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the merge orchestrator: %w", err)
@@ -910,6 +911,37 @@ func (n refusalNoter) NoteRefusal(ws ids.WorkspaceID) {
 		return
 	}
 	(*n.ref).NoteRefusal(ws)
+}
+
+// MergeCapturePauseEnv is a TEST-ONLY knob naming a rendezvous file. When it
+// is set, a merge run — right after it captured and ended the user's displaced
+// turn — creates that file and then blocks forever, which is the only way a
+// suite can hold a daemon inside the window a crash has to land in for the
+// boot recovery of displaced turns to have anything to do. UNSET IN
+// PRODUCTION: with no rendezvous named, the merge orchestrator gets a nil
+// pause and the code below is never reached.
+const MergeCapturePauseEnv = "AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE"
+
+// capturePause builds the test-only admission pause, or nil when the knob
+// names no rendezvous. A rendezvous file that cannot be created is an ERROR
+// and the run is NOT held: a pause whose signal never reached the test would
+// hang the suite with nothing said about why.
+func capturePause(log dlog.Logger) merge.AdmissionPause {
+	const op = "daemon.merge.capture_pause"
+	path := os.Getenv(MergeCapturePauseEnv)
+	if path == "" {
+		return nil
+	}
+	return func(ctx context.Context, ws ids.WorkspaceID) {
+		fields := dlog.Context{"workspace": string(ws), "rendezvous": path}
+		if err := os.WriteFile(path, []byte(string(ws)), 0o644); err != nil {
+			log.Error(op, "the merge capture rendezvous file could not be written; the run is not held",
+				dlog.Context{"workspace": string(ws), "rendezvous": path, "error": err.Error()})
+			return
+		}
+		log.Info(op, "holding the merge run after the displaced capture", fields)
+		<-ctx.Done()
+	}
 }
 
 // HoldoutWarnEnv compresses the rollout's never-free holdout warning cadence
