@@ -642,3 +642,8 @@ every UX or contract gap you surfaced instead of improvising.
   line old; convert/detached.ts hard-codes `requested` on task_started /
   task_notification (ctrl-b by_user preceded by a requested announcement;
   outputReadable unset on !bash-detach); the fold drops the usage carrier.
+- RULING (project lead): denied tool's start frame — do NOT defer starts;
+  denial RETIRES the unit: settle its `failure` arm with the denial as cause
+  (AgentToolFailure naming the permission id), no success/output; the gate
+  test asserts start-then-denied-failure. Recorded in shim.md's gate section;
+  code change rides the fakes/rebuild converter brief. No proto change.

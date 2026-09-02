@@ -321,6 +321,14 @@ purpose).
   permission mode, restated authoritatively on WatchSession.
 - An allowed tool then runs as an ordinary unit under the SAME identity; a
   denied tool never starts and has no activity frames.
+  RULING (project lead, 2026-09-01): "never starts" is the RECORD's truth,
+  not a stream-ordering guarantee. The tool_use block (and so the unit's
+  `start`) is already on the stream when canUseTool fires, and tool starts
+  are NOT deferred (every tool's streaming latency is not the price of one
+  gate case). On denial the shim settles that unit's `failure` arm with the
+  denial as its cause (the shared AgentToolFailure payload naming the
+  permission id), never a success/output; the store row is superseded whole,
+  so the record reads "denied, never ran" while the stream self-corrects.
 - Answer validation is free: the shim already holds the pending callback
   while the agent blocks, so echoes are checked against the ask in hand.
 
