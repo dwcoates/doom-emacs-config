@@ -391,6 +391,30 @@ func TestAQueryDeathDrawsTheInFlightTurnsTerminal(t *testing.T) {
 	}
 }
 
+// TestTheTurnOpenEdgeIsWhatAQueryDeathTerminates covers the turn a turn the
+// DAEMON opened: StartTurn answers with the prompt instead of echoing it on
+// the agent's stream, so the queue's hand-over is the feed's only source for
+// which turn is running.
+func TestTheTurnOpenEdgeIsWhatAQueryDeathTerminates(t *testing.T) {
+	// Arrange: the turn-open edge alone -- no streamed prompt at all.
+	h := newHarness(t)
+	h.resolver.OnTurnOpened(testWorkspace, ids.TurnID("turn-7"))
+
+	// Act.
+	h.resolver.OnSessionUpdate(testWorkspace, &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{
+			Cause: &conversationv1.SessionQueryDied_UnexpectedEof{
+				UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{},
+			},
+		}},
+	})
+
+	// Assert.
+	if h.terminalRow("turn-7").GetErrored().GetQueryDied() == nil {
+		t.Fatalf("rows = %+v, want the opened turn's query_died terminal", h.rows(rootFeed()))
+	}
+}
+
 func TestAQueryDeathWithNoTurnInFlightOwesNoTerminal(t *testing.T) {
 	// Arrange, Act.
 	h := newHarness(t)
