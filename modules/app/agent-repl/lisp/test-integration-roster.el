@@ -2032,10 +2032,24 @@ the gated case fanout §10 names but nothing in this suite exercised."
 
 ;; audit-3 #41
 (ert-deftest agent-repl-itest-roster-finish-edge-banner-names-the-workspace-and-activates ()
-  "The banner backend record's WS is the finished workspace, and ACTIVATE is set.
+  "The banner backend record's WS is the finished workspace, and the click raises it.
 R-CLICK backend shape `(WS TITLE MESSAGE ACTIVATE)': the message text
 alone does not pin which workspace clicking the banner would raise, nor
-that it raises anything at all."
+that it raises anything at all.
+
+ACTIVATE is the PER-NOTIFICATION override and nil is its documented
+workspace-shaped default: `agent-repl--notify-backend-alerter' runs
+`(agent-repl--notification-activate WS)' on a click when ACTIVATE is nil,
+which is exactly \"raise the frame and select WS's tab\".  So the finish
+edge passing nil is the CORRECT call -- host.el:518 passes an explicit
+function only because its click must carry more than the workspace name,
+and a finish edge that invented one would replace the default with a
+worse spelling of it.  What must therefore be pinned here is that WS is
+the finished workspace AND that the slot is nil rather than some third
+value the backend would neither run nor default for; the click itself is
+pinned in test-notifications.el
+\(`agent-repl-test-alerter-on-activate-jumps-on-click') and the caller
+side in test-session.el."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((agent-repl-roster-finish-functions
@@ -2058,7 +2072,7 @@ that it raises anything at all."
          (lambda () agent-repl-itest-notifications) nil "the desktop banner")
         (let ((recorded (car agent-repl-itest-notifications)))
           (should (equal (nth 0 recorded) "itest-fin-banner-shape"))
-          (should (nth 3 recorded)))))))
+          (should (null (nth 3 recorded))))))))
 
 ;; audit-3 #42
 (ert-deftest agent-repl-itest-roster-priority-badge-clears-when-the-row-drops-it ()
