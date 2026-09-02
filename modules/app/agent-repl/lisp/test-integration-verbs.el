@@ -49,6 +49,21 @@
 (declare-function agent-repl-frontend-daemon-stop "daemon")
 (declare-function agent-repl-link-successor "daemon-link")
 (declare-function agent-repl-host-faults "host")
+(declare-function agent-repl-roster-subscribe "roster")
+(declare-function agent-repl-merge-queue-pause "verbs")
+(declare-function agent-repl-merge-queue-resume "verbs")
+(declare-function agent-repl-create-workspace "verbs")
+(declare-function agent-repl-fork-workspace "verbs")
+(declare-function agent-repl-create-oneshot-self-merge "verbs")
+(declare-function agent-repl-create-oneshot-open-pr "verbs")
+(declare-function agent-repl-create-oneshot-open-pr-reviewed "verbs")
+(declare-function agent-repl-open-workspace "verbs")
+(declare-function agent-repl-daemon-shutdown-schedule "verbs")
+(declare-function agent-repl-daemon-shutdown-cancel "verbs")
+(declare-function agent-repl-daemon-shutdown-now "verbs")
+(defvar agent-repl-roster-view)
+(defvar agent-repl-roster-update-functions)
+(defvar agent-repl-roster-finish-functions)
 
 ;;;; ---- Fixtures ----
 
@@ -749,8 +764,16 @@ whole of what the user learns from the ack."
           (agent-repl-verb-merge agent-repl-itest-verbs--ws)
           (agent-repl-itest--await-call daemon "MergeWorkspace")
           ;; Assert: "Merge success -> `message \"merge enqueued\"'" (elisp-fanout.md §9).
-          (agent-repl-itest--wait-until (lambda () messages) nil
-                                        "the merge success message")
+          ;; WAIT FOR THE MESSAGE THIS TEST IS ABOUT, not for "some message":
+          ;; the `elisp.verbs.send' info record `--send' writes on issuing the
+          ;; call is already in this list before the daemon has even
+          ;; answered (every rung below `agent-repl--error' emits through
+          ;; `message', quietly, via `agent-repl--emit-message'), so waiting
+          ;; on a non-empty list is satisfied by the send log and races the
+          ;; success ack that produces "merge enqueued" itself.
+          (agent-repl-itest--wait-until
+           (lambda () (member "merge enqueued" messages))
+           nil "the merge success message")
           (should (member "merge enqueued" messages)))))))
 
 ;;;; ---- Close `blocked' messaging, no dialog (audit finding 71) ----
@@ -1686,6 +1709,685 @@ report a workspace the daemon has never heard of as fine."
                  (lambda (m) (string-match-p "session-health refused: unknown-workspace" m))
                  messages))
         (should (null (get-buffer "*agent-repl-health*")))))))
+
+;;;; ---- Audit-3 additions (R-SUITE-3) ----
+;;
+;; Findings 52-58 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+(defconst agent-repl-itest-verbs--repo-protojson
+  '((id . "repo-itest") (dir . "/tmp/itest-verbs-repo"))
+  "`agent-repl-itest-verbs--repo' as protojson, for building roster pushes.")
+
+(cl-defun agent-repl-itest-verbs--roster-row (id dir &key closed name)
+  "Return a minimal, valid RosterRow protojson alist for workspace ID/DIR.
+Every non-optional field is populated, matching what `agent-repl-roster-apply'
+requires to decode at all (an unset `status' oneof or a missing `closed'
+message are the invariant breaches audit-2's roster findings pin
+elsewhere).  CLOSED renders the row closed (`RosterRowClosed'); NAME
+overrides the display name, defaulting to ID."
+  `((workspace . ((workspace . ((id . ,id) (dir . ,dir)))))
+    (name . ((text . ,(or name id))))
+    (ready . ())
+    (current . ((current . :false)))
+    (when . ())
+    (detail . ())
+    (closed . ((closed . ,(if closed t :false))))))
+
+(defun agent-repl-itest-verbs--roster (rows)
+  "Return a WorkspaceRoster protojson alist carrying ROWS in the fixture section.
+The one repository section is keyed by `agent-repl-itest-verbs--repo',
+mirroring `agent-repl-itest-verbs--with-workspace''s fixture repo, so a
+scoped merge-queue action resolved from it names the SAME repository the
+rest of this suite already asserts against."
+  `((repository
+     . ((sections
+         . [((key . ((repository . ,agent-repl-itest-verbs--repo-protojson)))
+             (header . ((label . ((text . "itest-repo")))))
+             (rows . ((rows . ,(vconcat rows)))))])))
+    (task . ((sections . [])))
+    (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
+                        (rows . ((rows . [])))))))
+
+(defmacro agent-repl-itest-verbs--with-roster (daemon rows &rest body)
+  "Subscribe to DAEMON's roster stream, push ROWS, wait for the view, run BODY.
+`agent-repl-roster-view' and its hook lists are scratch bindings for the
+scenario, exactly as `agent-repl-itest-roster--with-subscription' binds
+them -- the roster is READ THROUGH THE WIRE and decoded by production
+code, never hand-built as a decoded plist, so this fixture pins the same
+schema the rest of the suite does."
+  (declare (indent 2) (debug (form form body)))
+  `(let ((agent-repl-itest-verbs--roster-conn
+          (agent-repl-connect-open (agent-repl-itest-daemon-address ,daemon)))
+         (agent-repl-roster-view nil)
+         (agent-repl-roster-update-functions nil)
+         (agent-repl-roster-finish-functions nil))
+     (unwind-protect
+         (progn
+           (agent-repl-roster-subscribe agent-repl-itest-verbs--roster-conn)
+           (agent-repl-itest--await-subscriber ,daemon "roster")
+           (agent-repl-itest--push
+            ,daemon "roster"
+            (list (cons 'roster (agent-repl-itest-verbs--roster ,rows))))
+           (agent-repl-itest--wait-until (lambda () agent-repl-roster-view) nil
+                                         "the roster push to reach the view")
+           ,@body)
+       (agent-repl-connect-close agent-repl-itest-verbs--roster-conn))))
+
+;;;; ---- #52: scoped merge-queue commands resolve REPOSITORY from the roster
+
+;; audit-3 #52
+(ert-deftest agent-repl-itest-verbs-merge-queue-pause-resolves-repository-from-the-roster ()
+  "A scoped merge-queue pause resolves its repository from the ROSTER.
+Pins fanout §9 + endpoint_update_merge_queue.proto \"a caller that means
+one names it\": `agent-repl-verbs--merge-queue-repository' reads the
+roster section holding the current workspace, so `pause.repository.id'
+must equal that section's own key."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (agent-repl-itest-verbs--with-roster
+       daemon (list (agent-repl-itest-verbs--roster-row
+                     (plist-get ref :id) (plist-get ref :dir)))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws)))
+          ;; Act.
+          (agent-repl-merge-queue-pause)
+          (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+          ;; Assert.
+          (should (equal (agent-repl-itest--body-field
+                          (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")
+                          'pause 'repository 'id)
+                         "repo-itest")))))))
+
+;; audit-3 #52
+(ert-deftest agent-repl-itest-verbs-merge-queue-pause-without-a-roster-repository-refuses-before-send ()
+  "Without a roster repository for the workspace, pause refuses before send.
+`agent-repl-verbs--merge-queue-repository' errors rather than fall back to
+the daemon-wide switch: sending that instead would pause every OTHER
+repository too on a caller who asked about just this one."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let ((agent-repl-roster-view nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws)))
+          ;; Act / Assert.
+          (should-error (agent-repl-merge-queue-pause) :type 'user-error)
+          (agent-repl-itest--await-log daemon "elisp.verbs.no-repository" "warn")
+          (should (null (agent-repl-itest--calls daemon "UpdateMergeQueue"))))))))
+
+;; audit-3 #52
+(ert-deftest agent-repl-itest-verbs-merge-queue-pause-daemon-wide-omits-repository-on-the-raw-wire ()
+  "A prefix-argument pause omits `repository' from the raw wire entirely.
+The daemon-wide switch is the ABSENCE of the field (UpdateMergeQueuePause),
+so a prefix argument must never resolve, and never send, a repository."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-merge-queue-pause t)
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "UpdateMergeQueue"))))
+        (should-not (string-match-p (regexp-quote "\"repository\"") raw))))))
+
+;; audit-3 #52
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-resolves-repository-from-the-roster ()
+  "A scoped merge-queue resume resolves its repository from the ROSTER.
+The other half of pause's roster resolution: a resolver that only worked
+for pause would leave resume silently daemon-wide."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (agent-repl-itest-verbs--with-roster
+       daemon (list (agent-repl-itest-verbs--roster-row
+                     (plist-get ref :id) (plist-get ref :dir)))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws)))
+          ;; Act.
+          (agent-repl-merge-queue-resume)
+          (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+          ;; Assert.
+          (should (equal (agent-repl-itest--body-field
+                          (agent-repl-itest-verbs--body daemon "UpdateMergeQueue")
+                          'resume 'repository 'id)
+                         "repo-itest")))))))
+
+;; audit-3 #52
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-without-a-roster-repository-refuses-before-send ()
+  "Without a roster repository for the workspace, resume refuses before send.
+Mirrors pause's refusal exactly, on the other admin verb."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let ((agent-repl-roster-view nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws)))
+          ;; Act / Assert.
+          (should-error (agent-repl-merge-queue-resume) :type 'user-error)
+          (agent-repl-itest--await-log daemon "elisp.verbs.no-repository" "warn")
+          (should (null (agent-repl-itest--calls daemon "UpdateMergeQueue"))))))))
+
+;; audit-3 #52
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-daemon-wide-omits-repository-on-the-raw-wire ()
+  "A prefix-argument resume omits `repository' from the raw wire entirely."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      ;; Act.
+      (agent-repl-merge-queue-resume t)
+      (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+      ;; Assert.
+      (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "UpdateMergeQueue"))))
+        (should-not (string-match-p (regexp-quote "\"repository\"") raw))))))
+
+;;;; ---- #53: the interactive create family
+
+;; audit-3 #53(a)
+(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-without-a-prefix-omits-parent ()
+  "`agent-repl-create-workspace' with NO prefix argument omits `parent' entirely.
+Pins fanout §9 \"the interactive create family (prefix arg = child)\": a
+plain create is a TOP-LEVEL workspace, never implicitly parented onto the
+workspace the command was invoked from.  No git/gh boundary is reached by
+this command -- the daemon owns creation -- so only the two Emacs readers
+are stubbed."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (agent-repl-itest-verbs--with-roster daemon nil
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'completing-read)
+                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
+                                                "itest-repo" "")))
+                  ((symbol-function 'read-string)
+                   (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
+          ;; Act.
+          (agent-repl-create-workspace nil)
+          (agent-repl-itest--await-call daemon "CreateWorkspace")
+          ;; Assert.
+          (should-not (assq 'parent (agent-repl-itest-verbs--body daemon "CreateWorkspace"))))))))
+
+;; audit-3 #53(b)
+(ert-deftest agent-repl-itest-verbs-create-workspace-interactive-with-a-prefix-names-the-parent-without-a-fork ()
+  "A PREFIX ARGUMENT makes the new workspace a CHILD, with no fork.
+Pins fanout §9: `parent.workspace.id' must echo the CURRENT workspace's
+ref verbatim, and `fork' must stay absent -- a plain child conversation is
+fresh, not a resumed one."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (agent-repl-itest-verbs--with-roster daemon nil
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'completing-read)
+                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
+                                                "itest-repo" "")))
+                  ((symbol-function 'read-string)
+                   (lambda (prompt &optional initial &rest _) (ignore prompt initial) "")))
+          ;; Act.
+          (agent-repl-create-workspace t)
+          (agent-repl-itest--await-call daemon "CreateWorkspace")
+          ;; Assert.
+          (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+            (should (equal (agent-repl-itest--body-field body 'parent 'workspace 'id)
+                           (plist-get ref :id)))
+            (should-not (assq 'fork (agent-repl-itest--body-field body 'parent)))))))))
+
+;; audit-3 #53(c)
+(ert-deftest agent-repl-itest-verbs-fork-workspace-interactive-sends-parent-and-fork ()
+  "`agent-repl-fork-workspace' names the parent AND sets the presence-only fork.
+A fork without a parent is unrepresentable by construction, so this
+command's whole contract is that BOTH facts ride together."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (agent-repl-itest-verbs--with-roster daemon nil
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () agent-repl-itest-verbs--ws))
+                  ((symbol-function 'completing-read)
+                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
+                                                "itest-repo" "")))
+                  ((symbol-function 'read-string)
+                   (lambda (prompt &optional initial &rest _)
+                     (ignore prompt initial) "forked prompt")))
+          ;; Act.
+          (agent-repl-fork-workspace)
+          (agent-repl-itest--await-call daemon "CreateWorkspace")
+          ;; Assert.
+          (let ((body (agent-repl-itest-verbs--body daemon "CreateWorkspace")))
+            (should (equal (agent-repl-itest--body-field body 'parent 'workspace 'id)
+                           (plist-get ref :id)))
+            (should (assq 'fork (agent-repl-itest--body-field body 'parent)))))))))
+
+;; audit-3 #53(d)
+(ert-deftest agent-repl-itest-verbs-create-oneshot-open-pr-reviewed-sends-explicit-false-on-the-raw-wire ()
+  "The REVIEWED one-shot open-PR command sends both flags explicitly false.
+`agent-repl-create-oneshot-open-pr-reviewed' is \"neither self-certified
+nor queued\", and the parsed body drops a zero-valued bool, so only the
+raw wire text can prove the daemon actually received `false' rather than
+an absence."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (agent-repl-itest-verbs--with-roster daemon nil
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
+                                                "itest-repo" "")))
+                  ((symbol-function 'read-string)
+                   (lambda (prompt &optional initial &rest _)
+                     (ignore prompt initial) "reviewed one-shot")))
+          ;; Act.
+          (agent-repl-create-oneshot-open-pr-reviewed nil)
+          (agent-repl-itest--await-call daemon "CreateWorkspace")
+          ;; Assert.
+          (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "CreateWorkspace"))))
+            (should (string-match-p (regexp-quote "\"selfCertified\":false") raw))
+            (should (string-match-p (regexp-quote "\"addToMergeQueue\":false") raw))))))))
+
+;; audit-3 #53(d)
+(ert-deftest agent-repl-itest-verbs-create-oneshot-open-pr-sends-explicit-true-on-the-raw-wire ()
+  "The PLAIN one-shot open-PR command sends both flags explicitly true.
+The other half of the reviewed case: a command that always encoded
+`false' would pass the reviewed test on its own."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (agent-repl-itest-verbs--with-roster daemon nil
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (prompt &rest _) (if (string-prefix-p "Repository" prompt)
+                                                "itest-repo" "")))
+                  ((symbol-function 'read-string)
+                   (lambda (prompt &optional initial &rest _)
+                     (ignore prompt initial) "queued one-shot")))
+          ;; Act.
+          (agent-repl-create-oneshot-open-pr nil)
+          (agent-repl-itest--await-call daemon "CreateWorkspace")
+          ;; Assert.
+          (let ((raw (car (agent-repl-itest--call-raw-bodies daemon "CreateWorkspace"))))
+            (should (string-match-p (regexp-quote "\"selfCertified\":true") raw))
+            (should (string-match-p (regexp-quote "\"addToMergeQueue\":true") raw))))))))
+
+;; audit-3 #53(e)
+(ert-deftest agent-repl-itest-verbs-create-oneshot-self-merge-with-a-model-prefix-sends-the-chosen-model ()
+  "A model-prefix one-shot sends the picker's CHOSEN candidate as `model'.
+`agent-repl-oneshot-model-candidates' backs the picker; without this a
+prefix that asked for a model choice could silently create on the
+daemon's default instead."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (agent-repl-itest-verbs--with-roster daemon nil
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (prompt &rest _)
+                     (cond ((string-prefix-p "Repository" prompt) "itest-repo")
+                           ((string-prefix-p "Model" prompt) "haiku")
+                           (t ""))))
+                  ((symbol-function 'read-string)
+                   (lambda (prompt &optional initial &rest _)
+                     (ignore prompt initial) "one-shot with a model")))
+          ;; Act.
+          (agent-repl-create-oneshot-self-merge t)
+          (agent-repl-itest--await-call daemon "CreateWorkspace")
+          ;; Assert.
+          (should (equal (agent-repl-itest--body-field
+                          (agent-repl-itest-verbs--body daemon "CreateWorkspace")
+                          'model)
+                         "haiku")))))))
+
+;;;; ---- #54: OpenWorkspace picks a CLOSED roster row; shutdown-schedule reads
+
+;; audit-3 #54
+(ert-deftest agent-repl-itest-verbs-open-workspace-interactive-picks-a-closed-row ()
+  "`agent-repl-open-workspace' completes over CLOSED rows and opens the one PICKED.
+Pins fanout §9 \"(completing-read over closed rows)\": OpenWorkspace must
+carry the CLOSED row's own ref -- id AND dir -- never the open row's, even
+though the open row is present on the same roster."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (agent-repl-itest-verbs--with-roster
+       daemon (list (agent-repl-itest-verbs--roster-row
+                     "itest-open-ws" "/tmp/itest-open-ws")
+                    (agent-repl-itest-verbs--roster-row
+                     "itest-closed-ws" "/tmp/itest-closed-ws" :closed t))
+        (let (offered)
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (prompt candidates &rest _)
+                       (ignore prompt)
+                       (setq offered candidates)
+                       "itest-closed-ws")))
+            ;; Act.
+            (agent-repl-open-workspace)
+            (agent-repl-itest--await-call daemon "OpenWorkspace"))
+          ;; Assert: only the CLOSED row was a candidate at all.
+          (should (equal offered '("itest-closed-ws")))
+          (let ((body (agent-repl-itest-verbs--body daemon "OpenWorkspace")))
+            (should (equal (agent-repl-itest--body-field body 'workspace 'id)
+                           "itest-closed-ws"))
+            (should (equal (agent-repl-itest--body-field body 'workspace 'dir)
+                           "/tmp/itest-closed-ws"))))))))
+
+;; audit-3 #54
+(ert-deftest agent-repl-itest-verbs-open-workspace-interactive-with-no-closed-rows-refuses-before-send ()
+  "With NO closed rows on the roster, `agent-repl-open-workspace' refuses
+before send, prompting for nothing at all."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (agent-repl-itest-verbs--with-roster
+       daemon (list (agent-repl-itest-verbs--roster-row
+                     "itest-open-ws" "/tmp/itest-open-ws"))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (&rest _)
+                     (error "agent-repl-itest: no closed row should prompt"))))
+          ;; Act / Assert.
+          (should-error (agent-repl-open-workspace) :type 'user-error)
+          (should (null (agent-repl-itest--calls daemon "OpenWorkspace"))))))))
+
+;; audit-3 #54
+(ert-deftest agent-repl-itest-verbs-daemon-shutdown-schedule-interactive-converts-minutes-to-at-ms ()
+  "`agent-repl-daemon-shutdown-schedule' converts its MINUTES argument to `atMs'.
+The interactive layer is what a keybinding actually reaches; `at-ms' must
+be an epoch instant MINUTES from now, not the bare minute count."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (let ((before (truncate (* 1000 (float-time)))))
+        (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "deploy"))
+                  ((symbol-function 'read-string) (lambda (&rest _) "")))
+          ;; Act.
+          (agent-repl-daemon-shutdown-schedule 5)
+          (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+          ;; Assert: at-ms lands within [now, now + 5min] plus generous slack
+          ;; for the time the test itself took to run.
+          (let* ((body (agent-repl-itest-verbs--body daemon "UpdateShutdownSchedule"))
+                 (at-ms (string-to-number
+                         (format "%s" (agent-repl-itest--body-field body 'schedule 'atMs)))))
+            (should (>= at-ms (+ before (* 5 60 1000))))
+            (should (<= at-ms (+ before (* 5 60 1000) 60000)))))))))
+
+;; audit-3 #54
+(ert-deftest agent-repl-itest-verbs-daemon-shutdown-now-interactive-blank-operator-note-refuses-before-send ()
+  "`agent-repl-daemon-shutdown-now' with a BLANK operator note refuses before send.
+`agent-repl-verbs--read-drain-reason' enforces the note's non-blankness
+at the READER, before any request is even built."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (cl-letf (((symbol-function 'completing-read) (lambda (&rest _) "operator"))
+                ((symbol-function 'read-string) (lambda (&rest _) "")))
+        ;; Act / Assert.
+        (should-error (agent-repl-daemon-shutdown-now) :type 'user-error)
+        (should (null (agent-repl-itest--calls daemon "UpdateShutdownSchedule")))))))
+
+;;;; ---- #55: every typed fault KIND rides the health path, with its payload
+
+;; audit-3 #55
+(ert-deftest agent-repl-itest-verbs-daemon-health-every-fault-kind-renders ()
+  "Every `DaemonFault' kind, with its own payload, renders its detail.
+`DaemonFault' declares SIX typed, payload-bearing kind arms; the
+pre-existing suite scripts only `wsmReadOnly', so an encoder/decoder
+regression on any of the other five would go uncaught."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (when (get-buffer "*agent-repl-health*") (kill-buffer "*agent-repl-health*"))
+      (let ((kinds
+             `((adoptionWindowExpired
+                . ((workspace . ((id . "aw-ws") (dir . "/tmp/aw-ws")))))
+               (logSinkPoisoned . ((sink . "emacs.jsonl")))
+               (deployScriptFailed . ((detail . "deploy.sh exit 1")))
+               (successorSpawnFailed . ((detail . "bind: address in use")))
+               (promptsDirMissing . ((path . "/var/prompts")))
+               (wsmReadOnly . ())))
+            (n 0))
+        (dolist (kind kinds)
+          (setq n (1+ n))
+          (let* ((detail (format "daemon-fault-detail-%d" n))
+                 (fault `((,(car kind) . ,(cdr kind)) (detail . ,detail)))
+                 (response `((success . ((unhealthy . ((faults . [,fault]))))))))
+            ;; Act.
+            (agent-repl-itest--script daemon "DaemonHealth" response)
+            (agent-repl-daemon-health)
+            (agent-repl-itest--await-call daemon "DaemonHealth" n)
+            ;; Assert.
+            (agent-repl-itest-verbs--await-health detail)))
+        (should (null (agent-repl-itest--log-entries
+                       daemon "elisp.verbs.health-unknown-arm" "error")))))))
+
+;; audit-3 #55
+(ert-deftest agent-repl-itest-verbs-session-health-every-fault-kind-renders ()
+  "Every `SessionFault' kind, with its own payload, renders its detail.
+`SessionFault' declares EIGHT typed, payload-bearing kind arms -- its own
+vocabulary, deliberately separate from `DaemonFault''s -- and the
+pre-existing suite scripts only `linkSevered'."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (when (get-buffer "*agent-repl-health*") (kill-buffer "*agent-repl-health*"))
+      (let ((kinds
+             `((shimStartFailed . ((exitCode . 1) (stderrTail . "panic: oops")))
+               (shimDied . ((exitCode . 137)))
+               (linkSevered . ())
+               (resumeFailed . ((cause . "transcript truncated")))
+               (bounceDied . ())
+               (bounceUnknown . ())
+               (classifierFailed . ((detail . "classifier timed out")))
+               (shimReported . ((component . "hooks") (kind . "permission-denied")))))
+            (n 0))
+        (dolist (kind kinds)
+          (setq n (1+ n))
+          (let* ((detail (format "session-fault-detail-%d" n))
+                 (fault `((,(car kind) . ,(cdr kind)) (detail . ,detail)))
+                 (response `((success . ((unhealthy . ((faults . [,fault]))))))))
+            ;; Act.
+            (agent-repl-itest--script daemon "SessionHealth" response)
+            (agent-repl-session-health agent-repl-itest-verbs--ws)
+            (agent-repl-itest--await-call daemon "SessionHealth" n)
+            ;; Assert.
+            (agent-repl-itest-verbs--await-health detail)))
+        (should (null (agent-repl-itest--log-entries
+                       daemon "elisp.verbs.health-unknown-arm" "error")))))))
+
+;;;; ---- #56: a transport failure's exact per-op message
+
+;; audit-3 #56
+(ert-deftest agent-repl-itest-verbs-transport-failure-messages-the-exact-per-op-text ()
+  "A transport failure messages EXACTLY \"merge failed -- the daemon did not
+answer\", not merely an ERROR log line.
+Pins fanout §9 `agent-repl--error' + `message': the pre-existing
+`agent-repl-itest-verbs-transport-failure-logs-an-error' asserts only the
+log side, leaving the user-facing text (`--send''s `:on-failure') unpinned."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (agent-repl-itest--stop-daemon daemon t)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (ignore-errors (agent-repl-verb-merge agent-repl-itest-verbs--ws))
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda ()
+             (seq-some (lambda (m)
+                         (string-match-p
+                          (regexp-quote "merge failed -- the daemon did not answer") m))
+                       messages))
+           nil "the exact merge transport-failure message")
+          (should (seq-some
+                   (lambda (m)
+                     (string-match-p
+                      (regexp-quote "merge failed -- the daemon did not answer") m))
+                   messages)))))))
+
+;;;; ---- #57: restart success's exact per-force text
+
+;; audit-3 #57
+(ert-deftest agent-repl-itest-verbs-restart-graceful-success-messages-the-exact-scheduled-text ()
+  "A graceful Restart success messages EXACTLY \"agent-repl: restart scheduled\".
+The pre-existing `agent-repl-itest-verbs-restart-success-messages' asserts
+only a \"restart\" substring, which the `elisp.verbs.send op=restart' INFO
+line ALSO satisfies -- that line reaches `message' too, quietly, via
+`agent-repl--emit-message' -- so a success handler that never fired would
+still pass it.  The per-force text is what distinguishes the two, and only
+the exact string proves the SUCCESS branch ran."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-verb-restart agent-repl-itest-verbs--ws nil)
+          (agent-repl-itest--await-call daemon "RestartWorkspace")
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (member "agent-repl: restart scheduled" messages))
+           nil "the exact graceful-restart message")
+          (should (member "agent-repl: restart scheduled" messages)))))))
+
+;; audit-3 #57
+(ert-deftest agent-repl-itest-verbs-restart-forced-success-messages-the-exact-under-way-text ()
+  "A FORCED Restart success messages EXACTLY \"agent-repl: restart under way\".
+The other half of the per-force text: a handler that always said
+\"scheduled\" would pass the graceful case and fail only here."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (ignore ref)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-verb-restart agent-repl-itest-verbs--ws t)
+          (agent-repl-itest--await-call daemon "RestartWorkspace")
+          ;; Assert.
+          (agent-repl-itest--wait-until
+           (lambda () (member "agent-repl: restart under way" messages))
+           nil "the exact forced-restart message")
+          (should (member "agent-repl: restart under way" messages)))))))
+
+;;;; ---- #58: admin-verb refusal arms and their op-named slugs
+
+;; audit-3 #58
+(ert-deftest agent-repl-itest-verbs-shutdown-cancel-nothing-scheduled-warns-with-the-op-named-slug ()
+  "Cancelling with NOTHING scheduled logs `elisp.verbs.shutdown-schedule-refused'
+at WARN and messages the arm by name.
+`agent-repl-daemon-shutdown-cancel' issues `agent-repl-verb-shutdown-schedule'
+under `:op \"shutdown-schedule\"', so that -- not a bare \"shutdown\" -- is
+the slug the arm-generic refusal handler actually writes."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "UpdateShutdownSchedule"
+                              '((error . ((nothingScheduled . ())))))
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-daemon-shutdown-cancel)
+          (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+          (agent-repl-itest--await-log
+           daemon "elisp.verbs.shutdown-schedule-refused" "warn")
+          ;; Assert.
+          (should (agent-repl-itest--logged-p
+                   daemon "elisp.verbs.shutdown-schedule-refused" "warn"))
+          (should (seq-some
+                   (lambda (m) (string-match-p
+                               "shutdown-schedule refused: nothing-scheduled" m))
+                   messages)))))))
+
+;; audit-3 #58
+(ert-deftest agent-repl-itest-verbs-merge-queue-pause-already-paused-warns-with-the-op-named-slug ()
+  "Pausing an ALREADY-PAUSED queue logs `elisp.verbs.merge-queue-refused' at
+WARN and messages the arm by name."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "UpdateMergeQueue"
+                              '((error . ((alreadyPaused . ())))))
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-verb-merge-queue (list :arm :pause))
+          (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+          (agent-repl-itest--await-log daemon "elisp.verbs.merge-queue-refused" "warn")
+          ;; Assert.
+          (should (agent-repl-itest--logged-p
+                   daemon "elisp.verbs.merge-queue-refused" "warn"))
+          (should (seq-some
+                   (lambda (m) (string-match-p "merge-queue refused: already-paused" m))
+                   messages)))))))
+
+;; audit-3 #58
+(ert-deftest agent-repl-itest-verbs-merge-queue-resume-not-paused-warns-with-the-op-named-slug ()
+  "Resuming a queue that is NOT paused logs `elisp.verbs.merge-queue-refused'
+at WARN and messages the arm by name."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "UpdateMergeQueue"
+                              '((error . ((notPaused . ())))))
+    (agent-repl-itest-verbs--with-primary daemon conn
+      (ignore conn)
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-verb-merge-queue (list :arm :resume))
+          (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+          (agent-repl-itest--await-log daemon "elisp.verbs.merge-queue-refused" "warn")
+          ;; Assert.
+          (should (agent-repl-itest--logged-p
+                   daemon "elisp.verbs.merge-queue-refused" "warn"))
+          (should (seq-some
+                   (lambda (m) (string-match-p "merge-queue refused: not-paused" m))
+                   messages)))))))
+
+;; audit-3 #58
+(ert-deftest agent-repl-itest-verbs-merge-queue-evict-no-such-queued-merge-warns-with-the-op-named-slug ()
+  "Evicting a workspace with NO queued merge logs
+`elisp.verbs.merge-queue-refused' at WARN and messages the arm by name."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "UpdateMergeQueue"
+                              '((error . ((noSuchQueuedMerge . ())))))
+    (agent-repl-itest-verbs--with-workspace daemon ref
+      (let (messages)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+          ;; Act.
+          (agent-repl-verb-merge-queue (list :arm :evict :workspace ref))
+          (agent-repl-itest--await-call daemon "UpdateMergeQueue")
+          (agent-repl-itest--await-log daemon "elisp.verbs.merge-queue-refused" "warn")
+          ;; Assert.
+          (should (agent-repl-itest--logged-p
+                   daemon "elisp.verbs.merge-queue-refused" "warn"))
+          (should (seq-some
+                   (lambda (m) (string-match-p
+                               "merge-queue refused: no-such-queued-merge" m))
+                   messages)))))))
 
 (provide 'test-integration-verbs)
 
