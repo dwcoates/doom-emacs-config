@@ -419,8 +419,9 @@ func TestTaskStopResultCancelsTheOwningTask(t *testing.T) {
 	// THE CANCELLED TERMINAL OWES THE OUTPUT THE SPOOL HELD: the run said
 	// something before it was stopped, and the terminal is the last thing any
 	// reader sees of it.
-	if got := interrupted.GetOutput().GetText().GetStdout(); !strings.Contains(got, "partial work") {
-		t.Errorf("the cancelled terminal carries stdout %q, wanted the output the spool held", got)
+	if want := requireContiguousDeltas(t, fx.CallID, rows); interrupted.GetOutput().GetText().GetStdout() != want {
+		t.Errorf("the cancelled terminal carries stdout %q, wanted exactly the run's joined deltas %q",
+			interrupted.GetOutput().GetText().GetStdout(), want)
 	}
 }
 
