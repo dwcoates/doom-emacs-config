@@ -624,6 +624,74 @@ input clears."
     (agent-repl--send :user-sent)
     (should-not agent-repl-test-input--refusals)))
 
+(ert-deftest agent-repl-input-bubble-refused-keeps-the-text ()
+  "The shim refused this agent; nothing landed, so the draft stays put."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :not-deliverable :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should (equal (agent-repl-test-input--composer-text) "hello"))))
+
+(ert-deftest agent-repl-input-bubble-refused-holds-nothing ()
+  "A re-drive would meet the same refusal, so nothing is queued."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :agent-busy :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--queued)))
+
+(ert-deftest agent-repl-input-bubble-refused-routes-to-no-handover ()
+  "It is the shim's answer about an agent, not a handover: host.el is out."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :agent-busy :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should-not agent-repl-test-input--refusals)))
+
+(ert-deftest agent-repl-input-bubble-refused-not-deliverable-names-the-kind ()
+  "The `not_deliverable' kind says there is no route to that agent."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :not-deliverable :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should (seq-some (lambda (text) (string-match-p "no route to that agent" text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-bubble-refused-agent-busy-names-the-kind ()
+  "The `agent_busy' kind says the addressed agent's own turn is running."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :agent-busy :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should (seq-some (lambda (text)
+                        (string-match-p "that agent's own turn is running" text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-bubble-refused-echoes-the-detail ()
+  "The shim's own account rides into the echo area verbatim."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "no such agent kind" :kind (:arm :not-deliverable :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should (seq-some (lambda (text) (string-match-p "(no such agent kind)" text))
+                      agent-repl-test-input--messages))))
+
+(ert-deftest agent-repl-input-bubble-refused-omits-an-empty-detail ()
+  "An empty detail adds no empty parenthetical to the sentence."
+  (agent-repl-test-input--with
+    (setq agent-repl-test-input--answer
+          '(:response (:arm :error :value (:reason (:arm :bubble-refused :value (:detail "" :kind (:arm :agent-busy :value nil)))))))
+    (agent-repl-test-input--type "hello")
+    (agent-repl--send :user-sent)
+    (should-not (seq-some (lambda (text) (string-match-p "()" text))
+                          agent-repl-test-input--messages))))
+
 (ert-deftest agent-repl-input-merging-error-keeps-the-text ()
   "The merging refusal KEEPS the text: the user resubmits after the merge."
   (agent-repl-test-input--with
