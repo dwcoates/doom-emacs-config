@@ -153,3 +153,21 @@ card.
 the panel is the version row plus the spliced account/model/mode rows and
 nothing else. cwd, auth, plugins and memory return if the handshake deferral
 ever lands. A playtest seeing the thin panel is seeing the settled consequence.
+
+## Proto proposals opened by the remediation pass (landing 7 candidates)
+
+Neither is an unlanded ARM: both messages exist, and each is missing a FIELD
+the daemon has evidence for and nowhere to put it.
+
+1. `FeedMergeAbandoned` is an EMPTY message. `internal/merge/terminal.go`'s
+   `publishAbandoned` states WHY a queued merge left the queue — the operator
+   evicted it, the user released its slot — and the arm carries nothing, so the
+   cause survives only in the daemon's own log. PROPOSAL: a `summary` string,
+   as `FeedMergeFailed` carries. The three distinct causes remain the separate
+   landing-7 shape already recorded above.
+
+2. `UpdateAgentFailure.agent_busy` (recorded in the landing-6 batch above) is
+   still owed: the `agent_busy` kind of `SubmitPromptError.bubble_refused` has
+   no producer without it, and
+   `TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal`
+   stays RED by design until it lands.
