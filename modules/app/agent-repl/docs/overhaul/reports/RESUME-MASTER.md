@@ -101,6 +101,19 @@ must be fast. After each suite run the worst offenders by duration get an
 opus-low root-cause pass: real external dependency executing, production
 timer ridden, or misbehavior; findings feed remediation.
 
+## E2E SUITE REBUILT AND MERGED 2026-09-02 (overhaul/integration 780ec2f6c)
+
+modules/app/agent-repl/e2e: own Go module importing the daemon integration
+harness (three additive seams: MainAt, Opts.ShimNode/ShimMain/StoreSocket).
+20 area files, 98 tests, 69/69 goldens mapped (67 assert, 2 ctrl-b skips
+ruled out of scope, 1 KillTurn-not-open skip lacking a black-box trigger).
+Real claude-repld + shim + shim-store + shim-sidecar per test; fake SDK and
+scripted fake git only; tests write nothing; grep gate in TestMain. NEVER
+RUN YET (compile gate only) — step 7 is the first execution. SPEC.md in the
+package; coverage table in reports/E2E-SCENARIO-COVERAGE.md (with a
+manifest/registry scenario-name drift section for a later shim pass).
+Landing 8 merged for daemon (5214cf70c) and webapp (45376d65b); elisp pending.
+
 ## LANDING 8 (2026-09-02, user-approved; protos 1fdf85e63, bindings 3791cd630)
 
 FeedSessionSeparation.compaction_failed and five FeedTurnEndedErrored arms
