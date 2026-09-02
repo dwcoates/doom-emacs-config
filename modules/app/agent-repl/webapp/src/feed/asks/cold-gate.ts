@@ -257,7 +257,10 @@ export function drawFeedColdGateResolved(
       word.textContent = drawFeedColdGateResolvedCompact(choice.value, `${path}.compact`);
       // The trace states WHICH scope was summarized as a datum of its own, so
       // the choice is readable without parsing the sentence it was worded into.
-      word.setAttribute("data-compact-scope", String(choice.value.scope));
+      word.setAttribute(
+        "data-compact-scope",
+        scopeName(choice.value.scope, `${path}.compact.scope`),
+      );
       break;
     default:
       return unreachableArm(`${path}.choice`, armName(choice as { case: string }));
@@ -419,16 +422,10 @@ function drawCompactSubmenu(
   scopeLabelEl.className = "cold-gate-submenu-label";
   scopeLabelEl.textContent = COLD_GATE_COPY.submenu.scope;
   menu.scopes.forEach((scope, index) => {
-    const name = SCOPE_NAMES[scope as keyof typeof SCOPE_NAMES];
     // A menu offering UNSPECIFIED (or an enum value this build has no word for)
     // is a malformed view: there is no honest label to draw, and picking one
     // would offer a scope the daemon did not.
-    if (name === undefined) {
-      throw new MalformedView(
-        `${path}.scopes[${index}]`,
-        `compaction scope ${String(scope)} is not one this build can offer`,
-      );
-    }
+    const name = scopeName(scope, `${path}.scopes[${index}]`);
     const row = document.createElement("label");
     row.className = "cold-gate-choice";
     const input = document.createElement("input");
@@ -536,8 +533,17 @@ function drawAnswerOutcome(
   }
 }
 
-/** One scope's offered words. */
-export function scopeLabel(scope: SessionCompactScope, path: string): string {
+/**
+ * One scope's ENUM NAME — the single spelling `[data-compact-scope]` carries,
+ * on the standing gate's radios and on the resolved trace alike.
+ *
+ * UNSPECIFIED (or an enum value this build has no word for) is a malformed
+ * view: there is no honest name to draw.
+ */
+export function scopeName(
+  scope: SessionCompactScope,
+  path: string,
+): keyof typeof COLD_GATE_COPY.scopes {
   const name = SCOPE_NAMES[scope as keyof typeof SCOPE_NAMES];
   if (name === undefined) {
     throw new MalformedView(
@@ -545,7 +551,12 @@ export function scopeLabel(scope: SessionCompactScope, path: string): string {
       `compaction scope ${String(scope)} is not one this build can word`,
     );
   }
-  return COLD_GATE_COPY.scopes[name];
+  return name;
+}
+
+/** One scope's offered words. */
+export function scopeLabel(scope: SessionCompactScope, path: string): string {
+  return COLD_GATE_COPY.scopes[scopeName(scope, path)];
 }
 
 /**
