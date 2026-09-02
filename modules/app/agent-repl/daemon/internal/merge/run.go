@@ -227,6 +227,12 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	} else if captured {
 		r.displaced = &displaced
 	}
+	// THE TEST SEAM, NIL IN PRODUCTION. See Deps.PauseAfterCapture: it holds a
+	// run in the window between the capture and everything that would close it,
+	// which is what makes the crash-after-capture recovery testable.
+	if o.deps.PauseAfterCapture != nil {
+		o.deps.PauseAfterCapture(ctx, ws)
+	}
 	o.mu.Lock()
 	o.running[repo] = r
 	o.runsByWorkspace[ws] = r
