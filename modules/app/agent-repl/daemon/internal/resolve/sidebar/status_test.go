@@ -348,12 +348,61 @@ func TestRowIsNotVendorBlockedOnAnOrdinaryRunFailure(t *testing.T) {
 
 	// Act: a run that failed is not a session that cannot proceed.
 	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_ExecutionError{
-			ExecutionError: &conversationv1.AgentExecutionError{}}})
+		Failure: &conversationv1.AgentFailure_ModelError{
+			ModelError: &conversationv1.AgentModelError{}}})
 
 	// Assert.
 	if got := statusName(onlyRow(t, r)); got == "vendor_blocked" {
 		t.Fatal("an ordinary run failure blocked the row on the vendor")
+	}
+}
+
+// The four run terminals whose failure.proto evidence messages state that they
+// resolve the workspace PURPLE — landing 8.
+func TestRowIsVendorBlockedOnEachPurpleRunTerminal(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+	}{
+		{"max_turns", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_MaxTurns{
+			MaxTurns: &conversationv1.AgentMaxTurnsReached{}}}},
+		{"budget_exhausted", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_BudgetExhausted{
+			BudgetExhausted: &conversationv1.AgentBudgetExhausted{}}}},
+		{"execution_error", &conversationv1.AgentFailure{Failure: &conversationv1.AgentFailure_ExecutionError{
+			ExecutionError: &conversationv1.AgentExecutionError{}}}},
+		{"structured_output_retry_exhausted", &conversationv1.AgentFailure{
+			Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{
+				StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}}}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+
+			// Act.
+			r.OnAgentTerminal(theWS, agent("a1"), nil, nil, tc.failure)
+
+			// Assert.
+			if got := statusName(onlyRow(t, r)); got != "vendor_blocked" {
+				t.Fatalf("status = %q, want vendor_blocked", got)
+			}
+		})
+	}
+}
+
+// A Stop hook is the user's own configuration, not the vendor refusing.
+func TestRowIsNotVendorBlockedOnAStopHookPrevention(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+
+	// Act.
+	r.OnAgentTerminal(theWS, agent("a1"), nil, nil, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_StopHookPrevented{
+			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}}})
+
+	// Assert.
+	if got := statusName(onlyRow(t, r)); got == "vendor_blocked" {
+		t.Fatal("a Stop hook blocked the row on the vendor")
 	}
 }
 

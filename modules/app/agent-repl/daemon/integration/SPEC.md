@@ -288,7 +288,12 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - worktree enter/exit draw separation dividers with the token delta unset
 - an AgentUpdate `context_cut` arm (cleared/compacted/compaction_failed)
   draws the separation row with formatted before/after; compaction_failed
-  draws no separation and surfaces the error
+  draws its own divider (label "compaction failed", the error verbatim,
+  `tokens` UNSET) and also surfaces the error on the turn's terminal
+- the run's own five terminals (max_turns, budget_exhausted,
+  execution_error, structured_output_retry_exhausted, stop_hook_prevented)
+  draw their own FeedTurnEndedErrored arms with composed headlines; the four
+  FailureVendor* ones also resolve the roster PURPLE
 - permission start → `permission.open` row + footer `waiting.permission`
   + host `notification{permission_requested}`; answered → `answered` re-push
 - question start → `question.open`; answers → `answered` with echoed labels
