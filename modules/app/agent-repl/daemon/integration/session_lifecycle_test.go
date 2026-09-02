@@ -934,7 +934,8 @@ func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.sessionwatcher.watch_session",
+		"daemon.rollout.relaunch", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.shimclient.exit", "daemon.shimclient.kill_session")
 	f.shim.ExpectStartSession()
 	f.submit("long running work", "k-restart-forced", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
