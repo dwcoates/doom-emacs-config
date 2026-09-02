@@ -1344,6 +1344,256 @@ rather than a lifecycle color."
       (agent-repl-itest--await-log daemon "elisp.rpc.stream-open" "info")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.stream-open" "info")))))
 
+;;;; ---- Audit-2 additions (R-SUITE-2) ----
+;;
+;; Findings 17-23 of docs/overhaul/reports/elisp-suite-audit-2.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+(declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster")
+(declare-function agent-repl--emacs-focused-p "notifications")
+(declare-function agent-repl--ws-get "workspace")
+(declare-function agent-repl--prompt-queue-on-finish "prompt-queue")
+
+;; audit-2 #17
+(ert-deftest agent-repl-itest-roster-row-that-left-the-roster-is-torn-down ()
+  "A row that VANISHES from the roster loses its tab.
+E5: \"nuked rows leave the roster\" — they are not marked `closed', they
+are simply gone.  R8: \"Tabs derive from `closed = false' rows\", and
+roster.el's reconcile \"tears down every roster-owned tab whose row is
+gone\".  A client that only reacted to `closed' would keep a tab for a
+workspace that no longer exists anywhere."
+  ;; Arrange: two rows, both open.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-stay" "itest-stay" 'ready)
+                     (agent-repl-itest-roster--row "itest-gone" "itest-gone" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (and (agent-repl--ws-by-ref-id "itest-stay")
+                       (agent-repl--ws-by-ref-id "itest-gone")))
+       nil "both rows' tabs to be opened")
+      ;; Act: the second row is nuked — it leaves the roster entirely.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-stay" "itest-stay" 'ready))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (not (agent-repl--ws-by-ref-id "itest-gone")))
+       nil "the vanished row's tab to be torn down")
+      (should (null (agent-repl--ws-by-ref-id "itest-gone")))
+      (should (equal (agent-repl--ws-by-ref-id "itest-stay") "itest-stay")))))
+
+;; audit-2 #18
+(ert-deftest agent-repl-itest-roster-tab-carries-the-rows-own-ref ()
+  "A tab is created with the ROW'S ref: its `:dir' is the ref's dir.
+fanout §8: \"workspace.el creates it with `:ref', `:dir' = ref.dir,
+`:name'\".  A path is never an identity, and a tab whose dir was derived
+anywhere but from the ref would send every later per-workspace rpc at the
+wrong directory."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-ref" "itest-ref" 'ready))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl--ws-by-ref-id "itest-ref"))
+       nil "the row's tab to be opened")
+      (let ((ws (agent-repl--ws-by-ref-id "itest-ref")))
+        (should (equal (agent-repl--ws-get ws :project-dir) "/tmp/itest-roster-itest-ref"))
+        (should (equal (plist-get (agent-repl-host-ref ws) :id) "itest-ref"))
+        (should (equal (plist-get (agent-repl-host-ref ws) :dir)
+                       "/tmp/itest-roster-itest-ref"))))))
+
+;; audit-2 #19
+(ert-deftest agent-repl-itest-roster-finish-reactions-are-globally-registered ()
+  "The four finish-edge reactions are registered at LOAD time, globally.
+Every other finish-edge test binds `agent-repl-roster-finish-functions'
+to exactly the consumer it exercises, so a production that dropped its
+`add-hook' would pass all of them.  The GLOBAL value is the only place
+the wiring itself is observable."
+  ;; Arrange / Act / Assert.
+  (let ((registered (default-value 'agent-repl-roster-finish-functions)))
+    (should (memq #'agent-repl-roster-notify-finished registered))
+    (should (memq #'agent-repl-roster-echo-finished registered))
+    (should (memq #'agent-repl-roster-refresh-magit registered))
+    (should (memq #'agent-repl--prompt-queue-on-finish registered))))
+
+;; audit-2 #19
+(ert-deftest agent-repl-itest-roster-attention-sync-is-globally-registered ()
+  "`agent-repl-status-sync-attention' is registered on the update hook.
+The attention marker is redrawn from every roster push; the reaction is
+installed once at load time (status.el), and every attention test in this
+suite re-installs it, so nothing else would notice its loss."
+  ;; Arrange / Act / Assert.
+  (should (memq #'agent-repl-status-sync-attention
+                (default-value 'agent-repl-roster-update-functions))))
+
+;; audit-2 #20
+(ert-deftest agent-repl-itest-roster-closed-teardown-is-idempotent ()
+  "Tearing a `closed' row down twice tears it down ONCE.
+fanout §8: \"`closed' true → ensure no tab (teardown is idempotent)\".
+The daemon re-pushes the whole roster on every change, so a closed row is
+seen again and again — a teardown that ran per sighting would log and act
+repeatedly against a tab that is already gone."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-idem" "itest-idem" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl--ws-by-ref-id "itest-idem"))
+       nil "the open row's tab")
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-idem" "itest-idem" 'merged
+                      '(closed . ((closed . t)))))))
+      (agent-repl-itest--await-log daemon "elisp.roster.tab-teardown")
+      ;; Act: the same closed row is pushed again, plus a fresh open row so
+      ;; the second push's application is observable.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-idem" "itest-idem" 'merged
+                      '(closed . ((closed . t))))
+                     (agent-repl-itest-roster--row
+                      "itest-idem-2" "itest-idem-2" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl--ws-by-ref-id "itest-idem-2"))
+       nil "the second push to be applied")
+      ;; Assert: one teardown in total, and no error anywhere.
+      (should (equal 1 (length (agent-repl-itest--log-entries
+                                daemon "elisp.roster.tab-teardown"))))
+      (should (null (agent-repl-itest--log-entries daemon "elisp.roster.push" "error"))))))
+
+;; audit-2 #21
+(ert-deftest agent-repl-itest-roster-current-naming-a-closed-row-does-not-switch ()
+  "A `current' naming a row that is `closed' switches nothing.
+frontend/v1/sidebar.proto: `current' is \"the last SelectWorkspace the
+daemon received\", which can LAG a close.  There is no tab to switch to —
+switching would call `agent-repl--ws-switch' on a workspace that was just
+torn down — and a lagging pointer is not a contract breach either, so
+nothing is dropped as invalid."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((switched nil)
+            (agent-repl-host-last-selected-id nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                   (lambda (ws &rest _) (push ws switched))))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-lag" "itest-lag" 'merged
+                          '(closed . ((closed . t)))
+                          '(current . ((current . t))))
+                         (agent-repl-itest-roster--row
+                          "itest-live" "itest-live" 'ready))
+                   '(current . ((workspace . ((id . "itest-lag")
+                                              (dir . "/tmp/itest-roster-itest-lag")))))))
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl--ws-by-ref-id "itest-live"))
+           nil "the push to be applied")
+          ;; Assert.
+          (should (null switched))
+          (should (null (agent-repl-itest--log-entries
+                         daemon "elisp.rpc.push-invalid" "error"))))))))
+
+;; audit-2 #21
+(ert-deftest agent-repl-itest-roster-current-naming-an-absent-row-does-not-switch ()
+  "A `current' naming a row that is not on the roster at all switches nothing.
+A nuked workspace leaves the roster while the daemon's `current' pointer
+still names it; the same lag, reached by the other way a row disappears."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((switched nil)
+            (agent-repl-host-last-selected-id nil))
+        (cl-letf (((symbol-function 'agent-repl--ws-switch)
+                   (lambda (ws &rest _) (push ws switched))))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-present" "itest-present" 'ready))
+                   '(current . ((workspace . ((id . "itest-vanished")
+                                              (dir . "/tmp/itest-roster-itest-vanished")))))))
+          (agent-repl-itest--wait-until
+           (lambda () (agent-repl--ws-by-ref-id "itest-present"))
+           nil "the push to be applied")
+          ;; Assert.
+          (should (null switched))
+          (should (null (agent-repl-itest--log-entries
+                         daemon "elisp.rpc.push-invalid" "error"))))))))
+
+;; audit-2 #22
+(ert-deftest agent-repl-itest-roster-two-status-arms-set-is-a-breach ()
+  "A row whose status oneof has TWO arms set is a contract breach.
+fanout §14 scenario 9 lists it explicitly; only the UNSET and the UNKNOWN
+arm are covered above.  protojson cannot put two arms of one oneof on the
+wire, so the fake refuses it before the transport and the DECODER is
+pinned directly."
+  ;; Arrange / Act / Assert.
+  (should-error
+   (agent-repl-wire-decode-watch-workspace-roster-response
+    `((roster
+       . ((repository
+           . ((sections
+               . [((key . ((repository . ((id . "repo-itest")
+                                          (dir . ,agent-repl-itest-roster--repo-dir)))))
+                   (header . ((label . ((text . "itest-repo")))))
+                   (rows
+                    . ((rows
+                        . [((workspace . ((workspace . ((id . "ws-x")
+                                                        (dir . "/tmp/ws-x")))))
+                            (name . ((text . "ws-x")))
+                            (ready . nil)
+                            (thinking . nil)
+                            (current . ((current . :false)))
+                            (when . nil)
+                            (detail . nil)
+                            (closed . ((closed . :false))))]))))])))
+          (task . ((sections . [])))
+          (recentlyMerged . ((header . ((label . ((text . "recently merged")))))
+                             (rows . ((rows . [])))))))))
+   :type 'agent-repl-wire-error))
+
+;; audit-2 #23
+(ert-deftest agent-repl-itest-roster-finish-edge-banner-is-suppressed-when-focused ()
+  "Reaction (1) is the UNFOCUSED banner: a focused Emacs posts nothing.
+fanout §8 (1).  The focus test is the whole policy — Emacs is the only
+process that knows — so a reaction asserted only by its message text
+would pass with the guard deleted and banner every finished turn straight
+into the user's face."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-roster-finish-functions
+             (list #'agent-repl-roster-notify-finished)))
+        (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
+          (agent-repl--ws-put "itest-fin-focused" :project-dir "/tmp/itest-fin-focused")
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-fin-focused" "itest-fin-focused" 'thinking))))
+          (agent-repl-itest--wait-until
+           (lambda () (eq (agent-repl-status-tab-state "itest-fin-focused") :thinking))
+           nil "the running state")
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row
+                          "itest-fin-focused" "itest-fin-focused" 'done))))
+          ;; Assert: the edge fired, and it drew no banner.
+          (agent-repl-itest--await-log daemon "elisp.roster.finish-edge" "info")
+          (should (null agent-repl-itest-notifications)))))))
+
 (provide 'test-integration-roster)
 
 ;;; test-integration-roster.el ends here
