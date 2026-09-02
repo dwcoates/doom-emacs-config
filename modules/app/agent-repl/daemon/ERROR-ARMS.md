@@ -67,17 +67,27 @@ here as the mapping the server handlers switch on, not as arms still owed:
 
 NOTHING NEW IS OWED by drain or rollout: no refusal either makes lacks an arm.
 
-## Landing 6 batch, opened by the server handlers (wave 3a)
+## Watch* refusals are TRANSPORT-CLOSED by ruling (landing 6, project lead)
 
-Every row below is a refusal the server MAKES and the contract has no arm for.
-Each answers through `server.UnlandedArm`.
+A `Watch*` rpc has NO `<Rpc>Error` message at all: a refused open is a Connect
+error raised before the first frame, and the stream simply never opens. That is
+the SETTLED shape, not a gap — these refusals are NOT unlanded arms and no arm
+is owed for any of them. The daemon still spells the intended arm into the
+error's message through `server.UnlandedArm`, because that is the one carrier
+that names a refusal in a message rather than a field, and a client reading the
+closed stream learns exactly which condition closed it.
 
-| rpc | arm | condition | package |
+| rpc | refusal | condition | package |
 | --- | --- | --- | --- |
 | WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted, or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
 | WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
 | WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
-| WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace, but a `Watch*` rpc has NO `<Rpc>Error` message — a refused open is a Connect error before any frame — so all four ownership arms are unlanded for the streams | server |
+| WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace before it opens | server |
+
+## Landing 6 batch, opened by the server handlers (wave 3a)
+
+Every row below is a refusal the server MAKES and the contract has no arm for.
+Each answers through `server.UnlandedArm`.
 
 One consequence is recorded as a row rather than lost: the SHIM still refuses a
 bubble-addressed submit with its own `turn_already_open`, propagated by name.
