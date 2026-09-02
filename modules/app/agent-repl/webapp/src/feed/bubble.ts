@@ -23,6 +23,7 @@ import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
+import type { AgentReplClient } from "../rpc/client.js";
 import {
   OpenFeedResponseSchema,
   type OpenFeedResponse,
@@ -263,18 +264,73 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
    * STANDING: it spans turns and ends only when this client cancels it, so an
    * end this bubble did not ask for is a transport failure the shared stream
    * machinery reports and reopens — never a bubble quietly going dead.
+   *
+   * A REOPEN GOES BACK THROUGH `OpenFeed`, exactly as the root feed's tail does
+   * (feed.ts). `FeedWatchToken` pins a tail to begin exactly after the page the
+   * open answered with, so re-echoing the DEAD token after a transport death
+   * would resume a tail pinned to a page painted before the link broke: every
+   * row produced during the outage silently missing, and the stale page still
+   * standing as though it were current. So the FIRST attempt tails the token
+   * the expanding click already minted, and every attempt after it opens the
+   * feed again, PAINTS THE FRESH PAGE OVER THE ROWS, and tails that page's own
+   * token.
+   *
+   * A REFUSED REOPEN DRAWS NOTHING HERE. Where such a refusal belongs is an
+   * open UX question — the expanding click's refusal marks the toggle, but a
+   * reopen has no click to mark — so this logs it and lets the shared backoff
+   * try again, which is what the root feed does with the same case.
    */
-  function openWatch(token: FeedWatchToken): void {
+  function openWatch(first: FeedWatchToken): void {
     watch?.cancel();
+    let pending: FeedWatchToken | null = first;
     watch = watchStream<WatchFeedResponse>(opts.ctx, {
       name: "WatchFeed",
       schema: WatchFeedResponseSchema,
-      open: (client, signal) =>
-        client.watchFeed(buildWatchFeedRequest(token), { signal }),
+      open: (client, signal) => tail(client, signal),
       onPush: (response) => {
         child?.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
       },
     });
+
+    async function* tail(
+      client: AgentReplClient,
+      signal: AbortSignal,
+    ): AsyncGenerator<WatchFeedResponse> {
+      const token = pending ?? (await reopen(signal));
+      pending = null;
+      if (token === null || disposed || signal.aborted) return;
+      yield* client.watchFeed(buildWatchFeedRequest(token), { signal });
+    }
+  }
+
+  /**
+   * One reopen attempt: `OpenFeed` on this bubble's own `FeedId`, the fresh
+   * page painted over the sub-feed's rows, and the token that page came with.
+   */
+  async function reopen(signal: AbortSignal): Promise<FeedWatchToken | null> {
+    const response: OpenFeedResponse = await callUnary(
+      opts.ctx,
+      "OpenFeed",
+      (client) => client.openFeed(buildOpenFeedRequest(opts.ctx.workspace, id)),
+      OpenFeedResponseSchema,
+    );
+    if (disposed || signal.aborted) return null;
+    const result = requireCase(response.result, "OpenFeedResponse.result");
+    switch (result.case) {
+      case "success": {
+        const controller = ensureChild();
+        controller.applyPage(requireMessage(result.value.page, "OpenFeedSuccess.page"), "replace");
+        return requireMessage(result.value.watch, "OpenFeedSuccess.watch");
+      }
+      case "error":
+        log("error", "the daemon refused to re-open a sub-feed after its tail died", {
+          operation: "feed.bubble-reopen-refused",
+          context: { row: id.value },
+        });
+        return null;
+      default:
+        return unreachableArm("OpenFeedResponse.result", armName(result));
+    }
   }
 
   /** Collapse: abandon the token, keep the DOM. */

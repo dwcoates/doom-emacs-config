@@ -30,6 +30,7 @@ import { createAgentReplClient } from "../../src/rpc/client";
 import { createAppContext, type AppContext } from "../../src/rpc/context";
 import { workspaceRef } from "../../src/rpc/workspace-ref";
 import { createTicker } from "../../src/clock";
+import { ForwardingLogger, bindLogContext, setLogger } from "../../src/log";
 import { mountFailureOverlay } from "../../src/failure/overlay";
 import { bootFailed } from "../../src/failure/sink";
 import { mountFeed, type FeedHandle } from "../../src/feed/feed";
@@ -247,6 +248,17 @@ export interface HarnessOptions {
   workspaceDir?: string;
   /** Script the daemon before anything mounts (the cold-open case). */
   arrange?(fake: FakeDaemon): void;
+  /**
+   * Install PRODUCTION'S OWN LOG SINK: one `ClientLog` call per record, as
+   * main.ts wires it (`clientLogSink`, deliberately NOT through `callUnary`,
+   * with the identity bound before anything draws).
+   *
+   * OFF BY DEFAULT, because every mount logs and a suite that is not about
+   * logging would then read its own diagnostics back out of the daemon's call
+   * log. The console function is a no-op so the suite's output stays clean;
+   * the forwarding half is the app's own.
+   */
+  clientLog?: boolean;
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
@@ -294,6 +306,22 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     failures,
     composerEnabled,
   });
+
+  // MAIN.TS'S OWN SINK, in main.ts's own order: the identity is bound and the
+  // forwarding logger installed BEFORE the first component draws, so a record
+  // emitted during boot travels the same path a record emitted later does.
+  if (options.clientLog === true) {
+    bindLogContext({
+      connection_id: "harness-connection",
+      workspace_id: ctx.workspace.id,
+      workspace_dir: ctx.workspace.dir,
+    });
+    setLogger(
+      new ForwardingLogger(async (record) => {
+        await client.clientLog({ workspace: ctx.workspace, record });
+      }, () => {}),
+    );
+  }
 
   const panels: SubmitPromptCommandPanel[] = [];
   const gate = createComposerGate();
