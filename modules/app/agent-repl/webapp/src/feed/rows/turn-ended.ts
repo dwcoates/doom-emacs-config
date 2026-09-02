@@ -33,6 +33,7 @@ import type {
   FeedTurnEndedInterrupted,
   FeedTurnErrorHeadline,
   FeedTurnErrorMessage,
+  FeedTurnErrorVendorUnmodeled,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -154,6 +155,9 @@ export function drawFeedTurnEndedErrored(
     drawFeedTurnErrorHeadline(requireMessage(errored.headline, `${PATH}.errored.headline`)),
   );
 
+  if (error.case === "vendorUnmodeled") {
+    el.append(drawFeedTurnErrorVendorUnmodeled(error.value));
+  }
   if (errored.message !== undefined) {
     el.append(drawFeedTurnErrorMessage(errored.message));
   }
@@ -197,6 +201,25 @@ export function drawFeedTurnErrorHeadline(headline: FeedTurnErrorHeadline): HTML
 function retryWait(error: { case: string; value: unknown }): bigint | undefined | null {
   if (!TURN_ERROR_WAIT_ARMS.includes(error.case)) return null;
   return (error.value as { retryAfterMs?: bigint }).retryAfterMs;
+}
+
+/**
+ * THE VENDOR'S OWN TYPE NAME, drawn verbatim.
+ *
+ * The arm exists because the vendor named a cause this contract does not model,
+ * and its one field is "the vendor's type name, drawn verbatim"
+ * (feed.proto, FeedTurnErrorVendorUnmodeled). So it is STATED, not folded into
+ * a sentence: it is the only handle the reader has on what actually happened,
+ * and the daemon's headline can only say that the cause was unmodeled.
+ */
+export function drawFeedTurnErrorVendorUnmodeled(
+  unmodeled: FeedTurnErrorVendorUnmodeled,
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "turn-ended-vendor-type";
+  el.setAttribute("data-vendor-type", unmodeled.type);
+  el.textContent = unmodeled.type;
+  return el;
 }
 
 /** The vendor's own wording, when the record carried one. */
