@@ -748,6 +748,61 @@ dead shadow never counts as the owner."
     (should-not (agent-repl--ws-live-p "ws1"))
     (should (agent-repl--ws-tombstoned-p "ws1"))))
 
+
+;;;; ---- Tests: --ws-revive ----
+
+(ert-deftest agent-repl-test-ws-revive-clears-the-tombstone ()
+  "Reviving a tombstoned workspace makes the name live again."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (agent-repl--ws-del "ws1")
+    ;; Act.
+    (agent-repl--ws-revive "ws1")
+    ;; Assert.
+    (should (agent-repl--ws-live-p "ws1"))))
+
+(ert-deftest agent-repl-test-ws-revive-keeps-last-killed-at ()
+  "A revive keeps `:last-killed-at': the previous close still happened."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (agent-repl--ws-del "ws1")
+    ;; Act.
+    (agent-repl--ws-revive "ws1")
+    ;; Assert.
+    (should (agent-repl--ws-get "ws1" :last-killed-at))))
+
+(ert-deftest agent-repl-test-ws-revive-on-a-live-workspace-answers-nil ()
+  "Reviving an already-live workspace moves nothing and answers nil."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    ;; Act / Assert.
+    (should-not (agent-repl--ws-revive "ws1"))))
+
+(ert-deftest agent-repl-test-ws-revive-on-an-unknown-workspace-answers-nil ()
+  "Reviving an unknown name creates no entry and answers nil."
+  ;; Arrange / Act.
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--ws-revive "missing"))
+    ;; Assert.
+    (should-not (agent-repl--ws-known-p "missing"))))
+
+(ert-deftest agent-repl-test-ws-revive-restores-ref-id-reverse-lookup ()
+  "After a revive the name answers `--ws-by-ref-id' again."
+  ;; Arrange.
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/x")
+    (agent-repl--ws-put "ws1" :ref '(:id "id-1" :dir "/tmp/x"))
+    (agent-repl--ws-del "ws1")
+    (should-not (agent-repl--ws-by-ref-id "id-1"))
+    ;; Act.
+    (agent-repl--ws-revive "ws1")
+    (agent-repl--ws-put "ws1" :ref '(:id "id-1" :dir "/tmp/x"))
+    ;; Assert.
+    (should (equal (agent-repl--ws-by-ref-id "id-1") "ws1"))))
+
 ;;;; ---- Tests: --ws-hide-tombstoned-p ----
 
 ;;;; ---- Tests: --ws-hide-tombstoned-names ----
