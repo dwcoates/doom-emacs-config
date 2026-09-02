@@ -301,7 +301,10 @@ func (c *controller) served(ctx context.Context) ([]wsm.Workspace, error) {
 }
 
 // manifest builds the stand-down record for every workspace being handed over.
-// Every one of them is IntentPreserve: a handover kills nothing.
+// A handover kills nothing, so every workspace with a live shim is
+// IntentPreserve; a workspace with NO SHIM PID is IntentNoSession, because
+// there is no process whose survival the successor could judge and calling it
+// "preserve" makes its free lock read as a session that silently died.
 func (c *controller) manifest(ctx context.Context, successor string, workspaces []wsm.Workspace, snapshot map[ids.WorkspaceID]Participants) Manifest {
 	m := Manifest{
 		Daemon:    c.deps.Instance,
@@ -313,7 +316,7 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 		record := ManifestSession{
 			Workspace:    ws.ID,
 			Dir:          ws.Dir,
-			Intent:       IntentPreserve,
+			Intent:       IntentNoSession,
 			ExpectedHost: snapshot[ws.ID].Host,
 			ExpectedWeb:  snapshot[ws.ID].Web,
 		}
@@ -325,6 +328,10 @@ func (c *controller) manifest(ctx context.Context, successor string, workspaces 
 			record.VendorSessionID = session.VendorSessionID
 			if session.ShimPID != nil {
 				record.ShimPID = *session.ShimPID
+				// THE PID IS WHAT MAKES IT A PRESERVE. A handover leaves a
+				// running shim running, and this is the entry whose free lock
+				// on the other side genuinely means the session died.
+				record.Intent = IntentPreserve
 			}
 		}
 		m.Sessions = append(m.Sessions, record)
