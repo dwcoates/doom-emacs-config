@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -338,34 +339,39 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
 	}
+	holdoutWarnEvery, err := resolveHoldoutWarnEvery()
+	if err != nil {
+		return nil, err
+	}
 	rolloutController, err := rollout.New(rollout.Deps{
-		PublishHost:     relay.PublishHostWorkspace,
-		Deploy:          scripts,
-		SelfExe:         selfExe,
-		SelfRepoDir:     paths.SelfRepo,
-		SelfAddress:     p.Claim.Address(),
-		Instance:        p.Instance,
-		StateDir:        p.Layout.Dir(),
-		IntentManifest:  p.Layout.IntentManifest(),
-		Git:             git,
-		DB:              p.DB,
-		Spawner:         rollout.NewProcessSpawner(selfExe, p.Layout.Dir()),
-		Announcer:       pushes,
-		Pusher:          pushes,
-		Participants:    pushes,
-		Quiesce:         intake.Quiesce,
-		DrainIntake:     intake.DrainIntake,
-		LeaseChanged:    queue.OnLeaseChanged,
-		Freeness:        fleet.Freeness(),
-		Shims:           fleet,
-		LockProbe:       fleet.ProbeLock,
-		PublishViews:    views.PublishViews,
-		WriteDaemonAddr: func(context.Context) error { return p.Claim.Publish() },
-		DeployStamp:     deployStamp(paths.BuiltSHA),
-		SessionBuildSHA: fleet.SessionBuildSHA,
-		ColdGate:        fleet.RaiseColdGate,
-		Exit:            orderlyExit(p.Exit),
-		Log:             p.Surfaces,
+		HoldoutWarnEvery: holdoutWarnEvery,
+		PublishHost:      relay.PublishHostWorkspace,
+		Deploy:           scripts,
+		SelfExe:          selfExe,
+		SelfRepoDir:      paths.SelfRepo,
+		SelfAddress:      p.Claim.Address(),
+		Instance:         p.Instance,
+		StateDir:         p.Layout.Dir(),
+		IntentManifest:   p.Layout.IntentManifest(),
+		Git:              git,
+		DB:               p.DB,
+		Spawner:          rollout.NewProcessSpawner(selfExe, p.Layout.Dir()),
+		Announcer:        pushes,
+		Pusher:           pushes,
+		Participants:     pushes,
+		Quiesce:          intake.Quiesce,
+		DrainIntake:      intake.DrainIntake,
+		LeaseChanged:     queue.OnLeaseChanged,
+		Freeness:         fleet.Freeness(),
+		Shims:            fleet,
+		LockProbe:        fleet.ProbeLock,
+		PublishViews:     views.PublishViews,
+		WriteDaemonAddr:  func(context.Context) error { return p.Claim.Publish() },
+		DeployStamp:      deployStamp(paths.BuiltSHA),
+		SessionBuildSHA:  fleet.SessionBuildSHA,
+		ColdGate:         fleet.RaiseColdGate,
+		Exit:             orderlyExit(p.Exit),
+		Log:              p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the rollout controller: %w", err)
@@ -828,4 +834,29 @@ func (n refusalNoter) NoteRefusal(ws ids.WorkspaceID) {
 		return
 	}
 	(*n.ref).NoteRefusal(ws)
+}
+
+// HoldoutWarnEnv compresses the rollout's never-free holdout warning cadence
+// for tests. A suite that must observe the warning cannot wait the production
+// ten minutes for it, and nothing else in the daemon can shorten it.
+const HoldoutWarnEnv = "AGENT_REPL_HOLDOUT_WARN_EVERY"
+
+// resolveHoldoutWarnEvery answers the holdout warning cadence: the environment
+// knob when it is set, else zero, which the rollout controller fills with its
+// own DefaultHoldoutWarnEvery. A MALFORMED value is an ERROR rather than a
+// fall-through to the default: a test knob that silently did nothing would make
+// the suite it was set for lie.
+func resolveHoldoutWarnEvery() (time.Duration, error) {
+	raw := os.Getenv(HoldoutWarnEnv)
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a duration: %w", HoldoutWarnEnv, raw, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", HoldoutWarnEnv, raw)
+	}
+	return d, nil
 }

@@ -32,6 +32,11 @@ type fixture struct {
 	ws   *workspacev1.WorkspaceRef
 	shim *harness.ShimControl
 	t    *testing.T
+	// host and web are the workspace's two client-hop streams, held open for
+	// the fixture's life so the workspace reads CONNECTED. They are the
+	// fixture's own: a test that wants to observe those streams opens its own.
+	host *harness.Stream[*agentreplv1.WatchHostWorkspaceResponse]
+	web  *harness.Stream[*agentreplv1.WatchWebWorkspaceResponse]
 }
 
 // newDaemon starts a daemon with no workspace.
@@ -57,6 +62,14 @@ func newOpened(t *testing.T, opts harness.Opts) *fixture {
 	t.Helper()
 	f := newRegistered(t, opts)
 	f.open()
+	// AN OPENED WORKSPACE HAS ALL THREE CONNECTIVITY HOPS UP (daemon.md
+	// invariant 11): Emacs holds WatchHostWorkspace and the page holds
+	// WatchWebWorkspace, and a workspace missing either is not connected
+	// however healthy its shim link is. Holding both here is what makes this
+	// fixture the OPENED workspace it claims to be rather than a half-open one
+	// whose footer would read disconnected forever.
+	f.host = f.d.WatchHost(f.ws)
+	f.web = f.d.WatchWeb(f.ws)
 	return f
 }
 

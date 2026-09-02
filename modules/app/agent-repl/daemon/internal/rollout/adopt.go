@@ -87,7 +87,9 @@ func (c *controller) joinFromManifest(ctx context.Context) (bool, error) {
 	if !found {
 		return false, nil
 	}
-	if _, err := c.Reconcile(ctx); err != nil {
+	// A JOINING SUCCESSOR ADOPTED NOTHING AT BOOT — the manifest is present
+	// here by construction, so the no-manifest accounting cannot apply.
+	if _, err := c.Reconcile(ctx, nil); err != nil {
 		return false, err
 	}
 

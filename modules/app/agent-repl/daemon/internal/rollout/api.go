@@ -103,7 +103,14 @@ type Controller interface {
 	// Reconcile reads the intent manifest against the kernel locks actually
 	// held and answers one disposition PER SESSION. PRESERVED, ROLLED, DIED
 	// and UNKNOWN are never collapsed and never counted.
-	Reconcile(ctx context.Context) ([]Disposition, error)
+	//
+	// adopted is the workspaces whose surviving shim this boot adopted. With NO
+	// MANIFEST — a crash or a force-kill, where the outgoing daemon never stood
+	// down — each of them is a session whose bounce nobody accounted for, and
+	// BOUNCE ACCOUNTABILITY says which sessions were left unaccounted is
+	// surfaced per workspace rather than passed over, so each gets an OPEN
+	// bounce_unknown fault.
+	Reconcile(ctx context.Context, adopted []ids.WorkspaceID) ([]Disposition, error)
 }
 
 // Deps are the controller's collaborators.

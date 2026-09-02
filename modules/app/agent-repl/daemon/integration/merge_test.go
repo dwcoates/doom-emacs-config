@@ -756,7 +756,10 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 	// not continue" (daemon.merge.abort, ERROR, the missing-brief failure this
 	// test is about) — read off internal/merge/phases.go's mergeTab Warn and
 	// internal/merge/terminal.go's abort Error call sites.
-	f.d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.abort")
+	// The scripted conflict is stated by the git client too, and the aborted
+	// run stops the admission pump: both are this failure, once each.
+	f.d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.abort",
+		"daemon.gitclient.merge_no_ff", "daemon.merge.pump")
 }
 
 // ---------------------------------------------------------------------------
@@ -910,6 +913,9 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir})
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "onceconflict", "do the feature", nil)
+	// THE CREATION ALREADY SENT ONE StartTurn — its initial prompt — so the
+	// brief is counted as a DELTA over that, never as an absolute count.
+	turnsBeforeTheMerge := f.shim.Count(harness.RPCStartTurn)
 	branch := mergeBranchOf(t, f.ws)
 	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -925,8 +931,8 @@ func TestAConflictedMergeBriefsTheAgentExactlyOnceEvenAfterItParks(t *testing.T)
 
 	// Assert: with the run settled on park, still exactly one StartTurn was
 	// ever sent for this conflict commit — the ONE brief, never a repeat.
-	if got := f.shim.Count(harness.RPCStartTurn); got != 1 {
-		t.Fatalf("StartTurn count once parked = %d, want exactly 1 (the conflict is briefed once, then parks)", got)
+	if got := f.shim.Count(harness.RPCStartTurn) - turnsBeforeTheMerge; got != 1 {
+		t.Fatalf("StartTurns since the merge began = %d, want exactly 1 (the conflict is briefed once, then parks)", got)
 	}
 }
 
@@ -1184,9 +1190,8 @@ func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	d.Stop()
 
 	// Assert: the ledger's merge_tab_intervals table carries one succeeded
-	// interval each for "merge" and "tests" (the two phases this clean,
-	// no-configured-action landing actually opens; TabQueue is never recorded
-	// through openTab/closeTab at all — see the report).
+	// interval each for "queue", "merge" and "tests" — the queue wait plus the
+	// two phases this clean, no-configured-action landing opens.
 	type interval struct {
 		kind               string
 		startedAt, endedAt int64
@@ -1215,7 +1220,7 @@ func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	for _, iv := range got {
 		byKind[iv.kind] = iv
 	}
-	for _, kind := range []string{"merge", "tests"} {
+	for _, kind := range []string{"queue", "merge", "tests"} {
 		iv, ok := byKind[kind]
 		if !ok {
 			t.Fatalf("merge_tab_intervals holds no %q row, want one; got %+v", kind, got)
@@ -1313,7 +1318,11 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 	// and everything waiting on that turn's end waits forever.
 	d.AwaitWorkspaceLogOperationCount(ws.GetDir(), harness.OpTurnOpened, 1)
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID(name+"-initial")))
-	return &fixture{d: d, ws: ws, shim: shim, t: t}
+	// A created workspace is an OPENED one, so all three connectivity hops are
+	// up (daemon.md invariant 11): without the two client streams its footer
+	// reads disconnected, which outranks every merge substatus.
+	return &fixture{d: d, ws: ws, shim: shim, t: t,
+		host: d.WatchHost(ws), web: d.WatchWeb(ws)}
 }
 
 // mergeBranchOf is the branch a mergeCreateChild workspace checked out —

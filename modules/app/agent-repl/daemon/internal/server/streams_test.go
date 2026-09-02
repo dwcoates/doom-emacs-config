@@ -212,3 +212,80 @@ func TestHostStreamCountsItsParticipant(t *testing.T) {
 		t.Fatal("the held host stream was not counted as a participant")
 	}
 }
+
+// TestAHostStreamOpenStatesTheHopToTheResolvers pins that the host stream's
+// open edge publishes the participant liveness the connectivity truth needs.
+func TestAHostStreamOpenStatesTheHopToTheResolvers(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+
+	// Act.
+	edges := h.Footer.Participants()
+
+	// Assert.
+	if len(edges) == 0 || !edges[len(edges)-1].Host {
+		t.Fatalf("footer participant edges = %+v, want the host hop stated live", edges)
+	}
+}
+
+// TestAHostStreamOpenStatesTheHopToTheTopbar pins the same edge on the topbar,
+// which draws the connectivity glyph from it.
+func TestAHostStreamOpenStatesTheHopToTheTopbar(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+
+	// Act.
+	edges := h.Topbar.Participants()
+
+	// Assert.
+	if len(edges) == 0 || !edges[len(edges)-1].Host {
+		t.Fatalf("topbar participant edges = %+v, want the host hop stated live", edges)
+	}
+}
+
+// TestAHostStreamCloseStatesTheHopDown pins the CLOSE edge: a hop going down
+// is published rather than waited for.
+func TestAHostStreamCloseStatesTheHopDown(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, dialErr := h.Client.WatchHostWorkspace(ctx, connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{
+		Workspace: ref(),
+	}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.Relay().ReloadWebapp(testWorkspaceID)
+	receiveHostEvent(t, stream)
+
+	h.Footer.AwaitEdge(t) // the open edge
+
+	// Act: the client goes away, and the handler's deferred release runs.
+	cancel()
+	edge := h.Footer.AwaitEdge(t)
+
+	// Assert.
+	if edge.Host {
+		t.Fatalf("footer participant edge = %+v, want the host hop stated down", edge)
+	}
+}

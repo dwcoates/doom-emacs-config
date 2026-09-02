@@ -25,11 +25,17 @@ const (
 	linkDead = "dead"
 )
 
-// connectivityKey maps the daemon-to-shim link onto the vocabulary's key. An
-// UNOBSERVED link is `no_session` and not `connecting`: nothing has been asked
-// to connect yet, and drawing it as in progress would claim work nobody
-// started.
-func connectivityKey(seen bool, link shimclient.LinkState) string {
+// connectivityKey maps the THREE HOPS of connectivity truth onto the
+// vocabulary's key. An UNOBSERVED link is `no_session` and not `connecting`:
+// nothing has been asked to connect yet, and drawing it as in progress would
+// claim work nobody started.
+//
+// peers is whether BOTH client hops — WatchHostWorkspace and
+// WatchWebWorkspace — are held. Per daemon.md invariant 11 a workspace is
+// connected only while all three hops are live, so a serving shim link with a
+// client hop down is `severed` and never `connected`: the route to the reader
+// is broken even though the route to the session is not.
+func connectivityKey(seen bool, link shimclient.LinkState, peers bool) string {
 	if !seen {
 		return linkNoSession
 	}
@@ -37,6 +43,9 @@ func connectivityKey(seen bool, link shimclient.LinkState) string {
 	case shimclient.LinkDialing:
 		return linkConnecting
 	case shimclient.LinkConnected:
+		if !peers {
+			return linkSevered
+		}
 		return linkConnected
 	case shimclient.LinkRedialing:
 		return linkSevered
