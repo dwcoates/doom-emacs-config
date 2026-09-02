@@ -19,7 +19,7 @@ import { cleanupShims, spawnShim } from "../integration-support/harness.js";
 import {
   connectCode,
   freshSession,
-  openStream,
+  openStream, openSessionUpdates,
   readHistoryFirst,
   startTurnRequest,
   streamOpenCode,
@@ -260,7 +260,7 @@ describe("a stream closed by the client ends nothing", () => {
     // restarted daemon able to reattach without having killed anything.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    const watch = openStream((options) =>
+    const watch = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     await watch.next();
@@ -271,7 +271,7 @@ describe("a stream closed by the client ends nothing", () => {
     // started rather than starting a new one, and a fresh watch still opens.
     const second = await shim.clients.h1.startSession(freshSession());
     expect(second.result.case).toBe("failure");
-    const reopened = openStream((options) =>
+    const reopened = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     expect(sessionUpdate(await reopened.next()).update.case).toBe("diagnostics");
