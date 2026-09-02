@@ -18,7 +18,7 @@
  * width so names stay aligned. Every character here is a plain text glyph —
  * no emoji presentation, no variation selectors.
  */
-import { toneClass, rosterStatusColor, mergeGlyph, type Color } from "../vocab.js";
+import { toneClass, rosterStatusColor, mergeGlyph } from "../vocab.js";
 import { MalformedView } from "../rpc/malformed.js";
 
 /**
@@ -67,11 +67,6 @@ export const ROSTER_ARM_CLASS: Readonly<Record<RosterStatusCase, string>> = Obje
     ROSTER_STATUS_CASES.map((arm) => [arm, toneClass(rosterStatusColor(arm))]),
   ) as Record<RosterStatusCase, string>,
 );
-
-/** The color an arm resolves to, for a caller that wants the name itself. */
-export function rosterArmColor(arm: RosterStatusCase): Color {
-  return rosterStatusColor(arm);
-}
 
 /**
  * The character each shared glyph NAME is drawn with.

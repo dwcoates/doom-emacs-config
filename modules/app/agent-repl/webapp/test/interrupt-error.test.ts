@@ -5,10 +5,12 @@ import {
   type InterruptError,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { MalformedView } from "../src/rpc/malformed.js";
+import { ForwardingLogger, setLogger } from "../src/log.js";
 import { registerWorkspaceMoved } from "../src/rpc/moved.js";
 import {
   INTERRUPT_ERROR_ARMS,
   interruptErrorSentence,
+  logInterruptRefusal,
   type InterruptErrorKind,
 } from "../src/interrupt-error.js";
 
@@ -101,6 +103,22 @@ describe("interruptErrorSentence: every arm words itself", () => {
     expect(() =>
       interruptErrorSentence({ case: "quarantined", value: {} } as never, "InterruptError.kind"),
     ).toThrow(MalformedView);
+  });
+});
+
+describe("logInterruptRefusal: the one line a refused stop leaves behind", () => {
+  it("warns with the arm's own case and sentence, under the caller's operation", () => {
+    const lines: Array<[string, string]> = [];
+    setLogger(new ForwardingLogger(async () => {}, (level, line) => lines.push([level, line])));
+    logInterruptRefusal(kindOf("noSession"), "this workspace has no session to interrupt", "footer.turn-stop-refused");
+    expect(
+      lines.some(
+        ([level, line]) =>
+          level === "warn" &&
+          line.includes("noSession") &&
+          line.includes("footer.turn-stop-refused"),
+      ),
+    ).toBe(true);
   });
 });
 

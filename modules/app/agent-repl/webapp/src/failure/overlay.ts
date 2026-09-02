@@ -39,8 +39,7 @@
  * down, so a card can never explain a workspace in a color the workspace is
  * not.
  */
-import { create } from "@bufbuild/protobuf";
-import { FailureKindSchema, type FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
+import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
 import { log } from "../log.js";
 import { requireCase } from "../rpc/strict.js";
 import { failureSideColor, toneClass } from "../vocab.js";
@@ -254,9 +253,4 @@ export function drawFailureCard(kind: FailureKind, arm: ClientFailureArm): HTMLE
     card.append(row);
   }
   return card;
-}
-
-/** An empty FailureKind, for a test asserting the unset-oneof refusal. */
-export function emptyFailureKind(): FailureKind {
-  return create(FailureKindSchema, {});
 }
