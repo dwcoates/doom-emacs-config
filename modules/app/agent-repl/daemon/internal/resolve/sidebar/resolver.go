@@ -277,6 +277,16 @@ func (r *resolver) SetTurn(ws ids.WorkspaceID, turn *footer.TurnStarted) {
 		func(s *wsState) { s.startTurn(turn) })
 }
 
+// AckTurn records the shim's acceptance of the turn, ending `submitting`.
+func (r *resolver) AckTurn(ws ids.WorkspaceID) {
+	r.mutateWorkspace(ws, "daemon.sidebar.ack_turn", "the roster took the turn's ack", nil,
+		func(s *wsState) {
+			if s.turn != nil {
+				s.sawActivity = true
+			}
+		})
+}
+
 // SetTurnEnded installs how the last turn ended.
 func (r *resolver) SetTurnEnded(ws ids.WorkspaceID, how TurnClose) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_turn_ended", "the roster took the turn's close",
