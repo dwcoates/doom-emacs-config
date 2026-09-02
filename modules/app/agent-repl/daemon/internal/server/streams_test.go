@@ -202,9 +202,7 @@ func TestHostStreamCountsItsParticipant(t *testing.T) {
 	// The relay publishes, which both proves the stream is live and
 	// synchronizes the assertion against the handler's registration.
 	h.Server.Relay().ReloadWebapp(testWorkspaceID)
-	if !stream.Receive() {
-		t.Fatalf("receive the push: %v", stream.Err())
-	}
+	receiveHostEvent(t, stream)
 
 	// Act.
 	participants := h.Server.Participants(testWorkspaceID)

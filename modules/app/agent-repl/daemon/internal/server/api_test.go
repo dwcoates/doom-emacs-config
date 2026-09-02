@@ -166,14 +166,12 @@ func TestRelayNotifyPushesTheTypedKind(t *testing.T) {
 
 	// Act.
 	h.Server.Relay().Notify(testWorkspaceID, "consent needed", "permission_requested", "Bash")
-	if !stream.Receive() {
-		t.Fatalf("receive the notification: %v", stream.Err())
-	}
+	push := receiveHostEvent(t, stream)
 
 	// Assert.
-	got := stream.Msg().GetNotification().GetKind().GetPermissionRequested()
+	got := push.GetNotification().GetKind().GetPermissionRequested()
 	if got == nil || got.GetToolName() != "Bash" {
-		t.Fatalf("notification kind = %v, want permission_requested{Bash}", stream.Msg().GetNotification().GetKind())
+		t.Fatalf("notification kind = %v, want permission_requested{Bash}", push.GetNotification().GetKind())
 	}
 }
 

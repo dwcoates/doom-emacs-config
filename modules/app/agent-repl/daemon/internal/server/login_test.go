@@ -171,12 +171,10 @@ func TestOpenInEditorRelaysOntoTheHostStream(t *testing.T) {
 	// Act: the verbs relay through the server's own relay face.
 	line := uint32(42)
 	h.Server.Relay().OpenInEditor(testWorkspaceID, "lisp/core.el", &line)
-	if !stream.Receive() {
-		t.Fatalf("receive the relay: %v", stream.Err())
-	}
+	push := receiveHostEvent(t, stream)
 
 	// Assert.
-	got := stream.Msg().GetOpenInEditor()
+	got := push.GetOpenInEditor()
 	if got.GetPath() != "lisp/core.el" || got.GetLine() != 42 {
 		t.Fatalf("open_in_editor = %v, want lisp/core.el:42", got)
 	}
