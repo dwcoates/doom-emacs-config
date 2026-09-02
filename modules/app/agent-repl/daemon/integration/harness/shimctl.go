@@ -32,6 +32,24 @@ type ShimProfile struct {
 	Stderr           string         `json:"stderr,omitempty"`
 	ColdOnResume     *ShimColdFacts `json:"cold_on_resume,omitempty"`
 	VendorSessionID  string         `json:"vendor_session_id,omitempty"`
+	// LiveWork is what the fake's SessionStarted states is already running,
+	// each element one binary-encoded conversation.v1 AgentDetachedWork.
+	LiveWork [][]byte `json:"live_work,omitempty"`
+}
+
+// EncodeLiveWork renders detached-work announcements for a ShimProfile's
+// LiveWork field.
+func EncodeLiveWork(t *testing.T, items ...*conversationv1.AgentDetachedWork) [][]byte {
+	t.Helper()
+	out := make([][]byte, 0, len(items))
+	for _, item := range items {
+		raw, err := proto.Marshal(item)
+		if err != nil {
+			t.Fatalf("harness: encode live work: %v", err)
+		}
+		out = append(out, raw)
+	}
+	return out
 }
 
 // ShimColdFacts are the facts a scripted cold refusal states.

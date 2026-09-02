@@ -121,7 +121,11 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
-	d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	// unknown_workspace is a LANDED CloseWorkspaceError arm (see the comment
+	// above), answered in band at DEBUG through server.refuse — never the
+	// daemon.refusal.unlanded_arm WARN this path was originally written
+	// against.
+	d.ExpectWarnings()
 	unknown := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
 
 	// Act
@@ -143,7 +147,10 @@ func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	// workspace_ref_mismatch is a LANDED CloseWorkspaceError arm too, answered
+	// in band at DEBUG — never the daemon.refusal.unlanded_arm WARN this path
+	// was originally written against.
+	f.d.ExpectWarnings()
 	mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: t.TempDir()}
 
 	// Act
@@ -180,5 +187,7 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 	if !containsField(err, "said") {
 		t.Fatalf("SubmitPrompt refusal = %v, want it to name the unset field \"said\"", err)
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// Validation refusals are plain connect.NewError(InvalidArgument, ...)
+	// (internal/server/validate.go's `invalid`), with no logging at all.
+	f.d.ExpectWarnings()
 }

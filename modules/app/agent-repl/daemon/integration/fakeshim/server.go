@@ -284,6 +284,7 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 					Mode: &conversationv1.AgentPermissionMode_Default{Default: &conversationv1.AgentPermissionModeDefault{}},
 				},
 				ModelCatalog: DefaultCatalog(),
+				LiveWork:     s.liveWork(),
 			},
 		}},
 	}
@@ -349,6 +350,24 @@ func (s *server) writeTranscript(vendorSessionID string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(`{"type":"session_started","sessionId":"` + vendorSessionID + `"}` + "\n")
+}
+
+// liveWork decodes the profile's already-running items. A profile that cannot
+// be decoded is a scripting error and dies loudly rather than opening a session
+// whose stated membership silently differs from what the test wrote.
+func (s *server) liveWork() []*conversationv1.AgentDetachedWork {
+	if len(s.profile.LiveWork) == 0 {
+		return nil
+	}
+	out := make([]*conversationv1.AgentDetachedWork, 0, len(s.profile.LiveWork))
+	for i, raw := range s.profile.LiveWork {
+		item := &conversationv1.AgentDetachedWork{}
+		if err := proto.Unmarshal(raw, item); err != nil {
+			panic(sprintf("fakeshim: profile live_work[%d] does not decode: %v", i, err))
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 func (s *server) buildSHA() string {
