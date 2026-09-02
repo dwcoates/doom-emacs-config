@@ -438,6 +438,24 @@ Mechanics:
 The merge-queue area (§C) asserts the git facts above against these real
 repositories, not against a scripted fixture world.
 
+### Harness helpers landed by overhaul/integration (a091a9b98)
+
+`overhaul/integration` added two helpers to `daemon/integration/harness`.
+They are merged into this branch; writers must know which one applies here.
+
+- **`(*Daemon) DisplacedTurnCount() int`** (`wsmdb.go`) — USABLE AS-IS. It
+  reads the daemon's own database (`SELECT count(*) FROM turns WHERE
+  displaced = 1`) through `WithDB`, so it is independent of git entirely. The
+  merge-queue area (§C, displaced turns) SHOULD use it rather than
+  re-deriving the count.
+- **`(*Repo) SetDirty(worktreeDir string, dirty bool)`** (`repo.go`) — **NOT
+  USABLE IN THIS SUITE.** It mutates the scripted `fakegit.State`, and this
+  suite sets `Opts.SkipFakeGit = true` and uses REAL git (ruling 4). A test
+  here makes a worktree dirty by actually writing a file into the real
+  worktree and leaving it uncommitted, then asserting through real `git
+  status --porcelain`. Do NOT call `SetDirty` from an e2e test: the daemon
+  reads real git here, so mutating fake-git state would assert nothing.
+
 ### Grep gate
 
 A `TestMain`-time check (before `m.Run()`) that fails the whole run if any
