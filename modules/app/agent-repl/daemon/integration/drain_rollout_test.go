@@ -19,6 +19,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
+	"claude-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -128,6 +129,7 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	stream := d.WatchDaemonStream()
 
 	// Act
+	before := time.Now()
 	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{Reason: drainReasonOperator("operator maintenance")}},
 	}))
@@ -139,14 +141,90 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	announced := harness.AwaitView(t, d.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
+	after := time.Now()
 	if announced.GetCause().GetImmediate() == nil {
 		t.Fatalf("shutdown_announced.cause = %v, want immediate", announced.GetCause())
+	}
+	if got := announced.GetCause().GetImmediate().GetReason().GetOperator().GetNote(); got != "operator maintenance" {
+		t.Fatalf("shutdown_announced.cause.immediate.reason.operator.note = %q, want the reason echoed verbatim", got)
 	}
 	if announced.Address != nil {
 		t.Fatalf("shutdown_announced.address = %q, want unset (a plain bounce, no successor)", announced.GetAddress())
 	}
+	// Enrichment (critique 15): minted_at_ms is this announcement's own mint
+	// instant (internal/drain/controller.go ShutdownNow: deps.Clock.Now()), so
+	// it falls inside the wall-clock window the rpc call bracketed.
+	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
+	if mintedAt.Before(before) || mintedAt.After(after) {
+		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between %d and %d", announced.GetMintedAtMs(), before.UnixMilli(), after.UnixMilli())
+	}
+	// An immediate operator shutdown states no bounded outage: unlike the
+	// self-merge rollout's handover.go (which states rollout.DefaultExpectedOutage),
+	// internal/drain/controller.go's ShutdownNow never sets ExpectedOutageMs.
+	if got := announced.GetExpectedOutageMs(); got != 0 {
+		t.Fatalf("shutdown_announced.expected_outage_ms for an immediate shutdown = %d, want 0 (the drain controller states no outage)", got)
+	}
 	// An immediate shutdown with a valid reason logs only at INFO
 	// (internal/drain/controller.go opNow): no WARN/ERROR is reached.
+	d.ExpectWarnings()
+}
+
+// TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause is
+// critique 15: strengthens the shutdown-announcement assertions onto the ONE
+// cause no other test in this file reaches — a schedule that actually fires
+// (every other shutdown_announced assertion here is either `now` or a
+// self-merge handover). A headless daemon has nothing to wait free, so the
+// drain loop (internal/drain/sweep.go Run, which caps its wait at the
+// schedule's own deadline regardless of the 5-minute sweep cadence) fires the
+// instant the deadline passes.
+func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	stream := d.WatchDaemonStream()
+	deadline := time.Now().Add(50 * time.Millisecond)
+	if _, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs: deadline.UnixMilli(), Reason: drainReasonDeploy(),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+	}
+	harness.AwaitView(t, d.Ctx(), stream, "drain_scheduled", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetDrainScheduled() != nil
+	})
+
+	// Act: wait out the deadline.
+	announced := harness.AwaitView(t, d.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	after := time.Now()
+
+	// Assert: the cause is the scheduled drain, carrying the SAME reason that
+	// was scheduled (internal/drain/controller.go fire() decodes the persisted
+	// row rather than re-deriving it).
+	if announced.GetCause().GetScheduledDrain().GetReason().GetDeploy() == nil {
+		t.Fatalf("shutdown_announced.cause = %v, want scheduled_drain with the deploy reason echoed", announced.GetCause())
+	}
+	// Enrichment (critique 15): minted_at_ms is minted only once fire() runs,
+	// which cannot happen before the deadline it is waiting on, and this
+	// assertion's own wall clock bounds it from above.
+	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
+	if mintedAt.Before(deadline) || mintedAt.After(after) {
+		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between the deadline %d and now %d", announced.GetMintedAtMs(), deadline.UnixMilli(), after.UnixMilli())
+	}
+	// A scheduled drain states no bounded outage either (see the immediate-
+	// shutdown test above for the same gap against the self-merge rollout).
+	if got := announced.GetExpectedOutageMs(); got != 0 {
+		t.Fatalf("shutdown_announced.expected_outage_ms for a scheduled drain = %d, want 0 (the drain controller states no outage)", got)
+	}
+	if announced.Address != nil {
+		t.Fatalf("shutdown_announced.address = %q, want unset (a scheduled drain has no successor)", announced.GetAddress())
+	}
+
+	// Assert: the orderly exit that closes fire() actually ran.
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the daemon's exit code after a fired scheduled drain = %d, want an orderly 0", code)
+	}
 	d.ExpectWarnings()
 }
 
@@ -351,6 +429,17 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	}).GetShutdownAnnounced()
 	if announced.GetCause().GetSelfMergeRollout() == nil {
 		t.Fatalf("shutdown_announced.cause = %v, want self_merge_rollout", announced.GetCause())
+	}
+	// Enrichment (critique 15): a handover states the ONE bounded outage the
+	// codebase knows exactly (internal/rollout/controller.go
+	// DefaultExpectedOutage, wired as rollout.Deps.ExpectedOutage in
+	// internal/rollout/handover.go) — unlike drain/controller.go's fire() and
+	// ShutdownNow(), which never set it.
+	if got, want := announced.GetExpectedOutageMs(), int64(rollout.DefaultExpectedOutage/time.Millisecond); got != want {
+		t.Fatalf("shutdown_announced.expected_outage_ms for a handover = %d, want the stated %d", got, want)
+	}
+	if announced.GetMintedAtMs() <= 0 {
+		t.Fatalf("shutdown_announced.minted_at_ms = %d, want a positive mint instant", announced.GetMintedAtMs())
 	}
 	addr := announced.GetAddress()
 	if addr == "" {
@@ -579,6 +668,133 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	if _, err := successor.SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
 		t.Fatalf("SelectWorkspace on the successor for a headless workspace = error %v, want a success", err)
 	}
+}
+
+// TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement
+// is critique 14's first arm: a client whose stream was NOT open at the
+// instant the handover was announced is refused with participant_not_expected
+// when it tries to join the rendezvous — verified against
+// AdoptWebWorkspaceParticipantNotExpected
+// (proto/src/agentrepl/v1/endpoint_adopt_web_workspace.proto) and
+// rollout.ErrParticipantNotExpected (internal/rollout/adopt.go).
+func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement(t *testing.T) {
+	// Arrange: only the HOST stream is open when the handover fires, so the
+	// manifest's ExpectedWeb is false (internal/rollout/handover.go: the
+	// snapshot is taken at announcement) — no web participant was ever
+	// expected for this workspace.
+	selfRepo, d := drainSelfRepoDaemon(t)
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	f.shim.ExpectWatchSession()
+	host := d.WatchHost(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+
+	// Act: fire the handover with no web stream ever opened.
+	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	daemonStream := d.WatchDaemonStream()
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	successor := drainDial(announced.GetAddress())
+
+	// Act: the never-open web client attempts to join anyway.
+	resp, err := successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace for a client not open at announcement = error %v, want a typed participant_not_expected answer", err)
+	}
+	if resp.Msg.GetError().GetParticipantNotExpected() == nil {
+		t.Fatalf("AdoptWebWorkspace for a client not open at announcement = %v, want error.participant_not_expected", resp.Msg)
+	}
+}
+
+// TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo is
+// critique 14's second arm: AdoptWebWorkspace on a plain boot — no handover
+// ever announced — is refused with no_transfer_announced, and
+// internal/server/adopt.go marks this refusal Info (the ORDINARY case on
+// every non-handover page boot), never WARN.
+func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *testing.T) {
+	// Arrange: an ordinary opened workspace; no handover was ever announced on
+	// this daemon.
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().AdoptWebWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the typed refusal.
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace on a plain boot = error %v, want a typed no_transfer_announced answer", err)
+	}
+	if resp.Msg.GetError().GetNoTransferAnnounced() == nil {
+		t.Fatalf("AdoptWebWorkspace on a plain boot = %v, want error.no_transfer_announced", resp.Msg)
+	}
+
+	// Assert: logged at INFO, naming the arm, never WARN.
+	rec := f.d.AwaitRunLogOperation("AdoptWebWorkspace")
+	if strings.ToLower(rec.Level) != "info" {
+		t.Fatalf("AdoptWebWorkspace's no_transfer_announced refusal logged at %q, want info", rec.Level)
+	}
+	if got := rec.Context["arm"]; got != "no_transfer_announced" {
+		t.Fatalf("AdoptWebWorkspace refusal record's arm = %v, want no_transfer_announced", got)
+	}
+	f.d.ExpectWarnings()
+}
+
+// ---- Drain schedule durability ----
+
+// TestDrainScheduleDoesNotSurviveRestartTheStandingBannerNeverReappears is
+// critique 11: the CONTRACT is that the standing drain banner (drain_scheduled)
+// reappears on a fresh WatchDaemon subscription after a restart on the same
+// state root — a client that reconnects after the daemon bounces must not
+// silently lose a schedule that is still in force.
+//
+// THIS TEST IS EXPECTED TO BE RED. wsm.DB persists the schedule
+// (PutDrainSchedule/DrainSchedule, internal/drain/api.go), and
+// internal/drain/sweep.go's Run DOES read DB.DrainSchedule(ctx) on every loop
+// iteration including the very first one after boot — but it only ACTS on a
+// schedule whose deadline has already passed (calling fire, which announces).
+// A schedule still in the future is silently absorbed into Run's wait
+// calculation and never handed to Announcer.DrainScheduled. The daemon-level
+// push topic (internal/server/api.go daemonTopic, a publish.Topic that replays
+// only its own process's latest value to new subscribers) is therefore EMPTY
+// on a fresh process until something re-announces — and nothing does: there is
+// no boot caller of DrainSchedule()/Current() anywhere in
+// cmd/claude-repld/graph.go (where drainController is built, ~line 385) or
+// internal/boot/sequence.go (which never mentions drain at all). The missing
+// call site is exactly there: after drain.New in graph.go, nothing reads the
+// persisted schedule and forwards it to the Announcer before the server starts
+// serving.
+func TestDrainScheduleDoesNotSurviveRestartTheStandingBannerNeverReappears(t *testing.T) {
+	// Arrange: schedule a drain far enough out that it never fires during this
+	// test, and confirm it is standing before the restart.
+	d1 := newDaemon(t, harness.Opts{})
+	stream1 := d1.WatchDaemonStream()
+	if _, err := d1.Client().UpdateShutdownSchedule(d1.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs: time.Now().Add(time.Hour).UnixMilli(), Reason: drainReasonDeploy(),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+	}
+	harness.AwaitView(t, d1.Ctx(), stream1, "drain_scheduled", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetDrainScheduled() != nil
+	})
+	d1.Stop()
+
+	// Act: restart on the same state root, then open a BRAND NEW subscription
+	// (standing in for a reconnecting Emacs or webview after the bounce).
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir})
+	stream2 := d2.WatchDaemonStream()
+
+	// Assert: the contract — the standing banner reappears. Bounded to a short
+	// probe rather than the harness's full 30s timeout, since this is expected
+	// to time out rather than succeed.
+	probeCtx, cancel := context.WithTimeout(d2.Ctx(), 2*time.Second)
+	defer cancel()
+	harness.AwaitView(t, probeCtx, stream2, "drain_scheduled reappearing after a restart", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetDrainScheduled() != nil
+	})
 }
 
 // ---- Asset origin ----
