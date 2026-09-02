@@ -75,8 +75,50 @@ export interface LiveWorkEntry {
  * because a terminal item is not live and remembering it would make this a
  * history of the session, which the store already is.
  */
+/**
+ * How many retired handles the table remembers.
+ *
+ * CONSTANT SIZE, which is the whole point: the shim accumulates nothing that
+ * grows with the session, so this is a fixed ring rather than a history. It
+ * exists because `StopBashFailure` distinguishes "the shell already ended" from
+ * "no live shell carries this handle", and only something that saw the handle
+ * retire can tell those apart. A consumer still holding a handle long after 64
+ * further items have retired is told `unknown_work`, which is the weaker but
+ * never wrong answer.
+ */
+const RETIRED_HANDLES_REMEMBERED = 64;
+
 export class LiveWorkTable {
   private readonly entries = new Map<string, LiveWorkEntry>();
+
+  /**
+   * The most recently retired WIRE handles, oldest first.
+   *
+   * Keyed by `tool_use_id` because that is what a caller addresses work by;
+   * an item whose start named no call has no wire handle and is not recorded.
+   */
+  private readonly retiredHandles: string[] = [];
+
+  /** Remember that a handle retired, evicting the oldest beyond the bound. */
+  private retire(entry: LiveWorkEntry | undefined): void {
+    const handle = entry?.toolUseId;
+    if (handle === undefined || handle === "") return;
+    const already = this.retiredHandles.indexOf(handle);
+    if (already !== -1) this.retiredHandles.splice(already, 1);
+    this.retiredHandles.push(handle);
+    while (this.retiredHandles.length > RETIRED_HANDLES_REMEMBERED) this.retiredHandles.shift();
+  }
+
+  /**
+   * Whether this handle names work that STARTED and has since ended.
+   *
+   * False means "not within the remembered window", never "never existed" — so
+   * a caller reports the weaker `unknown_work` on false and the sharper
+   * `already_ended` on true.
+   */
+  retired(toolUseId: string): boolean {
+    return this.retiredHandles.includes(toolUseId);
+  }
 
   /** A task began: the one moment the id, the call and the kind are all stated. */
   onTaskStarted(message: SdkTaskStartedMessage, turnId?: string): LiveWorkEntry {
@@ -129,6 +171,7 @@ export class LiveWorkTable {
   onTaskNotification(message: SdkTaskNotificationMessage): LiveWorkEntry | undefined {
     const existing = this.entries.get(message.task_id);
     this.entries.delete(message.task_id);
+    this.retire(existing);
     LOGGER.log(
       { task_id: message.task_id, status: message.status, known: existing !== undefined },
       "a detached-work item concluded and left the live set",
@@ -161,6 +204,9 @@ export class LiveWorkTable {
       );
     }
     const dropped = [...this.entries.keys()].filter((id) => !next.has(id));
+    // A LEVEL THAT OMITS AN ITEM RETIRES IT, exactly as a notification does —
+    // the vendor's level is the whole truth about what is live.
+    for (const id of dropped) this.retire(this.entries.get(id));
     this.entries.clear();
     for (const [id, entry] of next) this.entries.set(id, entry);
     LOGGER.log(

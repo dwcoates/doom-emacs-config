@@ -41,6 +41,7 @@ import {
   closingSubagentTerminal,
   findBashStart,
   findUnit,
+  stoppedBashTerminal,
 } from "../store/reconcile.js";
 import type {
   CanUseToolLike,
@@ -79,7 +80,7 @@ import {
 } from "./compaction.js";
 import { judgeCold, readTranscriptFacts, sessionCold, transcriptPath, type TranscriptFacts } from "./cold.js";
 import { ForegroundUnitTable } from "./foreground.js";
-import { LiveWorkTable } from "./detached.js";
+import { LiveWorkTable, type LiveWorkEntry } from "./detached.js";
 import {
   createAgentIdentityStore,
   mintVendorSessionId,
@@ -165,6 +166,13 @@ export interface EngineDeps {
 interface OpenWatcher {
   readonly agent: conversationv1.AgentId;
   readonly page: AgentPageSession;
+  /** Resolves when the handler's stream has finished, however it finished. */
+  readonly ended: Promise<void>;
+}
+
+/** One open `WatchBash` stream, held so the teardown can wait for its terminal. */
+interface OpenBashWatcher {
+  readonly work: conversationv1.DetachedWorkId;
   /** Resolves when the handler's stream has finished, however it finished. */
   readonly ended: Promise<void>;
 }
@@ -275,6 +283,29 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let lostRowsAtStandDown = 0;
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
   const watchers = new Set<OpenWatcher>();
+  /** Every open `WatchBash` stream, so the teardown can wait for its terminal. */
+  const bashWatchers = new Set<OpenBashWatcher>();
+  /**
+   * Subagent ids the RECORD named at reconciliation.
+   *
+   * Two sources, both bounded by the conversation's own shape: the open
+   * obligations the record named once at start, and every `created_agent_id`
+   * this session has ANNOUNCED. The second is the load-bearing one — a
+   * SYNCHRONOUS subagent runs inside the turn and is never a task, so the live
+   * table never holds it, yet the daemon opens a WatchAgent on it the instant
+   * it sees the spawn, before a single row of the child's exists.
+   */
+  const announcedAgents = new Set<string>();
+  /**
+   * Cuts produced BEFORE the session had an identity to key them to.
+   *
+   * The cold gate's `compact` remediation runs inside `StartSession`, before
+   * the identity is settled — a row cannot be written yet, and dropping it
+   * would lose the one page line that makes the compaction visible in the feed
+   * rather than only in the transcript. They are written the moment the
+   * identity exists, in the order they happened.
+   */
+  const pendingContextCuts: conversationv1.ContextCut[] = [];
 
   // THE RECORD PLANE'S FAULTS ARE THE SESSION'S. `Persistence` raises a
   // store_unreachable fault and opens a degraded window when the store stops
@@ -1056,6 +1087,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (update.case !== "activity") continue;
       const activity = update.value;
       const item = activity.item;
+      // AN ANNOUNCEMENT IS A PROMISE THE ID IS ADDRESSABLE. `created_agent_id`
+      // is the key a consumer draws a container under and opens its own
+      // WatchAgent on — the daemon does exactly that, the instant it sees the
+      // spawn. Recording it here is what lets that watch be answered before the
+      // subagent's first row exists, and it is the ONLY record for a
+      // SYNCHRONOUS subagent, which runs inside the turn and is never a task.
+      if (item.case === "subagent" && item.value.result.case === "start") {
+        const created = item.value.result.value.createdAgentId?.value ?? "";
+        if (created !== "") announcedAgents.add(created);
+      }
       const inner = item.value as { result?: { case?: string } } | undefined;
       const settled = inner?.result?.case !== undefined && inner.result.case !== "start";
       foreground.note(activity.activityId?.value ?? "", item.case ?? "", settled);
@@ -1383,6 +1424,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // identity just settled — and a write attempted before this raises rather
     // than landing rows under a name no replay could absorb against.
     deps.persistence.setProducer(identity.originalVendorSessionId);
+    // THE HELD CUTS, NOW KEYABLE. First write after the producer is named, in
+    // the order they happened, so the compaction the cold gate just performed
+    // is on the first page a consumer opens.
+    if (pendingContextCuts.length > 0) {
+      const held = pendingContextCuts.splice(0, pendingContextCuts.length);
+      LOGGER.log({ held: held.length }, "writing the context cuts held until the session had an identity");
+      for (const cut of held) writeContextCut(cut);
+    }
     if (clearedTo !== undefined) {
       // The AgentId does not move; only the resume handle does, and the
       // rotation is announced exactly like a vendor-initiated one.
@@ -1638,7 +1687,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** The `context_cut` page line, on the conversation's own book. */
   function writeContextCut(cut: conversationv1.ContextCut): void {
-    if (identity === undefined) return;
+    if (identity === undefined) {
+      // NEVER DROPPED, only DEFERRED. A row needs the agent id the identity
+      // settles, and the cold gate's remediation runs before that — so the cut
+      // waits rather than vanishing.
+      LOGGER.log(
+        { arm: cut.cut.case ?? "", pending: pendingContextCuts.length + 1 },
+        "a context cut was produced before the session had an identity; held until one exists",
+      );
+      pendingContextCuts.push(cut);
+      return;
+    }
     const agentId = identity.agentId;
     const entry: PersistEntry = {
       agentId,
@@ -1798,6 +1857,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     for (const agent of open.liveAgents) {
       if (agent.value === agentId.value) continue;
+      // NAMED BY THE RECORD, so a consumer may address it even though this
+      // process never watched it start -- that is what makes an empty book
+      // under this id "not written yet" rather than "no such agent".
+      announcedAgents.add(agent.value);
       closing.push(closingAgentTerminal(subagentId(agent.value)));
     }
     if (open.liveWorkflows.length > 0) {
@@ -1884,6 +1947,31 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       watchers.add(entry);
       return () => {
         watchers.delete(entry);
+        settle();
+      };
+    },
+    knowsAgent: (agent) => {
+      const value = agent.value;
+      if (value === "") return false;
+      if (identity !== undefined && value === identity.agentId.value) return true;
+      if (live.byToolUseId(value) !== undefined) return true;
+      if (live.retired(value)) return true;
+      return announcedAgents.has(value);
+    },
+    concludeStoppedRuns: (entries) => {
+      concludeStoppedRuns(entries);
+    },
+    bashWatcherOpened: (work) => {
+      let settle: () => void = () => undefined;
+      const entry: OpenBashWatcher = {
+        work,
+        ended: new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+      };
+      bashWatchers.add(entry);
+      return () => {
+        bashWatchers.delete(entry);
         settle();
       };
     },
@@ -2130,7 +2218,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           "the vendor refused the interrupt during teardown; continuing",
         );
       }
-      for (const entry of live.all()) {
+      // SNAPSHOT FIRST. Stopping a task provokes the vendor's own
+      // `task_notification`, which retires the entry from the live table — so
+      // reading the table again afterwards asks what is STILL live and gets
+      // exactly the items this teardown did not have to close.
+      const stopping = live.all();
+      for (const entry of stopping) {
         try {
           await active.stopTask(entry.taskId);
         } catch (err) {
@@ -2140,6 +2233,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           );
         }
       }
+      concludeStoppedRuns(stopping);
     }
     open = undefined;
     prompts?.close();
@@ -2160,9 +2254,83 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     await concludeWatchers();
+    await concludeBashWatchers();
     pushes.standDown();
     releaseLock?.();
     releaseLock = undefined;
+  }
+
+  /**
+   * Write the interrupted terminal for every shell run this teardown stopped.
+   *
+   * THE ACT WAS OURS, SO THE RECORD IS OURS. A detached shell's rows are
+   * normally the sidecar's, read off the spool — but a run stopped as the
+   * session dies may have no sidecar left to read the spool's `EXIT=` line, and
+   * "every started thing eventually gets a terminal row" is unconditional.
+   * Re-writing the same upsert key is absorbed, so a sidecar that does see the
+   * line later cannot produce a second, conflicting terminal.
+   *
+   * A SUBAGENT IS NOT A SHELL: its terminal is the spawn unit's, written where
+   * subagent terminals are written, so only shell work is closed here.
+   */
+  function concludeStoppedRuns(entries: readonly LiveWorkEntry[]): void {
+    const agent = identity?.agentId;
+    if (agent === undefined) return;
+    const closing: PersistEntry[] = [];
+    for (const entry of entries) {
+      const handle = entry.toolUseId;
+      if (handle === undefined || handle === "") {
+        // Tracked for liveness, addressable by nobody: there is no unit to
+        // settle, and inventing one would put work on a stream that never
+        // announced it.
+        LOGGER.log(
+          { level: "warn", task_id: entry.taskId },
+          "a stopped detached item names no originating call; it has no unit to settle",
+        );
+        continue;
+      }
+      // THE SAME RULE THE FOLD USES (`settlesAsSubagent`): `task_started`
+      // states `local_agent` for a spawned agent and `local_bash` for a shell,
+      // and an UNSTATED kind is an agent. Only a stated non-agent kind is a
+      // shell run, and only a shell run's terminal is ours to write.
+      if (entry.taskType === undefined || entry.taskType === "" || entry.taskType === "local_agent") {
+        continue;
+      }
+      closing.push(
+        stoppedBashTerminal(
+          agent,
+          toolCallActivityId(handle),
+          create(conversationv1.AgentBashCommandSchema, { line: entry.description }),
+        ),
+      );
+    }
+    if (closing.length === 0) return;
+    deps.persistence.write(closing);
+    LOGGER.log({ closed: closing.length }, "closed the shell runs this teardown stopped, as interrupted by the user");
+  }
+
+  /**
+   * Wait for every open `WatchBash` stream to end.
+   *
+   * A bash stream concludes ITSELF once the terminal row reaches it — the store
+   * ends `WatchBashRun` after a terminal — so there is nothing to conclude
+   * here, only something to WAIT FOR. Exiting the process first would cut the
+   * stream exactly where its terminal was owed, which a consumer reads as a
+   * transport failure rather than as the interrupted arm it was promised.
+   */
+  async function concludeBashWatchers(): Promise<void> {
+    const open = [...bashWatchers];
+    if (open.length === 0) return;
+    await Promise.all(
+      open.map((entry) =>
+        withBudget(
+          entry.ended,
+          WATCHER_CONCLUSION_BUDGET_MS,
+          `the WatchBash stream on ${entry.work.value} did not end within its conclusion budget`,
+        ),
+      ),
+    );
+    bashWatchers.clear();
   }
 
   /**

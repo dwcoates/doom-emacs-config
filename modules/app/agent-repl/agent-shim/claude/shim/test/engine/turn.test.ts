@@ -87,6 +87,9 @@ async function harness(): Promise<Harness> {
     nowMs: () => 1,
     openTurn: () => state.open,
     watcherOpened: () => () => undefined,
+    bashWatcherOpened: () => () => undefined,
+    concludeStoppedRuns: () => undefined,
+    knowsAgent: () => true,
     reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
     submit: (said, keepalive) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
