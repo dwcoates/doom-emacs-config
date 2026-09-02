@@ -50,6 +50,11 @@ const (
 	// ArmUnservedAnswer is an answer whose question text, chosen label or
 	// permission id was never served.
 	ArmUnservedAnswer = "unserved_answer"
+	// ArmAskNotStanding is an answer addressed to a card that is not standing:
+	// an ask the answer never names, or one no batch is open under. It is a
+	// DISTINCT arm from ArmUnservedAnswer, which is a value the standing batch
+	// never served (AnswerQuestionError spells the two apart).
+	ArmAskNotStanding = "ask_not_standing"
 	// ArmMultiPickOnSingleSelect is more than one choice on a single-select
 	// question.
 	ArmMultiPickOnSingleSelect = "multi_pick_on_single_select"
