@@ -69,6 +69,21 @@ Original list (all landed, none deferred beyond the two noted):
 - Webapp: no pull-driven health surface; session faults via pushed topbar warnings; UpdateMergeQueue has no webapp surface.
 - Compaction summary line still ungrounded (cheap-model capture never compacted); needs a user-approved longer-history capture.
 
+## USER RULING 2026-09-02: no playtests; e2e coverage hardening instead
+
+The final playtest step is DROPPED. After the cross-system e2e suite passes
+on overhaul/integration, a HARDENING step runs: measure coverage of the e2e
+run (daemon `-coverpkg=./... -coverprofile` restricted to ./e2e; shim
+vitest coverage over its mock-scenario suite; sidecar TestMockScenarios),
+then shore up gaps. Standard: high, weighted toward important and complex
+areas (permission asks, interrupts, compaction and session rotation,
+subagents, detached bash, merge and hold flows, failure and refusal arms);
+simple text-turn paths rank low. Ahead of it: a sonnet audit maps every
+mock-golden capture scenario (~70 at ~/.config/doom-overhaul/captures) to
+the e2e/integration test that exercises it (scratchpad
+e2e-scenario-coverage.md); uncovered high-rank scenarios become e2e tests
+dispatched to opus-low implementers.
+
 ## USER RULING 2026-09-02: leads are finished once parked
 
 A parked lead is DONE. The project lead takes it home: landing 7, the
