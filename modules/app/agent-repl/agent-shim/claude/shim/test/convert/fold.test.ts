@@ -739,6 +739,48 @@ describe("permission", () => {
     expect(denied.by.case).toBe("policy");
   });
 
+  it("records a CLASSIFIER denial as undecidable rather than as policy", () => {
+    // Nobody refused: the deciding machinery could not answer. Drawn as policy
+    // it implies a rule that does not exist, and it is the only denial here
+    // that retrying may resolve.
+    const fold = createFold();
+    const message = {
+      ...(denial() as unknown as Record<string, unknown>),
+      decision_reason_type: "classifier",
+      decision_reason: "the classifier could not reach a verdict",
+    } as unknown as SdkMessage;
+
+    const output = fold.onSdkMessage(message, foldContext());
+
+    const frame =
+      output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const permission = (frame?.result.value as conversationv1.AgentUpdate).update
+      .value as conversationv1.AgentPermission;
+    const success = permission.result.value as conversationv1.AgentPermissionSuccess;
+    const denied = success.decision.value as conversationv1.AgentPermissionDenied;
+    expect(denied.by.case).toBe("undecidable");
+  });
+
+  it("carries the classifier's own account as the undecidable detail", () => {
+    const fold = createFold();
+    const message = {
+      ...(denial() as unknown as Record<string, unknown>),
+      decision_reason_type: "classifier",
+      decision_reason: "the classifier could not reach a verdict",
+    } as unknown as SdkMessage;
+
+    const output = fold.onSdkMessage(message, foldContext());
+
+    const frame =
+      output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
+    const permission = (frame?.result.value as conversationv1.AgentUpdate).update
+      .value as conversationv1.AgentPermission;
+    const success = permission.result.value as conversationv1.AgentPermissionSuccess;
+    const denied = success.decision.value as conversationv1.AgentPermissionDenied;
+    const undecidable = denied.by.value as conversationv1.AgentPermissionDeniedForWantOfDecider;
+    expect(undecidable.detail).toBe("the classifier could not reach a verdict");
+  });
+
   it("produces nothing when the ENGINE's gate is already holding that ask", () => {
     const fold = createFold();
 
