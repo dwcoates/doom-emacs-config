@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -183,6 +184,75 @@ func TestWatchDaemonServesEveryClient(t *testing.T) {
 	// Assert.
 	if got := stream.Msg().GetShutdownAnnounced().GetMintedAtMs(); got != 7 {
 		t.Fatalf("minted_at_ms = %d, want 7", got)
+	}
+}
+
+// TestShutdownAnnouncedReachesAClientBeforeTheSurfaceCloses pins the ONE
+// ordering the announcement exists for: every caller of ShutdownAnnounced ends
+// the process immediately afterwards, so an announcement that were merely
+// queued would be lost to the teardown and the client would see its stream end
+// with no error and no reason at all.
+func TestShutdownAnnouncedReachesAClientBeforeTheSurfaceCloses(t *testing.T) {
+	// Arrange: a client holding the daemon stream, PROVEN subscribed by a push
+	// it has already taken -- waiting on the open alone would race the
+	// subscription the announcement has to reach.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 11})
+	if !stream.Receive() {
+		t.Fatalf("receive the schedule that proves the subscription: %v", stream.Err())
+	}
+
+	// Act: announce, then tear the surface down at once, exactly as the
+	// orderly exit does.
+	h.Server.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{MintedAtMs: 7})
+	if err := h.Server.Close(); err != nil {
+		t.Fatalf("close the surface: %v", err)
+	}
+
+	// Assert.
+	if !stream.Receive() {
+		t.Fatalf("the stream ended before the announcement: %v", stream.Err())
+	}
+	if got := stream.Msg().GetShutdownAnnounced().GetMintedAtMs(); got != 7 {
+		t.Fatalf("minted_at_ms = %d, want 7", got)
+	}
+}
+
+// TestShutdownAnnouncedDoesNotWaitOnAStreamThatHasGone pins the other half of
+// that wait: a client that has already left satisfies it at once, so a
+// departed stream can never hold the orderly exit open for the flush bound.
+func TestShutdownAnnouncedDoesNotWaitOnAStreamThatHasGone(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{}))
+	if dialErr != nil {
+		t.Fatalf("open the stream: %v", dialErr)
+	}
+	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 11})
+	if !stream.Receive() {
+		t.Fatalf("receive the schedule that proves the subscription: %v", stream.Err())
+	}
+	cancel()
+
+	// Act.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.Server.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{MintedAtMs: 7})
+	}()
+
+	// Assert: it returns well inside the flush bound rather than riding it.
+	select {
+	case <-done:
+	case <-time.After(announcementFlush / 2):
+		t.Fatal("ShutdownAnnounced is still waiting on a stream whose client has gone")
 	}
 }
 
