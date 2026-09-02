@@ -293,11 +293,22 @@ export function createFakeQuery(
   };
   const emit = (message: Record<string, unknown>): void => emitWithUuid(opts.newUuid(), message);
 
+  /**
+   * The call a subagent's stream events belong to, while one is being emitted.
+   *
+   * A SUBAGENT'S STREAM DELTAS CARRY THE SAME ATTRIBUTION AS ITS MESSAGE. The
+   * fold books a frame by `parent_tool_use_id`, and emitting the deltas with a
+   * null one put a subagent's OPEN block on the main agent's book and its
+   * SETTLED block on the subagent's — the same upsert key landing in two books,
+   * which is what a page then served back to the wrong reader.
+   */
+  let streamParentToolUseId: string | null = null;
+
   const emitStream = (event: Record<string, unknown>): void =>
     emit({
       type: "stream_event",
       event,
-      parent_tool_use_id: null,
+      parent_tool_use_id: streamParentToolUseId,
       // A fake message_start models the same SDK timing contract as a live one,
       // so the real ephemeral-correlation path stays exercised.
       ...(event.type === "message_start" ? { ttft_ms: 1 } : {}),
@@ -459,6 +470,7 @@ export function createFakeQuery(
     options: AssistantOptions = {},
   ): AssistantEmission => {
     const messageId = options.messageId ?? mintMessageId();
+    streamParentToolUseId = options.agent?.parentToolUseId ?? null;
     const reportedModel = options.model ?? model;
     const usage = fakeUsage();
     const requestId = `req_fake_${spawnTag}_${messageCounter}`;
@@ -538,6 +550,7 @@ export function createFakeQuery(
       context_management: { applied_edits: [] },
     });
     emitStream({ type: "message_stop" });
+    streamParentToolUseId = null;
     return { messageId, uuids };
   };
 
