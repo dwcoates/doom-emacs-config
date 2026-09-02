@@ -34,6 +34,11 @@
 (defvar agent-repl-test-pq--gate :open
   "The composer gate the stubbed host reports.")
 
+(defvar agent-repl-test-pq--conn nil
+  "The REAL connection object the stubbed host hands the drain, or nil.
+Real, not faked: aliveness is the struct's own flag, so the dead-connection
+case is arranged by actually closing it.")
+
 (defun agent-repl-test-pq--said (text)
   "Return a `UserSaid' carrying TEXT, as the composer would have built it."
   (list :content (list :blocks (list (list :arm :text :value (list :text text))))))
@@ -45,9 +50,15 @@
          (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
          (agent-repl-test-pq--submitted nil)
          (agent-repl-test-pq--link-up t)
-         (agent-repl-test-pq--gate :open))
+         (agent-repl-test-pq--gate :open)
+         (agent-repl-test-pq--conn
+          (agent-repl-connect-connection-create :address "127.0.0.1:9001")))
      (cl-letf (((symbol-function 'agent-repl-link-up-p)
                 (lambda () agent-repl-test-pq--link-up))
+               ((symbol-function 'agent-repl-host-conn)
+                (lambda (_ws) agent-repl-test-pq--conn))
+               ((symbol-function 'agent-repl-link-primary)
+                (lambda () agent-repl-test-pq--conn))
                ((symbol-function 'agent-repl-host-composer-gate)
                 (lambda (_ws) agent-repl-test-pq--gate))
                ((symbol-function 'agent-repl--input-submit)
@@ -133,6 +144,62 @@
   "An open composer on a live link is deliverable."
   (agent-repl-test-pq--with
     (should (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-not-deliverable-on-a-dead-connection ()
+  "A closed connection cannot carry a send, whatever the link reports."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    ;; Act / Assert
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-not-deliverable-without-a-connection ()
+  "No connection at all is the same refusal: there is nothing to send on."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (setq agent-repl-test-pq--conn nil)
+    ;; Act / Assert
+    (should-not (agent-repl-prompt-queue-deliverable-p "ws-one"))))
+
+(ert-deftest agent-repl-pq-dead-connection-is-warned ()
+  "The refusal is not silent: a held prompt not going out is news."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    (let ((warnings nil))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (agent-repl-prompt-queue-deliverable-p "ws-one")
+        ;; Assert
+        (should (cl-find-if (lambda (text)
+                              (string-match-p "elisp.prompt-queue.dead-conn" text))
+                            warnings))))))
+
+(ert-deftest agent-repl-pq-drain-on-a-dead-connection-sends-nothing ()
+  "A drain onto a corpse would lose the prompt for a send that cannot happen."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    ;; Act
+    (agent-repl-prompt-queue-drain "ws-one" :outage)
+    ;; Assert
+    (should-not agent-repl-test-pq--submitted)))
+
+(ert-deftest agent-repl-pq-drain-on-a-dead-connection-keeps-the-entry ()
+  "What was not sent stays HELD: this queue never drops a prompt silently."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    (agent-repl-connect-close agent-repl-test-pq--conn)
+    ;; Act
+    (agent-repl-prompt-queue-drain "ws-one" :outage)
+    ;; Assert
+    (should (equal (length (agent-repl-prompt-queue-pending "ws-one" :outage)) 1))))
 
 (ert-deftest agent-repl-pq-deliverable-when-merge-parked ()
   "A parked merge leaves the composer open, so a held prompt may go."
@@ -264,6 +331,34 @@
 (ert-deftest agent-repl-pq-registers-on-the-finish-edge ()
   "The deferral drain is wired to the roster's finish edge and nothing else."
   (should (memq #'agent-repl--prompt-queue-on-finish agent-repl-roster-finish-functions)))
+
+(ert-deftest agent-repl-pq-promotion-drains-outage-entries ()
+  "A handover never brings the link down, so the promotion is the other edge."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-link-promote 'old 'new)
+    ;; Assert
+    (should (equal (agent-repl-test-pq--sent-texts) '("a")))))
+
+(ert-deftest agent-repl-pq-promotion-resends-under-the-held-key ()
+  "The re-drive stays a RETRY of the refused submission, not a second turn."
+  (agent-repl-test-pq--with
+    ;; Arrange
+    (agent-repl-prompt-queue-offer "ws-one" (agent-repl-test-pq--said "a")
+                                   :user-sent "a" "key-9")
+    ;; Act
+    (agent-repl--prompt-queue-on-link-promote 'old 'new)
+    ;; Assert
+    (should (equal (nth 4 (car agent-repl-test-pq--submitted)) "key-9"))))
+
+(ert-deftest agent-repl-pq-registers-on-the-promote-edge ()
+  "The registration IS the release: without it a refused prompt is never sent."
+  ;; Act / Assert
+  (should (memq #'agent-repl--prompt-queue-on-link-promote
+                (default-value 'agent-repl-link-promote-functions))))
 
 (ert-deftest agent-repl-pq-registers-on-link-up ()
   "The outage drain is wired to link-up and nothing else."
