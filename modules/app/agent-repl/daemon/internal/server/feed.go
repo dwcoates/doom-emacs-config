@@ -126,7 +126,7 @@ func (s *server) WatchFeed(
 	token := req.Msg.GetWatch()
 	target, known := s.tokenTargetFor(token.GetValue())
 	if !known {
-		return UnlandedArm(s.log, rpc, "unknown_token",
+		return TransportClosed(s.log, rpc, "unknown_token",
 			fmt.Sprintf("no feed watch token %q was minted by this daemon", token.GetValue()), true)
 	}
 	log, err := s.workspaceLog(ctx, rpc, target.WS)
@@ -141,9 +141,9 @@ func (s *server) WatchFeed(
 	if err != nil {
 		switch {
 		case errors.Is(err, feed.ErrUnknownToken):
-			return UnlandedArm(log, rpc, "unknown_token", err.Error(), true)
+			return TransportClosed(log, rpc, "unknown_token", err.Error(), true)
 		case errors.Is(err, feed.ErrTokenExpired):
-			return UnlandedArm(log, rpc, "token_expired", err.Error(), false)
+			return TransportClosed(log, rpc, "token_expired", err.Error(), false)
 		}
 		return fail(log, rpc, err)
 	}

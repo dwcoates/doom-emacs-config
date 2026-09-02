@@ -63,7 +63,7 @@ func (s *server) SubmitPrompt(
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), target)
 	if err != nil {
 		if refused, ok := s.asRefusal(err); ok {
-			return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
+			return answer(resp, s.refuse(subject.Log, rpc, resp, bubbleRefused(refused)))
 		}
 		return nil, fail(subject.Log, rpc, err)
 	}
@@ -192,4 +192,38 @@ func (s *server) RequestCommandSupport(
 // refOf renders a registry record as the ref clients echo back.
 func refOf(record wsm.Workspace) *workspacev1.WorkspaceRef {
 	return &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir}
+}
+
+// The bubble-addressed submit refusals the SHIM makes, and the kind each one
+// takes on the landing-7 candidate arm `SubmitPromptError.bubble_refused
+// {kind: not_deliverable | agent_busy}`. Until that arm lands the two answer
+// through server.UnlandedArm naming `bubble_refused` with the kind in the
+// reason; both shapes are recorded under that one row in daemon/ERROR-ARMS.md.
+const (
+	// armBubbleRefused is the intended (unlanded) arm both shapes answer under.
+	armBubbleRefused = "bubble_refused"
+	// bubbleKindNotDeliverable is the shim's UpdateAgentFailure.not_deliverable:
+	// the SDK has no route to the addressed subagent.
+	bubbleKindNotDeliverable = "not_deliverable"
+	// bubbleKindAgentBusy is the shim's StartTurnFailure.turn_already_open: the
+	// addressed subagent's own turn is already running.
+	bubbleKindAgentBusy = "agent_busy"
+)
+
+// bubbleRefused folds the shim's two bubble-addressed submit refusals onto the
+// one intended arm, carrying the kind in the reason. Any other refusal passes
+// through untouched.
+func bubbleRefused(r refusal) refusal {
+	var kind string
+	switch r.Arm {
+	case bubbleKindNotDeliverable:
+		kind = bubbleKindNotDeliverable
+	case "turn_already_open":
+		kind = bubbleKindAgentBusy
+	default:
+		return r
+	}
+	r.Arm = armBubbleRefused
+	r.Reason = fmt.Sprintf("kind %s: %s", kind, r.Reason)
+	return r
 }

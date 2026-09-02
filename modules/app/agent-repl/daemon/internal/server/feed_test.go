@@ -154,8 +154,8 @@ func TestWatchFeedRefusesAnUnmintedToken(t *testing.T) {
 	}
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "WatchFeedError.unknown_token") {
-		t.Fatalf("error = %v, want the unknown_token sentinel", err)
+	if err == nil || !strings.Contains(err.Error(), "WatchFeed closed the stream: unknown_token") {
+		t.Fatalf("error = %v, want the transport-closed unknown_token cause", err)
 	}
 }
 

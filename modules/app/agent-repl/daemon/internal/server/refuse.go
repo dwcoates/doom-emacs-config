@@ -224,6 +224,24 @@ type resolved struct {
 // delegates: the verbs repeat the check for their own callers, but the rpcs
 // that do not route through the verbs would otherwise have none.
 func (s *server) resolveRef(ctx context.Context, rpc string, ref *workspacev1.WorkspaceRef) (resolved, *refusal, error) {
+	return s.resolveRefLogging(ctx, rpc, ref, true)
+}
+
+// resolveStreamRef is resolveRef for a STANDING STREAM. A refused stream open
+// is transport-closed by ruling, not an unlanded arm, so the standing refusals
+// are NOT warned here: the caller records them at INFO through TransportClosed.
+func (s *server) resolveStreamRef(ctx context.Context, rpc string, ref *workspacev1.WorkspaceRef) (resolved, *refusal, error) {
+	return s.resolveRefLogging(ctx, rpc, ref, false)
+}
+
+// resolveRefLogging is the shared body; warnStanding selects whether a standing
+// refusal is warned as an unlanded arm.
+func (s *server) resolveRefLogging(
+	ctx context.Context,
+	rpc string,
+	ref *workspacev1.WorkspaceRef,
+	warnStanding bool,
+) (resolved, *refusal, error) {
 	id := ids.WorkspaceID(ref.GetId())
 	record, err := s.deps.DB.Workspace(ctx, id)
 	if err != nil {
@@ -269,16 +287,20 @@ func (s *server) resolveRef(ctx context.Context, rpc string, ref *workspacev1.Wo
 			Arm:    workspace.ArmTransferringAway,
 			Reason: fmt.Sprintf("workspace %q has been handed to a successor daemon", id),
 		})
-		log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon no longer serves",
-			dlog.Context{"rpc": rpc, "arm": r.Arm})
+		if warnStanding {
+			log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon no longer serves",
+				dlog.Context{"rpc": rpc, "arm": r.Arm})
+		}
 		return resolved{}, &r, nil
 	case workspace.StandingNotYetAdopted:
 		r := s.fill(refusal{
 			Arm:    workspace.ArmNotYetAdopted,
 			Reason: fmt.Sprintf("workspace %q has not been adopted by this daemon yet", id),
 		})
-		log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon has not adopted",
-			dlog.Context{"rpc": rpc, "arm": r.Arm})
+		if warnStanding {
+			log.Warn(opUnlandedArm+".standing", "refused a workspace this daemon has not adopted",
+				dlog.Context{"rpc": rpc, "arm": r.Arm})
+		}
 		return resolved{}, &r, nil
 	default:
 		return resolved{}, nil, fmt.Errorf("%s: workspace %q: unknown serving standing %d", rpc, id, standing)

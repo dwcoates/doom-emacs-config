@@ -457,6 +457,31 @@ func UnlandedArm(log dlog.Logger, rpc, arm, reason string, notFound bool) *conne
 // the ledger in daemon/ERROR-ARMS.md reconciles against the log.
 const opUnlandedArm = "daemon.refusal.unlanded_arm"
 
+// TransportClosed answers a refused open of a STANDING STREAM. A Watch* rpc has
+// no `<Rpc>Error` message at all: the refusal IS the closed transport, which is
+// the settled shape rather than a gap, so it is NOT an unlanded arm. It answers
+// a Connect error — CodeNotFound for an unknown id, CodeFailedPrecondition
+// otherwise — whose message names the cause without the "intended arm:"
+// spelling, and records the refusal at INFO under
+// "daemon.refusal.transport_closed" with structured `rpc` and `cause`.
+func TransportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool) *connect.Error {
+	message := fmt.Sprintf("%s closed the stream: %s: %s", rpc, cause, reason)
+	code := connect.CodeFailedPrecondition
+	if notFound {
+		code = connect.CodeNotFound
+	}
+	if log != nil {
+		log.Info(opTransportClosed, message, dlog.Context{
+			"rpc": rpc, "cause": cause, "reason": reason, "not_found": notFound,
+		})
+	}
+	return connect.NewError(code, fmt.Errorf("%s", message))
+}
+
+// opTransportClosed is the operation every refused stream open is recorded
+// under. ERROR-ARMS.md's transport-closed section reconciles against it.
+const opTransportClosed = "daemon.refusal.transport_closed"
+
 // H2C wraps the Connect handler so ONE loopback listener serves both HTTP/1.1
 // and cleartext HTTP/2. The daemon binds one listener and serves the rpcs and
 // the webapp assets on one origin, which is what makes the webview URL and the
