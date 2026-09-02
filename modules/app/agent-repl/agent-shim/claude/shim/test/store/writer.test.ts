@@ -425,9 +425,15 @@ describe("the default backoff sleep", () => {
     started.failWrites("transient");
 
     plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
-    // The first attempt fails on the real backoff timer; let it elapse, then
-    // recover the store before the schedule runs out.
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Recover the store the moment the first attempt has actually been
+    // REFUSED, rather than after a wall-clock sleep. A sleep races the real
+    // backoff schedule: under load the four retries can burn while this thread
+    // is descheduled, and the recovery then lands after the batch is already
+    // lost. The refusal is the fact worth waiting for, and it is observable.
+    for (let i = 0; i < 1_000; i++) {
+      if (started.writeBatches().some((batch) => !batch.accepted)) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
     started.failWrites(null);
 
     await plane.flush();
