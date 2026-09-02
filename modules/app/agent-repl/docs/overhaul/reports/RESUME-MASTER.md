@@ -91,6 +91,20 @@ daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
 suite (real shim + store + sidecar, hosted daemon, no frontends). Both
 survive the merge.
 
+## USER RULING 2026-09-02: flaky tests are unacceptable; rerunning is not a strategy
+
+Every intermittent, order-dependent or load-sensitive failure is a defect to
+be root-caused and fixed at its SOURCE: production code when it reflects a
+real race or contention there; test code only when it is truly a test
+artifact. "Passes on rerun" is evidence of a race, not a resolution.
+"Pre-existing, left alone" is not an acceptable disposition. Never widen a
+bound to hide it. Known items to squash before close-out: daemon
+scheduled-drain under load; two daemon detached-shell tests at the 5 s
+bound under load; sidecar swept-up-terminal; webapp harness boot transport
+race (parallel runs); elisp order-dependent integration tests (verbs refusal
+context, composer command-refused, composer transferring-away, link bounce
+indicator, composer merge-parked badge).
+
 ## USER RULING 2026-09-02: only OUR systems run for real; e2e mocks git and the SDK
 
 Reverses the project lead's same-day ruling that e2e merge tests use real
