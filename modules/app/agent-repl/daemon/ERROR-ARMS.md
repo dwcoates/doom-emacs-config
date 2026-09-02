@@ -27,8 +27,6 @@ landed arm.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
-| UpdateMergeQueue | `unknown_repository` | `UpdateMergeQueuePause`/`UpdateMergeQueueResume` carries a `repository` ref that matches no registered repository (or names neither an id nor a dir) | merge |
-| SubmitPrompt | `duplicate_submission` | the request's `idempotency_key` already claimed a turn; the retry is refused rather than minting a second turn (`prompthandler.ErrDuplicateSubmission`) | prompthandler |
 
 One thing the batch did NOT land: `CloseWorkspaceError.blocked` exists but
 `CloseWorkspaceBlocked` is still an EMPTY message, so the composed reason the

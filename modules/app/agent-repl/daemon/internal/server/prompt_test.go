@@ -181,18 +181,21 @@ func TestSubmitPromptRefusesAnUndecodableFeed(t *testing.T) {
 	}
 }
 
-// TestSubmitPromptMapsTheDuplicateSubmissionRefusal pins the unlanded arm the
-// ledger records: a retried idempotency key mints no second turn.
+// TestSubmitPromptMapsTheDuplicateSubmissionRefusal pins the landed arm: a
+// retried idempotency key mints no second turn and answers IN BAND.
 func TestSubmitPromptMapsTheDuplicateSubmissionRefusal(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Prompts.err = prompthandler.ErrDuplicateSubmission
 
 	// Act.
-	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "SubmitPromptError.duplicate_submission") {
-		t.Fatalf("error = %v, want the duplicate_submission sentinel", err)
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	if resp.Msg.GetError().GetDuplicateSubmission() == nil {
+		t.Fatalf("result = %v, want duplicate_submission", resp.Msg.GetResult())
 	}
 }
