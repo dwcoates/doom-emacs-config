@@ -225,8 +225,9 @@ func TestEncodeFeedDecodeFeedRoundTrips(t *testing.T) {
 }
 
 func TestDecodeFeedDerivesSubagentSubFeedFromBubbleRow(t *testing.T) {
-	// Arrange: the subagent bubble row on the root feed.
-	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: SubagentRowKey("spawn-unit-1", agent("created-agent"))}
+	// Arrange: the subagent bubble row on the root feed
+	// (Kind=activity, ID=<spawn unit>, Sub=<created agent id>).
+	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: RowKey{Kind: KindActivity, ID: "spawn-unit-1", Sub: "created-agent"}}
 
 	// Act.
 	ws, feed, err := DecodeFeed(Encode(ref))
@@ -244,8 +245,8 @@ func TestDecodeFeedDerivesSubagentSubFeedFromBubbleRow(t *testing.T) {
 }
 
 func TestDecodeFeedDerivesMergeSubFeedFromMergeHead(t *testing.T) {
-	// Arrange.
-	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: MergeHeadRowKey("lease-4")}
+	// Arrange: a merge bubble's head row.
+	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: RowKey{Kind: KindMergeHead, ID: "lease-4"}}
 
 	// Act.
 	_, feed, err := DecodeFeed(Encode(ref))
@@ -285,22 +286,10 @@ func TestDecodeFeedRejectsActivityRowWithoutCreatedAgent(t *testing.T) {
 	}
 }
 
-func TestPlanRowKeyUsesThePlanBubbleSpelling(t *testing.T) {
-	// Act.
-	got := PlanRowKey("agent-1", "episode-2")
-
-	// Assert.
-	if got.Kind != KindActivity {
-		t.Fatalf("Kind = %q, want activity", got.Kind)
-	}
-	if got.ID != "plan:agent-1:episode-2" {
-		t.Fatalf("ID = %q, want plan:agent-1:episode-2", got.ID)
-	}
-}
-
-func TestPlanRowKeyRoundTrips(t *testing.T) {
-	// Arrange.
-	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: PlanRowKey("agent-1", "episode-2")}
+func TestPlanBubbleRowKeyRoundTrips(t *testing.T) {
+	// Arrange: the plan bubble's activity id spelling,
+	// `plan:<agent>:<episode>`.
+	ref := Ref{WS: "ws-1", Feed: Feed{Root: true}, Row: RowKey{Kind: KindActivity, ID: "plan:agent-1:episode-2"}}
 
 	// Act.
 	got, err := Decode(Encode(ref))
@@ -311,16 +300,6 @@ func TestPlanRowKeyRoundTrips(t *testing.T) {
 	}
 	if got != ref {
 		t.Fatalf("round trip = %+v, want %+v", got, ref)
-	}
-}
-
-func TestSubagentRowKeyWithNilAgentHasNoSub(t *testing.T) {
-	// Act.
-	got := SubagentRowKey("unit", nil)
-
-	// Assert.
-	if got.Sub != "" {
-		t.Fatalf("Sub = %q, want empty", got.Sub)
 	}
 }
 
