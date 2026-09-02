@@ -899,10 +899,32 @@ var (
 		"frame-link":             true,
 		"attribution-snapshot":   true,
 		"no_response_requested":  true,
-		"orphan_tool_result":     true,
 		vendorSpecificUserPrompt: true, // R15: a file-plane user prompt is never a page line
 	}
 )
+
+// orphanToolResultKind is what a tool_result whose CALL is behind the cursor
+// lands on. It is DELIBERATELY NOT a documented withholding class: a withholding
+// class is a record we understood and chose not to carry, and this is a settle
+// we FAILED to perform — the unit it belonged to stays open in every reader.
+//
+// The mocked vendor writes each scenario's transcript from the top, so the
+// sidecar reads every call before its result and no scenario has any excuse to
+// produce one. Allowing the kind made the whole mock suite blind to a join the
+// converter had simply stopped performing.
+const orphanToolResultKind = "orphan_tool_result"
+
+// requireNoOrphanToolResults: every tool_result the mock writes must settle the
+// call it answers.
+func requireNoOrphanToolResults(t *testing.T, scenario string, entries []*storev1.StoreEntry) {
+	t.Helper()
+	for _, v := range vendorSpecificOf(entries) {
+		if v.GetKind() == orphanToolResultKind {
+			t.Errorf("%s: a tool_result landed as %q — its call was never joined, so that unit stays open in every reader downstream: %v",
+				scenario, orphanToolResultKind, v.GetRaw().AsMap())
+		}
+	}
+}
 
 func vendorSpecificKindAllowed(kind string) bool {
 	if allowedVendorSpecificKinds[kind] {
