@@ -627,8 +627,12 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// The shim's own standing streams end WITH IT, and the session never
 	// ended, which is exactly what the session watcher records at ERROR for
 	// each of the two. They are the same crash the exit record names.
+	// The lost link is also RECORDED as the session's own fault, which is what
+	// SessionHealth answers with: the watcher says so and the reporter opens
+	// it.
 	f.d.ExpectWarnings("daemon.shimclient.exit",
-		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
 
 // ---------------------------------------------------------------------------
