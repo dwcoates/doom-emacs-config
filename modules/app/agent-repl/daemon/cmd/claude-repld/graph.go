@@ -659,6 +659,15 @@ func lockDir() string {
 func deployStamp(path string) func() (string, error) {
 	return func() (string, error) {
 		raw, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			// NO STAMP AT ALL is an ordinary state, not a failure: this
+			// checkout was never put through the deploy chain (every test
+			// harness builds the binary with `go build -o <tmp>`). The
+			// staleness check reads an empty stamp as "leave the shim alone",
+			// which is exactly right, and nothing is warned about. A stamp
+			// that EXISTS and cannot be read, or is blank, is still an error.
+			return "", nil
+		}
 		if err != nil {
 			return "", fmt.Errorf("read the deploy stamp %s: %w", path, err)
 		}

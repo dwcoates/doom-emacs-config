@@ -292,7 +292,10 @@ func (c *client) bringUp(parent context.Context) error {
 // afterFailedDial decides whether a failed dial ends the loop, and waits out
 // the backoff when it does not. A non-nil answer is the reason to stop.
 func (c *client) afterFailedDial(ctx context.Context, cause error, attempt int) error {
-	c.log.Warn("daemon.shimclient.dial", "shim dial failed; retrying", dlog.Context{
+	// A retried attempt is an ordinary branch of the ladder: the shim's socket
+	// simply does not exist yet on the first attempt of every spawn. The reason
+	// the ladder STOPS is returned from here and reported by the caller.
+	c.log.Debug("daemon.shimclient.dial", "shim dial failed; retrying", dlog.Context{
 		"uds": c.udsPath, "attempt": attempt, "error": cause.Error(),
 	})
 	if err := c.deathOrContext(ctx); err != nil {
