@@ -464,6 +464,68 @@ describe("the vendor's own facts", () => {
     expect(seen).toContain("modelChanged");
   });
 
+  it("does NOT rotate to conversation_reset's new_conversation_id", async () => {
+    // EVIDENCE, from the real /clear capture: `new_conversation_id` is a uuid
+    // NOTHING later uses -- no transcript is written under it, no init
+    // announces it, no resume takes it. Publishing it as the new identity would
+    // name an id that does not exist and hand the daemon a dead resume handle.
+    const h = harness();
+    const response = await started(h);
+    const original =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "an-id-nothing-uses",
+      uuid: "00000000-0000-4000-8000-000000000009",
+      session_id: original,
+    } as never);
+    // A rotation would be pushed synchronously with the message; the init that
+    // follows is what carries the real one.
+    await h.engine.onSdkMessage(initMessage({ sessionId: "the-id-the-session-moved-to" }));
+
+    const seen: string[] = [];
+    for (let index = 0; index < 6; index++) {
+      const step = await stream.next();
+      if (step.done === true) break;
+      const update = step.value.update;
+      if (update.case !== "identityRotated") continue;
+      seen.push(update.value.vendorSessionId);
+      break;
+    }
+    expect(seen).not.toContain("an-id-nothing-uses");
+  });
+
+  it("rotates to the id the post-reset init announces", async () => {
+    const h = harness();
+    const response = await started(h);
+    const original =
+      response.result.case === "success" ? (response.result.value.session?.vendorSessionId ?? "") : "";
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+
+    await h.engine.onSdkMessage({
+      type: "conversation_reset",
+      new_conversation_id: "an-id-nothing-uses",
+      uuid: "00000000-0000-4000-8000-000000000009",
+      session_id: original,
+    } as never);
+    await h.engine.onSdkMessage(initMessage({ sessionId: "the-id-the-session-moved-to" }));
+    // The rotation writes the link files, so the push lands a tick later.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    let rotatedTo = "";
+    for (let index = 0; index < 16; index++) {
+      const step = await stream.next();
+      if (step.done === true) break;
+      const update = step.value.update;
+      if (update.case !== "identityRotated") continue;
+      rotatedTo = update.value.vendorSessionId;
+      break;
+    }
+    expect(rotatedTo).toBe("the-id-the-session-moved-to");
+  });
+
   it("ROTATES the vendor id on a conversation reset while keeping the AgentId", async () => {
     const h = harness();
     const response = await started(h);
