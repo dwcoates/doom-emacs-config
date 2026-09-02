@@ -29,6 +29,8 @@ func (q *queue) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatc
 	}
 	q.mu.Unlock()
 	q.deps.Footer.SetInterrupting(ws, false)
+	// The roster's turn fact is the daemon's own, so its close is too.
+	q.deps.Sidebar.SetTurnEnded(ws, how)
 
 	if err := q.deps.DB.CloseTurn(ctx, turn, q.deps.Now(), how); err != nil {
 		log.Error(opTurnEnded, "could not stamp the turn's close", dlog.Context{"cause": err.Error()})

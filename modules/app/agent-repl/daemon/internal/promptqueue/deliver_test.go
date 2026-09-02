@@ -10,6 +10,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -269,5 +270,27 @@ func TestDeliveringAPromptStampsTheSessionsEngagement(t *testing.T) {
 	// Assert
 	if h.db.engagements != 1 {
 		t.Fatalf("engagement stamps = %d, want exactly one for the delivered prompt", h.db.engagements)
+	}
+}
+
+// TestDeliveringAPromptTellsTheRosterATurnIsRunning pins the roster's turn
+// fact: nothing on the shim's streams says a turn was accepted, so a roster
+// left to infer it reads `ready` for a workspace whose turn is running.
+func TestDeliveringAPromptTellsTheRosterATurnIsRunning(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	turns := h.sidebar.rosterTurns()
+	if len(turns) != 1 || turns[0] == nil {
+		t.Fatalf("roster turn facts = %v, want exactly one accepted turn", turns)
+	}
+	if turns[0].Act != footer.ActPrompt {
+		t.Fatalf("roster act = %v, want the ordinary prompt", turns[0].Act)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"claude-repld/internal/classifier"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -209,5 +210,41 @@ func TestSubmitSessionActSurfacesARefusedModelChange(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("a refused model change must be surfaced")
+	}
+}
+
+// TestAContextCutTellsTheFooterWhatItCarries pins the footer's act: nothing on
+// the shim's streams states what a turn is FOR, so without this a /clear draws
+// as thinking·submitting rather than as clearing.
+func TestAContextCutTellsTheFooterWhatItCarries(t *testing.T) {
+	tests := []struct {
+		name string
+		kind string
+		want footer.SessionAct
+	}{
+		{name: "clear", kind: ActClear, want: footer.ActClear},
+		{name: "compact", kind: ActCompact, want: footer.ActCompact},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			if err := h.q.SubmitSessionAct(context.Background(), theWorkspace, Act{
+				Kind: tc.kind, Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT,
+			}); err != nil {
+				t.Fatalf("SubmitSessionAct: %v", err)
+			}
+
+			// Assert
+			turns := h.footer.startedTurns()
+			if len(turns) != 1 || turns[0] == nil {
+				t.Fatalf("footer turn facts = %v, want exactly one", turns)
+			}
+			if turns[0].Act != tc.want {
+				t.Fatalf("footer act = %v, want %v", turns[0].Act, tc.want)
+			}
+		})
 	}
 }
