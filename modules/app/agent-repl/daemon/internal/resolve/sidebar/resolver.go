@@ -34,11 +34,6 @@ type resolver struct {
 // the arms this resolver emits. An arm with no color fails HERE rather than
 // drawing an unpainted dot, and a table row no arm claims fails too: a colored
 // state nothing can reach means the table and the oneof have drifted.
-//
-// The assertion is computed here rather than delegated to
-// RenderColors.AssertRosterStatusArms because that helper is not landed yet.
-// When it lands this collapses to the one call; the guarantee is the same
-// either way, and it is the guarantee that matters.
 func newResolver(colors vocab.RenderColors, log dlog.Surfaces) (*resolver, error) {
 	if log == nil {
 		return nil, fmt.Errorf("sidebar resolver needs log surfaces")
@@ -50,31 +45,15 @@ func newResolver(colors vocab.RenderColors, log dlog.Surfaces) (*resolver, error
 }
 
 // assertTables checks the roster_status table row for row against statusArms,
-// and merge_glyphs row for row against the merge arms. Both directions are
-// checked: a missing row would draw an unpainted dot, and a surplus row is a
-// state the vocabulary paints and the resolver can never emit.
+// and merge_glyphs row for row against the merge arms, through the vocabulary's
+// OWN assertions. Both directions are checked: a missing row would draw an
+// unpainted dot, and a surplus row is a state the vocabulary paints and the
+// resolver can never emit.
 func assertTables(colors vocab.RenderColors) error {
-	if len(colors.RosterStatus) == 0 {
-		return fmt.Errorf("render-colors carries no roster_status table")
+	if err := colors.AssertRosterStatusArms(statusArms); err != nil {
+		return err
 	}
-	want := make(map[string]struct{}, len(statusArms))
-	for _, arm := range statusArms {
-		want[arm] = struct{}{}
-		if _, ok := colors.RosterStatus[arm]; !ok {
-			return fmt.Errorf("roster_status has no color for the %q arm", arm)
-		}
-	}
-	for arm := range colors.RosterStatus {
-		if _, ok := want[arm]; !ok {
-			return fmt.Errorf("roster_status colors %q, which is no RosterRow.status arm", arm)
-		}
-	}
-	for _, arm := range mergeArms {
-		if _, ok := colors.MergeGlyphs[arm]; !ok {
-			return fmt.Errorf("merge_glyphs has no glyph for the %q arm", arm)
-		}
-	}
-	return nil
+	return colors.AssertMergeGlyphArms(mergeArms)
 }
 
 // Topic is the one editor-global roster publication.
