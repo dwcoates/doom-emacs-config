@@ -377,6 +377,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   unknown_repository on pause/resume/evict → WARN + message naming the
   repository. R-LANDING6 dispatched (`opus-low`, elisp-agents/landing6).
   Running: regress, landing6.
+- PAUSE DIRECTIVE (user, 2026-09-01 late): the project pauses once every
+  lead has resolved. Elisp finishes its recorded queue — merge R-REGRESS
+  and R-LANDING6, full run, adversarial audit 3 (fable) + remediation of
+  real findings, final report with the §17 dead-code lists — then parks:
+  no dispatch after the report; STOP-elisp.md rewritten with the
+  resumption state; the teamlead stays resident.
 
 ## 1. Module map (final tree of lisp/)
 
