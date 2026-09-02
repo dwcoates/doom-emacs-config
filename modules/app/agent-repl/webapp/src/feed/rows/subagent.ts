@@ -194,7 +194,7 @@ export function drawFeedSubagentLastProgress(
   const el = document.createElement("span");
   el.className = "subagent-quiet";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `quiet for ${formatElapsed(nowMs - atMs)}`;
+    el.textContent = `quiet for ${formatTickedElapsed(nowMs - atMs)}`;
   });
   return el;
 }
