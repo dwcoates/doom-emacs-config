@@ -72,6 +72,13 @@ type Opts struct {
 	DefaultAccountEmail string
 	// MultiRepoAccountEmail is written into the multi-repo config root.
 	MultiRepoAccountEmail string
+	// NoFake starts the daemon WITHOUT `--fake` and without
+	// AGENT_REPL_CLAUDE_BIN, so every vendor call site (the classifier's
+	// headless run, the login pty) reaches its real implementation and is
+	// refused by the vendor guard. It is the only way to exercise the
+	// guard's refusal sites; the fake shim is unaffected, since `--node`
+	// still names it.
+	NoFake bool
 	// JSONCodec dials the daemon with the JSON codec instead of binary.
 	JSONCodec bool
 	// ExpectEarlyExit stops the harness from failing when the daemon exits on
@@ -255,7 +262,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 
 	args := []string{
 		"--state-dir", d.StateDir,
-		"--fake",
 		"--node", FakeShimBinary(t),
 		"--shim-main", mainJS,
 		"--webapp-dist", d.WebappDir,
@@ -263,6 +269,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"--prompts-dir", d.PromptsDir,
 		"--default-config-dir", d.DefaultConfigDir,
 		"--multi-repo-config-dir", d.MultiRepoConfigDir,
+	}
+	if !opts.NoFake {
+		args = append(args, "--fake")
 	}
 	if opts.Joining != "" {
 		args = append(args, "--joining", opts.Joining)
@@ -288,7 +297,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_SCRIPT="+d.Deploy.Path,
-		"AGENT_REPL_CLAUDE_BIN="+fakeClaude,
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
 		// The fake shim has no built bundle, so the daemon's stamp comes from
@@ -312,6 +320,13 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		selfRepo = NewRepoAt(t, filepath.Join(root, "self-repo")).Dir
 	}
 	env = append(env, "AGENT_REPL_SELF_REPO_DIR="+selfRepo)
+	// THE VENDOR BINARY IS THE GUARD'S OTHER HALF. Left unset, the login pty
+	// falls back to the default `claude` and the guard refuses it; naming the
+	// fake claude is what makes the ordinary tests spawn something harmless.
+	// NoFake therefore withholds it deliberately.
+	if !opts.NoFake {
+		env = append(env, "AGENT_REPL_CLAUDE_BIN="+fakeClaude)
+	}
 	env = append(env, opts.ExtraEnv...)
 
 	// A NON-JOINING START THAT EXPECTS TO SERVE OWNS daemon.addr. A crash-restart test reuses a state
