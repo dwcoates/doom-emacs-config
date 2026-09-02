@@ -25,6 +25,16 @@
  */
 import "./styles.css";
 import { createTicker } from "./clock.js";
+import { createComposerGate, mountComposer } from "./composer/composer.js";
+import { createRowRenderers } from "./feed/renderers.js";
+import { mountFeed } from "./feed/feed.js";
+import { mountFooter } from "./footer/footer.js";
+import { adoptAtBoot, startLifecycle } from "./lifecycle/lifecycle.js";
+import { mountLoginOverlay } from "./login/login.js";
+import { drawCommandPanel } from "./panels/panels.js";
+import { mountSidebar } from "./sidebar/sidebar.js";
+import { mountTopbar } from "./topbar/topbar.js";
+import { mountHoldTray } from "./tray/tray.js";
 import { bootFailed } from "./failure/sink.js";
 import { mountFailureOverlay, type FailureOverlayHandle } from "./failure/overlay.js";
 import { ForwardingLogger, bindLogContext, log, setLogger, type ClientLogSink } from "./log.js";
@@ -33,6 +43,7 @@ import { createAppContext } from "./rpc/context.js";
 import { pageAddress } from "./rpc/page-address.js";
 import { createDaemonTransport } from "./rpc/transport.js";
 import { workspaceRef } from "./rpc/workspace-ref.js";
+import type { SubmitPromptCommandPanel } from "../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { WorkspaceRef } from "../../proto/gen/ts/workspace/v1/workspace_pb";
 import { shellElements } from "./shell.js";
 
@@ -66,7 +77,7 @@ function clientLogSink(getClient: () => AgentReplClient, workspace: WorkspaceRef
   };
 }
 
-export function boot(): void {
+export async function boot(): Promise<void> {
   const shell = shellElements(document);
   let overlay: FailureOverlayHandle | null = null;
   try {
@@ -103,18 +114,65 @@ export function boot(): void {
       },
     });
 
+    // ADOPTION COMES BEFORE EVERY STREAM. A daemon that has just joined
+    // refuses every per-workspace rpc with `not_yet_adopted` until its
+    // rendezvous completes, so a page that opened its views first would spend
+    // the whole rendezvous filing refusals for calls that were merely early.
+    // A terminal refusal throws `AdoptionFailed`, which the catch below mints
+    // as `boot_failed` — the page has no workspace to show and says so.
+    await adoptAtBoot(ctx);
+
     // The dev-mode composer is the only shell element the boot itself reveals;
     // production runs composer-less, so the host ships hidden.
     if (address.composer) shell.composer.hidden = false;
 
-    // WIRING: mountTopbar(shell.topbar, ctx, { openLogin })
-    // WIRING: mountSidebar(shell.sidebar, ctx)
-    // WIRING: mountFeed(shell.feed, ctx, { renderers, composerFactory })
-    // WIRING: mountHoldTray(shell.holdTray, ctx)
-    // WIRING: mountFooter(shell.footer, ctx, { revealRow })
-    // WIRING: mountComposer(shell.composer, ctx, { gate, onPanel })
-    // WIRING: mountLoginOverlay(shell.loginOverlay, ctx)
-    // WIRING: startLifecycle(ctx, { drainBannerHost: shell.drainBanner })
+    // THE MOUNT ORDER IS index.html's OWN ORDER, top to bottom, with two
+    // forced exceptions: the login overlay is mounted BEFORE the topbar,
+    // because the topbar's account control opens it; and the feed is mounted
+    // before the footer, because the footer's jump rows reveal feed rows.
+    const gate = createComposerGate();
+    // A dev-mode composer's `/status`-style answer is a PANEL, and it is drawn
+    // beside the composer that asked for it rather than as a feed row: the
+    // panel answers one submission, not the conversation. The feed's own
+    // `command_panel` rows are the daemon's, and travel the ordinary row path.
+    const showPanel = (panel: SubmitPromptCommandPanel): void => {
+      for (const stale of shell.composer.querySelectorAll(":scope > [data-panel]")) stale.remove();
+      shell.composer.append(drawCommandPanel(panel, ctx));
+    };
+    const login = mountLoginOverlay(shell.loginOverlay, ctx);
+
+    mountSidebar(shell.sidebar, ctx);
+    mountTopbar(shell.topbar, ctx, { openLogin: () => login.open() });
+
+    const feed = mountFeed(shell.feed, ctx, {
+      renderers: createRowRenderers(ctx),
+      // PER-BUBBLE COMPOSERS ARE DEV-MODE ONLY (R7): production's root
+      // composer is host-native, and a webview that submits nothing has no
+      // business drawing a text box inside a bubble either.
+      composerFactory: address.composer
+        ? (host, bubble) =>
+            mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
+        : undefined,
+    });
+
+    mountHoldTray(shell.holdTray, ctx);
+
+    const footer = mountFooter(shell.footer, ctx, { revealRow: (id) => feed.revealRow(id) });
+    // THE GATE IS THE FOOTER'S OWN WORD (R7). A composer closes while the
+    // workspace is merging, closing, or disconnected, and the sentence it
+    // shows is the footer's status arm rather than a second vocabulary this
+    // end invented for the same three states.
+    footer.onStatus((statusCase) => {
+      const closed =
+        statusCase === "merging" || statusCase === "closing" || statusCase === "disconnected";
+      gate.set(closed ? "closed" : "open", closed ? statusCase : undefined);
+    });
+
+    if (address.composer) {
+      mountComposer(shell.composer, ctx, { gate, onPanel: showPanel });
+    }
+
+    startLifecycle(ctx, { drainBannerHost: shell.drainBanner });
   } catch (err) {
     reportBootFailure(err, overlay);
     throw err;
@@ -144,4 +202,13 @@ function reportBootFailure(err: unknown, overlay: FailureOverlayHandle | null): 
   console.error(`the webapp failed to boot before it could report anything: ${cause}`);
 }
 
-boot();
+// THE BOOT IS ASYNCHRONOUS because adoption is an rpc, so its failure cannot
+// be a bare throw any more. `boot` has already drawn and logged the failure by
+// the time it rejects; rethrowing from a microtask re-raises it as the uncaught
+// error the browser reports, which is exactly the loudness the synchronous
+// throw used to have — and is not the same thing as swallowing it.
+void boot().catch((err: unknown) => {
+  queueMicrotask(() => {
+    throw err;
+  });
+});
