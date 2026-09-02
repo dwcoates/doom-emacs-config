@@ -98,7 +98,8 @@ export const FAIL_EXECUTION = stopScenario({
   subtype: "error_during_execution",
   terminalReason: "api_error",
   error: "the turn raised during execution",
-  arms: "AgentFailure.execution_error",
+  arms:
+    "AgentFailure.execution_error — DECLARED-ONLY: no capture grounds this terminal (`turn-stop-error-during-execution` ended `success.interrupted` after an `aborted_streaming`), so the mock keeps the declared arm and the evidence gap is listed in testdata/captures/MANIFEST.md",
 });
 
 export const FAIL_MAX_TURNS = stopScenario({
@@ -122,7 +123,8 @@ export const FAIL_STRUCTURED_OUTPUT = stopScenario({
   subtype: "error_max_structured_output_retries",
   terminalReason: "structured_output_retry_exhausted",
   error: "the structured-output retries were exhausted",
-  arms: "AgentFailure.structured_output_retry_exhausted",
+  arms:
+    "AgentFailure.structured_output_retry_exhausted — DECLARED-ONLY: no capture grounds this terminal (`turn-stop-max-structured-output-retries` ended `success.completed`), so the mock keeps the declared arm and the evidence gap is listed in testdata/captures/MANIFEST.md",
 });
 
 export const FAIL_BLOCKING_LIMIT = stopScenario({
@@ -210,7 +212,8 @@ export const FAIL_STOP_HOOK = stopScenario({
   subtype: "error_during_execution",
   terminalReason: "stop_hook_prevented",
   error: "a Stop hook prevented the turn from finishing",
-  arms: "AgentFailure.stop_hook_prevented",
+  arms:
+    "AgentFailure.stop_hook_prevented — DECLARED-ONLY: no capture grounds this terminal (`turn-stop-hook-stop` ended `success.completed`), so the mock keeps the declared arm and the evidence gap is listed in testdata/captures/MANIFEST.md",
   before(ctx) {
     // The vendor's own record of the stop-hook run. The shim NEVER synthesizes
     // a terminal from this — the terminal is the result's own reason — but a

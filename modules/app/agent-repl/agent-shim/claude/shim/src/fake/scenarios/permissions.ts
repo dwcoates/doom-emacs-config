@@ -188,9 +188,58 @@ export const PERM_UNDECIDABLE = scenario({
   },
 });
 
+export const PERM_ALLOW_STANDING_MODE = scenario({
+  name: "perm-allow-standing-mode",
+  prompt: "!perm-allow-standing-mode",
+  emits:
+    "a gated `Bash` whose ask OFFERS a standing that changes the session's permission mode: the suggestions carry " +
+    "an `addRules` and a `setMode` to `acceptEdits` on the SESSION destination, so a grant echoing the offered " +
+    "standing legitimately moves the session's mode",
+  writes: "the tool_use line, the tool_result line, the closing text line",
+  arms:
+    "AgentPermissionAllowed.scope=standing whose changes include set_mode — the ONE grounded producer of a " +
+    "mode-changing grant, and the negative for a set_mode the ask never offered",
+  async run(ctx) {
+    ctx.log(
+      { turn: ctx.turn, branch: "perm-allow-standing-mode" },
+      "fake permission (standing carrying a mode change) turn",
+    );
+    const call = ctx.toolUse("Bash", { command: "npm run build" });
+    const decision = await askPermission(ctx, call, {
+      title: "Claude wants to run npm run build",
+      decisionReason: "the command is not covered by an existing rule",
+      suggestions: [
+        {
+          type: "addRules",
+          rules: [{ toolName: call.name, ruleContent: "npm run build" }],
+          behavior: "allow",
+          destination: "localSettings",
+        },
+        { type: "setMode", mode: "acceptEdits", destination: "session" },
+      ],
+    });
+    if (decision?.behavior !== "allow") {
+      ctx.toolResult(call, "denied", { error: "denied" }, { isError: true });
+      conclude(ctx, "The user declined the command.");
+      return;
+    }
+    const standing = decision.updatedPermissions ?? [];
+    ctx.log({ standing_rules: standing.length }, "fake mode-carrying standing ask resolved");
+    ctx.toolResult(call, "built\n", {
+      stdout: "built\n",
+      stderr: "",
+      interrupted: false,
+      isImage: false,
+      noOutputExpected: false,
+    });
+    conclude(ctx, `Ran the command with ${standing.length} standing rule(s).`);
+  },
+});
+
 export const PERMISSION_SCENARIOS = [
   PERM_ALLOW_ONCE,
   PERM_ALLOW_STANDING,
+  PERM_ALLOW_STANDING_MODE,
   PERM_DENY_USER,
   PERM_DENY_POLICY,
   PERM_UNDECIDABLE,
