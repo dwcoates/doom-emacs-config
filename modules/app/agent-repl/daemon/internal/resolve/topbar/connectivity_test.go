@@ -9,7 +9,7 @@ import (
 
 func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(false, shimclient.LinkConnected)
+	got := connectivityKey(false, shimclient.LinkConnected, true)
 
 	// Assert
 	if got != linkNoSession {
@@ -19,7 +19,7 @@ func TestAnUnobservedLinkIsNoSession(t *testing.T) {
 
 func TestADialingLinkIsConnecting(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDialing)
+	got := connectivityKey(true, shimclient.LinkDialing, true)
 
 	// Assert
 	if got != linkConnecting {
@@ -29,7 +29,7 @@ func TestADialingLinkIsConnecting(t *testing.T) {
 
 func TestAServingLinkIsConnected(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkConnected)
+	got := connectivityKey(true, shimclient.LinkConnected, true)
 
 	// Assert
 	if got != linkConnected {
@@ -39,7 +39,7 @@ func TestAServingLinkIsConnected(t *testing.T) {
 
 func TestARedialingLinkIsSevered(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkRedialing)
+	got := connectivityKey(true, shimclient.LinkRedialing, true)
 
 	// Assert
 	if got != linkSevered {
@@ -49,11 +49,52 @@ func TestARedialingLinkIsSevered(t *testing.T) {
 
 func TestADeadLinkIsDead(t *testing.T) {
 	// Arrange, Act
-	got := connectivityKey(true, shimclient.LinkDead)
+	got := connectivityKey(true, shimclient.LinkDead, true)
 
 	// Assert
 	if got != linkDead {
 		t.Fatalf("key = %q, want dead", got)
+	}
+}
+
+func TestAServingLinkWithAPeerHopDownIsSevered(t *testing.T) {
+	// Arrange, Act: the shim hop serves but a client hop does not.
+	got := connectivityKey(true, shimclient.LinkConnected, false)
+
+	// Assert
+	if got != linkSevered {
+		t.Fatalf("key = %q, want severed: a workspace is connected only while all three hops are live", got)
+	}
+}
+
+func TestADialingLinkWithAPeerHopDownIsStillConnecting(t *testing.T) {
+	// Arrange, Act: the shim hop already says not-connected, and the peer hop
+	// must not overwrite the more specific bring-up state.
+	got := connectivityKey(true, shimclient.LinkDialing, false)
+
+	// Assert
+	if got != linkConnecting {
+		t.Fatalf("key = %q, want connecting", got)
+	}
+}
+
+func TestADeadLinkWithAPeerHopDownIsStillDead(t *testing.T) {
+	// Arrange, Act
+	got := connectivityKey(true, shimclient.LinkDead, false)
+
+	// Assert
+	if got != linkDead {
+		t.Fatalf("key = %q, want dead", got)
+	}
+}
+
+func TestAnUnobservedLinkWithAPeerHopDownIsStillNoSession(t *testing.T) {
+	// Arrange, Act
+	got := connectivityKey(false, shimclient.LinkConnected, false)
+
+	// Assert
+	if got != linkNoSession {
+		t.Fatalf("key = %q, want no_session", got)
 	}
 }
 
@@ -179,5 +220,38 @@ func TestAnUnpaintedStateIsRecordedAndNothingIsPublished(t *testing.T) {
 	records := log.Records()
 	if len(records) == 0 || records[len(records)-1].Level != "error" {
 		t.Fatalf("records = %+v, want the failure recorded at ERROR", records)
+	}
+}
+
+func TestAServingLinkWithNoWebStreamDrawsTheCompromisedTone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Act
+	h.r.SetParticipants(testWS, true, false)
+
+	// Assert
+	got := h.view(t).GetConnectivity()
+	if got.GetTone() != "blue" {
+		t.Fatalf("tone = %q, want the compromised tone: a client hop is down", got.GetTone())
+	}
+}
+
+func TestTheLastPeerHopComingUpDrawsTheServingTone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetParticipants(testWS, true, false)
+	h.r.OnLink(testWS, shimclient.LinkConnected)
+
+	// Act
+	h.r.SetParticipants(testWS, true, true)
+
+	// Assert
+	got := h.view(t).GetConnectivity()
+	if got.GetTone() != "green" {
+		t.Fatalf("tone = %q, want green once every hop is live", got.GetTone())
 	}
 }

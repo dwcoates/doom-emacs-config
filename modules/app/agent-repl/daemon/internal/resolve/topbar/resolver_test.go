@@ -79,6 +79,10 @@ func (h *harness) ready(t *testing.T) {
 	h.r.SetAccount(testWS, "dev@example.com")
 	h.r.SetPermissionModePicker(testWS, picker("default", "default", "accept_edits", "plan"))
 	h.r.OnSessionUpdate(testWS, contextUsage(142_300, 200_000, 71, "claude-opus-5"))
+	// The two client hops of connectivity truth are up too: a serving shim
+	// link alone is not a connected workspace (daemon.md invariant 11), so a
+	// test that wants one hop down states that hop itself.
+	h.r.SetParticipants(testWS, true, true)
 }
 
 // view is the workspace's last published view, failing when none exists.

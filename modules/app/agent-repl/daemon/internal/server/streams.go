@@ -310,13 +310,22 @@ func (s *server) WatchDaemon(
 }
 
 // holdParticipant records that one of a workspace's two per-workspace streams
-// is held, which is the fact rollout's adoption rendezvous terminates on.
+// is held, which is the fact rollout's adoption rendezvous terminates on AND
+// two of the three hops of connectivity truth (daemon.md invariant 11). Every
+// open and close edge states the pair to the two resolvers that draw
+// connectivity, so a hop going down is published rather than waited for.
 func (s *server) holdParticipant(ws ids.WorkspaceID, host bool, delta int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if host {
 		s.hostHeld[ws] += delta
-		return
+	} else {
+		s.webHeld[ws] += delta
 	}
-	s.webHeld[ws] += delta
+	hostLive, webLive := s.hostHeld[ws] > 0, s.webHeld[ws] > 0
+	s.mu.Unlock()
+
+	s.log.Debug("daemon.server.participants", "a per-workspace stream edge moved the participant set",
+		dlog.Context{"workspace": string(ws), "host_stream": hostLive, "web_stream": webLive})
+	s.deps.Footer.SetParticipants(ws, hostLive, webLive)
+	s.deps.Topbar.SetParticipants(ws, hostLive, webLive)
 }
