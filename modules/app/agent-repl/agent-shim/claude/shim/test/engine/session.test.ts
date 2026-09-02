@@ -548,6 +548,44 @@ describe("the vendor's own facts", () => {
     expect(history.result.case).toBe("success");
   });
 
+  it("CONCLUDES the open turn with a failure terminal when the query dies", async () => {
+    // query_died is a SESSION fact; a consumer watching the AGENT -- the one
+    // actually waiting on the turn -- would otherwise see its stream simply
+    // stop producing, unable to tell a dead query from a slow one.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const terminal = h.persistence.buffered.find(
+      (entry) => entry.item.kind === "frame" && entry.item.frame.result.case === "failure",
+    );
+    expect(terminal).toBeDefined();
+  });
+
+  it("writes NO terminal when the query dies between turns", async () => {
+    // A session that lost its query with nothing open has no turn to conclude.
+    const h = harness();
+    await started(h);
+
+    h.queries[0]?.query.end();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const terminal = h.persistence.buffered.find(
+      (entry) => entry.item.kind === "frame" && entry.item.frame.result.case === "failure",
+    );
+    expect(terminal).toBeUndefined();
+  });
+
   it("reports the query's death as an unexpected EOF", async () => {
     const h = harness();
     await started(h);

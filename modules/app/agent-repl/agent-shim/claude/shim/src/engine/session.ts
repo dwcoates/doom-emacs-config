@@ -1180,6 +1180,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   function onQueryLost(detail: string): void {
     gate.standDown(`the vendor query died: ${detail}`);
     query = undefined;
+    // THE STREAM OWNER GETS ITS OWN TERMINAL. `query_died` is a SESSION fact,
+    // and a consumer watching the agent -- which is the consumer actually
+    // waiting on the turn -- would otherwise see the stream simply stop
+    // producing, with no terminal frame and no way to tell a dead query from a
+    // slow one. Duplicated on purpose: a consumer with no stream open still
+    // needs the session-level fact, and a consumer with no WatchSession open
+    // still needs its turn concluded.
+    writeQueryDeathTerminal(detail);
     open = undefined;
     cadence?.stop();
     pushes.fault(sessionFault({ kind: "vendorQueryFailed" }, "shim-engine-session", detail));
@@ -1567,6 +1575,52 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       controller.abort();
       throwaway?.close();
     }
+  }
+
+  /**
+   * Conclude the open turn with a failure terminal, because the query died.
+   *
+   * `execution_error` and not an invented arm: the vendor stated no reason --
+   * its process is simply gone -- and `errors` carries the account. Nothing is
+   * written when no turn was open: a session that lost its query between turns
+   * has no turn to conclude.
+   */
+  function writeQueryDeathTerminal(detail: string): void {
+    const ended = open;
+    if (ended === undefined || identity === undefined) return;
+    const agentId = identity.agentId;
+    const coordinate = `query-died-${ended.id.value}`;
+    deps.persistence.write([
+      {
+        agentId,
+        upsertKey: terminalUpsertKey(agentId, coordinate),
+        source: {
+          vendorUuid: `${coordinate}-${identity.vendorSessionId}`,
+          discriminator: "agent_frame.failure.execution_error",
+        },
+        keepalive: ended.keepalive,
+        item: {
+          kind: "frame",
+          frame: create(conversationv1.AgentFrameSchema, {
+            agentId,
+            result: {
+              case: "failure",
+              value: create(conversationv1.AgentFailureSchema, {
+                errors: [detail],
+                failure: {
+                  case: "executionError",
+                  value: create(conversationv1.AgentExecutionErrorSchema, {}),
+                },
+              }),
+            },
+          }),
+        },
+      },
+    ]);
+    LOGGER.log(
+      { level: "warn", turn_id: ended.id.value, cause: detail },
+      "concluded the open turn with a failure terminal: the vendor query died under it",
+    );
   }
 
   /** The `context_cut` page line, on the conversation's own book. */
