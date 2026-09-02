@@ -56,6 +56,16 @@ const LOGGER = bindLog({ component: "shim-fake", operation: "shim.fake.vendor-fi
 export const FAKE_CLI_VERSION = "2.1.215";
 
 /**
+ * A thinking signature shaped like the corpus's (opaque, truncated there too).
+ *
+ * Lives here rather than beside the scenarios because the mock's own emitters
+ * need it: every tool call and every turn conclusion carries a reasoning block,
+ * and the signature is what makes a WITHHELD one legible as withheld.
+ */
+export const FAKE_REASONING_SIGNATURE =
+  "EqICCokBCBAYAipA7QezsC7A4qgwYLQJ7i3E1wpsSpekzx1YfakeSignature==";
+
+/**
  * The `entrypoint` every record reports. The shim always drives the SDK, and
  * the SDK's CLI stamps `sdk-cli` (corpus: every `sdk-cli` line was produced by
  * a shim-driven session; `cli` lines came from interactive terminals).

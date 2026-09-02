@@ -480,14 +480,34 @@ describe("the shell that moved rather than ended", () => {
 });
 
 describe("detached work", () => {
-  it("announces work that left the turn", () => {
+  it("announces an AGENT task that left the turn", () => {
+    // The corpus's only real `task_started` is a `local_bash` one, so the
+    // AGENT case is that record with its `task_type` changed — a field value,
+    // not an invented shape.
     const fold = createFold();
+    const agentTask = {
+      ...(streamMessage("task_started") as unknown as Record<string, unknown>),
+      task_type: "local_agent",
+    } as unknown as SdkMessage;
 
-    const output = fold.onSdkMessage(streamMessage("task_started"), foldContext());
+    const output = fold.onSdkMessage(agentTask, foldContext());
 
     const frame =
       output.entries[0]?.item.kind === "frame" ? output.entries[0].item.frame : undefined;
     expect(frame?.result.case).toBe("detachedWork");
+  });
+
+  it("announces NOTHING for a shell task's start", () => {
+    // A FOREGROUND shell is tracked as a task from the moment it starts — that
+    // is what makes Ctrl-B addressable — so `task_started` says neither that
+    // the work left the turn nor why. The Bash result is the only record that
+    // states the cause, and announcing `requested` here put a wrong-cause
+    // announcement on the stream ahead of the right one.
+    const fold = createFold();
+
+    const output = fold.onSdkMessage(streamMessage("task_started"), foldContext());
+
+    expect(output.entries).toHaveLength(0);
   });
 
   it("consumes the background-task LEVEL without recording it", () => {
@@ -781,11 +801,16 @@ describe("permission", () => {
     expect(undecidable.detail).toBe("the classifier could not reach a verdict");
   });
 
-  it("settles NOTHING from a denied call's tool_result", () => {
-    // A denied tool never ran. The vendor still emits a tool_result for it --
-    // the deny message IS the result the model sees -- and folding that into an
-    // activity would put a settled unit in the feed for work that never
-    // happened, when the permission frame has already given the whole account.
+  it("retires a denied call's unit with failure and NO content", () => {
+    // THE RULING (project lead, 2026-09-01, final): starts are NOT deferred, so
+    // the gated unit is already on the stream and must reach a terminal like
+    // every other. A denial RETIRES it: the `failure` arm settles with content
+    // UNSET (the producer observed no error content) and `settled_at` stamped.
+    // The vendor's own tool_result for a denial is the deny sentence the MODEL
+    // was shown -- `toolUseResult` is a bare "Error: ..." string there rather
+    // than the tool's Output object -- which is why neither is carried. It is
+    // drawn denied through the permission unit, whose id IS this unit's
+    // AgentActivityId, so no `denied` cause on AgentToolFailure is needed.
     const fold = createFold();
     const denied = foldContext({ deniedCall: (toolUseId) => toolUseId === "toolu_d" });
     fold.onSdkMessage(
@@ -795,9 +820,20 @@ describe("permission", () => {
       denied,
     );
 
-    const output = fold.onSdkMessage(toolResult("toolu_d", { stdout: "" }, true), denied);
+    const output = fold.onSdkMessage(
+      toolResult("toolu_d", "Error: the user denied this call", true),
+      denied,
+    );
 
-    expect(output.entries).toHaveLength(0);
+    expect(output.entries).toHaveLength(1);
+    const activity = activityOf(output.entries[0]);
+    expect(activity?.activityId?.value).toBe("toolu_d");
+    if (activity?.item.case !== "bash" || activity.item.value.result.case !== "failure") {
+      throw new Error("a denied call did not settle its unit's failure arm");
+    }
+    const error = activity.item.value.result.value.error;
+    expect(error?.content).toBeUndefined();
+    expect(error?.settledAt).toBeDefined();
   });
 
   it("still settles a call the shim did NOT deny", () => {

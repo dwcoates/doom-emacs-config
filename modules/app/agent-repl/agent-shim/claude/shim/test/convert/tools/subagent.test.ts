@@ -1,7 +1,9 @@
 /**
  * The subagent spawn. A WRONG created-agent id here does not crash — it draws a
- * whole subagent's book under an agent that does not exist — so the absence of
- * one at announcement is asserted as producing no frame at all.
+ * whole subagent's book under an agent that does not exist — so the id the
+ * announcement carries is asserted to be exactly the one the subagent's frames
+ * are routed by: the spawning call's `tool_use_id` (landing 3's binding minting
+ * rule, and the same value `convert/fold-context.ts:subagentBook` uses).
  */
 import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
@@ -32,7 +34,7 @@ function successOf(item: conversationv1.AgentActivity["item"]): conversationv1.A
 }
 
 describe("subagentConverter.start", () => {
-  it("produces NO frame, because the created agent's identity is unknown at announcement", () => {
+  it("names the created agent as the spawning call's own id", () => {
     // Arrange.
     const pending = call(toolInput("agent"));
 
@@ -40,7 +42,28 @@ describe("subagentConverter.start", () => {
     const item = subagentConverter.start(pending);
 
     // Assert.
-    expect(item.case).toBeUndefined();
+    expect(item.case).toBe("subagent");
+    const result = (item.value as conversationv1.AgentSubagent).result;
+    expect(result.case).toBe("start");
+    expect((result.value as conversationv1.AgentSubagentStart).createdAgentId?.value).toBe(
+      "toolu_spawn",
+    );
+  });
+
+  it("restates the commission on the start, from the call's own input", () => {
+    // A start frame stands alone: a consumer draws the container AND what the
+    // subagent was asked to do from this one frame.
+    // Arrange.
+    const pending = call(toolInput("agent"));
+
+    // Act.
+    const item = subagentConverter.start(pending);
+
+    // Assert.
+    const result = (item.value as conversationv1.AgentSubagent).result;
+    const start = result.value as conversationv1.AgentSubagentStart;
+    expect(start.prompt).toEqual(subagentPrompt(pending));
+    expect(start.startedAt).toBeDefined();
   });
 });
 

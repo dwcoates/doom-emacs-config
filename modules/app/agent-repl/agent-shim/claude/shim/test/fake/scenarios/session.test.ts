@@ -7,55 +7,82 @@ import { describe, expect, it } from "vitest";
 import { driveScenario, ofType, recordsOfType, theResult } from "../harness.js";
 
 describe("identity rotation", () => {
-  it("announces the new conversation id on the stream", async () => {
+  /** Every message, as plain records, in arrival order. */
+  const records = (driven: Awaited<ReturnType<typeof driveScenario>>): Record<string, unknown>[] =>
+    driven.messages as unknown as Record<string, unknown>[];
+
+  it("announces the reset under the OLD identity", async () => {
+    // OBSERVED (identity-rotation-clear, 2026-09-01): `conversation_reset`
+    // carries the session id it is RETIRING, not the one it is moving to.
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
     const reset = ofType(driven, "conversation_reset")[0];
 
     // Assert
-    expect(typeof reset?.new_conversation_id).toBe("string");
+    expect(reset?.session_id).toBe("sess-fake-1");
   });
 
-  it("follows the reset with a fresh init reporting the NEW id", async () => {
+  it("announces a new_conversation_id that NOTHING later uses", async () => {
+    // The third uuid. It exists on this one message and is never adopted as an
+    // identity — reading it as the new session id was the old mock's mistake
+    // and would have made the shim write a link file for a phantom.
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
-    const resetIndex = (driven.messages as unknown as Record<string, unknown>[]).findIndex(
-      (m) => m.type === "conversation_reset",
-    );
-    const init = (driven.messages as unknown as Record<string, unknown>[])[resetIndex + 1];
-    const newId = (driven.messages as unknown as Record<string, unknown>[])[resetIndex]?.new_conversation_id;
+    const announced = String(ofType(driven, "conversation_reset")[0]?.new_conversation_id);
 
     // Assert
-    expect({ type: init?.type, subtype: init?.subtype, id: init?.session_id }).toEqual({
+    expect(typeof announced).toBe("string");
+    expect(records(driven).filter((m) => m.session_id === announced)).toEqual([]);
+  });
+
+  it("follows the reset with a SECOND init that states the real new id", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!rotate"]);
+    const all = records(driven);
+    const resetIndex = all.findIndex((m) => m.type === "conversation_reset");
+    const init = all[resetIndex + 1];
+    const announced = all[resetIndex]?.new_conversation_id;
+
+    // Assert
+    expect({ type: init?.type, subtype: init?.subtype }).toEqual({
       type: "system",
       subtype: "init",
-      id: newId,
     });
+    expect(init?.session_id).not.toBe("sess-fake-1");
+    expect(init?.session_id).not.toBe(announced);
   });
 
   it("carries the turn's own result under the NEW identity", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
-    const newId = String(ofType(driven, "conversation_reset")[0]?.new_conversation_id);
+    const all = records(driven);
+    const resetIndex = all.findIndex((m) => m.type === "conversation_reset");
+    const newId = all[resetIndex + 1]?.session_id;
 
     // Assert. The turn STARTED under one id and ENDS under another; that split
     // is the whole shape rotation handling exists for.
     expect(theResult(driven).session_id).toBe(newId);
   });
 
-  it("leaves the retired transcript intact with a closing record", async () => {
+  it("leaves the retired transcript with NO closing record", async () => {
+    // The old file SIMPLY STOPS. The mock used to append a `compact_boundary`
+    // "Conversation cleared" line, which no capture carries — and which said
+    // the wrong thing besides, since compaction is IN PLACE and rotates nothing.
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
     const oldLines = driven.transcript("sess-fake-1");
 
     // Assert
-    expect(oldLines.at(-1)).toMatchObject({ type: "system", subtype: "compact_boundary" });
+    expect(oldLines.filter((line) => line.subtype === "compact_boundary")).toEqual([]);
+    expect(oldLines.at(-1)?.type).not.toBe("system");
   });
 
-  it("starts a new transcript file whose chain begins fresh", async () => {
+  it("starts a new transcript file under the INIT's id", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!rotate"]);
-    const newId = String(ofType(driven, "conversation_reset")[0]?.new_conversation_id);
+    const all = records(driven);
+    const resetIndex = all.findIndex((m) => m.type === "conversation_reset");
+    const newId = String(all[resetIndex + 1]?.session_id);
 
     // Assert
     expect(driven.transcript(newId)[0]).toMatchObject({ parentUuid: null, sessionId: newId });
@@ -149,6 +176,40 @@ describe("the generic context tip", () => {
     };
 
     expect(attachment.tip?.featureId).toBe("goal");
+  });
+});
+
+describe("the total-tokens reminder", () => {
+  it("carries the ONE token-budget shape any capture holds", async () => {
+    // From `artifact-publish-and-list`, the only capture with it: a bare `text`
+    // field spelling the count inside a `<total_tokens>` element, and no
+    // structured figure anywhere.
+    // Arrange + Act
+    const driven = await driveScenario(["!tokens-reminder"]);
+    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as Record<
+      string,
+      unknown
+    >;
+
+    // Assert
+    expect(attachment).toEqual({
+      type: "total_tokens_reminder",
+      text: "<total_tokens>15000000 tokens left</total_tokens>",
+    });
+  });
+
+  it("is NOT dressed as the context-budget warning", async () => {
+    // No capture carries a `context_budget_warning` record of any spelling, so
+    // that producer stays ungrounded. Mapping the nearest carrier to it would
+    // make every suite agree with a mapping the vendor never made.
+    // Arrange + Act
+    const driven = await driveScenario(["!tokens-reminder"]);
+    const types = recordsOfType(driven.transcript(), "attachment").map(
+      (line) => (line.attachment as { type?: string }).type,
+    );
+
+    // Assert
+    expect(types).not.toContain("context_budget_warning");
   });
 });
 
@@ -450,8 +511,10 @@ describe("an unsolicited model fallback", () => {
       .filter((m) => m.type === "assistant")
       .map((m) => (m.message as { model: string }).model);
 
-    // Assert
-    expect(answers).toEqual(["fake-sonnet-5"]);
+    // Assert. TWO lines, one per block: the closing API response is `[thinking,
+    // text]` in every capture and both lines report the model that produced
+    // them, which is the fallback.
+    expect(answers).toEqual(["fake-sonnet-5", "fake-sonnet-5"]);
   });
 
   it("STICKS: a following ordinary turn answers on the fallback model too", async () => {

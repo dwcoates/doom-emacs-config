@@ -73,13 +73,25 @@ describe("turn-stop terminals", () => {
     ]);
   });
 
-  it("emits NO assistant content on a stopped turn", async () => {
+  it("emits the work the turn REACHED before it stopped", async () => {
+    // A TURN DOES NOT STOP BEFORE IT HAS DONE ANYTHING. Every turn-stop capture
+    // carries work ahead of its terminal (`turn-stop-max-budget-usd` is
+    // thinking + a response, `turn-stop-max-turns` thinking + a bash call), so
+    // a bare result was a shape no capture shows — and it left every stop arm
+    // asserted over an empty turn, where a converter that dropped the work
+    // silently would still have passed.
     // Arrange + Act
     const driven = await driveScenario(["!fail-execution"]);
 
-    // Assert. Fabricating an empty message would put a blank bubble on every
-    // frontend that renders the conversation.
-    expect(ofType(driven, "assistant")).toHaveLength(0);
+    // Assert. One assistant line per block, and the response did NOT end the
+    // turn — the result did.
+    const lines = ofType(driven, "assistant");
+    expect(
+      lines.map((line) => (line.message as { content: { type?: string }[] }).content[0]?.type),
+    ).toEqual(["thinking", "text"]);
+    expect(
+      lines.map((line) => (line.message as { stop_reason?: unknown }).stop_reason),
+    ).toEqual([null, null]);
   });
 
   it("carries the cause as an errors array on the failing result", async () => {

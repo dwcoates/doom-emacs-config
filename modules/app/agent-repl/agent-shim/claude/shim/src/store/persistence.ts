@@ -24,6 +24,7 @@
  * codes against these names.
  */
 import type { conversationv1, storev1 } from "../proto.js";
+import type { SourceCoordinates } from "./keys.js";
 import type { StoreClient } from "./client.js";
 
 // ---------------------------------------------------------------------------
@@ -33,20 +34,13 @@ import type { StoreClient } from "./client.js";
 /**
  * WHERE a frame came from in the vendor's own record, plus what it says.
  *
- * The three fields together are the write's identity: `sha256("<producer>|<
- * vendorUuid[:blockIndex]>|<discriminator>")`. The discriminator is the frame's
- * ARM PATH, and it is what keeps two frames derived from ONE vendor record
- * (a tool call's start and the session fact the same record implied) from
- * hashing identically and having one silently absorbed as a duplicate.
+ * DECLARED ONCE, in `store/keys.ts`, and re-exported here so the engine keeps
+ * coding against this module's names. The three fields together are the write's
+ * identity: `sha256("<producer>|<vendorUuid[:blockIndex]>|<discriminator>")` —
+ * which is why the hashing module owns the declaration and nothing translates
+ * between two shapes of one fact.
  */
-export interface SourceCoordinates {
-  /** The SDK message's `uuid` — the vendor's own name for the record. */
-  readonly vendorUuid: string;
-  /** The 0-based content-block index, for a frame derived from one block. */
-  readonly blockIndex?: number;
-  /** The frame's arm path, e.g. `agent_frame.update.activity.read.start`. */
-  readonly discriminator: string;
-}
+export type { SourceCoordinates } from "./keys.js";
 
 /**
  * One row to write: what it is, which book it belongs to, and which row it

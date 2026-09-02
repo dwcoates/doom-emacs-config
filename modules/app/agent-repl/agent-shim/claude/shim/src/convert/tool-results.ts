@@ -27,7 +27,7 @@ import {
   type ToolOutcome,
 } from "./tool-calls.js";
 import { skillDocumentSettle } from "./tools/skill-use.js";
-import { bashDetachmentEntry } from "./detached.js";
+import { bashDetachmentEntry, type TaskKindRegistry } from "./detached.js";
 import { activityEntry, agentActivity } from "./entries.js";
 import { toolCallActivityId } from "./ids.js";
 
@@ -52,6 +52,7 @@ export function convertUserRecord(
   context: FoldContext,
   registry: CallRegistry,
   converters: ReadonlyMap<string, ToolConverter>,
+  taskKinds: TaskKindRegistry,
 ): readonly PersistEntry[] {
   const record = message as unknown as Record<string, unknown>;
   const skillDocument = skillDocumentEntry(message, context, registry);
@@ -96,17 +97,32 @@ export function convertUserRecord(
       );
       continue;
     }
-    // A DENIED TOOL NEVER STARTS, so nothing settles here. The vendor emits a
-    // `tool_result` for it because the deny message IS the result the model
-    // sees, but folding that into an activity would put a unit in the feed for
-    // work that never happened -- and the permission frame has already said,
-    // in full, what became of the call. The registry entry is consumed so the
-    // call does not stay open forever.
+    // A DENIED CALL RETIRES ITS UNIT (project lead ruling, 2026-09-01, final).
+    // The start is ALREADY on the stream — the `tool_use` block precedes
+    // `canUseTool`, and starts are never deferred — so the unit exists and must
+    // reach a terminal like every other. It settles `failure` with content
+    // UNSET (the producer observed no error content: the documented meaning of
+    // an unset `AgentToolFailure.content`) and `settled_at` stamped. It is
+    // DRAWN denied through its permission unit, whose id IS this unit's
+    // AgentActivityId, so no `denied` cause on AgentToolFailure is needed.
+    //
+    // The vendor's own `tool_result` for a denial is the deny sentence the
+    // MODEL was shown (`toolUseResult` is a bare "Error: …" string there, not
+    // the tool's Output object), which is why neither is carried.
     if (context.deniedCall(toolUseId)) {
-      registry.take(toolUseId);
       LOGGER.log(
         { tool_use_id: toolUseId, uuid: message.uuid },
-        "a denied call's tool_result settles nothing: the tool never ran, and its permission frame is the account",
+        "a denied call retires its unit: settling failure with no content, drawn denied via its permission unit",
+      );
+      entries.push(
+        ...convertToolResult(
+          converters,
+          context,
+          registry,
+          toolUseId,
+          { content: undefined, isError: true, structured: undefined, settledAtMs },
+          { vendorUuid: uuidOf(toolUseId) },
+        ),
       );
       continue;
     }
@@ -131,6 +147,9 @@ export function convertUserRecord(
         // The vendor names the spool path only in the result's PROSE on a
         // backgrounded Bash; see outputPathFromProse.
         outcome.content,
+        // So the cause this result STATES is the one the later
+        // `task_notification` upserts, rather than a hard-coded `requested`.
+        taskKinds,
       );
       if (detachment !== undefined) entries.push(detachment);
     }

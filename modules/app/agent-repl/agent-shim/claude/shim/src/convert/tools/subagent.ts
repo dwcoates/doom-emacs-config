@@ -1,21 +1,28 @@
 /**
  * convert/tools/subagent.ts — the spawn of a subagent, and the report it settles with.
  *
- * # The spawn's identity is not the spawn's own
+ * # The spawn's identity IS the spawning call's id
  *
  * `AgentSubagentStart.created_agent_id` names THE AGENT THIS SPAWN CREATED —
- * the join key every later frame of that agent routes by. The vendor does not
- * state it at ANNOUNCEMENT: `AgentInput` carries a description, a prompt and a
- * configuration, and no identity at all. It first appears on the RESULT, as
- * `agentId`.
+ * the join key every later frame of that agent routes by. The vendor states no
+ * identity at announcement: `AgentInput` carries a description, a prompt and a
+ * configuration, and the vendor's own 17-hex `agentId` first appears on the
+ * RESULT and on the subagent's files.
  *
- * So the announcement produces NO start frame. An `AgentId` is not optional
- * here, and minting one — from the tool-use id, from the requested name, from
- * anything — would attribute a subagent's whole book to an agent that does not
- * exist, which is exactly the silently-wrong attribution the four identifier
- * spaces exist to prevent. {@link subagentStartFrom} is the way in for whatever
- * DOES learn the created agent's identity (the vendor's own subagent stream, or
- * a re-announcement on the work's own stream).
+ * THE MINTING RULE SETTLES IT (project lead, landing 3, binding and in the
+ * proto comment): a subagent's `AgentId` IS the spawning call's `tool_use_id`.
+ * That is not a guess standing in for the vendor's id — it is the wire
+ * identity, chosen precisely because the stream plane carries no agent id
+ * anywhere (a subagent's own messages name `parent_tool_use_id` and nothing
+ * else), and it is the SAME value `convert/fold-context.ts:subagentBook` routes
+ * the subagent's frames into. So the announcement DOES produce a start frame,
+ * and the container a consumer draws on it is the one every later frame lands
+ * in. The vendor's 17-hex id stays on the FILE plane, where `meta.toolUseId` is
+ * the link back to this call — a reader-side join, so the mock's layout can
+ * stay vendor-faithful.
+ *
+ * {@link subagentStartFrom} is the way in for a caller that has some OTHER
+ * identity to state (a re-announcement on the work's own stream).
  *
  * # One lifecycle, three vendor statuses
  *
@@ -28,6 +35,7 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../../log.js";
 import { conversationv1 } from "../../proto.js";
 import { prose, settledAt, startedAt } from "../entries.js";
+import { subagentId } from "../ids.js";
 import type { PendingCall, ToolConverter, ToolOutcome } from "../tool-calls.js";
 import { arr, asRecord, bool, failureOf, num, obj, str, uint } from "./support.js";
 
@@ -262,13 +270,15 @@ export const subagentConverter: ToolConverter = {
   carriesProgress: false,
 
   start(call) {
-    // NO START FRAME. The created agent's identity is unknown at announcement
-    // and it is not optional; see the file header.
-    LOGGER.log(
-      { level: "warn", tool_use_id: call.toolUseId, tool: call.toolName },
-      "a subagent spawn was announced without the created agent's identity; no start frame is produced",
+    // THE CREATED AGENT IS THE CALL'S OWN ID (landing 3's minting rule), which
+    // is exactly the book its frames route into. Producing no start frame left
+    // the spawn unit with no start at all: a consumer had no container to draw,
+    // and the unit's terminal was its first and only frame.
+    LOGGER.logVerbose(
+      { tool_use_id: call.toolUseId, tool: call.toolName },
+      "announcing a subagent spawn; the created agent's id is the spawning call's own",
     );
-    return { case: undefined };
+    return subagentStartFrom(call, subagentId(call.toolUseId));
   },
 
   settle(call, outcome) {

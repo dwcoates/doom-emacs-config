@@ -287,9 +287,15 @@ describe("a permission ask", () => {
     session.close();
   });
 
-  test("a user deny settles denied.user with the message and the tool never runs", async () => {
-    // A denied tool NEVER STARTS and has no activity frames — the deny message
-    // becomes the tool_result the model sees, not a unit in the feed.
+  test("a user deny settles denied.user, and the gated unit goes start → failure with no content", async () => {
+    // THE RULING (project lead, 2026-09-01, final): starts are NOT deferred —
+    // the `tool_use` block is on the stream before `canUseTool` fires — so the
+    // gated unit DOES start, and the denial RETIRES it: its `failure` arm
+    // settles with content UNSET (the producer observed no error content) and
+    // `settled_at` stamped, never a success and never an output. It is drawn
+    // denied through the permission unit, whose id IS the gated unit's
+    // AgentActivityId — which is why no `denied` cause exists on
+    // AgentToolFailure.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
@@ -321,11 +327,33 @@ describe("a permission ask", () => {
     } else {
       throw new Error("the permission did not settle denied.user");
     }
-    const ranAnyway = stream.frames().some((frame) => {
-      const update = updateOf(frame);
-      return update?.update.case === "activity" && update.update.value.activityId?.value === gated;
-    });
-    expect(ranAnyway).toBe(false);
+    // The gated unit's OWN frames, in order: exactly a start and then the
+    // denial's failure. Anything else — a success, an output, or no terminal at
+    // all — is the defect this asserts against.
+    const gatedUnit = stream
+      .frames()
+      .map(updateOf)
+      .filter((update): update is conversationv1.AgentUpdate => update !== null)
+      .filter(
+        (update) =>
+          update.update.case === "activity" && update.update.value.activityId?.value === gated,
+      )
+      .map((update) =>
+        update.update.case === "activity" ? update.update.value.item : { case: undefined },
+      );
+    expect(gatedUnit.map((item) => item.case)).toEqual(["bash", "bash"]);
+    const arms = gatedUnit.map((item) =>
+      item.case === "bash" ? item.value.result.case : "not-bash",
+    );
+    expect(arms).toEqual(["start", "failure"]);
+    const terminal = gatedUnit[1];
+    if (terminal?.case !== "bash" || terminal.value.result.case !== "failure") {
+      throw new Error("the gated unit did not settle its failure arm");
+    }
+    const error = terminal.value.result.value.error;
+    // Content UNSET, settled_at stamped: the ruling's exact shape.
+    expect(error?.content).toBeUndefined();
+    expect(error?.settledAt).toBeDefined();
     stream.close();
   });
 

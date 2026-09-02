@@ -45,7 +45,7 @@
  * failure; they end well because a defective vendor message does not stop a
  * turn.
  */
-import { conclude, scenario } from "./support.js";
+import { conclude, scenario, withheldThinking } from "./support.js";
 import type { Scenario, ScenarioContext } from "../scenario.js";
 
 /**
@@ -70,14 +70,23 @@ function stopScenario(spec: {
   return scenario({
     name: spec.name,
     prompt: `!${spec.name}`,
-    emits: `an error \`result\` with subtype \`${spec.subtype}\` and \`terminal_reason: "${spec.terminalReason}"\`, and NO assistant content`,
-    writes: "the prompt line and the turn record; a failed turn wrote no answer",
-    arms: spec.arms,
+    emits: `a reasoning block and a partial answer, then an error \`result\` with subtype \`${spec.subtype}\` and \`terminal_reason: "${spec.terminalReason}"\``,
+    writes: "the assistant lines for the work it did reach, the prompt line and the turn record",
+    arms: `AgentThinking + AgentResponse, then ${spec.arms}`,
     run(ctx) {
       ctx.log(
         { turn: ctx.turn, branch: spec.name, terminal_reason: spec.terminalReason },
         "fake failing turn",
       );
+      // A TURN DOES NOT STOP BEFORE IT HAS DONE ANYTHING. Every turn-stop
+      // capture carries work ahead of its terminal — `turn-stop-max-budget-usd`
+      // is thinking + a response, `turn-stop-max-turns` is thinking + a bash
+      // call — and the mock used to emit the bare result, which is a shape no
+      // capture shows and which left the stop arms asserted over an empty turn.
+      // `stopReason: null` because the API response did NOT end the turn.
+      ctx.assistant([withheldThinking(), { type: "text", text: "Working on it…" }], {
+        stopReason: null,
+      });
       spec.before?.(ctx);
       ctx.result({ subtype: spec.subtype, terminalReason: spec.terminalReason, errors: [spec.error] });
     },
