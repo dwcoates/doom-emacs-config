@@ -288,10 +288,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /**
    * Subagent ids the RECORD named at reconciliation.
    *
-   * Bounded by the session's open obligations, read once at start. A subagent
-   * this session spawns itself is in the live table instead, and one whose work
-   * is already written is known from its own book — this covers the third case:
-   * an agent the record knows about that this process never watched start.
+   * Two sources, both bounded by the conversation's own shape: the open
+   * obligations the record named once at start, and every `created_agent_id`
+   * this session has ANNOUNCED. The second is the load-bearing one — a
+   * SYNCHRONOUS subagent runs inside the turn and is never a task, so the live
+   * table never holds it, yet the daemon opens a WatchAgent on it the instant
+   * it sees the spawn, before a single row of the child's exists.
    */
   const announcedAgents = new Set<string>();
   /**
@@ -1085,6 +1087,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (update.case !== "activity") continue;
       const activity = update.value;
       const item = activity.item;
+      // AN ANNOUNCEMENT IS A PROMISE THE ID IS ADDRESSABLE. `created_agent_id`
+      // is the key a consumer draws a container under and opens its own
+      // WatchAgent on — the daemon does exactly that, the instant it sees the
+      // spawn. Recording it here is what lets that watch be answered before the
+      // subagent's first row exists, and it is the ONLY record for a
+      // SYNCHRONOUS subagent, which runs inside the turn and is never a task.
+      if (item.case === "subagent" && item.value.result.case === "start") {
+        const created = item.value.result.value.createdAgentId?.value ?? "";
+        if (created !== "") announcedAgents.add(created);
+      }
       const inner = item.value as { result?: { case?: string } } | undefined;
       const settled = inner?.result?.case !== undefined && inner.result.case !== "start";
       foreground.note(activity.activityId?.value ?? "", item.case ?? "", settled);
