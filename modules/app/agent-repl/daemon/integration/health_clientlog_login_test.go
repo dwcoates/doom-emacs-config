@@ -4,6 +4,7 @@ package integration
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -691,6 +692,217 @@ func TestASecondOpenLoginJoinsTheSamePty(t *testing.T) {
 			second.Msg.GetSuccess().GetConfigDir(), first.Msg.GetSuccess().GetConfigDir())
 	}
 	harness.ExpectNoPush(t, stream, harness.ProbeWindow, "a second login banner from a second pty")
+}
+
+// awaitLoginMarkerOn reads terminal bytes on a bare *harness.Daemon (no
+// *fixture available) until the accumulated output carries
+// harness.FakeClaudeLoginMarker, and returns everything accumulated so a
+// caller can count occurrences rather than merely detect one.
+func awaitLoginMarkerOn(t *testing.T, d *harness.Daemon, s *harness.Stream[*agentreplv1.LoginTerminalOutput]) string {
+	t.Helper()
+	var seen strings.Builder
+	harness.AwaitView(t, d.Ctx(), s, "the terminal text "+harness.FakeClaudeLoginMarker, func(o *agentreplv1.LoginTerminalOutput) bool {
+		seen.Write(o.GetBytes().GetData())
+		return strings.Contains(seen.String(), harness.FakeClaudeLoginMarker)
+	})
+	return seen.String()
+}
+
+func TestOpenLoginFromTwoWorkspacesOutsideTheMultiRepoRootSharesOnePty(t *testing.T) {
+	// Arrange: two DIFFERENT workspaces whose repositories are both OUTSIDE
+	// $MULTI_REPO_ROOT, so both route to the same default account root
+	// (internal/login/manager.go keys its session map by CONFIG DIR, not by
+	// workspace -- login idempotence is PER ACCOUNT).
+	d := newDaemon(t, harness.Opts{})
+	repoA := harness.NewRepo(t)
+	wsA := harness.Register(t, d, repoA.Dir)
+	repoB := harness.NewRepo(t)
+	wsB := harness.Register(t, d, repoB.Dir)
+
+	// Act
+	first, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: wsA}))
+	if err != nil {
+		t.Fatalf("the first OpenLogin = error %v, want a success", err)
+	}
+	second, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: wsB}))
+	if err != nil {
+		t.Fatalf("the second OpenLogin (a different workspace, the same account root) = error %v, want a success", err)
+	}
+
+	// Assert: the same account root, so the SAME pty -- one banner, not two.
+	if second.Msg.GetSuccess().GetConfigDir() != first.Msg.GetSuccess().GetConfigDir() {
+		t.Fatalf("OpenLogin config dir = %q for the second workspace, want the first's %q (both route to the default account)",
+			second.Msg.GetSuccess().GetConfigDir(), first.Msg.GetSuccess().GetConfigDir())
+	}
+	stream := d.WatchLogin(wsB)
+	seen := awaitLoginMarkerOn(t, d, stream)
+	if got := strings.Count(seen, harness.FakeClaudeLoginMarker); got != 1 {
+		t.Fatalf("login marker count = %d in the shared pty's scrollback (seen by a late subscriber on the SECOND workspace), want exactly 1: the second OpenLogin joined rather than spawning a second pty", got)
+	}
+}
+
+func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.T) {
+	// Arrange: one workspace's repository lives directly UNDER
+	// $MULTI_REPO_ROOT, the other outside it, so the two route to DIFFERENT
+	// account roots (the same routing the existing account tests exercise in
+	// session_lifecycle_test.go's TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount).
+	d := newDaemon(t, harness.Opts{})
+	multiRepo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "under-the-multi-root"))
+	multiWS := harness.Register(t, d, multiRepo.Dir)
+	defaultRepo := harness.NewRepo(t)
+	defaultWS := harness.Register(t, d, defaultRepo.Dir)
+
+	// Act
+	multiResp, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: multiWS}))
+	if err != nil {
+		t.Fatalf("OpenLogin under the multi-repo root = error %v, want a success", err)
+	}
+	defaultResp, err := d.Client().OpenLogin(d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: defaultWS}))
+	if err != nil {
+		t.Fatalf("OpenLogin outside the multi-repo root = error %v, want a success", err)
+	}
+
+	// Assert: two distinct account roots, matching the two config dirs the
+	// harness minted.
+	if got, want := multiResp.Msg.GetSuccess().GetConfigDir(), d.MultiRepoConfigDir; got != want {
+		t.Fatalf("OpenLogin under the multi-repo root = config dir %q, want the multi-repo account root %q", got, want)
+	}
+	if got, want := defaultResp.Msg.GetSuccess().GetConfigDir(), d.DefaultConfigDir; got != want {
+		t.Fatalf("OpenLogin outside the multi-repo root = config dir %q, want the default account root %q", got, want)
+	}
+
+	// Assert: TWO ptys -- each workspace's own terminal shows exactly one
+	// banner, and neither pty is the other's.
+	multiSeen := awaitLoginMarkerOn(t, d, d.WatchLogin(multiWS))
+	if got := strings.Count(multiSeen, harness.FakeClaudeLoginMarker); got != 1 {
+		t.Fatalf("login marker count = %d on the multi-repo account's pty, want exactly 1", got)
+	}
+	defaultSeen := awaitLoginMarkerOn(t, d, d.WatchLogin(defaultWS))
+	if got := strings.Count(defaultSeen, harness.FakeClaudeLoginMarker); got != 1 {
+		t.Fatalf("login marker count = %d on the default account's pty, want exactly 1", got)
+	}
+}
+
+func TestCloseLoginWithNothingOpenAnswersSuccess(t *testing.T) {
+	// Arrange: no OpenLogin has ever run on this workspace.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().CloseLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseLoginRequest{Workspace: f.ws}))
+
+	// Assert: closing an ABSENT login is SUCCESS -- the desired state already
+	// holds (endpoint_close_login.proto, internal/login/manager.go's Close:
+	// `!ok` returns nil, never login.ErrNoSession).
+	if err != nil {
+		t.Fatalf("CloseLogin with nothing open = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("CloseLogin with nothing open = %v, want success{}", resp.Msg)
+	}
+}
+
+func TestOpenLoginWhoseVendorBinaryFailsToSpawnAnswersSpawnFailed(t *testing.T) {
+	// Arrange: AGENT_REPL_CLAUDE_BIN names a path that does not exist, so
+	// pty.Start's exec genuinely fails -- distinct from the vendor guard's
+	// refusal, which fires only for the DEFAULT binary "claude"
+	// (internal/login/manager.go's spawn: "an explicit path ... is by
+	// construction something else ... so refusing it would forbid the very
+	// thing the knob exists to allow").
+	f := newRegistered(t, harness.Opts{ExtraEnv: []string{"AGENT_REPL_CLAUDE_BIN=/nonexistent/bogus-claude-bin"}})
+	f.d.ExpectWarnings("daemon.login.open")
+
+	// Act
+	resp, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws}))
+
+	// Assert: OpenLoginError.spawn_failed is the landed arm
+	// (endpoint_open_login.proto); server.OpenLogin's fallback
+	// (internal/server/login.go) maps any error asRefusal does not recognize
+	// onto it.
+	if err != nil {
+		t.Fatalf("OpenLogin with an unspawnable vendor binary = error %v, want a success carrying error{spawn_failed}", err)
+	}
+	spawnFailed := resp.Msg.GetError().GetSpawnFailed()
+	if spawnFailed == nil {
+		t.Fatalf("OpenLogin with an unspawnable vendor binary = %v, want error{spawn_failed}", resp.Msg)
+	}
+	if !strings.Contains(spawnFailed.GetDetail(), "/nonexistent/bogus-claude-bin") {
+		t.Fatalf("spawn_failed.detail = %q, want it to name the vendor binary that failed to spawn", spawnFailed.GetDetail())
+	}
+}
+
+func TestOpenLoginUnderNoFakeIsRefusedNamingTheLoginSite(t *testing.T) {
+	// Arrange: NoFake withholds AGENT_REPL_CLAUDE_BIN, so the login manager
+	// falls back to the default vendor binary "claude"
+	// (internal/login/manager.go's DefaultVendorBin) and its guard check
+	// actually runs: envc.VendorGuard refuses it, naming the site "login"
+	// (internal/login/manager.go's guardSite), because
+	// AGENT_REPL_FORBID_VENDOR_CALLS=1 is every test process's contract
+	// (AGENTS.md).
+	f := newRegistered(t, harness.Opts{NoFake: true})
+	f.d.ExpectWarnings("daemon.login.open")
+
+	// Act
+	resp, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws}))
+
+	// Assert: internal/server/refuse.go's asRefusal does not recognize
+	// *envc.ForbiddenError, so OpenLogin's fallback (internal/server/login.go)
+	// answers the landed spawn_failed arm rather than a bare connect error --
+	// the refusal SHAPE the source actually produces.
+	if err != nil {
+		t.Fatalf("OpenLogin under NoFake = error %v, want a success carrying error{spawn_failed}", err)
+	}
+	spawnFailed := resp.Msg.GetError().GetSpawnFailed()
+	if spawnFailed == nil {
+		t.Fatalf("OpenLogin under NoFake = %v, want error{spawn_failed}", resp.Msg)
+	}
+	if !strings.Contains(spawnFailed.GetDetail(), "login") {
+		t.Fatalf("spawn_failed.detail = %q, want it to name the refused site \"login\"", spawnFailed.GetDetail())
+	}
+}
+
+func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldWithClassificationError(t *testing.T) {
+	// Arrange: NoFake means the classifier reaches its real vendor-backed
+	// implementation (internal/classifier/vendor.go), guarded by
+	// envc.VendorGuard, which refuses the "classifier" site while
+	// AGENT_REPL_FORBID_VENDOR_CALLS=1 (every test process's contract,
+	// AGENTS.md). A turn must be running so an incoming prompt is actually
+	// classified rather than started fresh.
+	f := newOpened(t, harness.Opts{NoFake: true})
+	f.d.ExpectWarnings("daemon.promptqueue.classify")
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	holds := f.d.WatchHolds(f.ws)
+	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.DaemonHoldTray) bool {
+		return len(tray.GetItems()) == 0
+	})
+
+	// Act: an ordinary follow-up, no explicit-interrupt keyword, so the
+	// classifier is actually consulted rather than answered by the fast path
+	// (classifier.ExplicitInterrupts).
+	resp := f.submit("please also check the other file", "k-held", origin)
+	turn := resp.GetSuccess().GetTurn().GetTurn()
+	if turn.GetValue() == "" {
+		t.Fatalf("SubmitPrompt while a turn runs = %v, want a minted TurnId (it is HELD, not refused)", resp)
+	}
+
+	// Assert: the classifying push comes first, synchronously
+	// (internal/promptqueue/classify.go's hold).
+	classifying := harness.AwaitNext(t, f.d.Ctx(), holds, "the classifying push")
+	if p := promptHeldEntry(classifying, turn); p == nil || p.GetClassifying() == nil {
+		t.Fatalf("the first tray push for the held prompt = %v, want the transient classifying arm", p)
+	}
+
+	// Assert: the verdict is classification_error -- the guard's refusal is
+	// NOT a verdict either way (classifier.Judge's doc comment) -- and its
+	// detail names the refused site "classifier" (envc.ForbiddenError.Error()).
+	verdict := harness.AwaitNext(t, f.d.Ctx(), holds, "the classification_error verdict")
+	p := promptHeldEntry(verdict, turn)
+	if p == nil || p.GetClassificationError() == nil {
+		t.Fatalf("the verdict for the held prompt under NoFake = %v, want classification_error", p)
+	}
+	if !strings.Contains(p.GetClassificationError().GetDetail(), "classifier") {
+		t.Fatalf("classification_error.detail = %q, want it to name the refused site \"classifier\"", p.GetClassificationError().GetDetail())
+	}
 }
 
 // ---------------------------------------------------------------------------
