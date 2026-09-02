@@ -454,11 +454,20 @@ type fakeSidebar struct {
 
 	registries []sidebar.Registry
 	selected   []ids.WorkspaceID
+	// calls records the ORDER the resolver was told things in, which is what
+	// decides whether a push carries a whole view or a half-refreshed one.
+	calls []string
 }
 
-func (s *fakeSidebar) SetRegistry(reg sidebar.Registry) { s.registries = append(s.registries, reg) }
+func (s *fakeSidebar) SetRegistry(reg sidebar.Registry) {
+	s.registries = append(s.registries, reg)
+	s.calls = append(s.calls, "registry")
+}
 
-func (s *fakeSidebar) SetSelected(ws ids.WorkspaceID) { s.selected = append(s.selected, ws) }
+func (s *fakeSidebar) SetSelected(ws ids.WorkspaceID) {
+	s.selected = append(s.selected, ws)
+	s.calls = append(s.calls, "selected")
+}
 
 // fakeHost is a HostRelay.
 type fakeHost struct {
