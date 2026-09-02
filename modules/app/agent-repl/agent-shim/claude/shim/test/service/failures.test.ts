@@ -283,6 +283,8 @@ describe("updateAgentFailure", () => {
     ["answerMismatch"],
     ["nothingRunning"],
     ["noSession"],
+    ["notDeliverable"],
+    ["agentBusy"],
   ] as const)("states the %s arm", (kind) => {
     // Arrange, Act.
     const failure = failures.updateAgentFailure({ kind }, "why");

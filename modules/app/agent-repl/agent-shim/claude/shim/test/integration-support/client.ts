@@ -151,6 +151,35 @@ export class Stream<T> {
   }
 }
 
+/**
+ * A WatchSession stream with the `session_started` RE-ANNOUNCEMENT dropped.
+ *
+ * The re-announcement is sent once per watch, right after the opening
+ * diagnostics (landing 7). A suite reading session FACTS is not reading it, and
+ * a helper that let it through would make every such suite restate the frame
+ * order. `test/integration/session.test.ts` asserts the re-announcement itself
+ * through the unfiltered stream.
+ */
+export function openSessionUpdates(
+  open: (options: { signal: AbortSignal }) => AsyncIterable<shimv1.WatchSessionResponse>,
+): Stream<shimv1.WatchSessionResponse> {
+  const controller = new AbortController();
+  // THE CALL IS MADE HERE, NOT INSIDE THE GENERATOR. A generator body does not
+  // run until its first `next()`, and a watch that only subscribed then would
+  // miss every fact pushed between the open and the first pull — which is
+  // exactly what a suite that opens its watch before prompting relies on.
+  const source = open({ signal: controller.signal });
+  return new Stream(
+    (async function* filtered(): AsyncIterable<shimv1.WatchSessionResponse> {
+      for await (const frame of source) {
+        if (frame.frame.case === "sessionStarted") continue;
+        yield frame;
+      }
+    })(),
+    controller,
+  );
+}
+
 /** Open a server stream through `open`, wired to its own abort controller. */
 export function openStream<T>(
   open: (options: { signal: AbortSignal }) => AsyncIterable<T>,

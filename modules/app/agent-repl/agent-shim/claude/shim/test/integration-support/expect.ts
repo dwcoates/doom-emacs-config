@@ -319,13 +319,32 @@ export function detachForegroundAccepted(response: shimv1.DetachForegroundRespon
 // stream frames
 // ---------------------------------------------------------------------------
 
-/** The `SessionUpdate` a WatchSession frame carries. */
+/**
+ * The `SessionUpdate` a WatchSession frame carries.
+ *
+ * Raises on the `session_started` re-announcement rather than skipping it: a
+ * caller that wants updates asks for updates, and a helper that quietly
+ * swallowed the other arm would hide a frame ordering defect.
+ */
 export function sessionUpdate(frame: shimv1.WatchSessionResponse): conversationv1.SessionUpdate {
-  const update = frame.update;
-  if (update === undefined) {
-    throw new Error("WatchSession pushed a frame with no SessionUpdate — the non-optional rule");
+  if (frame.frame.case !== "update") {
+    throw new Error(
+      `WatchSession pushed a ${frame.frame.case ?? "unset"} frame where a SessionUpdate was expected`,
+    );
   }
-  return update;
+  return frame.frame.value;
+}
+
+/** The `SessionStarted` re-announcement a WatchSession frame carries. */
+export function sessionStartedFrame(
+  frame: shimv1.WatchSessionResponse,
+): conversationv1.SessionStarted {
+  if (frame.frame.case !== "sessionStarted") {
+    throw new Error(
+      `WatchSession pushed a ${frame.frame.case ?? "unset"} frame where the re-announcement was expected`,
+    );
+  }
+  return frame.frame.value;
 }
 
 /** The arm name of a WatchSession frame. */

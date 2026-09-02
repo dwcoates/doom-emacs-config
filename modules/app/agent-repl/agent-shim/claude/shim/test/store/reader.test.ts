@@ -306,6 +306,21 @@ describe("failure translation", () => {
     expect(readFailure(failure).kind).toBe("stale_pointer");
   });
 
+  it("maps the store's own unknown_agent arm to unknown_agent", () => {
+    // Landing 7: the record plane, not the shim, is what knows a book exists.
+    // Arrange.
+    const failure = create(storev1.OpenAgentSessionFailureSchema, {
+      detail: "sqlite: database is locked",
+      kind: {
+        case: "unknownAgent",
+        value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+      },
+    });
+
+    // Act, Assert.
+    expect(readFailure(failure).kind).toBe("unknown_agent");
+  });
+
   it("maps invalid_request to unknown_agent, the condition the engine can act on", () => {
     // Arrange.
     const failure = create(storev1.OpenAgentSessionFailureSchema, {

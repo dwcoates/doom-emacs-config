@@ -342,8 +342,22 @@ func (*CloseWorkspaceError_TransferringAway) isCloseWorkspaceError_Cause() {}
 
 func (*CloseWorkspaceError_NotYetAdopted) isCloseWorkspaceError_Cause() {}
 
+// WHY the close is blocked — the same evidence the footer's close-blocked
+// state draws, so a caller with no footer (a test, a log line, the host's
+// own message) can still say why. (Landing 7, 2026-09-02.)
 type CloseWorkspaceBlocked struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The main thread has a turn in flight.
+	TurnInFlight bool `protobuf:"varint,1,opt,name=turn_in_flight,json=turnInFlight,proto3" json:"turn_in_flight,omitempty"`
+	// Detached items live now (subagents, runs, tasks).
+	LiveWork uint32 `protobuf:"varint,2,opt,name=live_work,json=liveWork,proto3" json:"live_work,omitempty"`
+	// Held prompts in the tray — undelivered user intent.
+	HeldPrompts uint32 `protobuf:"varint,3,opt,name=held_prompts,json=heldPrompts,proto3" json:"held_prompts,omitempty"`
+	// The workspace is queued for, or inside, a merge.
+	MergeQueued bool `protobuf:"varint,4,opt,name=merge_queued,json=mergeQueued,proto3" json:"merge_queued,omitempty"`
+	// The daemon's composed sentence over the fields above — the footer's
+	// activity line, verbatim.
+	Summary       string `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -376,6 +390,41 @@ func (x *CloseWorkspaceBlocked) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CloseWorkspaceBlocked.ProtoReflect.Descriptor instead.
 func (*CloseWorkspaceBlocked) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_close_workspace_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CloseWorkspaceBlocked) GetTurnInFlight() bool {
+	if x != nil {
+		return x.TurnInFlight
+	}
+	return false
+}
+
+func (x *CloseWorkspaceBlocked) GetLiveWork() uint32 {
+	if x != nil {
+		return x.LiveWork
+	}
+	return 0
+}
+
+func (x *CloseWorkspaceBlocked) GetHeldPrompts() uint32 {
+	if x != nil {
+		return x.HeldPrompts
+	}
+	return 0
+}
+
+func (x *CloseWorkspaceBlocked) GetMergeQueued() bool {
+	if x != nil {
+		return x.MergeQueued
+	}
+	return false
+}
+
+func (x *CloseWorkspaceBlocked) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
 }
 
 type CloseWorkspaceUnknownWorkspace struct {
@@ -558,8 +607,13 @@ const file_agentrepl_v1_endpoint_close_workspace_proto_rawDesc = "" +
 	"\x16workspace_ref_mismatch\x18\x03 \x01(\v20.agentrepl.v1.CloseWorkspaceWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12[\n" +
 	"\x11transferring_away\x18\x04 \x01(\v2,.agentrepl.v1.CloseWorkspaceTransferringAwayH\x00R\x10transferringAway\x12S\n" +
 	"\x0fnot_yet_adopted\x18\x05 \x01(\v2).agentrepl.v1.CloseWorkspaceNotYetAdoptedH\x00R\rnotYetAdoptedB\a\n" +
-	"\x05cause\"\x17\n" +
-	"\x15CloseWorkspaceBlocked\" \n" +
+	"\x05cause\"\xba\x01\n" +
+	"\x15CloseWorkspaceBlocked\x12$\n" +
+	"\x0eturn_in_flight\x18\x01 \x01(\bR\fturnInFlight\x12\x1b\n" +
+	"\tlive_work\x18\x02 \x01(\rR\bliveWork\x12!\n" +
+	"\fheld_prompts\x18\x03 \x01(\rR\vheldPrompts\x12!\n" +
+	"\fmerge_queued\x18\x04 \x01(\bR\vmergeQueued\x12\x18\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\" \n" +
 	"\x1eCloseWorkspaceUnknownWorkspace\"G\n" +
 	"\"CloseWorkspaceWorkspaceRefMismatch\x12!\n" +
 	"\fregistry_dir\x18\x01 \x01(\tR\vregistryDir\":\n" +

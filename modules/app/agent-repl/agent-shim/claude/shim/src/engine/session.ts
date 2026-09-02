@@ -282,6 +282,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let permissionMode: conversationv1.AgentPermissionMode = fromVendorPermissionMode("default");
   let modelCatalog: conversationv1.ModelOption[] = [];
   let started = false;
+  /**
+   * The `SessionStarted` this session announced, kept for re-announcement.
+   *
+   * UNSET until StartSession succeeds, which is exactly when a watch has
+   * nothing to be told.
+   */
+  let announcedStart: conversationv1.SessionStarted | undefined;
   let standingDown = false;
   /** A model change accepted mid-turn, and the call still waiting on it. */
   let pendingModel:
@@ -1569,6 +1576,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       modelCatalog,
       liveWork,
     });
+    // KEPT SO A LATER WATCH CAN BE TOLD. A daemon that adopts an already-started
+    // shim (crash boot, handover) was not there for this announcement, and the
+    // shim's own state is the only place it survives: WatchSession re-states it
+    // once per watch, with the live membership refreshed to NOW (landing 7).
+    announcedStart = started_;
     LOGGER.log(
       {
         vendor_session_id: identity.vendorSessionId,
@@ -2235,6 +2247,81 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     return hibernateAcked();
   }
 
+  /**
+   * The session's opening, RE-STATED for a watch that just attached.
+   *
+   * Identity, runtime, model, mode and catalog are the ORIGINAL facts: they are
+   * fixed for the session, which is why an opening states them at all. The live
+   * membership is NOT — a daemon adopting a running shim needs what is live NOW,
+   * not what was live when the session opened — so `turn_in_flight` and
+   * `live_work` are recomputed here.
+   *
+   * `created`-origin, exactly as the reconciliation at StartSession announces
+   * re-adopted work: a consumer that was never there for the original
+   * announcement has no element to continue and must be told what the work IS.
+   *
+   * UNSET before StartSession, which is the one state with nothing to re-state.
+   */
+  async function reannounceStart(): Promise<conversationv1.SessionStarted | undefined> {
+    if (announcedStart === undefined) return undefined;
+    return create(conversationv1.SessionStartedSchema, {
+      vendorSessionId: announcedStart.vendorSessionId,
+      ...(announcedStart.runtime === undefined ? {} : { runtime: announcedStart.runtime }),
+      ...(announcedStart.effectiveModel === undefined
+        ? {}
+        : { effectiveModel: announcedStart.effectiveModel }),
+      ...(announcedStart.permissionMode === undefined
+        ? {}
+        : { permissionMode: announcedStart.permissionMode }),
+      modelCatalog: announcedStart.modelCatalog,
+      ...(open === undefined ? {} : { turnInFlight: open.id }),
+      liveWork: await announceLiveWorkNow(),
+    });
+  }
+
+  /**
+   * Every detached item live RIGHT NOW, described from the record.
+   *
+   * A READ AND NOTHING ELSE. The StartSession reconciliation writes terminals
+   * for work the vendor no longer holds; re-announcing must never do that — a
+   * daemon attaching is not a reason to close anybody's run — so this shares
+   * only the pure description step with it.
+   *
+   * THE STORE'S LIVE SET IS THE ANSWER, not the in-memory table: work this
+   * process re-adopted at StartSession was never seen to START here, so the
+   * table does not hold it, and a re-announcement built from the table alone
+   * would tell an adopting daemon that a running shell does not exist.
+   */
+  async function announceLiveWorkNow(): Promise<conversationv1.AgentDetachedWork[]> {
+    let page: AgentPageSession | undefined;
+    try {
+      const handles = (await deps.persistence.liveWork()).liveDetached;
+      if (handles.length === 0) return [];
+      page = await deps.persistence.openAgentPage(requireIdentity().agentId, RECONCILE_PAGE_SIZE);
+      return announceLiveWork(page.page.entries, handles);
+    } catch (err) {
+      // LOUD, NEVER SILENT: the watch still opens — a consumer told nothing at
+      // all is worse off than one told the opening with an empty membership —
+      // but the record plane being unreachable is a session-level fact every
+      // consumer is entitled to, so it goes out as the fault it is.
+      const detail = err instanceof Error ? err.message : String(err);
+      LOGGER.log(
+        { level: "error", cause: detail },
+        "the record plane could not be read to re-announce the live membership for a new watch",
+      );
+      pushes.fault(
+        sessionFault(
+          { kind: "storeUnreachable" },
+          "shim-engine-session",
+          `re-announcing live work for a new WatchSession failed: ${detail}`,
+        ),
+      );
+      return [];
+    } finally {
+      page?.close();
+    }
+  }
+
   function sessionLive(): conversationv1.SessionLive {
     const announceable = live.announceable();
     return create(conversationv1.SessionLiveSchema, {
@@ -2535,7 +2622,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // pull: the diagnostics frame is seeded into the subscriber's queue by that
     // call, and a generator that only subscribed on first `next()` would leave
     // the daemon unable to tell "not ready" from "refused".
-    watchSession: () => mapSessionUpdates(pushes.subscribe()),
+    watchSession: () => watchSessionFrames(pushes.subscribe(), reannounceStart),
     setSessionModel,
     setSessionPermissionMode,
     hibernate,
@@ -2556,11 +2643,34 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   return engine;
 }
 
-/** Wrap each session fact in its response message. */
-async function* mapSessionUpdates(
+/**
+ * The watch's frames: the opening diagnostics, the re-announcement, then facts.
+ *
+ * THE DIAGNOSTICS GO FIRST AND ALONE. It is the readiness signal a consumer may
+ * open this stream before anything else to receive, and connect surfaces a
+ * server-stream refusal only at the first Receive — so nothing may be computed
+ * ahead of it. The re-announcement follows it, on EVERY new watch, which is
+ * what lets a daemon that adopts an already-started shim attach purely.
+ *
+ * A session that has not started yet re-announces nothing: there is no opening
+ * to re-state, and the diagnostics already said so.
+ */
+async function* watchSessionFrames(
   updates: AsyncIterable<conversationv1.SessionUpdate>,
+  reannounce: () => Promise<conversationv1.SessionStarted | undefined>,
 ): AsyncIterable<shimv1.WatchSessionResponse> {
+  let opened = false;
   for await (const update of updates) {
-    yield create(shimv1.WatchSessionResponseSchema, { update });
+    yield create(shimv1.WatchSessionResponseSchema, {
+      frame: { case: "update", value: update },
+    });
+    if (opened) continue;
+    opened = true;
+    const started = await reannounce();
+    if (started !== undefined) {
+      yield create(shimv1.WatchSessionResponseSchema, {
+        frame: { case: "sessionStarted", value: started },
+      });
+    }
   }
 }

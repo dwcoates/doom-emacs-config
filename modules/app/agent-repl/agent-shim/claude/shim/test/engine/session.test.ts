@@ -171,6 +171,20 @@ function freshRequest(): shimv1.StartSessionRequest {
   });
 }
 
+/** A fresh start naming NO model: the SDK's own default takes effect. */
+function freshRequestNoModel(): shimv1.StartSessionRequest {
+  return create(shimv1.StartSessionRequestSchema, {
+    source: {
+      case: "fresh",
+      value: create(shimv1.StartSessionFreshSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "default", value: create(conversationv1.AgentPermissionModeDefaultSchema, {}) },
+        }),
+      }),
+    },
+  });
+}
+
 function resumeRequest(
   vendorSessionId: string,
   remediation?: conversationv1.SessionColdRemediation,
@@ -279,6 +293,42 @@ describe("StartSession, fresh", () => {
         ? response.result.value.session?.runtime?.agentBinaryVersion
         : undefined,
     ).toBe("2.1.999");
+  });
+
+  it("passes NO model to the SDK when the fresh start named none", async () => {
+    // Optional since landing 7: UNSET means the SDK's own default, and naming
+    // an empty model would override that default with nothing.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoModel());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: "claude-sonnet-5",
+      }),
+    );
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBeUndefined();
+  });
+
+  it("reports the model the SDK chose as effective_model when none was named", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoModel());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: "claude-sonnet-5",
+      }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.effectiveModel?.name
+        : undefined,
+    ).toBe("claude-sonnet-5");
   });
 
   it("reports the model catalog from the vendor", async () => {
@@ -1443,15 +1493,114 @@ describe("standing down", () => {
 });
 
 describe("WatchSession", () => {
+  /** The arm names of the first `count` frames of a fresh watch. */
+  async function frames(h: Harness, count: number): Promise<string[]> {
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    const seen: string[] = [];
+    for (let taken = 0; taken < count; taken++) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      const frame = next.value.frame;
+      seen.push(frame.case === "update" ? `update.${frame.value.update.case ?? "unset"}` : (frame.case ?? "unset"));
+    }
+    await iterator.return?.();
+    return seen;
+  }
+
   it("delivers diagnostics as its FIRST frame", async () => {
+    const h = harness();
+
+    expect((await frames(h, 1))[0]).toBe("update.diagnostics");
+  });
+
+  it("re-announces nothing before a session has started", async () => {
+    // There is no opening to re-state, and the diagnostics already said so.
+    // A second frame is pushed so the assertion reads a real frame rather than
+    // waiting out a stream that would correctly never produce one.
     const h = harness();
     const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
       Symbol.asyncIterator
     ]();
+    await iterator.next();
+    h.engine.pushes.push(
+      create(conversationv1.SessionUpdateSchema, {
+        update: {
+          case: "queryDied",
+          value: create(conversationv1.SessionQueryDiedSchema, {}),
+        },
+      }),
+    );
 
-    const first = await iterator.next();
+    const second = await iterator.next();
+    await iterator.return?.();
 
-    expect(first.value?.update?.update.case).toBe("diagnostics");
+    expect(second.value?.frame.case).toBe("update");
+  });
+
+  it("re-announces the session's opening right AFTER the diagnostics", async () => {
+    // Landing 7: a daemon adopting an already-started shim attaches purely.
+    const h = harness();
+    await started(h);
+
+    expect((await frames(h, 2))[1]).toBe("sessionStarted");
+  });
+
+  it("re-announces on EVERY new watch, not only the first", async () => {
+    const h = harness();
+    await started(h);
+    await frames(h, 2);
+
+    expect((await frames(h, 2))[1]).toBe("sessionStarted");
+  });
+
+  it("re-states the ORIGINAL identity, which is fixed for the session", async () => {
+    const h = harness();
+    const opening = await started(h);
+    const announced =
+      opening.result.case === "success" ? opening.result.value.session?.vendorSessionId : undefined;
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const second = await iterator.next();
+    await iterator.return?.();
+
+    expect(
+      second.value?.frame.case === "sessionStarted"
+        ? second.value.frame.value.vendorSessionId
+        : undefined,
+    ).toBe(announced);
+  });
+
+  it("re-states the turn in flight as it is NOW, not as the opening found it", async () => {
+    // The opening's live membership is the one thing that is not a fact at
+    // start: an adopting daemon needs what is live now.
+    const h = harness();
+    await started(h);
+    await h.engine.startTurn(
+      create(shimv1.StartTurnRequestSchema, {
+        turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }),
+        said: textSaid("go"),
+        origin: conversationv1.PromptOrigin.USER_SENT,
+        pageSize: 5,
+      }),
+    );
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const second = await iterator.next();
+    await iterator.return?.();
+
+    expect(
+      second.value?.frame.case === "sessionStarted"
+        ? second.value.frame.value.turnInFlight?.value !== undefined
+        : undefined,
+    ).toBe(true);
   });
 });
 
@@ -1595,6 +1744,74 @@ describe("GetLiveWork reconciliation", () => {
         ? entry.item.frame.result.value.command
         : undefined;
     expect(command?.line).toBe("");
+  });
+
+  it("re-announces the live membership as it is NOW on a new watch", async () => {
+    // Landing 7: everything else on the opening is a fact at start, but a
+    // daemon adopting a running shim needs the membership that is live now.
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const second = await iterator.next();
+    await iterator.return?.();
+
+    expect(
+      second.value?.frame.case === "sessionStarted"
+        ? second.value.frame.value.liveWork.map(
+            (work: conversationv1.AgentDetachedWork) => work.work?.value,
+          )
+        : undefined,
+    ).toEqual(["b01"]);
+  });
+
+  it("REPORTS a book it could not read for a re-announcement as a session fault", async () => {
+    // A watch that opens is better than one that fails, but a record plane the
+    // shim cannot reach is a session-level fact, never a quiet empty list.
+    const h = harness({ backgroundTasks: true });
+    h.persistence.live = create(storev1.GetLiveWorkSuccessSchema, {
+      liveDetached: [create(conversationv1.DetachedWorkIdSchema, { value: "b01" })],
+    });
+    h.persistence.page = create(conversationv1.HistoryPageSchema, {
+      entries: [recordedBashRun("b01")],
+      boundary: { case: "floor", value: create(conversationv1.HistoryFloorSchema, {}) },
+    });
+    await started(h);
+    h.persistence.openError = new (await import("../../src/store/persistence.js")).PersistenceError(
+      "store_unavailable",
+      "the store is down",
+    );
+
+    const iterator = h.engine.watchSession(create(shimv1.WatchSessionRequestSchema, {}))[
+      Symbol.asyncIterator
+    ]();
+    await iterator.next();
+    const unhealthy: boolean[] = [];
+    // The re-announcement and the replayed current view sit ahead of the
+    // restated diagnostics the fault produces; this drains past them and stops
+    // as soon as one is seen, so it never waits on a frame that will not come.
+    for (let taken = 0; taken < 8 && !unhealthy.includes(true); taken++) {
+      const next = await iterator.next();
+      if (next.done === true) break;
+      const frame = next.value.frame;
+      if (frame.case !== "update") continue;
+      const update = frame.value.update;
+      if (update.case === "diagnostics") unhealthy.push(update.value.health.case === "unhealthy");
+    }
+    await iterator.return?.();
+
+    // A fault restates the diagnostics, which is how every consumer learns it.
+    expect(unhealthy).toContain(true);
   });
 
   it("writes a closing terminal for a subagent that did not survive", async () => {

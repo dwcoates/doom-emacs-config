@@ -207,7 +207,7 @@ check("a SECOND StartSession is refused as already started", session, "alreadySt
 // Receive: the stream's FIRST frame is diagnostics.
 const firstWatchFrame = await (async (): Promise<unknown> => {
   for await (const response of withStore.client.watchSession(create(shimv1.WatchSessionRequestSchema, {}))) {
-    return response.update?.update.case;
+    return response.frame.case === "update" ? response.frame.value.update.case : response.frame.case;
   }
   return "ended";
 })();

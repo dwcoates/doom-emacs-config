@@ -171,7 +171,11 @@ export interface FakeStore {
 export type StoreReadVerb = "OpenAgentSession" | "ReadAgentPage" | "GetLiveWork";
 
 /** The typed refusal arms a read can carry, as the protos declare them. */
-export type StoreReadFailureArm = "invalid_request" | "stale_pointer" | "storage_failure";
+export type StoreReadFailureArm =
+  | "invalid_request"
+  | "unknown_agent"
+  | "stale_pointer"
+  | "storage_failure";
 
 /** The typed refusal arms `WriteBatch` declares. */
 export type StoreWriteFailureArm = "invalid_request" | "storage_failure";
@@ -369,7 +373,12 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
                           field: "agent",
                         }),
                       }
-                    : refusal.arm === "stale_pointer"
+                    : refusal.arm === "unknown_agent"
+                      ? {
+                          case: "unknownAgent",
+                          value: create(storev1.OpenAgentSessionUnknownAgentSchema, {}),
+                        }
+                      : refusal.arm === "stale_pointer"
                       ? {
                           case: "stalePointer",
                           value: create(storev1.OpenAgentSessionStalePointerSchema, {}),
@@ -714,6 +723,12 @@ export async function startFakeStore(socketPath: string): Promise<FakeStore> {
       if (arm === null) {
         readFailures.delete(verb);
         return;
+      }
+      if (arm === "unknown_agent" && verb !== "OpenAgentSession") {
+        // REFUSED RATHER THAN FABRICATED: only OpenAgentSessionFailure declares
+        // `unknown_agent` (landing 7). Collapsing it into storage_failure on
+        // another verb would test the reader against a store that cannot exist.
+        throw new Error(`fake store: ${verb} declares no unknown_agent arm`);
       }
       if (verb === "GetLiveWork" && arm !== "storage_failure") {
         // REFUSED RATHER THAN FABRICATED: GetLiveWorkFailure declares one arm,
