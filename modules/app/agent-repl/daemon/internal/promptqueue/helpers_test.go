@@ -179,6 +179,16 @@ func (d *fakeDB) TombstoneHeldPrompt(_ context.Context, turn ids.TurnID, why wsm
 	return nil
 }
 
+// retired answers one turn's tombstone, which HeldPrompts hides.
+func (d *fakeDB) retired(turn ids.TurnID) *wsm.Tombstone {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if h, ok := d.held[turn]; ok {
+		return h.Tombstone
+	}
+	return nil
+}
+
 func (d *fakeDB) HeldPrompts(_ context.Context, id ids.WorkspaceID) ([]wsm.HeldPrompt, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

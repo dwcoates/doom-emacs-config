@@ -268,18 +268,73 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log 
 			q.mu.Unlock()
 		}()
 		revived, err := q.revive(ctx, ws, log)
-		if err != nil || !revived {
-			// revive() recorded the failure loudly. THE PROMPT STAYS HELD:
-			// the tray keeps showing it, so nothing the user typed is lost to
-			// a revival that did not happen.
+		if err != nil {
+			// THE BRING-UP FAILED, and daemon_hold.proto settles what that
+			// means for the entries waiting on it: "a loud drop when the
+			// bring-up fails (a session that never comes up can never
+			// deliver, so a retained entry would be a leak, not a delay)".
+			// The workspace fault the bring-up already opened is the
+			// operator's record; this is the tray's.
+			q.dropRevivalHolds(ctx, ws, log, err.Error())
+			return
+		}
+		if !revived {
+			// NO REVIVAL WAS ATTEMPTED — this queue has no revival hook at
+			// all. Nothing failed, so nothing is dropped: the prompt stays
+			// held and the tray keeps showing it.
+			log.Debug(opSubmit, "no revival hook is wired; the prompt stays held", nil)
 			return
 		}
 		if _, ok := q.deps.Client(ws); !ok {
-			log.Error(opSubmit, "the revival reported success but the workspace still has no session; the prompt stays held", nil)
+			log.Error(opSubmit, "the revival reported success but the workspace still has no session", nil)
+			q.dropRevivalHolds(ctx, ws, log, "the revival reported success but no session came up")
 			return
 		}
 		q.releaseRevivalHolds(ctx, ws, log)
 	}()
+}
+
+// dropRevivalHolds retires every revival-pending hold on a workspace whose
+// bring-up FAILED, loudly.
+//
+// A session that never came up can never deliver these entries, and the hold
+// has no force-through: left standing they would sit in the tray forever
+// under a state whose only exit never arrives. Dropping them is what makes the
+// failure VISIBLE and actionable — the tray re-pushes without them, and the
+// warning names each turn so nothing vanishes unrecorded.
+func (q *queue) dropRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger, cause string) {
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
+
+	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
+	if err != nil {
+		log.Error(opSubmit, "could not read the holds the failed revival should drop",
+			dlog.Context{"cause": err.Error()})
+		return
+	}
+	dropped := 0
+	for _, h := range standing {
+		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldSessionStarting {
+			continue
+		}
+		if err := q.deps.DB.TombstoneHeldPrompt(ctx, h.Turn, wsm.Tombstone{
+			Kind: tombstoneDropped, At: q.deps.Now(),
+		}); err != nil {
+			log.Error(opSubmit, "could not drop a revival-pending hold",
+				dlog.Context{"turn": string(h.Turn), "cause": err.Error()})
+			continue
+		}
+		log.Warn(opSubmit, "dropped a revival-pending hold whose bring-up failed",
+			dlog.Context{"turn": string(h.Turn), "cause": cause})
+		dropped++
+	}
+	if dropped == 0 {
+		return
+	}
+	if err := q.pushTray(ctx, ws, log); err != nil {
+		return
+	}
 }
 
 // releaseRevivalHolds un-stamps every revival-pending hold on a workspace whose
