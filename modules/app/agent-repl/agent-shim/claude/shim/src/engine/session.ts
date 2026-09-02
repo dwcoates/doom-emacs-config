@@ -294,6 +294,16 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * an agent the record knows about that this process never watched start.
    */
   const announcedAgents = new Set<string>();
+  /**
+   * Cuts produced BEFORE the session had an identity to key them to.
+   *
+   * The cold gate's `compact` remediation runs inside `StartSession`, before
+   * the identity is settled — a row cannot be written yet, and dropping it
+   * would lose the one page line that makes the compaction visible in the feed
+   * rather than only in the transcript. They are written the moment the
+   * identity exists, in the order they happened.
+   */
+  const pendingContextCuts: conversationv1.ContextCut[] = [];
 
   // THE RECORD PLANE'S FAULTS ARE THE SESSION'S. `Persistence` raises a
   // store_unreachable fault and opens a degraded window when the store stops
@@ -1402,6 +1412,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // identity just settled — and a write attempted before this raises rather
     // than landing rows under a name no replay could absorb against.
     deps.persistence.setProducer(identity.originalVendorSessionId);
+    // THE HELD CUTS, NOW KEYABLE. First write after the producer is named, in
+    // the order they happened, so the compaction the cold gate just performed
+    // is on the first page a consumer opens.
+    if (pendingContextCuts.length > 0) {
+      const held = pendingContextCuts.splice(0, pendingContextCuts.length);
+      LOGGER.log({ held: held.length }, "writing the context cuts held until the session had an identity");
+      for (const cut of held) writeContextCut(cut);
+    }
     if (clearedTo !== undefined) {
       // The AgentId does not move; only the resume handle does, and the
       // rotation is announced exactly like a vendor-initiated one.
@@ -1657,7 +1675,17 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** The `context_cut` page line, on the conversation's own book. */
   function writeContextCut(cut: conversationv1.ContextCut): void {
-    if (identity === undefined) return;
+    if (identity === undefined) {
+      // NEVER DROPPED, only DEFERRED. A row needs the agent id the identity
+      // settles, and the cold gate's remediation runs before that — so the cut
+      // waits rather than vanishing.
+      LOGGER.log(
+        { arm: cut.cut.case ?? "", pending: pendingContextCuts.length + 1 },
+        "a context cut was produced before the session had an identity; held until one exists",
+      );
+      pendingContextCuts.push(cut);
+      return;
+    }
     const agentId = identity.agentId;
     const entry: PersistEntry = {
       agentId,
@@ -2178,7 +2206,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           "the vendor refused the interrupt during teardown; continuing",
         );
       }
-      for (const entry of live.all()) {
+      // SNAPSHOT FIRST. Stopping a task provokes the vendor's own
+      // `task_notification`, which retires the entry from the live table — so
+      // reading the table again afterwards asks what is STILL live and gets
+      // exactly the items this teardown did not have to close.
+      const stopping = live.all();
+      for (const entry of stopping) {
         try {
           await active.stopTask(entry.taskId);
         } catch (err) {
@@ -2188,7 +2221,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
           );
         }
       }
-      concludeStoppedRuns(live.all());
+      concludeStoppedRuns(stopping);
     }
     open = undefined;
     prompts?.close();
