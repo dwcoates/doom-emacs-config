@@ -30,9 +30,15 @@ type Observer interface {
 	// TaskSpawned reports a spawning call and the task it opened. toolUseID is
 	// the spawning call's activity id — which IS the created agent's AgentId
 	// under the cross-plane minting rule, so no separate id is reported —
-	// ownerAgentID the agent whose book the spawn happened in, and outputPath the
-	// spool the task writes to when the vendor named one.
-	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string)
+	// ownerAgentID the agent whose book the spawn happened in, outputPath the
+	// spool the task writes to when the vendor named one, and backgrounded
+	// whether the spawn went to the background.
+	//
+	// BACKGROUNDED TRAVELS RATHER THAN BEING RE-DERIVED. Only the converter sees
+	// the launch result that states it, and the reader's own alternative — an a*
+	// task id, or a spool target carrying a task id — is a second reading of the
+	// same fact, which is how the two halves of the seam come to disagree.
+	TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool)
 
 	// TaskStopped reports that a person stopped a task. The reader owns what
 	// that means: the terminal is minted by the spool's handler, which is the
@@ -43,13 +49,14 @@ type Observer interface {
 var _ Observer = (*sidecar)(nil)
 
 // TaskSpawned implements Observer for the sidecar.
-func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string) {
+func (s *sidecar) TaskSpawned(taskID, toolUseID, ownerAgentID, outputPath string, backgrounded bool) {
 	s.owners.observe(observation{
-		taskID:      taskID,
-		activityID:  toolUseID,
-		agentID:     ownerAgentID,
-		mainAgentID: ownerAgentID,
-		outputPath:  discover.Normalize(outputPath),
+		taskID:       taskID,
+		activityID:   toolUseID,
+		agentID:      ownerAgentID,
+		mainAgentID:  ownerAgentID,
+		outputPath:   discover.Normalize(outputPath),
+		backgrounded: backgrounded,
 	})
 }
 

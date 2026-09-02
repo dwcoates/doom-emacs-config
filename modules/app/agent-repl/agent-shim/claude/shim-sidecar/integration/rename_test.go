@@ -2,7 +2,6 @@ package integration
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -257,10 +256,15 @@ func TestARenamedTranscriptIsRewoundOnceForTheWholeFile(t *testing.T) {
 	}
 	awaitCursorAtLeast(ctx, t, store.Client, secondMove, movedAgain.Offset())
 
-	// Assert.
+	// Assert. A PERFORMED rewind is addressed by its record's SHAPE, never by a
+	// sentence: the operation, the info level (the branches that DECLINED to
+	// rewind state themselves at warn or verbose), and the `offset` key naming
+	// the position the reader moved to. A message substring is prose that may be
+	// reworded at any time, and matching on one would let this subject pass
+	// silently the moment it was.
 	var rewinds int
-	for _, r := range logsForOperation(readLog(t, opts.LogPath), "boot-rewind") {
-		if strings.Contains(r.Message, "rewound the restored cursor") {
+	for _, r := range recordsAt(readLog(t, opts.LogPath), "boot-rewind", "info") {
+		if _, ok := r.Context["offset"]; ok {
 			rewinds++
 		}
 	}

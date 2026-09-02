@@ -258,8 +258,8 @@ func TestAFailedCursorReadProducesNothing(t *testing.T) {
 	for _, line := range captured.Lines {
 		g.AppendLine(line)
 	}
-	awaitLog(ctx, t, opts.LogPath, "the suspension warning after a refused cursor read", func(r logRecord) bool {
-		return r.Level == "warn"
+	awaitLog(ctx, t, opts.LogPath, "the suspension record after a refused cursor read", func(r logRecord) bool {
+		return r.Operation == "production-suspended" && r.Level == "warn"
 	})
 
 	// Assert.
