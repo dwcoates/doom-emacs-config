@@ -72,36 +72,6 @@ func TestFactsAreAbsentBeforeAnyMerge(t *testing.T) {
 	}
 }
 
-// TestSelfRepoDirPrefersTheEnvironmentOverride covers the test knob: it
-// overrides the daemon's own-checkout identity for the method split.
-func TestSelfRepoDirPrefersTheEnvironmentOverride(t *testing.T) {
-	// Arrange: the override set.
-	t.Setenv("AGENT_REPL_SELF_REPO_DIR", "/override/checkout")
-
-	// Act.
-	got := SelfRepoDir("/real/checkout")
-
-	// Assert.
-	if got != "/override/checkout" {
-		t.Fatalf("SelfRepoDir answered %q, want the override", got)
-	}
-}
-
-// TestSelfRepoDirFallsBackToTheDaemonsCheckout covers the ordinary case, where
-// no override is set.
-func TestSelfRepoDirFallsBackToTheDaemonsCheckout(t *testing.T) {
-	// Arrange: no override.
-	t.Setenv("AGENT_REPL_SELF_REPO_DIR", "")
-
-	// Act.
-	got := SelfRepoDir("/real/checkout")
-
-	// Assert.
-	if got != "/real/checkout" {
-		t.Fatalf("SelfRepoDir answered %q, want the daemon's own checkout", got)
-	}
-}
-
 // TestTestCommandPrefersTheScriptOverride covers the gate's test knob, whose
 // existence is what lets the landed-range-to-deploy path be asserted end to end
 // without running the repository's real suite.

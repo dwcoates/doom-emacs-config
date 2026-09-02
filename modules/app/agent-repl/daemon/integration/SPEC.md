@@ -31,9 +31,9 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   changed paths and cleanliness are all fixture data. No `git init` and no real
   git binary anywhere. Helpers: `Commit(file, content)`, `Branch(name)`,
   `Checkout(name)`, `Head()`, `Worktrees()`, `Branches()`, `HasBranch`,
-  `HasWorktree`, `LogSubjects(ref)`, `AddWorktree(name)`, `CommitIn`, and the
+  `HasWorktree`, `AddWorktree(name)`, `CommitIn`, and the
   scripting verbs `ScriptConflict(worktreeDir, branch, paths...)`,
-  `ScriptFailure(dir, exit, stderr, match...)`, `SetDirty`, `SetPaths`.
+  `ScriptFailure(dir, exit, stderr, match...)`, `SetPaths`.
 - `Register(t, d, repo) WorkspaceRef` via RegisterWorkspace.
 - Fake shim (`daemon/integration/fakeshim`, a Go `main`): accepts the real
   argv (`<main.js> --listen <uds> --store-socket <p> --log-fd 3 [--fake]`),
@@ -64,9 +64,9 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   be watched refusing it — and the daemon must be STOPPED while they run.
 - ORDERING PROOFS: the fake shim records every verb on one timeline in its
   durable sink, and `harness.ShimVerbOrder(t, dir)` /
-  `d.AwaitShimVerbOrder(dir, verbs...)` / `harness.IndexOfVerb(order, verb)`
-  read it back. The in-memory recorder answers per verb and so cannot say
-  whether Hibernate preceded KillSession; this can.
+  `d.AwaitShimVerbOrder(dir, verbs...)` read it back. The in-memory recorder
+  answers per verb and so cannot say whether Hibernate preceded KillSession;
+  this can.
 - ALREADY-RUNNING WORK: `ShimProfile.LiveWork` (built with
   `harness.EncodeLiveWork(t, items...)`) is what the fake's `SessionStarted`
   states as `live_work`. It is a startup PROFILE rather than a scripted
@@ -78,11 +78,11 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   `internal/resolve/feed.DefaultPageSize`, never a copy. A walk test pushes
   `FeedPageSize + 1` rows and FAILS if `has_more` is unset; it never skips on
   "the page size is unknown".
-- TRANSCRIPTS: `harness.TranscriptPath`, `d.WriteTranscript` and
-  `harness.HasTranscript` lay down and read back a `<vendor session id>.jsonl`
-  under either account root, which is how account-switch PORTING is watched
-  under a root no session has ever run in. `d.RemoveTranscripts` is the other
-  side (a resume whose transcript is gone).
+- TRANSCRIPTS: `harness.TranscriptPath` and `harness.HasTranscript` read back a
+  `<vendor session id>.jsonl` under either account root, which is how
+  account-switch PORTING is watched under a root no session has ever run in
+  (the fake shim writes one at every StartSession). `d.RemoveTranscripts` is
+  the other side (a resume whose transcript is gone).
 - LAUNCHER FAILURE: the fake browser and every other recorder executable take
   `SetExitCode(n)`, so `OpenExternal`'s `launch_failed` arm is driven by a
   launcher that really exits non-zero rather than by a stub.

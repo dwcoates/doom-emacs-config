@@ -443,13 +443,6 @@ func worktreeOf(t *testing.T, repo *harness.Repo, name string) string {
 	return repo.AddWorktree(name)
 }
 
-// worktreeOfRepo is worktreeOf, named for the merge tests that care that the
-// repository is the daemon's own checkout.
-func worktreeOfRepo(t *testing.T, repo *harness.Repo, name string) string {
-	t.Helper()
-	return repo.AddWorktree(name)
-}
-
 // writeCommit commits a file inside a worktree of a repository.
 func writeCommit(t *testing.T, repo *harness.Repo, worktree, file, content string) string {
 	t.Helper()

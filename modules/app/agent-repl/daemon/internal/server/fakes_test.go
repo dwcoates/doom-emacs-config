@@ -158,7 +158,6 @@ type fakeVerbs struct {
 
 	answerPermissionErr  error
 	answerQuestionErr    error
-	answerColdGateErr    error
 	setPermissionModeErr error
 	assignTaskErr        error
 }

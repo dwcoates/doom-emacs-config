@@ -1,7 +1,6 @@
 package envc_test
 
 import (
-	"reflect"
 	"testing"
 
 	"claude-repld/internal/envc"
@@ -63,19 +62,6 @@ func TestLoadStateDir(t *testing.T) {
 	}
 }
 
-func TestLoadOwned(t *testing.T) {
-	// Arrange.
-	t.Setenv(envc.EnvOwned, "1")
-
-	// Act.
-	got := envc.Load().Owned()
-
-	// Assert.
-	if !got {
-		t.Fatal("Owned() = false, want true")
-	}
-}
-
 func TestWithFakeOverridesEnvironment(t *testing.T) {
 	// Arrange.
 	t.Setenv(envc.EnvFake, "")
@@ -130,58 +116,4 @@ func TestWithFakeDoesNotMutateReceiver(t *testing.T) {
 	if c.Fake() {
 		t.Fatal("receiver mutated by WithFake")
 	}
-}
-
-func TestChildEnv(t *testing.T) {
-	tests := []struct {
-		name              string
-		fake              bool
-		forbidVendorCalls bool
-		stateDir          string
-		want              []string
-	}{
-		{
-			name: "bare",
-			want: []string{"AGENT_REPL_OWNED=1"},
-		},
-		{
-			name:     "state dir only",
-			stateDir: "/s",
-			want:     []string{"AGENT_REPL_OWNED=1", "AGENT_REPL_STATE_DIR=/s"},
-		},
-		{
-			name: "fake only",
-			fake: true,
-			want: []string{"AGENT_REPL_OWNED=1", "AGENT_REPL_FAKE=1"},
-		},
-		{
-			name:              "forbid only",
-			forbidVendorCalls: true,
-			want:              []string{"AGENT_REPL_OWNED=1", "AGENT_REPL_FORBID_VENDOR_CALLS=1"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			t.Setenv(envc.EnvFake, boolEnv(tc.fake))
-			t.Setenv(envc.EnvForbidVendorCalls, boolEnv(tc.forbidVendorCalls))
-			t.Setenv(envc.EnvStateDir, tc.stateDir)
-			t.Setenv(envc.EnvOwned, "")
-
-			// Act.
-			got := envc.Load().ChildEnv()
-
-			// Assert.
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("ChildEnv() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func boolEnv(b bool) string {
-	if b {
-		return "1"
-	}
-	return ""
 }
