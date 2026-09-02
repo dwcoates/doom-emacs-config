@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 )
 
 // LoopbackHost is the only interface the daemon ever binds. The daemon serves
@@ -157,33 +156,4 @@ func (c *claim) Close() error {
 		}
 	}
 	return firstErr
-}
-
-// read parses an existing daemon.addr. A missing file, an empty file and a
-// malformed line are each an error: "no daemon is running" and "the daemon is
-// at nowhere" are different answers, and only the caller may decide what an
-// absent incumbent means.
-func read(addrPath string) (string, error) {
-	if addrPath == "" {
-		return "", fmt.Errorf("daemon.addr path is empty")
-	}
-	raw, err := os.ReadFile(addrPath)
-	if err != nil {
-		return "", fmt.Errorf("read %q: %w", addrPath, err)
-	}
-	addr := strings.TrimSpace(string(raw))
-	if addr == "" {
-		return "", fmt.Errorf("%q is empty: no daemon address is advertised", addrPath)
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "", fmt.Errorf("parse the daemon address %q from %q: %w", addr, addrPath, err)
-	}
-	if host == "" {
-		return "", fmt.Errorf("daemon address %q in %q has no host", addr, addrPath)
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return "", fmt.Errorf("daemon address %q in %q has a non-numeric port: %w", addr, addrPath, err)
-	}
-	return addr, nil
 }

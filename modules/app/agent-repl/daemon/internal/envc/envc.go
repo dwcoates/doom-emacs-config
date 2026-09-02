@@ -62,10 +62,6 @@ func (c Contracts) ForbidVendorCalls() bool { return c.forbidVendorCalls }
 // applies its default).
 func (c Contracts) StateDir() string { return c.stateDir }
 
-// Owned reports whether this process was launched by the daemon. The daemon
-// sets it on every child it spawns.
-func (c Contracts) Owned() bool { return c.owned }
-
 // WithFake returns a copy whose fake contract is the flag's value; the -fake
 // flag overrides the environment.
 func (c Contracts) WithFake(fake bool) Contracts { c.fake = fake; return c }
@@ -77,25 +73,6 @@ func (c Contracts) WithStateDir(dir string) Contracts {
 		c.stateDir = dir
 	}
 	return c
-}
-
-// ChildEnv is the contract half of a spawned child's environment: the four
-// names with this daemon's resolved values, as KEY=VALUE entries. Boolean
-// contracts that are false are omitted so a child sees exactly what the
-// spawn contract in ARCHITECTURE.md prescribes. AGENT_REPL_OWNED is always
-// set, because anything the daemon spawns is by definition owned.
-func (c Contracts) ChildEnv() []string {
-	env := []string{EnvOwned + "=1"}
-	if c.stateDir != "" {
-		env = append(env, EnvStateDir+"="+c.stateDir)
-	}
-	if c.fake {
-		env = append(env, EnvFake+"=1")
-	}
-	if c.forbidVendorCalls {
-		env = append(env, EnvForbidVendorCalls+"=1")
-	}
-	return env
 }
 
 // truthy is the one spelling of a boolean environment contract. Anything not
