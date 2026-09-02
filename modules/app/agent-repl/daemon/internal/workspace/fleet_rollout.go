@@ -308,11 +308,11 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	// no watches leaves the daemon blind to the session it just adopted — no
 	// turn terminals, no live work, no connectivity truth.
 	//
-	// The opening level comes from the DURABLE RECORD rather than from a
-	// StartSession answer, because the session is already started on the shim
-	// and the contract offers no way to read a running shim's SessionStarted.
-	// The turn in flight and the live-work set are therefore NOT restated here:
-	// the shim's own pushes are what repopulate them.
+	// THE ATTACH IS PURE (landing 7): the watcher opens with NO session facts
+	// and takes them from the shim's own re-announcement of SessionStarted,
+	// which rides every new WatchSession right after the opening diagnostics.
+	// The durable record is not consulted for the opening level any more —
+	// the shim is the authority on its own session.
 	if err := f.watchInstalled(ctx, ws, c); err != nil {
 		return err
 	}
@@ -346,18 +346,18 @@ func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Clien
 	// ATTACH ONLY. The transferred shim's session is ALREADY STARTED — the
 	// whole point of a handover is that the conversation never stopped — and
 	// StartSession on it would either be refused or, worse, start a second one.
-	// The contract offers no way to read a running shim's SessionStarted, so
-	// the opening level comes from the durable record and the shim's own
-	// pushes repopulate the rest.
+	// The session facts come from the shim's re-announcement on the watch this
+	// install opens (landing 7), never from the durable record.
 	if err := f.Install(ctx, ws, client); err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
 	return client, nil
 }
 
-// watchInstalled opens an adopted shim's watches from the session's durable
-// record. A workspace with NO session record has no conversation to watch, so
-// it is left alone.
+// watchInstalled opens an adopted shim's watches. The durable record is read
+// for ONE decision only — whether there is a conversation here at all — because
+// a workspace with no session record has nothing to watch. Every FACT about the
+// session comes from the shim's re-announcement on the watch itself.
 func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimclient.Client) error {
 	record, err := f.deps.DB.Workspace(ctx, ws)
 	if err != nil {
@@ -378,12 +378,7 @@ func (f *Fleet) watchInstalled(ctx context.Context, ws ids.WorkspaceID, c shimcl
 		return nil
 	}
 
-	started := &conversationv1.SessionStarted{
-		VendorSessionId: session.VendorSessionID,
-		EffectiveModel:  &conversationv1.AgentModel{Name: f.modelOrDefault(session.Model)},
-		PermissionMode:  permissionMode(session.PermissionMode),
-	}
-	watcher, err := f.watch(context.WithoutCancel(ctx), ws, c, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, c, sessionwatcher.Session{}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opFleetRollout, "could not open the adopted session's watches", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("workspace: install a shim for %q: start the watcher: %w", ws, err)

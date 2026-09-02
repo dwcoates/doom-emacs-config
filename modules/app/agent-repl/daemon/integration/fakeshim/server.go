@@ -113,6 +113,10 @@ type server struct {
 	// its answer has been written.
 	sessionKilled bool
 	vendorID      string
+	// started is the SessionStarted this fake last answered. Every new session
+	// watch RE-ANNOUNCES it right after the opening diagnostics (landing 7),
+	// which is what lets an adopting daemon attach purely.
+	started *conversationv1.SessionStarted
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
@@ -300,6 +304,14 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	return connect.NewResponse(resp), nil
 }
 
+// startedSession answers the SessionStarted this fake last announced, nil
+// before any session has started.
+func (s *server) startedSession() *conversationv1.SessionStarted {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.started
+}
+
 // claimFirstSessionStream reports whether this open is the FIRST session
 // stream, which is the one DelayDiagnostics withholds its opening frames from.
 func (s *server) claimFirstSessionStream() bool {
@@ -322,6 +334,7 @@ func (s *server) noteVendorSession(resp *shimv1.StartSessionResponse) {
 	s.mu.Lock()
 	first := s.vendorID == ""
 	s.vendorID = id
+	s.started = resp.GetSuccess().GetSession()
 	hook := s.onSessionStarted
 	s.mu.Unlock()
 	s.writeTranscript(id)
@@ -396,13 +409,28 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 	defer s.sessions.unsubscribe(id)
 
 	if !s.profile.DelayDiagnostics || !s.claimFirstSessionStream() {
-		if err := stream.Send(&shimv1.WatchSessionResponse{Update: HealthyDiagnostics()}); err != nil {
+		if err := stream.Send(&shimv1.WatchSessionResponse{
+			Frame: &shimv1.WatchSessionResponse_Update{Update: HealthyDiagnostics()},
+		}); err != nil {
 			return err
 		}
 		// The opening context usage rides the same open: the topbar publishes
 		// nothing until it holds one, exactly as against the real shim.
-		if err := stream.Send(&shimv1.WatchSessionResponse{Update: DefaultContextUsage()}); err != nil {
+		if err := stream.Send(&shimv1.WatchSessionResponse{
+			Frame: &shimv1.WatchSessionResponse_Update{Update: DefaultContextUsage()},
+		}); err != nil {
 			return err
+		}
+		// THE RE-ANNOUNCEMENT (landing 7): the session's original
+		// SessionStarted, once per watch, right after the opening
+		// diagnostics — on EVERY new watch, so a daemon that adopts an
+		// already-started shim learns the facts from the shim.
+		if started := s.startedSession(); started != nil {
+			if err := stream.Send(&shimv1.WatchSessionResponse{
+				Frame: &shimv1.WatchSessionResponse_SessionStarted{SessionStarted: started},
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	for {
@@ -415,7 +443,9 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 				// the daemon must read as a connectivity failure.
 				return connect.NewError(connect.CodeUnavailable, errors.New("fakeshim: session stream dropped"))
 			}
-			if err := stream.Send(&shimv1.WatchSessionResponse{Update: u}); err != nil {
+			if err := stream.Send(&shimv1.WatchSessionResponse{
+				Frame: &shimv1.WatchSessionResponse_Update{Update: u},
+			}); err != nil {
 				return err
 			}
 		}

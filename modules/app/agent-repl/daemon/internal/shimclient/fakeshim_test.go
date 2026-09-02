@@ -239,7 +239,11 @@ func (f *fakeShim) WatchSession(ctx context.Context, _ *connect.Request[shimv1.W
 		case <-s.drop:
 			return nil
 		case update := <-s.updates:
-			if err := stream.Send(&shimv1.WatchSessionResponse{Update: update}); err != nil {
+			frame := &shimv1.WatchSessionResponse{}
+			if update != nil {
+				frame.Frame = &shimv1.WatchSessionResponse_Update{Update: update}
+			}
+			if err := stream.Send(frame); err != nil {
 				return err
 			}
 		}

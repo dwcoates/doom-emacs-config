@@ -586,7 +586,7 @@ func TestSessionStreamReachesRouting(t *testing.T) {
 	h.quiet()
 
 	// Act.
-	h.session.send(t, compactingUpdate())
+	h.sendSessionUpdate(t, compactingUpdate())
 
 	// Assert: the wait returns the moment the footer is called.
 	h.rec.until(t, "footer.OnSessionUpdate")
