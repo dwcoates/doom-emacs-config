@@ -232,13 +232,21 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 // TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant covers the
 // roster's durable half moving on a LANDED merge.
 //
-// It is built on the merge tests' own fixture, and deliberately so: a merge
-// only lands for a workspace the daemon CREATED (its layout facts are what the
-// merge reads its target and brief from), and a bare `RegisterWorkspace` on a
-// hand-made worktree is refused for exactly that reason — which is what
-// TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused asserts. This test
-// previously registered such a worktree and then waited for a merge that could
-// never be enqueued.
+// It is built on the merge tests' own fixture (mergeCleanRepo), and
+// deliberately so: a merge only lands for a workspace the daemon CREATED
+// (its layout facts are what the merge reads its target and brief from), and
+// a bare `RegisterWorkspace` on a hand-made worktree is refused for exactly
+// that reason — which is what
+// TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused asserts.
+//
+// mergeCleanRepo's workspace is NOT such a bare registration: mergeCreateChild
+// mints it through the real CreateWorkspace rpc, which writes the
+// wsm.CreationJob carrying Layout.SourceBranch / SourceDir / TargetDir —
+// internal/merge/orchestrator.go's layoutFor (queue.go's Enqueue calls it
+// first) reads exactly that job, finds it, and returns it with no refusal.
+// TestTheTestGatePassingSettlesTheTestsTab proves the same fixture's merge
+// lands cleanly end to end, so no daemon.merge.enqueue WARN is ever produced
+// on this path — that expectation was phantom and is dropped.
 func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
@@ -269,19 +277,12 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	if row.GetWhen().GetMerged().GetAtMs() == 0 {
 		t.Fatalf("the recently merged row's when = %v, want when.merged stamped", row.GetWhen())
 	}
-	// UNCERTAIN — needs a suite run to confirm. `source` here is only
-	// harness.Register-ed, never materialized through CreateWorkspace, so it
-	// carries no wsm.CreationJob; internal/merge/orchestrator.go's layoutFor
-	// says geometry is "NEVER inferred later: a workspace materialized
-	// without it can never be merged", and Enqueue
-	// (internal/merge/queue.go:32-35) refuses immediately with WARN
-	// daemon.merge.enqueue when layoutFor finds none. If that reading is
-	// right this MergeWorkspace call is refused rather than landed, which
-	// would also mean the roster never reaches recently_merged and the test
-	// hangs on its own awaitRoster — a likely pre-existing defect in this
-	// test unrelated to critique 20, flagged to the teamlead. Naming the one
-	// operation the refusal path reaches as the best guess:
-	d.ExpectWarnings("daemon.merge.enqueue")
+	// internal/resolve/sidebar/rows.go's recedes() greys a row on ANY of three
+	// settled ends, one being rec.MergedAt != nil — a merged row's closed.closed
+	// is true for that reason, not because the workspace's editor was closed.
+	if !row.GetClosed().GetClosed() {
+		t.Fatalf("the recently merged row's closed.closed = false, want true (recedes() on rec.MergedAt != nil)")
+	}
 }
 
 func TestTaskViewGroupsAssignedWorkspaces(t *testing.T) {
