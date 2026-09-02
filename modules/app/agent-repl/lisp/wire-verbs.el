@@ -1431,6 +1431,12 @@ arrive here as unknown fields."
     (agent-repl-wire-verbs--check-keys message json '(command))
     (list :command (agent-repl-wire-verbs--decode-string message 'command json))))
 
+(defun agent-repl-wire-decode-submit-prompt-command-acted (json)
+  "Decode SubmitPromptCommandActed from JSON.  Empty: a session-acting command
+was recognized and queued as an act that mints no turn; the visible effect
+arrives on the component streams."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptCommandActed" json))
+
 (defun agent-repl-wire-decode-submit-prompt-success-turn (json)
   "Decode SubmitPromptSuccess's `turn' outcome arm from JSON."
   (agent-repl-wire-decode-submit-prompt-turn json))
@@ -1443,20 +1449,26 @@ arrive here as unknown fields."
   "Decode SubmitPromptSuccess's `command_refused' outcome arm from JSON."
   (agent-repl-wire-decode-submit-prompt-command-refused json))
 
+(defun agent-repl-wire-decode-submit-prompt-success-command-acted (json)
+  "Decode SubmitPromptSuccess's `command_acted' outcome arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-command-acted json))
+
 (defun agent-repl-wire-decode-submit-prompt-success (json)
   "Decode SubmitPromptSuccess from JSON into (:arm ARM :value V).
-All three arms are ANSWERS: a minted turn, a resolved panel, or a
-recognized-but-unsupported command.  Only the turn arm means there is
-anything to await."
+All four arms are ANSWERS: a minted turn, a resolved panel, a
+recognized-but-unsupported command, or a session-acting command the daemon
+acted on.  Only the turn arm means there is anything to await."
   (let ((message "SubmitPromptSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused))
+    (agent-repl-wire-verbs--check-keys message json '(turn commandPanel commandRefused commandActed))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'turn :turn #'agent-repl-wire-decode-submit-prompt-success-turn)
            (list 'commandPanel :command-panel
                  #'agent-repl-wire-decode-submit-prompt-success-command-panel)
            (list 'commandRefused :command-refused
-                 #'agent-repl-wire-decode-submit-prompt-success-command-refused)))))
+                 #'agent-repl-wire-decode-submit-prompt-success-command-refused)
+           (list 'commandActed :command-acted
+                 #'agent-repl-wire-decode-submit-prompt-success-command-acted)))))
 
 (defun agent-repl-wire-decode-submit-prompt-refused-merging (json)
   "Decode SubmitPromptRefusedMerging from JSON.  Empty: a merge is in flight
@@ -1500,15 +1512,16 @@ to another workspace."
 decode."
   (agent-repl-wire-verbs--decode-empty "SubmitPromptFeedUndecodable" json))
 
-(defun agent-repl-wire-decode-submit-prompt-turn-already-open (json)
-  "Decode SubmitPromptTurnAlreadyOpen from JSON.  Empty: A bubble-addressed
-submit while that agent's turn runs."
-  (agent-repl-wire-verbs--decode-empty "SubmitPromptTurnAlreadyOpen" json))
-
 (defun agent-repl-wire-decode-submit-prompt-no-session (json)
   "Decode SubmitPromptNoSession from JSON.  Empty: The workspace has no session
 to submit to."
   (agent-repl-wire-verbs--decode-empty "SubmitPromptNoSession" json))
+
+(defun agent-repl-wire-decode-submit-prompt-duplicate-submission (json)
+  "Decode SubmitPromptDuplicateSubmission from JSON.  Empty: the client-minted
+`idempotency_key' was already accepted for this workspace, so the earlier
+submission stands and nothing is submitted twice."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptDuplicateSubmission" json))
 
 (defun agent-repl-wire-decode-submit-prompt-error-merging (json)
   "Decode SubmitPromptError's `merging' reason arm from JSON."
@@ -1538,20 +1551,20 @@ to submit to."
   "Decode SubmitPromptError's `feed_undecodable' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-feed-undecodable json))
 
-(defun agent-repl-wire-decode-submit-prompt-error-turn-already-open (json)
-  "Decode SubmitPromptError's `turn_already_open' reason arm from JSON."
-  (agent-repl-wire-decode-submit-prompt-turn-already-open json))
-
 (defun agent-repl-wire-decode-submit-prompt-error-no-session (json)
   "Decode SubmitPromptError's `no_session' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-no-session json))
+
+(defun agent-repl-wire-decode-submit-prompt-error-duplicate-submission (json)
+  "Decode SubmitPromptError's `duplicate_submission' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-duplicate-submission json))
 
 (defun agent-repl-wire-decode-submit-prompt-error (json)
   "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable turnAlreadyOpen noSession))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -1562,8 +1575,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-submit-prompt-error-not-yet-adopted)
          (list 'feedNotInWorkspace :feed-not-in-workspace #'agent-repl-wire-decode-submit-prompt-error-feed-not-in-workspace)
          (list 'feedUndecodable :feed-undecodable #'agent-repl-wire-decode-submit-prompt-error-feed-undecodable)
-         (list 'turnAlreadyOpen :turn-already-open #'agent-repl-wire-decode-submit-prompt-error-turn-already-open)
-         (list 'noSession :no-session #'agent-repl-wire-decode-submit-prompt-error-no-session))))))
+         (list 'noSession :no-session #'agent-repl-wire-decode-submit-prompt-error-no-session)
+         (list 'duplicateSubmission :duplicate-submission #'agent-repl-wire-decode-submit-prompt-error-duplicate-submission))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
@@ -1787,6 +1800,11 @@ paused."
 for that workspace."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoSuchQueuedMerge" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-unknown-repository (json)
+  "Decode UpdateMergeQueueUnknownRepository from JSON.  Empty: `repository'
+named a RepositoryRef the daemon's registry does not hold."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueUnknownRepository" json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -1815,12 +1833,16 @@ for that workspace."
   "Decode UpdateMergeQueueError's `no_such_queued_merge' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-no-such-queued-merge json))
 
+(defun agent-repl-wire-decode-update-merge-queue-error-unknown-repository (json)
+  "Decode UpdateMergeQueueError's `unknown_repository' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-unknown-repository json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error (json)
   "Decode UpdateMergeQueueError from JSON into (:cause (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -1830,7 +1852,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'notYetAdopted :not-yet-adopted #'agent-repl-wire-decode-update-merge-queue-error-not-yet-adopted)
          (list 'alreadyPaused :already-paused #'agent-repl-wire-decode-update-merge-queue-error-already-paused)
          (list 'notPaused :not-paused #'agent-repl-wire-decode-update-merge-queue-error-not-paused)
-         (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge))))))
+         (list 'noSuchQueuedMerge :no-such-queued-merge #'agent-repl-wire-decode-update-merge-queue-error-no-such-queued-merge)
+         (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."
