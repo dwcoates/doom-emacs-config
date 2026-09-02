@@ -1105,7 +1105,7 @@ func TestInterruptTurnWithLiveDetachedAgentsAnswersConfirmRequiredWithTheCount(t
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
 	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
 	// watcher's own record of it is the edge that says it changed. The footer's
 	// background chip cannot serve as the signal: a turn is in flight here, and
@@ -1141,7 +1141,7 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 	f := newOpened(t, harness.Opts{})
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
-	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
 	// The LIVE-WORK SET is what the interrupt's challenge counts, and the
 	// watcher's own record of it is the edge that says it changed. The footer's
 	// background chip cannot serve as the signal: a turn is in flight here, and
@@ -1168,7 +1168,38 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 		t.Fatalf("Interrupt{turn, confirm_agents} = error %v, want a success", err)
 	}
 	f.shim.ExpectKillTurn()
-	f.shim.ExpectStopBash()
+	if got := f.shim.ExpectUpdateAgent(); got.GetInput().GetStop() == nil {
+		t.Fatalf("the confirmed interrupt's UpdateAgent = %v, want the stop arm on the detached subagent", got)
+	}
+}
+
+// TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation is the other side
+// of the challenge's contract: `live_agent_count` counts AGENTS, and a
+// detached shell is not one. It dies with the query like anything else, but
+// the user is not challenged over it.
+func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the work", "k-running", origin)
+	f.shim.ExpectStartTurn()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-1", "sleep 5")))
+	awaitLiveWork(t, f, 1)
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Interrupt{turn} with only a detached shell = error %v, want a success", err)
+	}
+	if challenge := resp.Msg.GetError().GetConfirmRequired(); challenge != nil {
+		t.Fatalf("Interrupt{turn} with only a detached shell = confirm_required(%d), want no challenge", challenge.GetLiveAgentCount())
+	}
+	f.shim.ExpectKillTurn()
+	f.d.ExpectWarnings(harness.AllowAllWarnings)
 }
 
 func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
