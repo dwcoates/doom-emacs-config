@@ -568,3 +568,47 @@ func TestAnswerQuestionStillSurfacesATransportFailure(t *testing.T) {
 		t.Fatalf("AnswerQuestion() = %v, want a failure rather than a refusal", err)
 	}
 }
+
+// TestAnswerColdGateRetiresTheGateItAnswered covers the spend: a gate left
+// standing would re-open the session again on every replayed click, and a
+// second answer must find nothing standing instead.
+func TestAnswerColdGateRetiresTheGateItAnswered(t *testing.T) {
+	// Arrange: a standing gate on a live session.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1"}
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1",
+		&frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}},
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AnswerColdGate: %v", err)
+	}
+	if f.cards.coldGatesCleared != 1 {
+		t.Fatalf("cold gates retired = %d, want exactly the answered one", f.cards.coldGatesCleared)
+	}
+}
+
+// TestASecondAnswerOfTheSameColdGateIsRefused is the consequence the retirement
+// exists for: the gate is spent, so answering it again finds none standing.
+func TestASecondAnswerOfTheSameColdGateIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1"}
+	pay := &frontendv1.FeedColdGateResolved{Choice: &frontendv1.FeedColdGateResolved_Pay{Pay: &frontendv1.FeedColdGateResolvedPay{}}}
+	if err := f.verbs.AnswerColdGate(context.Background(), "w1", pay,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED); err != nil {
+		t.Fatalf("the first AnswerColdGate: %v", err)
+	}
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", pay,
+		conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED)
+
+	// Assert.
+	asRefusal(t, err, ArmNoColdGate)
+}

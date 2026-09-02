@@ -266,6 +266,15 @@ func (f *Fleet) ColdGate(ws ids.WorkspaceID) (ServedColdGate, bool) {
 	return gate, ok
 }
 
+// ClearColdGate retires an answered gate. It is the resolve path's own step:
+// Stop clears the gate along with the session, but a gate that was ANSWERED
+// leaves no session behind to clear it.
+func (f *Fleet) ClearColdGate(ws ids.WorkspaceID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.coldGates, ws)
+}
+
 // source is the decided way a session comes up: fresh, or a resume of one named
 // conversation.
 type source struct {
