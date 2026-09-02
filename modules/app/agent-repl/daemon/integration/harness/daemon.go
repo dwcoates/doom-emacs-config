@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -149,7 +148,6 @@ type Daemon struct {
 	t          *testing.T
 	ctx        context.Context
 	cmd        *exec.Cmd
-	stderr     *syncBuffer
 	stderrPath string
 	client     agentreplv1connect.AgentReplClient
 	http       *http.Client
@@ -205,24 +203,6 @@ func cleanGitEnv(env []string) []string {
 	return out
 }
 
-// syncBuffer collects a process's stderr without racing the reader.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
 // StartDaemon lays out a hermetic environment, starts the daemon, waits for
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.
 func StartDaemon(t *testing.T, opts Opts) *Daemon {
@@ -247,7 +227,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Deploy:             NewFakeDeployScript(t, filepath.Join(root, "bin")),
 		t:                  t,
-		stderr:             &syncBuffer{},
 		expected:           map[string]bool{},
 		shims:              map[string]*ShimControl{},
 	}
@@ -686,9 +665,6 @@ func (d *Daemon) AwaitExit() int {
 
 // Stderr is everything the daemon wrote to its terminal mirror.
 func (d *Daemon) Stderr() string {
-	if d.stderrPath == "" {
-		return d.stderr.String()
-	}
 	raw, err := os.ReadFile(d.stderrPath)
 	if err != nil {
 		return ""
