@@ -48,6 +48,17 @@ export interface AssistantOptions {
   /** Suppress the transcript lines (a message the vendor streams but never records). */
   readonly skipTranscript?: boolean;
   /**
+   * Suppress the THINKING PRELUDE a tool call and a turn's conclusion carry.
+   *
+   * OBSERVED IN EVERY CAPTURE: the vendor's first API response of a tool turn
+   * is `[thinking, tool_use]` on ONE message id, and its closing response is
+   * `[thinking, text]` — a reasoning block precedes both. So the mock emits one
+   * by default, and a scenario opts out only where it is deliberately modelling
+   * a response the vendor produced without one (a refusal leg, a continuation
+   * of an already-open message).
+   */
+  readonly noReasoning?: boolean;
+  /**
    * Stamp the message with a specific instant instead of the mock's clock.
    *
    * FOR SCENARIOS THAT DELIBERATELY LIE ABOUT WHEN, and only about when — the

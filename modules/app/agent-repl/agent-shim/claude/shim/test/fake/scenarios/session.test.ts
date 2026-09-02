@@ -477,8 +477,10 @@ describe("an unsolicited model fallback", () => {
       .filter((m) => m.type === "assistant")
       .map((m) => (m.message as { model: string }).model);
 
-    // Assert
-    expect(answers).toEqual(["fake-sonnet-5"]);
+    // Assert. TWO lines, one per block: the closing API response is `[thinking,
+    // text]` in every capture and both lines report the model that produced
+    // them, which is the fallback.
+    expect(answers).toEqual(["fake-sonnet-5", "fake-sonnet-5"]);
   });
 
   it("STICKS: a following ordinary turn answers on the fallback model too", async () => {
