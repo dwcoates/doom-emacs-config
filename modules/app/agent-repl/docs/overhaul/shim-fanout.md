@@ -709,3 +709,14 @@ every UX or contract gap you surfaced instead of improvising.
   conversation_owned. Folded into remediation #4 agent S (owns main.ts lock
   path + process.test); shim.md KERNEL LOCKS amended; "Process shell" startup
   order above is superseded (locks are no longer taken before bind).
+- LEDGER: remediation #4 agent S merged at faef4c312 (tip 7aa77d52d):
+  workspace lock inside StartSession (be119abbf; lead notified); signal
+  handlers before the "serving" record; host_shutdown terminal now produced;
+  mock result/turn record share one uuid; harness dialed the wrong socket
+  for a second shim (fixed); `AGENT_REPL_FAKE_REFUSE` lever; integration
+  238 / 0 / 2 todo. Rulings by the lead: KillSession query_refused_to_end
+  stays a todo (no producer; fatalizing a refused interrupt is a contract
+  change); retry-buffer overflow survivors-order test deferred to the resume
+  queue (no drain hook this wave); identity_rotated key has no file-plane
+  join (accepted). S resumed for one fix: fresh StartSession retry after
+  vendor_start_failed must not escape as Internal. Agent T still running.
