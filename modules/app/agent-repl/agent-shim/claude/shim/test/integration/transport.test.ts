@@ -26,7 +26,7 @@ import {
   watchAgentRequest,
   workId,
 } from "../integration-support/client.js";
-import { sessionStarted, sessionUpdate } from "../integration-support/expect.js";
+import { sessionStarted, sessionUpdate, watchAgentPage } from "../integration-support/expect.js";
 import { rawBody, rawStreamOpenH1, rawStreamOpenH2 } from "../integration-support/raw.js";
 
 afterEach(cleanupShims);
@@ -325,5 +325,34 @@ describe("a stream closed by the client ends nothing", () => {
       startTurnRequest({ turn: "t2", text: "another" }),
     );
     expect(second.result.case).toBe("failure");
+  });
+});
+
+describe("many streams on one socket", () => {
+  test("several HTTP/1.1 WatchAgent streams all receive their opening page", async () => {
+    // THE EARLY HEAD AND RESPONSE COMPRESSION CANNOT BOTH BE TRUE. The shim
+    // writes the response head itself the moment it accepts a stream, and the
+    // adapter's own later `writeHead` — the one that would have announced
+    // `connect-content-encoding` — is absorbed. So a compressed envelope would
+    // reach a client that was never told how to read it, and connect-go's own
+    // client says exactly that: "received compressed envelope, but do not know
+    // how to decompress".
+    //
+    // It only bites once a page grows past the compression threshold, which is
+    // why it showed up as later streams failing while the first few worked.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    // Grow the book so an opening page is comfortably over any threshold.
+    for (const turn of ["t1", "t2", "t3", "t4"]) {
+      await shim.clients.h1.startTurn(startTurnRequest({ turn, text: "!md" }));
+    }
+
+    const streams = [0, 1, 2, 3, 4, 5].map(() =>
+      openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options)),
+    );
+    const pages = await Promise.all(streams.map(async (stream) => stream.next()));
+
+    for (const page of pages) expect(watchAgentPage(page).entries.length).toBeGreaterThan(0);
+    for (const stream of streams) stream.close();
   });
 });
