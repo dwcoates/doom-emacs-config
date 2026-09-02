@@ -215,6 +215,7 @@ type UpdateAgentFailure struct {
 	//	*UpdateAgentFailure_NothingRunning
 	//	*UpdateAgentFailure_NoSession
 	//	*UpdateAgentFailure_NotDeliverable
+	//	*UpdateAgentFailure_AgentBusy
 	Kind          isUpdateAgentFailure_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -318,6 +319,15 @@ func (x *UpdateAgentFailure) GetNotDeliverable() *UpdateAgentNotDeliverable {
 	return nil
 }
 
+func (x *UpdateAgentFailure) GetAgentBusy() *UpdateAgentAgentBusy {
+	if x != nil {
+		if x, ok := x.Kind.(*UpdateAgentFailure_AgentBusy); ok {
+			return x.AgentBusy
+		}
+	}
+	return nil
+}
+
 type isUpdateAgentFailure_Kind interface {
 	isUpdateAgentFailure_Kind()
 }
@@ -356,6 +366,13 @@ type UpdateAgentFailure_NotDeliverable struct {
 	NotDeliverable *UpdateAgentNotDeliverable `protobuf:"bytes,7,opt,name=not_deliverable,json=notDeliverable,proto3,oneof"`
 }
 
+type UpdateAgentFailure_AgentBusy struct {
+	// A prompt was sent to a subagent whose own turn is already running; the
+	// daemon relays it as SubmitPromptError.bubble_refused{agent_busy}.
+	// (Landing 7, 2026-09-02.)
+	AgentBusy *UpdateAgentAgentBusy `protobuf:"bytes,8,opt,name=agent_busy,json=agentBusy,proto3,oneof"`
+}
+
 func (*UpdateAgentFailure_UnknownAgent) isUpdateAgentFailure_Kind() {}
 
 func (*UpdateAgentFailure_NoOpenAsk) isUpdateAgentFailure_Kind() {}
@@ -368,6 +385,44 @@ func (*UpdateAgentFailure_NoSession) isUpdateAgentFailure_Kind() {}
 
 func (*UpdateAgentFailure_NotDeliverable) isUpdateAgentFailure_Kind() {}
 
+func (*UpdateAgentFailure_AgentBusy) isUpdateAgentFailure_Kind() {}
+
+type UpdateAgentAgentBusy struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateAgentAgentBusy) Reset() {
+	*x = UpdateAgentAgentBusy{}
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateAgentAgentBusy) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateAgentAgentBusy) ProtoMessage() {}
+
+func (x *UpdateAgentAgentBusy) ProtoReflect() protoreflect.Message {
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateAgentAgentBusy.ProtoReflect.Descriptor instead.
+func (*UpdateAgentAgentBusy) Descriptor() ([]byte, []int) {
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{4}
+}
+
 type UpdateAgentUnknownAgent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -376,7 +431,7 @@ type UpdateAgentUnknownAgent struct {
 
 func (x *UpdateAgentUnknownAgent) Reset() {
 	*x = UpdateAgentUnknownAgent{}
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +443,7 @@ func (x *UpdateAgentUnknownAgent) String() string {
 func (*UpdateAgentUnknownAgent) ProtoMessage() {}
 
 func (x *UpdateAgentUnknownAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[4]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +456,7 @@ func (x *UpdateAgentUnknownAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentUnknownAgent.ProtoReflect.Descriptor instead.
 func (*UpdateAgentUnknownAgent) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{4}
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{5}
 }
 
 type UpdateAgentNoOpenAsk struct {
@@ -412,7 +467,7 @@ type UpdateAgentNoOpenAsk struct {
 
 func (x *UpdateAgentNoOpenAsk) Reset() {
 	*x = UpdateAgentNoOpenAsk{}
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -424,7 +479,7 @@ func (x *UpdateAgentNoOpenAsk) String() string {
 func (*UpdateAgentNoOpenAsk) ProtoMessage() {}
 
 func (x *UpdateAgentNoOpenAsk) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[5]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -437,7 +492,7 @@ func (x *UpdateAgentNoOpenAsk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentNoOpenAsk.ProtoReflect.Descriptor instead.
 func (*UpdateAgentNoOpenAsk) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{5}
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{6}
 }
 
 type UpdateAgentAnswerMismatch struct {
@@ -448,7 +503,7 @@ type UpdateAgentAnswerMismatch struct {
 
 func (x *UpdateAgentAnswerMismatch) Reset() {
 	*x = UpdateAgentAnswerMismatch{}
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +515,7 @@ func (x *UpdateAgentAnswerMismatch) String() string {
 func (*UpdateAgentAnswerMismatch) ProtoMessage() {}
 
 func (x *UpdateAgentAnswerMismatch) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[6]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +528,7 @@ func (x *UpdateAgentAnswerMismatch) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentAnswerMismatch.ProtoReflect.Descriptor instead.
 func (*UpdateAgentAnswerMismatch) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{6}
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{7}
 }
 
 type UpdateAgentNothingRunning struct {
@@ -484,7 +539,7 @@ type UpdateAgentNothingRunning struct {
 
 func (x *UpdateAgentNothingRunning) Reset() {
 	*x = UpdateAgentNothingRunning{}
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -496,7 +551,7 @@ func (x *UpdateAgentNothingRunning) String() string {
 func (*UpdateAgentNothingRunning) ProtoMessage() {}
 
 func (x *UpdateAgentNothingRunning) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[7]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -509,7 +564,7 @@ func (x *UpdateAgentNothingRunning) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentNothingRunning.ProtoReflect.Descriptor instead.
 func (*UpdateAgentNothingRunning) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{7}
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{8}
 }
 
 type UpdateAgentNoSession struct {
@@ -520,7 +575,7 @@ type UpdateAgentNoSession struct {
 
 func (x *UpdateAgentNoSession) Reset() {
 	*x = UpdateAgentNoSession{}
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -532,7 +587,7 @@ func (x *UpdateAgentNoSession) String() string {
 func (*UpdateAgentNoSession) ProtoMessage() {}
 
 func (x *UpdateAgentNoSession) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[8]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -545,7 +600,7 @@ func (x *UpdateAgentNoSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentNoSession.ProtoReflect.Descriptor instead.
 func (*UpdateAgentNoSession) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{8}
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{9}
 }
 
 type UpdateAgentNotDeliverable struct {
@@ -556,7 +611,7 @@ type UpdateAgentNotDeliverable struct {
 
 func (x *UpdateAgentNotDeliverable) Reset() {
 	*x = UpdateAgentNotDeliverable{}
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -568,7 +623,7 @@ func (x *UpdateAgentNotDeliverable) String() string {
 func (*UpdateAgentNotDeliverable) ProtoMessage() {}
 
 func (x *UpdateAgentNotDeliverable) ProtoReflect() protoreflect.Message {
-	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[9]
+	mi := &file_shim_v1_endpoint_update_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -581,7 +636,7 @@ func (x *UpdateAgentNotDeliverable) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateAgentNotDeliverable.ProtoReflect.Descriptor instead.
 func (*UpdateAgentNotDeliverable) Descriptor() ([]byte, []int) {
-	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{9}
+	return file_shim_v1_endpoint_update_agent_proto_rawDescGZIP(), []int{10}
 }
 
 var File_shim_v1_endpoint_update_agent_proto protoreflect.FileDescriptor
@@ -597,7 +652,7 @@ const file_shim_v1_endpoint_update_agent_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\v2\x1b.shim.v1.UpdateAgentSuccessH\x00R\asuccess\x127\n" +
 	"\afailure\x18\x02 \x01(\v2\x1b.shim.v1.UpdateAgentFailureH\x00R\afailureB\b\n" +
 	"\x06result\"\x14\n" +
-	"\x12UpdateAgentSuccess\"\xeb\x03\n" +
+	"\x12UpdateAgentSuccess\"\xab\x04\n" +
 	"\x12UpdateAgentFailure\x12\x16\n" +
 	"\x06detail\x18\x01 \x01(\tR\x06detail\x12G\n" +
 	"\runknown_agent\x18\x02 \x01(\v2 .shim.v1.UpdateAgentUnknownAgentH\x00R\funknownAgent\x12?\n" +
@@ -606,8 +661,11 @@ const file_shim_v1_endpoint_update_agent_proto_rawDesc = "" +
 	"\x0fnothing_running\x18\x05 \x01(\v2\".shim.v1.UpdateAgentNothingRunningH\x00R\x0enothingRunning\x12>\n" +
 	"\n" +
 	"no_session\x18\x06 \x01(\v2\x1d.shim.v1.UpdateAgentNoSessionH\x00R\tnoSession\x12M\n" +
-	"\x0fnot_deliverable\x18\a \x01(\v2\".shim.v1.UpdateAgentNotDeliverableH\x00R\x0enotDeliverableB\x06\n" +
-	"\x04kind\"\x19\n" +
+	"\x0fnot_deliverable\x18\a \x01(\v2\".shim.v1.UpdateAgentNotDeliverableH\x00R\x0enotDeliverable\x12>\n" +
+	"\n" +
+	"agent_busy\x18\b \x01(\v2\x1d.shim.v1.UpdateAgentAgentBusyH\x00R\tagentBusyB\x06\n" +
+	"\x04kind\"\x16\n" +
+	"\x14UpdateAgentAgentBusy\"\x19\n" +
 	"\x17UpdateAgentUnknownAgent\"\x16\n" +
 	"\x14UpdateAgentNoOpenAsk\"\x1b\n" +
 	"\x19UpdateAgentAnswerMismatch\"\x1b\n" +
@@ -627,37 +685,39 @@ func file_shim_v1_endpoint_update_agent_proto_rawDescGZIP() []byte {
 	return file_shim_v1_endpoint_update_agent_proto_rawDescData
 }
 
-var file_shim_v1_endpoint_update_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_shim_v1_endpoint_update_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_shim_v1_endpoint_update_agent_proto_goTypes = []any{
 	(*UpdateAgentRequest)(nil),        // 0: shim.v1.UpdateAgentRequest
 	(*UpdateAgentResponse)(nil),       // 1: shim.v1.UpdateAgentResponse
 	(*UpdateAgentSuccess)(nil),        // 2: shim.v1.UpdateAgentSuccess
 	(*UpdateAgentFailure)(nil),        // 3: shim.v1.UpdateAgentFailure
-	(*UpdateAgentUnknownAgent)(nil),   // 4: shim.v1.UpdateAgentUnknownAgent
-	(*UpdateAgentNoOpenAsk)(nil),      // 5: shim.v1.UpdateAgentNoOpenAsk
-	(*UpdateAgentAnswerMismatch)(nil), // 6: shim.v1.UpdateAgentAnswerMismatch
-	(*UpdateAgentNothingRunning)(nil), // 7: shim.v1.UpdateAgentNothingRunning
-	(*UpdateAgentNoSession)(nil),      // 8: shim.v1.UpdateAgentNoSession
-	(*UpdateAgentNotDeliverable)(nil), // 9: shim.v1.UpdateAgentNotDeliverable
-	(*v1.AgentId)(nil),                // 10: conversation.v1.AgentId
-	(*v1.AgentInput)(nil),             // 11: conversation.v1.AgentInput
+	(*UpdateAgentAgentBusy)(nil),      // 4: shim.v1.UpdateAgentAgentBusy
+	(*UpdateAgentUnknownAgent)(nil),   // 5: shim.v1.UpdateAgentUnknownAgent
+	(*UpdateAgentNoOpenAsk)(nil),      // 6: shim.v1.UpdateAgentNoOpenAsk
+	(*UpdateAgentAnswerMismatch)(nil), // 7: shim.v1.UpdateAgentAnswerMismatch
+	(*UpdateAgentNothingRunning)(nil), // 8: shim.v1.UpdateAgentNothingRunning
+	(*UpdateAgentNoSession)(nil),      // 9: shim.v1.UpdateAgentNoSession
+	(*UpdateAgentNotDeliverable)(nil), // 10: shim.v1.UpdateAgentNotDeliverable
+	(*v1.AgentId)(nil),                // 11: conversation.v1.AgentId
+	(*v1.AgentInput)(nil),             // 12: conversation.v1.AgentInput
 }
 var file_shim_v1_endpoint_update_agent_proto_depIdxs = []int32{
-	10, // 0: shim.v1.UpdateAgentRequest.target:type_name -> conversation.v1.AgentId
-	11, // 1: shim.v1.UpdateAgentRequest.input:type_name -> conversation.v1.AgentInput
+	11, // 0: shim.v1.UpdateAgentRequest.target:type_name -> conversation.v1.AgentId
+	12, // 1: shim.v1.UpdateAgentRequest.input:type_name -> conversation.v1.AgentInput
 	2,  // 2: shim.v1.UpdateAgentResponse.success:type_name -> shim.v1.UpdateAgentSuccess
 	3,  // 3: shim.v1.UpdateAgentResponse.failure:type_name -> shim.v1.UpdateAgentFailure
-	4,  // 4: shim.v1.UpdateAgentFailure.unknown_agent:type_name -> shim.v1.UpdateAgentUnknownAgent
-	5,  // 5: shim.v1.UpdateAgentFailure.no_open_ask:type_name -> shim.v1.UpdateAgentNoOpenAsk
-	6,  // 6: shim.v1.UpdateAgentFailure.answer_mismatch:type_name -> shim.v1.UpdateAgentAnswerMismatch
-	7,  // 7: shim.v1.UpdateAgentFailure.nothing_running:type_name -> shim.v1.UpdateAgentNothingRunning
-	8,  // 8: shim.v1.UpdateAgentFailure.no_session:type_name -> shim.v1.UpdateAgentNoSession
-	9,  // 9: shim.v1.UpdateAgentFailure.not_deliverable:type_name -> shim.v1.UpdateAgentNotDeliverable
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	5,  // 4: shim.v1.UpdateAgentFailure.unknown_agent:type_name -> shim.v1.UpdateAgentUnknownAgent
+	6,  // 5: shim.v1.UpdateAgentFailure.no_open_ask:type_name -> shim.v1.UpdateAgentNoOpenAsk
+	7,  // 6: shim.v1.UpdateAgentFailure.answer_mismatch:type_name -> shim.v1.UpdateAgentAnswerMismatch
+	8,  // 7: shim.v1.UpdateAgentFailure.nothing_running:type_name -> shim.v1.UpdateAgentNothingRunning
+	9,  // 8: shim.v1.UpdateAgentFailure.no_session:type_name -> shim.v1.UpdateAgentNoSession
+	10, // 9: shim.v1.UpdateAgentFailure.not_deliverable:type_name -> shim.v1.UpdateAgentNotDeliverable
+	4,  // 10: shim.v1.UpdateAgentFailure.agent_busy:type_name -> shim.v1.UpdateAgentAgentBusy
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_shim_v1_endpoint_update_agent_proto_init() }
@@ -677,6 +737,7 @@ func file_shim_v1_endpoint_update_agent_proto_init() {
 		(*UpdateAgentFailure_NothingRunning)(nil),
 		(*UpdateAgentFailure_NoSession)(nil),
 		(*UpdateAgentFailure_NotDeliverable)(nil),
+		(*UpdateAgentFailure_AgentBusy)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -684,7 +745,7 @@ func file_shim_v1_endpoint_update_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_shim_v1_endpoint_update_agent_proto_rawDesc), len(file_shim_v1_endpoint_update_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

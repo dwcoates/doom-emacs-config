@@ -38,8 +38,10 @@ message StartSessionRequest {
 // A new vendor session. Carries what nothing can recover: the model and the
 // mode to begin with.
 message StartSessionFresh {
-  // The model to start on — an echo of a served option.
-  conversation.v1.AgentModel model = 1;
+  // The model to start on — an echo of a served option. UNSET = the SDK's
+  // own default; SessionStarted.effective_model states what took effect.
+  // (Optional since landing 7, 2026-09-02.)
+  optional conversation.v1.AgentModel model = 1;
   // The permission mode to start in. Session state, changed later by
   // SetSessionPermissionMode; never per prompt.
   conversation.v1.AgentPermissionMode permission_mode = 2;

@@ -162,8 +162,30 @@ message SubmitPromptError {
     // already visible); nothing is submitted twice. Empty: the key the
     // client sent is the only identity involved. (Landing 6, 2026-09-01.)
     SubmitPromptDuplicateSubmission duplicate_submission = 10;
+    // The SHIM refused a bubble-addressed (subagent) prompt and the daemon
+    // relays that refusal by kind — the daemon never judges a subagent's
+    // turn itself (why tag 8 retired). (Landing 7, 2026-09-02.)
+    SubmitPromptBubbleRefused bubble_refused = 11;
   }
 }
+
+// The shim's refusal of a bubble-addressed prompt, relayed. ONE arm, the
+// kind inside: both kinds are the same user act meeting the same answer
+// ("not this agent, not now"), and the feed's bubble draws them alike.
+message SubmitPromptBubbleRefused {
+  // The shim's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // The shim's UpdateAgentFailure.not_deliverable: the vendor offers no
+    // route to this agent kind.
+    SubmitPromptBubbleNotDeliverable not_deliverable = 2;
+    // The shim's UpdateAgentFailure.agent_busy: the addressed subagent's own
+    // turn is already running.
+    SubmitPromptBubbleAgentBusy agent_busy = 3;
+  }
+}
+message SubmitPromptBubbleNotDeliverable {}
+message SubmitPromptBubbleAgentBusy {}
 
 // The duplicate-key refusal. Empty on purpose (see the arm).
 message SubmitPromptDuplicateSubmission {}
