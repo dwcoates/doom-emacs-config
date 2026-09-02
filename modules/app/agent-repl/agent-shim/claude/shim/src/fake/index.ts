@@ -78,7 +78,7 @@ import type {
   ToolCall,
   ToolResultOptions,
 } from "./scenario.js";
-import { FAKE_CLI_VERSION, VendorFiles } from "./vendor-files.js";
+import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, VendorFiles } from "./vendor-files.js";
 
 /**
  * IS THIS TASK A SHELL RUN? The vendor's own distinction, read off the id.
@@ -514,20 +514,44 @@ export function createFakeQuery(
     return { messageId, uuids };
   };
 
+  /**
+   * The reasoning block that precedes a tool call and a turn's conclusion.
+   *
+   * WITHHELD, which on the wire is a `thinking` block with an empty `thinking`
+   * string and a PRESENT signature (corpus: `content-blocks/thinking.jsonl`).
+   * The signature is what tells a consumer the reasoning existed and was not
+   * surfaced; a block without one would be a different fact.
+   */
+  const withheldReasoning = (): FakeBlock => ({
+    type: "thinking",
+    thinking: "",
+    signature: FAKE_REASONING_SIGNATURE,
+  });
+
   const toolUse = (
     name: string,
     input: Record<string, unknown>,
     options: AssistantOptions = {},
   ): ToolCall => {
     const toolUseId = mintToolUseId();
-    const emission = assistant([{ type: "tool_use", id: toolUseId, name, input }], options);
+    // THE OBSERVED SHAPE OF A TOOL TURN'S FIRST API RESPONSE: `[thinking,
+    // tool_use]` on ONE message id, each block its own assistant line. Every
+    // capture has it (`bash-foreground-completed` is the smallest), and a mock
+    // that announced a bare tool_use produced a turn with no reasoning unit at
+    // all — a shape the vendor never emits.
+    const blocks: FakeBlock[] =
+      options.noReasoning === true
+        ? [{ type: "tool_use", id: toolUseId, name, input }]
+        : [withheldReasoning(), { type: "tool_use", id: toolUseId, name, input }];
+    const emission = assistant(blocks, options);
     return {
       toolUseId,
       name,
       input,
-      // The tool_use block is the message's ONLY block here, so its record uuid
-      // is the one the answering user record names in `sourceToolAssistantUUID`.
-      assistantUuid: emission.uuids[0] ?? "",
+      // The tool_use block's OWN record uuid — the one the answering user record
+      // names in `sourceToolAssistantUUID`. It is the LAST line of the emission
+      // because the reasoning block precedes it.
+      assistantUuid: emission.uuids.at(-1) ?? "",
       messageId: emission.messageId,
     };
   };

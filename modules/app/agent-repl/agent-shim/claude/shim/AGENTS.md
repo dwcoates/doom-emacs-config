@@ -133,6 +133,43 @@ turn (the daemon's merge-pipeline gate spells it identically). Env:
 `AGENT_REPL_FAKE_TURN_GATE` + `_TEXT` park a matching turn until the named path
 appears; `AGENT_REPL_FAKE_SPOOL_ROOT` roots the spool tree.
 
+### Which rows are capture-grounded, and which are only declared
+
+Every row below is one of two things, and the difference matters when a row and
+production disagree.
+
+**CAPTURE-GROUNDED.** A real recording of the actual agent binary stands behind
+it, under `testdata/captures/`, and `test/fake/golden-conformance.test.ts` drives
+the mock's scenario and that capture through the SAME fold and compares the unit
+kinds they produce. Twenty-seven of the fifty-nine mapped rows reproduce their capture's shape EXACTLY;
+the rest are pinned there too, each with a stated reason for the difference —
+almost always MODEL CHOICE (the recorded run read a file before editing it, or
+globbed with `Bash`), which is one model's habits rather than vendor shape.
+
+**DECLARED, NOT CAPTURE-GROUNDED.** No capture exercises the arm, so the row is
+built from `sdk.d.ts` and the corpus fixtures alone. These stay — a declared type
+is still a contract — but nothing has confirmed the vendor spells them this way:
+
+- the typed arms the recorded runs never reached, because the model chose `Bash`
+  or `Skill` instead: `!glob`, `!grep-content`, `!grep-files`, `!grep-count`,
+  `!artifact-publish`, `!artifact-list`, `!wakeup-schedule`, `!wakeup-stop`,
+  `!worktree-keep`, `!worktree-remove`, `!memory`, `!skills-injected`;
+- `!send-message-resumed` / `!send-message-refused` — no capture addresses a
+  subagent;
+- `!subagent-failed` — no capture has a failed subagent;
+- every `!api-*` row, `!refusal-fallback`, `!refusal-no-fallback` and
+  `!context-window`: the capture harness quarantines an API error, so an API
+  failure can never be a golden;
+- `!query-eof`, `!query-fail`, `!fail-marker`, `!fault-converter`,
+  `!fault-recover` — producer-side failures no vendor run produces;
+- `!cold-seed` — the cold gate is tripped on a LATER resume, which no single
+  capture spans;
+- `!compact`, `!compact-auto`, `!compact-failed` — the `compaction-directed`
+  capture answered "Not enough messages to compact", so no
+  `compact_boundary` / `isCompactSummary` record exists anywhere in the corpus.
+  The compaction writer stays graded against the corpus fixture and MARKED
+  SYNTHETIC until a longer-history capture is approved.
+
 | Prompt | What the vendor emits | What it writes on disk | conversation.v1 arms exercised |
 | --- | --- | --- | --- |
 | `(any text with no `!scenario` prefix)` | one API response of four blocks — withheld thinking, visible thinking, an opening text block, and the concluding text block — then a success `result` whose `result` is the conclusion verbatim | four assistant lines sharing one `message.id`, then the user prompt line and the turn record | AgentThinking (withheld + text), AgentResponse.from_model, AgentSuccess.completed |
@@ -207,7 +244,7 @@ appears; `AGENT_REPL_FAKE_SPOOL_ROOT` roots the spool tree.
 | `!ask-free` | a single-select question answered with FREE TEXT rather than a listed label — the vendor's automatic "Other" option. NO corpus sample exists for this shape; the answer map simply carries prose no option matches | the tool_use line, the tool_result line, the closing text line | AgentQuestionAnswers carrying free text — the residue rule's subject |
 | `!ask-unanswered` | a question the user never answers: the gate's DENY becomes an error tool_result and the batch ends unanswered. `sdk.d.ts` declares NO question timeout, so an expiry is modeled as this same denial and the gap is recorded rather than invented | the tool_use line, the error tool_result line, the closing text line | AgentQuestionSuccess.outcome=unanswered |
 | `!rotate` | a `/clear` in the OBSERVED shape: ONE `conversation_reset` carrying the OLD `session_id` and a `new_conversation_id` nothing later uses, then a SECOND `system:init` whose `session_id` is the REAL new id (a third uuid), and the REST of the turn — its result included — belongs to that identity | a NEW `<new-session>.jsonl` carrying everything after the reset; the OLD file simply STOPS, with no closing record of any kind | SessionIdentityRotated + AgentUpdate.context_cut(ContextCleared) |
-| `!slash` | a slash command the VENDOR answers itself: a `local_command_output` message, and the transcript's `system:local_command` record wrapping the output in `<local-command-stdout>` | a `system:local_command` line and a `command_permissions` attachment line | the vendor-answered slash-command family — no agent activity at all |
+| `!slash` | a slash command the VENDOR answers itself: a `local_command_output` message, and the transcript's `system:local_command` record wrapping the output in `<local-command-stdout>` | a `system:local_command` line and a `command_permissions` attachment line | the vendor-answered slash-command family — no agent activity beyond the answer, and NO reasoning |
 | `!context-usage-drift` | prose only. It switches `getContextUsage()` to a GROWING answer, so the `context_usage` the shim pushes at this turn's end differs from the one it pushed at session start — total tokens, percentage, the message category and the whole `messageBreakdown` all move, and the answer stays a full `SDKControlGetContextUsageResponse`. CADENCE IS THE ENGINE'S: context_usage is pushed at session start and at EVERY turn end regardless of scenario, so this one changes what is sampled and never when | the assistant line, the prompt line and the turn record | SessionContextUsage — the same arm twice with DIFFERENT figures, which is what a re-render tests |
 | `!model-fallback` | an UNSOLICITED model change: the declared `model_refusal_fallback` message with `direction: "retry"`, the `session_state_changed` beat, and then the answer from the FALLBACK model — whose `message.model` is the only evidence the swap happened. The swap STICKS, so a following turn answers on the fallback model too. Nothing called SetSessionModel, so no confirmation exists anywhere | a `system:model_refusal_fallback` line, the fallback-model assistant line, the prompt line and the turn record | SessionModelChanged with no SetSessionModel behind it — the vendor's own decision, not a confirmed request |
 | `!fast-on` | a turn whose `result` reports `fast_mode_state: "on"`. The state STICKS: every later result reports it, and so does the `init` a rotation emits — the two places `sdk.d.ts` carries fast mode at all | the assistant line, the prompt line and the turn record | SessionFastMode.state=on |
@@ -232,22 +269,22 @@ appears; `AGENT_REPL_FAKE_SPOOL_ROOT` roots the spool tree.
 | `!away-summary` | prose only; the vendor's recap is a `system:away_summary` transcript record | a `system:away_summary` line | vendor_specific residue — `system/away_summary`, which no conversation.v1 arm models |
 | `!residue` | prose only; it writes the two attachment records BOTH planes agree are vendor bookkeeping, not context | `deferred_tools_delta` and `agent_listing_delta` attachment lines | NONE — these are `StoreUnservedItem.vendor_specific{kind:"attachment/deferred_tools_delta"}` and `attachment/agent_listing_delta`, dropped from every page by both planes |
 | `!cold-seed` | an ordinary turn whose TRANSCRIPT RECORDS are stamped TWO HOURS IN THE PAST, so the next resume of this session trips the shim's own cold-context detection | the ASSISTANT line (with its usage) and the turn_duration line, both carrying a two-hour-old `timestamp` | SessionColdLapsed on the NEXT resume — this scenario only seeds the condition |
-| `!fail-execution` | an error `result` with subtype `error_during_execution` and `terminal_reason: "api_error"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.execution_error |
-| `!fail-max-turns` | an error `result` with subtype `error_max_turns` and `terminal_reason: "max_turns"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.max_turns |
-| `!fail-budget` | an error `result` with subtype `error_max_budget_usd` and `terminal_reason: "budget_exhausted"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.budget_exhausted |
-| `!fail-structured-output` | an error `result` with subtype `error_max_structured_output_retries` and `terminal_reason: "structured_output_retry_exhausted"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.structured_output_retry_exhausted |
-| `!fail-blocking-limit` | an error `result` with subtype `error_during_execution` and `terminal_reason: "blocking_limit"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.blocking_limit |
-| `!fail-rapid-refill` | an error `result` with subtype `error_during_execution` and `terminal_reason: "rapid_refill_breaker"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.rapid_refill_breaker |
-| `!fail-prompt-too-long` | an error `result` with subtype `error_during_execution` and `terminal_reason: "prompt_too_long"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.prompt_too_long |
-| `!fail-image` | an error `result` with subtype `error_during_execution` and `terminal_reason: "image_error"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.image_error |
-| `!fail-model` | an error `result` with subtype `error_during_execution` and `terminal_reason: "model_error"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.model_error |
-| `!fail-malformed-tool-use` | an error `result` with subtype `error_during_execution` and `terminal_reason: "malformed_tool_use_exhausted"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.malformed_tool_use_exhausted |
-| `!fail-tool-deferred` | an error `result` with subtype `error_during_execution` and `terminal_reason: "tool_deferred"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.tool_deferred |
-| `!fail-tool-deferred-unavailable` | an error `result` with subtype `error_during_execution` and `terminal_reason: "tool_deferred_unavailable"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.tool_deferred_unavailable |
-| `!fail-turn-setup` | an error `result` with subtype `error_during_execution` and `terminal_reason: "turn_setup_failed"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.turn_setup_failed |
-| `!fail-aborted-tools` | an error `result` with subtype `error_during_execution` and `terminal_reason: "aborted_tools"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentInterrupted.by_user, reached through the tools rather than the stream |
-| `!fail-stop-hook` | an error `result` with subtype `error_during_execution` and `terminal_reason: "stop_hook_prevented"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.stop_hook_prevented |
-| `!fail-hook-stopped` | an error `result` with subtype `error_during_execution` and `terminal_reason: "hook_stopped"`, and NO assistant content | the prompt line and the turn record; a failed turn wrote no answer | AgentFailure.hook_stopped |
+| `!fail-execution` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "api_error"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.execution_error |
+| `!fail-max-turns` | a reasoning block and a partial answer, then an error `result` with subtype `error_max_turns` and `terminal_reason: "max_turns"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.max_turns |
+| `!fail-budget` | a reasoning block and a partial answer, then an error `result` with subtype `error_max_budget_usd` and `terminal_reason: "budget_exhausted"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.budget_exhausted |
+| `!fail-structured-output` | a reasoning block and a partial answer, then an error `result` with subtype `error_max_structured_output_retries` and `terminal_reason: "structured_output_retry_exhausted"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.structured_output_retry_exhausted |
+| `!fail-blocking-limit` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "blocking_limit"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.blocking_limit |
+| `!fail-rapid-refill` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "rapid_refill_breaker"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.rapid_refill_breaker |
+| `!fail-prompt-too-long` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "prompt_too_long"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.prompt_too_long |
+| `!fail-image` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "image_error"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.image_error |
+| `!fail-model` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "model_error"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.model_error |
+| `!fail-malformed-tool-use` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "malformed_tool_use_exhausted"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.malformed_tool_use_exhausted |
+| `!fail-tool-deferred` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "tool_deferred"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.tool_deferred |
+| `!fail-tool-deferred-unavailable` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "tool_deferred_unavailable"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.tool_deferred_unavailable |
+| `!fail-turn-setup` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "turn_setup_failed"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.turn_setup_failed |
+| `!fail-aborted-tools` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "aborted_tools"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentInterrupted.by_user, reached through the tools rather than the stream |
+| `!fail-stop-hook` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "stop_hook_prevented"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.stop_hook_prevented |
+| `!fail-hook-stopped` | a reasoning block and a partial answer, then an error `result` with subtype `error_during_execution` and `terminal_reason: "hook_stopped"` | the assistant lines for the work it did reach, the prompt line and the turn record | AgentThinking + AgentResponse, then AgentFailure.hook_stopped |
 | `!fail-continuation-prevented` | an `informational` message with `prevent_continuation: true`, a `stop_hook_summary` record whose `preventedContinuation` is true, then a `stop_hook_prevented` terminal | the `system:stop_hook_summary` line, the prompt line and the turn record | AgentFailure.continuation_prevented — UNSETTLED: no `TerminalReason` names it, so this pairs the two declared prevent-continuation signals with the nearest terminal |
 | `!api-429` | a `system:api_error` record and an `api_retry` message, then an `error_during_execution` result with `terminal_reason: "api_error"` and status 429 | a `system:api_error` line, the prompt line and the turn record | AgentUpdate.api_error mid-turn, then AgentFailure.api_request_failed → ApiRateLimited (with the retry-after) |
 | `!api-529` | a `system:api_error` record and an `api_retry` message, then an `error_during_execution` result with `terminal_reason: "api_error"` and status 529 | a `system:api_error` line, the prompt line and the turn record | AgentUpdate.api_error mid-turn, then AgentFailure.api_request_failed → ApiOverloaded |
