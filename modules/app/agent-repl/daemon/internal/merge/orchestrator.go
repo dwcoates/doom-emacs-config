@@ -80,6 +80,11 @@ type orchestrator struct {
 	// repoOf remembers which queue a workspace was enqueued on, so an evict
 	// does not have to re-derive geometry that may no longer resolve.
 	repoOf map[ids.WorkspaceID]wsm.RepoKey
+	// ledgerOf is the merge's LEDGER identity, minted at ENQUEUE. It addresses
+	// the merge bubble -- which a QUEUED merge already has, showing its queue
+	// tab -- and it is the identity the occupancy lease is later acquired
+	// under, so the queued bubble and the admitted one are one bubble.
+	ledgerOf map[ids.WorkspaceID]ids.LeaseID
 	// pumping guards one admission pump per repository.
 	pumping map[wsm.RepoKey]bool
 	// async reports whether Enqueue starts the admission pump itself.
@@ -120,6 +125,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		facts:           map[ids.WorkspaceID]MergeFacts{},
 		running:         map[wsm.RepoKey]*run{},
 		runsByWorkspace: map[ids.WorkspaceID]*run{},
+		ledgerOf:        map[ids.WorkspaceID]ids.LeaseID{},
 		offers:          map[ids.WorkspaceID]bool{},
 		repoOf:          map[ids.WorkspaceID]wsm.RepoKey{},
 		pumping:         map[wsm.RepoKey]bool{},
@@ -210,6 +216,9 @@ func (o *orchestrator) publishHost(ws ids.WorkspaceID) {
 func (o *orchestrator) forget(ws ids.WorkspaceID) {
 	o.mu.Lock()
 	delete(o.facts, ws)
+	// The merge is gone as far as every surface is concerned, and so is the
+	// bubble its ledger identity addressed.
+	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	o.deps.Footer.SetMerge(ws, MergeFacts{State: "none"})
 	o.deps.Sidebar.SetMerge(ws, MergeFacts{State: "none"})

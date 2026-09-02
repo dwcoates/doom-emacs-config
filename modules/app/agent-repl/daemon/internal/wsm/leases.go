@@ -44,7 +44,23 @@ const leaseColumns = `id, workspace_id, holder, policy, acquired_at`
 // current holder and the insert are one immediate transaction, so two
 // acquisitions can never both see the lease free.
 func (s *store) AcquireLease(ctx context.Context, id WorkspaceID, holder LeaseHolder, policy LeasePolicy) (Lease, error) {
+	return s.AcquireLeaseAs(ctx, id, NewLeaseID(), holder, policy)
+}
+
+// AcquireLeaseAs acquires the lease under an identity the CALLER minted.
+//
+// It exists for the merge, whose lease id is also its LEDGER identity: the
+// merge bubble is addressed by it and is drawn from the moment a merge is
+// QUEUED, which is before any occupancy is taken. Minting at acquisition would
+// mean the queued bubble and the admitted one had different addresses.
+func (s *store) AcquireLeaseAs(ctx context.Context, id WorkspaceID, lease LeaseID, holder LeaseHolder, policy LeasePolicy) (Lease, error) {
 	const op = "daemon.wsm.acquire_lease"
+	if lease == "" {
+		err := fmt.Errorf("wsm: a lease acquisition needs an identity")
+		s.log.Error(op, "refused a lease acquisition with no identity",
+			withError(dlog.Context{"workspace": string(id)}, err))
+		return Lease{}, err
+	}
 	fields := dlog.Context{"workspace": string(id), "holder": holder.String(), "policy": policy.String()}
 	if !holder.valid() || !policy.valid() {
 		err := fmt.Errorf("wsm: undeclared lease holder %d or policy %d", int(holder), int(policy))
@@ -60,7 +76,7 @@ func (s *store) AcquireLease(ctx context.Context, id WorkspaceID, holder LeaseHo
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
-		out = Lease{ID: NewLeaseID(), Workspace: id, Holder: holder, Policy: policy, AcquiredAt: time.Now().UTC()}
+		out = Lease{ID: lease, Workspace: id, Holder: holder, Policy: policy, AcquiredAt: time.Now().UTC()}
 		_, err = tx.ExecContext(ctx, `INSERT INTO leases (`+leaseColumns+`) VALUES (?, ?, ?, ?, ?)`,
 			out.ID, out.Workspace, int(out.Holder), int(out.Policy), nanos(out.AcquiredAt))
 		return err
