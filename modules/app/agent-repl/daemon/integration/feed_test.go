@@ -586,8 +586,11 @@ func TestAFailedToolCallDrawsReturnedFailed(t *testing.T) {
 	}))
 
 	// Assert
-	row := awaitRow(t, f, tail, "the failed call's tool card", func(r *frontendv1.FeedRow) bool {
-		return r.GetActivity().GetSimpleToolCall() != nil
+	// The card's SETTLED push is the subject: the start's own push carries a
+	// running card, and matching that would assert on the row before the
+	// failure ever reached the resolver.
+	row := awaitRow(t, f, tail, "the failed call's settled tool card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetReturned() != nil
 	})
 	if row.GetActivity().GetSimpleToolCall().GetReturned().GetFailed() == nil {
 		t.Fatalf("a failed call's outcome = %v, want returned.failed", row.GetActivity().GetSimpleToolCall().GetOutcome())
@@ -1154,7 +1157,7 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 
 	// Assert: the fake saw WatchAgent for the detached subagent BEFORE this
 	// test ever calls OpenFeed on its bubble.
-	watched := f.shim.ExpectWatchAgent()
+	watched := f.shim.ExpectWatchAgentFor("sub-detached-1")
 	if watched.GetTarget().GetValue() != "sub-detached-1" {
 		t.Fatalf("the eager WatchAgent named %q, want the detached subagent's id %q", watched.GetTarget().GetValue(), "sub-detached-1")
 	}

@@ -755,9 +755,15 @@ func mergeRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *wo
 	return ref
 }
 
+// mergeFindRepoKey finds a repository section by its worktree.
+//
+// A repository is keyed by its COMMON DIR -- registration derives it from git
+// and it is `<worktree>/.git` for an ordinary checkout -- so a worktree's
+// section is found under either spelling rather than the worktree's alone.
 func mergeFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
 	for _, s := range r.GetRepository().GetSections() {
-		if s.GetKey().GetRepository().GetDir() == dir {
+		switch s.GetKey().GetRepository().GetDir() {
+		case dir, filepath.Join(dir, ".git"):
 			return s.GetKey().GetRepository()
 		}
 	}

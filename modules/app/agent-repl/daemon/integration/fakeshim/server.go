@@ -288,6 +288,11 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 		if err := stream.Send(&shimv1.WatchSessionResponse{Update: HealthyDiagnostics()}); err != nil {
 			return err
 		}
+		// The opening context usage rides the same open: the topbar publishes
+		// nothing until it holds one, exactly as against the real shim.
+		if err := stream.Send(&shimv1.WatchSessionResponse{Update: DefaultContextUsage()}); err != nil {
+			return err
+		}
 	}
 	for {
 		select {
