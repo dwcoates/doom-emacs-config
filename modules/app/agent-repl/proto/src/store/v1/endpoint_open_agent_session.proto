@@ -57,8 +57,14 @@ message OpenAgentSessionFailure {
     // A well-formed known_through naming no line of THIS book.
     OpenAgentSessionStalePointer stale_pointer = 3;
     OpenAgentSessionStorageFailure storage_failure = 4;
+    // A well-formed agent id naming NO book of this store: refused rather
+    // than served empty, so a stale or mistyped target is distinguishable
+    // from a real agent that has said nothing yet. The shim maps it to
+    // NotFound. (Landing 7, 2026-09-02; cross-plane, store lead agreed.)
+    OpenAgentSessionUnknownAgent unknown_agent = 5;
   }
 }
+message OpenAgentSessionUnknownAgent {}
 // The request was malformed or violated the validation invariant.
 message OpenAgentSessionInvalidRequest {
   // Which field (with the offending entry's index where one applies), as
