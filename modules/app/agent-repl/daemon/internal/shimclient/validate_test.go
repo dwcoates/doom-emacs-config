@@ -58,11 +58,11 @@ func TestValidateStartSessionRequest(t *testing.T) {
 			field: "StartSessionRequest.source",
 		},
 		{
-			name: "fresh without a model",
+			name: "fresh with a model whose name is empty",
 			req: &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
-				Fresh: &shimv1.StartSessionFresh{PermissionMode: validMode()},
+				Fresh: &shimv1.StartSessionFresh{Model: &conversationv1.AgentModel{}, PermissionMode: validMode()},
 			}},
-			field: "StartSessionRequest.fresh.model",
+			field: "StartSessionRequest.fresh.model.name",
 		},
 		{
 			name: "fresh without a permission mode",
@@ -324,5 +324,23 @@ func assertInvalidField(t *testing.T, err error, field string) {
 	}
 	if invalidErr.Field != field {
 		t.Fatalf("field = %q, want %q", invalidErr.Field, field)
+	}
+}
+
+// TestValidateStartSessionFreshAcceptsAnUnsetModel is the landing-7 contract:
+// StartSessionFresh.model is optional, and UNSET means the SDK's own default
+// rather than a missing required field.
+func TestValidateStartSessionFreshAcceptsAnUnsetModel(t *testing.T) {
+	// Arrange.
+	req := &shimv1.StartSessionRequest{Source: &shimv1.StartSessionRequest_Fresh{
+		Fresh: &shimv1.StartSessionFresh{PermissionMode: validMode()},
+	}}
+
+	// Act.
+	err := validateStartSessionRequest(req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("validateStartSessionRequest with no model = %v, want it accepted", err)
 	}
 }
