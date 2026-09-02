@@ -334,7 +334,14 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// The watcher is handed the opening LEVEL: the turn in flight and every
 	// live detached item are what it opens its watches for, and nothing else
 	// states them.
-	watcher, err := f.watch(ctx, ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	//
+	// Its context is DETACHED from the caller's: the watch fleet outlives the
+	// verb that brought the session up (an OpenWorkspace rpc, a create, the
+	// relaunch engine), and every stream it opens -- now and on every redial --
+	// is opened against this context. Bound to the request instead, the whole
+	// fleet is canceled the instant the rpc answers, and the session is then
+	// left with no standing WatchSession and no standing WatchAgent at all.
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)

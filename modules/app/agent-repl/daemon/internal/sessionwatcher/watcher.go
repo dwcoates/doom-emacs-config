@@ -77,6 +77,15 @@ type watcher struct {
 	// sessionEnded records that the session itself is over (query_died), which
 	// is the one way a stream may legally end without a terminal.
 	sessionEnded bool
+	// degraded records that a standing stream is actually DOWN -- a stream
+	// that ended while the session was live, or a watch that could not be
+	// opened. It, and not the link state, is what a re-open answers: the
+	// client's connectivity feed replays the bring-up transitions (dialing,
+	// then connected) to a watcher that was handed a connected link, and a
+	// re-open on that history would tear down the very streams bring-up had
+	// just established. A link that comes back with every stream still
+	// standing has nothing to re-open.
+	degraded bool
 
 	link LinkState
 	addr OutputAddress
@@ -482,8 +491,9 @@ func (w *watcher) runLink() {
 			return
 		}
 		previous := w.link
+		degraded := w.degraded
 		w.setLinkLocked(state)
-		if state == shimclient.LinkConnected && previous != shimclient.LinkConnected {
+		if state == shimclient.LinkConnected && previous != shimclient.LinkConnected && degraded {
 			w.reopenLocked("the link came back")
 		}
 		w.mu.Unlock()
@@ -520,6 +530,7 @@ func (w *watcher) severedLocked(operation, detail string, err error) {
 		ctx["error"] = err.Error()
 	}
 	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
+	w.degraded = true
 	w.setLinkLocked(shimclient.LinkRedialing)
 }
 
@@ -528,6 +539,9 @@ func (w *watcher) severedLocked(operation, detail string, err error) {
 // old goroutines' errors stale rather than a second severing.
 func (w *watcher) reopenLocked(reason string) {
 	w.gen++
+	// The fleet is whole again from here: any open below that fails calls
+	// severedLocked, which sets the flag afresh.
+	w.degraded = false
 	// The closers run OFF the lock, for the reason takeStreamsLocked states:
 	// a stream's Close drains its response body and does not return until the
 	// SERVER ends the stream, and a standing watch is never ended by the

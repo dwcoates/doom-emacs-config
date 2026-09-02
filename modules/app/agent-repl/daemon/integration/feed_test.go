@@ -29,7 +29,19 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 
 	// Act: open the root feed (mints the page + token), then push a SECOND
 	// row before ever watching the tail.
-	page, token := f.openFeed(nil)
+	//
+	// A push is fire-and-forget over the fake shim's control socket, so the
+	// open is re-taken until resp-1 has actually landed: the subject is what a
+	// page carries versus what the tail then delivers, and racing the open
+	// against the routing of the frame tests neither.
+	page, token := f.openFeedOnceCarrying("resp-1's settled prose", func(p *frontendv1.FeedPage) bool {
+		for _, r := range p.GetSuccess().GetRows() {
+			if r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "first" {
+				return true
+			}
+		}
+		return false
+	})
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-2", "second")[0])
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-2", "second")[1])
 	tail := f.d.WatchFeed(token)
