@@ -18,39 +18,19 @@
  * duration of one awaited call. A module-level map keyed by row id would
  * outlive the row it described.
  */
-import { frameUndecodable } from "../../failure/sink.js";
 import { log } from "../../log.js";
-import { isMalformedView } from "../../rpc/malformed.js";
 import type { AppContext } from "../../rpc/context.js";
 import type { RowContext } from "../renderers.js";
 
 /** The attribute a fold's toggle carries its state on. */
 export const FOLD_STATE_ATTRIBUTE = "data-folded";
 
-/**
- * THE REFUSAL, drawn at the call site.
- *
- * A `<Method>Error` arm — or a transport failure — is the answer to ONE click,
- * so it marks the control that was clicked. `data-arm` carries the error's own
- * arm name (or `transport`), never a word this end invented for it.
- */
-export function refusal(arm: string, text: string): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "refusal";
-  el.setAttribute("data-arm", arm);
-  el.textContent = text;
-  return el;
-}
-
-/**
- * Drop whatever a previous click left inside HOST.
- *
- * Called before every call rather than after: a stale refusal standing beside a
- * control the user just clicked again reads as an answer to the NEW click.
- */
-export function clearRefusals(host: HTMLElement): void {
-  for (const stale of host.querySelectorAll(".refusal")) stale.remove();
-}
+// THE REFUSAL PRIMITIVES ARE THE RPC LAYER'S, not the feed's: `refusal`,
+// `clearRefusals` and `drawMalformedRefusal` are the SAME elements the topbar,
+// the login overlay and the sidebar draw, so they live in `src/rpc/refuse.ts`
+// with the rest of the one refusal hook. They are re-exported here because the
+// cards have always reached them through `controls`.
+export { refusal, clearRefusals, drawMalformedRefusal } from "../../rpc/refuse.js";
 
 /**
  * A folded section: a caret toggle over a body that hides rather than unmounts.
@@ -136,37 +116,6 @@ export async function whileInFlight<T>(
     for (const button of buttons) button.disabled = false;
     return { failed: err };
   }
-}
-
-/**
- * Draw a REFUSAL THIS BUILD COULD NOT READ, and report it once.
- *
- * A `<Rpc>Error` whose cause oneof is unset — or whose arm a newer daemon
- * added — is a malformed view arriving on a CLICK rather than on a draw, so the
- * feed core's own malformed path never sees it. Left to propagate it would
- * become an unhandled rejection inside a click handler: the failure would be
- * real, logged nowhere the user can see, and the button would sit there looking
- * as if nothing had happened. So it is logged at error, reported through the
- * failure sink exactly once by this layer, and stated at the control — which is
- * every one of the things "never swallow an error" asks for.
- *
- * Answers whether ERR was a malformed view; anything else is not this
- * function's to interpret and the caller must rethrow it.
- */
-export function drawMalformedRefusal(
-  ctx: AppContext,
-  host: HTMLElement,
-  operation: string,
-  err: unknown,
-): boolean {
-  if (!isMalformedView(err)) return false;
-  log("error", `a refusal could not be read: ${err.message}`, {
-    operation,
-    context: { path: err.path, detail: err.detail },
-  });
-  ctx.failures.report(frameUndecodable(err.detail, err.path));
-  host.append(refusal("malformed", `unreadable refusal at ${err.path}`));
-  return true;
 }
 
 /** Give the controls back after an answer the card drew in place. */

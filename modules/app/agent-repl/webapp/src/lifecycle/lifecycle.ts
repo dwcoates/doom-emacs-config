@@ -55,6 +55,7 @@ import { formatElapsed } from "../duration.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
+import { registerWorkspaceMoved } from "../rpc/moved.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
@@ -89,33 +90,13 @@ export const ADOPT_BUDGET_MS = 60_000;
 //
 // `transferring_away{address}` can come back at ANY control, and it means
 // exactly what the `transferred` push means. Rather than teach every call site
-// how to draw a page-wide notice, the lifecycle registers the one handler and
-// a refusal site raises it by name.
+// how to draw a page-wide notice, the lifecycle REGISTERS the one handler with
+// `src/rpc/moved.ts` and a refusal site raises it by name. The registry lives
+// down in the rpc layer rather than here so the shared refusal hook can reach
+// it without the rpc layer importing a component.
 // ---------------------------------------------------------------------------
 
-/** Installed by `startLifecycle`; there is at most one page. */
-let moveHandler: ((address: string) => void) | null = null;
-
-/**
- * The workspace has moved to ADDRESS — from a push, or from any control's
- * `transferring_away` refusal.
- *
- * Answers whether a handler was installed. A `false` is logged at warn and NOT
- * swallowed by the caller: it means the page learned the workspace moved and
- * had nowhere to say so, which the reader must not be left to infer from a
- * screen that quietly stops updating.
- */
-export function workspaceMoved(address: string): boolean {
-  if (moveHandler === null) {
-    log("warn", `the workspace moved to ${address} but no lifecycle is mounted to say so`, {
-      operation: "lifecycle.move-unhandled",
-      context: { address },
-    });
-    return false;
-  }
-  moveHandler(address);
-  return true;
-}
+export { workspaceMoved } from "../rpc/moved.js";
 
 /**
  * Start the page's lifecycle. Returns the handle that stops both streams.
@@ -136,7 +117,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
     banner.showMoved(address);
     ctx.quiesce();
   };
-  moveHandler = onMoved;
+  const unregisterMoved = registerWorkspaceMoved(onMoved);
 
   const webLink = watchStream(ctx, {
     name: "WatchWebWorkspace",
@@ -186,7 +167,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   return {
     dispose(): void {
       log("debug", "disposing the page lifecycle", { operation: "lifecycle.dispose" });
-      if (moveHandler === onMoved) moveHandler = null;
+      unregisterMoved();
       webLink.cancel();
       daemon.cancel();
       banner.dispose();
