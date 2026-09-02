@@ -229,24 +229,32 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 	}
 }
 
+// TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant covers the
+// roster's durable half moving on a LANDED merge.
+//
+// It is built on the merge tests' own fixture, and deliberately so: a merge
+// only lands for a workspace the daemon CREATED (its layout facts are what the
+// merge reads its target and brief from), and a bare `RegisterWorkspace` on a
+// hand-made worktree is refused for exactly that reason — which is what
+// TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused asserts. This test
+// previously registered such a worktree and then waited for a merge that could
+// never be enqueued.
 func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	// Arrange
-	selfRepo := harness.NewRepo(t)
-	d := harness.StartDaemon(t, harness.Opts{SelfRepo: selfRepo.Dir})
-	source := worktreeOfRepo(t, selfRepo, "feature")
-	ws := harness.Register(t, d, source)
-	writeCommit(t, selfRepo, source, "feature.txt", "work\n")
+	f, d, _, script := mergeCleanRepo(t)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
 	roster := d.WatchRoster()
 
 	// Act
-	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: ws})); err != nil {
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
 	// Assert
 	got := awaitRoster(t, d, roster, "the merged workspace under recently_merged", func(r *frontendv1.WorkspaceRoster) bool {
 		for _, row := range r.GetRecentlyMerged().GetRows().GetRows() {
-			if row.GetWorkspace().GetWorkspace().GetId() == ws.GetId() {
+			if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
 				return true
 			}
 		}
@@ -254,7 +262,7 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	})
 	var row *frontendv1.RosterRow
 	for _, r := range got.GetRecentlyMerged().GetRows().GetRows() {
-		if r.GetWorkspace().GetWorkspace().GetId() == ws.GetId() {
+		if r.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
 			row = r
 		}
 	}
