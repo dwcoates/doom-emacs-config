@@ -486,6 +486,17 @@ describe("the settled card", () => {
     expect(el.querySelector(".q-when")?.textContent).toBe("1m ago");
   });
 
+  it("reads the stamp's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the answer instant does not share the shared ticker's phase.
+    vi.setSystemTime(4920);
+    const el = drawFeedQuestion(
+      question({ case: "answered", value: { atMs: 0n, answers: [] } }),
+      askHarness().rc,
+    );
+    // Assert: five real seconds ago reads 5s, not the lagging 4s.
+    expect(el.querySelector(".q-when")?.textContent).toBe("5s ago");
+  });
+
   it("draws an expired ask as expired, never as pending forever", () => {
     const el = drawFeedQuestion(
       question({ case: "expired", value: { atMs: 0n } }),
