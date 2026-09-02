@@ -580,7 +580,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Adopted:        fleet.Install,
 			Log:            p.Surfaces,
 		},
-		Prime: verbs.PublishRegistry,
+		// PRIME IS WHERE A STANDING DRAIN COMES BACK. The daemon topic replays
+		// only this process's own latest value, so a schedule that outlived a
+		// bounce has to be announced again by the process that inherited it —
+		// after the push surface is bound and before anything is served.
+		Prime: func(ctx context.Context) error {
+			if err := verbs.PublishRegistry(ctx); err != nil {
+				return err
+			}
+			return drainController.Republish(ctx)
+		},
 		Bind: func(srv server.Server) {
 			pushes.bind(srv)
 			relay.bind(srv.Relay())
