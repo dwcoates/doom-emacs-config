@@ -276,7 +276,17 @@ The dead-code pass's live-code/dead-code pairs, resolved:
   producer has to exist first. Route this to the project lead as a behavior
   question, not a proto ask.
 - `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` stays
-  skipped: no crash-window hook.
+  skipped, and the earlier reading of WHY was wrong. The blocker is not the
+  missing crash-window hook: THE BOUNCE-CROSSING RESUBMISSION HAS NO PRODUCER.
+  `wsm.Turn.Displaced` is written by `workspace.CaptureDisplaced` and read back
+  by nothing outside `wsm/turns.go`'s own scan and insert. `merge/recover.go`
+  re-runs an interrupted merge, but that second run's `CaptureDisplaced` finds
+  nothing in flight (the first run already killed the turn), so
+  `resubmitDisplaced` no-ops. A turn displaced by a merge that then crashes
+  stays marked displaced forever and is never put back. Un-skipping needs a
+  boot-time recovery that resubmits every still-marked displaced turn exactly
+  once with `PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME` and clears the mark in
+  the same step. Behavior question for the project lead, not a test-hook ask.
 - The merge ENDS the displaced user turn (KillTurn) after capturing it, then
   resubmits exactly once at lease release. daemon.md says only "captured
   durably and resubmitted exactly once"; the rationale for ending it is that a
@@ -377,7 +387,11 @@ instances of the same defect and deserve a sweep.
    then the per-cause arms. This is a behavior question for the project lead,
    not a proto ask.
 2. `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` — the
-   BEHAVIOR IS IMPLEMENTED; the skip is a missing TEST HOOK. The merge captures
+   BEHAVIOR IS **NOT** IMPLEMENTED (corrected 2026-09-02; see "Remaining
+   items"). Nothing reads `wsm.Turn.Displaced` back, so no bounce ever
+   resubmits. The paragraph below records the SECOND blocker, the missing test
+   hook, which only matters once the behavior exists. Original text:
+   the skip is a missing TEST HOOK. The merge captures
    the displaced turn durably, ends it (KillTurn), and resubmits exactly once
    at lease release. What cannot be constructed is a deterministic crash inside
    the narrow window between `CaptureDisplaced` and either the merge's own next
