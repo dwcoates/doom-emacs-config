@@ -44,6 +44,11 @@ type process struct {
 	// minted once per process: an instance id that changed mid-run would let a
 	// daemon fail to recognize the workspaces it claimed itself.
 	Instance ids.InstanceID
+	// Exit ends the serving lifetime. It is the daemon's ORDERLY exit — the
+	// drain's deadline and the handover's last transfer both leave through it
+	// — and it is handed to the graph rather than taken by it, because only
+	// the boot spine owns the lifetime.
+	Exit func()
 }
 
 // hooks are the seams the process-level tests drive. Production supplies the
@@ -51,8 +56,11 @@ type process struct {
 // advertisement, the joining deferral — is exercised without a component graph
 // behind it.
 type hooks struct {
-	// Graph builds the component graph from the resolved process facts.
-	Graph func(ctx context.Context, p process) (server.Deps, boot.Deps, error)
+	// Graph builds the component graph from the resolved process facts. It
+	// answers the two argument sets plus the late bindings and the background
+	// loops, because two edges of the graph point at the server, which cannot
+	// exist until its own dependencies do.
+	Graph func(ctx context.Context, p process) (*graph, error)
 	// Server builds the Connect surface.
 	Server func(server.Deps) (server.Server, error)
 	// Serve runs the http server until ctx ends.
@@ -190,7 +198,13 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	defer db.Close()
 
-	p := process{
+	// SERVING IS ITS OWN LIFETIME, cancelled either by the process's signal
+	// context or by the daemon's own orderly exit — the drain's deadline and
+	// the handover's last transfer both end the process through it.
+	serving, stopServing := context.WithCancel(ctx)
+	defer stopServing()
+
+	built, err := h.Graph(serving, process{
 		Opts:      opts,
 		Contracts: contracts,
 		Layout:    layout,
@@ -198,8 +212,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 		DB:        db,
 		Claim:     claim,
 		Instance:  wsm.NewInstanceID(),
-	}
-	serverDeps, bootDeps, err := h.Graph(ctx, p)
+		Exit:      stopServing,
+	})
 	if err != nil {
 		log.Error("daemon.cmd.graph", "the component graph could not be built", dlog.Context{
 			"error": err.Error(),
@@ -207,7 +221,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return err
 	}
 
-	sequence, err := boot.New(bootDeps)
+	sequence, err := boot.New(built.Boot)
 	if err != nil {
 		return fmt.Errorf("claude-repld: build the boot sequence: %w", err)
 	}
@@ -221,17 +235,29 @@ func run(ctx context.Context, opts options, h hooks) error {
 		"holds_restored": report.HoldsRestored,
 	})
 
-	srv, err := h.Server(serverDeps)
+	srv, err := h.Server(built.Server)
 	if err != nil {
 		return fmt.Errorf("claude-repld: build the server: %w", err)
 	}
 	defer srv.Close()
 
+	// THE LATE BINDINGS ARE COMPLETED BEFORE ANYTHING IS SERVED: the rollout's
+	// and the drain's pushes, and the workspace verbs' host relay, all reach
+	// the surface that has just been built.
+	if built.Bind != nil {
+		built.Bind(srv)
+	}
+	// The background loops start only now, for the same reason: each of them
+	// can push, and pushing into a surface that does not exist is a drop.
+	for _, loop := range built.Background {
+		go loop.run(serving, log)
+	}
+
 	log.Debug("daemon.cmd.serve", "serving", dlog.Context{
 		"address": claim.Address(),
 		"joining": joining,
 	})
-	return h.Serve(ctx, claim.Listener(), server.H2C(srv))
+	return h.Serve(serving, claim.Listener(), server.H2C(srv))
 }
 
 // openState opens the state client. A JOINING daemon opens it READ-ONLY: until
