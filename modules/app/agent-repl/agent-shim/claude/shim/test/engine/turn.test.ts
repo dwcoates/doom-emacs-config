@@ -9,6 +9,7 @@
  * prompt that was never recorded.
  */
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, it } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { PersistenceError } from "../../src/store/persistence.js";
@@ -667,6 +668,28 @@ describe("WatchAgent", () => {
       })(),
     ).rejects.toThrow(/no such book/);
   });
+
+  it("closes the store's own unknown_agent refusal with Code.NotFound", async () => {
+    // Landing 7: the store refuses a well-formed id naming no book; the shim
+    // relays that as NotFound rather than as an internal error.
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("unknown_agent", "no book under that id");
+
+    const error = await (async () => {
+      try {
+        for await (const _ of h.turns.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          // the open is refused before anything is yielded
+        }
+        return undefined;
+      } catch (caught) {
+        return caught;
+      }
+    })();
+
+    expect(error instanceof ConnectError ? error.code : undefined).toBe(Code.NotFound);
+  });
 });
 
 describe("StopBash", () => {
@@ -817,6 +840,73 @@ describe("UpdateAgent.prompt to a subagent", () => {
     );
 
     expect(failureKind(response)).not.toBe("nothingRunning");
+  });
+
+  /** A running task under `taskId`, of the named kind. */
+  function running(h: Harness, taskId: string, taskType?: string): void {
+    h.live.onTaskStarted(
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: taskId,
+        tool_use_id: `toolu_${taskId}`,
+        description: "a subagent",
+        uuid: "00000000-0000-4000-8000-000000000000",
+        session_id: "s",
+        ...(taskType === undefined ? {} : { task_type: taskType }),
+      } as SdkTaskStartedMessage,
+      "turn-1",
+    );
+  }
+
+  const promptTo = (target: string): shimv1.UpdateAgentRequest =>
+    create(shimv1.UpdateAgentRequestSchema, {
+      target: create(conversationv1.AgentIdSchema, { value: target }),
+      input: create(conversationv1.AgentInputSchema, {
+        input: { case: "prompt", value: textSaid("carry on") },
+      }),
+    });
+
+  it("refuses agent_busy when the addressed subagent's own turn is running", async () => {
+    // Landing 7: the daemon relays this as bubble_refused{agent_busy}.
+    const h = await harness();
+    running(h, "agent-7", "local_agent");
+
+    const response = await h.turns.updateAgent(promptTo("agent-7"));
+
+    expect(failureKind(response)).toBe("agentBusy");
+  });
+
+  it("refuses agent_busy when the target is the SPAWNING CALL's handle", async () => {
+    // A subagent is addressed by its tool_use_id on the wire, never by the
+    // vendor's task id.
+    const h = await harness();
+    running(h, "agent-7", "local_agent");
+
+    const response = await h.turns.updateAgent(promptTo("toolu_agent-7"));
+
+    expect(failureKind(response)).toBe("agentBusy");
+  });
+
+  it("refuses agent_busy for a running task whose kind the vendor left unstated", async () => {
+    // An unset `task_type` is the agent kind, as everywhere else in the shim.
+    const h = await harness();
+    running(h, "agent-7");
+
+    const response = await h.turns.updateAgent(promptTo("agent-7"));
+
+    expect(failureKind(response)).toBe("agentBusy");
+  });
+
+  it("keeps not_deliverable for a running SHELL under the same handle", async () => {
+    // A `local_bash` run is not an agent, so its liveness says nothing about a
+    // subagent's turn; the SDK route gap is still the refusal.
+    const h = await harness();
+    running(h, "agent-7", "local_bash");
+
+    const response = await h.turns.updateAgent(promptTo("agent-7"));
+
+    expect(failureKind(response)).toBe("notDeliverable");
   });
 });
 

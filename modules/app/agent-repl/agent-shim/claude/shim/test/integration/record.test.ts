@@ -25,7 +25,7 @@ import { BACKUP_KEEP, backupDir } from "../../src/engine/backup.js";
 import { agentIdPath, vendorLinkPath } from "../../src/engine/identity.js";
 import {
   freshSession,
-  openStream,
+  openStream, openSessionUpdates,
   remediationPay,
   resumeSession,
   startTurnRequest,
@@ -427,7 +427,7 @@ describe("every entry's envelope", () => {
     // vendor conversation, so they ride WatchSession and never the record.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const session = openStream((options) =>
+    const session = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     // Consume enough to know both were pushed.
@@ -558,7 +558,7 @@ describe("write ids and absorption", () => {
   test("an outage opens a degraded window and reports store_unreachable", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const session = openStream((options) =>
+    const session = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     await session.next();
@@ -585,7 +585,7 @@ describe("write ids and absorption", () => {
   test("a recovered outage closes the window with the dropped count", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const session = openStream((options) =>
+    const session = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     await session.next();

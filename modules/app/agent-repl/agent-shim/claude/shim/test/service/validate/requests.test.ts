@@ -60,6 +60,40 @@ describe("validateStartSessionRequest", () => {
     expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
   });
 
+  it("accepts a fresh start naming NO model: the SDK's default takes effect", () => {
+    // Optional since landing 7; SessionStarted.effective_model reports what
+    // the SDK chose.
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      source: {
+        case: "fresh",
+        value: create(shimv1.StartSessionFreshSchema, {
+          permissionMode: requests.permissionMode(),
+        }),
+      },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBeUndefined();
+  });
+
+  it("still refuses a fresh start whose model is SET but named nothing", () => {
+    // Saying nothing and meaning to say something are different requests.
+    // Arrange.
+    const request = create(shimv1.StartSessionRequestSchema, {
+      source: {
+        case: "fresh",
+        value: create(shimv1.StartSessionFreshSchema, {
+          model: create(conversationv1.AgentModelSchema, { name: "" }),
+          permissionMode: requests.permissionMode(),
+        }),
+      },
+    });
+
+    // Act, Assert.
+    expect(codeOf(() => validate.validateStartSessionRequest(request))).toBe(Code.InvalidArgument);
+  });
+
   it("refuses a fresh start with an unset permission mode", () => {
     // Arrange.
     const request = create(shimv1.StartSessionRequestSchema, {
