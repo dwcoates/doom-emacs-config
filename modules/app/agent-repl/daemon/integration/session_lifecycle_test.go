@@ -1496,3 +1496,74 @@ func assertShimRequestOrder(t *testing.T, f *fixture, first, second string) {
 		t.Fatalf("the shim received %s before %s, want %s first", second, first, first)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// audit-3 critique 4: a hibernate refusal or failure DEFERS the stand-down —
+// the sweep never forces a session down over a hibernate it could not get an
+// ack for. internal/drain/sweep.go's hibernate returns false (deferring)
+// before ever calling KillSession on both the transport-failure and the
+// typed-refusal branches.
+// ---------------------------------------------------------------------------
+
+// TestHibernateTransportFailureDefersTheStandDown covers the transport-level
+// failure: c.deps.Stand.Hibernate itself errors (shimclient's unary() passes
+// a raw connect error through), which internal/drain/sweep.go's hibernate()
+// logs at ERROR under daemon.drain.sweep ("the hibernate directive failed;
+// deferring the hibernation") — NOT WARN. The sweep's typed-refusal branch
+// (the other test below) is the one that logs WARN; a transport failure never
+// reaches that branch at all, so this test asserts the ERROR record the
+// source actually produces.
+func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
+	// Arrange: a very short idle cutoff so the sweep fires promptly, and a
+	// generous run of scripted Hibernate transport failures so the assertion
+	// window below never lands on a sweep pass that got through to a real
+	// (successful) hibernate and forced a KillSession for real.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	f.d.ExpectWarnings("daemon.drain.sweep")
+	for i := 0; i < 20; i++ {
+		f.shim.AnswerFailure(harness.RPCHibernate, "transport blew up")
+	}
+
+	// Act: wait for the sweep to log the failed directive.
+	rec := f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
+		"an ERROR record for the failed hibernate directive",
+		func(r harness.LogRecord) bool {
+			return r.Operation == "daemon.drain.sweep" && strings.EqualFold(r.Level, "error")
+		})
+
+	// Assert: the record is the hibernate-directive failure, not some other
+	// daemon.drain.sweep error.
+	if !strings.Contains(rec.Message, "hibernate directive failed") {
+		t.Fatalf("daemon.drain.sweep ERROR record = %q, want it to name the failed hibernate directive", rec.Message)
+	}
+
+	// Assert: the daemon never forces the session down over the refused
+	// hibernate.
+	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
+}
+
+// TestHibernateTurnInFlightRefusalDefersTheStandDown covers the shim's own
+// typed refusal: HibernateError.turn_in_flight (shim.v1/endpoint_hibernate.proto).
+// The sweep logs this at DEBUG only ("a turn is in flight; deferring the
+// hibernation") — quieter than the OTHER typed refusals (compaction_failed,
+// no_session), which log WARN — so this test asserts no WARN fires at all.
+func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	for i := 0; i < 20; i++ {
+		f.shim.Answer(harness.RPCHibernate, &shimv1.HibernateResponse{
+			Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
+				Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
+			}},
+		})
+	}
+
+	// Act: wait for at least one refused Hibernate attempt.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+
+	// Assert: the daemon never forces the session down over the deferred
+	// hibernate.
+	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
+}
