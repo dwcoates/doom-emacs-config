@@ -1,0 +1,27 @@
+{
+  "scenario": "web-fetch",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Fetch https://example.com and tell me the exact text of its heading.",
+  "prompts": [
+    {
+      "text": "Fetch https://example.com and tell me the exact text of its heading.",
+      "resume": false
+    }
+  ],
+  "world": "web-fetch",
+  "cwd_init": null,
+  "vendor_session_id": "7733492c-5079-4fda-b9bb-98c20f0cf67b",
+  "manual": null,
+  "expect": [
+    "tool:WebFetch",
+    "tool_result:web_fetch"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-web-fetch-GCKGw2-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:20:45.152Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

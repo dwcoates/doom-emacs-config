@@ -1,0 +1,27 @@
+{
+  "scenario": "report-findings",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Audit report-me.py for correctness bugs and report your findings through the findings tool rather than as prose.",
+  "prompts": [
+    {
+      "text": "Audit report-me.py for correctness bugs and report your findings through the findings tool rather than as prose.",
+      "resume": false
+    }
+  ],
+  "world": "report-findings",
+  "cwd_init": null,
+  "vendor_session_id": "26bc1a05-ba87-43e8-ab7e-51d6f9537638",
+  "manual": null,
+  "expect": [
+    "tool:ReportFindings",
+    "tool_result:report_findings"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-report-findings-zVuAot-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:22:09.559Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
