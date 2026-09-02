@@ -14,11 +14,11 @@ func TestRefusedReportsTheArm(t *testing.T) {
 	err := refuse(ArmAlreadyQueued, theWorkspace, "it already holds place %d", 2)
 
 	// Act.
-	arm, refused := Refused(err)
+	refusal, refused := Refused(err)
 
 	// Assert.
-	if !refused || arm != ArmAlreadyQueued {
-		t.Fatalf("Refused answered (%q, %v), want the already_queued arm", arm, refused)
+	if !refused || refusal.Arm != ArmAlreadyQueued {
+		t.Fatalf("Refused answered (%q, %v), want the already_queued arm", refusal.Arm, refused)
 	}
 }
 
@@ -29,11 +29,11 @@ func TestRefusedSeesThroughAWrappedError(t *testing.T) {
 	err := fmt.Errorf("enqueueing: %w", refuse(ArmSessionDeleted, theWorkspace, "it was deleted"))
 
 	// Act.
-	arm, refused := Refused(err)
+	refusal, refused := Refused(err)
 
 	// Assert.
-	if !refused || arm != ArmSessionDeleted {
-		t.Fatalf("Refused answered (%q, %v) for a wrapped refusal", arm, refused)
+	if !refused || refusal.Arm != ArmSessionDeleted {
+		t.Fatalf("Refused answered (%q, %v) for a wrapped refusal", refusal.Arm, refused)
 	}
 }
 
