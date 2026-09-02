@@ -7,7 +7,7 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
 ## Build and test
 
 - `go build ./... && go vet ./... && go test ./...` from this directory.
-- Integration suite: `TMPDIR=/tmp go test -tags integration ./integration/...`
+- Integration suite: `TMPDIR=/tmp go test -tags integration ./integration/... -timeout 180s`
   (a real daemon subprocess against a fake shim.v1 server, fake git repos and a
   temp state root; the fake shim binary is `integration/fakeshim`).
   `TMPDIR=/tmp` IS REQUIRED on macOS: `t.TempDir()` otherwise roots the state
@@ -16,6 +16,28 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   boot before anything else runs.
 - Every test process exports `AGENT_REPL_FORBID_VENDOR_CALLS=1`. No test
   ever calls the vendor.
+- **Wait bounds are TIGHT, on purpose.** Every wait the harness performs is
+  bounded, never a `time.Sleep`. Teamlead run 8 measured 443 passing tests at
+  a 0.2s median and 1.7s max wall time each, so a wait that only ever needs to
+  observe ORDINARY daemon behavior does not need anywhere near 30s to prove
+  itself — and a red test that DOES time out should burn seconds, not 30 of
+  them, or a run with a double-digit number of reds turns into a five-minute
+  wait for nothing new.
+
+  | bound | value | where | reason |
+  | --- | --- | --- | --- |
+  | `harness.DefaultTimeout` | 5s | every `harness.Daemon`'s context, unless overridden | ~3x run 8's observed 1.7s max; the shared budget for one daemon process's whole test |
+  | `harness.HandoverChainTimeout` (`Opts.Timeout`) | 15s (3x default) | the handful of tests whose ONE daemon context must span an entire self-reload handover — a merge landing, the rollout trigger, a SECOND real `claude-repld`'s full boot and adoption, and the incumbent's orderly exit, all on the incumbent's own budget rather than a fresh one | structurally two real process lifecycles sharing one budget, not one; run 8 already saw this chain finish inside 1.7s, so 15s is headroom, not a measured need |
+  | `harness.ProbeWindow` | 500ms | `harness.ExpectNoPush`, `harness.Daemon.ExpectFileUnchanged` | negative assertions that must wait out a bound rather than an event; 500ms is long enough for a push that IS coming to have arrived |
+  | `shortTimeout` (integration/support_session_test.go) | 200ms | `TestSessionSurvivesADaemonRestart`-style old-PID-gone probes | a structural "is it already true" check that should fail fast rather than ride the whole test's deadline |
+  | inline `context.WithTimeout` (drain_rollout_test.go, the drain-schedule-survives-a-restart test) | 2s | asserting the drain banner does NOT reappear after a restart | an expected-to-time-out negative probe, deliberately tighter than `DefaultTimeout` |
+
+  A wait that needs longer than `DefaultTimeout` gets one of the rows above —
+  never a bigger default. Package `-timeout 180s` leaves margin over the
+  measured ~139s full-suite wall time with today's known reds (each now
+  costing ~5s instead of ~30s) plus build/link time; it existed only as Go's
+  implicit 10-minute default before this bound table, which let a run with
+  many reds run needlessly long.
 
 ## Command line (binding spellings; Go's flag package accepts one or two dashes)
 
