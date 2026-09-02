@@ -688,9 +688,27 @@ frontend webview buffer (*agent-frontend-WS*) — the two buffers a
 workspace has."
   (cond
    ((string-match-p agent-repl--input-buffer-re name)
-    (substring name (length "*agent-panel-input-") (- (length name) (length "*"))))
+    ;; The identity segment ends at the space that introduces the optional
+    ;; display title, or at the closing star when there is no title.
+    (let* ((body (substring name (length "*agent-panel-input-")
+                            (- (length name) (length "*"))))
+           (space (string-search " " body)))
+      (if space (substring body 0 space) body)))
    ((string-match-p agent-repl--frontend-buffer-re name)
     (substring name (length "*agent-frontend-") (- (length name) (length "*"))))))
+
+(defun agent-repl--input-buffer-name-for-id (id)
+  "Return the name of the live input buffer whose identity segment is ID.
+The input buffer's name carries an optional display title, so it cannot
+be reconstructed from ID alone; the live buffers are the only place the
+current title is written down.  Answers nil when no such buffer lives."
+  (seq-some (lambda (buf)
+              (let ((name (buffer-name buf)))
+                (and name
+                     (string-match-p agent-repl--input-buffer-re name)
+                     (equal (agent-repl--extract-panel-id name) id)
+                     name)))
+            (buffer-list)))
 
 (defun agent-repl--partner-buffer-name (name id)
   "Return the partner buffer name for agent panel NAME with identifier ID.
@@ -698,7 +716,12 @@ For the input buffer, the partner is the frontend webview buffer, and
 vice versa."
   (if (string-match-p agent-repl--input-buffer-re name)
       (format "*agent-frontend-%s*" id)
-    (format "*agent-panel-input-%s*" id)))
+    ;; The partner input buffer may carry a display title, so its name is
+    ;; READ off the live buffer rather than rebuilt; the canonical name is
+    ;; the answer only while no such buffer lives, which is exactly the
+    ;; case the orphan check is about.
+    (or (agent-repl--input-buffer-name-for-id id)
+        (format "*agent-panel-input-%s*" id))))
 
 (defun agent-repl--orphaned-panel-p (name)
   "Return non-nil if NAME is a agent panel buffer whose partner is not visible.

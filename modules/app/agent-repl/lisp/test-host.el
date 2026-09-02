@@ -690,6 +690,98 @@ unary rpc can produce, which the contract never collapses into one."
       ;; Assert
       (should (equal seen (list "ws-1" host))))))
 
+(ert-deftest agent-repl-test-host-naming-title-renames-the-input-buffer ()
+  "Titles NAME THE BUFFERS: the composer's own name carries the title."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug "slug-1"
+                                                          :title "Refactor the codec"))))
+            ;; Assert
+            (should (string-match-p (regexp-quote "Refactor the codec")
+                                    (buffer-name buffer))))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-naming-slug-names-the-input-buffer ()
+  "With no vendor title the daemon-derived slug is what the buffer shows."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug "slug-1" :title nil))))
+            ;; Assert
+            (should (string-match-p (regexp-quote "slug-1") (buffer-name buffer))))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-renamed-input-buffer-is-still-an-agent-panel ()
+  "A titled composer must stay an agent panel to every name predicate."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug nil
+                                                          :title "Refactor the codec"))))
+            ;; Assert
+            (should (agent-repl--agent-panel-buffer-p buffer)))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-renamed-input-buffer-keeps-its-identity-segment ()
+  "The workspace is still recoverable from the titled name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host
+                          :value (plist-put (agent-repl-test-host--live)
+                                            :naming (list :slug nil
+                                                          :title "Refactor the codec"))))
+            ;; Assert
+            (should (equal (agent-repl--extract-panel-id (buffer-name buffer)) "ws-1")))
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-repl-test-host-naming-without-a-title-or-slug-leaves-the-name-bare ()
+  "Un-derived naming is the ordinary early state, not a title to write down."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((buffer (generate-new-buffer " *test-host-input*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key) (and (eq key :input-buffer) buffer))))
+            (agent-repl-test-host--subscribe "ws-1")
+            ;; Act
+            (agent-repl-test-host--push
+             "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
+            ;; Assert
+            (should (equal (buffer-name buffer) "*agent-panel-input-ws-1*")))
+        (kill-buffer buffer)))))
+
 ;;;; ---- The notification policy ----
 
 (ert-deftest agent-repl-test-host-notification-unfocused-posts-a-desktop-banner ()

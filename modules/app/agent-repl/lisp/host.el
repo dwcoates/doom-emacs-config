@@ -404,12 +404,42 @@ only records the fact and drops the dead stream."
       (_ (agent-repl--error ws "elisp.host.unknown-push ws=%s arm=%S push=%S"
                             ws arm push)))))
 
+(defun agent-repl-host--apply-naming (ws)
+  "Rename WS's input buffer so its name carries WS's display title.
+fanout §7: buffer titles use `naming.title', else `naming.slug', else the
+row name — TITLES NAME THE BUFFERS, so a display-title accessor that
+answers the right string while every buffer keeps its old name is not the
+contract.  `agent-repl--input-buffer-name' keeps the name matching
+`agent-repl--input-buffer-re', so a titled composer is still an agent
+panel to every predicate and its identity segment is still recoverable.
+
+The WEBVIEW buffer is deliberately left alone: its name is a lookup key
+(`agent-repl--frontend-webview-buffer-name') that callers derive from the
+workspace name without ever seeing the title.
+
+Silent and inert when WS has no live input buffer — a workspace whose
+composer has not been created yet has no name to write the title into,
+and the name is built at creation from the title the daemon has by then."
+  (let ((buffer (agent-repl--ws-get ws :input-buffer)))
+    (when (buffer-live-p buffer)
+      (let ((want (agent-repl--input-buffer-name ws (agent-repl-host-display-title ws))))
+        (unless (equal (buffer-name buffer) want)
+          (with-current-buffer buffer
+            ;; UNIQUE-OK: two workspaces may be handed the same vendor title,
+            ;; and a rename that ERRORED on the collision would strand the
+            ;; second composer under the old name with no way back.
+            (rename-buffer want t))
+          (agent-repl--info ws "elisp.host.buffer-renamed ws=%s buffer=%S title=%S"
+                            ws (buffer-name buffer)
+                            (agent-repl-host-display-title ws)))))))
+
 (defun agent-repl-host--apply-state (ws host)
   "Whole-replace WS's host state with HOST and run the update hooks.
 `shim_attached' false gets NO treatment: a parked workspace presents as
 live and unwired, and the frontend cannot tell parked from idle, on
 purpose."
   (agent-repl-host--put ws :host host)
+  (agent-repl-host--apply-naming ws)
   (agent-repl--log ws "elisp.host.state ws=%s gate=%S backfill=%S faults=%d"
                    ws (agent-repl-host-composer-gate ws)
                    (agent-repl-host-backfill ws)

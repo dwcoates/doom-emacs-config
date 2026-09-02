@@ -3633,6 +3633,26 @@ survives into the rest of the batch run."
           (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
 
 
+(ert-deftest agent-repl-test-core-input-buffer-name-carries-the-title ()
+  "The title rides after the identity segment, inside the name form."
+  (should (equal (agent-repl--input-buffer-name "ws-1" "Refactor the codec")
+                 "*agent-panel-input-ws-1 Refactor the codec*")))
+
+(ert-deftest agent-repl-test-core-input-buffer-name-without-a-title-is-canonical ()
+  "The row-name fallback adds nothing, so the name stays the bare one."
+  (should (equal (agent-repl--input-buffer-name "ws-1" "ws-1")
+                 "*agent-panel-input-ws-1*")))
+
+(ert-deftest agent-repl-test-core-input-buffer-name-drops-asterisks-from-the-title ()
+  "The asterisk is the name form's own delimiter and cannot ride a title."
+  (should (equal (agent-repl--input-buffer-name "ws-1" "a*b")
+                 "*agent-panel-input-ws-1 ab*")))
+
+(ert-deftest agent-repl-test-core-titled-input-buffer-name-still-matches ()
+  "A titled composer must still match the input buffer regexp."
+  (should (string-match-p agent-repl--input-buffer-re
+                          "*agent-panel-input-ws-1 Refactor the codec*")))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
