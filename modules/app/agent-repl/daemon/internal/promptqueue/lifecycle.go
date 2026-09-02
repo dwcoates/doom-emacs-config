@@ -173,6 +173,24 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 		want = &leaseHold{kind: kind, scheduleID: scheduleID}
 	}
 
+	// A LEASE ENDING IS NOT A SESSION ARRIVING. A hibernation's lease is
+	// dropped as the hibernation completes, while the workspace it parked
+	// still has no shim; un-stamping its holds there would publish a tray
+	// that calls them deliverable and would leave a release with no state to
+	// name -- the session_starting refusal gone, and no session either, so
+	// the only honest answer left would be the untyped "no session" about a
+	// workspace that is in fact still coming up. The hold that survives the
+	// lease is therefore restamped as session_starting and the bring-up is
+	// driven by the same background revival a fresh submission takes, which
+	// un-stamps and delivers when the session is actually up.
+	revivalPending := false
+	if want == nil && len(standing) > 0 {
+		if _, live := q.deps.Client(ws); !live {
+			want = &leaseHold{kind: wsm.HoldSessionStarting}
+			revivalPending = true
+		}
+	}
+
 	changed := false
 	for _, h := range standing {
 		if h.Tombstone != nil || sameHold(h, want) {
@@ -194,9 +212,18 @@ func (q *queue) OnLeaseChanged(ws ids.WorkspaceID) {
 	if !changed {
 		log.Debug(opLeaseChange, "no standing hold changed under the new lease",
 			dlog.Context{"holds": len(standing)})
+		if revivalPending {
+			q.reviveInBackground(ctx, ws, log)
+		}
 		return
 	}
 	if err := q.pushTray(ctx, ws, log); err != nil {
+		return
+	}
+	if revivalPending {
+		log.Debug(opLeaseChange, "the lease ended with no session up; the holds wait on a revival",
+			dlog.Context{"holds": len(standing)})
+		q.reviveInBackground(ctx, ws, log)
 		return
 	}
 

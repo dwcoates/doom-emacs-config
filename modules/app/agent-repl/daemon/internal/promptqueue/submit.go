@@ -385,6 +385,8 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 		return false, nil
 	}
 	log.Debug(opSubmit, "no session is live; reviving the workspace for the submission", nil)
+	q.noteBringUp(ws, 1)
+	defer q.noteBringUp(ws, -1)
 	if err := q.deps.Revive(ctx, ws); err != nil {
 		log.Error(opSubmit, "the revival failed; the submission cannot be delivered",
 			dlog.Context{"cause": err.Error()})
@@ -392,4 +394,22 @@ func (q *queue) revive(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger)
 	}
 	log.Info(opSubmit, "revived the workspace's session for the submission", nil)
 	return true, nil
+}
+
+// noteBringUp records one revival entering or leaving flight.
+func (q *queue) noteBringUp(ws ids.WorkspaceID, delta int) {
+	s := q.state(ws)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	s.bringUps += delta
+}
+
+// isReviving reports whether a bring-up for a workspace is running or about to
+// run: either a background revival goroutine is in flight, or a revival call
+// itself is. Both mean the session is still coming up.
+func (q *queue) isReviving(ws ids.WorkspaceID) bool {
+	s := q.state(ws)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return s.reviving || s.bringUps > 0
 }
