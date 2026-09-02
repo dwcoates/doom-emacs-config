@@ -916,21 +916,35 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 		t.Fatalf("the first bubble submit = %v, want a success", first)
 	}
 	f.shim.ExpectUpdateAgent()
+	// The SHIM is what judges a subagent's own turn, so the fake states the
+	// verdict: the next UpdateAgent is refused agent_busy
+	// (shim.v1 UpdateAgentFailure.agent_busy, landing 7).
+	f.shim.Answer(harness.RPCUpdateAgent, &shimv1.UpdateAgentResponse{
+		Result: &shimv1.UpdateAgentResponse_Failure{Failure: &shimv1.UpdateAgentFailure{
+			Detail: "the addressed agent's own turn is already open",
+			Kind:   &shimv1.UpdateAgentFailure_AgentBusy{AgentBusy: &shimv1.UpdateAgentAgentBusy{}},
+		}},
+	})
 
 	// Act
-	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
+	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
 		Workspace: f.ws, Said: said("second"), IdempotencyKey: "k-bubble-2", Origin: origin, Feed: row.GetId(),
 	})
 
 	// Assert
-	// Project-lead ruling: the shim's turn_already_open on a bubble-addressed
-	// submit has no SubmitPromptError home, and answers under the landing-7
-	// candidate arm bubble_refused with kind agent_busy in the reason.
-	if !namesIntendedArm(err, "SubmitPromptError.bubble_refused") ||
-		!strings.Contains(err.Error(), "kind agent_busy") {
-		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want bubble_refused{kind agent_busy}", err)
+	// LANDING 7: the shim's refusal is relayed by kind on the landed arm
+	// SubmitPromptError.bubble_refused, and the daemon never judges the
+	// subagent's turn itself.
+	refused := resp.GetError().GetBubbleRefused()
+	if refused == nil || refused.GetAgentBusy() == nil {
+		t.Fatalf("a second bubble submit while the agent's turn runs = %v, want error.bubble_refused{kind: agent_busy}", resp)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+	if refused.GetDetail() == "" {
+		t.Fatalf("bubble_refused.detail is empty, want the shim's own words as evidence")
+	}
+	// The queue records the shim's refusal of the delivery it attempted; the
+	// refusal is an ANSWER to the caller and the record is its evidence.
+	f.d.ExpectWarnings("daemon.promptqueue.deliver")
 }
 
 // ---------------------------------------------------------------------------
