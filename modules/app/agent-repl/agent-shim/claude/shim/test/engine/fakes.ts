@@ -263,11 +263,37 @@ export class RecordingPersistence implements Persistence {
       },
     });
   }
-  onFault(): () => void {
+  private readonly faultListeners: ((fault: conversationv1.SessionFault) => void)[] = [];
+  private readonly windowListeners: ((w: conversationv1.SessionDegradedWindow) => void)[] = [];
+  onFault(listener: (fault: conversationv1.SessionFault) => void): () => void {
+    this.faultListeners.push(listener);
     return () => undefined;
   }
-  onDegradedWindow(): () => void {
+  onDegradedWindow(listener: (window: conversationv1.SessionDegradedWindow) => void): () => void {
+    this.windowListeners.push(listener);
     return () => undefined;
+  }
+  /** Raise a record-plane fault, the way the writer does on a store outage. */
+  raiseFault(detail: string): void {
+    const fault = create(conversationv1.SessionFaultSchema, {
+      component: "store-writer",
+      detail,
+      kind: {
+        case: "storeUnreachable",
+        value: create(conversationv1.SessionFaultStoreUnreachableSchema, {}),
+      },
+    });
+    for (const listener of this.faultListeners) listener(fault);
+  }
+  /** Open a record-plane degraded window, the way the writer does. */
+  raiseDegradedWindow(reason: string): void {
+    const window = create(conversationv1.SessionDegradedWindowSchema, {
+      component: "store-writer",
+      reason,
+      beganAtMs: 1n,
+      extent: { case: "open", value: create(conversationv1.SessionDegradedOpenSchema, {}) },
+    });
+    for (const listener of this.windowListeners) listener(window);
   }
 }
 

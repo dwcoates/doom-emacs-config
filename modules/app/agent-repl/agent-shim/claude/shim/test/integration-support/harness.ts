@@ -279,6 +279,13 @@ export async function cleanupShims(): Promise<void> {
         await handle.exited;
       }
       await handle.store?.close();
+      // AGENT_REPL_ITEST_KEEP leaves the temp tree in place so a failing run's
+      // shim log can be read afterwards. Never set in CI: the trees are large
+      // and one per spawn.
+      if (process.env.AGENT_REPL_ITEST_KEEP === "1") {
+        process.stderr.write(`itest: kept ${handle.dirs.root}\n`);
+        return;
+      }
       rmSync(handle.dirs.root, { recursive: true, force: true });
     }),
   );
