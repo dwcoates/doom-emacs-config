@@ -163,7 +163,10 @@ describe("shim runtime logging", () => {
 
   it("reports fatal errors canonically after configuration and through bootstrap stderr before it", async () => {
     const bootstrapLog = await freshLog();
-    const { reportFatal: bootstrapFatal } = await import("../src/main.js");
+    // src/fatal.js, NOT src/main.js: the fatal reporter is deliberately off the
+    // wiring graph, so this test pulls in one small module rather than the whole
+    // shim (engine, store, service, sdk) on every fresh module registry.
+    const { reportFatal: bootstrapFatal } = await import("../src/fatal.js");
     const bootstrapTerminal = stderr();
     bootstrapFatal(new Error("bootstrap"));
     expect(mockedWriteSync).not.toHaveBeenCalled();
