@@ -69,6 +69,18 @@ Original list (all landed, none deferred beyond the two noted):
 - Webapp: no pull-driven health surface; session faults via pushed topbar warnings; UpdateMergeQueue has no webapp surface.
 - Compaction summary line still ungrounded (cheap-model capture never compacted); needs a user-approved longer-history capture.
 
+## E2E cleanup orchestration (2026-09-02)
+
+Steps 2-6 of reports/E2E-SIDECAR-PLAN.md are orchestrated by ONE opus-low
+agent that dispatches sonnet-medium writers only, never runs the e2e or
+integration suites (compile gate only), and makes NO production code changes
+(fake SDK and e2e harness/tests are test tooling and in scope; anything
+needing production change is reported back undone). Branches:
+overhaul/shim-fakesdk (worktree shim-agents/fakesdk) and overhaul/e2e-cleanup
+(worktree doom-overhaul/e2e-cleanup, off integration). Steps 5-6 wait for
+the project lead's "merge landed" message. Project lead resumes at step 7:
+run the e2e suite, dispatch remediation, then audit gaps, coverage, hardening.
+
 ## USER RULING 2026-09-02: e2e runs a REAL sidecar; no test writes the store
 
 daemon/e2e tests that hand-write sidecar events into the store are wrong.
