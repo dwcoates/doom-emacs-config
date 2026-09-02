@@ -228,13 +228,3 @@ func (p Prompt) Splice(values map[string]string) (string, error) {
 	}
 	return out, nil
 }
-
-// LoadAndSplice is Load followed by Splice, which is how every call site uses
-// this package: a brief is read at the moment its prompt is composed.
-func LoadAndSplice(dir, name string, values map[string]string) (string, error) {
-	prompt, err := Load(dir, name)
-	if err != nil {
-		return "", err
-	}
-	return prompt.Splice(values)
-}

@@ -20,11 +20,6 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// MergeDequeueHeadline is the sentence the merge-dequeue offer card leads
-// with, composed HERE because the contract fixes composition on the daemon and
-// the tray is the daemon's one author of the tray's prose.
-const MergeDequeueHeadline = "interrupting — keep your merge's queue slot, or release it?"
-
 // Resolver is the tray's whole surface.
 type Resolver interface {
 	sessionwatcher.HoldsSink
@@ -44,19 +39,6 @@ type Resolver interface {
 	SetOffer(ws ids.WorkspaceID, offer *frontendv1.HeldOffer)
 	// Topic is the workspace's tray publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.DaemonHoldTray]
-}
-
-// MergeDequeueOffer composes the merge-dequeue offer. The merge orchestrator
-// raises the offer by handing this to SetOffer, so the sentence has ONE author
-// and no caller assembles prose of its own.
-func MergeDequeueOffer() *frontendv1.HeldOffer {
-	return &frontendv1.HeldOffer{
-		Offer: &frontendv1.HeldOffer_MergeDequeue{
-			MergeDequeue: &frontendv1.HeldOfferMergeDequeue{
-				Headline: &frontendv1.HeldOfferHeadline{Text: MergeDequeueHeadline},
-			},
-		},
-	}
 }
 
 // New builds the holds resolver.
