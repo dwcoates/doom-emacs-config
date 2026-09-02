@@ -124,6 +124,10 @@ type Fleet struct {
 	// is what makes a prelaunched shim's socket path distinct from the running
 	// one's.
 	generation map[ids.WorkspaceID]int
+	// buildSHA is the shim build each live session reported at start. It is a
+	// fact of the RUNNING process, which is why it is remembered here and not
+	// persisted.
+	buildSHA map[ids.WorkspaceID]string
 }
 
 // NewFleet builds the session fleet.
@@ -161,6 +165,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		coldGates:  map[ids.WorkspaceID]ServedColdGate{},
 		lastCold:   map[ids.WorkspaceID]*conversationv1.SessionCold{},
 		generation: map[ids.WorkspaceID]int{},
+		buildSHA:   map[ids.WorkspaceID]string{},
 	}, nil
 }
 
@@ -488,6 +493,11 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	if next.StartedAt.IsZero() {
 		next.StartedAt = now
 	}
+	if sha := started.GetRuntime().GetShimBuildSha(); sha != "" {
+		f.mu.Lock()
+		f.buildSHA[ws] = sha
+		f.mu.Unlock()
+	}
 	if err := f.deps.DB.PutSession(ctx, next); err != nil {
 		log.Error(opBringUp, "could not record the session facts", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: record the session facts: %w", ws, err)
@@ -512,6 +522,7 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	delete(f.sessions, ws)
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
+	delete(f.buildSHA, ws)
 	f.mu.Unlock()
 	if !ok {
 		return nil
