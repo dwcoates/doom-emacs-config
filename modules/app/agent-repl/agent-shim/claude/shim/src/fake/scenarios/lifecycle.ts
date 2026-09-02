@@ -13,7 +13,7 @@
  * treated both as EOF would silently erase every producer failure, which is
  * why the mock can produce each on demand.
  */
-import { conclude, scenario } from "./support.js";
+import { askPermission, conclude, scenario } from "./support.js";
 
 export const HOLD = scenario({
   name: "hold",
@@ -86,6 +86,31 @@ export const QUERY_FAIL = scenario({
   },
 });
 
+export const QUERY_EOF_MID_ASK = scenario({
+  name: "query-eof-mid-ask",
+  prompt: "!query-eof-mid-ask",
+  emits:
+    "a gated `Bash` whose `canUseTool` ask is opened and then NEVER answered by the vendor: the iterable ENDS " +
+    "with the callback still pending. THE ASK IS OPENED BEFORE THE DEATH, which is the whole point — an " +
+    "unresolved `canUseTool` promise wedges the vendor process, so the query-death path owes every pending " +
+    "callback a denial",
+  writes: "the tool_use line and the prompt line; there is no turn record because there was no turn end",
+  arms: "SessionQueryDied.cause=unexpected_eof with an AgentPermission settling denied",
+  async run(ctx) {
+    ctx.log(
+      { level: "warn", turn: ctx.turn, branch: "query-eof-mid-ask" },
+      "fake query ENDING with a permission ask still open",
+    );
+    const call = ctx.toolUse("Bash", { command: "git status" });
+    // The gate OPENS and PERSISTS the ask synchronously before it hands back
+    // the promise, so the stream below always dies with a genuinely open ask
+    // rather than racing one into existence. Never awaited here: only the
+    // shim's stand-down can resolve it.
+    void askPermission(ctx, call);
+    ctx.endStream();
+  },
+});
+
 export const KEEPALIVE_ECHO = scenario({
   name: "keepalive",
   prompt: "!keepalive",
@@ -100,4 +125,11 @@ export const KEEPALIVE_ECHO = scenario({
   },
 });
 
-export const LIFECYCLE_SCENARIOS = [HOLD, INTERRUPT_MID_TOOL, QUERY_EOF, QUERY_FAIL, KEEPALIVE_ECHO];
+export const LIFECYCLE_SCENARIOS = [
+  HOLD,
+  INTERRUPT_MID_TOOL,
+  QUERY_EOF,
+  QUERY_EOF_MID_ASK,
+  QUERY_FAIL,
+  KEEPALIVE_ECHO,
+];

@@ -11,7 +11,7 @@
  * module that accumulated one-off emitters would become the place shapes drift
  * away from the corpus.
  */
-import type { PermissionResultLike } from "../../sdk/types.js";
+import type { PermissionResultLike, PermissionUpdateLike } from "../../sdk/types.js";
 import type { Scenario, ScenarioContext, ToolCall } from "../scenario.js";
 import { FAKE_REASONING_SIGNATURE } from "../vendor-files.js";
 
@@ -80,19 +80,31 @@ export function visibleThinking(text: string): {
 export async function askPermission(
   ctx: ScenarioContext,
   call: ToolCall,
-  extra: { title?: string; displayName?: string; description?: string; decisionReason?: string } = {},
+  extra: {
+    title?: string;
+    displayName?: string;
+    description?: string;
+    decisionReason?: string;
+    /**
+     * The standing the ask OFFERS, when the default single add-rule suggestion
+     * is not the shape under test (a `setMode` offer, for instance).
+     */
+    suggestions?: readonly PermissionUpdateLike[];
+  } = {},
 ): Promise<PermissionResultLike | null> {
   return ctx.canUseTool(call.name, call.input, {
     signal: new AbortController().signal,
     toolUseID: call.toolUseId,
     requestId: `req_perm_${call.toolUseId}`,
     suggestions: [
-      {
-        type: "addRules",
-        rules: [{ toolName: call.name, ruleContent: String(call.input.command ?? call.input.file_path ?? "") }],
-        behavior: "allow",
-        destination: "localSettings",
-      },
+      ...(extra.suggestions ?? [
+        {
+          type: "addRules",
+          rules: [{ toolName: call.name, ruleContent: String(call.input.command ?? call.input.file_path ?? "") }],
+          behavior: "allow",
+          destination: "localSettings",
+        },
+      ]),
     ],
     title: extra.title ?? `Claude wants to run ${call.name}`,
     displayName: extra.displayName ?? call.name,
