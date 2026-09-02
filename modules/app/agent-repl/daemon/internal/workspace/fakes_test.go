@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/gitclient"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/promptqueue"
@@ -720,6 +722,43 @@ func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFa
 
 func (s *fakeSurfaces) Close() error { return nil }
 
+// fakeHealth is a health.Reporter that records the faults it was asked to open
+// and answers the standing ones from that same list, so a test asserts both
+// that a fault was raised and that a second identical one was not.
+type fakeHealth struct {
+	health.Reporter
+
+	opened []wsm.Fault
+	// openErr fails every OpenFault.
+	openErr error
+	// listErr fails every OpenFaults.
+	listErr error
+}
+
+func (h *fakeHealth) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
+	if h.openErr != nil {
+		return "", h.openErr
+	}
+	id := ids.FaultID(fmt.Sprintf("fault-%d", len(h.opened)+1))
+	f.ID = id
+	h.opened = append(h.opened, f)
+	return id, nil
+}
+
+func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	if h.listErr != nil {
+		return nil, h.listErr
+	}
+	var out []wsm.Fault
+	for _, f := range h.opened {
+		if scope.Kind != "" && f.Kind != scope.Kind {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
+}
+
 // fixture is one arranged verb surface plus every fake behind it, so a test
 // arranges by mutating fields and asserts by reading them.
 type fixture struct {
@@ -733,6 +772,7 @@ type fixture struct {
 	feed    *fakeFeed
 	footer  *fakeFooter
 	sidebar *fakeSidebar
+	health  *fakeHealth
 	host    *fakeHost
 	browser *fakeBrowser
 	fleet   *fakeSessions
@@ -765,6 +805,7 @@ func newFixture(t *testing.T) *fixture {
 		feed:    &fakeFeed{},
 		footer:  newFakeFooter(),
 		sidebar: &fakeSidebar{},
+		health:  &fakeHealth{},
 		host:    &fakeHost{},
 		browser: &fakeBrowser{},
 		fleet:   newFakeSessions(),
@@ -780,6 +821,7 @@ func newFixture(t *testing.T) *fixture {
 		DB: f.db, Git: f.git, Accounts: f.account, Queue: f.queue, Merge: f.merge,
 		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{}, Browser: f.browser,
 		Sidebar: f.sidebar, Holds: stubHolds{}, Host: f.host, Sessions: f.fleet,
+		Health:     f.health,
 		PromptsDir: "/prompts", Log: f.log,
 		Shim: func(ids.WorkspaceID) (Shim, bool) {
 			if !f.hasSession {
