@@ -91,6 +91,27 @@ daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
 suite (real shim + store + sidecar, hosted daemon, no frontends). Both
 survive the merge.
 
+## FIVE-WAY MERGE LANDED 2026-09-02 (overhaul/integration)
+
+Merged in order daemon 892fab33e, shim d8236003d, webapp e5cd9002c, store
+92bb708e4, elisp b80504704 (two docs conflicts resolved: agent-shim/AGENTS.md
+takes the store text with `wire/` marked DELETED; wire/AGENTS.md deleted with
+the package). Everything builds: proto check-generated, daemon build + vet
+(both tag sets), store, sidecar, shim typecheck, webapp typecheck. Elisp's
+tightwaits and shared-fake-daemon branches are test-only and merge later.
+
+FINDING: daemon/e2e NO LONGER EXISTS. The daemon lead rebuilt the daemon from
+scratch (23cc6a672, 2026-08-29) and deleted the whole old tree including the
+83-file e2e suite, which targeted the OLD daemon's internals. The cross-system
+e2e suite must be REBUILT against the new daemon; E2E-SIDECAR-PLAN steps 5-6
+(rewriting the old files) are moot; the step-2 inventory becomes part of the
+new suite's spec. Decision owed by the user (see the ledger).
+
+Daemon final: 892fab33e, STOP-daemon.md; owed items: abandoned-merge cause has
+no producer (behavior decision), displaced-turn test needs a freeze hook,
+~10 subscribe-after-trigger race sites in merge_test.go, KillTurn-after-capture
+confirmed as ruled (daemon.md wording to update).
+
 ## USER RULING 2026-09-02: no playtests; e2e coverage hardening instead
 
 The final playtest step is DROPPED. After the cross-system e2e suite passes
