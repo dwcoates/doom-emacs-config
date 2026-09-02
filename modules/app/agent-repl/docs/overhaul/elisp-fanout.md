@@ -349,6 +349,18 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   tests R-REGRESS holds — likely one cause); test-roster's `--with-editor`
   stub writes `:project-dir` itself and masked the gap (teamlead: leave the
   stub; the new test overrides it locally — noted as a follow-up).
+- R-RED-HOST MERGED (1deaa97a3): host 68/68. Production: last-selected-id
+  stamped on Select success only; Select/Adopt error arms route
+  transferring_away / not_yet_adopted through `agent-repl-host--on-refused`
+  → `agent-repl-host-handle-refusal`; empty transferring_away address is
+  the breach; `not_yet_adopted` retry paced by
+  `agent-repl-host-handover-retry-delay` (0.2 s defcustom) — accepted as an
+  implementation-detail override of §7's "retry on acceptance" (the
+  acceptance path stays for the no-successor case); `naming.title` renames
+  the INPUT buffer (`agent-repl--input-buffer-name`, identity segment +
+  title); the webview buffer name stays a lookup key (ruled: correct — the
+  contract asks for a name in every standing, not for every buffer to
+  carry it). Worktrees left: regress.
 
 ## 1. Module map (final tree of lisp/)
 
