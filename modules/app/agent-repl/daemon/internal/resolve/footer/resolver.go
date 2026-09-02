@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/vocab"
 )
 
 // resolver is the footer resolver. One instance serves every workspace; each
@@ -27,9 +28,15 @@ type resolver struct {
 }
 
 // newResolver builds the resolver with the injectable knobs resolved.
-func newResolver(log dlog.Surfaces, opts ...Option) (*resolver, error) {
+func newResolver(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (*resolver, error) {
 	if log == nil {
 		return nil, fmt.Errorf("footer resolver needs log surfaces")
+	}
+	if err := colors.AssertFooterStatusArms(statusArms); err != nil {
+		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
+	}
+	if err := colors.AssertFooterAllowanceArms(allowanceArms); err != nil {
+		return nil, fmt.Errorf("footer resolver refuses to serve an unpainted state: %w", err)
 	}
 	o := options{
 		clock:         SystemClock{},
