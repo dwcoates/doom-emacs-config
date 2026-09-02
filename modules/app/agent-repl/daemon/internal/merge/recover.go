@@ -33,10 +33,18 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		return err
 	}
 	repos := make([]wsm.RepoKey, 0, len(queues))
+	total := 0
 	for repo := range queues {
 		repos = append(repos, repo)
+		total += len(queues[repo])
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i] < repos[j] })
+	// THE RUN LOG CARRIES THE RECOVERY ITSELF. Each merge's own fate is a
+	// workspace-scoped record, but "this boot reconciled the merge queues" is a
+	// fact about the restart, and the restart-scoped log is where the daemon's
+	// boot sequence is read.
+	o.deps.Log.Global().Info(op, "recovering the merge queues", dlog.Context{
+		"repositories": len(repos), "entries": total})
 
 	for _, repo := range repos {
 		for _, entry := range queues[repo] {
