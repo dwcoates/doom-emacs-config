@@ -403,6 +403,9 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   `:feed-undecodable`), unknown_repository on merge-queue verbs (WARN +
   message naming the requested repository; evict names nil by design).
   No agent worktrees remain. Only audit 3 in flight.
+- GREEN at e165981f9: connect 25/25, link 31/31, host 68/68, roster 56/56,
+  daemon 21/21, verbs 74/74, composer 56/56; all-suite 3367/3367;
+  test-helpers load clean; fake daemon go test ok. Awaiting audit 3.
 
 ## 1. Module map (final tree of lisp/)
 
