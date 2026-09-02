@@ -620,3 +620,37 @@ describe("standing down", () => {
     expect(gate.pendingCount).toBe(0);
   });
 });
+
+/**
+ * noteVendorDenial / deniedCall: the memory of a denial the GATE did not
+ * itself decide (a vendor `permission_denied` record the fold relays), kept
+ * so `deniedCall` answers the same regardless of which half of the shim saw
+ * it. Session wiring routes `session.deniedCall` to `gate.deniedCall` and
+ * calls `gate.noteVendorDenial` on a relayed denial, but no unit scenario
+ * currently exercises that vendor-denial path, so neither method had ever
+ * run in the unit suite.
+ */
+describe("noteVendorDenial and deniedCall", () => {
+  it("is not denied before any denial is noted", () => {
+    const { gate } = gateWith();
+
+    expect(gate.deniedCall("toolu_1")).toBe(false);
+  });
+
+  it("remembers a vendor denial the gate never asked about", () => {
+    const { gate } = gateWith();
+
+    gate.noteVendorDenial("toolu_1");
+
+    expect(gate.deniedCall("toolu_1")).toBe(true);
+    expect(gate.deniedCall("toolu_2")).toBe(false);
+  });
+
+  it("ignores an empty tool_use_id", () => {
+    const { gate } = gateWith();
+
+    gate.noteVendorDenial("");
+
+    expect(gate.deniedCall("")).toBe(false);
+  });
+});
