@@ -5882,3 +5882,16 @@ body.ungated #mode-select {
 
 /* The merge commit's narration lines. */
 .merge-line { padding: 0.1rem 0; color: var(--muted); }
+
+/* ---- searched paths under a sidebar refusal (src/sidebar/verbs.ts) ---- */
+/* `transcript_missing` names the places the daemon looked. They are paths, so
+   they are monospace, and they are supporting detail, so they are muted. */
+#ws-sidebar .sb-refusal-paths {
+  list-style: none;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  color: var(--muted);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.65rem;
+}
+#ws-sidebar .sb-refusal-paths > li { overflow-wrap: anywhere; }

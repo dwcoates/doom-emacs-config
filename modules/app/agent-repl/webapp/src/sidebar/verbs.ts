@@ -493,7 +493,7 @@ export async function runVerb<Res extends VerbResponse>(
       operation: "sidebar.verbs.refused",
       context: { rpc: spec.rpc, arm: cause.case, sentence: say },
     });
-    drawRefusal(control, cause.case, say);
+    drawRefusal(control, cause.case, say, refusalDetail(cause));
     setDisabled(control, false);
     return false;
   } catch (err) {
@@ -580,7 +580,10 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
     case "sessionDeleted":
       return "this workspace's session has been deleted";
     case "transcriptMissing":
-      return `the transcript for session ${cause.value.vendorSessionId} was not found in ${cause.value.searchedPaths.length} searched path(s)`;
+      // THE PATHS THEMSELVES, not a count of them: the reader's next act is to
+      // go look in one, and "3 searched path(s)" tells them nothing they can
+      // act on. The list is drawn under the sentence by `refusalDetail`.
+      return `the transcript for session ${cause.value.vendorSessionId} was not found`;
     case "spawnFailed":
       return `the session could not be started: ${cause.value.detail}`;
     default:
@@ -650,12 +653,42 @@ export function assignWorkspaceTaskRefusal(cause: CauseOf<AssignWorkspaceTaskErr
 }
 
 /** The refusal, drawn as the NEXT SIBLING of the control that made the call. */
-export function drawRefusal(control: HTMLElement, arm: string, text: string): void {
+export function drawRefusal(
+  control: HTMLElement,
+  arm: string,
+  text: string,
+  detail: HTMLElement | null = null,
+): void {
   const refusal = document.createElement("div");
   refusal.className = "refusal sb-refusal";
   refusal.setAttribute("data-arm", arm);
-  refusal.textContent = text;
+  const sentence = document.createElement("div");
+  sentence.textContent = text;
+  refusal.append(sentence);
+  if (detail !== null) refusal.append(detail);
   control.after(refusal);
+}
+
+/**
+ * The FACTS an arm carries that do not fit in a sentence.
+ *
+ * `transcript_missing` carries the paths the daemon looked in, and those are
+ * the reader's next act — so they are listed verbatim rather than counted. Every
+ * other arm's facts fit its sentence, so this answers `null` for them.
+ */
+export function refusalDetail(cause: RefusalCause & { case: string }): HTMLElement | null {
+  if (cause.case !== "transcriptMissing") return null;
+  const paths = (cause.value as { searchedPaths?: readonly string[] }).searchedPaths ?? [];
+  if (paths.length === 0) return null;
+  const list = document.createElement("ul");
+  list.className = "sb-refusal-paths";
+  list.setAttribute("data-searched-paths", "");
+  for (const path of paths) {
+    const item = document.createElement("li");
+    item.textContent = path;
+    list.append(item);
+  }
+  return list;
 }
 
 /** Drop whatever a previous attempt at this control left behind. */
