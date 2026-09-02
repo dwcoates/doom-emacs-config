@@ -285,6 +285,9 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	f.deps.Log.Global().Debug(opFleetRollout, "installed a new shim client", dlog.Context{
 		"workspace": string(ws), "pid": c.PID(), "retired": previous != nil,
 	})
+	// The process behind the session changed; the host view carries its pid's
+	// attachment and its generation.
+	f.publishHost(ws)
 	return nil
 }
 
@@ -358,6 +361,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 	if err := f.recordFacts(ctx, log, ws, session, started, session.ConfigDir, session.HostSessionID, c.PID()); err != nil {
 		return rollout.Resumed{}, err
 	}
+	f.publishHost(ws)
 	log.Info(opFleetRollout, "resumed the conversation on the new shim", dlog.Context{
 		"vendor_session_id": started.GetVendorSessionId(), "shim_pid": c.PID(),
 	})

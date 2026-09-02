@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -88,7 +89,10 @@ type watcher struct {
 	degraded bool
 
 	link LinkState
-	addr OutputAddress
+	// linkNow mirrors link for the lock-free readers; every write to link
+	// writes it under mu, so the mirror can never lead the truth.
+	linkNow atomic.Int32
+	addr    OutputAddress
 
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
@@ -220,6 +224,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		closedTurns: map[ids.TurnID]TurnClose{},
 		facts:       map[string]*activityFact{},
 	}
+	w.linkNow.Store(int32(shimclient.LinkConnected))
 	if session.MainKnownThrough != nil {
 		w.known[mainWatchKey] = session.MainKnownThrough
 	}
@@ -269,11 +274,13 @@ func rootAddress() OutputAddress {
 func (w *watcher) Connected() bool { return w.Link() == shimclient.LinkConnected }
 
 // Link is the current link state.
-func (w *watcher) Link() LinkState {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.link
-}
+//
+// It is read WITHOUT the watcher's lock, from an atomic mirror of w.link. The
+// link is asked for from every direction -- freeness, health, and the host
+// view's shim_attached, which is recomposed from inside a sink call the
+// watcher makes while holding mu -- and a lock-taking reader there is a
+// self-deadlock, not a race.
+func (w *watcher) Link() LinkState { return LinkState(w.linkNow.Load()) }
 
 // LiveWork is the current live-work set.
 func (w *watcher) LiveWork() LiveWorkSet {
@@ -511,14 +518,18 @@ func (w *watcher) setLinkLocked(state LinkState) {
 		"previous": int(w.link), "link": int(state),
 	})
 	w.link = state
+	w.linkNow.Store(int32(state))
 	w.publishLinkLocked()
 }
 
-// publishLinkLocked hands the link to the three views that draw it.
+// publishLinkLocked hands the link to the three views that draw it, and the
+// bare attachment to the daemon's own machinery (the host view's
+// `shim_attached`, which no view sink carries).
 func (w *watcher) publishLinkLocked() {
 	w.sinks.Footer.OnLink(w.ws, w.link)
 	w.sinks.Topbar.OnLink(w.ws, w.link)
 	w.sinks.Sidebar.OnLink(w.ws, w.link)
+	w.sinks.Lifecycle.OnLinkChanged(w.ws, w.link == shimclient.LinkConnected)
 }
 
 // severedLocked records a transport failure on a stream that should still have

@@ -316,6 +316,13 @@ func (r hostRelay) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
 func (r hostRelay) ReloadWebapp(ws ids.WorkspaceID) { r.s.ReloadWebapp(ws) }
 
 // Notify pushes a host notification onto the workspace's host stream.
+// PublishHostWorkspace republishes the workspace's host state. The lifetime is
+// the SERVER's, not any caller's: the edges that call it are async (a shim
+// dying, a lease released) and carry no request context of their own.
+func (r hostRelay) PublishHostWorkspace(ws ids.WorkspaceID) {
+	r.s.PublishHostWorkspace(r.s.life, ws)
+}
+
 func (r hostRelay) Notify(ws ids.WorkspaceID, text, kind, toolName string) {
 	r.s.notify(ws, text, kind, toolName)
 }

@@ -242,12 +242,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	mergeRef := &mergeForwarder{}
 
 	var queue promptqueue.Queue
-	lifecycle := &lifecycleSink{verbs: verbsRef, log: log}
+	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, log: log}
 
 	fleet, err := workspace.NewFleet(workspace.FleetDeps{
-		DB:         p.DB,
-		Accounts:   accounts,
-		Supervisor: supervisor,
+		PublishHost: relay.PublishHostWorkspace,
+		DB:          p.DB,
+		Accounts:    accounts,
+		Supervisor:  supervisor,
 		Sinks: sessionwatcher.Sinks{
 			Feed:      feedResolver,
 			Footer:    footerResolver,
@@ -383,6 +384,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	ownership := workspace.NewOwnership(rolloutController)
 	mergeOrchestrator, err := merge.New(merge.Deps{
+		PublishHost:      relay.PublishHostWorkspace,
 		DB:               p.DB,
 		Git:              git,
 		Queue:            queue,

@@ -98,6 +98,12 @@ type FleetDeps struct {
 	Log dlog.Surfaces
 	// Now supplies the instants the fleet stamps; nil means time.Now.
 	Now func() time.Time
+	// PublishHost recomposes and republishes one workspace's HOST view. The
+	// fleet owns the edges that move it and the server cannot see them: a
+	// session coming up, a session going away, a shim replaced. Nil means no
+	// host surface is wired yet (the boot sequence runs before the server),
+	// which is why every call goes through publishHost.
+	PublishHost func(ids.WorkspaceID)
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -177,6 +183,16 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		generation: map[ids.WorkspaceID]int{},
 		buildSHA:   map[ids.WorkspaceID]string{},
 	}, nil
+}
+
+// publishHost republishes the workspace's host view when a surface is wired.
+// Before the server exists there is nothing to publish onto, and that is not a
+// failure: the boot sequence deliberately runs first.
+func (f *Fleet) publishHost(ws ids.WorkspaceID) {
+	if f.deps.PublishHost == nil {
+		return
+	}
+	f.deps.PublishHost(ws)
 }
 
 // lockDir answers where the kernel locks live: the explicit setting, then the
@@ -372,6 +388,9 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	log.Info(opBringUp, "the session is up", dlog.Context{
 		"adopted": adopted, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
 	})
+	// A SESSION NOW EXISTS where none did: the host view's whole session arm
+	// changed, and nothing the server can see says so.
+	f.publishHost(ws)
 	return nil
 }
 
@@ -580,6 +599,10 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	if !ok {
 		return nil
 	}
+	// THE SESSION IS GONE from this daemon's point of view the moment it
+	// leaves the map: the host view's session arm changes here, whatever the
+	// teardown below then does.
+	defer f.publishHost(ws)
 	if session.watcher != nil {
 		if err := session.watcher.Close(); err != nil {
 			return fmt.Errorf("stop session for %q: close the watcher: %w", ws, err)

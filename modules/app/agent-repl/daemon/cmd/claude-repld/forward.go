@@ -147,6 +147,12 @@ func (f *relayForwarder) ReloadWebapp(ws ids.WorkspaceID) {
 	}
 }
 
+func (f *relayForwarder) PublishHostWorkspace(ws ids.WorkspaceID) {
+	if target, ok := f.relay(); ok {
+		target.PublishHostWorkspace(ws)
+	}
+}
+
 func (f *relayForwarder) Notify(ws ids.WorkspaceID, text, kind, toolName string) {
 	if target, ok := f.relay(); ok {
 		target.Notify(ws, text, kind, toolName)
