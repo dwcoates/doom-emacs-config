@@ -67,31 +67,11 @@ func TestQuestionAskedNotificationCarriesItsHeaderAndSetsAttention(t *testing.T)
 	})
 }
 
-// TestAgentAddressedNotificationCarriesItsText documents the audit's
-// critique that an `agent_addressed` host notification carries its text,
-// driven from the fake shim's AgentPushNotification start frame — and is
-// UNEXPRESSIBLE against the current daemon.
-//
-// Grepping proto/src confirms the message
-// (conversation/v1/agent_activity.proto AgentPushNotification /
-// AgentPushNotificationStart, item tag 32 on AgentActivity) and the outer
-// envelope that would carry the composed text
-// (agentrepl/v1/endpoint_watch_host_workspace.proto
-// HostWorkspaceNotification.text; HostNotificationAgentAddressed itself
-// carries NO fields — the text is never inside the kind arm).
-//
-// But grepping internal/sessionwatcher/route.go shows
-// sinks.Lifecycle.OnNotification is called from exactly two sites —
-// notifyPermissionLocked (AgentUpdate.permission) and notifyQuestionLocked
-// (AgentUpdate.question) — and NEVER from routeActivityLocked's
-// AgentActivity_PushNotification arm. NotificationAgentAddressed
-// (internal/sessionwatcher/api.go) is constructed nowhere except
-// server.notificationKind's unknown-kind-name fallback
-// (internal/server/api.go), which an AgentPushNotification frame never
-// reaches. The missing hook: sessionwatcher must route a
-// AgentPushNotificationStart frame to
-// sinks.Lifecycle.OnNotification(kind: agent_addressed, text: <the pushed
-// message>) the way it already does for permission and question asks.
+// TestAgentAddressedNotificationCarriesItsText pins
+// HostNotificationKind.agent_addressed: an AgentPushNotification start frame
+// is the agent reaching an ABSENT user, and the local attention presentation
+// is this system's own fan-out of it (agent_activity.proto). The pushed
+// message rides the envelope's `text`; the kind arm itself carries no fields.
 func TestAgentAddressedNotificationCarriesItsText(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -108,5 +88,12 @@ func TestAgentAddressedNotificationCarriesItsText(t *testing.T) {
 		}},
 	}))
 
-	t.Skip("unexpressible: no production hook routes an AgentPushNotification start frame to a host agent_addressed notification — internal/sessionwatcher/route.go never calls sinks.Lifecycle.OnNotification for AgentActivity_PushNotification; see the exact hook named in this test's doc comment")
+	// Assert
+	push := harness.AwaitView(t, f.d.Ctx(), f.host, "the agent_addressed host notification",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetNotification().GetKind().GetAgentAddressed() != nil
+		})
+	if got := push.GetNotification().GetText(); got != "the deploy finished" {
+		t.Fatalf("agent_addressed notification text = %q, want the pushed message verbatim", got)
+	}
 }
