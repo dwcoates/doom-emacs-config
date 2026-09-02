@@ -185,33 +185,12 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 			},
 		}, true
 
-	case "WatchHostWorkspace":
-		return subscriptionScenario{
-			drive1: func(t *testing.T, f *fixture) {
-				line := uint32(1)
-				if _, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
-					Workspace: f.ws, Path: "README.md", Line: &line,
-				})); err != nil {
-					t.Fatalf("OpenInEditor = error %v, want a success", err)
-				}
-			},
-			isFirst: func(msg proto.Message) bool {
-				oe := msg.(*agentreplv1.WatchHostWorkspaceResponse).GetOpenInEditor()
-				return oe.GetPath() == "README.md" && oe.GetLine() == 1
-			},
-			drive2: func(t *testing.T, f *fixture) {
-				line := uint32(2)
-				if _, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
-					Workspace: f.ws, Path: "README.md", Line: &line,
-				})); err != nil {
-					t.Fatalf("OpenInEditor = error %v, want a success", err)
-				}
-			},
-			isSecond: func(msg proto.Message) bool {
-				oe := msg.(*agentreplv1.WatchHostWorkspaceResponse).GetOpenInEditor()
-				return oe.GetPath() == "README.md" && oe.GetLine() == 2
-			},
-		}, true
+	// WatchHostWorkspace has NO scenario here on purpose. Its only lightweight
+	// two-step driver in this suite is OpenInEditor, and that is a one-shot
+	// host RELAY — a command sent once to whoever is listening — not a
+	// retained view. The invariant under test is about views: what a LATE
+	// subscriber is replayed. A relay is replayed to nobody, by design, so
+	// driving one here would assert the opposite of the contract.
 
 	default:
 		return subscriptionScenario{}, false
@@ -257,10 +236,14 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 			scenario.drive2(t, f)
 			second := harness.AwaitView(t, f.d.Ctx(), witness, k.Name+": the driven second view", scenario.isSecond)
 
-			// Assert (b): the further change arrives next, in order.
-			gotSecond := harness.AwaitNext(t, f.d.Ctx(), late, k.Name+": the late subscriber's next push")
+			// Assert (b): the further change reaches the late subscriber too.
+			// It is AWAITED, not demanded of the very next frame: a driver may
+			// publish INTERMEDIATE views on its way to the settled one (the
+			// hold tray's `classifying` before its verdict), and every one of
+			// them is a real push the late subscriber is entitled to.
+			gotSecond := harness.AwaitView(t, f.d.Ctx(), late, k.Name+": the late subscriber's further view", scenario.isSecond)
 			if !proto.Equal(gotSecond, second) {
-				t.Fatalf("%s: late subscriber's next push = %v, want the further-published view %v", k.Name, gotSecond, second)
+				t.Fatalf("%s: late subscriber's further view = %v, want the further-published view %v", k.Name, gotSecond, second)
 			}
 		})
 	}
@@ -311,6 +294,12 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 				if push.(*agentreplv1.WatchHostWorkspaceResponse).GetHost().GetNone() == nil {
 					t.Fatalf("%s on a registered-but-unopened workspace = %v, want host.none (composed before every subscribe)", k.Name, push)
 				}
+			case "WatchWorkspaceRoster":
+				// The BOOT publishes the roster: cmd/claude-repld's Prime step
+				// runs verbs.PublishRegistry after the push surface is bound
+				// and before anything is served, so every subscriber — first or
+				// late — always has a complete roster to receive.
+				harness.AwaitNext(t, d.Ctx(), s, k.Name+": the roster the boot primed")
 			default:
 				harness.ExpectNoPush(t, s, harness.ProbeWindow, k.Name+" carries no frame before anything is ever published")
 			}
