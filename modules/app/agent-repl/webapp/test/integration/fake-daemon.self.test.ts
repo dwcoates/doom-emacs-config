@@ -42,10 +42,13 @@ let client: Client<typeof AgentRepl>;
 
 beforeEach(async () => {
   fake = createFakeDaemon();
-  const { baseUrl } = await fake.start();
+  const { baseUrl, socketPath } = await fake.start();
+  // `baseUrl` is the daemon's identity and resolves nowhere; `socketPath` is
+  // where it actually accepts. connect-node hands `nodeOptions` straight to
+  // http.request, so this is the same dial the harness makes through undici.
   client = createClient(
     AgentRepl,
-    createGrpcWebTransport({ baseUrl, httpVersion: "1.1" }),
+    createGrpcWebTransport({ baseUrl, httpVersion: "1.1", nodeOptions: { socketPath } }),
   );
 });
 
@@ -590,13 +593,13 @@ describe("headers flush on accept", () => {
    * rather than waiting for the adapter's lazy one.
    */
   const PROTOCOLS = [
-    { name: "connect binary", make: (baseUrl: string) => createConnectTransport({ baseUrl, httpVersion: "1.1" as const, useBinaryFormat: true }) },
-    { name: "grpc-web", make: (baseUrl: string) => createGrpcWebTransport({ baseUrl, httpVersion: "1.1" as const }) },
+    { name: "connect binary", make: (baseUrl: string, socketPath: string) => createConnectTransport({ baseUrl, httpVersion: "1.1" as const, useBinaryFormat: true, nodeOptions: { socketPath } }) },
+    { name: "grpc-web", make: (baseUrl: string, socketPath: string) => createGrpcWebTransport({ baseUrl, httpVersion: "1.1" as const, nodeOptions: { socketPath } }) },
   ];
 
   it.each(PROTOCOLS)("resolves the response head over $name with no pushes", async ({ make }) => {
     // Arrange: WatchDaemon pushes nothing on open, so only the head can arrive.
-    const typed = createClient(AgentRepl, make(fake.baseUrl));
+    const typed = createClient(AgentRepl, make(fake.baseUrl, fake.socketPath));
     let sawHeader = false;
     const stream = typed.watchDaemon({}, { onHeader: () => { sawHeader = true; } });
     const reading = (async () => {
@@ -776,5 +779,53 @@ describe("typed faults", () => {
     const health = response.result.case === "success" ? response.result.value.health : undefined;
     const faults = health?.case === "unhealthy" ? health.value.faults : [];
     expect(faults[0]?.kind.case).toBe("shimDied");
+  });
+});
+
+/**
+ * THE LISTENER'S OWN CONTRACT — the two facts that make the boot-time
+ * `AdoptWebWorkspace refused (transport): fetch failed` flake unrepresentable
+ * rather than merely rare.
+ *
+ * The flake was a genuine `connect(2)` failure: every fake daemon used to bind
+ * a fresh 127.0.0.1 port, ~1600 of them per run with several standing streams
+ * each, and a few concurrent runs walked macOS's 49152-65535 ephemeral range
+ * dry until `connect` answered EADDRNOTAVAIL. Undici reports that to the page
+ * as a bare "fetch failed", the boot adoption is the first call to make, and it
+ * fails there. Neither half of that mechanism can recur if the daemon consumes
+ * no port and is accepting before `start()` resolves.
+ */
+describe("the listener's contract", () => {
+  it("is already accepting when start() resolves", async () => {
+    // Arrange: a daemon of its own, dialed on the very first tick after start.
+    const fresh = createFakeDaemon();
+    const { baseUrl, socketPath } = await fresh.start();
+    const freshClient = createClient(
+      AgentRepl,
+      createGrpcWebTransport({ baseUrl, httpVersion: "1.1", nodeOptions: { socketPath } }),
+    );
+    try {
+      // Act: no settle, no yield, no retry — the first dial must land.
+      const response = await freshClient.daemonHealth({});
+      // Assert
+      expect(response.result.case).toBe("success");
+    } finally {
+      await fresh.stop();
+    }
+  });
+
+  it("consumes no tcp port", async () => {
+    // Arrange
+    const fresh = createFakeDaemon();
+    await fresh.start();
+    try {
+      // Act: what the listener actually bound.
+      const bound = fresh.socketPath;
+      // Assert: a filesystem path, and the identity url resolves nowhere.
+      expect(bound.endsWith(".sock")).toBe(true);
+      expect(new URL(fresh.baseUrl).hostname.endsWith(".invalid")).toBe(true);
+    } finally {
+      await fresh.stop();
+    }
   });
 });

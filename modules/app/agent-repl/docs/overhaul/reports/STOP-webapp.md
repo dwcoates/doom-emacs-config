@@ -67,3 +67,39 @@ Fable-low lead; opus-low implementers (sonnet-medium offloads and the dead-code
 pass only); 3-concurrent cap; no proto edits; no real git in tests; no pushes or
 PRs; hand-created worktrees fast-forwarded to the tip; round-trip before reaping;
 scratch files prefixed `webapp-`.
+
+## Integration suite: parallel is now a supported mode (2026-09-02)
+
+`npm run test:integration` runs file-parallel by default and is green that way;
+`--no-file-parallelism` is a convenience for readable output, not a requirement.
+
+The boot-time flake it used to show — `AdoptionFailed: AdoptWebWorkspace refused
+(transport): fetch failed`, up to 113 cases in a loaded run, all green in
+isolation — was NOT a race and NOT a production defect. Mechanism, measured:
+
+- Each fake daemon bound a fresh `127.0.0.1:0` listener. A run is ~1600 tests,
+  each booting a daemon and holding several standing streams, so a run opened
+  many thousands of loopback connections; each burns an ephemeral port that then
+  sits in `TIME_WAIT` for an MSL (macOS: 15 s).
+- With a few runs concurrent, macOS's `net.inet.ip.portrange` (49152-65535,
+  16384 ports) went dry. Instrumenting the harness fetch caught the errno
+  directly: `connect EADDRNOTAVAIL 127.0.0.1:<port>`, thousands of them.
+- Undici surfaces that as a bare `fetch failed`; adoption is the FIRST call a
+  page makes, so the exhaustion always landed there and failed the boot.
+
+Fix (harness only, `test/integration/fake-daemon.ts` + `harness.ts`): the fake
+daemon listens on a unix socket in a per-daemon temp dir, and the harness's
+fetch is given an undici `Agent` pinned to that socket. `baseUrl` is now an
+identity (`http://fake-daemon-N.invalid`) — the wire carries a daemon address as
+a string and a transfer test asserts it is drawn, but nothing dials it. No
+ephemeral port is consumed anywhere in the suite, so the exhaustion is
+unrepresentable rather than unlikely. `lifecycle.ts` was NOT changed: its refusal
+to retry a boot transport error is the frozen contract and was never the fault.
+
+Locked by two tests in `fake-daemon.self.test.ts` ("the listener's contract"):
+the first dial after `start()` resolves lands with no retry, and the listener is
+a filesystem path while `baseUrl` resolves nowhere.
+
+Known non-fault: four suite runs at once (52 vitest workers on 16 cores) fail on
+the 900 ms `testTimeout`, with zero `AdoptionFailed`. That is machine
+oversubscription, not a suite defect.

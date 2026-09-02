@@ -9,8 +9,10 @@
  * refusals are all the app's own.
  *
  * The one substitution is Node's `fetch`: jsdom's window has none, and the
- * transport needs one to reach loopback. That is a capability the environment
- * is missing, not a seam in the app.
+ * transport needs one to reach the fake daemon. That is a capability the
+ * environment is missing, not a seam in the app. It is handed an undici agent
+ * pinned to that daemon's unix socket, because a loopback port per daemon
+ * exhausted the ephemeral range under parallel runs (see fake-daemon.ts).
  *
  * TIME. Fake timers drive every clock, so a "quiet for N s" or a countdown is
  * asserted by advancing time rather than waiting for it. `shouldAdvanceTime`
@@ -21,6 +23,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
+import { Agent } from "undici";
 import { vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
@@ -91,16 +94,23 @@ interface Handle {
 function fetchAcceptingJsdomSignals(
   underlying: typeof globalThis.fetch,
   inFlight: { count: number },
+  dispatcher: Agent,
 ): typeof globalThis.fetch {
   return (input, init) => {
     const signal = init?.signal;
     const bridged = ((): RequestInit | undefined => {
-      if (signal === undefined || signal === null) return init ?? undefined;
+      // THE DISPATCHER IS WHAT MAKES THE URL REACH ANYTHING. The fake
+      // daemon's `baseUrl` is an identity, not an address (`*.invalid`); this
+      // agent is pinned to that daemon's unix socket, so every request the app
+      // forms against that origin lands on that listener and no ephemeral port
+      // is ever consumed.
+      const routed = { ...init, dispatcher } as RequestInit;
+      if (signal === undefined || signal === null) return routed;
       const bridge = transferableAbortController();
       const abort = (): void => bridge.abort(signal.reason);
       if (signal.aborted) abort();
       else signal.addEventListener("abort", abort, { once: true });
-      return { ...init, signal: bridge.signal };
+      return { ...routed, signal: bridge.signal };
     })();
     // COUNTED SO `settle()` CANNOT RETURN MID-ROUND-TRIP. A request is in
     // flight until its RESPONSE HEAD lands, which for a standing stream is the
@@ -290,7 +300,16 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   vi.useFakeTimers({ shouldAdvanceTime: true, now: HARNESS_EPOCH_MS });
 
   const fake = createFakeDaemon();
-  const { baseUrl } = await fake.start();
+  const { baseUrl, socketPath } = await fake.start();
+  const dispatcher = new Agent({ connect: { socketPath } });
+  // `stop()` is idempotent (a test may stop explicitly and the afterEach stops
+  // again), and undici throws on a second close, so the close is claimed once.
+  let dispatcherClosed = false;
+  const closeDispatcher = async (): Promise<void> => {
+    if (dispatcherClosed) return;
+    dispatcherClosed = true;
+    await closeDispatcher();
+  };
   options.arrange?.(fake);
 
   installShell(document);
@@ -300,7 +319,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   // jsdom's window carries no fetch; Node's global one reaches loopback.
   const inFlight = { count: 0 };
   const transport = createDaemonTransport(baseUrl, {
-    fetch: fetchAcceptingJsdomSignals(globalThis.fetch, inFlight),
+    fetch: fetchAcceptingJsdomSignals(globalThis.fetch, inFlight, dispatcher),
   });
   const client = createAgentReplClient(transport);
   const ticker = createTicker();
@@ -365,6 +384,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     // of the failed boot a test can read.
     failures.report(bootFailed(err instanceof Error ? err.message : String(err)));
     await fake.stop();
+    await closeDispatcher();
     throw err;
   }
   handles.push(startLifecycle(ctx, { drainBannerHost: shell.drainBanner }));
@@ -490,6 +510,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       for (const handle of [...handles].reverse()) handle.dispose();
       await fake.stop();
       await harness.secondFake?.stop();
+      // The agent holds this daemon's sockets open; a run leaves ~1600 of them
+      // otherwise, and the next test's daemon is a different socket anyway.
+      await closeDispatcher();
       // A FRESH BROWSER PROFILE PER TEST. The webview-local preferences (R14 —
       // the open footer panel, the sidebar grouping, folds) live in
       // `localStorage`, which jsdom shares across every test in a file. Left
