@@ -67,8 +67,7 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 			Fields: wsRefusal.Fields,
 		}), true
 	}
-	var mergeRefusal *merge.RefusalError
-	if errors.As(err, &mergeRefusal) {
+	if mergeRefusal, ok := merge.Refused(err); ok {
 		return s.fill(refusal{Arm: mergeRefusal.Arm, Reason: mergeRefusal.Reason}), true
 	}
 	var confirm *workspace.ConfirmRequired

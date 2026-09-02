@@ -444,8 +444,8 @@ func TestAnswerDequeueRefusesWithNoOfferStanding(t *testing.T) {
 	err := h.o.AnswerDequeue(context.Background(), theWorkspace, false)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmNoOfferStanding {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmNoOfferStanding {
 		t.Fatalf("AnswerDequeue answered %v, want the %s refusal", err, ArmNoOfferStanding)
 	}
 }

@@ -242,3 +242,41 @@ func TestAsRefusalUnwrapsAWrappedWorkspaceRefusal(t *testing.T) {
 		t.Fatalf("asRefusal = %+v, %t, want the wrapped arm", got, ok)
 	}
 }
+
+// TestAsRefusalCarriesTheMergeRefusalsReason pins that the merge extractor
+// hands back the refusal's SENTENCE as well as its arm: the reason becomes the
+// arm's text and detail fields, so an extractor that dropped it would answer
+// every merge refusal with an empty message.
+func TestAsRefusalCarriesTheMergeRefusalsReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := fmt.Errorf("MergeWorkspace: %w",
+		&merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "a merge is already queued"})
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+
+	// Assert.
+	if !ok || got.Arm != merge.ArmAlreadyQueued || got.Reason != "a merge is already queued" {
+		t.Fatalf("asRefusal = %+v, %t, want the merge arm and its reason", got, ok)
+	}
+}
+
+// TestAsRefusalPutsTheMergeReasonOnTheArmsTextField pins the one consequence
+// that made the arm-only extractor unusable here: the reason must reach the
+// arm's own text field, not only the refusal's prose.
+func TestAsRefusalPutsTheMergeReasonOnTheArmsTextField(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := &merge.RefusalError{Arm: merge.ArmAlreadyQueued, Reason: "a merge is already queued"}
+
+	// Act.
+	got, _ := surface.asRefusal(err)
+
+	// Assert.
+	if got.Fields["text"] != "a merge is already queued" {
+		t.Fatalf("Fields[text] = %v, want the merge refusal's reason", got.Fields["text"])
+	}
+}
