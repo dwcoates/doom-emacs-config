@@ -376,7 +376,14 @@ export class TurnEngine {
       LOGGER.log({ agent_id: target.value }, "interrupted the main agent");
       return updateAgentDelivered();
     }
-    const entry = this.session.live.all().find((item) => item.taskId === target.value);
+    // ONE HANDLE, NO VENDOR IDS. A subagent's `AgentId` on the wire is the
+    // SPAWNING CALL's tool_use_id — the vendor's own task id never crosses the
+    // boundary — so a target is resolved through the spawn map as well as by
+    // the task id. Looking only at the task id refused every stop a consumer
+    // addressed by the id it was actually given.
+    const entry =
+      this.session.live.all().find((item) => item.taskId === target.value) ??
+      this.session.live.byToolUseId(target.value);
     if (entry === undefined) {
       return updateAgentRefused(
         { kind: "unknownAgent" },

@@ -26,6 +26,16 @@ export type Line = Record<string, unknown>;
 export interface Driven {
   /** Every SDK message the query yielded, in order. */
   readonly messages: SdkMessage[];
+  /**
+   * The error the drive's iterable REJECTED with, when it rejected.
+   *
+   * A scenario that fails its iterable (`!query-fail`) is a fact under test, so
+   * the drive itself does not throw — but a caller that did not ask for a death
+   * must not be handed a truncated message list as if it were a whole one.
+   * Every caller that expects a clean drive asserts this is undefined; see
+   * {@link expectDroveCleanly}.
+   */
+  readonly failure?: unknown;
   /** The main session transcript's records. */
   transcript(sessionId?: string): Line[];
   /** One subagent's transcript records. */
@@ -147,12 +157,17 @@ export async function driveScenario(
   );
 
   const messages: SdkMessage[] = [];
+  let failure: unknown;
   const collect = (async () => {
     try {
       for await (const message of query) messages.push(message);
-    } catch {
+    } catch (err) {
       // A scenario that FAILS its iterable is a fact under test, not a suite
       // failure; `messages` still holds everything delivered before the death.
+      // KEPT, NEVER SWALLOWED: a drive that died unexpectedly used to look
+      // exactly like a short scenario, so a conformance row could pass on the
+      // handful of messages that arrived before the failure.
+      failure = err;
     }
   })();
 
@@ -171,6 +186,7 @@ export async function driveScenario(
   const projectDir = join(configDir, "projects", cwdSlug(cwd));
   return {
     messages,
+    ...(failure === undefined ? {} : { failure }),
     configDir,
     cwd,
     spoolRoot,
@@ -189,6 +205,21 @@ export async function driveScenario(
       return existsSync(dir) ? readdirSync(dir).map((f) => f.replace(/\.output$/, "")).sort() : [];
     },
   };
+}
+
+/**
+ * Assert the drive reached its end without its iterable rejecting.
+ *
+ * The loud half of {@link Driven.failure}: a caller that expects a whole
+ * scenario says so, and a death that would otherwise have been read as "the
+ * scenario was short" fails the row with the error that caused it.
+ */
+export function expectDroveCleanly(driven: Driven): Driven {
+  if (driven.failure !== undefined) {
+    const detail = driven.failure instanceof Error ? driven.failure.message : String(driven.failure);
+    throw new Error(`the fake vendor drive REJECTED before the scenario finished: ${detail}`);
+  }
+  return driven;
 }
 
 /** Every message of one `type` (and optional `subtype`). */

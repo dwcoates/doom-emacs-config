@@ -42,6 +42,21 @@ nearest carrier observed is a `total_tokens_reminder` attachment), no failed
 subagent, and no `compact_boundary` / `isCompactSummary` record anywhere —
 `/compact` answered `Not enough messages to compact.`
 
+Three TURN-STOP FAILURE terminals are DECLARED-ONLY — the mock keeps them
+because `sdk.d.ts` declares them, but no capture reaches them, so nothing here
+grounds the pairing and none may be asserted from a golden:
+
+- `AgentFailure.execution_error` — `turn-stop-error-during-execution` ended
+  `success.interrupted` (the run aborted its streaming rather than raising).
+- `AgentFailure.stop_hook_prevented` — `turn-stop-hook-stop` ended
+  `success.completed`; the Stop hook did not prevent continuation.
+- `AgentFailure.structured_output_retry_exhausted` —
+  `turn-stop-max-structured-output-retries` ended `success.completed`; the
+  retries never exhausted.
+
+Their `!fail-execution`, `!fail-stop-hook` and `!fail-structured-output` rows
+in the shim's AGENTS.md scenario table carry the same DECLARED-ONLY mark.
+
 | Scenario | Captured | Golden for (unit kinds → terminal) | Notes | Size |
 |---|---|---|---|---|
 | `account-usage` | 2026-09-02 | `hook`, `thinking`, `response` → `success.completed` | single turn | 44 KB |
