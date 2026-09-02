@@ -770,10 +770,12 @@ type fakeCards struct {
 	permissions map[string]ServedPermission
 	questions   map[string]ServedQuestion
 	coldGate    *ServedColdGate
-	modes       []string
-	hasModes    bool
-	models      []string
-	hasModels   bool
+	// coldGatesCleared counts the retirements the resolve path made.
+	coldGatesCleared int
+	modes            []string
+	hasModes         bool
+	models           []string
+	hasModels        bool
 }
 
 func newFakeCards() *fakeCards {
@@ -798,6 +800,11 @@ func (c *fakeCards) ColdGate(ids.WorkspaceID) (ServedColdGate, bool) {
 		return ServedColdGate{}, false
 	}
 	return *c.coldGate, true
+}
+
+func (c *fakeCards) ClearColdGate(ids.WorkspaceID) {
+	c.coldGate = nil
+	c.coldGatesCleared++
 }
 
 func (c *fakeCards) PermissionModes(ids.WorkspaceID) ([]string, bool) {

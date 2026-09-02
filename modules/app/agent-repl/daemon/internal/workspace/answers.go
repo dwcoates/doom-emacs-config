@@ -202,6 +202,10 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		return fmt.Errorf("answer cold gate on %q: %w", ws, err)
 	}
 
+	// THE GATE IS SPENT. A second answer against the same id must find nothing
+	// standing rather than re-opening the session again.
+	v.deps.Cards.ClearColdGate(ws)
+
 	// The gate row becomes its resolved state and the footer stops saying the
 	// session is parked, both in the same beat as the re-open.
 	v.deps.Feed.UpsertSynthesized(ws, rootFeed(), coldGateRow(ws, served.VendorSessionID, answer))
