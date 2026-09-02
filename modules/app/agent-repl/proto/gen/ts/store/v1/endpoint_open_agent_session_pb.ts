@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file store/v1/endpoint_open_agent_session.proto.
  */
 export const file_store_v1_endpoint_open_agent_session: GenFile = /*@__PURE__*/
-  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxIp8BChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI2Cg1rbm93bl90aHJvdWdoGAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAiAEBQhAKDl9rbm93bl90aHJvdWdoIpABChhPcGVuQWdlbnRTZXNzaW9uUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdWNjZXNzSAASNAoHZmFpbHVyZRgCIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0Im8KF09wZW5BZ2VudFNlc3Npb25TdWNjZXNzEigKBHBhZ2UYASABKAsyGi5zdG9yZS52MS5BZ2VudFNlc3Npb25QYWdlEioKBXdhdGNoGAIgASgLMhsuc3RvcmUudjEuQWdlbnRTZXNzaW9uVG9rZW4i/AEKF09wZW5BZ2VudFNlc3Npb25GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJDCg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3RIABI/Cg1zdGFsZV9wb2ludGVyGAMgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckgAEkMKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIoLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdG9yYWdlRmFpbHVyZUgAQgYKBGtpbmQiLwoeT3BlbkFnZW50U2Vzc2lvbkludmFsaWRSZXF1ZXN0Eg0KBWZpZWxkGAEgASgJIiAKHk9wZW5BZ2VudFNlc3Npb25TdG9yYWdlRmFpbHVyZSIeChxPcGVuQWdlbnRTZXNzaW9uU3RhbGVQb2ludGVyQiJaIGFnZW50cmVwbC9wcm90by9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_conversation_v1_agent_activity, file_store_v1_store]);
+  fileDesc("CipzdG9yZS92MS9lbmRwb2ludF9vcGVuX2FnZW50X3Nlc3Npb24ucHJvdG8SCHN0b3JlLnYxIp8BChdPcGVuQWdlbnRTZXNzaW9uUmVxdWVzdBInCgVhZ2VudBgBIAEoCzIYLmNvbnZlcnNhdGlvbi52MS5BZ2VudElkEhEKCXBhZ2Vfc2l6ZRgCIAEoDRI2Cg1rbm93bl90aHJvdWdoGAMgASgLMhouc3RvcmUudjEuU3RvcmVJdGVtUG9pbnRlckgAiAEBQhAKDl9rbm93bl90aHJvdWdoIpABChhPcGVuQWdlbnRTZXNzaW9uUmVzcG9uc2USNAoHc3VjY2VzcxgBIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdWNjZXNzSAASNAoHZmFpbHVyZRgCIAEoCzIhLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25GYWlsdXJlSABCCAoGcmVzdWx0Im8KF09wZW5BZ2VudFNlc3Npb25TdWNjZXNzEigKBHBhZ2UYASABKAsyGi5zdG9yZS52MS5BZ2VudFNlc3Npb25QYWdlEioKBXdhdGNoGAIgASgLMhsuc3RvcmUudjEuQWdlbnRTZXNzaW9uVG9rZW4ivQIKF09wZW5BZ2VudFNlc3Npb25GYWlsdXJlEg4KBmRldGFpbBgBIAEoCRJDCg9pbnZhbGlkX3JlcXVlc3QYAiABKAsyKC5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uSW52YWxpZFJlcXVlc3RIABI/Cg1zdGFsZV9wb2ludGVyGAMgASgLMiYuc3RvcmUudjEuT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckgAEkMKD3N0b3JhZ2VfZmFpbHVyZRgEIAEoCzIoLnN0b3JlLnYxLk9wZW5BZ2VudFNlc3Npb25TdG9yYWdlRmFpbHVyZUgAEj8KDXVua25vd25fYWdlbnQYBSABKAsyJi5zdG9yZS52MS5PcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50SABCBgoEa2luZCIeChxPcGVuQWdlbnRTZXNzaW9uVW5rbm93bkFnZW50Ii8KHk9wZW5BZ2VudFNlc3Npb25JbnZhbGlkUmVxdWVzdBINCgVmaWVsZBgBIAEoCSIgCh5PcGVuQWdlbnRTZXNzaW9uU3RvcmFnZUZhaWx1cmUiHgocT3BlbkFnZW50U2Vzc2lvblN0YWxlUG9pbnRlckIiWiBhZ2VudHJlcGwvcHJvdG8vc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_conversation_v1_agent_activity, file_store_v1_store]);
 
 /**
  * Open one agent's reading session: the first page, and the address of the
@@ -162,6 +162,17 @@ export type OpenAgentSessionFailure = Message<"store.v1.OpenAgentSessionFailure"
      */
     value: OpenAgentSessionStorageFailure;
     case: "storageFailure";
+  } | {
+    /**
+     * A well-formed agent id naming NO book of this store: refused rather
+     * than served empty, so a stale or mistyped target is distinguishable
+     * from a real agent that has said nothing yet. The shim maps it to
+     * NotFound. (Landing 7, 2026-09-02; cross-plane, store lead agreed.)
+     *
+     * @generated from field: store.v1.OpenAgentSessionUnknownAgent unknown_agent = 5;
+     */
+    value: OpenAgentSessionUnknownAgent;
+    case: "unknownAgent";
   } | { case: undefined; value?: undefined };
 };
 
@@ -171,6 +182,19 @@ export type OpenAgentSessionFailure = Message<"store.v1.OpenAgentSessionFailure"
  */
 export const OpenAgentSessionFailureSchema: GenMessage<OpenAgentSessionFailure> = /*@__PURE__*/
   messageDesc(file_store_v1_endpoint_open_agent_session, 3);
+
+/**
+ * @generated from message store.v1.OpenAgentSessionUnknownAgent
+ */
+export type OpenAgentSessionUnknownAgent = Message<"store.v1.OpenAgentSessionUnknownAgent"> & {
+};
+
+/**
+ * Describes the message store.v1.OpenAgentSessionUnknownAgent.
+ * Use `create(OpenAgentSessionUnknownAgentSchema)` to create a new message.
+ */
+export const OpenAgentSessionUnknownAgentSchema: GenMessage<OpenAgentSessionUnknownAgent> = /*@__PURE__*/
+  messageDesc(file_store_v1_endpoint_open_agent_session, 4);
 
 /**
  * The request was malformed or violated the validation invariant.
@@ -192,7 +216,7 @@ export type OpenAgentSessionInvalidRequest = Message<"store.v1.OpenAgentSessionI
  * Use `create(OpenAgentSessionInvalidRequestSchema)` to create a new message.
  */
 export const OpenAgentSessionInvalidRequestSchema: GenMessage<OpenAgentSessionInvalidRequest> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_open_agent_session, 4);
+  messageDesc(file_store_v1_endpoint_open_agent_session, 5);
 
 /**
  * The database failed; `detail` carries the driver's text.
@@ -207,7 +231,7 @@ export type OpenAgentSessionStorageFailure = Message<"store.v1.OpenAgentSessionS
  * Use `create(OpenAgentSessionStorageFailureSchema)` to create a new message.
  */
 export const OpenAgentSessionStorageFailureSchema: GenMessage<OpenAgentSessionStorageFailure> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_open_agent_session, 5);
+  messageDesc(file_store_v1_endpoint_open_agent_session, 6);
 
 /**
  * The pointer names no line of the addressed book.
@@ -222,5 +246,5 @@ export type OpenAgentSessionStalePointer = Message<"store.v1.OpenAgentSessionSta
  * Use `create(OpenAgentSessionStalePointerSchema)` to create a new message.
  */
 export const OpenAgentSessionStalePointerSchema: GenMessage<OpenAgentSessionStalePointer> = /*@__PURE__*/
-  messageDesc(file_store_v1_endpoint_open_agent_session, 6);
+  messageDesc(file_store_v1_endpoint_open_agent_session, 7);
 

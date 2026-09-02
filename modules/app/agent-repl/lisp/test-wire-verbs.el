@@ -474,7 +474,9 @@ THE ARM IS THE REFUSAL, so a bare error says nothing the caller can act on."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-close-workspace-response
                     (agent-repl-test-wire-verbs--parse "{\"error\":{\"blocked\":{}}}"))
-                   '(:arm :error :value (:cause (:arm :blocked :value nil)))))))
+                   (list :arm :error :value
+                         (list :cause (list :arm :blocked :value
+                                            '(:turn-in-flight nil :live-work 0 :held-prompts 0 :merge-queued nil :summary ""))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-close-response-error-without-cause ()
   "A close error with no cause arm set is a contract breach."
@@ -1099,9 +1101,10 @@ here."
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
                        #'string<)
-                 '("duplicateSubmission" "feedNotInWorkspace" "feedUndecodable"
-                   "merging" "noSession" "notYetAdopted" "transferringAway"
-                   "unknownWorkspace" "workspaceRefMismatch"))))
+                 '("bubbleRefused" "duplicateSubmission" "feedNotInWorkspace"
+                   "feedUndecodable" "merging" "noSession" "notYetAdopted"
+                   "transferringAway" "unknownWorkspace"
+                   "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
   "UpdateShutdownScheduleRequest's action oneof has exactly the three arms
@@ -1331,7 +1334,37 @@ at."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-close-workspace-error
                     (agent-repl-test-wire-verbs--parse "{\"blocked\":{}}"))
-                   '(:cause (:arm :blocked :value nil))))))
+                   '(:cause (:arm :blocked :value (:turn-in-flight nil :live-work 0 :held-prompts 0 :merge-queued nil :summary "")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-blocked-evidence ()
+  "CloseWorkspaceBlocked decodes every evidence field it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-blocked
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"turnInFlight\":true,\"liveWork\":2,\"heldPrompts\":1,\"mergeQueued\":true,\"summary\":\"a turn is running\"}"))
+                   '(:turn-in-flight t :live-work 2 :held-prompts 1
+                     :merge-queued t :summary "a turn is running")))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-blocked-defaults ()
+  "CloseWorkspaceBlocked's omitted scalars are the proto3 defaults."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-close-workspace-blocked
+                    (agent-repl-test-wire-verbs--parse "{}"))
+                   '(:turn-in-flight nil :live-work 0 :held-prompts 0 :merge-queued nil :summary "")))))
+
+(ert-deftest agent-repl-test-wire-verbs-close-blocked-negative-live-work ()
+  "A negative uint32 in CloseWorkspaceBlocked is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-blocked
+                   (agent-repl-test-wire-verbs--parse "{\"liveWork\":-1}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-close-blocked-unknown-field ()
+  "An unknown field on CloseWorkspaceBlocked is refused, not dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-close-workspace-blocked
+                   (agent-repl-test-wire-verbs--parse "{\"nope\":1}"))
+                  :type 'agent-repl-wire-error)))
 
 (ert-deftest agent-repl-test-wire-verbs-close-error-unknown-workspace-arm ()
   "CloseWorkspaceError's `unknown_workspace' arm decodes with everything it
@@ -1818,12 +1851,69 @@ breach."
                    (agent-repl-test-wire-verbs--parse "{\"noSuchArm\":{}}"))
                   :type 'agent-repl-wire-error)))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-error-bubble-refused-arm ()
+  "SubmitPromptError's `bubble_refused' arm decodes with everything it carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"bubbleRefused\":{\"detail\":\"no route\",\"notDeliverable\":{}}}"))
+                   '(:reason (:arm :bubble-refused
+                              :value (:detail "no route"
+                                      :kind (:arm :not-deliverable :value nil))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-bubble-refused-agent-busy-kind ()
+  "SubmitPromptBubbleRefused's `agent_busy' kind decodes to its keyword."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-bubble-refused
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"detail\":\"busy\",\"agentBusy\":{}}"))
+                   '(:detail "busy" :kind (:arm :agent-busy :value nil))))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-bubble-refused-detail-default ()
+  "SubmitPromptBubbleRefused's omitted detail is the empty string."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-wire-decode-submit-prompt-bubble-refused
+                               (agent-repl-test-wire-verbs--parse "{\"agentBusy\":{}}"))
+                              :detail)
+                   ""))))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-bubble-refused-kind-unset ()
+  "SubmitPromptBubbleRefused with no kind arm set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-bubble-refused
+                   (agent-repl-test-wire-verbs--parse "{\"detail\":\"x\"}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-bubble-refused-two-kinds ()
+  "SubmitPromptBubbleRefused with two kind arms set is a contract breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-bubble-refused
+                   (agent-repl-test-wire-verbs--parse
+                    "{\"notDeliverable\":{},\"agentBusy\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-bubble-refused-unknown-field ()
+  "An unknown field on SubmitPromptBubbleRefused is refused, not dropped."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-bubble-refused
+                   (agent-repl-test-wire-verbs--parse "{\"agentBusy\":{},\"nope\":1}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-bubble-kind-arms-pinned ()
+  "SubmitPromptBubbleRefused's kind oneof has exactly the arms this codec
+decodes."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_submit_prompt.pb.go"
+                        "SubmitPromptBubbleRefused")
+                       #'string<)
+                 '("agentBusy" "notDeliverable"))))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-error-arms-pinned ()
   "SubmitPromptError's arm set is exactly what the frozen schema declares."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission" "bubbleRefused")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()

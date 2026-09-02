@@ -166,6 +166,18 @@ default 0, which protojson omits."
   (let ((raw (agent-repl-wire--raw object field)))
     (if (null raw) 0 (agent-repl-wire--parse-integer message-name field raw))))
 
+(defun agent-repl-wire--decode-uint32 (message-name field object)
+  "Decode OBJECT's non-optional uint32 FIELD of MESSAGE-NAME.
+An absent field is the proto3 default 0, which protojson omits; a
+negative value is a contract breach for an unsigned field."
+  (let ((raw (agent-repl-wire--raw object field)))
+    (if (null raw)
+        0
+      (let ((n (agent-repl-wire--parse-integer message-name field raw)))
+        (when (< n 0)
+          (agent-repl-wire--fail message-name field "expected a non-negative integer"))
+        n))))
+
 (defun agent-repl-wire--decode-optional-uint32 (message-name field object)
   "Decode OBJECT's optional uint32 FIELD of MESSAGE-NAME, nil when absent."
   (let ((raw (agent-repl-wire--raw object field)))

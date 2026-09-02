@@ -57,6 +57,8 @@
 ;; wire-common.el (concurrent sibling module) owns the shared leaf codecs and
 ;; the `agent-repl-wire-error' definition.
 (declare-function agent-repl-wire--fail "agent-repl-wire-common" (message field reason))
+(declare-function agent-repl-wire--decode-bool "agent-repl-wire-common" (message-name field object))
+(declare-function agent-repl-wire--decode-uint32 "agent-repl-wire-common" (message-name field object))
 (declare-function agent-repl-wire-encode-workspace-ref "agent-repl-wire-common" (ref))
 (declare-function agent-repl-wire-decode-workspace-ref "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-encode-repository-ref "agent-repl-wire-common" (ref))
@@ -722,9 +724,20 @@ happened."
   (agent-repl-wire-verbs--decode-empty "CloseWorkspaceSuccess" json))
 
 (defun agent-repl-wire-decode-close-workspace-blocked (json)
-  "Decode CloseWorkspaceBlocked from JSON.  Empty: Work is in flight; the
-footer's close-blocked state carries the reasons."
-  (agent-repl-wire-verbs--decode-empty "CloseWorkspaceBlocked" json))
+  "Decode CloseWorkspaceBlocked from JSON into a plist.
+The plist is (`:turn-in-flight' `:live-work' `:held-prompts'
+`:merge-queued' `:summary') -- the daemon's own close-blocked evidence,
+with `summary' its composed sentence over the other four.  A caller with
+no footer in front of it can say WHY the close was refused; the footer
+itself stays the place the reasons are read."
+  (let ((message "CloseWorkspaceBlocked"))
+    (agent-repl-wire-verbs--check-keys
+     message json '(turnInFlight liveWork heldPrompts mergeQueued summary))
+    (list :turn-in-flight (agent-repl-wire--decode-bool message 'turnInFlight json)
+          :live-work (agent-repl-wire--decode-uint32 message 'liveWork json)
+          :held-prompts (agent-repl-wire--decode-uint32 message 'heldPrompts json)
+          :merge-queued (agent-repl-wire--decode-bool message 'mergeQueued json)
+          :summary (agent-repl-wire-verbs--decode-string message 'summary json))))
 
 (defun agent-repl-wire-decode-close-workspace-unknown-workspace (json)
   "Decode CloseWorkspaceUnknownWorkspace from JSON.  Empty: The workspace id is
@@ -1559,12 +1572,52 @@ submission stands and nothing is submitted twice."
   "Decode SubmitPromptError's `duplicate_submission' reason arm from JSON."
   (agent-repl-wire-decode-submit-prompt-duplicate-submission json))
 
+(defun agent-repl-wire-decode-submit-prompt-bubble-not-deliverable (json)
+  "Decode SubmitPromptBubbleNotDeliverable from JSON.  Empty: the vendor
+offers no route to this agent kind."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptBubbleNotDeliverable" json))
+
+(defun agent-repl-wire-decode-submit-prompt-bubble-agent-busy (json)
+  "Decode SubmitPromptBubbleAgentBusy from JSON.  Empty: the addressed
+subagent's own turn is already running."
+  (agent-repl-wire-verbs--decode-empty "SubmitPromptBubbleAgentBusy" json))
+
+(defun agent-repl-wire-decode-submit-prompt-bubble-refused-not-deliverable (json)
+  "Decode SubmitPromptBubbleRefused's `not_deliverable' kind arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-bubble-not-deliverable json))
+
+(defun agent-repl-wire-decode-submit-prompt-bubble-refused-agent-busy (json)
+  "Decode SubmitPromptBubbleRefused's `agent_busy' kind arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-bubble-agent-busy json))
+
+(defun agent-repl-wire-decode-submit-prompt-bubble-refused (json)
+  "Decode SubmitPromptBubbleRefused from JSON into (`:detail' `:kind').
+The SHIM refused a bubble-addressed prompt and the daemon relays that
+refusal BY KIND -- the daemon never judges a subagent's turn itself.  The
+kind oneof is REQUIRED: the arm is the refusal, so an unset one is a
+contract breach.  `detail' is the shim's own account, for a human and for
+logs, and is never switched on."
+  (let ((message "SubmitPromptBubbleRefused"))
+    (agent-repl-wire-verbs--check-keys message json '(detail notDeliverable agentBusy))
+    (list :detail (agent-repl-wire-verbs--decode-string message 'detail json)
+          :kind
+          (agent-repl-wire-verbs--decode-oneof
+           message "kind" json
+           (list (list 'notDeliverable :not-deliverable
+                       #'agent-repl-wire-decode-submit-prompt-bubble-refused-not-deliverable)
+                 (list 'agentBusy :agent-busy
+                       #'agent-repl-wire-decode-submit-prompt-bubble-refused-agent-busy))))))
+
+(defun agent-repl-wire-decode-submit-prompt-error-bubble-refused (json)
+  "Decode SubmitPromptError's `bubble_refused' reason arm from JSON."
+  (agent-repl-wire-decode-submit-prompt-bubble-refused json))
+
 (defun agent-repl-wire-decode-submit-prompt-error (json)
   "Decode SubmitPromptError from JSON into (:reason (:arm ARM :value V)).
 THE ARM IS THE REFUSAL, so an unset reason is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "SubmitPromptError"))
-    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission))
+    (agent-repl-wire-verbs--check-keys message json '(merging unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted feedNotInWorkspace feedUndecodable noSession duplicateSubmission bubbleRefused))
     (list :reason
           (agent-repl-wire-verbs--decode-oneof
            message "reason" json
@@ -1576,7 +1629,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'feedNotInWorkspace :feed-not-in-workspace #'agent-repl-wire-decode-submit-prompt-error-feed-not-in-workspace)
          (list 'feedUndecodable :feed-undecodable #'agent-repl-wire-decode-submit-prompt-error-feed-undecodable)
          (list 'noSession :no-session #'agent-repl-wire-decode-submit-prompt-error-no-session)
-         (list 'duplicateSubmission :duplicate-submission #'agent-repl-wire-decode-submit-prompt-error-duplicate-submission))))))
+         (list 'duplicateSubmission :duplicate-submission #'agent-repl-wire-decode-submit-prompt-error-duplicate-submission)
+         (list 'bubbleRefused :bubble-refused #'agent-repl-wire-decode-submit-prompt-error-bubble-refused))))))
 
 (defun agent-repl-wire-decode-submit-prompt-response-success (json)
   "Decode SubmitPromptResponse's `success' arm from JSON."
