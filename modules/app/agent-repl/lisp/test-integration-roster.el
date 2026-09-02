@@ -1714,8 +1714,15 @@ the host re-key bug above and already holds independently of it.)"
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row "itest-collide-live" "dead" 'ready))))
       ;; Assert: refused loudly, and the old tab untouched — never half-renamed.
-      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
-      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      ;; The refusal is recorded by `agent-repl-roster--rename-state', which
+      ;; catches `--ws-rename-state''s `user-error' so it cannot escape the
+      ;; push handler and abort the reconcile walk mid-list: the ruled shape
+      ;; (fanout §0c, R-AUDIT3-PROD) is a WHOLE refusal logged at ERROR, not
+      ;; an invalid push.  A `push-invalid' here would mean the signal
+      ;; escaped and the tab bar describes a roster nobody finished reading.
+      (agent-repl-itest--await-log daemon "elisp.roster.tab-rename-refused" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.roster.tab-rename-refused" "error"))
+      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
       (should (equal (agent-repl--ws-by-ref-id "itest-collide-live") "live")))))
 
 ;; audit-3 #34
