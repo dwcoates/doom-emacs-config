@@ -87,6 +87,30 @@ type fakeDB struct {
 	workspaces   map[ids.WorkspaceID]wsm.Workspace
 	repositories []wsm.Repository
 	drainPut     []wsm.DrainSchedule
+	// sessions are the durable session records, by workspace.
+	sessions map[ids.WorkspaceID]wsm.Session
+	// sessionErr fails every session read.
+	sessionErr error
+	// leases are the occupancy leases in force, by workspace.
+	leases map[ids.WorkspaceID]wsm.Lease
+	// leaseErr fails every lease read.
+	leaseErr error
+}
+
+func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bool, error) {
+	if f.sessionErr != nil {
+		return wsm.Session{}, false, f.sessionErr
+	}
+	session, ok := f.sessions[id]
+	return session, ok, nil
+}
+
+func (f *fakeDB) Lease(_ context.Context, id ids.WorkspaceID) (wsm.Lease, bool, error) {
+	if f.leaseErr != nil {
+		return wsm.Lease{}, false, f.leaseErr
+	}
+	lease, ok := f.leases[id]
+	return lease, ok, nil
 }
 
 func (f *fakeDB) Workspace(_ context.Context, id ids.WorkspaceID) (wsm.Workspace, error) {
@@ -254,6 +278,29 @@ type fakeHealth struct {
 	health.Reporter
 	daemon  *agentreplv1.DaemonHealthResponse
 	session *agentreplv1.SessionHealthResponse
+	// faults are the open faults every scope answers with.
+	faults []wsm.Fault
+	// faultsErr fails every open-fault read.
+	faultsErr error
+}
+
+func (f *fakeHealth) OpenFaults(context.Context, wsm.FaultScope) ([]wsm.Fault, error) {
+	if f.faultsErr != nil {
+		return nil, f.faultsErr
+	}
+	return f.faults, nil
+}
+
+// fakeSessionFacts is a SessionFacts. It answers per workspace, so a test
+// arranges a live session by putting facts in and an absent one by leaving
+// them out.
+type fakeSessionFacts struct {
+	facts map[ids.WorkspaceID]HostFacts
+}
+
+func (f *fakeSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (HostFacts, bool) {
+	got, ok := f.facts[ws]
+	return got, ok
 }
 
 func (f *fakeHealth) Daemon(context.Context) (*agentreplv1.DaemonHealthResponse, error) {
@@ -390,6 +437,7 @@ type harness struct {
 	Drain      *fakeDrain
 	Rollout    *fakeRollout
 	Health     *fakeHealth
+	Facts      *fakeSessionFacts
 	Login      *fakeLogin
 	Feed       *fakeFeed
 	Footer     *fakeFooter
@@ -428,6 +476,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Drain:      &fakeDrain{},
 		Rollout:    &fakeRollout{},
 		Health:     &fakeHealth{},
+		Facts:      &fakeSessionFacts{facts: map[ids.WorkspaceID]HostFacts{}},
 		Login:      &fakeLogin{},
 		Feed:       &fakeFeed{},
 		Footer:     &fakeFooter{},
@@ -447,6 +496,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Drain:            h.Drain,
 		Rollout:          h.Rollout,
 		Health:           h.Health,
+		SessionFacts:     h.Facts,
 		Login:            h.Login,
 		Ownership:        h.Ownership,
 		SuccessorAddress: func() string { return "127.0.0.1:9999" },
@@ -536,4 +586,25 @@ func (l *recordingLogger) at(level string) []logRecord {
 		}
 	}
 	return out
+}
+
+// receiveHostEvent reads the host stream until an EVENT arm arrives, skipping
+// the `host` state pushes.
+//
+// Every fresh subscription now opens with the workspace's host STATE (the
+// stream's whole point), so a test asserting on one of the four event arms has
+// to read past it rather than assume the first frame is its own.
+func receiveHostEvent(
+	t *testing.T,
+	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
+) *agentreplv1.WatchHostWorkspaceResponse {
+	t.Helper()
+	for stream.Receive() {
+		if stream.Msg().GetHost() != nil {
+			continue
+		}
+		return stream.Msg()
+	}
+	t.Fatalf("the host stream ended before an event arrived: %v", stream.Err())
+	return nil
 }

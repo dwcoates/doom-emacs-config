@@ -98,8 +98,11 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 	// or materialized: git would otherwise fail halfway through `worktree add`
 	// and leave the creation job standing for a workspace that cannot exist.
 	if _, err := v.deps.Git.ResolveRef(ctx, repoDir, baseRef); err != nil {
-		return wsm.Workspace{}, refuse(global, "CreateWorkspace", ArmBaseRefUnresolved,
-			fmt.Sprintf("the base ref %q does not resolve in %q: %v", baseRef, repoDir, err), false)
+		// The arm spells `ref`, so the ref TRAVELS AS THE FIELD and not only
+		// inside the sentence: a client rendering the arm names the bad ref.
+		return wsm.Workspace{}, refuseWith(global, "CreateWorkspace", ArmBaseRefUnresolved,
+			fmt.Sprintf("the base ref %q does not resolve in %q: %v", baseRef, repoDir, err), false,
+			map[string]any{"ref": baseRef})
 	}
 
 	parent := spec.parentWorkspace()

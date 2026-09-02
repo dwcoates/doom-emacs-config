@@ -66,6 +66,11 @@ type Deps struct {
 	Rollout rollout.Controller
 	// Health backs DaemonHealth and SessionHealth.
 	Health health.Reporter
+	// SessionFacts answers the LIVE half of the host view — the session
+	// identity, the controller generation, whether the shim is attached and
+	// the transcript's backfill. Only the party that spawns and supervises
+	// shims can know them, and the server must not reach into it for them.
+	SessionFacts SessionFacts
 	// Login backs the four login verbs; WatchLoginTerminal is a SERVER stream
 	// and SendLoginInput is unary.
 	Login login.Manager
@@ -129,6 +134,14 @@ type Server interface {
 	// be methods of one type; the relay wraps the same push topics.
 	Relay() workspace.HostRelay
 
+	// PublishHostWorkspace recomposes and publishes one workspace's host view.
+	// It is exported because the SESSION EDGES that move the view — a shim
+	// dying, a merge parking, a lease released — happen inside the fleet and
+	// the merge orchestrator, not inside an rpc the server handles. Those
+	// parties call it; the topic's proto.Equal dedupe means a caller never has
+	// to decide whether its edge actually changed anything.
+	PublishHostWorkspace(ctx context.Context, ws ids.WorkspaceID)
+
 	// Daemon pushes a daemon-scoped fact onto every WatchDaemon stream — the
 	// graceful rollout's stand-down announcement. It serves Emacs AND every
 	// webview alike (R3).
@@ -151,8 +164,13 @@ type server struct {
 	cancel context.CancelFunc
 
 	mu sync.Mutex
-	// hostTopics is one push topic per workspace's WatchHostWorkspace stream.
+	// hostTopics is one EVENT topic per workspace's WatchHostWorkspace stream.
 	hostTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]
+	// hostStateTopics is one STATE topic per workspace, carrying the `host`
+	// arm. It is separate from the event topic because a Topic replays exactly
+	// its latest value: sharing one would hand a late subscriber whichever
+	// event happened last instead of the state it subscribed for.
+	hostStateTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]
 	// webTopics is one push topic per workspace's WatchWebWorkspace stream.
 	webTopics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]
 	// daemonTopic is the one daemon-level push topic, for Emacs and every
@@ -217,18 +235,27 @@ func New(deps Deps) (Server, error) {
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	}
+	if deps.SessionFacts == nil {
+		// The host view's live half has no source. That is recorded where it
+		// does HARM — at each withheld view, which names the workspace — and
+		// not here: a daemon serving no sessions is not damaged by the missing
+		// seam, and an unconditional record at construction would say every
+		// daemon is broken when most are not.
+		deps.SessionFacts = unwiredSessionFacts{}
+	}
 
 	life, cancel := context.WithCancel(context.Background())
 	s := &server{
-		deps:        deps,
-		log:         deps.Log.Global(),
-		life:        life,
-		cancel:      cancel,
-		hostTopics:  make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
-		webTopics:   make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
-		hostHeld:    make(map[ids.WorkspaceID]int),
-		webHeld:     make(map[ids.WorkspaceID]int),
-		watchTokens: make(map[string]tokenTarget),
+		deps:            deps,
+		log:             deps.Log.Global(),
+		life:            life,
+		cancel:          cancel,
+		hostTopics:      make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchHostWorkspaceResponse]),
+		hostStateTopics: make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspace]),
+		webTopics:       make(map[ids.WorkspaceID]*publish.Topic[*agentreplv1.WatchWebWorkspaceResponse]),
+		hostHeld:        make(map[ids.WorkspaceID]int),
+		webHeld:         make(map[ids.WorkspaceID]int),
+		watchTokens:     make(map[string]tokenTarget),
 	}
 
 	mux := http.NewServeMux()

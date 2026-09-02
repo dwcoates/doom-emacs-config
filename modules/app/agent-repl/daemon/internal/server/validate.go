@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -128,6 +129,20 @@ func validateDrainReason(field string, reason *agentreplv1.DrainReason) *connect
 	}
 	if reason.GetKind() == nil {
 		return invalid(field+".kind", "a drain reason's arm is required")
+	}
+	if operator := reason.GetOperator(); operator != nil {
+		return validateDrainReasonOperator(field+".operator", operator)
+	}
+	return nil
+}
+
+// validateDrainReasonOperator is DrainReasonOperator's base function. The note
+// is REQUIRED NON-BLANK by drain_reason.proto: an operator arm whose note says
+// nothing is the operator arm saying nothing, which is what `maintenance`
+// already spells.
+func validateDrainReasonOperator(field string, operator *agentreplv1.DrainReasonOperator) *connect.Error {
+	if strings.TrimSpace(operator.GetNote()) == "" {
+		return invalid(field+".note", "an operator drain reason requires a non-blank note")
 	}
 	return nil
 }

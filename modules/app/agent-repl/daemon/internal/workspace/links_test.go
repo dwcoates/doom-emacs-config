@@ -67,10 +67,19 @@ func TestOpenInEditorRelaysAnAbsolutePathInsideTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestOpenInEditorResolvesARelativePathAgainstTheWorkspace(t *testing.T) {
+// TestOpenInEditorRelaysARelativePathVerbatim pins the contract's own wording
+// (endpoint_open_in_editor.proto: the daemon "relays the path VERBATIM", "the
+// path on the daemon's host, exactly as the feed row carried it"). The
+// resolution against the workspace dir exists for the CONTAINMENT CHECK that
+// feeds the path_escapes_workspace arm, and for nothing else: rewriting the
+// relayed path would hand Emacs a string the click never carried.
+//
+// (This assertion previously demanded the resolved absolute path. The contract
+// states the opposite in two places, so the test moved, not the rule.)
+func TestOpenInEditorRelaysARelativePathVerbatim(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir())
+	f.workspace("w1", t.TempDir())
 
 	// Act.
 	if err := f.verbs.OpenInEditor(context.Background(), "w1", "src/a.go", nil); err != nil {
@@ -78,9 +87,27 @@ func TestOpenInEditorResolvesARelativePathAgainstTheWorkspace(t *testing.T) {
 	}
 
 	// Assert.
+	if got := f.host.editorOpens[0].Path; got != "src/a.go" {
+		t.Fatalf("relayed path = %q, want the caller's own spelling %q", got, "src/a.go")
+	}
+}
+
+// TestOpenInEditorRelaysAnAbsolutePathVerbatim pins the same rule for the
+// spelling that needs no resolution at all.
+func TestOpenInEditorRelaysAnAbsolutePathVerbatim(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir())
 	want := filepath.Join(ws.Dir, "src", "a.go")
-	if f.host.editorOpens[0].Path != want {
-		t.Fatalf("relayed path = %q, want %q", f.host.editorOpens[0].Path, want)
+
+	// Act.
+	if err := f.verbs.OpenInEditor(context.Background(), "w1", want, nil); err != nil {
+		t.Fatalf("OpenInEditor: %v", err)
+	}
+
+	// Assert.
+	if got := f.host.editorOpens[0].Path; got != want {
+		t.Fatalf("relayed path = %q, want %q", got, want)
 	}
 }
 
