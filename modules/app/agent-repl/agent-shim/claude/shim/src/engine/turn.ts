@@ -97,6 +97,36 @@ export interface SessionContext {
    */
   watcherOpened(agent: conversationv1.AgentId, page: AgentPageSession): () => void;
   /**
+   * Register one open `WatchBash` stream, so the teardown can wait for it.
+   *
+   * A stopped run's interrupted terminal is written by the teardown itself, and
+   * a consumer must RECEIVE it before the process goes — a stream cut where a
+   * terminal was owed reads as a transport failure. Returns the callback that
+   * retires the registration, however the stream ended.
+   */
+  bashWatcherOpened(work: conversationv1.DetachedWorkId): () => void;
+  /**
+   * Write the `interrupted.by_user` terminal for every SHELL run in `entries`.
+   *
+   * THE ACT WAS OURS, SO THE RECORD IS OURS. A detached shell's rows are the
+   * sidecar's, but the spool's `EXIT=` line read alone says only what code it
+   * exited with — that a user asked for the stop is known here and nowhere
+   * else. Subagents are untouched: their terminals come from the vendor's own
+   * `task_notification`, which does state `stopped`.
+   */
+  concludeStoppedRuns(entries: readonly LiveWorkEntry[]): void;
+  /**
+   * Whether this shim has ever ANNOUNCED the named agent.
+   *
+   * The main agent, anything the live table holds or watched retire, and the
+   * subagents the record named at reconciliation. It is the shim's side of the
+   * unknown-target refusal: the STORE cannot refuse a book it has no rows for
+   * (`OpenAgentSessionFailure` has no `unknown_agent` arm), so a book that
+   * comes back EMPTY is either a real agent nothing has been written for yet or
+   * an id nobody ever minted, and only the producer can tell those apart.
+   */
+  knowsAgent(agent: conversationv1.AgentId): boolean;
+  /**
    * Report that the record plane could not be reached.
    *
    * A REFUSAL IS NOT A REPORT. The caller of the verb learns its own call was
@@ -487,6 +517,11 @@ export class TurnEngine {
       await query.interrupt();
       for (const entry of spawned) await query.stopTask(entry.taskId);
     }
+    // A SUBAGENT'S TERMINAL ARRIVES ON ITS OWN, in the `task_notification` the
+    // stop provokes; A SHELL'S DOES NOT, because no vendor message states that
+    // a shell run was stopped. Every item this kill named concludes, or the
+    // consumer is left watching work that will never end.
+    this.session.concludeStoppedRuns(spawned);
     this.session.setOpenTurn(undefined);
     const killed = create(conversationv1.TurnKilledSchema, {
       how:
@@ -535,6 +570,7 @@ export class TurnEngine {
     if (query !== undefined) {
       for (const entry of spawned) await query.stopTask(entry.taskId);
     }
+    this.session.concludeStoppedRuns(spawned);
     LOGGER.log(
       { turn_id: turnId, stopped: spawned.length },
       "killed the live work a closed turn left running",
@@ -665,6 +701,25 @@ export class TurnEngine {
         ? notFound(`WatchAgent(${target.value}): ${err.message}`)
         : err;
     }
+    // THE STORE ANSWERS FIRST, and a book with rows is known BY DEFINITION —
+    // something wrote them under this id. Only an EMPTY book is ambiguous, and
+    // there the producer decides: an id this shim never announced names no
+    // agent, and standing a tail on it would leave a consumer watching forever
+    // for frames that can never come.
+    //
+    // A stream has no arm to say "refused" — its response type is the frame it
+    // carries — so the refusal closes the stream at the transport.
+    if (opened.page.entries.length === 0 && !this.session.knowsAgent(target)) {
+      opened.close();
+      LOGGER.log(
+        { level: "warn", agent_id: target.value },
+        "REFUSED WatchAgent: the record holds no rows for this target and this shim never announced it",
+      );
+      throw notFound(
+        `WatchAgent(${target.value}): no agent by that id has been announced by this session, and the ` +
+          "record holds no rows under it",
+      );
+    }
     const watcherEnded = this.session.watcherOpened(target, opened);
     try {
       yield create(shimv1.WatchAgentResponseSchema, {
@@ -725,16 +780,32 @@ export class TurnEngine {
   async *watchBash(request: shimv1.WatchBashRequest): AsyncIterable<shimv1.WatchBashResponse> {
     const work = request.work;
     if (work === undefined) throw notFound("WatchBash reached the engine with no work id");
-    let run;
+    // THE LIVE TABLE IS THE SHIM'S OWN ANSWER to "does this run exist". The
+    // store refuses a run before its first row lands, and the daemon opens its
+    // watch on the announcement, so the refusal is waited out while the shim
+    // still holds the run and only then reported.
+    const stillLive = (): boolean => this.session.live.byToolUseId(work.value) !== undefined;
+    // A REFUSAL CAN SURFACE FROM THE ITERATION, not only from the open: the
+    // store's own stream is what refuses, and its first frame is pulled when
+    // the tail is read. Both are mapped, or the transport answers a bare
+    // `internal error` for a refusal the shim understood perfectly well.
+    const watcherEnded = this.session.bashWatcherOpened(work);
     try {
-      run = await this.session.persistence.openBashRun(work);
+      const run = await this.session.persistence.openBashRun(work, stillLive);
+      for await (const frame of run) {
+        yield create(shimv1.WatchBashResponseSchema, { bash: frame });
+      }
     } catch (err) {
-      throw err instanceof PersistenceError
-        ? notFound(`WatchBash(${work.value}): ${err.message}`)
-        : err;
-    }
-    for await (const frame of run) {
-      yield create(shimv1.WatchBashResponseSchema, { bash: frame });
+      if (err instanceof PersistenceError) {
+        LOGGER.log(
+          { level: "warn", work_id: work.value, kind: err.kind },
+          "WatchBash refused",
+        );
+        throw notFound(`WatchBash(${work.value}): ${err.message}`);
+      }
+      throw err;
+    } finally {
+      watcherEnded();
     }
   }
 
@@ -747,6 +818,17 @@ export class TurnEngine {
     // the internal address `stopTask` wants.
     const entry = this.session.live.byToolUseId(work.value);
     if (entry === undefined) {
+      // TWO REASONS FOR ONE MISS, and the arms mean different things. A handle
+      // the table watched RETIRE names a shell that ended, which is what
+      // `already_ended` says; a handle it never knew names nothing at all.
+      if (this.session.live.retired(work.value)) {
+        LOGGER.log({ level: "warn", work_id: work.value }, "StopBash refused: the shell already ended");
+        return stopBashRefused(
+          { kind: "alreadyEnded" },
+          `the shell addressed by ${JSON.stringify(work.value)} has already ended`,
+        );
+      }
+      LOGGER.log({ level: "warn", work_id: work.value }, "StopBash refused: no live shell carries this handle");
       return stopBashRefused(
         { kind: "unknownWork" },
         `no live detached work is addressed by ${JSON.stringify(work.value)}`,
@@ -757,6 +839,12 @@ export class TurnEngine {
       return stopBashRefused({ kind: "alreadyEnded" }, "the vendor query is dead; the run cannot still be live");
     }
     await query.stopTask(entry.taskId);
+    // THE STOP WAS OURS, SO ITS TERMINAL IS OURS. The spool's `EXIT=143` line
+    // is all the sidecar can see, and read alone it says "exited 143" — only
+    // this shim knows a user asked for the kill, which is what
+    // `interrupted.by_user` states. The row shares the run's terminal upsert
+    // key, so a sidecar row for the same run supersedes rather than duplicates.
+    this.session.concludeStoppedRuns([entry]);
     LOGGER.log({ work_id: work.value }, "stopped a detached shell run");
     return stopBashStopped();
   }

@@ -648,3 +648,18 @@ export function unimplemented(rpc: string): ConnectError {
     Code.Unimplemented,
   );
 }
+
+/**
+ * An exception no handler anticipated.
+ *
+ * A `ConnectError` is a refusal the shim MEANT to make and passes through
+ * unchanged; anything else is a defect, and answering a bare `internal error`
+ * with no detail loses the one piece of evidence the caller could act on. So
+ * the detail names the rpc and carries the exception's own message, and the
+ * caller is never handed a silent stream close.
+ */
+export function internalFromUnknown(rpc: string, error: unknown): ConnectError {
+  if (error instanceof ConnectError) return error;
+  const detail = error instanceof Error ? error.message : String(error);
+  return new ConnectError(`shim.v1.${rpc}: ${detail}`, Code.Internal);
+}

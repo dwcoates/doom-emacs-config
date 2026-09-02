@@ -234,8 +234,19 @@ export interface Persistence {
   ): Promise<conversationv1.HistoryPage>;
   /** Everything the record holds a start for and no terminal. */
   liveWork(): Promise<storev1.GetLiveWorkSuccess>;
-  /** One detached shell run's lifecycle frames: the announced start, then the tail. */
-  openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  /**
+   * One detached shell run's lifecycle frames: the announced start, then the tail.
+   *
+   * `stillLive` is the CALLER'S belief that the run exists — the live table's
+   * own answer. The store refuses a run it holds no row for, and an eager
+   * watcher routinely beats the first row there, so that refusal is waited out
+   * for as long as this predicate holds and surfaced as `unknown_work` once it
+   * does not.
+   */
+  openBashRun(
+    work: conversationv1.DetachedWorkId,
+    stillLive?: () => boolean,
+  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Observe faults the record plane raises. Returns an unsubscribe. */
   onFault(listener: (fault: conversationv1.SessionFault) => void): () => void;
   /** Observe degraded windows the record plane opens and closes. */
