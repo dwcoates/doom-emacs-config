@@ -126,6 +126,12 @@ type Client interface {
 	// Exited yields exactly one ExitInfo when the process is gone, then
 	// closes. It carries the exit decoding and the stderr ring as evidence.
 	Exited() <-chan ExitInfo
+	// Reaped answers the decoded exit WITHOUT consuming Exited, whose channel
+	// carries exactly one value and is therefore owned by a single waiter. A
+	// second party that needs the exit code as EVIDENCE — the watcher raising
+	// the session's shim_died fault — reads it here instead of racing that
+	// waiter for the value.
+	Reaped() (ExitInfo, bool)
 	// Kill stops the process, recording who asked and why.
 	Kill(attr KillAttribution) error
 	// Detach stops supervising while LEAVING THE PROCESS RUNNING — the
