@@ -774,8 +774,29 @@ func agentID(value string) *conversationv1.AgentId {
 	return &conversationv1.AgentId{Value: value}
 }
 
-// openBook opens one agent's reading session and returns the opening page.
+// openBook opens one agent's reading session and returns the opening page. The
+// agent MUST already name a book: a `unknown_agent` refusal fails the subject
+// here, because a one-shot read that names an unregistered agent is asserting
+// against a book that was never written.
 func openBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) *storev1.OpenAgentSessionSuccess {
+	t.Helper()
+	ok, known := openBookIfKnown(ctx, t, c, agent, pageSize)
+	if !known {
+		t.Fatalf("OpenAgentSession(%s) refused: the agent names no book of this store", agent)
+	}
+	return ok
+}
+
+// openBookIfKnown opens one agent's reading session, reporting whether the
+// store has HEARD OF the agent at all.
+//
+// The store's agent register is filled by the sidecar's own page-line writes,
+// so between "the file was written" and "the sidecar's first batch committed"
+// the agent legitimately names no book and the store refuses with
+// `unknown_agent`. For a POLLING reader that refusal is indistinguishable from
+// "no lines yet" and is the state it is waiting out; every other failure arm is
+// a real defect and fails the subject.
+func openBookIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) (*storev1.OpenAgentSessionSuccess, bool) {
 	t.Helper()
 	res, err := c.OpenAgentSession(ctx, connect.NewRequest(&storev1.OpenAgentSessionRequest{
 		Agent:    agentID(agent),
@@ -785,20 +806,35 @@ func openBook(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClien
 		t.Fatalf("OpenAgentSession(%s): %v", agent, err)
 	}
 	if f := res.Msg.GetFailure(); f != nil {
+		if f.GetUnknownAgent() != nil {
+			return nil, false
+		}
 		t.Fatalf("OpenAgentSession(%s) refused: %s", agent, f.GetDetail())
 	}
 	ok := res.Msg.GetSuccess()
 	if ok == nil {
 		t.Fatalf("OpenAgentSession(%s) answered neither arm", agent)
 	}
-	return ok
+	return ok, true
 }
 
 // bookLines walks a whole book, newest first, across as many ReadAgentPage
 // calls as the boundary arm demands.
 func bookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) []*storev1.StoreLineAt {
 	t.Helper()
-	opened := openBook(ctx, t, c, agent, pageSize)
+	lines, _ := bookLinesIfKnown(ctx, t, c, agent, pageSize)
+	return lines
+}
+
+// bookLinesIfKnown is bookLines for a POLLING reader: an agent the store has
+// never heard of yields no lines and known=false rather than failing, because
+// the register is written by the sidecar's first committed batch.
+func bookLinesIfKnown(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClient, agent string, pageSize uint32) ([]*storev1.StoreLineAt, bool) {
+	t.Helper()
+	opened, known := openBookIfKnown(ctx, t, c, agent, pageSize)
+	if !known {
+		return nil, false
+	}
 	out := append([]*storev1.StoreLineAt(nil), opened.GetPage().GetLines()...)
 	more := opened.GetPage().GetMore()
 	for more != nil {
@@ -823,7 +859,7 @@ func bookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStoreClie
 			break
 		}
 	}
-	return out
+	return out, true
 }
 
 // awaitBookLines re-reads one book until it holds at least want lines, bounded
@@ -834,7 +870,7 @@ func awaitBookLines(ctx context.Context, t *testing.T, c storev1connect.ShimStor
 	defer tick.Stop()
 	var last []*storev1.StoreLineAt
 	for {
-		last = bookLines(ctx, t, c, agent, 200)
+		last, _ = bookLinesIfKnown(ctx, t, c, agent, 200)
 		if len(last) >= want {
 			return last
 		}
@@ -859,7 +895,7 @@ func awaitBookUnits(ctx context.Context, t *testing.T, c storev1connect.ShimStor
 	tick := time.NewTicker(pollTick)
 	defer tick.Stop()
 	for {
-		lines := bookLines(ctx, t, c, agent, 200)
+		lines, _ := bookLinesIfKnown(ctx, t, c, agent, 200)
 		held := map[string]bool{}
 		for _, at := range lines {
 			if a := activityOf(at.GetLine()); a != nil {
