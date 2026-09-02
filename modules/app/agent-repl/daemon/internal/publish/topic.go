@@ -49,6 +49,26 @@ func (t *Topic[T]) Publish(v T) {
 	}
 }
 
+// Republish hands the topic's CURRENT latest value to every subscriber again,
+// without changing it. It reports whether there was one to hand out.
+//
+// It exists because Publish deliberately drops an identical re-render, which
+// is right for a resolver re-rendering the same view and wrong for the one
+// caller that means the repetition: an adopted workspace whose clients must be
+// repainted from what the daemon holds, not from what they happened to receive
+// before the handover.
+func (t *Topic[T]) Republish() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.has {
+		return false
+	}
+	for s := range t.subs {
+		s.enqueue(t.latest)
+	}
+	return true
+}
+
 // Latest reports the most recently published value, and whether anything has
 // been published at all.
 func (t *Topic[T]) Latest() (T, bool) {

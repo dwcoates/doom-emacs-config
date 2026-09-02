@@ -39,6 +39,12 @@ func (r *resolver) drawPermission(s *wsState, agent *conversationv1.AgentId, p *
 		}
 		s.permissionRows[askID] = state
 	}
+	// The asking agent is recorded on EVERY frame, not only the opening one:
+	// an adoption can meet the ask mid-flight, and an answer with no agent to
+	// deliver it to is an ask nobody can settle.
+	if agent.GetValue() != "" {
+		state.agent = agent
+	}
 	card := state.card
 
 	switch frame := p.GetResult().(type) {

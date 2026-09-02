@@ -55,17 +55,18 @@ func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 	plain := t.TempDir()
 
 	// Act
-	_, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: plain}))
+	resp, err := d.Client().RegisterWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RegisterWorkspaceRequest{Dir: plain}))
 
-	// Assert
-	if err == nil {
-		t.Fatalf("RegisterWorkspace(%s) = success, want a refusal: the directory is not a git worktree", plain)
+	// Assert: `not_a_worktree` is a LANDED arm of RegisterWorkspaceError, so
+	// the refusal is answered IN BAND rather than as a transport error. (This
+	// assertion was written against the unlanded-arm path; the arm landed with
+	// the proto, and an in-band arm is never also a Connect error.)
+	if err != nil {
+		t.Fatalf("RegisterWorkspace(%s) = transport error %v, want the in-band not_a_worktree arm", plain, err)
 	}
-	if !namesIntendedArm(err, "RegisterWorkspaceError.") {
-		t.Fatalf("RegisterWorkspace refusal = %v, want it to name RegisterWorkspaceError.<arm>", err)
+	if resp.Msg.GetError().GetNotAWorktree() == nil {
+		t.Fatalf("RegisterWorkspace(%s) = %v, want RegisterWorkspaceError.not_a_worktree", plain, resp.Msg)
 	}
-	d.AwaitRunLogOperation("daemon.refusal.unlanded_arm")
-	d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestSelectWorkspaceStampsCurrentOnTheRoster(t *testing.T) {

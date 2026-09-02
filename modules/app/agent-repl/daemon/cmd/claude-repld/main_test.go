@@ -128,7 +128,9 @@ func TestTheFlagSetSpellsEveryBindingName(t *testing.T) {
 
 // TestTheGraphNamesEveryUnwiredCollaborator pins that a graph which cannot be
 // built says WHICH collaborator has no landed source, rather than failing with
-// a bare refusal a reader has to go hunting behind.
+// a bare refusal a reader has to go hunting behind. The list is empty today —
+// every collaborator has a producer — and the test stays so that adding one
+// keeps the refusal legible.
 func TestTheGraphNamesEveryUnwiredCollaborator(t *testing.T) {
 	// Arrange.
 	if len(unwired) == 0 {
@@ -136,15 +138,15 @@ func TestTheGraphNamesEveryUnwiredCollaborator(t *testing.T) {
 	}
 
 	// Act.
-	_, _, err := buildGraph(t.Context(), process{})
+	_, err := buildGraph(t.Context(), process{})
 
 	// Assert.
 	if err == nil {
 		t.Fatal("buildGraph returned no error while collaborators are unwired")
 	}
 	for _, u := range unwired {
-		if !strings.Contains(err.Error(), u.Field) {
-			t.Fatalf("the refusal does not name %q: %v", u.Field, err)
+		if !strings.Contains(err.Error(), u) {
+			t.Fatalf("the refusal does not name %q: %v", u, err)
 		}
 	}
 }

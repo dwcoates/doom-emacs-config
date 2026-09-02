@@ -120,6 +120,13 @@ type Verbs interface {
 	// Register records a workspace Emacs announced. Idempotent by normalized
 	// dir.
 	Register(ctx context.Context, dir string, facts wsm.RegisterFacts) (wsm.Workspace, error)
+	// PublishRegistry publishes the roster's durable half once, from what the
+	// registry holds right now. The boot spine calls it before anything is
+	// served: the roster is otherwise published only as a side effect of a
+	// verb, and a daemon nobody has asked anything of yet would leave the one
+	// editor-global stream with nothing to deliver — including the EMPTY
+	// roster, which is a roster.
+	PublishRegistry(ctx context.Context) error
 	// Create materializes a new workspace: slug from the initial prompt by the
 	// naming rule, branch, worktree, layout facts recorded, and REGISTRATION
 	// ONLY AFTER MATERIALIZATION.
