@@ -342,6 +342,7 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	req := f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
 
 	// Assert: the brief's placeholders were spliced.
 	if req.GetOrigin() != mergeConflictRepairOrigin {
@@ -397,6 +398,7 @@ func TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal(t *test
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
 	host := f.d.WatchHost(f.ws)
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
@@ -477,6 +479,7 @@ func TestATestGateFailureOpensTheFixesTabWithTheBriefAndParksOnEscalation(t *tes
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	req := f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
 
 	// Assert: the fixes brief was spliced.
 	if req.GetOrigin() != mergeTestRepairOrigin {
@@ -663,6 +666,7 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 	f.shim.ExpectStartTurn()
+	f.d.AwaitWorkspaceLogOperationCount(f.ws.GetDir(), harness.OpTurnOpened, 2)
 	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID("conflict-brief-done")))
 	host := f.d.WatchHost(f.ws)
 	awaitView(t, f, host, "the host composer parked on the merge", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
@@ -798,6 +802,10 @@ func mergeCreateChild(t *testing.T, d *harness.Daemon, repoRef *workspacev1.Repo
 	shim := d.Shim(ws)
 	shim.ExpectStartSession()
 	shim.ExpectStartTurn()
+	// The fake records StartTurn on ARRIVAL; the terminal frame must not be
+	// pushed until the daemon has the turn OPEN, or the terminal names no turn
+	// and everything waiting on that turn's end waits forever.
+	d.AwaitWorkspaceLogOperationCount(ws.GetDir(), harness.OpTurnOpened, 1)
 	shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID(name+"-initial")))
 	return &fixture{d: d, ws: ws, shim: shim, t: t}
 }

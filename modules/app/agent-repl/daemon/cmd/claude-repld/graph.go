@@ -282,8 +282,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Judge:          judge,
 		Feed:           feedResolver,
 		Footer:         footerResolver,
+		Sidebar:        sidebarResolver,
 		Holds:          holdsResolver,
 		Client:         fleet.Sender,
+		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
 		// A submission that arrives under a PARKED merge lease goes to the
 		// orchestrator as guidance. The queue never imports merge, so the
@@ -369,13 +371,14 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	}
 
 	drainController, err = drain.New(drain.Deps{
-		DB:         p.DB,
-		IdleCutoff: p.Opts.idleCutoff,
-		Stand:      fleet,
-		Freeness:   fleet.Freeness(),
-		Announcer:  pushes,
-		Exit:       orderlyExit(p.Exit),
-		Log:        p.Surfaces,
+		DB:           p.DB,
+		IdleCutoff:   p.Opts.idleCutoff,
+		Stand:        fleet,
+		Freeness:     fleet.Freeness(),
+		Announcer:    pushes,
+		LeaseChanged: queue.OnLeaseChanged,
+		Exit:         orderlyExit(p.Exit),
+		Log:          p.Surfaces,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the drain controller: %w", err)
@@ -721,8 +724,17 @@ func sentinelStripper(log dlog.Logger) func(string) string {
 	}
 }
 
+// DeployStampEnv overrides the deploy stamp file. It is the counterpart of
+// rollout.DeployScriptEnv: a test that must make a shim's reported build
+// disagree with the deployed one has no other way to state the deployed one,
+// because the stamp file lives beside a binary the harness builds itself.
+const DeployStampEnv = "AGENT_REPL_DEPLOY_STAMP"
+
 func deployStamp(path string) func() (string, error) {
 	return func() (string, error) {
+		if fromEnv := os.Getenv(DeployStampEnv); fromEnv != "" {
+			return fromEnv, nil
+		}
 		raw, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
 			// NO STAMP AT ALL is an ordinary state, not a failure: this

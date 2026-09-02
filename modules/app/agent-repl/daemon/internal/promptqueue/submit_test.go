@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -225,5 +226,47 @@ func TestSubmitRefusesALeasePolicyItDoesNotKnow(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("an unknown lease policy must be surfaced rather than defaulted")
+	}
+}
+
+// TestSubmitRevivesAParkedWorkspaceRatherThanRefusingIt pins the hibernation
+// revival: a session hibernated by the idle sweep is idle, not dead, and the
+// prompt is what brings it back.
+func TestSubmitRevivesAParkedWorkspaceRatherThanRefusingIt(t *testing.T) {
+	// Arrange: no session, and the revival makes one.
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.noSession = false }
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit onto a parked workspace = %v, want the revival to deliver it", err)
+	}
+	if !got.Delivered {
+		t.Fatalf("disposition = %+v, want the prompt delivered after the revival", got)
+	}
+	if h.revivals != 1 {
+		t.Fatalf("revivals = %d, want exactly one", h.revivals)
+	}
+}
+
+// TestSubmitSurfacesAFailedRevival is the other edge: a workspace that will not
+// come back fails the submission loudly rather than refusing it as "no
+// session", which would read as an ordinary state.
+func TestSubmitSurfacesAFailedRevival(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveErr = errors.New("the shim would not spawn")
+
+	// Act
+	_, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the shim would not spawn") {
+		t.Fatalf("Submit = %v, want the revival's own failure surfaced", err)
 	}
 }
