@@ -442,3 +442,15 @@ One file per drawn component; each file's header comment is its spec.
 - SubmitPromptSuccess.command_acted: a recognized act with no turn; the composer clears its text and draws nothing (the effect arrives on the topbar/footer streams). SubmitPromptError.duplicate_submission: refusal at the composer, text preserved, worded as "already submitted".
 - SubmitPromptError.turn_already_open is retired; remove its sentence and arm guard (schema-driven enumeration should already drop it).
 - UpdateMergeQueueError.unknown_repository: refusal at the merge-queue control.
+
+## Landing 7 relay (2026-09-02, project lead)
+
+Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
+- SubmitPromptError.bubble_refused{detail, kind}: the bubble's refusal
+  rendering keys on kind (not_deliverable | agent_busy); `detail` is the
+  human line. Replaces any interim rendering of the transport fault.
+- CloseWorkspaceBlocked now carries fields; the webapp still draws the
+  footer's close-blocked state (pushed), NOT this response — no new surface,
+  only the decoder/type update.
+- FeedMergeAbandoned.summary: draw it on the collapsed merge line exactly as
+  FeedMergeFailed.summary is drawn.
