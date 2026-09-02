@@ -511,3 +511,12 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
   for the echo-area line.
 - FeedMergeAbandoned.summary: render on the collapsed merge line as the
   failed summary is rendered.
+
+## Landing 8 relay (2026-09-02, project lead; user-approved)
+
+Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
+- Decode FeedSessionSeparation.kind.compaction_failed{error}; render the
+  divider with the daemon's label (the host draws separations where it already
+  draws cleared/compacted).
+- Decode the five new FeedTurnEndedErrored.error arms; the host draws the
+  daemon-composed headline as for every other arm; pinned-arm lists extended.

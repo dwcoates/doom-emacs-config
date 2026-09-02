@@ -101,6 +101,14 @@ must be fast. After each suite run the worst offenders by duration get an
 opus-low root-cause pass: real external dependency executing, production
 timer ridden, or misbehavior; findings feed remediation.
 
+## LANDING 8 (2026-09-02, user-approved; protos 1fdf85e63, bindings 3791cd630)
+
+FeedSessionSeparation.compaction_failed and five FeedTurnEndedErrored arms
+(max_turns, max_budget, execution_error, turn_failed, stop_hook_prevented).
+Adaptation: opus-low implementers off overhaul/integration for daemon, webapp,
+elisp (worktrees integration-agents/landing8-<sys>); e2e writers update the
+compaction and turn-lifecycle assertions to the new arms.
+
 ## STEP 7 PROCEDURE (user, 2026-09-02): run once, table first, then remediation
 
 The project lead runs the rebuilt e2e suite ONCE with `-v -json` redirected to
