@@ -462,6 +462,35 @@ make coverage                         # ../../bin/report-nonlisp-coverage.sh sto
   coverage — audit critical branches and errors directly even when its ratio
   rises.
 
+### Test wait bounds
+
+Every harness timeout is a small multiple (~3x) of the healthy max observed on
+a clean `go test -race -count=1 -v ./...` run, never a round number picked by
+feel. Re-derive them the same way after a change materially alters a suite's
+real timing (a new real-process boot, a new outage ladder) rather than nudging
+a number that started failing.
+
+| Bound | Where | Old | New | Basis |
+| --- | --- | --- | --- | --- |
+| `readyTimeout` | `integration/helpers_test.go` | 30s | 2s | `integration` package healthy max 0.62s (the store binary is built once in `TestMain`; every boot lands under 100ms) |
+| `shutdownTimeout` | `integration/helpers_test.go` | 20s | 2s | same basis as `readyTimeout` |
+| `callTimeout` | `integration/helpers_test.go` | 30s | 2s | same basis as `readyTimeout` |
+| `streamTimeout` | `integration/helpers_test.go` | 30s | 2s | same basis as `readyTimeout` |
+| `openBound` | `internal/server/flush_test.go` | 10s | 1s | `internal/server` package healthy max 0.01s (in-process `httptest.Server` over a fake `Store`, no real I/O); floored above a literal 3x because the package's timings round to 0.00–0.01s and a sub-30ms bound would be fragile under `-race` scheduler/GC jitter |
+| inline shutdown bounds (x3) | `internal/server/server_test.go` | 5s, 10s, 5s | 1s each | same basis and floor as `openBound` |
+
+Per-site exception, deliberately NOT tightened by this pass:
+
+- `pprofBootFailureGrace` (`main.go`, 5s) is production behavior, not a test
+  harness default: `TestRunWithLoggerOpensThePprofSurfaceBeforeTheDatabase`
+  observes the real hold duration directly, so its ~5s cost is the thing under
+  test, not a bound guarding the test. Tightening it would change the store's
+  runtime diagnosability contract, which this pass does not touch.
+- `shutdownGrace` (`main.go`, 5s), `occupancyDialTimeout`
+  (`internal/server/listen.go`, 2s), the `http.Server` `ReadHeaderTimeout`
+  values (10s), and `DefaultSlowQuery` (`internal/db/slowquery.go`, 250ms) are
+  all production defaults, not test-only harness bounds, and are out of scope.
+
 ## Dependencies
 
 `agentrepl/proto` (generated Go for `store.v1` and `conversation.v1`, plus the
