@@ -214,11 +214,15 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.mu.Lock()
 	delete(o.repoOf, ws)
-	// The bubble goes with the merge: a dropped merge has no ledger.
+	// THE LEDGER IDENTITY IS KEPT LONG ENOUGH TO END THE BUBBLE. It addresses
+	// the queued merge's own bubble, and a bubble that simply stopped
+	// mid-queue-tab would leave a reader with no terminal at all — so the
+	// terminal is drawn against it before the identity is dropped.
+	ledger := o.ledgerOf[ws]
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": cause})
-	o.publishAbandoned(ctx, ws, summary)
+	o.publishAbandoned(ctx, ws, ledger, summary)
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
