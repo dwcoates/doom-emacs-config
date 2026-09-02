@@ -115,8 +115,14 @@ The project lead runs the rebuilt e2e suite ONCE with `-v -json` redirected to
 a file in the scratchpad (never read raw output into context), derives a
 per-test `test | duration | result` table sorted by duration into a second
 file, and shows the user that table plus totals BEFORE any remediation is
-dispatched. Failures are then dispatched to opus-low implementers (all
-collected in one run, never fail-fast).
+dispatched. Then an opus-low agent root-causes the worst offenders by
+duration (real external dependency executing, production timer ridden, or
+misbehavior in production or in the test). HARD STOP (user, 2026-09-02): the
+project lead summarizes that report to the user and the two decide together
+before ANY remediation is dispatched; slow tests are a defect class of their
+own ("slow tests mean slow development, and are highly suggestive of bad
+behavior"). Only after that are failures dispatched to opus-low implementers
+(all collected in one run, never fail-fast).
 
 ## USER DECISION 2026-09-02: REBUILD the cross-system e2e suite
 
