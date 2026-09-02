@@ -101,11 +101,27 @@ it never had a producer — the session watcher answers the MAIN turn's flight a
 nothing in the daemon tracks a subagent's own — so the sentinel, the mapping and
 the arm all went away together.
 
-## Panel commands with no producer (server, wave 3a)
+## Panel commands with no producer (server, NOTES — not unlanded arms)
 
-`server.Panels` is the prompt handler's panel source. Only `/context` has a
-producer (the topbar resolver's context tree). `/status`, `/todos`, `/mcp` have
-no resolver at all, and `/agents` and `/help` are ruled UNPRODUCED (Q1) — they
-answer as `command_refused` before recognition ever reaches a panel. A panel
-command with no producer fails LOUDLY out of the handler rather than drawing an
-empty card.
+`server.Panels` is the prompt handler's panel source. TWO panels have a
+producer: `/context` draws the topbar resolver's context tree, and `/status`
+draws the daemon's build stamp plus the resolver's spliced account, model and
+permission-mode facts (landing 6). `/agents` and `/help` are ruled UNPRODUCED
+(Q1) — they answer as `command_refused` before recognition ever reaches a panel.
+
+The two below are NOTES, not unlanded arms: the panel arms are landed and the
+contract owes nothing. What is missing is a daemon-side PRODUCER, and until one
+exists the command fails LOUDLY out of the handler rather than drawing an empty
+card.
+
+- NOTE `/todos`: `SubmitPromptCommandPanel.todos` is landed and
+  `TodosPanelView` is spelled, but no daemon resolver holds the tracker's
+  checklist this wave. The command fails loudly.
+- NOTE `/mcp`: `SubmitPromptCommandPanel.mcp` is landed and `McpPanelView` is
+  spelled, but nothing in the daemon observes the MCP server set this wave. The
+  command fails loudly.
+
+/status DEGRADES BY DESIGN (project lead): the vendor handshake is deferred, so
+the panel is the version row plus the spliced account/model/mode rows and
+nothing else. cwd, auth, plugins and memory return if the handshake deferral
+ever lands. A playtest seeing the thin panel is seeing the settled consequence.

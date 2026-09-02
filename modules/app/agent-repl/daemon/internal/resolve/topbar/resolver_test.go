@@ -564,3 +564,45 @@ func contains(haystack, needle string) bool {
 	}
 	return false
 }
+
+// TestStatusFactsReportsFalseBeforeTheSessionStarts covers the honest absence:
+// a workspace whose session never opened has no facts for the /status panel.
+func TestStatusFactsReportsFalseBeforeTheSessionStarts(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+
+	// Act.
+	facts, ok := r.StatusFacts(ws)
+
+	// Assert.
+	if ok {
+		t.Fatalf("StatusFacts = %+v, true before the session started, want false", facts)
+	}
+}
+
+// TestStatusFactsCarriesTheSessionsOwnFacts pins that the panel's account,
+// model and mode are exactly what the session and the config root stated.
+func TestStatusFactsCarriesTheSessionsOwnFacts(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+	r.OnSessionStarted(ws, &conversationv1.SessionStarted{
+		VendorSessionId: "vendor-1",
+		EffectiveModel:  &conversationv1.AgentModel{Name: "opus"},
+		PermissionMode: &conversationv1.AgentPermissionMode{
+			Mode: &conversationv1.AgentPermissionMode_Plan{Plan: &conversationv1.AgentPermissionModePlan{}},
+		},
+	})
+	r.SetAccount(ws, "someone@example.com")
+
+	// Act.
+	facts, ok := r.StatusFacts(ws)
+
+	// Assert.
+	if !ok {
+		t.Fatal("StatusFacts reported false after the session started")
+	}
+	want := StatusFacts{Account: "someone@example.com", Model: "opus", PermissionMode: "plan"}
+	if facts != want {
+		t.Fatalf("facts = %+v, want %+v", facts, want)
+	}
+}
