@@ -430,6 +430,19 @@ describe("the per-rpc causes, worded at their own site", () => {
     expect(refusal?.textContent).toContain("vs-1");
   });
 
+  it("lists the paths a missing transcript was searched for in", async () => {
+    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    expect([...(refusal?.querySelectorAll("[data-searched-paths] li") ?? [])].map((li) => li.textContent)).toEqual([
+      "/a",
+      "/b",
+    ]);
+  });
+
+  it("counts no paths in the sentence, because a count is not actionable", async () => {
+    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    expect(refusal?.textContent).not.toContain("2 searched");
+  });
+
   it("carries the spawn failure's own detail", async () => {
     const refusal = await refuseWith(VERBS[0], "spawnFailed");
     expect(refusal?.textContent).toContain("exec format error");
