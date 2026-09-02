@@ -320,6 +320,15 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   before send; composer merge_parked badge + merging-refusal mode-line
   flash). Triage rule: payload against the codec first. Running:
   deadcode2, red-host, red-misc.
+- R-DEADCODE-2 MERGED (567bcf8fd; `sonnet-medium` per the amended rule):
+  rulings (b) dead gui send/interrupt frontend plumbing deleted, (c) magit
+  GitHub URL builder fixed (ssh remote slash) with table-driven tests;
+  prompts.el deleted (file-backed prompt loader had no caller left) with
+  its test and load line; uncalled core.el/workspace.el/host.el helpers
+  deleted; `agent-repl-host-forget` kept — R-SUITE-2's composer/host
+  suites call it for teardown. Whole-suite green, byte-compile clean, no
+  removal-list files present. Full lists in the agent's report (carried
+  into the final report). Worktrees left: red-host, red-misc.
 
 ## 1. Module map (final tree of lisp/)
 
