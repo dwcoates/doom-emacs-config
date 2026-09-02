@@ -8,8 +8,7 @@ merge/workspace state, and render-state derivation never live here.
 Layout: one directory per VENDOR (`claude/`, a future `codex/`), each holding
 that vendor's shim and its vendor-facing services — `claude/shim/` (the
 per-session SDK subprocess) and `claude/shim-sidecar/` (the file-plane reader)
-— plus the vendor-neutral `shim-store/` (event store) and `wire/` (shared Go
-framing) at this level.
+— plus the vendor-neutral `shim-store/` (event store) at this level.
 
 ## What belongs in a shim-wire package, and what does not
 

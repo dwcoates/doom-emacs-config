@@ -1,0 +1,781 @@
+package feed
+
+import (
+	"fmt"
+	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+)
+
+// ONE SHARED SHELL, per-tool specifics composed by the DAEMON: the client holds
+// no per-tool knowledge, so every phrasing rule gets a case here.
+
+// card returns the only tool card on the root feed.
+func (h *harness) card() *frontendv1.FeedSimpleToolCall {
+	h.t.Helper()
+	return h.only(rootFeed()).GetActivity().GetSimpleToolCall()
+}
+
+// activityOf wraps one tool item as an activity.
+func activityOf(unit string, item any) *conversationv1.AgentActivity {
+	act := &conversationv1.AgentActivity{ActivityId: &conversationv1.AgentActivityId{Value: unit}}
+	switch i := item.(type) {
+	case *conversationv1.AgentRead:
+		act.Item = &conversationv1.AgentActivity_Read{Read: i}
+	case *conversationv1.AgentWrite:
+		act.Item = &conversationv1.AgentActivity_Write{Write: i}
+	case *conversationv1.AgentEdit:
+		act.Item = &conversationv1.AgentActivity_Edit{Edit: i}
+	case *conversationv1.AgentGrep:
+		act.Item = &conversationv1.AgentActivity_Grep{Grep: i}
+	case *conversationv1.AgentGlob:
+		act.Item = &conversationv1.AgentActivity_Glob{Glob: i}
+	case *conversationv1.AgentBash:
+		act.Item = &conversationv1.AgentActivity_Bash{Bash: i}
+	case *conversationv1.AgentWebFetch:
+		act.Item = &conversationv1.AgentActivity_WebFetch{WebFetch: i}
+	case *conversationv1.AgentWebSearch:
+		act.Item = &conversationv1.AgentActivity_WebSearch{WebSearch: i}
+	case *conversationv1.AgentUnmodeled:
+		act.Item = &conversationv1.AgentActivity_Unmodeled{Unmodeled: i}
+	}
+	return act
+}
+
+// send pushes one activity through the sink.
+func (h *harness) send(act *conversationv1.AgentActivity) {
+	h.t.Helper()
+	h.resolver.OnActivity(testWorkspace, mainAgent(), act, noAddress())
+}
+
+// ---- READ ----
+
+func TestReadStartDrawsTheRunningCardWithThePathAsItsInput(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert.
+	card := h.card()
+	if card.GetName().GetText() != "Read" {
+		t.Fatalf("name = %q, want Read", card.GetName().GetText())
+	}
+	if card.GetInput().GetText() != "internal/feed/row.go" {
+		t.Fatalf("input = %q, want the path", card.GetInput().GetText())
+	}
+	if card.GetInput().GetPath() == nil {
+		t.Fatalf("input form = %T, want the path form", card.GetInput().GetForm())
+	}
+	if card.GetRunning() == nil {
+		t.Fatalf("outcome = %T, want running", card.GetOutcome())
+	}
+}
+
+func TestAProgressBeatBecomesTheRunningCardsLastProgress(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Progress{
+			Progress: &conversationv1.AgentToolCallProgress{LastProgressAtMs: 4_200},
+		},
+	}))
+
+	// Assert: the daemon relays the observed beat; the client ticks locally.
+	if got := h.card().GetRunning().GetLastProgress().GetAtMs(); got != 4_200 {
+		t.Fatalf("last_progress = %d, want 4200", got)
+	}
+}
+
+func TestAWholeReadDrawsHighlightedCodeWithNoOmittedLine(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path:   &conversationv1.ReadPath{Path: "row.go"},
+			Extent: &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "package feed\n"}},
+		}},
+	}))
+
+	// Assert: painted spans, the grammar chosen from the path, no truncation.
+	code := h.card().GetReturned().GetCode()
+	if code == nil || len(code.GetSpans()) != 1 || code.GetSpans()[0].GetPaintClass() != "keyword" {
+		t.Fatalf("code = %+v, want the painter's spans", code)
+	}
+	if h.painter.lastLanguage != "go" {
+		t.Fatalf("language = %q, want go", h.painter.lastLanguage)
+	}
+	if code.GetOmitted() != nil {
+		t.Fatalf("omitted = %+v, want unset for a whole read", code.GetOmitted())
+	}
+}
+
+func TestAHeadReadStatesTheCut(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path: &conversationv1.ReadPath{Path: "row.go"},
+			Extent: &conversationv1.AgentReadSuccess_Head{Head: &conversationv1.AgentReadHead{
+				Contents:   "a\nb\n",
+				TotalLines: 4_312,
+				Cut: &conversationv1.AgentReadHead_LineCap{
+					LineCap: &conversationv1.AgentReadCutAtLineCap{},
+				},
+			}},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetReturned().GetCode().GetOmitted().GetText(); got != "showing 2 of 4,312 lines" {
+		t.Fatalf("omitted = %q", got)
+	}
+}
+
+func TestAnOffsetReadStatesTheSliceItDrew(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path: &conversationv1.ReadPath{Path: "row.go"},
+			Extent: &conversationv1.AgentReadSuccess_Range{Range: &conversationv1.AgentReadRange{
+				Contents: "x\n", FirstLine: 400, LineCount: 100, TotalLines: 4_312,
+			}},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetReturned().GetCode().GetOmitted().GetText(); got != "lines 400-499 of 4,312" {
+		t.Fatalf("omitted = %q", got)
+	}
+}
+
+func TestAPainterRefusalDrawsThePlainCodeAndWarns(t *testing.T) {
+	// Arrange: the file the agent read is worth more than its coloring.
+	h := newHarness(t)
+	h.painter.err = fmt.Errorf("no such grammar")
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path:   &conversationv1.ReadPath{Path: "row.go"},
+			Extent: &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "package feed"}},
+		}},
+	}))
+
+	// Assert.
+	spans := h.card().GetReturned().GetCode().GetSpans()
+	if len(spans) != 1 || spans[0].GetText() != "package feed" || spans[0].GetPaintClass() != "" {
+		t.Fatalf("spans = %+v, want one plain span", spans)
+	}
+	if !h.hasRecord("warn", "daemon.feed.highlight_failed") {
+		t.Fatalf("records = %+v, want a WARN daemon.feed.highlight_failed", h.records())
+	}
+}
+
+func TestAFailedReadDrawsItsErrorTextWithTheFailedBadge(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Failure{Failure: &conversationv1.AgentReadFailure{
+			Error: &conversationv1.AgentToolFailure{
+				Content: &conversationv1.ToolResultContent{Blocks: []*conversationv1.ToolResultContentBlock{{
+					Block: &conversationv1.ToolResultContentBlock_Text{
+						Text: &conversationv1.TextBlock{Text: "no such file"},
+					},
+				}}},
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000},
+			},
+		}},
+	}))
+
+	// Assert.
+	returned := h.card().GetReturned()
+	if returned.GetFailed() == nil {
+		t.Fatalf("verdict = %T, want failed", returned.GetVerdict())
+	}
+	if returned.GetText().GetText() != "no such file" {
+		t.Fatalf("output = %q, want the error text", returned.GetText().GetText())
+	}
+}
+
+// ---- WRITE and EDIT ----
+
+func TestAWriteDrawsTheBarePathAsItsInputLine(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentWrite{
+		Result: &conversationv1.AgentWrite_Success{Success: &conversationv1.AgentWriteSuccess{
+			Path:    &conversationv1.ReadPath{Path: "new.go"},
+			Outcome: &conversationv1.AgentWriteSuccess_Created{Created: &conversationv1.AgentWriteCreated{}},
+			Patch:   []*conversationv1.FilePatchHunk{{Lines: []string{"+package feed"}}},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetInput().GetText(); got != "new.go" {
+		t.Fatalf("input = %q, want the bare path", got)
+	}
+}
+
+func TestDiffLinesCarryTheirKindAsTheArmAndNotAsAPrefix(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Success{Success: &conversationv1.AgentEditSuccess{
+			Path: &conversationv1.ReadPath{Path: "row.go"},
+			Patch: []*conversationv1.FilePatchHunk{{
+				OldRange: &conversationv1.FilePatchHunkRange{Start: 3, Lines: 7},
+				NewRange: &conversationv1.FilePatchHunkRange{Start: 3, Lines: 9},
+				Lines:    []string{" context", "-old", "+new"},
+			}},
+		}},
+	}))
+
+	// Assert: a header composed from the ranges, then the three kinds, each
+	// with its marker stripped.
+	lines := h.card().GetReturned().GetDiff().GetLines()
+	if len(lines) != 4 {
+		t.Fatalf("diff lines = %d, want 4", len(lines))
+	}
+	if lines[0].GetHeader() == nil || lines[0].GetText() != "@@ -3,7 +3,9 @@" {
+		t.Fatalf("header = %+v", lines[0])
+	}
+	if lines[1].GetContext() == nil || lines[1].GetText() != "context" {
+		t.Fatalf("context line = %+v", lines[1])
+	}
+	if lines[2].GetRemoved() == nil || lines[2].GetText() != "old" {
+		t.Fatalf("removed line = %+v", lines[2])
+	}
+	if lines[3].GetAdded() == nil || lines[3].GetText() != "new" {
+		t.Fatalf("added line = %+v", lines[3])
+	}
+}
+
+func TestDiagnosticsAmendTheSettledCardTheyFollow(t *testing.T) {
+	// Arrange: a settled edit.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Success{Success: &conversationv1.AgentEditSuccess{
+			Path:  &conversationv1.ReadPath{Path: "render.ts"},
+			Patch: []*conversationv1.FilePatchHunk{{Lines: []string{"+const x = 1"}}},
+		}},
+	}))
+
+	// Act: the report arrives AFTER the terminal, by adjacency.
+	h.send(activityOf("unit-1", &conversationv1.AgentEdit{
+		Result: &conversationv1.AgentEdit_Diagnostics{Diagnostics: &conversationv1.AgentDiagnosticsReport{
+			Files: []*conversationv1.AgentDiagnosticsFile{{
+				Path: "render.ts",
+				Diagnostics: []*conversationv1.AgentDiagnostic{{
+					Severity:  conversationv1.AgentDiagnosticSeverity_AGENT_DIAGNOSTIC_SEVERITY_ERROR,
+					Message:   "'x' is never used",
+					StartLine: 213,
+				}},
+			}},
+		}},
+	}))
+
+	// Assert: one card, amended — the vendor's zero-based line drawn one-based.
+	lines := h.card().GetReturned().GetDiagnostics().GetLines()
+	if len(lines) != 1 || lines[0] != "render.ts:214 · error · 'x' is never used" {
+		t.Fatalf("diagnostics = %v", lines)
+	}
+}
+
+func TestDiagnosticsBeforeATerminalAreRefusedLoudly(t *testing.T) {
+	// Arrange: no card has settled.
+	h := newHarness(t)
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentWrite{
+		Result: &conversationv1.AgentWrite_Diagnostics{Diagnostics: &conversationv1.AgentDiagnosticsReport{}},
+	}))
+
+	// Assert.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want none", len(rows))
+	}
+	if !h.hasRecord("warn", "daemon.feed.diagnostics_without_card") {
+		t.Fatalf("records = %+v, want a WARN daemon.feed.diagnostics_without_card", h.records())
+	}
+}
+
+// ---- GREP and GLOB ----
+
+func TestGrepContentDrawsItsMatchingLinesAndStatesTheOmitted(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Success{Success: &conversationv1.AgentGrepSuccess{
+			Query: &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+			Matches: &conversationv1.AgentGrepSuccess_Content{Content: &conversationv1.AgentGrepContent{
+				Content: "row.go:1:FeedRow\nrow.go:2:FeedRow\n",
+				Extent: &conversationv1.AgentGrepContent_Partial{
+					Partial: &conversationv1.AgentGrepContentPartial{LinesReturned: 2, LinesOmitted: 42},
+				},
+			}},
+		}},
+	}))
+
+	// Assert.
+	card := h.card()
+	if got := card.GetInput().GetText(); got != "FeedRow" {
+		t.Fatalf("input = %q", got)
+	}
+	if card.GetInput().GetQuery() == nil {
+		t.Fatalf("input form = %T, want the query form", card.GetInput().GetForm())
+	}
+	lines := card.GetReturned().GetLines()
+	if len(lines.GetLines()) != 2 {
+		t.Fatalf("lines = %v, want the two matches", lines.GetLines())
+	}
+	if lines.GetOmitted().GetText() != "42 more lines not shown" {
+		t.Fatalf("omitted = %q", lines.GetOmitted().GetText())
+	}
+}
+
+func TestGrepMatchingNothingIsASuccessWithNothingToDraw(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Success{Success: &conversationv1.AgentGrepSuccess{
+			Query: &conversationv1.AgentGrepQuery{Pattern: "nothing"},
+			Matches: &conversationv1.AgentGrepSuccess_Files{Files: &conversationv1.AgentGrepFiles{
+				Extent: &conversationv1.AgentGrepFiles_All{All: &conversationv1.AgentGrepFilesAll{}},
+			}},
+		}},
+	}))
+
+	// Assert: the caller asked a question and got one — a success whose form is
+	// `none`, never an empty text output.
+	returned := h.card().GetReturned()
+	if returned.GetSucceeded() == nil {
+		t.Fatalf("verdict = %T, want succeeded", returned.GetVerdict())
+	}
+	if returned.GetNone() == nil {
+		t.Fatalf("form = %T, want none", returned.GetForm())
+	}
+}
+
+func TestGrepCountDrawsTheFigureAsText(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentGrep{
+		Result: &conversationv1.AgentGrep_Success{Success: &conversationv1.AgentGrepSuccess{
+			Query: &conversationv1.AgentGrepQuery{Pattern: "x"},
+			Matches: &conversationv1.AgentGrepSuccess_Count{
+				Count: &conversationv1.AgentGrepCount{Matches: 1_204},
+			},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetReturned().GetText().GetText(); got != "1,204 matches" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestGlobDistinguishesAnExactRemainderFromAFloor(t *testing.T) {
+	tests := []struct {
+		name    string
+		omitted any
+		want    string
+	}{
+		{
+			name:    "exact",
+			omitted: &conversationv1.AgentGlobOmittedExact{FilesOmitted: 42},
+			want:    "42 more paths not shown",
+		},
+		{
+			name:    "a floor is a different claim",
+			omitted: &conversationv1.AgentGlobOmittedAtLeast{FilesOmittedAtLeast: 42},
+			want:    "at least 42 more paths not shown",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			partial := &conversationv1.AgentGlobPartial{FilesReturned: 3}
+			switch o := tc.omitted.(type) {
+			case *conversationv1.AgentGlobOmittedExact:
+				partial.Omitted = &conversationv1.AgentGlobPartial_Exact{Exact: o}
+			case *conversationv1.AgentGlobOmittedAtLeast:
+				partial.Omitted = &conversationv1.AgentGlobPartial_AtLeast{AtLeast: o}
+			}
+
+			// Act.
+			h.send(activityOf("unit-1", &conversationv1.AgentGlob{
+				Result: &conversationv1.AgentGlob_Success{Success: &conversationv1.AgentGlobSuccess{
+					Query:  &conversationv1.AgentGlobQuery{Pattern: "**/*.go"},
+					Paths:  []string{"a.go", "b.go", "c.go"},
+					Extent: &conversationv1.AgentGlobSuccess_Partial{Partial: partial},
+				}},
+			}))
+
+			// Assert.
+			got := h.card().GetReturned().GetLines().GetOmitted().GetText()
+			if got != tc.want {
+				t.Fatalf("omitted = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---- BASH, in the FOREGROUND ----
+
+func TestAForegroundShellsInputLineIsTheBareCommandInTheCommandForm(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "go test ./..."},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert.
+	card := h.card()
+	if got := card.GetInput().GetText(); got != "go test ./..." {
+		t.Fatalf("input = %q", got)
+	}
+	if card.GetInput().GetCommand() == nil {
+		t.Fatalf("input form = %T, want the command form", card.GetInput().GetForm())
+	}
+}
+
+func TestTheInputLineCarriesNoChromeForAnyForm(t *testing.T) {
+	tests := []struct {
+		name     string
+		item     any
+		wantText string
+		wantForm string
+	}{
+		{
+			name: "a command line is the vendor's line, byte for byte",
+			item: &conversationv1.AgentBash{
+				Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+					Command:   &conversationv1.AgentBashCommand{Line: "go test ./..."},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "go test ./...",
+			wantForm: "command",
+		},
+		{
+			name: "a path is the path, with no verb",
+			item: &conversationv1.AgentRead{
+				Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+					Path:      &conversationv1.ReadPath{Path: "internal/feed/row.go"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "internal/feed/row.go",
+			wantForm: "path",
+		},
+		{
+			name: "a query is the terms, with no label",
+			item: &conversationv1.AgentGrep{
+				Result: &conversationv1.AgentGrep_Start{Start: &conversationv1.AgentGrepStart{
+					Query:     &conversationv1.AgentGrepQuery{Pattern: "FeedRow"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "FeedRow",
+			wantForm: "query",
+		},
+		{
+			name: "a glob pattern is the pattern",
+			item: &conversationv1.AgentGlob{
+				Result: &conversationv1.AgentGlob_Start{Start: &conversationv1.AgentGlobStart{
+					Query:     &conversationv1.AgentGlobQuery{Pattern: "**/*.go"},
+					StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+				}},
+			},
+			wantText: "**/*.go",
+			wantForm: "query",
+		},
+		{
+			name: "search terms are the terms",
+			item: &conversationv1.AgentWebSearch{
+				Result: &conversationv1.AgentWebSearch_Start{Start: &conversationv1.AgentWebSearchStart{
+					Query:       &conversationv1.AgentWebSearchQuery{Terms: "connect-go streaming"},
+					StartedAtMs: 1_000,
+				}},
+			},
+			wantText: "connect-go streaming",
+			wantForm: "query",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.send(activityOf("unit-1", tc.item))
+
+			// Assert: the DAEMON states the form and the CLIENT draws its
+			// chrome, so the wire text is never decorated.
+			input := h.card().GetInput()
+			if input.GetText() != tc.wantText {
+				t.Fatalf("input text = %q, want the bare %q", input.GetText(), tc.wantText)
+			}
+			if got := inputFormWord(input); got != tc.wantForm {
+				t.Fatalf("input form = %q, want %q", got, tc.wantForm)
+			}
+		})
+	}
+}
+
+// inputFormWord names the form arm an input line carries.
+func inputFormWord(input *frontendv1.FeedToolCallInput) string {
+	switch input.GetForm().(type) {
+	case *frontendv1.FeedToolCallInput_Command:
+		return "command"
+	case *frontendv1.FeedToolCallInput_Path:
+		return "path"
+	case *frontendv1.FeedToolCallInput_Query:
+		return "query"
+	}
+	return "none"
+}
+
+func TestANonZeroExitStillCompletedTheCall(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "false"},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output: &conversationv1.AgentBashOutput{
+					Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+						Stdout: "boom",
+						Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
+					}},
+				},
+			}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	}))
+
+	// Assert: the exit code is the command's verdict on itself, not the call's.
+	if h.card().GetReturned().GetSucceeded() == nil {
+		t.Fatalf("verdict = %T, want succeeded for a completed call", h.card().GetReturned().GetVerdict())
+	}
+}
+
+func TestATimedOutShellSaysSoAboveItsLastLines(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "sleep 999"},
+			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+				Output: &conversationv1.AgentBashOutput{
+					Form: &conversationv1.AgentBashOutput_Text{Text: &conversationv1.AgentBashOutputText{
+						Stdout: "still going",
+						Extent: &conversationv1.AgentBashOutputText_Whole{Whole: &conversationv1.AgentBashOutputWhole{}},
+					}},
+				},
+				Cause: &conversationv1.AgentBashInterrupted_TimedOut{
+					TimedOut: &conversationv1.AgentBashInterruptedByTimeout{TimeoutMs: 120_000},
+				},
+			}},
+		}},
+	}))
+
+	// Assert: an interrupted call did not complete, and its last lines are
+	// usually the reason it was cut.
+	returned := h.card().GetReturned()
+	if returned.GetFailed() == nil {
+		t.Fatalf("verdict = %T, want failed for an interrupted call", returned.GetVerdict())
+	}
+	text := returned.GetText().GetText()
+	if !contains(text, "timed out after 2m 0s") || !contains(text, "still going") {
+		t.Fatalf("output = %q, want the cause above the last lines", text)
+	}
+}
+
+func TestAUserInterruptedShellNamesThePerson(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "sleep 999"},
+			Outcome: &conversationv1.AgentBashSuccess_Interrupted{Interrupted: &conversationv1.AgentBashInterrupted{
+				Output: &conversationv1.AgentBashOutput{},
+				Cause: &conversationv1.AgentBashInterrupted_ByUser{
+					ByUser: &conversationv1.AgentBashInterruptedByUser{},
+				},
+			}},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetReturned().GetText().GetText(); got != "interrupted by the user" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestASettledCardStatesItsRuntime(t *testing.T) {
+	// Arrange: a start instant, then a settle.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Start{Start: &conversationv1.AgentReadStart{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Act.
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			Extent:    &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "x"}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetReturned().GetRuntime().GetText(); got != "ran 4.2 s" {
+		t.Fatalf("runtime = %q", got)
+	}
+}
+
+func TestASettleWithNoStartInstantShowsNoElapsedFigure(t *testing.T) {
+	// Arrange, Act: a settled frame with no announcement before it.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentRead{
+		Result: &conversationv1.AgentRead_Success{Success: &conversationv1.AgentReadSuccess{
+			Path:      &conversationv1.ReadPath{Path: "a.go"},
+			Extent:    &conversationv1.AgentReadSuccess_Whole{Whole: &conversationv1.AgentReadWhole{Contents: "x"}},
+			SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 5_200},
+		}},
+	}))
+
+	// Assert: no ticking and no invented figure.
+	if h.card().GetReturned().GetRuntime() != nil {
+		t.Fatalf("runtime = %+v, want unset", h.card().GetReturned().GetRuntime())
+	}
+}
+
+// ---- WEB FETCH and WEB SEARCH ----
+
+func TestAWebFetchLinksItsInputLineToThePage(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentWebFetch{
+		Result: &conversationv1.AgentWebFetch_Start{Start: &conversationv1.AgentWebFetchStart{
+			Target:      &conversationv1.AgentWebFetchTarget{Url: "https://example.com/doc"},
+			StartedAtMs: 1_000,
+		}},
+	}))
+
+	// Assert.
+	if got := h.card().GetInput().GetLink().GetUrl(); got != "https://example.com/doc" {
+		t.Fatalf("link = %q", got)
+	}
+}
+
+func TestAnHttpErrorPageIsAServedAnswerAndBadgedFailed(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentWebFetch{
+		Result: &conversationv1.AgentWebFetch_Success{Success: &conversationv1.AgentWebFetchSuccess{
+			Target: &conversationv1.AgentWebFetchTarget{Url: "https://example.com/missing"},
+			Status: &conversationv1.AgentWebFetchHttpStatus{Code: 404, Text: "Not Found"},
+			Result: "the page is gone",
+		}},
+	}))
+
+	// Assert: the status says how the server answered, and it is drawn.
+	returned := h.card().GetReturned()
+	if returned.GetFailed() == nil {
+		t.Fatalf("verdict = %T, want failed for a 404", returned.GetVerdict())
+	}
+	if !contains(returned.GetText().GetText(), "404 Not Found") {
+		t.Fatalf("output = %q, want the status drawn", returned.GetText().GetText())
+	}
+}
+
+func TestAWebSearchDrawsLinksAndNarrationInTheServedOrder(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentWebSearch{
+		Result: &conversationv1.AgentWebSearch_Success{Success: &conversationv1.AgentWebSearchSuccess{
+			Query: &conversationv1.AgentWebSearchQuery{Terms: "connect-go streaming"},
+			Results: []*conversationv1.AgentWebSearchResult{
+				{Entry: &conversationv1.AgentWebSearchResult_Note{
+					Note: &conversationv1.AgentWebSearchNote{Text: "searching the web"},
+				}},
+				{Entry: &conversationv1.AgentWebSearchResult_Link{
+					Link: &conversationv1.AgentWebSearchLink{Title: "Connect docs", Url: "https://connectrpc.com"},
+				}},
+			},
+		}},
+	}))
+
+	// Assert: a narration row is not clickable; a link row is.
+	links := h.card().GetReturned().GetLinks().GetLinks()
+	if len(links) != 2 {
+		t.Fatalf("links = %d, want 2", len(links))
+	}
+	if links[0].GetUrl() != nil {
+		t.Fatalf("narration row = %+v, want no url", links[0])
+	}
+	if links[1].GetUrl().GetUrl() != "https://connectrpc.com" {
+		t.Fatalf("link row = %+v", links[1])
+	}
+}
+
+// ---- the kinds that draw NOTHING ----
+
+func TestAnUnmodeledToolDrawsNoRow(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentUnmodeled{
+		Result: &conversationv1.AgentUnmodeled_Start{Start: &conversationv1.AgentUnmodeledStart{
+			ToolName:  "mcp__thing__do",
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+
+	// Assert: its home is the topbar's warning dropdown, never a feed row.
+	if rows := h.rows(rootFeed()); len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0 for an unmodeled tool", len(rows))
+	}
+	if !h.hasRecord("debug", "daemon.feed.activity_draws_nothing") {
+		t.Fatalf("records = %+v, want the not-a-row branch recorded", h.records())
+	}
+}
+
+func TestAnActivityWithNoUnitIdentityIsRefusedLoudly(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.resolver.OnActivity(testWorkspace, mainAgent(), &conversationv1.AgentActivity{
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{}},
+	}, noAddress())
+
+	// Assert.
+	if !h.hasRecord("error", "daemon.feed.activity_without_identity") {
+		t.Fatalf("records = %+v, want an ERROR daemon.feed.activity_without_identity", h.records())
+	}
+}
+
+// unusedFrontend keeps the frontend import honest.
+var _ = (*frontendv1.FeedRow)(nil)

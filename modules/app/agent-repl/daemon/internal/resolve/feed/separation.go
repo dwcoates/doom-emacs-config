@@ -1,0 +1,198 @@
+package feed
+
+import (
+	"fmt"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/figures"
+)
+
+// ⑤ THE SEPARATION DIVIDER: the session changed shape or place here, and a
+// reader scrolling back must see where. ONE row kind for every arm — context
+// cuts and worktree moves alike — because one renderer subroutine draws them
+// all and an arm selects only its accent and its label.
+//
+// A separation belongs to NO TURN and is deliberately left unstamped.
+
+// drawContextCut draws the divider a context cut leaves.
+func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut *conversationv1.ContextCut) {
+	log := r.logger(s.id)
+	at := r.place(s, agent)
+	s.synthSeq++
+	id := r.rowID(s.id, at.feed, feedid.RowKey{
+		Kind: feedid.KindSeparation,
+		ID:   fmt.Sprintf("context_cut:%d", s.synthSeq),
+	})
+
+	separation := &frontendv1.FeedSessionSeparation{}
+	switch arm := cut.GetCut().(type) {
+	case *conversationv1.ContextCut_Cleared:
+		// The vendor's conversation-reset record carries NO token delta, so
+		// none is drawn: an invented figure would be worse than none.
+		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "context cleared"}
+		separation.Kind = &frontendv1.FeedSessionSeparation_Cleared{Cleared: &frontendv1.FeedContextCutCleared{}}
+	case *conversationv1.ContextCut_Compacted:
+		compacted := arm.Compacted
+		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: compactionLabel(compacted)}
+		separation.Kind = &frontendv1.FeedSessionSeparation_Compacted{Compacted: &frontendv1.FeedContextCutCompacted{
+			Summary: &frontendv1.FeedContextCutSummary{Markdown: compacted.GetSummary().GetMarkdown()},
+			// Folded by default: the cut is not a hole in the conversation,
+			// but it is not the conversation either.
+			Fold: &frontendv1.FeedContextCutFold{Folded: true},
+		}}
+		// BOTH SIDES ARE FORMATTED HERE. The client renders them verbatim and
+		// does no arithmetic and no unit rounding of its own.
+		if tokens := compacted.GetTokens(); tokens != nil {
+			separation.Tokens = &frontendv1.FeedContextCutTokens{
+				BeforeText: figures.Tokens(uint64(tokens.GetTokensBefore())),
+				AfterText:  figures.Tokens(uint64(tokens.GetTokensAfter())),
+			}
+		}
+	case *conversationv1.ContextCut_CompactionFailed:
+		// NOTHING WAS CUT, so there is NO DIVIDER: drawing one would claim the
+		// conversation was compacted when the context is as it was — and still
+		// too large, which is why this is not silence either. It is a WARNING
+		// and it rides the turn's evidence.
+		reason := arm.CompactionFailed.GetError()
+		r.addEvidence(s, "a compaction failed and nothing was cut: "+reason)
+		log.Warn("daemon.feed.compaction_failed",
+			"a compaction failed, so no separation divider was drawn; it rides the turn's evidence",
+			dlog.Context{"agent": agent.GetValue(), "error": reason})
+		return
+	default:
+		log.Warn("daemon.feed.context_cut_unset",
+			"a context cut arrived with no arm set; no divider was drawn",
+			dlog.Context{"agent": agent.GetValue()})
+		return
+	}
+
+	log.Debug("daemon.feed.separation",
+		"a session separation divider was drawn",
+		dlog.Context{"row": id.GetValue(), "kind": separationArm(separation)})
+	r.upsert(s, at, &frontendv1.FeedRow{
+		Id:  id,
+		Row: &frontendv1.FeedRow_Separation{Separation: separation},
+	}, true)
+}
+
+// compactionLabel words a compaction's divider. A MANUAL compaction is
+// something the user did; an AUTOMATIC one is something that HAPPENED to them
+// — their conversation was silently rewritten while they watched — and drawing
+// the two identically is the most misleading thing this divider can do.
+func compactionLabel(compacted *conversationv1.ContextCompacted) string {
+	label := "context compacted"
+	switch compacted.GetTrigger().(type) {
+	case *conversationv1.ContextCompacted_Automatic:
+		label = "context compacted automatically"
+	case *conversationv1.ContextCompacted_Requested:
+		label = "context compacted on request"
+	}
+	if ms := compacted.GetDurationMs(); ms > 0 {
+		label = label + " · took " + formatDuration(int64(ms))
+	}
+	return label
+}
+
+// separationArm names a divider's arm for a log record.
+func separationArm(separation *frontendv1.FeedSessionSeparation) string {
+	switch separation.GetKind().(type) {
+	case *frontendv1.FeedSessionSeparation_Cleared:
+		return "cleared"
+	case *frontendv1.FeedSessionSeparation_Compacted:
+		return "compacted"
+	case *frontendv1.FeedSessionSeparation_WorktreeEntered:
+		return "worktree_entered"
+	case *frontendv1.FeedSessionSeparation_WorktreeLeft:
+		return "worktree_left"
+	}
+	return "unset"
+}
+
+// drawWorktree draws the divider a worktree move leaves. Each SETTLED act is
+// its own divider — never a tool card, and never coalesced with its pair: the
+// two moments can be far apart and everything between them happened inside the
+// tree. A worktree call that FAILED is a tool failure, not a divider.
+func (r *resolver) drawWorktree(s *wsState, at placement, act *conversationv1.AgentActivity, worktree *conversationv1.AgentWorktree) (*frontendv1.FeedRow, error) {
+	unitID := act.GetActivityId().GetValue()
+	success, ok := worktree.GetState().(*conversationv1.AgentWorktree_Success)
+	if !ok {
+		return nil, errNotARow
+	}
+
+	separation := &frontendv1.FeedSessionSeparation{}
+	switch outcome := success.Success.GetAct().(type) {
+	case *conversationv1.AgentWorktreeSuccess_Entered:
+		entered := outcome.Entered
+		separation.Label = &frontendv1.FeedSessionSeparationLabel{
+			Text: "entered worktree " + entered.GetPath(),
+		}
+		payload := &frontendv1.FeedWorktreeEntered{
+			Path: &frontendv1.FeedWorktreePath{Text: entered.GetPath()},
+		}
+		if entered.Branch != nil && entered.GetBranch() != "" {
+			payload.Branch = &frontendv1.FeedWorktreeBranch{Text: entered.GetBranch()}
+		}
+		separation.Kind = &frontendv1.FeedSessionSeparation_WorktreeEntered{WorktreeEntered: payload}
+	case *conversationv1.AgentWorktreeSuccess_Exited:
+		exited := outcome.Exited
+		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "left the worktree"}
+		separation.Kind = &frontendv1.FeedSessionSeparation_WorktreeLeft{WorktreeLeft: worktreeLeft(exited)}
+	default:
+		return nil, errNotARow
+	}
+
+	// UNSET on the worktree arms: they change no context.
+	r.logger(s.id).Debug("daemon.feed.worktree_separation",
+		"a worktree act was drawn as a separation divider",
+		dlog.Context{"unit": unitID, "kind": separationArm(separation)})
+	return &frontendv1.FeedRow{
+		Id:  r.rowID(s.id, at.feed, feedid.RowKey{Kind: feedid.KindSeparation, ID: unitID}),
+		Row: &frontendv1.FeedRow_Separation{Separation: separation},
+	}, nil
+}
+
+// worktreeLeft renders what became of the tree. A KEPT tree is somewhere to
+// go; a REMOVED one may have taken work with it, so the discard line is drawn
+// loud when anything was discarded.
+func worktreeLeft(exited *conversationv1.AgentWorktreeExited) *frontendv1.FeedWorktreeLeft {
+	switch outcome := exited.GetOutcome().(type) {
+	case *conversationv1.AgentWorktreeExited_Kept:
+		return &frontendv1.FeedWorktreeLeft{Outcome: &frontendv1.FeedWorktreeLeft_Kept{
+			Kept: &frontendv1.FeedWorktreeKept{Path: &frontendv1.FeedWorktreePath{Text: exited.GetPath()}},
+		}}
+	case *conversationv1.AgentWorktreeExited_Removed:
+		removed := &frontendv1.FeedWorktreeRemoved{}
+		if line := discardLine(outcome.Removed); line != "" {
+			removed.Discarded = &frontendv1.FeedWorktreeDiscarded{Text: line}
+		}
+		return &frontendv1.FeedWorktreeLeft{Outcome: &frontendv1.FeedWorktreeLeft_Removed{Removed: removed}}
+	}
+	return &frontendv1.FeedWorktreeLeft{Outcome: &frontendv1.FeedWorktreeLeft_Kept{
+		Kept: &frontendv1.FeedWorktreeKept{Path: &frontendv1.FeedWorktreePath{Text: exited.GetPath()}},
+	}}
+}
+
+// discardLine composes what the removal took with it. UNSET figures are NOT
+// zero — the vendor stating no figure is different from it stating none were
+// discarded — so an unstated figure contributes nothing to the line.
+func discardLine(removed *conversationv1.AgentWorktreeRemoved) string {
+	var parts []string
+	if removed.DiscardedFiles != nil && removed.GetDiscardedFiles() > 0 {
+		parts = append(parts, fmt.Sprintf("%d files", removed.GetDiscardedFiles()))
+	}
+	if removed.DiscardedCommits != nil && removed.GetDiscardedCommits() > 0 {
+		parts = append(parts, fmt.Sprintf("%d commits", removed.GetDiscardedCommits()))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	line := parts[0]
+	for _, part := range parts[1:] {
+		line = line + ", " + part
+	}
+	return line + " discarded"
+}
