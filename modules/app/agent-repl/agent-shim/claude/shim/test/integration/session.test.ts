@@ -9,7 +9,7 @@
  * than silently paid.
  */
 import { create } from "@bufbuild/protobuf";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
@@ -1494,20 +1494,55 @@ describe("the vendor refusing a CONTROL call", () => {
     expect(startSessionCause(response)).toBe("vendorStartFailed");
   });
 
-  test("a shim whose vendor refused to start is still SERVING", async () => {
-    // The refusal is a SESSION failure, not a process one: the shim is still
-    // the daemon's to use. Probed with a verb that mints no second identity —
-    // a second `fresh` StartSession would ask this shim to become a DIFFERENT
-    // conversation, which the record plane refuses by design.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start" } });
-    await shim.clients.h1.startSession(freshSession());
+  test("a failed start leaves NOTHING behind: the retry on the same shim SUCCEEDS", async () => {
+    // A FAILED START LEAVES THE ENGINE AS IT FOUND IT. The refusal is a session
+    // failure, not a process one — the daemon may fix the condition and try
+    // again on the same warm shim — and the retry must be an ordinary
+    // StartSession, not a second attempt tripping over the wreckage of the
+    // first.
+    //
+    // The wreckage was real: the failed attempt had already named the record
+    // plane's writer from the identity it settled, so the retry's own identity
+    // hit the producer re-key guard and escaped as an unhandled `Internal` on a
+    // verb that has a typed refusal for every real condition.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-once" } });
+    expect(startSessionCause(await shim.clients.h1.startSession(freshSession()))).toBe(
+      "vendorStartFailed",
+    );
+    expect(shim.child.exitCode).toBeNull();
+    // NOTHING PERSISTED: the identity file named a conversation the vendor
+    // never opened, so it is gone.
+    expect(
+      existsSync(agentIdPath(shim.dirs.stateDir, workspaceLockKey(workspaceRealPath(shim.dirs)))),
+    ).toBe(false);
 
-    const response = await shim.clients.h1.killSession(
-      create(shimv1.KillSessionRequestSchema, { force: false }),
+    const retried = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    expect(retried.vendorSessionId).not.toBe("");
+    // AND BOTH CLAIMS WERE FREE TO RETAKE: the failed attempt released them, so
+    // the retry holds them under its OWN identity.
+    expect(readdirSync(shim.dirs.lockDir)).toContain(`session-${retried.vendorSessionId}.lock`);
+    const persisted = JSON.parse(
+      readFileSync(
+        agentIdPath(shim.dirs.stateDir, workspaceLockKey(workspaceRealPath(shim.dirs))),
+        "utf8",
+      ),
+    ) as { original_vendor_session_id: string };
+    expect(persisted.original_vendor_session_id).toBe(retried.vendorSessionId);
+  });
+
+  test("a retried start serves an ordinary turn", async () => {
+    // The retry is not merely accepted, it WORKS: the session it produced is
+    // indistinguishable from one whose first start had succeeded.
+    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-once" } });
+    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+
+    const prompt = turnStarted(
+      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" })),
     );
 
-    expect(killSessionCause(response)).toBe("noSession");
-    expect(shim.child.exitCode).toBeNull();
+    expect(prompt.agent?.value).toBe(started.vendorSessionId);
   });
 });
 

@@ -213,6 +213,9 @@ export class RecordingPersistence implements Persistence {
   setProducer(originalVendorSessionId: string): void {
     this.producer = originalVendorSessionId;
   }
+  clearProducer(): void {
+    this.producer = undefined;
+  }
   writeDurable(entries: PersistEntry[]): Promise<void> {
     this.durable.push(...entries);
     return Promise.resolve();
