@@ -122,11 +122,13 @@ type DB interface {
 	// displaces a turn by ending it, so the record a boot has to put back is
 	// normally a closed one. It is the boot recovery's whole input.
 	AllDisplacedTurns(ctx context.Context) ([]Turn, error)
-	// RetireDisplacedTurn clears a turn's displaced mark and, for a turn still
-	// open, stamps its close in the SAME transaction. Retiring is what makes
-	// the resubmission exactly-once: a record whose mark is down is nobody's
-	// to put back.
-	RetireDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) error
+	// ClaimDisplacedTurn takes exclusive ownership of a displaced turn: it
+	// clears the mark and, for a turn still open, stamps its close, in ONE
+	// conditional statement. It reports whether THIS caller took the record —
+	// false means somebody else already did, and the caller must not put the
+	// turn back. It is what makes the resubmission exactly-once with two
+	// possible owners (the merge's own release and the boot recovery).
+	ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (bool, error)
 	// ClaimIdempotencyKey binds a client's key to a turn. When the key is
 	// already claimed it returns the existing turn and mints nothing.
 	ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (*TurnID, error)
