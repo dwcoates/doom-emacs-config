@@ -406,6 +406,12 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
 - GREEN at e165981f9: connect 25/25, link 31/31, host 68/68, roster 56/56,
   daemon 21/21, verbs 74/74, composer 56/56; all-suite 3367/3367;
   test-helpers load clean; fake daemon go test ok. Awaiting audit 3.
+- AUDIT 3 DONE (reports/elisp-suite-audit-3.md, 58 findings, all
+  accepted; one WRONG = production #33 rename never re-keys host.el; #27
+  probable gap; ruling #51 recorded in the file). Closing wave dispatched
+  (`opus-low`): R-SUITE-3 (elisp-agents/suite3; tests only) and
+  R-AUDIT3-PROD (elisp-agents/audit3-prod; #33, #27, #51, verify #43-45).
+  After merge: full run → final report → STOP-elisp.md → park.
 
 ## 1. Module map (final tree of lisp/)
 
