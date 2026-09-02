@@ -602,6 +602,10 @@ func TestANeverFreeHandoverEmitsAPeriodicWarningNamingTheHoldout(t *testing.T) {
 			"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
 			"AGENT_REPL_HOLDOUT_WARN_EVERY=25ms",
 		},
+		// This test's own drainTriggerRollout call boots a real successor
+		// within THIS daemon's one context (see drainSelfRepoDaemon), so it
+		// needs the same longer, justified bound.
+		Timeout: harness.HandoverChainTimeout,
 	})
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
@@ -788,8 +792,8 @@ func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T
 	stream2 := d2.WatchDaemonStream()
 
 	// Assert: the contract — the standing banner reappears. Bounded to a short
-	// probe rather than the harness's full 30s timeout, since this is expected
-	// to time out rather than succeed.
+	// probe rather than the harness's full DefaultTimeout, since this is
+	// expected to time out rather than succeed.
 	probeCtx, cancel := context.WithTimeout(d2.Ctx(), 2*time.Second)
 	defer cancel()
 	harness.AwaitView(t, probeCtx, stream2, "drain_scheduled reappearing after a restart", func(r *agentreplv1.WatchDaemonResponse) bool {
@@ -905,6 +909,12 @@ func drainSelfRepoDaemon(t *testing.T) (*harness.Repo, *harness.Daemon) {
 	d := harness.StartDaemon(t, harness.Opts{
 		SelfRepo: selfRepo.Dir,
 		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+		// Every caller of this fixture drives a real self-reload handover
+		// (drainTriggerRollout): a second real claude-repld boots and adopts
+		// every workspace within THIS daemon's one context, never a fresh one
+		// of its own, so it gets HandoverChainTimeout rather than the tighter
+		// single-boot default.
+		Timeout: harness.HandoverChainTimeout,
 	})
 	return selfRepo, d
 }
