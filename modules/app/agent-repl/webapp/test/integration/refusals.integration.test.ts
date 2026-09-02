@@ -518,6 +518,13 @@ const REFUSAL_SITES: RefusalSite[] = [
     click: "[data-question-submit]",
     site: '[data-feed-row="ask"]',
     arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, questionRow("open", { id: feedId("ask") })),
+    // The batch is answered WHOLE (src/feed/asks/question.ts: an unanswered
+    // question blocks submit in place rather than sending a partial batch), so
+    // every question is answered before the submit that provokes the refusal.
+    before: async (h) => {
+      for (const option of h.$$('[data-feed-row="ask"] .q-opts input')) option.click();
+      await h.settle();
+    },
   },
   {
     name: "AnswerColdGate",
