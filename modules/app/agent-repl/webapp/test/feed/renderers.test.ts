@@ -4,6 +4,7 @@ import { create } from "@bufbuild/protobuf";
 import { FeedBreadcrumbSchema } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import {
   NEST_ATTRIBUTE,
+  createRowRenderers,
   arrangeSubfeedRows,
   armName,
   defaultBubbleBody,
@@ -13,6 +14,7 @@ import {
 } from "../../src/feed/renderers.js";
 import { feedId, harness, mergeTabRow, responseRow, rowContext, userPromptRow } from "./harness.js";
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { RowRenderers } from "../../src/feed/renderers.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -206,5 +208,46 @@ describe("defaultBubbleBody", () => {
     rows.push(responseRow("b"));
     view.fire();
     expect(mount.querySelectorAll("[data-feed-row]")).toHaveLength(0);
+  });
+});
+
+/**
+ * THE REGISTRY IS COMPLETE.
+ *
+ * The type-level half is the annotation on this list: a key added to
+ * `RowRenderers` and missing from it does not compile, and a key here that the
+ * interface does not declare does not compile either. The runtime half is the
+ * sweep below, which catches the one thing the type cannot — a key declared,
+ * typed, and left `undefined` by the assembler.
+ */
+const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
+  "response",
+  "simpleToolCall",
+  "hook",
+  "skill",
+  "artifact",
+  "plan",
+  "findings",
+  "shell",
+  "permission",
+  "question",
+  "coldGate",
+  "mergeHead",
+  "commandPanel",
+  "commandRefused",
+  "mergeBody",
+];
+
+describe("createRowRenderers", () => {
+  for (const key of REGISTRY_KEYS) {
+    it(`fills the ${key} seam`, () => {
+      const h = harness();
+      expect(typeof createRowRenderers(h.ctx)[key]).toBe("function");
+    });
+  }
+
+  it("fills no seam the interface does not declare", () => {
+    const h = harness();
+    expect(Object.keys(createRowRenderers(h.ctx)).sort()).toEqual([...REGISTRY_KEYS].sort());
   });
 });
