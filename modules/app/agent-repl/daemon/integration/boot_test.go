@@ -301,7 +301,7 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 		}
 	}
 
-	f.d.ExpectWarnings("daemon.shimclient.spawn", "daemon.workspace.open",
+	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.spawn", "daemon.workspace.open",
 		"daemon.shimclient.exit", "daemon.workspace.bring_up")
 }
 
