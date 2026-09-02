@@ -322,10 +322,11 @@ obvious answer is the repo the user is already working in."
 
 (defun agent-repl-verb-close (ws)
   "Close WS: a VIEW act.  The daemon-shim session is untouched.
-A BLOCKED refusal draws NO dialog and leaves the tab in place: the
-response carries only the cause arm, and the reasons themselves are
-composed by the daemon onto the workspace footer, which is where the user
-reads them."
+A BLOCKED refusal draws NO dialog and leaves the tab in place.  The
+reasons are composed by the daemon onto the workspace footer, which is
+where the user reads them; the refusal also carries the daemon\='s own
+`summary\=' sentence, echoed to the echo area so a caller with no footer in
+front of it can still say why."
   (let ((ref (agent-repl-verbs--ref ws)))
     (agent-repl-verbs--send
      #'agent-repl-rpc-close-workspace (agent-repl-verbs--conn ws)
@@ -339,10 +340,22 @@ reads them."
        ;; are read from the footer the daemon composed them onto.  Every
        ;; other arm is not claimed, and falls through to the generic
        ;; refusal handling.
-       (when (eq (plist-get (agent-repl-verbs--refusal-arm value) :arm) :blocked)
-         (agent-repl--info ws "elisp.verbs.close-blocked ws=%s" ws)
-         (message "close blocked -- see the workspace footer")
-         t)))))
+       (let ((refusal (agent-repl-verbs--refusal-arm value)))
+         (when (eq (plist-get refusal :arm) :blocked)
+           (let* ((blocked (plist-get refusal :value))
+                  (summary (plist-get blocked :summary)))
+             (agent-repl--info
+              ws "elisp.verbs.close-blocked ws=%s turn=%S live=%S held=%S merge=%S"
+              ws (plist-get blocked :turn-in-flight) (plist-get blocked :live-work)
+              (plist-get blocked :held-prompts) (plist-get blocked :merge-queued))
+             ;; The daemon composes the sentence; when it sent one it is
+             ;; echoed verbatim, so a user with no footer in front of them
+             ;; still reads WHY.  Without one the footer stays the answer.
+             (message "close blocked -- %s"
+                      (if (and (stringp summary) (not (string-empty-p summary)))
+                          summary
+                        "see the workspace footer")))
+           t))))))
 
 (defun agent-repl-verb-kill (ws)
   "Kill WS's session by force.  The worktree and branch survive."
