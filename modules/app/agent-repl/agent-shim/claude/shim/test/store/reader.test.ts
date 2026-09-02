@@ -166,7 +166,11 @@ describe("the tail", () => {
     await expect(
       Promise.race([
         pending.then(() => "settled"),
-        new Promise((resolve) => setTimeout(() => resolve("hung"), 2_000)),
+        // 300ms: a HANG guard, not the mechanism of success — the real settle
+        // is sub-millisecond, so this only bounds how long a genuine hang
+        // costs before the assertion fails with a clear "hung" value instead
+        // of the test's own timeout.
+        new Promise((resolve) => setTimeout(() => resolve("hung"), 300)),
       ]),
     ).resolves.toBe("settled");
   });
@@ -192,7 +196,11 @@ describe("the tail", () => {
     await expect(
       Promise.race([
         iterator.next().then(() => "settled"),
-        new Promise((resolve) => setTimeout(() => resolve("hung"), 2_000)),
+        // 300ms: a HANG guard, not the mechanism of success — the real settle
+        // is sub-millisecond, so this only bounds how long a genuine hang
+        // costs before the assertion fails with a clear "hung" value instead
+        // of the test's own timeout.
+        new Promise((resolve) => setTimeout(() => resolve("hung"), 300)),
       ]),
     ).resolves.toBe("settled");
   });
