@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -64,6 +65,9 @@ type fakeDB struct {
 	dropped        []string
 	// enqueueErr, when set, fails the next EnqueueMerge.
 	enqueueErr error
+	// retired records the displaced turns whose mark was claimed, which is
+	// what "exactly once" is asserted against.
+	retired []wsm.TurnID
 }
 
 func newFakeDB() *fakeDB {
@@ -184,6 +188,41 @@ func (f *fakeDB) CloseTurn(_ context.Context, turn wsm.TurnID, at time.Time, how
 		}
 		f.turns[id] = kept
 	}
+	return nil
+}
+
+// AllDisplacedTurns answers the staged turns still carrying the mark, which is
+// the boot recovery's whole input.
+func (f *fakeDB) AllDisplacedTurns(_ context.Context) ([]wsm.Turn, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []wsm.Turn
+	for _, list := range f.turns {
+		for _, t := range list {
+			if t.Displaced {
+				out = append(out, t)
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// RetireDisplacedTurn clears the mark and retires the record, exactly as the
+// store's one statement does.
+func (f *fakeDB) RetireDisplacedTurn(_ context.Context, turn wsm.TurnID, _ time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, list := range f.turns {
+		kept := list[:0]
+		for _, t := range list {
+			if t.ID != turn {
+				kept = append(kept, t)
+			}
+		}
+		f.turns[id] = kept
+	}
+	f.retired = append(f.retired, turn)
 	return nil
 }
 
@@ -835,6 +874,8 @@ type harness struct {
 	// briefs answers the brief loader; a name absent from it is a LOUD failure,
 	// exactly as a missing file is.
 	briefs map[string][]string
+	// pauseAfterCapture stands in for the production-nil admission seam.
+	pauseAfterCapture AdmissionPause
 	// briefValues records the values each brief was spliced with, which is how
 	// the escalation constants are asserted to reach the agent.
 	briefValues []map[string]string
@@ -969,6 +1010,7 @@ func (h *harness) deps() Deps {
 			}
 			return *h.displaced, true, nil
 		},
+		PauseAfterCapture: h.pauseAfterCapture,
 		ParkedRoute: func(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid) (ids.TurnID, error) {
 			h.mu.Lock()
 			defer h.mu.Unlock()

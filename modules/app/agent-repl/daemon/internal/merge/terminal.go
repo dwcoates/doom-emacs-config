@@ -159,7 +159,8 @@ func terminalCause(out outcome) string {
 // resubmitDisplaced puts back the user turn the merge displaced, EXACTLY ONCE.
 // The capture is durable, so the resubmission survives a bounce; the run's own
 // record is cleared by the submission itself, so a second teardown cannot
-// double it.
+// double it, and the DURABLE mark is retired here so the boot recovery's sweep
+// (recoverDisplaced) never puts the same turn back a second time.
 //
 // The text comes from the CAPTURE, not from a re-read of the open turns: the
 // displaced turn was ended when the merge took the session away from it, so its
@@ -171,6 +172,17 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 	displaced := *r.displaced
 	r.displaced = nil
 	fields := dlog.Context{"workspace": string(r.ws), "turn": string(displaced.Turn)}
+	// THE CLAIM GOES DOWN BEFORE THE SUBMISSION. Retiring clears the durable
+	// displaced mark, and the mark is what the boot recovery sweeps: a
+	// submission made first and a crash before the mark came down would have
+	// the next boot submit the same turn a second time. The claim is the one
+	// thing that makes "exactly once" hold across a bounce, so it is taken
+	// first, by this owner and by the sweep alike.
+	if err := r.o.deps.DB.RetireDisplacedTurn(ctx, displaced.Turn, r.o.deps.Now()); err != nil {
+		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not claim the displaced turn",
+			withField(fields, "error", err.Error()))
+		return
+	}
 	if _, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{
 		WS: r.ws, Turn: wsm.NewTurnID(), Said: saidText(displaced.Text),
 		Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
@@ -178,13 +190,6 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not resubmit the displaced turn",
 			withField(fields, "error", err.Error()))
 		return
-	}
-	// The captured record is retired whether or not it was still open: the
-	// displaced turn is spent, and a record left marked displaced would be
-	// resubmitted again by a boot recovery.
-	if err := r.o.deps.DB.CloseTurn(ctx, displaced.Turn, r.o.deps.Now(), wsm.CloseCompleted); err != nil {
-		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn's record was already retired",
-			withField(fields, "cause", err.Error()))
 	}
 	r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "resubmitted the displaced turn", fields)
 }
