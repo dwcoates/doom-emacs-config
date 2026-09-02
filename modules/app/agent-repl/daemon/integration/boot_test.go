@@ -669,3 +669,36 @@ func TestPprofServesOverAUnixSocket(t *testing.T) {
 	}
 	d.ExpectWarnings("daemon.pprof.enabled")
 }
+
+// TestBootRefusesWithoutAnAccountRoot is the cross-system guard for the
+// launcher's argv. The account is DETERMINED by the workspace's path, so both
+// config roots must have an answer; a daemon spawned without one exits before
+// it serves, and the reason has to be in its stderr rather than only implied
+// by a client's boot timeout.
+func TestBootRefusesWithoutAnAccountRoot(t *testing.T) {
+	tests := []struct {
+		name string
+		omit string
+		want string
+	}{
+		{name: "no default config dir", omit: "--default-config-dir", want: "Roots.Default is required"},
+		{name: "no multi-repo config dir", omit: "--multi-repo-config-dir", want: "Roots.MultiRepo is required"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act
+			d := harness.StartDaemon(t, harness.Opts{OmitArgs: []string{tc.omit}, ExpectEarlyExit: true})
+			// The graph refusal is the point of the test, not a stray warning.
+			d.ExpectWarnings("daemon.cmd.graph")
+			code := d.AwaitExit()
+
+			// Assert
+			if code == 0 {
+				t.Fatalf("boot without %s exited 0, want a refusal before it served", tc.omit)
+			}
+			if !strings.Contains(d.Stderr(), tc.want) {
+				t.Fatalf("boot stderr = %q, want it to name %q", d.Stderr(), tc.want)
+			}
+		})
+	}
+}
