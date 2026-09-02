@@ -575,7 +575,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_session", "daemon.shimclient.redial")
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
@@ -641,7 +641,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// "redial stopped" -- which is precisely the stop this test asserts.
 	// Before the witness was wired the redials looped forever instead; both
 	// records are failure-path evidence and stay loud.
-	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.redial",
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
