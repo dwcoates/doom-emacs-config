@@ -47,6 +47,7 @@
 (defvar agent-repl-link-drain)
 (defvar agent-repl-link-drain-segment)
 (defvar agent-repl-link-reconnect-interval-seconds)
+(defvar agent-repl-link-reconnect-max-interval-seconds)
 
 ;;;; ---- Fixtures ----
 
@@ -80,7 +81,8 @@ loop's own timing is not what a test spends its deadline on."
          (agent-repl-link-no-daemon-functions nil)
          (agent-repl-link-drain nil)
          (agent-repl-link-drain-segment nil)
-         (agent-repl-link-reconnect-interval-seconds 0.05))
+         (agent-repl-link-reconnect-interval-seconds 0.05)
+         (agent-repl-link-reconnect-max-interval-seconds 0.2))
      (unwind-protect
          (progn
            (agent-repl-link-connect)
@@ -98,7 +100,8 @@ is what findings 16-18 need — \"host.el's link-up hook doing the work, not
 the test\" and \"roster.el re-subscribes\" mean production code reacting to
 the seam, never the test driving it by hand."
   (declare (indent 1) (debug (form body)))
-  `(let ((agent-repl-link-reconnect-interval-seconds 0.05))
+  `(let ((agent-repl-link-reconnect-interval-seconds 0.05)
+         (agent-repl-link-reconnect-max-interval-seconds 0.2))
      (unwind-protect
          (progn
            (agent-repl-link-connect)
@@ -163,7 +166,8 @@ input is the header block."
           (agent-repl-link-no-daemon-functions nil)
           (agent-repl-link-drain nil)
           (agent-repl-link-drain-segment nil)
-          (agent-repl-link-reconnect-interval-seconds 0.05))
+          (agent-repl-link-reconnect-interval-seconds 0.05)
+          (agent-repl-link-reconnect-max-interval-seconds 0.2))
       (add-hook 'agent-repl-link-up-functions (lambda (&rest _) (setq up t)))
       (unwind-protect
           (progn
