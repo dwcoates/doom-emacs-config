@@ -28,6 +28,7 @@
 (defvar agent-repl-find-file-workspace-open-function)
 (defvar agent-repl-find-file-workspace-create-function)
 (defvar agent-repl--ffw-pending)
+(defvar agent-repl--ffw-refused)
 (defvar agent-repl-roster-update-functions)
 
 (defun agent-repl-test--ffw-home-path (relative)
@@ -319,7 +320,8 @@
 (defmacro agent-repl-test--ffw-with-pending (&rest body)
   "Run BODY with an EMPTY pending-placement table of its own."
   (declare (indent 0))
-  `(let ((agent-repl--ffw-pending (make-hash-table :test 'equal)))
+  `(let ((agent-repl--ffw-pending (make-hash-table :test 'equal))
+         (agent-repl--ffw-refused (make-hash-table :test 'equal)))
      ,@body))
 
 (ert-deftest agent-repl-test-ffw-pending-fires-when-the-tab-arrives ()
@@ -417,6 +419,81 @@
 (ert-deftest agent-repl-test-ffw-pending-fire-is-on-the-roster-hook ()
   "The arrival point is the roster's post-reconcile hook, not a timer."
   (should (memq 'agent-repl--ffw-pending-fire agent-repl-roster-update-functions)))
+
+;;;; ---- The refused-root guard ----
+
+(ert-deftest agent-repl-test-ffw-acquire-records-the-refused-root ()
+  "A verb that signals records its root, so the failure is remembered."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let ((root (agent-repl-test--ffw-home-path "ffw-repo")))
+          (agent-repl--ffw-acquire root buf (lambda () (error "daemon refused")))
+          (should (agent-repl--ffw-refused-p root)))))))
+
+(ert-deftest agent-repl-test-ffw-route-does-not-retry-a-refused-root ()
+  "The acquisition verb is NOT re-sent for a root that already refused.
+This is the guard against the unbounded retry loop: acquiring re-enters
+the display step, so a failing acquisition would otherwise re-attempt
+itself forever and wedge Emacs."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+               (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+               (persp-names-cache nil)
+               (calls 0)
+               (agent-repl-find-file-workspace-create-function
+                (lambda (_dir) (cl-incf calls) (error "daemon refused"))))
+          (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "other")))
+            (should-not (agent-repl--ffw-route buf))
+            (should-not (agent-repl--ffw-route buf)))
+          (should (= calls 1)))))))
+
+(ert-deftest agent-repl-test-ffw-refused-root-falls-through-to-ordinary-display ()
+  "A refused root answers nil, so the caller displays the file itself."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let* ((root (agent-repl-test--ffw-home-path "ffw-repo"))
+               (agent-repl-find-file-workspace-root-function (lambda (_dir) root))
+               (persp-names-cache nil))
+          (agent-repl--ffw-refused-record root)
+          (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "other")))
+            (should-not (agent-repl--ffw-route buf))))))))
+
+(ert-deftest agent-repl-test-ffw-refusal-cleared-when-the-workspace-opens ()
+  "A refused root routes again once its workspace's tab actually arrives."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (let ((root (agent-repl-test--ffw-home-path "ffw-repo")))
+        (agent-repl--ffw-refused-record root)
+        (agent-repl--ws-put "ffw-ws" :project-dir root)
+        (let ((persp-names-cache '("ffw-ws")))
+          (agent-repl--ffw-pending-fire))
+        (should-not (agent-repl--ffw-refused-p root))))))
+
+(ert-deftest agent-repl-test-ffw-refusal-survives-a-push-that-does-not-open-it ()
+  "A roster push that does NOT open the root's workspace keeps the refusal."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (let ((root (agent-repl-test--ffw-home-path "ffw-repo")))
+        (agent-repl--ffw-refused-record root)
+        (let ((persp-names-cache nil))
+          (agent-repl--ffw-pending-fire))
+        (should (agent-repl--ffw-refused-p root))))))
+
+(ert-deftest agent-repl-test-ffw-reset-clears-pending-and-refusals ()
+  "The manual reset forgets both tables."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--ffw-with-pending
+      (agent-repl-test--ffw-with-file-buffer buf "ffw-repo/a.el"
+        (let ((root (agent-repl-test--ffw-home-path "ffw-repo")))
+          (agent-repl--ffw-pending-register root buf)
+          (agent-repl--ffw-refused-record root)
+          (agent-repl-find-file-workspace-reset)
+          (should (zerop (hash-table-count agent-repl--ffw-pending)))
+          (should (zerop (hash-table-count agent-repl--ffw-refused))))))))
 
 (provide 'test-find-file-workspace)
 
