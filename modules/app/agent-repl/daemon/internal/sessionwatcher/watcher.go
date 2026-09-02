@@ -115,8 +115,12 @@ type watcher struct {
 	closedTurns     map[ids.TurnID]TurnClose
 	closedTurnOrder []ids.TurnID
 
-	sessionStream shimclient.Stream[*conversationv1.SessionUpdate]
-	main          *agentWatch
+	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
+	// started records that the session facts have been taken up, from
+	// StartSession's answer or the shim's re-announcement. It is what makes a
+	// repeat re-announcement idempotent.
+	started bool
+	main    *agentWatch
 
 	// agents is one entry per LIVE DETACHED SUBAGENT, keyed by AgentId.value.
 	// The main watch is not in it: the open set here IS the live subagent set.
@@ -205,9 +209,6 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 	if log == nil {
 		return nil, errors.New("sessionwatcher: nil logger")
 	}
-	if session.Started == nil {
-		return nil, errors.New("sessionwatcher: Session.Started is unset")
-	}
 	if sinks.Feed == nil || sinks.Footer == nil || sinks.Topbar == nil || sinks.Sidebar == nil || sinks.Lifecycle == nil {
 		return nil, errors.New("sessionwatcher: every sink but Holds is required")
 	}
@@ -246,21 +247,21 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		"vendor_session_id": session.Started.GetVendorSessionId(),
 		"turn_in_flight":    session.Started.GetTurnInFlight().GetValue(),
 		"live_work":         len(session.Started.GetLiveWork()),
+		// A PURE ATTACH opens with no facts at all: an adopting daemon
+		// (crash boot, handover) learns them from the shim's own
+		// re-announcement on the watch it is about to open (landing 7).
+		"attached": session.Started == nil,
 	})
 
-	w.sinks.Topbar.OnSessionStarted(w.ws, session.Started)
-	w.sinks.Sidebar.OnSessionStarted(w.ws, session.Started)
-	w.publishLinkLocked()
-
-	if t := session.Started.GetTurnInFlight(); t != nil {
-		turn := ids.TurnID(t.GetValue())
-		w.turn = &turn
+	if session.Started != nil {
+		w.applySessionStartedLocked(session.Started)
 	}
+	w.publishLinkLocked()
 
 	w.openSessionLocked()
 	w.openMainLocked()
-	for _, item := range session.Started.GetLiveWork() {
-		w.routeDetachedWorkLocked(nil, item)
+	if session.Started != nil {
+		w.adoptLiveWorkLocked(session.Started)
 	}
 	w.publishLiveWorkLocked()
 	w.mu.Unlock()
@@ -715,9 +716,9 @@ func watchKey(id *conversationv1.AgentId) string {
 // ---- consuming streams ----
 
 // runSession consumes the session's standing stream.
-func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*conversationv1.SessionUpdate]) {
+func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*shimv1.WatchSessionResponse]) {
 	for {
-		update, err := stream.Recv()
+		frame, err := stream.Recv()
 		if err != nil {
 			w.streamEnded(gen, "session", "watch_session", "", nil, err)
 			return
@@ -727,9 +728,67 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*conversationv
 			w.mu.Unlock()
 			return
 		}
-		w.routeSessionUpdateLocked(update)
+		switch {
+		case frame.GetUpdate() != nil:
+			w.routeSessionUpdateLocked(frame.GetUpdate())
+		case frame.GetSessionStarted() != nil:
+			w.reannouncedLocked(frame.GetSessionStarted())
+		default:
+			// The shim client validates the oneof before a frame ever reaches
+			// here, so an unset arm at this seam is an invariant violation and
+			// is recorded rather than dropped.
+			w.log.Error("daemon.sessionwatcher.watch_session",
+				"a session frame carries no arm", nil)
+		}
 		w.mu.Unlock()
 		w.flushTurnEnds()
+	}
+}
+
+// reannouncedLocked takes the shim's ONCE-PER-WATCH re-announcement of the
+// session's own SessionStarted (landing 7).
+//
+// A watcher that ALREADY HOLDS the facts ignores it: the re-announcement rides
+// every new watch, including each re-open after a link break, and re-publishing
+// the same facts would be churn on every subscriber for no new information. It
+// is the ORDINARY case, so it is not warned.
+func (w *watcher) reannouncedLocked(started *conversationv1.SessionStarted) {
+	if w.started {
+		w.log.Debug("daemon.sessionwatcher.watch_session",
+			"ignored a re-announced SessionStarted; the facts are already held",
+			dlog.Context{"vendor_session_id": started.GetVendorSessionId()})
+		return
+	}
+	w.log.Info("daemon.sessionwatcher.watch_session",
+		"took the session facts from the shim's re-announcement", dlog.Context{
+			"vendor_session_id": started.GetVendorSessionId(),
+			"turn_in_flight":    started.GetTurnInFlight().GetValue(),
+			"live_work":         len(started.GetLiveWork()),
+		})
+	w.applySessionStartedLocked(started)
+	w.adoptLiveWorkLocked(started)
+	w.publishLiveWorkLocked()
+}
+
+// applySessionStartedLocked is the ONE place the session facts are taken up,
+// whichever way they arrived: StartSession's own answer, or the shim's
+// re-announcement on an adopted watch.
+func (w *watcher) applySessionStartedLocked(started *conversationv1.SessionStarted) {
+	w.started = true
+	w.sinks.Topbar.OnSessionStarted(w.ws, started)
+	w.sinks.Sidebar.OnSessionStarted(w.ws, started)
+	if t := started.GetTurnInFlight(); t != nil {
+		turn := ids.TurnID(t.GetValue())
+		w.turn = &turn
+	}
+}
+
+// adoptLiveWorkLocked opens a watch for every item the session says is already
+// live. It runs AFTER the session and main watches are open, because the order
+// the watches are opened in is the order a reader sees them.
+func (w *watcher) adoptLiveWorkLocked(started *conversationv1.SessionStarted) {
+	for _, item := range started.GetLiveWork() {
+		w.routeDetachedWorkLocked(nil, item)
 	}
 }
 

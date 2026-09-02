@@ -54,17 +54,37 @@ func TestLiveWorkSetEmpty(t *testing.T) {
 // TestStartRefusesAnIncompleteFleet covers the constructor's refusals: a
 // watcher with a missing collaborator would fail later, on a frame, where the
 // cause is no longer visible.
+// TestStartAcceptsAnUnsetSessionStartedAsAPureAttach is the landing-7 contract
+// change: an ADOPTING daemon (crash boot, handover) opens the watch fleet with
+// NO session facts and takes them from the shim's re-announcement, so an unset
+// Session.Started is legal rather than the refusal it used to be.
+func TestStartAcceptsAnUnsetSessionStartedAsAPureAttach(t *testing.T) {
+	// Arrange.
+	rec := newRecorder()
+	sinks := Sinks{
+		Feed:      &feedSink{rec: rec},
+		Footer:    &footerSink{rec: rec},
+		Topbar:    &topbarSink{rec: rec},
+		Sidebar:   &sidebarSink{rec: rec},
+		Lifecycle: &lifecycleSink{rec: rec},
+	}
+
+	// Act.
+	w, err := Start(t.Context(), "ws-1", newFakeClient(), Session{}, sinks, newTestLogger())
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Start with no session facts = %v, want a pure attach", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+}
+
 func TestStartRefusesAnIncompleteFleet(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(*Session, *Sinks)
 		wantErr string
 	}{
-		{
-			name:    "an unset SessionStarted is refused",
-			mutate:  func(s *Session, _ *Sinks) { s.Started = nil },
-			wantErr: "Session.Started is unset",
-		},
 		{
 			name:    "a missing feed sink is refused",
 			mutate:  func(_ *Session, sinks *Sinks) { sinks.Feed = nil },

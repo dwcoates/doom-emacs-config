@@ -109,7 +109,7 @@ type bashOpen struct {
 // the test drives. Only the three watch verbs and Connectivity are exercised;
 // every other verb belongs to callers this package is not.
 type fakeClient struct {
-	sessionOpens chan *fakeStream[*conversationv1.SessionUpdate]
+	sessionOpens chan *fakeStream[*shimv1.WatchSessionResponse]
 	agentOpens   chan agentOpen
 	bashOpens    chan bashOpen
 	links        chan shimclient.LinkState
@@ -131,7 +131,7 @@ func (c *fakeClient) setReaped(info shimclient.ExitInfo) {
 
 func newFakeClient() *fakeClient {
 	return &fakeClient{
-		sessionOpens: make(chan *fakeStream[*conversationv1.SessionUpdate], 8),
+		sessionOpens: make(chan *fakeStream[*shimv1.WatchSessionResponse], 8),
 		agentOpens:   make(chan agentOpen, 32),
 		bashOpens:    make(chan bashOpen, 32),
 		links:        make(chan shimclient.LinkState, 8),
@@ -139,8 +139,8 @@ func newFakeClient() *fakeClient {
 	}
 }
 
-func (c *fakeClient) WatchSession(context.Context) (shimclient.Stream[*conversationv1.SessionUpdate], error) {
-	stream := newFakeStream[*conversationv1.SessionUpdate]()
+func (c *fakeClient) WatchSession(context.Context) (shimclient.Stream[*shimv1.WatchSessionResponse], error) {
+	stream := newFakeStream[*shimv1.WatchSessionResponse]()
 	c.mu.Lock()
 	c.sessionCount++
 	c.mu.Unlock()
@@ -193,7 +193,7 @@ func (c *fakeClient) nextBashOpen(t *testing.T) bashOpen {
 }
 
 // nextSessionOpen returns the next WatchSession the watcher opened.
-func (c *fakeClient) nextSessionOpen(t *testing.T) *fakeStream[*conversationv1.SessionUpdate] {
+func (c *fakeClient) nextSessionOpen(t *testing.T) *fakeStream[*shimv1.WatchSessionResponse] {
 	t.Helper()
 	select {
 	case stream := <-c.sessionOpens:
@@ -567,7 +567,7 @@ type harness struct {
 	log    *dlog.TestLogger
 	w      *watcher
 
-	session *fakeStream[*conversationv1.SessionUpdate]
+	session *fakeStream[*shimv1.WatchSessionResponse]
 	main    *fakeStream[*shimv1.WatchAgentResponse]
 	mainReq *shimv1.WatchAgentRequest
 }
@@ -1276,4 +1276,21 @@ func (h *harness) awaitLinkFault(t *testing.T) LinkFault {
 			return LinkFault{}
 		}
 	}
+}
+
+// sendSessionUpdate pushes one SessionUpdate as the session stream's `update`
+// frame, which is the shape the shim client hands the watcher.
+func (h *harness) sendSessionUpdate(t *testing.T, u *conversationv1.SessionUpdate) {
+	t.Helper()
+	h.session.send(t, &shimv1.WatchSessionResponse{
+		Frame: &shimv1.WatchSessionResponse_Update{Update: u},
+	})
+}
+
+// sendSessionStarted pushes the shim's once-per-watch re-announcement.
+func (h *harness) sendSessionStarted(t *testing.T, started *conversationv1.SessionStarted) {
+	t.Helper()
+	h.session.send(t, &shimv1.WatchSessionResponse{
+		Frame: &shimv1.WatchSessionResponse_SessionStarted{SessionStarted: started},
+	})
 }
