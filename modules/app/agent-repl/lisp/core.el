@@ -1161,6 +1161,39 @@ to be stable, so the BARE format string travels here separately."
       (error "agent-repl log routing invariant violated: unsafe directory component: %s" component))
     component))
 
+(defun agent-repl--install-workspace-log-link (canonical target)
+  "Atomically point CANONICAL at TARGET, replacing whatever link is there.
+CANONICAL's directory is proven real before anything is created, so a
+hostile parent leaves no artifact behind.  Reserving a temporary name
+first gives a collision-proof link name; removing that reservation
+immediately before a non-overwriting `make-symbolic-link' makes an
+interloper cause failure rather than silent reuse, and `rename-file'
+makes the canonical-link replacement atomic.
+
+Never logs: this runs inside the file sink (see
+`agent-repl--do-log-to-file'), so the logging ladder would re-enter it."
+  (let ((canonical-dir (file-name-directory canonical))
+        (link-tmp nil))
+    (agent-repl--ensure-real-log-directory canonical-dir)
+    (when (file-directory-p canonical)
+      (error "agent-repl log routing invariant violated: canonical log path is a directory: %s" canonical))
+    (unwind-protect
+        (progn
+          (setq link-tmp (make-temp-file
+                          (expand-file-name ".emacs.log-link-" canonical-dir)))
+          (delete-file link-tmp)
+          (make-symbolic-link target link-tmp)
+          (rename-file link-tmp canonical t)
+          (setq link-tmp nil)
+          target)
+      (when (and link-tmp
+                 (or (file-exists-p link-tmp) (file-symlink-p link-tmp)))
+        (delete-file link-tmp)))))
+
+(defun agent-repl--workspace-log-link-current-p (canonical target)
+  "Return non-nil when CANONICAL is a symlink naming TARGET."
+  (equal (file-symlink-p canonical) target))
+
 (defun agent-repl--workspace-emacs-log-target (ws)
   "Return WS's runtime-owned external target and atomically install its link.
 WS must have a registered project directory.  Workspace-controlled paths are
@@ -1181,45 +1214,48 @@ the day of invisible records that keying by name cost."
             (error "agent-repl log routing invariant violated: workspace %S retained a target after identity rebinding" ws))
           (unless (file-regular-p target)
             (error "agent-repl log routing invariant violated: owned target vanished: %s" target))
+          ;; THE LINK IS PART OF THE OWNERSHIP, not a one-time side effect of
+          ;; minting the target.  Everything that reads a workspace's records
+          ;; -- an operator, the log reader, the integration harness -- reaches
+          ;; them ONLY through the canonical path, so a link that stops naming
+          ;; the owned target makes every record written afterwards invisible
+          ;; while the sink reports success.  Anything can unseat it: another
+          ;; Emacs runtime registering the same directory, a `.claude' tree
+          ;; restored from a backup, a stray `rm'.  Re-establishing it on the
+          ;; reuse path is what makes "written" and "findable" the same fact.
+          (unless (agent-repl--workspace-log-link-current-p
+                   (agent-repl--workspace-emacs-log-path
+                    (plist-get identity :project-dir))
+                   target)
+            (agent-repl--install-workspace-log-link
+             (agent-repl--workspace-emacs-log-path (plist-get identity :project-dir))
+             target))
           target)
-      (let ((project-dir (plist-get identity :project-dir)))
-        (let* ((canonical (agent-repl--workspace-emacs-log-path project-dir))
-               (canonical-dir (file-name-directory canonical)))
-               ;; On a new Emacs runtime, the workspace path is untrusted even
-               ;; when it names an old temporary file.  Only this in-memory
-               ;; registry authorizes target reuse, which makes link poisoning
-               ;; structurally unable to redirect a durable write.
-          (agent-repl--ensure-real-log-directory (expand-file-name ".claude" project-dir))
-          (agent-repl--ensure-real-log-directory canonical-dir)
-          (when (file-directory-p canonical)
-            (error "agent-repl log routing invariant violated: canonical log path is a directory: %s" canonical))
-          ;; Target creation happens only after both workspace-controlled
-          ;; directory components are proven real, so a hostile parent leaves
-          ;; no runtime-owned temporary artifact behind.
-          (let ((target (make-temp-file agent-repl--emacs-log-target-prefix nil ".log"))
-                (link-tmp nil)
-                (installed nil))
-            (unwind-protect
-                (progn
-                  (setq link-tmp (make-temp-file
-                                  (expand-file-name ".emacs.log-link-" canonical-dir)))
-                  ;; Reserving first gives a collision-proof name.  Removing
-                  ;; that reservation immediately before a non-overwriting
-                  ;; symlink creation ensures an interloper causes failure.
-                  (delete-file link-tmp)
-                  (make-symbolic-link target link-tmp)
-                  ;; `rename-file' makes the canonical-link replacement atomic.
-                  (rename-file link-tmp canonical t)
-                  (puthash key (append (list :target target) identity)
-                           agent-repl--workspace-log-targets)
-                  (setq installed t)
-                  target)
-              (when (and link-tmp
-                         (or (file-exists-p link-tmp) (file-symlink-p link-tmp)))
-                (delete-file link-tmp))
-              (unless installed
-                (when (file-exists-p target)
-                  (delete-file target))))))))))
+      (let* ((project-dir (plist-get identity :project-dir))
+             (canonical (agent-repl--workspace-emacs-log-path project-dir)))
+        ;; On a new Emacs runtime, the workspace path is untrusted even when it
+        ;; names an old temporary file.  Only this in-memory registry
+        ;; authorizes target reuse, which makes link poisoning structurally
+        ;; unable to redirect a durable write.
+        (agent-repl--ensure-real-log-directory (expand-file-name ".claude" project-dir))
+        (agent-repl--ensure-real-log-directory (file-name-directory canonical))
+        (when (file-directory-p canonical)
+          (error "agent-repl log routing invariant violated: canonical log path is a directory: %s" canonical))
+        ;; Target creation happens only after both workspace-controlled
+        ;; directory components are proven real, so a hostile parent leaves no
+        ;; runtime-owned temporary artifact behind.
+        (let ((target (make-temp-file agent-repl--emacs-log-target-prefix nil ".log"))
+              (installed nil))
+          (unwind-protect
+              (progn
+                (agent-repl--install-workspace-log-link canonical target)
+                (puthash key (append (list :target target) identity)
+                         agent-repl--workspace-log-targets)
+                (setq installed t)
+                target)
+            (unless installed
+              (when (file-exists-p target)
+                (delete-file target)))))))))
 
 (defvar agent-repl--log-write-counter 0
   "Monotonic counter of successful log-file writes.
