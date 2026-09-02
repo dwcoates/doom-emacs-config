@@ -665,6 +665,26 @@ be exactly the leak a fresh process used to prevent."
               (delete-directory entry t)
             (delete-file entry)))))))
 
+(defun agent-repl-itest--sweep-fixture-root ()
+  "Empty this process\='s fixture root, so no scenario inherits a log sink.
+
+A FIXTURE WORKSPACE\='S RECORDS OUTLIVE THE SCENARIO THAT WROTE THEM.  The
+suites reuse one directory per suite, and a registered workspace\='s
+records reach a reader only through that directory\='s canonical
+`.claude/emacs/emacs.log\=' symlink.  The log-target registry is scratch-
+bound per scenario, so each scenario mints a FRESH target -- but the link
+still names the PREVIOUS scenario\='s target until this scenario writes
+its first workspace-owned record.
+
+In that window `agent-repl-itest--await-log\=' is satisfied instantly by
+the previous scenario\='s record for the same operation, and the assertion
+behind it then reads THAT record\='s arguments -- the refusal fields, the
+arm keyword -- and fails on a scenario whose own answer had not arrived
+yet.  Sweeping the root is what makes a record found a record this
+scenario wrote; production recreates the `.claude\=' tree the moment it
+routes one."
+  (ignore-errors (delete-directory agent-repl-itest--fixture-root t)))
+
 (defun agent-repl-itest--republish-addr (daemon)
   "Point DAEMON\='s state root at DAEMON, whatever last wrote `daemon.addr'.
 A cold-start scenario spawns a STUB daemon that publishes its own address
@@ -697,6 +717,7 @@ that made it, so a scenario that dies mid-way cannot poison its successor."
     ;; subscribed.
     (agent-repl-itest--reset daemon)
     (agent-repl-itest--sweep-state-dir daemon)
+    (agent-repl-itest--sweep-fixture-root)
     (agent-repl-itest--republish-addr daemon)
     daemon))
 
