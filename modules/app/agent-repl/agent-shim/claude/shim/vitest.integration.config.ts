@@ -35,8 +35,21 @@ export default defineConfig({
     // Each test spawns and tears down its own shim, so they must not share a
     // process-global; threads are fine, but the per-test budget has to cover a
     // real spawn.
-    testTimeout: 60_000,
-    hookTimeout: 60_000,
-    teardownTimeout: 30_000,
+    //
+    // Tight on purpose: the observed healthy max across 302 tests is ~5.14s
+    // (test/integration/session.test.ts, a forced KillSession draining a
+    // detached stream) and ~4.25s (test/integration/record.test.ts, a write
+    // that rides the real DEFAULT_RETRY_POLICY backoff schedule — 50+200+
+    // 800+3000ms — through a real store outage). 16s is ~3x that observed
+    // max, with no per-site exception needed: both of those legitimately-slow
+    // scenarios already fit inside it with margin. A test hitting this
+    // timeout is hung, not merely slow — raise it only with a new measured
+    // reason, never to paper over a hang. Hooks here are only
+    // `afterEach(cleanupShims)` (SIGKILL + temp-dir removal), which is far
+    // cheaper than any test body, so it shares the test budget rather than
+    // getting its own inflated one.
+    testTimeout: 16_000,
+    hookTimeout: 16_000,
+    teardownTimeout: 10_000,
   },
 });

@@ -460,3 +460,36 @@ npm run smoke         # spawn and dial dist/main.js for real (needs a build firs
 - `modules/app/agent-repl/bin/report-logging-density.sh shim` is a rough review
   aid, not semantic coverage: audit critical branches and errors directly even
   when the ratio rises.
+
+### Timeout bounds, and why they are this tight
+
+Every wait/timeout bound in these two suites is a small multiple (about 3x)
+of the observed healthy max for that suite, never a round "safe" guess. A
+suite hitting its bound is HUNG, not merely slow, and should be diagnosed as
+a hang — never fixed by raising the number back up.
+
+| Bound | Where | Value | Observed healthy max it is sized from |
+| --- | --- | --- | --- |
+| `testTimeout` | `vitest.config.ts` (unit) | 2,500ms | ~640ms (`test/log.test.ts`, bootstrap-stderr logging) |
+| `hookTimeout` | `vitest.config.ts` (unit) | 2,500ms | same — hooks here are `setupFiles` only |
+| `teardownTimeout` | `vitest.config.ts` (unit) | 2,500ms | same |
+| `testTimeout` | `vitest.integration.config.ts` | 16,000ms | ~5.14s (`test/integration/session.test.ts`, a forced `KillSession` that rides the real 5s `EXIT_QUIET_BUDGET_MS` production quiet-drain) |
+| `hookTimeout` | `vitest.integration.config.ts` | 16,000ms | shares the test budget — the only hook is `afterEach(cleanupShims)` (SIGKILL + temp-dir removal), far cheaper than any test body |
+| `teardownTimeout` | `vitest.integration.config.ts` | 10,000ms | same reasoning, vitest's own default |
+| the fs.watch re-drain interval | `test/integration-support/redrain.ts` | 20ms | deliberate level-then-edge guard against a dropped FSEvents notification, not a success path — keep as-is, do not tighten further |
+| the "stops promptly" hang guards | `test/store/reader.test.ts` (2 sites) | 300ms | the real settle is sub-millisecond; this only bounds how long a genuine hang costs before failing with a clear "hung" value |
+
+Two integration scenarios legitimately run several seconds and are NOT test
+harness bounds to tighten — they are production code paths under test:
+
+- `test/integration/session.test.ts`'s two `KillSession force` tests
+  (~5.14s) ride `EXIT_QUIET_BUDGET_MS` (`src/main.ts`, 5,000ms): the test
+  deliberately leaves a standing watch open, so the shim's own graceful-exit
+  quiet-drain runs to its full production budget before exiting.
+- `test/integration/record.test.ts`'s outage/retry tests (~4.2s each) ride
+  `DEFAULT_RETRY_POLICY.backoffMs` (`src/store/persistence.ts`,
+  `[50, 200, 800, 3000]`): a real store outage exercised end to end through
+  the real backoff schedule.
+
+Neither is a test-side wait bound, so neither was changed; both are already
+comfortably inside the 16s `testTimeout` above with margin.
