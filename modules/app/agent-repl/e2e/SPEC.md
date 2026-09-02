@@ -1114,3 +1114,20 @@ the first place. Items 1-4 above are the closest candidates and are phrased
 as reachability/verification questions rather than contract-vs-production
 conflicts, per the binding instruction not to read production code looking
 for bugs.
+
+## G. Open items for the project lead
+
+- **The e2e harness must launch the daemon with EXACTLY the argv the Emacs
+  launcher builds.** (Raised 2026-09-02 by the elisp daemon-argv landing; NOT
+  implemented here.) The launcher now appends `--default-config-dir` and
+  `--multi-repo-config-dir` (both expanded) and exports `MULTI_REPO_ROOT`,
+  because the daemon's account resolver refuses to build without the two roots
+  and exits 2 — which is precisely the defect that reached the user's live
+  logs. An e2e harness that builds its own argv is a SECOND spelling of the
+  launch contract and can drift from the one that ships; the e2e daemon start
+  should derive its argv from the elisp launcher's own builder
+  (`agent-repl-daemon--argv` in `lisp/daemon.el`, and the account roots in
+  `daemon/integration/harness/daemon.go`) rather than restating it. Until that
+  is settled, the guard against a missing root lives in
+  `daemon/integration/boot_test.go` (`TestBootRefusesWithoutAnAccountRoot`) and
+  in `lisp/test-daemon.el`.
