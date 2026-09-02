@@ -17,7 +17,7 @@
 //     Cancelled arm also falls into) is commented "Succeeded and cancelled
 //     draw nothing."
 //   - agent-shim/claude/shim/src/convert/hooks.ts: converts the vendor's
-///    `hook_started`/`hook_response` stream pair into AgentHook, and is the
+//     `hook_started`/`hook_response` stream pair into AgentHook, and is the
 //     source of the exact wire text asserted below (see HookBlocked's own
 //     comment for one place this text differs from the fake scenario's
 //     ATTACHMENT record, which this suite never reads — attachments are a
