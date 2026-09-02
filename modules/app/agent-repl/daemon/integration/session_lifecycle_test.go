@@ -3,7 +3,10 @@
 package integration
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -13,6 +16,8 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/integration/harness"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 )
@@ -88,9 +93,18 @@ func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 	// Assert: while diagnostics is withheld the workspace has NO session at
 	// all — bring-up is what records one, and it has not finished.
 	//
-	// (The proto's `existing` arm with shim_attached false is NOT asserted
-	// here: it describes a session this daemon knows of but is not attached to,
-	// and a bring-up that never completed records no session to describe.)
+	// SETTLED BEHAVIOR (read from internal/workspace/sessions.go and
+	// internal/shimclient/supervisor.go, not rationalized here): Fleet.Start
+	// calls f.remember — the only thing that populates HostSessionFacts, which
+	// hostExisting requires before it can compose ANY `existing` arm — only
+	// AFTER bringUpClient returns, and Supervisor.Spawn (what bringUpClient
+	// calls to bring the shim up) itself blocks internally until the shim's
+	// first healthy diagnostics arrives. So there is no session record for any
+	// arm — including `existing.live.shim_attached:false` — to attach to while
+	// diagnostics is withheld; `host.none` is the only answer the daemon can
+	// give. SPEC.md's "HostWorkspace shows shim_attached:false until it
+	// arrives, then true" describes a state this architecture cannot reach;
+	// see the report for the proposed correction.
 	harness.AwaitView(t, f.d.Ctx(), host, "the workspace with no session while readiness is withheld",
 		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
 			return r.GetHost().GetNone() != nil
@@ -137,12 +151,39 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	//
 	// The host stream's shim_start_failed fault is NOT asserted here: the
 	// workspace has no session record at all (the bring-up died before one was
-	// made), so its host view is the `none` arm, which carries no faults. The
-	// fault IS recorded — the health surface is where it is readable.
+	// made), so its host view is the `none` arm, which carries no faults.
 	awaitFooter(t, f, footer, "footer disconnected.start_failed", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetDisconnected().GetStartFailed() != nil
 	})
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+
+	// Assert: the fault IS recorded — SessionHealth is the surface that reads
+	// it, since it needs only a registered workspace (never a live session),
+	// unlike the host stream's faults, which live on the HostSessionLive arm
+	// and so cannot exist for a bring-up that never got that far.
+	health, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
+	if err != nil {
+		t.Fatalf("SessionHealth after a bring-up death = error %v, want an unhealthy answer", err)
+	}
+	unhealthy := health.Msg.GetSuccess().GetUnhealthy()
+	if unhealthy == nil {
+		t.Fatalf("SessionHealth = %v, want SessionHealthUnhealthy", health.Msg)
+	}
+	var startFailed *agentreplv1.SessionFaultShimStartFailed
+	for _, flt := range unhealthy.GetFaults() {
+		if sf := flt.GetShimStartFailed(); sf != nil {
+			startFailed = sf
+		}
+	}
+	if startFailed == nil {
+		t.Fatalf("SessionHealth faults = %v, want a shim_start_failed fault", unhealthy.GetFaults())
+	}
+	if startFailed.GetExitCode() != 7 {
+		t.Fatalf("shim_start_failed.exit_code = %d, want 7", startFailed.GetExitCode())
+	}
+	if !strings.Contains(startFailed.GetStderrTail(), "boom: fake bring-up death") {
+		t.Fatalf("shim_start_failed.stderr_tail = %q, want it to carry the fake's stderr", startFailed.GetStderrTail())
+	}
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
@@ -216,7 +257,11 @@ func TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawnsBefore {
 		t.Fatalf("shim spawn records = %d after the refusal, want the %d before it: the guard refuses BEFORE the spawn", got, spawnsBefore)
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// internal/workspace/refusal.go's refuse() helper — what resumeGuard calls
+	// for ArmTranscriptMissing — logs WARN under this exact operation for
+	// EVERY refusal it raises, landed arm or not; it is not gated on the
+	// arm's landing status the way server.UnlandedArm is.
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing.T) {
@@ -380,7 +425,10 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	if resp.Msg.GetError().GetUnservedRemediation() == nil {
 		t.Fatalf("AnswerColdGate = %v, want AnswerColdGateError.unserved_remediation", resp.Msg)
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// internal/workspace/refusal.go's refuse() helper — what raises
+	// ArmUnservedRemediation — logs WARN under this operation unconditionally,
+	// regardless of the arm's landing status.
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
@@ -521,7 +569,10 @@ func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
 	awaitFooter(t, f, footer, "footer closing.blocked", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
 	})
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// internal/workspace/close.go logs WARN under this operation itself
+	// whenever closeBlocker names a reason, independent of the arm-landing
+	// machinery in internal/workspace/refusal.go.
+	f.d.ExpectWarnings("daemon.workspace.close")
 }
 
 func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
@@ -566,7 +617,12 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	if resp.Msg.GetError().GetBlocked() == nil {
 		t.Fatalf("CloseWorkspace with a queued merge = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// "daemon.merge.merge_tab" (the scripted conflict) and "daemon.merge.
+	// conflicts" (the resulting park) fire during Arrange; "daemon.workspace.
+	// close" fires on the Act's own blocked refusal. Needs a suite run to
+	// confirm no other operation is reached by the merge machinery this
+	// Arrange exercises.
+	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts", "daemon.workspace.close")
 }
 
 func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {
@@ -798,7 +854,11 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawns {
 		t.Fatalf("shim spawns = %d after a second mount, want the %d already made: the stamp was already bounced for", got, spawns)
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// A staleness bounce that runs to completion has no refusal on this path
+	// (internal/rollout/relaunch.go warns only on a stand-down-window
+	// timeout, which the fake's prompt KillSession acceptance never reaches);
+	// needs a suite run to confirm nothing else warns across two mounts.
+	f.d.ExpectWarnings()
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
@@ -842,4 +902,317 @@ func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
 	// the host faults, never a count" vocabulary names no generated arm this
 	// suite could find (see report): the observable adoption facts above are
 	// asserted; the UNKNOWN/PRESERVED classification itself is not.
+}
+
+// ---- critique 3: CloseWorkspace with a held prompt ----
+
+func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
+	// Arrange: hibernate an idle session, then submit a revival prompt while
+	// the revival's new shim withholds its diagnostics. Nothing else is live
+	// (no turn, no detached work) at that point, which is what lets
+	// closeBlocker (internal/workspace/open.go) reach its held_prompts branch
+	// instead of returning turn_in_flight first.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.shim.AwaitGone()
+
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
+	footer := f.d.WatchFooter(f.ws)
+	held := f.submit("wake up", "k-close-held-prompt", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	if held.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("SubmitPrompt during revival = %v, want a minted TurnId even though delivery is held", held)
+	}
+
+	// Act
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the landed blocked arm.
+	if err != nil {
+		t.Fatalf("CloseWorkspace with a held prompt = transport error %v, want the blocked arm", err)
+	}
+	if resp.Msg.GetError().GetBlocked() == nil {
+		t.Fatalf("CloseWorkspace with a held prompt = %v, want CloseWorkspaceError.blocked", resp.Msg)
+	}
+
+	// Assert: the footer names the held-prompt cause specifically (not
+	// turn_in_flight or live_work).
+	view := awaitFooter(t, f, footer, "footer closing.blocked naming the held prompt", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
+	})
+	text := view.GetStrip().GetStatus().GetClosing().GetActivity().GetCloseBlocked().GetText()
+	if !strings.Contains(text, "held prompt") {
+		t.Fatalf("closing.blocked activity text = %q, want it to name the held-prompt cause", text)
+	}
+	f.d.ExpectWarnings("daemon.workspace.close")
+}
+
+// ---- critique 12: relaunch mechanics ----
+
+func TestRestartWorkspaceGracefulPrelaunchesASecondShimWithNoStartSessionUntilFreeness(t *testing.T) {
+	// Arrange / Act: attaching to the prelaunch's control socket already
+	// proves it was spawned WHILE the turn still runs -- ShimAt blocks until
+	// the control listener binds, and the turn is never ended in this test.
+	_, second := restartGracefulInFlight(t, "k-relaunch-prelaunch")
+
+	// Assert: it receives zero StartSession calls until freeness.
+	expectNoRPC(t, second, harness.RPCStartSession, harness.ProbeWindow)
+}
+
+func TestRestartWorkspaceGracefulSendsGracefulKillSessionToTheOldShim(t *testing.T) {
+	// Arrange
+	f, _ := restartGracefulInFlight(t, "k-relaunch-kill-old")
+
+	// Act: end the in-flight turn, letting freeness -- and the stand-down --
+	// proceed.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: the OLD shim received a graceful KillSession. Read from the
+	// shim's durable LOG, not its control socket: the fake exits once it
+	// accepts KillSession, so the socket is gone before a second control
+	// round trip could complete.
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
+	if killed.GetForce() {
+		t.Fatalf("the relaunch's stand-down KillSession.force = true, want false: the engine's own stand-down is graceful")
+	}
+}
+
+func TestRestartWorkspaceGracefulReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
+	// Arrange
+	f, second := restartGracefulInFlight(t, "k-relaunch-reap-order")
+	oldPID := f.shim.Info().PID
+
+	// Act: end the in-flight turn.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: the resume reaches the NEW shim.
+	resume := second.ExpectStartSession()
+	if resume.GetResume() == nil {
+		t.Fatalf("StartSession on the prelaunched shim = %v, want a resume source", resume)
+	}
+
+	// Assert: by the time that resume arrived, the old process was ALREADY
+	// gone. internal/rollout/relaunch.go's standDown passes the reap gate
+	// (<-exited) before Install and Resume are ever called, so this is a
+	// near-instant confirmation of an already-settled fact, not a wait: a
+	// violation of the ordering is still caught, just not masked behind a
+	// long timeout.
+	harness.AwaitProcessGone(t, shortTimeout(t, f.d.Ctx(), 200*time.Millisecond), oldPID)
+}
+
+func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	f.submit("long running work", "k-restart-forced-no-redrive", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+
+	// Act
+	resp, err := f.d.Client().RestartWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws, Force: true}))
+	if err != nil {
+		t.Fatalf("RestartWorkspace{force:true} = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
+	}
+	killedTurn := f.shim.ExpectKillTurn()
+	if !killedTurn.GetForce() {
+		t.Fatalf("KillTurn.force = false on a forced restart, want true: the running turn is interrupted rather than waited out")
+	}
+
+	second := f.d.ShimAt(prelaunchControlSocket(f.d, f.ws, 1))
+	resume := second.ExpectStartSession()
+	if resume.GetResume() == nil {
+		t.Fatalf("StartSession on the resumed shim = %v, want a resume source", resume)
+	}
+
+	// Assert: the interrupted turn is NOT re-driven -- the daemon never
+	// resubmits it as a fresh StartTurn once the resumed shim is up.
+	expectNoRPC(t, second, harness.RPCStartTurn, harness.ProbeWindow)
+}
+
+// ---- critique 13: bounce accountability ----
+
+func TestCrashBootWithNoManifestProducesNoBounceFault(t *testing.T) {
+	t.Skip("unexpressible against current production code: internal/rollout/manifest.go's Reconcile() " +
+		"returns early with ZERO dispositions when no intent manifest is present (found=false at " +
+		"manifest.go:181-192), so a crash that leaves no manifest on disk never opens ANY fault -- " +
+		"bounce_unknown or otherwise -- for the surviving session. This is not a missing HARNESS " +
+		"capability; it is a missing PRODUCTION hook: Reconcile has no branch that treats an absent " +
+		"manifest as anything but an ordinary boot. SPEC.md's crash-boot-adoption note (\"the intent " +
+		"manifest absent -> reports UNKNOWN/PRESERVED per session in the host faults\") describes " +
+		"behavior this function does not implement; see the report for the proposed SPEC.md correction.")
+}
+
+func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
+	// Arrange: an opened workspace whose shim will be gone before restart.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	oldPID := f.shim.Info().PID
+	vendorID := f.shim.Info().VendorSessionID
+	if vendorID == "" {
+		t.Fatal("the fake shim reports no vendor session id after StartSession(fresh)")
+	}
+
+	// Kill the daemon AND the shim: the workspace lock reads FREE at restart,
+	// which is what "a pid that is gone" means to the lock probe the
+	// disposition is computed against.
+	f.d.Kill()
+	if proc, err := os.FindProcess(oldPID); err == nil {
+		_ = proc.Signal(syscall.SIGKILL)
+	}
+	harness.AwaitProcessGone(t, f.d.Ctx(), oldPID)
+
+	// A manifest naming this session as one the outgoing daemon meant to
+	// PRESERVE, whose pid is now gone: disposition(preserve, free) = DIED,
+	// which health.KindBounceDied ("bounce_died") is meant to report.
+	writeIntentManifest(t, f.d, rollout.ManifestSession{
+		Workspace:       ids.WorkspaceID(f.ws.GetId()),
+		Dir:             f.repo.Dir,
+		ShimPID:         oldPID,
+		VendorSessionID: vendorID,
+		Intent:          rollout.IntentPreserve,
+	})
+
+	// Act: restart on the same state root.
+	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
+
+	// Assert: the successor's host stream carries a bounce_died fault for
+	// this workspace.
+	host := successor.WatchHost(f.ws)
+	awaitHostFault(t, successor, host, "a bounce_died fault", func(hf *agentreplv1.HostFault) bool {
+		return hf.GetBounceDied() != nil
+	})
+}
+
+// ---- critique 14: SessionStarted.live_work ----
+
+func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
+	// Arrange: a registered-but-unopened workspace whose profile states one
+	// already-live detached shell, so OpenWorkspace's SessionStarted carries
+	// it as restored live work.
+	f := newRegistered(t, harness.Opts{})
+	work := detachedShell("restored-shell-1", "sleep 100")
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+		LiveWork: harness.EncodeLiveWork(t, work),
+	})
+	feed := f.watchRootFeed() // subscribed BEFORE open, so nothing races the restore
+
+	// Act
+	f.open()
+
+	// Assert: the restored item's row lands on the ROOT feed.
+	awaitRow(t, f, feed, "the restored live-work row on the root feed", func(r *frontendv1.FeedRow) bool {
+		return r.GetDetachedShell() != nil
+	})
+}
+
+func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
+	// Arrange: a restored live item whose origin is `detached` (continuing an
+	// in-turn unit) rather than `created`. At restore time the watcher has no
+	// prior in-turn fact for ANY activity id -- it was just constructed -- so
+	// this is unresolvable by construction, which is exactly the scenario
+	// internal/sessionwatcher/route.go's resolveDetachedLocked logs as
+	// daemon.sessionwatcher.detached_kind_unknown before routeDetachedWorkLocked's
+	// own default branch logs it a second time and skips the item.
+	f := newRegistered(t, harness.Opts{})
+	unknown := &conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: "restored-detached-1"},
+		Origin: &conversationv1.AgentDetachedWork_Detached{Detached: &conversationv1.DetachedWorkDetached{
+			DetachedFromId: &conversationv1.AgentActivityId{Value: "some-earlier-activity"},
+			Cause:          &conversationv1.DetachedWorkDetached_Requested{Requested: &conversationv1.DetachedCauseRequested{}},
+		}},
+	}
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
+		LiveWork: harness.EncodeLiveWork(t, unknown),
+	})
+
+	// Act
+	f.open()
+
+	// Assert: the daemon logs the error and the item is skipped -- the
+	// restored live-work set settles at zero rather than crashing bring-up.
+	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.sessionwatcher.detached_kind_unknown")
+	awaitLiveWork(t, f, 0)
+	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
+}
+
+// ---- critique 17 (this agent's share): AnswerColdGate{clear} ----
+
+func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
+		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
+	}})
+	feed := f.watchRootFeed()
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
+		return r.GetColdGate().GetStanding() != nil
+	})
+
+	// Act
+	answered, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+		Workspace: f.ws,
+		Gate:      gateRow.GetId(),
+		Choice:    &agentreplv1.AnswerColdGateRequest_Clear{Clear: &agentreplv1.AnswerColdGateClear{}},
+	}))
+	if err != nil {
+		t.Fatalf("AnswerColdGate{clear} = error %v, want a success", err)
+	}
+	if answered.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerColdGate{clear} = %v, want a success", answered.Msg)
+	}
+
+	// Assert: the retry echoes the clear choice exactly.
+	retry := shim.ExpectStartSession()
+	if retry.GetResume().GetColdRemediation().GetClear() == nil {
+		t.Fatalf("the retry's cold_remediation = %v, want {clear}", retry.GetResume().GetColdRemediation())
+	}
+}
+
+// ---- critique 25 (this agent's share): KillWorkspace preserves data ----
+
+func TestKillWorkspaceLeavesTheWorktreeAndBranchIntact(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	repo := harness.NewRepo(t)
+	dir := worktreeOf(t, repo, "kill-keep-data")
+	ws := harness.Register(t, d, dir)
+	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	}
+	shim := d.Shim(ws)
+	shim.ExpectStartSession()
+
+	// Act
+	resp, err := d.Client().KillWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("KillWorkspace = %v, want a success", resp.Msg)
+	}
+	shim.AwaitGone()
+
+	// Assert: the worktree and branch both still exist -- Kill ends the
+	// session, never the workspace's data.
+	if !repo.HasWorktree(dir) {
+		t.Fatalf("worktree %s is gone after KillWorkspace, want the workspace's data left intact", dir)
+	}
+	if !repo.HasBranch("kill-keep-data") {
+		t.Fatalf("branch %q is gone after KillWorkspace, want the workspace's data left intact", "kill-keep-data")
+	}
 }
