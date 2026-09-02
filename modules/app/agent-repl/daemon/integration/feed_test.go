@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -72,7 +73,18 @@ func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 	if err == nil {
 		t.Fatal("WatchFeed(bogus token) = success, want a transport-level refusal")
 	}
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// A refused Watch* open is transport-closed BY DESIGN (project lead): it is
+	// recorded at INFO under daemon.refusal.transport_closed, never warned as
+	// an unlanded arm.
+	rec := f.d.AwaitRunLogOperation("daemon.refusal.transport_closed")
+	if !strings.EqualFold(rec.Level, "info") {
+		t.Fatalf("the transport-closed record = level %q, want INFO", rec.Level)
+	}
+	if rec.Context["rpc"] != "WatchFeed" || rec.Context["cause"] != "unknown_token" {
+		t.Fatalf("the transport-closed record's context = %v, want rpc WatchFeed and cause unknown_token", rec.Context)
+	}
+	// No ExpectWarnings operation: the refusal must produce no WARN at all.
+	f.d.ExpectWarnings()
 }
 
 func TestGetFeedPageNextWithNoWalkStandingIsRefused(t *testing.T) {

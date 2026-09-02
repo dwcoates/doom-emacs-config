@@ -202,3 +202,70 @@ func TestPushTransferredReachesTheWebStreamWithTheAddress(t *testing.T) {
 		t.Fatalf("address = %q, want the successor's", got)
 	}
 }
+
+// TestTransportClosedRecordsTheInfoShape pins the record a refused stream open
+// makes: INFO, operation daemon.refusal.transport_closed, structured rpc and
+// cause.
+func TestTransportClosedRecordsTheInfoShape(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	TransportClosed(log, "WatchFooter", "unknown_workspace", "no workspace \"w1\" is registered", true)
+
+	// Assert.
+	info := log.at("INFO")
+	if len(info) != 1 {
+		t.Fatalf("INFO records = %d, want exactly one", len(info))
+	}
+	if info[0].Operation != "daemon.refusal.transport_closed" {
+		t.Fatalf("operation = %q, want daemon.refusal.transport_closed", info[0].Operation)
+	}
+	if info[0].Context["rpc"] != "WatchFooter" || info[0].Context["cause"] != "unknown_workspace" {
+		t.Fatalf("context = %v, want structured rpc and cause", info[0].Context)
+	}
+}
+
+// TestTransportClosedEmitsNoWarning pins the ruling's negative half: a
+// by-design transport-closed refusal is never warned as an unlanded arm.
+func TestTransportClosedEmitsNoWarning(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	TransportClosed(log, "WatchFeed", "unknown_token", "the token was never minted", true)
+
+	// Assert.
+	if warnings := log.at("WARN"); len(warnings) != 0 {
+		t.Fatalf("WARN records = %v, want none", warnings)
+	}
+}
+
+// TestTransportClosedDropsTheIntendedArmSpelling pins that the client-facing
+// message names the cause WITHOUT the unlanded-arm spelling.
+func TestTransportClosedDropsTheIntendedArmSpelling(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	cerr := TransportClosed(log, "WatchTopbar", "not_yet_adopted", "not adopted yet", false)
+
+	// Assert.
+	if got := cerr.Message(); got != "WatchTopbar closed the stream: not_yet_adopted: not adopted yet" {
+		t.Fatalf("message = %q, want the cause named without \"intended arm:\"", got)
+	}
+}
+
+// TestTransportClosedUsesNotFoundForAnUnknownID pins the code split.
+func TestTransportClosedUsesNotFoundForAnUnknownID(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	cerr := TransportClosed(log, "WatchFeed", "unknown_token", "no such token", true)
+
+	// Assert.
+	if cerr.Code() != connect.CodeNotFound {
+		t.Fatalf("code = %v, want CodeNotFound", cerr.Code())
+	}
+}

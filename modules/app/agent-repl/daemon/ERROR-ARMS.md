@@ -72,10 +72,19 @@ NOTHING NEW IS OWED by drain or rollout: no refusal either makes lacks an arm.
 A `Watch*` rpc has NO `<Rpc>Error` message at all: a refused open is a Connect
 error raised before the first frame, and the stream simply never opens. That is
 the SETTLED shape, not a gap — these refusals are NOT unlanded arms and no arm
-is owed for any of them. The daemon still spells the intended arm into the
-error's message through `server.UnlandedArm`, because that is the one carrier
-that names a refusal in a message rather than a field, and a client reading the
-closed stream learns exactly which condition closed it.
+is owed for any of them.
+
+Because they are by design, they are NOT logged as unlanded arms (project lead,
+landing 6 follow-up). Every refused stream open goes through
+`server.TransportClosed`, which records it at INFO under operation
+`daemon.refusal.transport_closed` with structured `rpc` and `cause` fields, and
+NEVER at WARNING. The Connect error the client sees still names the cause —
+`<Rpc> closed the stream: <cause>: <reason>` — but drops the `intended arm:`
+spelling, which belongs only to genuinely unlanded arms. `server.UnlandedArm` is
+used at NO Watch* refusal site, and the per-workspace standing refusals
+(`transferring_away`, `not_yet_adopted`) resolved for a stream are likewise not
+warned: `server.resolveStreamRef` suppresses that warning, so the INFO record is
+the only one a refused open makes.
 
 | rpc | refusal | condition | package |
 | --- | --- | --- | --- |
@@ -89,12 +98,17 @@ closed stream learns exactly which condition closed it.
 Every row below is a refusal the server MAKES and the contract has no arm for.
 Each answers through `server.UnlandedArm`.
 
-One consequence is recorded as a row rather than lost: the SHIM still refuses a
-bubble-addressed submit with its own `turn_already_open`, propagated by name.
+One consequence is recorded as a row rather than lost: the SHIM refuses a
+bubble-addressed submit in TWO shapes and `SubmitPromptError` has a home for
+neither. By project-lead ruling the landing-7 candidate is ONE arm,
+`SubmitPromptError.bubble_refused { kind: not_deliverable | agent_busy }`, and
+until it lands both shapes answer through `server.UnlandedArm` naming
+`SubmitPromptError.bubble_refused` with the kind in the reason
+(`kind <kind>: <reason>`). `server.bubbleRefused` is the one mapping.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
-| SubmitPrompt (the bubble path) | `turn_already_open` | the shim's `StartTurnFailure.turn_already_open` for a subagent whose turn runs, propagated by NAME rather than collapsed into a sentence. `SubmitPromptError` no longer carries the arm | workspace |
+| SubmitPrompt (the bubble path) | `bubble_refused` | ONE arm, two kinds. `kind: not_deliverable` — the shim's `UpdateAgentFailure.not_deliverable` for an `UpdateAgent{prompt}` the SDK cannot route to the addressed subagent. `kind: agent_busy` — the shim's `StartTurnFailure.turn_already_open` for a subagent whose own turn is already running. `SubmitPromptError` carries neither shape today | workspace / server |
 
 `SubmitPromptError.turn_already_open` is RETIRED (landing 6, tag 8 reserved):
 it never had a producer — the session watcher answers the MAIN turn's flight and
