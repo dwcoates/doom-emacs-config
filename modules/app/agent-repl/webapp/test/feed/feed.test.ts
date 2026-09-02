@@ -107,6 +107,95 @@ describe("mountFeed: opening the root feed", () => {
   });
 });
 
+describe("mountFeed: re-opening the tail", () => {
+  /**
+   * A daemon whose root page is whatever `pages` yields next, tailed on a
+   * channel the test can close to kill the stream.
+   */
+  function reopening(pages: FeedRow[][]) {
+    const channels = new Map<string, Channel<WatchFeedResponse>>();
+    const channel = new Channel<WatchFeedResponse>();
+    channels.set("tok:root", channel);
+    let served = 0;
+    const h = harness({
+      channels,
+      openFeed: (req) => {
+        const rows = pages[Math.min(served, pages.length - 1)];
+        served += 1;
+        return openSuccess(page(rows), tokenFor(req));
+      },
+    });
+    return { h, channel };
+  }
+
+  it("opens the feed again when the tail ends on its own", async () => {
+    // Arrange
+    const { h, channel } = reopening([[userPromptRow("p1", "cold")]]);
+    mount(h);
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert: the token pins the tail to its page, so a reopen re-opens.
+    expect(h.calls.openFeed.length).toBeGreaterThan(1);
+  });
+
+  it("paints the fresh page over the rows on a reopen", async () => {
+    // Arrange
+    const { h, channel } = reopening([
+      [userPromptRow("p1", "cold")],
+      [userPromptRow("p2", "fresh")],
+    ]);
+    const { host } = mount(h);
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert
+    expect(host.querySelector('[data-feed-row="p2"]')).not.toBeNull();
+  });
+
+  it("drops a row the fresh page omits", async () => {
+    // Arrange
+    const { h, channel } = reopening([
+      [userPromptRow("p1", "cold")],
+      [userPromptRow("p2", "fresh")],
+    ]);
+    const { host } = mount(h);
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert: a page is a whole view, so the reopen replaces rather than adds.
+    expect(host.querySelector('[data-feed-row="p1"]')).toBeNull();
+  });
+
+  it("tails the token the reopen minted", async () => {
+    // Arrange
+    const { h, channel } = reopening([[userPromptRow("p1", "cold")]]);
+    mount(h);
+    await settle();
+    // Act
+    channel.close();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    // Assert
+    expect(h.calls.watchFeed.at(-1)?.watch?.value).toBe("tok:root");
+  });
+
+  it("opens the feed once for the first attempt", async () => {
+    // Arrange / Act
+    const { h } = reopening([[userPromptRow("p1", "cold")]]);
+    mount(h);
+    await settle();
+    // Assert: the open belongs to the stream, but only one attempt has run.
+    expect(h.calls.openFeed).toHaveLength(1);
+  });
+});
+
 describe("mountFeed: the bubble kinds", () => {
   /** A daemon whose ROOT page is ROWS and whose sub-feeds are empty. */
   function rootOnly(rows: FeedRow[]): Harness {

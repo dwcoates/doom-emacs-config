@@ -36,8 +36,8 @@ import {
   type FeedRow,
   type FeedSubagent,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import type { FeedWatchToken } from "../../../proto/gen/ts/agentrepl/v1/feed_token_pb";
 import type { AppContext } from "../rpc/context.js";
+import type { AgentReplClient } from "../rpc/client.js";
 import { buildOpenFeedRequest, buildWatchFeedRequest } from "./requests.js";
 import { mountBubble } from "./bubble.js";
 import {
@@ -107,7 +107,7 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     scroll: scrollBox === null || tail === null ? undefined : { box: scrollBox, tail },
   });
 
-  void openRoot();
+  openWatch();
 
   return { revealRow, dispose };
 
@@ -127,51 +127,71 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
     };
   }
 
-  /** Open the root feed: page, then tail. */
-  async function openRoot(): Promise<void> {
-    let response: OpenFeedResponse;
-    try {
-      response = await callUnary(
-        ctx,
-        "OpenFeed",
-        (client) => client.openFeed(buildOpenFeedRequest(ctx.workspace)),
-        OpenFeedResponseSchema,
-      );
-    } catch {
-      // callUnary logged the transport failure; the failure overlay is fed by
-      // the stream machinery, and the open retries when the page reconnects.
-      return;
-    }
-    if (disposed) return;
+  /**
+   * THE ROOT FEED'S STANDING TAIL, opened THROUGH `OpenFeed` on every attempt.
+   *
+   * THE OPEN IS PART OF THE STREAM, not a step before it. `FeedWatchToken`
+   * pins the tail "to begin exactly after the page the open answered with, so
+   * the page/tail seam cannot gap or overlap" (feed_token.proto). A reopen that
+   * re-echoed the DEAD token would resume a tail pinned to a page painted
+   * before the link broke: every row produced during the outage silently
+   * missing, and every row from the stale page still standing as though it were
+   * current. So each attempt opens the feed again, PAINTS THE FRESH PAGE OVER
+   * THE ROWS — a page is a whole view, and `"replace"` is what makes it one —
+   * and tails the token that page came with.
+   *
+   * Putting it inside `open` rather than in a reconnect hook keeps ONE handle
+   * for the whole life of the tail, which is what lets `watchStream` own the
+   * backoff, the `daemon_unreachable` window and its retraction exactly once.
+   */
+  function openWatch(): void {
+    watch?.cancel();
+    watch = watchStream<WatchFeedResponse>(ctx, {
+      name: "WatchFeed",
+      schema: WatchFeedResponseSchema,
+      open: (client, signal) => openAndTail(client, signal),
+      onPush: (response) => {
+        root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
+      },
+    });
+  }
+
+  /**
+   * One attempt: `OpenFeed`, paint, then tail.
+   *
+   * A refusal ENDS the attempt rather than throwing something the loop would
+   * mislabel. The loop then treats the end as a stream that stopped on its own
+   * — which it is — files its card and retries with backoff, which is right for
+   * `not_yet_adopted` and no worse than a permanently empty feed for the rest.
+   */
+  async function* openAndTail(
+    client: AgentReplClient,
+    signal: AbortSignal,
+  ): AsyncGenerator<WatchFeedResponse> {
+    const response: OpenFeedResponse = await callUnary(
+      ctx,
+      "OpenFeed",
+      (c) => c.openFeed(buildOpenFeedRequest(ctx.workspace)),
+      OpenFeedResponseSchema,
+    );
+    if (disposed || signal.aborted) return;
     const result = requireCase(response.result, "OpenFeedResponse.result");
     switch (result.case) {
-      case "success":
+      case "success": {
         root.applyPage(requireMessage(result.value.page, "OpenFeedSuccess.page"), "replace");
-        openWatch(requireMessage(result.value.watch, "OpenFeedSuccess.watch"));
+        const token = requireMessage(result.value.watch, "OpenFeedSuccess.watch");
+        yield* client.watchFeed(buildWatchFeedRequest(token), { signal });
         return;
+      }
       case "error":
         log("error", "the daemon refused to open the workspace's root feed", {
           operation: "feed.root-open-refused",
-          context: {},
+          context: { arm: requireCase(result.value.cause ?? {}, "OpenFeedError.cause").case },
         });
         return;
       default:
         unreachableArm("OpenFeedResponse.result", armName(result));
     }
-  }
-
-  /** The root feed's standing tail. */
-  function openWatch(token: FeedWatchToken): void {
-    watch?.cancel();
-    watch = watchStream<WatchFeedResponse>(ctx, {
-      name: "WatchFeed",
-      schema: WatchFeedResponseSchema,
-      open: (client, signal) =>
-        client.watchFeed(buildWatchFeedRequest(token), { signal }),
-      onPush: (response) => {
-        root.upsert(requireMessage(response.row, "WatchFeedResponse.row"));
-      },
-    });
   }
 
   /**
