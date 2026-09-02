@@ -453,3 +453,10 @@ One file per drawn component; each file's header comment is its spec.
   fed by the PUSHED TopbarView (the daemon routes diagnostics into it), drawn by
   typed arm — that is what the Landing 4 relay line meant.
 - The integration suite's three extrapolated fault blocks (33 tests) are deleted.
+
+## UpdateMergeQueue ruling (2026-09-01, project lead)
+
+- UpdateMergeQueue is Emacs-side operator tooling with no webapp surface: no
+  merge-queue control exists in the webapp, and its refusal arms (incl. landing
+  6's `unknown_repository`) render nowhere here. The integration suite's seven
+  UpdateMergeQueue refusal cases are deleted.
