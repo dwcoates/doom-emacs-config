@@ -904,9 +904,6 @@ export function createFakeQuery(
     },
     prompt: "",
     args: "",
-    get sessionUuid() {
-      return sessionUuid;
-    },
     get model() {
       return model;
     },
@@ -931,9 +928,7 @@ export function createFakeQuery(
     systemRecord,
     systemMessage,
     result,
-    gate: () => awaitTurnGate(context.prompt),
     canUseTool,
-    interrupted: () => interrupted,
     awaitInterrupt: () =>
       interrupted
         ? Promise.resolve()
@@ -951,7 +946,6 @@ export function createFakeQuery(
     mintAgentTaskId,
     mintMessageId,
     startTask,
-    liveTasks: () => [...liveTasks.values()],
     announceLiveTasks,
     endTask: (taskId: string) => {
       liveTasks.delete(taskId);
