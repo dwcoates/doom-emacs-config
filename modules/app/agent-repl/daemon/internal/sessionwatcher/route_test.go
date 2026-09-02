@@ -9,10 +9,11 @@ import (
 	"claude-repld/internal/wsm"
 )
 
-// TestRouteActivityGoesToFeedAndFooterOnly covers the ordinary activity: the
-// feed draws the row and the footer advances its status tree, and the topbar
-// must NOT see it — the topbar sees an activity for one reason only.
-func TestRouteActivityGoesToFeedAndFooterOnly(t *testing.T) {
+// TestRouteActivityGoesToTheThreeSinksThatDrawFromIt covers the ordinary
+// activity: the feed draws the row, the footer advances its status tree, and
+// the topbar accumulates the session's token spend from the usage the frame
+// carries.
+func TestRouteActivityGoesToTheThreeSinksThatDrawFromIt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
 	h.quiet()
@@ -21,12 +22,12 @@ func TestRouteActivityGoesToFeedAndFooterOnly(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(readActivity("act-1")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
 }
 
-// TestRouteUnmodeledActivityAlsoWarnsTheTopbar covers the one reason the
-// topbar sees an activity: an activity the schema does not model is a warning
-// it shows.
+// TestRouteUnmodeledActivityAlsoWarnsTheTopbar covers the extra thing an
+// unmodeled activity earns beyond the ordinary routing: a warning the topbar
+// shows.
 func TestRouteUnmodeledActivityAlsoWarnsTheTopbar(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -55,7 +56,7 @@ func TestRouteContextInjectedActivity(t *testing.T) {
 	got := h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(contextInjectedActivity("act-1")))))
 
 	// Assert.
-	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity"})
+	assertNames(t, got, []string{"feed.OnActivity", "footer.OnActivity", "topbar.OnActivity"})
 }
 
 // TestRouteQuestion covers a blocked question: the feed draws it, the footer
