@@ -95,22 +95,14 @@ func tlResponseMarkdown(t *testing.T, rows []*frontendv1.FeedRow, id *frontendv1
 	return ""
 }
 
-// tlLogTerminal records the actual FeedTurnEnded outcome arm this run
-// observed, for the tests below whose SPEC.md-described terminal shape has no
-// currently-wired proto path (see each such test's own header comment) — a
-// human reading `go test -v` output can see the real shape without this file
-// asserting one it cannot ground in the contract.
-func tlLogTerminal(t *testing.T, ended *frontendv1.FeedTurnEnded) {
+// tlAssertHeadline asserts the errored terminal's daemon-composed headline is
+// non-empty — Landing 8 (PROTO-CHANGES.md): every FeedTurnEndedErrored carries
+// `headline`, the client's whole account of what the arm means, drawn by the
+// daemon rather than table-looked-up by the client.
+func tlAssertHeadline(t *testing.T, errored *frontendv1.FeedTurnEndedErrored) {
 	t.Helper()
-	switch {
-	case ended.GetConcluded() != nil:
-		t.Logf("turn ended: Concluded (answer=%v)", ended.GetConcluded().GetAnswer())
-	case ended.GetErrored() != nil:
-		t.Logf("turn ended: Errored (arm=%T, headline=%q)", ended.GetErrored().GetError(), ended.GetErrored().GetHeadline().GetText())
-	case ended.GetInterrupted() != nil:
-		t.Logf("turn ended: Interrupted")
-	default:
-		t.Fatalf("FeedTurnEnded has no outcome set at all: %v", ended)
+	if errored.GetHeadline().GetText() == "" {
+		t.Fatalf("FeedTurnEndedErrored.Headline.Text is empty, want a non-empty daemon-composed headline: %v", errored)
 	}
 }
 
@@ -157,28 +149,18 @@ func TestTurnStartToCompletion(t *testing.T) {
 
 // TestTurnStopMaxTurns pins shim.md's "Where the sixteen failure arms
 // actually live" (`AgentFailure.max_turns`, `result.terminal_reason:
-// "max_turns"`). Scenario: `!fail-max-turns`
+// "max_turns"`) as landed on the wire by PROTO-CHANGES.md's "Landing 8"
+// (2026-09-02, protos 1fdf85e63, bindings 3791cd630): `frontend.v1
+// FeedTurnEndedErrored.error` gained `max_turns` (tag 19,
+// `FailureVendorMaxTurns`), importing failure.proto's evidence message as
+// that file prescribes. Before Landing 8 this arm had no wire path to any
+// frontend stream at all (this test's own prior revision could only assert
+// "some terminal" for exactly that reason).
+//
+// Scenario: `!fail-max-turns`
 // (agent-shim/claude/shim/src/fake/scenarios/failures.ts's FAIL_MAX_TURNS) —
 // the fake-registry name behind the `turn-stop-max-turns` capture golden
-// named in SPEC.md's test list and MANIFEST.md's table (confirmed by reading
-// both scenario source and the manifest: the capture's own recorded prompt
-// was free prose, but the fake SDK reproduces the SAME arm pairing under this
-// `!name`).
-//
-// OPEN QUESTION (not guessed around — reading only proto/src): this test does
-// NOT assert a `FeedTurnEndedErrored` arm for max_turns. Confirmed by
-// grep: `frontend/v1/feed.proto`'s `FeedTurnEndedErrored.error` oneof carries
-// only the twelve `api_request_failed` sub-arms (rate_limited ..
-// max_output_tokens); `frontend/v1/failure.proto` separately declares
-// `FailureVendorMaxTurns` with a header comment stating it is meant to be
-// "that entry's OWN `error` arm in feed.proto, which imports the evidence
-// message directly" — but feed.proto does not reference
-// `FailureVendorMaxTurns` anywhere (confirmed by grep), nor is it wired into
-// `FailureKind`'s oneof. So no proto-typed path currently carries this fact
-// to a frontend watch stream. This test therefore asserts only the
-// structurally-guaranteed fact — the turn reaches SOME terminal, per shim.md
-// "every bounded stream concludes with a TERMINAL FRAME" — and logs the
-// observed outcome arm for whoever resolves this gap.
+// named in SPEC.md's test list and MANIFEST.md's table.
 func TestTurnStopMaxTurns(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -193,19 +175,21 @@ func TestTurnStopMaxTurns(t *testing.T) {
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
 	}
-	tlLogTerminal(t, ended)
-	if ended.GetInterrupted() != nil {
-		t.Fatalf("FeedTurnEnded.Outcome = Interrupted, want a vendor-stop terminal (max_turns is a limit reached, never a user interrupt)")
+	errored := ended.GetErrored()
+	if errored == nil {
+		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored{MaxTurns}", ended)
 	}
+	if errored.GetMaxTurns() == nil {
+		t.Fatalf("FeedTurnEndedErrored.Error = %T, want MaxTurns", errored.GetError())
+	}
+	tlAssertHeadline(t, errored)
 }
 
 // TestTurnStopMaxBudgetUsd is TestTurnStopMaxTurns's sibling for the budget
-// ceiling: shim.md's `AgentFailure.budget_exhausted`,
-// `terminal_reason: "budget_exhausted"`. Scenario: `!fail-budget`
-// (failures.ts's FAIL_BUDGET) — the `turn-stop-max-budget-usd` golden's
-// fake-registry name. Same OPEN QUESTION as TestTurnStopMaxTurns applies
-// verbatim: `FailureVendorMaxBudget` is declared in failure.proto for exactly
-// this fact and is not wired into any oneof a frontend watch stream carries.
+// ceiling: shim.md's `AgentFailure.budget_exhausted`, landed by Landing 8 as
+// `frontend.v1 FeedTurnEndedErrored.error`'s `max_budget` (tag 20,
+// `FailureVendorMaxBudget`). Scenario: `!fail-budget` (failures.ts's
+// FAIL_BUDGET) — the `turn-stop-max-budget-usd` golden's fake-registry name.
 func TestTurnStopMaxBudgetUsd(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -220,10 +204,14 @@ func TestTurnStopMaxBudgetUsd(t *testing.T) {
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
 	}
-	tlLogTerminal(t, ended)
-	if ended.GetInterrupted() != nil {
-		t.Fatalf("FeedTurnEnded.Outcome = Interrupted, want a vendor-stop terminal (budget_exhausted is a limit reached, never a user interrupt)")
+	errored := ended.GetErrored()
+	if errored == nil {
+		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored{MaxBudget}", ended)
 	}
+	if errored.GetMaxBudget() == nil {
+		t.Fatalf("FeedTurnEndedErrored.Error = %T, want MaxBudget", errored.GetError())
+	}
+	tlAssertHeadline(t, errored)
 }
 
 // ---------------------------------------------------------------------------
@@ -232,22 +220,23 @@ func TestTurnStopMaxBudgetUsd(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestTurnStopMaxStructuredOutputRetries pins shim.md's
-// `AgentFailure.structured_output_retry_exhausted`. Scenario:
-// `!fail-structured-output` (failures.ts's FAIL_STRUCTURED_OUTPUT).
+// `AgentFailure.structured_output_retry_exhausted`. Landing 8 (PROTO-CHANGES.md,
+// 2026-09-02) gives this NO dedicated arm of its own: it "arrives as
+// `turn_failed` with that `stop_reason`, not as its own arm" — `frontend.v1
+// FeedTurnEndedErrored.error`'s `turn_failed` (tag 22,
+// `FailureVendorTurnFailed`) carries a `stop_reason` string, and
+// `structured_output_retry_exhausted` rides that field rather than getting
+// its own oneof member. Scenario: `!fail-structured-output` (failures.ts's
+// FAIL_STRUCTURED_OUTPUT).
 //
 // DECLARED-ONLY (testdata/captures/MANIFEST.md, "Evidence gaps": "no capture
 // grounds this terminal (`turn-stop-max-structured-output-retries` ended
 // `success.completed`)... the mock keeps the declared arm"). The fake SDK's
 // `run()` still deliberately emits the declared `error_max_structured_output_
-// retries` subtype (unlike the real capture, which never reached it), so
-// this test drives a genuinely-produced-by-the-mock arm that no real vendor
+// retries` subtype (unlike the real capture, which never reached it), so this
+// test drives a genuinely-produced-by-the-mock arm that no real vendor
 // recording grounds — it is asserting the SHAPE the mock declares, not a
 // golden-verified fact, exactly as SPEC.md's test-list entry #4 describes.
-//
-// Same OPEN QUESTION as the max-turns/budget pair: no `FeedTurnEndedErrored`
-// arm or wired `FailureKind` arm corresponds to
-// `structured_output_retry_exhausted` either, so this test asserts only the
-// structural terminal fact and logs the observed arm.
 func TestTurnStopMaxStructuredOutputRetries(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -262,15 +251,25 @@ func TestTurnStopMaxStructuredOutputRetries(t *testing.T) {
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
 	}
-	tlLogTerminal(t, ended)
-	if ended.GetInterrupted() != nil {
-		t.Fatalf("FeedTurnEnded.Outcome = Interrupted, want a vendor-stop terminal")
+	errored := ended.GetErrored()
+	if errored == nil {
+		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored{TurnFailed}", ended)
 	}
+	turnFailed := errored.GetTurnFailed()
+	if turnFailed == nil {
+		t.Fatalf("FeedTurnEndedErrored.Error = %T, want TurnFailed (structured_output_retry_exhausted rides its stop_reason, per Landing 8)", errored.GetError())
+	}
+	if got, want := turnFailed.GetStopReason(), "structured_output_retry_exhausted"; got != want {
+		t.Fatalf("FailureVendorTurnFailed.StopReason = %q, want %q", got, want)
+	}
+	tlAssertHeadline(t, errored)
 }
 
 // TestTurnStopErrorDuringExecution pins shim.md's
-// `AgentFailure.execution_error`. Scenario: `!fail-execution`
-// (failures.ts's FAIL_EXECUTION).
+// `AgentFailure.execution_error`, landed by Landing 8 as `frontend.v1
+// FeedTurnEndedErrored.error`'s `execution_error` (tag 21,
+// `FailureVendorExecutionError`). Scenario: `!fail-execution` (failures.ts's
+// FAIL_EXECUTION).
 //
 // DECLARED-ONLY (MANIFEST.md: "no capture grounds this terminal
 // (`turn-stop-error-during-execution` ended `success.interrupted` after an
@@ -279,10 +278,6 @@ func TestTurnStopMaxStructuredOutputRetries(t *testing.T) {
 // see failures.ts's own comment: naming a reason would reach whatever that
 // reason spells instead of the unclassified arm), so this test drives a
 // declared-but-ungrounded shape, per SPEC.md's own instruction for this row.
-//
-// Same OPEN QUESTION: `FailureVendorExecutionError` is declared in
-// failure.proto for exactly this fact and is unwired, same as MaxTurns/
-// MaxBudget above.
 func TestTurnStopErrorDuringExecution(t *testing.T) {
 	// Arrange
 	w := NewWorld(t, WorldOpts{})
@@ -297,24 +292,28 @@ func TestTurnStopErrorDuringExecution(t *testing.T) {
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
 	}
-	tlLogTerminal(t, ended)
-	if ended.GetInterrupted() != nil {
-		t.Fatalf("FeedTurnEnded.Outcome = Interrupted, want a vendor-stop terminal")
+	errored := ended.GetErrored()
+	if errored == nil {
+		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored{ExecutionError}", ended)
 	}
+	if errored.GetExecutionError() == nil {
+		t.Fatalf("FeedTurnEndedErrored.Error = %T, want ExecutionError", errored.GetError())
+	}
+	tlAssertHeadline(t, errored)
 }
 
-// TestTurnStopHookStop pins shim.md's `AgentFailure.stop_hook_prevented`.
-// Scenario: `!fail-stop-hook` (failures.ts's FAIL_STOP_HOOK), which also
-// writes the vendor's own `system:stop_hook_summary` transcript record ahead
-// of its result (SPEC.md's test-list entry #6: "residue
-// vendor_specific/system/notification").
+// TestTurnStopHookStop pins shim.md's `AgentFailure.stop_hook_prevented`,
+// landed by Landing 8 as `frontend.v1 FeedTurnEndedErrored.error`'s
+// `stop_hook_prevented` (tag 23, the new empty
+// `FeedTurnErrorStopHookPrevented`). Scenario: `!fail-stop-hook`
+// (failures.ts's FAIL_STOP_HOOK), which also writes the vendor's own
+// `system:stop_hook_summary` transcript record ahead of its result (SPEC.md's
+// test-list entry #6: "residue vendor_specific/system/notification").
 //
 // DECLARED-ONLY (MANIFEST.md: "no capture grounds this terminal
 // (`turn-stop-hook-stop` ended `success.completed`)").
 //
-// This test asserts only the terminal fact (same OPEN QUESTION as #2-#5:
-// `FailureVendorTurnFailed`/no wired arm covers `stop_hook_prevented`
-// either). It does NOT attempt to assert the residue record itself: the
+// This test does NOT attempt to assert the residue record itself: the
 // harness exposes no residue-read verb (a residue record is store-internal
 // bookkeeping, not a frontend.v1 shape), and inventing a store read outside
 // the harness's documented surface would be exactly the kind of adaptation
@@ -333,10 +332,14 @@ func TestTurnStopHookStop(t *testing.T) {
 	if ended == nil {
 		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
 	}
-	tlLogTerminal(t, ended)
-	if ended.GetInterrupted() != nil {
-		t.Fatalf("FeedTurnEnded.Outcome = Interrupted, want a vendor-stop terminal")
+	errored := ended.GetErrored()
+	if errored == nil {
+		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored{StopHookPrevented}", ended)
 	}
+	if errored.GetStopHookPrevented() == nil {
+		t.Fatalf("FeedTurnEndedErrored.Error = %T, want StopHookPrevented", errored.GetError())
+	}
+	tlAssertHeadline(t, errored)
 }
 
 // ---------------------------------------------------------------------------
