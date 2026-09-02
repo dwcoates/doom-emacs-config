@@ -55,8 +55,9 @@ import (
 	"claude-repld/integration/harness"
 )
 
-// openWorkspace registers a fresh REAL git repository (ruling 4 — this suite
-// uses real git, never the scripted fake) and opens it on the daemon,
+// openWorkspace registers a fresh repository (harness.NewRepo, the scripted
+// fake-git world — this suite mocks every external dependency except
+// claude-repld, the shim, shim-store and shim-sidecar) and opens it on the daemon,
 // spawning the real session the degraded-state tests observe. Modeled on
 // daemon/integration/support_test.go's fixture.open(): SubmitPrompt refuses
 // with SubmitPromptNoSession (endpoint_submit_prompt.proto) until the
@@ -65,7 +66,7 @@ import (
 // for the test's life exactly as that convention does.
 func openWorkspace(t *testing.T, w *World) *workspacev1.WorkspaceRef {
 	t.Helper()
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	resp, err := w.Client().OpenWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws}))
