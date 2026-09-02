@@ -654,7 +654,7 @@ describe("typed refusals", () => {
 
   it("serves a refusal on the rpc whose oneof is spelled `reason`", async () => {
     // Arrange
-    fake.refuse("submitPrompt", "turnAlreadyOpen");
+    fake.refuse("submitPrompt", "duplicateSubmission");
     // Act
     const response = await client.submitPrompt({
       workspace: workspaceRef(),
@@ -664,7 +664,7 @@ describe("typed refusals", () => {
     });
     // Assert
     const error = response.result.case === "error" ? response.result.value : undefined;
-    expect(error?.reason.case).toBe("turnAlreadyOpen");
+    expect(error?.reason.case).toBe("duplicateSubmission");
   });
 
   it("refuses to script an arm the schema does not declare", () => {

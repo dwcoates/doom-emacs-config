@@ -262,6 +262,16 @@ export function mountComposer(
             context: { command: outcome.value.command },
           });
           return;
+        case "commandActed":
+          // A RECOGNIZED ACT WITH NO TURN. The answer is empty on purpose: the
+          // visible effect (the model change, restated authoritatively) arrives
+          // on the topbar and footer streams, never here. So the box clears —
+          // the words are spent — and this component draws nothing at all.
+          accepted();
+          log("debug", "SubmitPrompt acted on a command without minting a turn", {
+            operation: "composer.command-acted",
+          });
+          return;
         default: {
           const other: { case: string } = outcome;
           unreachableArm("SubmitPromptSuccess.outcome", other.case);
@@ -411,8 +421,8 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return "that feed does not belong to this workspace — your text is kept";
     case "feedUndecodable":
       return "the daemon could not read that feed's id — your text is kept";
-    case "turnAlreadyOpen":
-      return "a turn is already open — resubmit once it ends";
+    case "duplicateSubmission":
+      return "this prompt was already submitted — the earlier one stands";
     case "noSession":
       return "this workspace has no session to prompt — your text is kept";
     default: {
