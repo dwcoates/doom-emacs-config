@@ -11,6 +11,8 @@ import (
 // The fake's default session facts. They are the ones SPEC.md fixes, so a
 // test that does not care about them can leave them alone.
 const (
+	// DefaultBuildSHA is duplicated as harness.FakeShimDefaultBuildSHA, which
+	// the daemon's own SHIM_BUILD_SHA is set from; the two move together.
 	DefaultBuildSHA = "fake"
 	DefaultModel    = "opus"
 	MainAgentID     = "main"

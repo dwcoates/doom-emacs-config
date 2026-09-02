@@ -23,6 +23,7 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/fakegit"
+	"claude-repld/internal/stateroot"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -35,6 +36,12 @@ const DefaultTimeout = 30 * time.Second
 // pollInterval is how often a file-existence wait re-checks. Nothing in the
 // harness sleeps to let another party make progress.
 const pollInterval = 5 * time.Millisecond
+
+// FakeShimDefaultBuildSHA is the runtime shim_build_sha the fake shim reports
+// when FAKESHIM_BUILD_SHA is unset. It duplicates fakeshim's own
+// DefaultBuildSHA because the fake is a program, not an importable package;
+// the two constants are documented on each other and move together.
+const FakeShimDefaultBuildSHA = "fake"
 
 // Opts configures one daemon process.
 type Opts struct {
@@ -180,6 +187,11 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	t.Helper()
 	binary := DaemonBinary(t)
 	root := t.TempDir()
+	// Unix-domain socket paths are capped at 103 bytes, and t.TempDir() encodes
+	// the whole test name, which blows that budget for the longer names in this
+	// suite. Everything the daemon opens a SOCKET under lives beneath a short
+	// root of its own; everything else stays under t.TempDir().
+	sockRoot := shortTempDir(t)
 
 	d := &Daemon{
 		StateDir:           opts.StateDir,
@@ -189,7 +201,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		WebappDir:          NewFakeWebappDist(t, filepath.Join(root, "dist")),
 		DefaultConfigDir:   NewConfigRoot(t, filepath.Join(root, "config-default"), accountEmail(opts.DefaultAccountEmail, "default@example.invalid")),
 		MultiRepoConfigDir: NewConfigRoot(t, filepath.Join(root, "config-multi"), accountEmail(opts.MultiRepoAccountEmail, "multi@example.invalid")),
-		StoreSocket:        filepath.Join(root, "store.sock"),
+		StoreSocket:        filepath.Join(sockRoot, "store.sock"),
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Deploy:             NewFakeDeployScript(t, filepath.Join(root, "bin")),
 		t:                  t,
@@ -198,11 +210,12 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		shims:              map[string]*ShimControl{},
 	}
 	if d.StateDir == "" {
-		d.StateDir = filepath.Join(root, "state")
+		d.StateDir = filepath.Join(sockRoot, "state")
 		if err := os.MkdirAll(d.StateDir, 0o755); err != nil {
 			t.Fatalf("harness: mkdir state root: %v", err)
 		}
 	}
+	requireSocketPathBudget(t, d.StateDir)
 	for _, dir := range []string{d.ProfileDir, d.LockDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("harness: mkdir %s: %v", dir, err)
@@ -256,13 +269,19 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"AGENT_REPL_STATE_DIR="+d.StateDir,
 		"AGENT_REPL_FORBID_VENDOR_CALLS=1",
 		"AGENT_REPL_LOCK_DIR="+d.LockDir,
-		"AGENT_REPL_STORE_SOCKET="+filepath.Join(root, "unused-store.sock"),
+		"AGENT_REPL_STORE_SOCKET="+filepath.Join(sockRoot, "unused-store.sock"),
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_SCRIPT="+d.Deploy.Path,
 		"AGENT_REPL_CLAUDE_BIN="+fakeClaude,
 		fakegit.EnvStateFile+"="+d.Git.StateFile,
 		"FAKESHIM_PROFILE_DIR="+d.ProfileDir,
+		// The fake shim has no built bundle, so the daemon's stamp comes from
+		// the environment, and it must match what the fake reports as its
+		// runtime shim_build_sha or the rollout staleness check bounces every
+		// session. A test that wants a mismatch overrides either half through
+		// ExtraEnv, which is appended after this.
+		"SHIM_BUILD_SHA="+FakeShimDefaultBuildSHA,
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
@@ -294,6 +313,33 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		d.dial(opts.JSONCodec)
 	}
 	return d
+}
+
+// shortTempDir mints a directory directly under /tmp, short enough that a
+// state root beneath it still fits a unix-domain socket path. t.TempDir()
+// cannot be used: it encodes the test's whole name.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "ar")
+	if err != nil {
+		t.Fatalf("harness: mkdir a short temp root: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// requireSocketPathBudget fails the test before the daemon is launched when
+// the state root cannot hold a shim socket. The daemon refuses such a root at
+// boot; without this the failure surfaces as a 30-second wait for daemon.addr.
+func requireSocketPathBudget(t *testing.T, stateDir string) {
+	t.Helper()
+	layout, err := stateroot.Root(stateDir, "")
+	if err != nil {
+		t.Fatalf("harness: resolve the state root %q: %v", stateDir, err)
+	}
+	if err := layout.CheckSocketPathBudget(); err != nil {
+		t.Fatalf("harness: %v", err)
+	}
 }
 
 func accountEmail(given, fallback string) string {
