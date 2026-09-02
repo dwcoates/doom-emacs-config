@@ -256,9 +256,10 @@ unmarked is DISCRETIONARY by default.
        conflict commit then parked for a human; evict/dequeue/abandon
        are three distinct ends with distinct causes; a DELETED session
        refuses the merge; a workspace with no session merges
-       sessionless; the displaced user turn is captured durably and
-       resubmitted exactly once at lease release, across a daemon
-       bounce.
+       sessionless; the displaced user turn is captured durably, then
+       ENDED (KillTurn) once the capture is durable, then resubmitted
+       exactly once at lease release, across a daemon bounce (ruled
+       2026-09-02; confirmed against the daemon's implementation).
    - RULED (merge-variants investigation):
      - TWO INGRESSES, ONE ENGINE: Emacs merges arrive via the
        MergeWorkspace rpc, non-Emacs merges via the workspace
