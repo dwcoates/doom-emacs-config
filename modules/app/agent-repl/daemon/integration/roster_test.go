@@ -402,7 +402,7 @@ func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
-	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.kill")
 	f.shim.ExpectStartSession()

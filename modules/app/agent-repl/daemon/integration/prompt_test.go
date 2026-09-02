@@ -337,7 +337,7 @@ func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t 
 	// ending, and the lost link is recorded as the session's own fault. Every
 	// one of these is that one stand-down, honestly recorded once per observer
 	// -- the same set TestCloseWorkspaceWithAHeldPromptRefuses declares.
-	f.d.ExpectWarnings("daemon.promptqueue.release",
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.promptqueue.release",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
 		"daemon.shimclient.redial", "daemon.workspace.bring_up",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",

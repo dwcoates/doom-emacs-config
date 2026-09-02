@@ -299,7 +299,7 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 	// "shim link broke; redialing" and then, the moment the death is evidence,
 	// "redial stopped". Before the witness was wired the redials looped
 	// forever instead; both records are failure-path evidence and stay loud.
-	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.redial",
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault", "daemon.health.session")
 
