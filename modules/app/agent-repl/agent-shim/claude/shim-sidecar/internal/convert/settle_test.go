@@ -5,6 +5,7 @@ package convert
 import (
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 )
 
@@ -405,6 +406,27 @@ func TestUnknownToolBecomesUnmodeledNotResidue(t *testing.T) {
 	}
 }
 
+func TestUnknownToolsResultSettlesAsUnmodeledSuccess(t *testing.T) {
+	// Arrange. The RESULT of an unknown tool goes through settleUnmodeled,
+	// a separate path from the call's own AgentUnmodeled_Start announcement.
+	c := newTestConverter(t)
+	call := assistantWith("a1", "msg_1", ts1, toolCall("toolu_m", "mcp__claude_ai_Gmail__send_message", `{"to":"x"}`))
+	result := toolResultLine("u1", "toolu_m", ts2, `[{"type":"text","text":"sent"}]`, `{}`)
+
+	// Act.
+	entries := convertLines(t, c, call, result)
+
+	// Assert.
+	terminal := lastEntryByKey(t, entries, ActivityKey("toolu_m"))
+	success := activityOf(terminal).GetUnmodeled().GetSuccess()
+	if success == nil {
+		t.Fatal("an unknown tool's result must settle AgentUnmodeled_Success")
+	}
+	if got := success.GetToolName(); got != "mcp__claude_ai_Gmail__send_message" {
+		t.Fatalf("tool_name = %q, want the qualified name unparsed", got)
+	}
+}
+
 // recordingObserver captures the facts a conversion reports to the reader.
 type recordingObserver struct {
 	stopped *[]string
@@ -459,5 +481,30 @@ func TestTaskStopWithTheVendorsLocalAgentSpellingSettlesTheSpawn(t *testing.T) {
 	failure := activityOf(terminal).GetSubagent().GetFailure()
 	if failure.GetStoppedByUser() == nil {
 		t.Fatal("a stopped subagent must resolve stopped_by_user, which is not a fault")
+	}
+}
+
+func TestImageBlockPrefersAUrlSourceOverAPath(t *testing.T) {
+	// Arrange: a vendor image with a url must resolve to the url location,
+	// never the path arm, which the two are mutually exclusive over.
+	block := map[string]any{"source": map[string]any{
+		"media_type": "image/png",
+		"url":        "https://example.com/a.png",
+		"path":       "/tmp/a.png",
+	}}
+
+	// Act
+	got := imageBlock(block)
+
+	// Assert
+	if got.GetMediaType() != "image/png" {
+		t.Fatalf("MediaType = %q, want image/png", got.GetMediaType())
+	}
+	url, ok := got.GetLocation().(*conversationv1.ImageBlock_Url)
+	if !ok {
+		t.Fatalf("Location = %T, want ImageBlock_Url", got.GetLocation())
+	}
+	if url.Url.GetUrl() != "https://example.com/a.png" {
+		t.Fatalf("Url = %q, want https://example.com/a.png", url.Url.GetUrl())
 	}
 }
