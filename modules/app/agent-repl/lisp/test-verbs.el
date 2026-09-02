@@ -778,8 +778,12 @@ pause sent."
       '((:daemon-health
          . (:response (:arm :success
                        :value (:arm :unhealthy
-                               :value (:faults ((:detail "shim adoption stalled")
-                                                (:detail "store socket absent"))))))))
+                               :value (:faults ((:detail "shim adoption stalled"
+                                                 :kind (:arm :adoption-window-expired
+                                                        :value nil))
+                                                (:detail "store socket absent"
+                                                 :kind (:arm :log-sink-poisoned
+                                                        :value nil)))))))))
     (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer) (erase-buffer))
     (agent-repl-daemon-health)
     (let ((text (agent-repl-test-verbs--health-text)))
@@ -793,13 +797,56 @@ pause sent."
       '((:session-health . (:response (:arm :success
                                        :value (:arm :healthy :value nil)))))
     (cl-letf (((symbol-function 'agent-repl-host-faults)
-               (lambda (_ws) (list (list :detail "generation fault window open")))))
+               (lambda (_ws) (list (list :detail "generation fault window open"
+                                         :kind (list :arm :link-severed :value nil))))))
       (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer) (erase-buffer))
       (agent-repl-session-health "ws-one")
       (let ((text (agent-repl-test-verbs--health-text)))
         (should (string-match-p "session ws-one: HEALTHY" text))
         (should (string-match-p "standing host faults (1)" text))
         (should (string-match-p "generation fault window open" text))))))
+
+(ert-deftest agent-repl-verbs-daemon-fault-line-names-its-kind ()
+  "A DaemonFault renders its KIND beside the detail, never the detail alone."
+  (agent-repl-test-verbs--with
+      '((:daemon-health
+         . (:response (:arm :success
+                       :value (:arm :unhealthy
+                               :value (:faults ((:detail "prompts dir gone"
+                                                 :kind (:arm :prompts-dir-missing
+                                                        :value nil)))))))))
+    (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer) (erase-buffer))
+    (agent-repl-daemon-health)
+    (should (string-match-p "prompts-dir-missing: prompts dir gone"
+                            (agent-repl-test-verbs--health-text)))))
+
+(ert-deftest agent-repl-verbs-session-fault-line-names-its-kind ()
+  "A SessionFault renders its KIND beside the detail, through the same formatter."
+  (agent-repl-test-verbs--with
+      '((:session-health
+         . (:response (:arm :success
+                       :value (:arm :unhealthy
+                               :value (:faults ((:detail "shim exited 2"
+                                                 :kind (:arm :shim-start-failed
+                                                        :value nil)))))))))
+    (cl-letf (((symbol-function 'agent-repl-host-faults) (lambda (_ws) nil)))
+      (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer) (erase-buffer))
+      (agent-repl-session-health "ws-one")
+      (should (string-match-p "shim-start-failed: shim exited 2"
+                              (agent-repl-test-verbs--health-text))))))
+
+(ert-deftest agent-repl-verbs-standing-host-fault-line-names-its-kind ()
+  "A standing HostFault renders its KIND beside the detail (audit-3 #29)."
+  (agent-repl-test-verbs--with
+      '((:session-health . (:response (:arm :success
+                                       :value (:arm :healthy :value nil)))))
+    (cl-letf (((symbol-function 'agent-repl-host-faults)
+               (lambda (_ws) (list (list :detail "store socket unreachable"
+                                         :kind (list :arm :bounce-unknown :value nil))))))
+      (with-current-buffer (get-buffer-create agent-repl-verbs-health-buffer) (erase-buffer))
+      (agent-repl-session-health "ws-one")
+      (should (string-match-p "bounce-unknown: store socket unreachable"
+                              (agent-repl-test-verbs--health-text))))))
 
 (ert-deftest agent-repl-verbs-session-health-echoes-the-ref ()
   "SessionHealth is a per-workspace pull and carries the ref."
