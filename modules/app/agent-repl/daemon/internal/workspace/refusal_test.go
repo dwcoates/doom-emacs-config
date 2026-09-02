@@ -77,7 +77,7 @@ func TestAsRefusalRejectsAnOrdinaryError(t *testing.T) {
 	}
 }
 
-func TestRefuseLogsTheIntendedArmAtWarning(t *testing.T) {
+func TestRefuseLogsTheTypedRefusalAtInfo(t *testing.T) {
 	// Arrange.
 	log := dlog.NewTestLogger()
 
@@ -89,8 +89,63 @@ func TestRefuseLogsTheIntendedArmAtWarning(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("records = %v, want exactly one", records)
 	}
-	if records[0].Level != "warn" || records[0].Operation != opRefusal {
-		t.Fatalf("record = %+v, want a warning under %s", records[0], opRefusal)
+	if records[0].Level != "info" || records[0].Operation != "daemon.refusal.typed" {
+		t.Fatalf("record = %+v, want an info record under daemon.refusal.typed", records[0])
+	}
+}
+
+func TestRefuseNeverLogsTheUnlandedArmOperation(t *testing.T) {
+	// Arrange: only server.UnlandedArm may warn under that operation, so the
+	// log stays usable for reconciling ERROR-ARMS.md.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	refuse(log, "Interrupt", ArmNoSession, "no live session", false)
+
+	// Assert.
+	for _, record := range log.Records() {
+		if record.Operation == "daemon.refusal.unlanded_arm" {
+			t.Fatalf("record = %+v, want no unlanded-arm record from a verb refusal", record)
+		}
+		if record.Level == "warn" {
+			t.Fatalf("record = %+v, want no warning from a typed refusal", record)
+		}
+	}
+}
+
+func TestRefuseWithLogsTheTypedRefusalAtInfo(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false,
+		map[string]any{"ref": "origin/nope"})
+
+	// Assert.
+	records := log.Records()
+	if len(records) != 1 {
+		t.Fatalf("records = %v, want exactly one", records)
+	}
+	if records[0].Level != "info" || records[0].Operation != "daemon.refusal.typed" {
+		t.Fatalf("record = %+v, want an info record under daemon.refusal.typed", records[0])
+	}
+}
+
+func TestRefuseWithRecordsTheArmsFieldsInTheLog(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false,
+		map[string]any{"ref": "origin/nope"})
+
+	// Assert.
+	records := log.Records()
+	if len(records) != 1 {
+		t.Fatalf("records = %v, want exactly one", records)
+	}
+	if got := records[0].Context["arm_ref"]; got != "origin/nope" {
+		t.Fatalf("context[arm_ref] = %v, want the ref the refusal named", got)
 	}
 }
 
