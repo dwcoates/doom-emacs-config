@@ -179,7 +179,10 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		lock.Release()
 		return err
 	}
-	lease, err := o.deps.DB.AcquireLease(ctx, ws, wsm.HolderMerge, wsm.PolicyRefuse)
+	// THE OCCUPANCY IS TAKEN UNDER THE LEDGER IDENTITY minted at enqueue, so
+	// the queued bubble and the running one are one bubble.
+	ledger := o.mintLedger(ws)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, ledger, wsm.HolderMerge, wsm.PolicyRefuse)
 	if err != nil {
 		lock.Release()
 		log.Error(op, "could not take the merge lease", dlog.Context{"workspace": string(ws), "error": err.Error()})

@@ -103,16 +103,20 @@ func (f *fakeDB) Session(_ context.Context, id ids.WorkspaceID) (wsm.Session, bo
 	return s, ok, nil
 }
 
-func (f *fakeDB) AcquireLease(_ context.Context, id ids.WorkspaceID, holder wsm.LeaseHolder, policy wsm.LeasePolicy) (wsm.Lease, error) {
+func (f *fakeDB) AcquireLease(ctx context.Context, id ids.WorkspaceID, holder wsm.LeaseHolder, policy wsm.LeasePolicy) (wsm.Lease, error) {
+	return f.AcquireLeaseAs(ctx, id, wsm.NewLeaseID(), holder, policy)
+}
+
+func (f *fakeDB) AcquireLeaseAs(_ context.Context, id ids.WorkspaceID, lease wsm.LeaseID, holder wsm.LeaseHolder, policy wsm.LeasePolicy) (wsm.Lease, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if existing, held := f.leases[id]; held {
 		return wsm.Lease{}, &wsm.LeaseHeldError{Workspace: id, Lease: existing.ID, Holder: existing.Holder, Policy: existing.Policy}
 	}
-	lease := wsm.Lease{ID: wsm.NewLeaseID(), Workspace: id, Holder: holder, Policy: policy}
-	f.leases[id] = lease
-	f.policies[lease.ID] = policy
-	return lease, nil
+	held := wsm.Lease{ID: lease, Workspace: id, Holder: holder, Policy: policy}
+	f.leases[id] = held
+	f.policies[held.ID] = policy
+	return held, nil
 }
 
 func (f *fakeDB) ReleaseLease(_ context.Context, lease wsm.LeaseID) error {
