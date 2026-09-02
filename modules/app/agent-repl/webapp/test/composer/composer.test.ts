@@ -60,6 +60,10 @@ const refusedSuccess = (): SubmitPromptResponse =>
       value: { outcome: { case: "commandRefused", value: { command: "/agents" } } },
     },
   });
+const actedSuccess = (): SubmitPromptResponse =>
+  create(SubmitPromptResponseSchema, {
+    result: { case: "success", value: { outcome: { case: "commandActed", value: {} } } },
+  });
 const mergingError = (): SubmitPromptResponse =>
   create(SubmitPromptResponseSchema, {
     result: { case: "error", value: { reason: { case: "merging", value: {} } } },
@@ -428,10 +432,26 @@ describe("the refusals", () => {
     h.handle.dispose();
   });
 
-  it("tells a turn-already-open submitter what to wait for", async () => {
-    const h = mount(refusalError("turnAlreadyOpen"));
+  it("tells a duplicate submitter the earlier submission already stands", async () => {
+    const h = mount(refusalError("duplicateSubmission"));
     await sendText(h, "hello");
-    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain("already open");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain("already submitted");
+    h.handle.dispose();
+  });
+
+  it("labels the duplicate-submission refusal with its own arm", async () => {
+    const h = mount(refusalError("duplicateSubmission"));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.getAttribute("data-arm")).toBe(
+      "duplicateSubmission",
+    );
+    h.handle.dispose();
+  });
+
+  it("keeps the words in the box through a duplicate-submission refusal", async () => {
+    const h = mount(refusalError("duplicateSubmission"));
+    await sendText(h, "hello");
+    expect(h.input.value).toBe("hello");
     h.handle.dispose();
   });
 
@@ -518,5 +538,35 @@ describe("restoring a dropped prompt", () => {
     h.handle.dispose();
     document.dispatchEvent(new CustomEvent(DROPPED_EVENT, { detail: { text: "dropped" } }));
     expect(h.input.value).toBe("");
+  });
+});
+
+describe("a command the daemon acted on without minting a turn", () => {
+  it("clears the box, because the words are spent", async () => {
+    const h = mount(actedSuccess);
+    await sendText(h, "/model opus");
+    expect(h.input.value).toBe("");
+    h.handle.dispose();
+  });
+
+  it("draws no refusal, because the act is an answer and not a failure", async () => {
+    const h = mount(actedSuccess);
+    await sendText(h, "/model opus");
+    expect(h.host.querySelector(".composer-refusal")).toBeNull();
+    h.handle.dispose();
+  });
+
+  it("hands no panel over, because the act carries none", async () => {
+    const h = mount(actedSuccess);
+    await sendText(h, "/model opus");
+    expect(h.panels).toEqual([]);
+    h.handle.dispose();
+  });
+
+  it("records no turn, because the act minted none", async () => {
+    const h = mount(actedSuccess);
+    await sendText(h, "/model opus");
+    expect(h.handle.lastTurn()).toBeUndefined();
+    h.handle.dispose();
   });
 });

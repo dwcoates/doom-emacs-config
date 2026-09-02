@@ -501,11 +501,12 @@ describe("command panels", () => {
     assertCoversOneof(SubmitPromptCommandPanelSchema, "panel", [...COMMAND_PANEL_ARMS]);
   });
 
-  it("covers both SubmitPrompt success outcomes plus the refusal", () => {
+  it("covers every SubmitPrompt success outcome", () => {
     assertCoversOneof(SubmitPromptSuccessSchema, "outcome", [
       "turn",
       "commandPanel",
       "commandRefused",
+      "commandActed",
     ]);
   });
 
