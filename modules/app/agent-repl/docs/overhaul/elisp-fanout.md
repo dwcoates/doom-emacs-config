@@ -451,6 +451,11 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   logs `elisp.verbs.fault-without-kind` and still prints the detail); #30
   docstrings state the ruling. red3a/red3b re-cut at 48c49e576 and
   dispatched (`opus-low`). Running: red3a, red3b.
+- HALT (user) then RESUME (user go): red3a/red3b stopped clean at
+  48c49e576 (triage only) and were resumed by message. Triage carried:
+  the rename-collision test awaits `elisp.rpc.push-invalid` but the ruled
+  refused-whole path logs `elisp.roster.tab-rename-refused` (suite bug);
+  the re-key test fails only on the final host-push gate wait.
 
 ## 1. Module map (final tree of lisp/)
 
