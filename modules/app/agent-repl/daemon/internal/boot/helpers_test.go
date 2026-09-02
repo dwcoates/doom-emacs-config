@@ -57,22 +57,14 @@ func (s *fakeSupervisor) calls() []ids.WorkspaceID {
 // the boot sequence calls exactly one of them.
 type fakeQueue struct {
 	promptqueue.Queue
-	mu       sync.Mutex
-	restored int
-	err      error
+	mu  sync.Mutex
+	err error
 }
 
 func (q *fakeQueue) RestoreHolds(context.Context) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.restored++
 	return q.err
-}
-
-func (q *fakeQueue) restores() int {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.restored
 }
 
 // fakeMerge is the merge orchestrator's recovery half.

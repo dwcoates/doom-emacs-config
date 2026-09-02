@@ -711,17 +711,6 @@ func (f *fakeFooter) SetMerge(_ ids.WorkspaceID, facts footer.MergeFacts) {
 	f.mu.Unlock()
 }
 
-// states reports the state words the footer was told, in order.
-func (f *fakeFooter) states() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []string
-	for _, facts := range f.facts {
-		out = append(out, facts.State)
-	}
-	return out
-}
-
 // last reports the footer's most recent facts.
 func (f *fakeFooter) last() footer.MergeFacts {
 	f.mu.Lock()
@@ -1094,14 +1083,6 @@ func (h *harness) ownCheckout() {
 // mergeConflicted scripts a no-ff merge that stopped on conflicts.
 func mergeConflicted(files ...string) gitclient.MergeOutcome {
 	return gitclient.MergeOutcome{Conflicted: files}
-}
-
-// parks arms the harness's park signal and answers the channel a test waits on.
-// Synchronization is on the PARK ITSELF: nothing here waits for elapsed time.
-func (h *harness) parks() <-chan ids.WorkspaceID {
-	parked := make(chan ids.WorkspaceID, 8)
-	h.o.onPark = func(ws ids.WorkspaceID) { parked <- ws }
-	return parked
 }
 
 // configureActions records the workspace's configured before/after prompts.
