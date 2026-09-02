@@ -148,6 +148,26 @@ func Save(path string, s *State) error {
 	return nil
 }
 
+// LoadLocked reads the fixture file under the SAME lock every write takes.
+// Save truncates and rewrites in place, so an unlocked reader can see an empty
+// or half-written file and read it as a world with no repositories at all.
+func LoadLocked(path string) (*State, error) {
+	lockPath := path + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, fmt.Errorf("fakegit: mkdir %s: %w", filepath.Dir(lockPath), err)
+	}
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("fakegit: open %s: %w", lockPath, err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, fmt.Errorf("fakegit: lock %s: %w", lockPath, err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return Load(path)
+}
+
 // WithLock runs fn against the fixture file under an exclusive kernel lock, so
 // a concurrent invocation can never lose an update. The lock is a sibling file
 // rather than the state file itself, so a truncating write can never race the

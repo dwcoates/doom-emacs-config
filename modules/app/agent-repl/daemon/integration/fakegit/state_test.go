@@ -152,3 +152,28 @@ func TestRemoveWorktreeDropsOnlyThatTree(t *testing.T) {
 		t.Fatalf("after RemoveWorktree = %v, want only /b", repo.Worktrees)
 	}
 }
+
+// TestLoadLockedReadsThroughTheSameLockWritesTake covers the reader's half of
+// the fixture file's exclusion: Save truncates and rewrites in place, so an
+// unlocked read can see an empty file and report a world with no repositories.
+func TestLoadLockedReadsThroughTheSameLockWritesTake(t *testing.T) {
+	// Arrange: a world with one repository, written under the lock.
+	path := filepath.Join(t.TempDir(), "fakegit.json")
+	if err := WithLock(path, func(s *State) error {
+		s.Repos = append(s.Repos, &Repo{Dir: "/repo", DefaultBranch: "main"})
+		return nil
+	}); err != nil {
+		t.Fatalf("WithLock: %v", err)
+	}
+
+	// Act.
+	got, err := LoadLocked(path)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("LoadLocked = %v, want the written world", err)
+	}
+	if len(got.Repos) != 1 {
+		t.Fatalf("LoadLocked carried %d repos, want the one that was written", len(got.Repos))
+	}
+}
