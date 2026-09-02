@@ -10,10 +10,13 @@ import (
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
+
+	"connectrpc.com/connect"
 )
 
 // ---------------------------------------------------------------------------
@@ -302,6 +305,128 @@ func TestFooterLiveWorkChipsAreUnsetWhenZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Footer: the allowance cell — composed from TWO facts.
+// ---------------------------------------------------------------------------
+
+func TestFooterAllowanceComposedFromAccountUsageAndRateLimitStatus(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "idle before any usage sample", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+
+	// Act: the FIGURES come from account_usage...
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_AccountUsage{AccountUsage: &conversationv1.SessionAccountUsage{
+			ObservedAtMs: 1_700_000_000_000,
+			Outcome: &conversationv1.SessionAccountUsage_Available{Available: &conversationv1.SessionAccountUsageAvailable{
+				FiveHour: &conversationv1.SessionUsageWindow{UtilizationPercent: 95, ResetsAtMs: 1_700_010_000_000},
+			}},
+		}},
+	})
+	// ...and the VERDICT comes from rate_limit_status, for the same window.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_RateLimitStatus{RateLimitStatus: &conversationv1.SessionRateLimitStatus{
+			Status: &conversationv1.SessionRateLimitStatus_AllowedWarning{AllowedWarning: &conversationv1.SessionRateLimitAllowedWarning{}},
+			RateLimitType: &conversationv1.SessionRateLimitType{
+				Window: &conversationv1.SessionRateLimitType_FiveHour{FiveHour: &conversationv1.SessionRateLimitWindowFiveHour{}},
+			},
+		}},
+	})
+
+	// Assert: the session allowance carries BOTH the figure (utilization,
+	// reset) from account_usage and the verdict (allowed_warning) from
+	// rate_limit_status -- one cell composed from two different facts.
+	got := awaitFooter(t, f, footer, "the session allowance composed from both facts", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession().GetAllowedWarning() != nil
+	})
+	allowance := got.GetStrip().GetStatus().GetIdle().GetActivity().GetRateLimited().GetSession()
+	if allowance.GetUtilization() != 0.95 {
+		t.Fatalf("the session allowance's utilization = %v, want 0.95 (the account_usage figure, converted)", allowance.GetUtilization())
+	}
+	if allowance.GetResetsAtS() != 1_700_010_000_000/1000 {
+		t.Fatalf("the session allowance's resets_at_s = %d, want the account_usage figure converted to seconds", allowance.GetResetsAtS())
+	}
+	if !allowance.GetNewsworthy() {
+		t.Fatal("the session allowance is not drawn newsworthy at 95% utilization")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Deny-and-continue.
+// ---------------------------------------------------------------------------
+
+func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-deny-continue", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "thinking before the permission ask", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetThinking() != nil
+	})
+	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-deny-cont", "act-deny-cont")},
+	}))
+	row := awaitRow(t, f, tail, "the open permission card", func(r *frontendv1.FeedRow) bool { return r.GetPermission().GetOpen() != nil })
+
+	// Act: deny the permission.
+	resp, err := f.d.Client().AnswerPermission(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerPermissionRequest{
+		Workspace: f.ws, Permission: row.GetId(),
+		Answer: &agentreplv1.AnswerPermissionRequest_Deny{Deny: &agentreplv1.AnswerPermissionDeny{
+			Reason: &agentreplv1.AnswerPermissionDenyReason{Text: "no"},
+		}},
+	}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerPermission{deny} = %v, %v, want a success", resp, err)
+	}
+	// The card itself re-pushes answered -- consuming that push first keeps
+	// the ExpectNoPush below honest about what comes AFTER the deny.
+	awaitRow(t, f, tail, "the answered (denied) permission card", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == row.GetId().GetValue() && r.GetPermission().GetAnswered() != nil
+	})
+
+	// Assert: the footer stays thinking (a deny does not end the turn) and no
+	// turn_ended row is drawn until the fake pushes the turn's own terminal.
+	got := awaitFooter(t, f, footer, "thinking still standing after the deny", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetThinking() != nil
+	})
+	if got.GetStrip().GetStatus().GetIdle() != nil {
+		t.Fatalf("footer status = %v after a permission deny, want the turn still in flight", got.GetStrip().GetStatus())
+	}
+	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "no turn_ended row until the fake's own terminal")
+
+	// Act: the fake concludes the turn on its own.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: now, and only now, the terminal lands.
+	awaitRow(t, f, tail, "the turn's terminal row after the fake's own conclusion", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded() != nil
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Flush-on-accept.
+// ---------------------------------------------------------------------------
+
+func TestWatchWebWorkspaceFlushesHeadersBeforeAnyFrameWhenNothingIsPublishedYet(t *testing.T) {
+	// Arrange / Act: WatchWebWorkspace carries no state topic of its own --
+	// only the `transferred` event, which nothing in this test ever raises --
+	// so a fresh subscription has no published view to replay. Without
+	// flush-on-accept (a ResponseWriter wrapper that flushes headers the
+	// moment the subscription is registered) the daemon would never send
+	// anything and this open would hang until the daemon's context times out;
+	// WatchWeb already t.Fatalf's on an open error, so its returning at all
+	// is the first half of the assertion.
+	f := newOpened(t, harness.Opts{})
+	web := f.d.WatchWeb(f.ws)
+
+	// Assert: headers arrived (the open returned) and no frame follows.
+	harness.ExpectNoPush(t, web, harness.ProbeWindow, "WatchWebWorkspace with nothing ever published carries no frame")
+}
+
+// ---------------------------------------------------------------------------
 // Footer: wakeup fallback and precedence
 // ---------------------------------------------------------------------------
 
@@ -485,7 +610,11 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// Assert: no further churn — a dead shim gets no more redial attempts, so
 	// the footer settles rather than cycling.
 	harness.ExpectNoPush(t, footer, harness.ProbeWindow, "no further footer churn once the shim is dead (redials stop)")
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// The exit was not attributed to a daemon-requested kill, so
+	// publishExit's ELSE branch fires: daemon.shimclient.exit at ERROR
+	// ("shim died"). Nothing else observes this exit (no query_died update
+	// was pushed -- the process simply exited).
+	f.d.ExpectWarnings("daemon.shimclient.exit")
 }
 
 // ---------------------------------------------------------------------------
