@@ -1920,3 +1920,86 @@ describe("the keep-alive interval", () => {
     expect(h.scheduler.intervals[0]).toBe(200);
   });
 });
+
+/**
+ * `engine`'s per-turn verbs are one-line delegations to `turns.*`
+ * (`watchAgent: (request) => turns.watchAgent(request)`, and so on) — the
+ * dispatch surface `service/server.ts` actually calls. `engine/turn.test.ts`
+ * covers `turns.*` directly and exhaustively; nothing calls them THROUGH
+ * `engine` in any unit test, which is why coverage saw these arrows as
+ * zero-hit. This pins that the delegation itself works, with the cheapest
+ * refusal each verb answers before a session exists.
+ */
+describe("the per-turn verbs, through the engine's own dispatch surface", () => {
+  it("watchAgent refuses (at iteration) with no session started", async () => {
+    const h = harness();
+
+    await expect(
+      (async () => {
+        for await (const _ of h.engine.watchAgent(
+          create(shimv1.WatchAgentRequestSchema, { pageSize: 10 }),
+        )) {
+          // refused before anything is yielded
+        }
+      })(),
+    ).rejects.toThrow();
+  });
+
+  it("updateAgent refuses noSession with no session started", async () => {
+    const h = harness();
+
+    const response = await h.engine.updateAgent(create(shimv1.UpdateAgentRequestSchema, {}));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("noSession");
+  });
+
+  it("killTurn refuses noSession with no session started", async () => {
+    const h = harness();
+
+    const response = await h.engine.killTurn(create(shimv1.KillTurnRequestSchema, {}));
+
+    expect(
+      response.result.case === "failure" ? response.result.value.cause.case : undefined,
+    ).toBe("noSession");
+  });
+
+  it("watchBash refuses (at iteration) with no work id named", async () => {
+    const h = harness();
+
+    await expect(
+      (async () => {
+        for await (const _ of h.engine.watchBash(create(shimv1.WatchBashRequestSchema, {}))) {
+          // refused before anything is yielded
+        }
+      })(),
+    ).rejects.toThrow();
+  });
+
+  it("stopBash refuses unknownWork for a work id nothing announced", async () => {
+    const h = harness();
+
+    const response = await h.engine.stopBash(
+      create(shimv1.StopBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "b-nope" }),
+      }),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("unknownWork");
+  });
+
+  it("detachForeground refuses noSession with no session started", async () => {
+    const h = harness();
+
+    const response = await h.engine.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {}),
+    );
+
+    expect(
+      response.result.case === "failure" ? response.result.value.kind.case : undefined,
+    ).toBe("noSession");
+  });
+});
