@@ -590,3 +590,9 @@ every UX or contract gap you surfaced instead of improvising.
   only in src/convert. Queued: scenario-script rebuild from captures (after
   fakes merge + re-capture), fresh integration run, fable auditor #2,
   sonnet-medium dead-code pass.
+- LEDGER: re-capture sweep complete (project lead): 16 ran, none
+  quarantined; 13 goldens replaced (the 12 + held-turn-gate); 69 goldens
+  total. Caveat to verify: compaction-directed may still carry no
+  compact_boundary under the cheap model. Goldens agent told to include all
+  69 and to report the compaction and /clear shapes; the scenario-script
+  rebuild waits on the fakes merge.
