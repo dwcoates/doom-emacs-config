@@ -98,15 +98,14 @@ func (w sliceWriter) Write(p []byte) (int, error) {
 // harness is one sidecar wired to a fake store over a real unix socket, with a
 // fake clock. Nothing here sleeps: the cycle is driven by calling its steps.
 type harness struct {
-	sc      *sidecar
-	store   *fakeStore
-	logs    *[]string
-	base    string
-	rootA   string
-	spool   string
-	clock   time.Time
-	socket  string
-	started bool
+	sc     *sidecar
+	store  *fakeStore
+	logs   *[]string
+	base   string
+	rootA  string
+	spool  string
+	clock  time.Time
+	socket string
 }
 
 func shortSocket(t *testing.T) string {
