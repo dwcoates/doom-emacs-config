@@ -499,6 +499,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	return &graph{
 		Server: server.Deps{
 			Instance:         p.Instance,
+			SessionFacts:     hostSessionFacts{fleet: fleet},
 			DB:               p.DB,
 			Prompts:          handler,
 			Queue:            queue,
@@ -666,6 +667,30 @@ func lockDir() string {
 // deployStamp reads the deployed build's sha from the stamp the deploy chain
 // writes. A missing stamp is an ERROR rather than an empty sha: a staleness
 // check against nothing would call every shim current.
+// hostSessionFacts adapts the session fleet to server.SessionFacts. The
+// conversion lives HERE because internal/workspace sits below internal/server
+// and cannot name its types: the composition root is the one place that knows
+// both sides.
+type hostSessionFacts struct{ fleet *workspace.Fleet }
+
+func (h hostSessionFacts) HostSessionFacts(ws ids.WorkspaceID) (server.HostFacts, bool) {
+	facts, live := h.fleet.HostSessionFacts(ws)
+	if !live {
+		return server.HostFacts{}, false
+	}
+	// BACKFILL HAS NO PRODUCER HERE. It is the file plane's delivery into the
+	// store; the daemon never imports store.v1 and holds no store client, so
+	// the only honest arm is `none` -- "no transcript reached the store
+	// through anything this daemon can see". The fleet's BackfillKnown says
+	// the same, and it is always false.
+	return server.HostFacts{
+		SessionID:    facts.SessionID,
+		Generation:   facts.Generation,
+		ShimAttached: facts.ShimAttached,
+		Backfill:     server.BackfillNone,
+	}, true
+}
+
 // sentinelStripper adapts prompts.StripSentinels to the resolvers' drawing
 // seam. An UNBALANCED marker is a producer bug: it is recorded at WARNING and
 // the text is drawn as it stands, because losing the prompt row is worse than

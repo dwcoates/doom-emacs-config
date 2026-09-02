@@ -211,10 +211,6 @@ type HostSessionFacts struct {
 	// ShimAttached reports whether the session's shim link is connected right
 	// now. It is what distinguishes "live but momentarily unwired" from "up".
 	ShimAttached bool
-	// VendorSessionID and ConfigDir are the vendor conversation's identifiers.
-	// VendorSessionID is empty while no vendor conversation exists yet.
-	VendorSessionID string
-	ConfigDir       string
 	// BackfillKnown reports whether anything in this daemon can state the
 	// transcript's backfill. IT IS ALWAYS FALSE: backfill is the FILE PLANE's
 	// delivery into the store, the daemon never imports store.v1 and holds no
@@ -224,28 +220,29 @@ type HostSessionFacts struct {
 }
 
 // HostSessionFacts answers one workspace's host-facing session facts. The bool
-// reports that the workspace HAS a session; a workspace with none is the host
-// stream's `none` arm, which is an answer and not a failure.
-func (f *Fleet) HostSessionFacts(ctx context.Context, ws ids.WorkspaceID) (HostSessionFacts, bool, error) {
-	session, ok, err := f.deps.DB.Session(ctx, ws)
-	if err != nil {
-		return HostSessionFacts{}, false, fmt.Errorf("workspace: host session facts for %q: %w", ws, err)
-	}
-	if !ok || session.HostSessionID == "" {
-		return HostSessionFacts{}, false, nil
-	}
+// reports whether THIS DAEMON OPERATES a session for the workspace; anything
+// else is the host view's `none` arm, which is an answer and not a failure.
+//
+// It reads only what the fleet holds in memory: the durable row can outlive
+// the session it describes (a workspace this daemon has handed away, or has
+// not brought up), and the live half of the host view must never be composed
+// from a session nobody is operating.
+func (f *Fleet) HostSessionFacts(ws ids.WorkspaceID) (HostSessionFacts, bool) {
 	f.mu.RLock()
-	generation := f.generation[ws]
 	current := f.sessions[ws]
+	generation := f.generation[ws]
 	f.mu.RUnlock()
-	attached := current != nil && current.watcher != nil && current.watcher.Connected()
+	if current == nil || current.hostSessionID == "" {
+		return HostSessionFacts{}, false
+	}
+	// The FIRST shim of a session is generation 1: freshSocketPath bumps the
+	// counter only for a RELAUNCH's prelaunch, so an untouched session sits at
+	// zero, and a generation of "0" would read as no generation at all.
 	return HostSessionFacts{
-		SessionID:       session.HostSessionID,
-		Generation:      strconv.Itoa(generation),
-		ShimAttached:    attached,
-		VendorSessionID: session.VendorSessionID,
-		ConfigDir:       session.ConfigDir,
-	}, true, nil
+		SessionID:    current.hostSessionID,
+		Generation:   strconv.Itoa(generation + 1),
+		ShimAttached: current.watcher != nil && current.watcher.Connected(),
+	}, true
 }
 
 // freshSocketPath mints a socket path no running shim of this workspace holds.
@@ -270,7 +267,13 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 	}
 	f.mu.Lock()
 	previous := f.sessions[ws]
-	f.sessions[ws] = &live{client: c}
+	// An INSTALL rotates the process, never the session: the adopted client
+	// serves the identity the retired one did.
+	carried := ""
+	if previous != nil {
+		carried = previous.hostSessionID
+	}
+	f.sessions[ws] = &live{client: c, hostSessionID: carried}
 	delete(f.coldGates, ws)
 	f.mu.Unlock()
 
@@ -349,7 +352,7 @@ func (f *Fleet) Resume(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cli
 		})
 		return rollout.Resumed{}, fmt.Errorf("workspace: resume %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: c, watcher: watcher})
+	f.remember(ws, &live{client: c, watcher: watcher, hostSessionID: session.HostSessionID})
 	// A resume keeps the session's host identity: the process rotated, the
 	// session did not.
 	if err := f.recordFacts(ctx, log, ws, session, started, session.ConfigDir, session.HostSessionID, c.PID()); err != nil {

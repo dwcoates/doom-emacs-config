@@ -5,8 +5,6 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-
-	"claude-repld/internal/wsm"
 )
 
 // TestRouteGuidanceRefusesAnUnspecifiedOrigin covers the origin the contract
@@ -144,28 +142,32 @@ func TestSessionBuildSHAReportsAnUnknownWorkspace(t *testing.T) {
 func TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
-	f.db.sessions["w1"] = wsm.Session{
-		Workspace:       "w1",
-		HostSessionID:   "host-1",
-		VendorSessionID: "vendor-1",
-		ConfigDir:       "/roots/default",
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
 
 	// Act.
-	facts, ok, err := f.fleet.HostSessionFacts(context.Background(), "w1")
+	facts, ok := f.fleet.HostSessionFacts(ws.ID)
 
 	// Assert.
-	if err != nil || !ok {
-		t.Fatalf("HostSessionFacts = (%+v, %v, %v), want the session's facts", facts, ok, err)
+	if !ok {
+		t.Fatalf("HostSessionFacts = (%+v, %v), want the operated session's facts", facts, ok)
 	}
-	if facts.SessionID != "host-1" || facts.VendorSessionID != "vendor-1" || facts.ConfigDir != "/roots/default" {
-		t.Fatalf("facts = %+v, want the recorded identities", facts)
+	if facts.SessionID == "" {
+		t.Fatalf("facts = %+v, want a minted host session id", facts)
 	}
-	if facts.ShimAttached {
-		t.Fatal("facts report the shim attached with no live session, want false")
+	if facts.Generation == "" || facts.Generation == "0" {
+		t.Fatalf("facts.Generation = %q, want the first generation", facts.Generation)
+	}
+	if !facts.ShimAttached {
+		t.Fatal("facts report the shim detached while the watcher is connected")
 	}
 	if facts.BackfillKnown {
 		t.Fatal("facts claim to know the backfill; the daemon holds no store client and can state none")
+	}
+	if recorded := f.db.sessions[ws.ID].HostSessionID; recorded != facts.SessionID {
+		t.Fatalf("recorded host session id = %q, want the answered %q", recorded, facts.SessionID)
 	}
 }
 
@@ -176,13 +178,10 @@ func TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone(t *testing.T) {
 	f := newFleetFixture(t)
 
 	// Act.
-	_, ok, err := f.fleet.HostSessionFacts(context.Background(), "w1")
+	_, ok := f.fleet.HostSessionFacts("w1")
 
 	// Assert.
-	if err != nil {
-		t.Fatalf("HostSessionFacts = error %v, want no session as an answer", err)
-	}
 	if ok {
-		t.Fatal("HostSessionFacts reports a session for a workspace that never had one")
+		t.Fatal("HostSessionFacts reports a session this daemon does not operate")
 	}
 }
