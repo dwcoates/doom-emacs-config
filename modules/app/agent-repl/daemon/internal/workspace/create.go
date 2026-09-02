@@ -67,7 +67,13 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		return wsm.Workspace{}, fmt.Errorf("create: repository %q: %w", spec.RepoDir, err)
 	}
 
-	branch, err := v.branchFor(global, spec)
+	// The workspace id is minted HERE, before anything is named: it is the
+	// creation job's key, and it is also what an unnamed, promptless create is
+	// named after — there is nothing else to derive a name from, and the
+	// naming rule never invents free text.
+	workspaceID := wsm.NewWorkspaceID()
+
+	branch, err := v.branchFor(global, spec, workspaceID)
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
@@ -101,10 +107,10 @@ func (v *verbs) Create(ctx context.Context, spec CreateSpec) (wsm.Workspace, err
 		origin = OriginCreateOneShot
 	}
 	job := wsm.CreationJob{
-		// The workspace id is pre-minted so the geometry can be recorded
-		// BEFORE materialization; registration mints the registry's own id,
-		// and the job is re-keyed onto it below.
-		Workspace: wsm.NewWorkspaceID(),
+		// The pre-minted workspace id lets the geometry be recorded BEFORE
+		// materialization; registration mints the registry's own id, and the
+		// job is re-keyed onto it below.
+		Workspace: workspaceID,
 		Layout: wsm.MergeLayout{
 			SourceBranch: branch,
 			SourceDir:    worktreeDir,
@@ -240,12 +246,21 @@ func (v *verbs) validateCreate(log dlog.Logger, spec CreateSpec) error {
 //
 // A supplied name that already carries a prefix component is taken as it
 // stands; the prefix is applied only to a name this daemon derived.
-func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec) (string, error) {
+func (v *verbs) branchFor(log dlog.Logger, spec CreateSpec, minted wsm.WorkspaceID) (string, error) {
 	if supplied := strings.TrimSpace(spec.Name); supplied != "" {
 		if strings.Contains(supplied, "/") {
 			return supplied, nil
 		}
 		return Name(Prefix(), supplied), nil
+	}
+	// An initial prompt is OPTIONAL on the standard form: an unset one is an
+	// empty workspace, which is a legal create. With no prompt there is no
+	// text to derive a slug from, so the branch is named after the workspace's
+	// own minted id rather than refused.
+	if strings.TrimSpace(spec.InitialPrompt) == "" {
+		branch := Name(Prefix(), UnnamedSlugPrefix+string(minted))
+		log.Debug(opCreate, "named the branch after the minted workspace id", dlog.Context{"branch": branch})
+		return branch, nil
 	}
 	slug, err := Slug(spec.InitialPrompt)
 	if err != nil {
