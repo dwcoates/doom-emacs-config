@@ -2377,3 +2377,122 @@ resolving an identity that would raise."
                 ;; Assert
                 (should-not (equal target next)))))
         (delete-directory project t)))))
+
+;;;; ---- agent-repl--call-in-background-workspace ----
+
+(ert-deftest agent-repl-test-call-in-background-switches-in-before-fn-runs ()
+  "FN runs with the target workspace activated, not the caller's."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((current "caller-ws")
+          (seen nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+        ;; Act
+        (agent-repl--call-in-background-workspace
+         "target-ws" (lambda () (setq seen current)))
+        ;; Assert
+        (should (equal seen "target-ws"))))))
+
+(ert-deftest agent-repl-test-call-in-background-restores-the-callers-workspace ()
+  "The caller's workspace is selected again once FN returns."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((current "caller-ws"))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+        ;; Act
+        (agent-repl--call-in-background-workspace "target-ws" #'ignore)
+        ;; Assert
+        (should (equal current "caller-ws"))))))
+
+(ert-deftest agent-repl-test-call-in-background-restores-focus-when-fn-signals ()
+  "A signalling FN still leaves the caller's workspace selected."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((current "caller-ws"))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () current))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (ws &rest _) (setq current ws)))
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+        ;; Act
+        (should-error (agent-repl--call-in-background-workspace
+                       "target-ws" (lambda () (error "boom"))))
+        ;; Assert
+        (should (equal current "caller-ws"))))))
+
+(ert-deftest agent-repl-test-call-in-background-skips-the-switch-when-already-current ()
+  "No perspective traffic at all when the target is already the current workspace."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((switches 0))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "target-ws"))
+                ((symbol-function 'agent-repl--ws-switch)
+                 (lambda (&rest _) (cl-incf switches)))
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+        ;; Act
+        (agent-repl--call-in-background-workspace "target-ws" #'ignore)
+        ;; Assert
+        (should (zerop switches))))))
+
+(ert-deftest agent-repl-test-call-in-background-cleans-foreign-windows-before-fn ()
+  "The frame is cleared of other workspaces' windows before FN builds into it."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((order nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "target-ws"))
+                ((symbol-function 'agent-repl--ws-switch) #'ignore)
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows)
+                 (lambda (_ws) (push 'clean order))))
+        ;; Act
+        (agent-repl--call-in-background-workspace
+         "target-ws" (lambda () (push 'fn order)))
+        ;; Assert
+        (should (equal (nreverse order) '(clean fn)))))))
+
+(ert-deftest agent-repl-test-call-in-background-binds-the-eager-open-flag ()
+  "The activation-reactive hooks are suppressed for the duration of FN."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((seen nil))
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "target-ws"))
+                ((symbol-function 'agent-repl--ws-switch) #'ignore)
+                ((symbol-function 'agent-repl--clean-frame-foreign-windows) #'ignore))
+        ;; Act
+        (agent-repl--call-in-background-workspace
+         "target-ws" (lambda () (setq seen agent-repl--eager-open-in-progress)))
+        ;; Assert
+        (should seen)
+        (should-not agent-repl--eager-open-in-progress)))))
+
+(ert-deftest agent-repl-test-restore-focus-reselects-the-original-window ()
+  "A live original window is selected again even when the body moved away."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((conf (current-window-configuration)))
+      (unwind-protect
+          (let (orig other)
+            (delete-other-windows)
+            (setq orig (selected-window))
+            (setq other (split-window orig))
+            (select-window other)
+            ;; Act
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+              (agent-repl--restore-focus nil orig (window-buffer orig)))
+            ;; Assert
+            (should (eq (selected-window) orig)))
+        (set-window-configuration conf)))))
+
+(ert-deftest agent-repl-test-restore-focus-survives-a-failing-switch-back ()
+  "A switch-back that signals is recorded, not re-signaled."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "elsewhere"))
+              ((symbol-function 'agent-repl--ws-switch)
+               (lambda (&rest _) (error "persp gone"))))
+      ;; Act / Assert
+      (should-not (agent-repl--restore-focus "caller-ws" nil nil)))))
