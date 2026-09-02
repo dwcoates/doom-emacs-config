@@ -3,7 +3,10 @@
 // Contract read: SPEC.md §B ("Waits", the driveScenarioToCompletion/
 // driveDocumentedPrompt contract), §C "Slash commands" (#60-63), §D row 65
 // (`vendor-answered-slash-commands` -> test #60, no new scenario needed) and
-// §F ruling 4 is NOT relevant here (this file drives no git fact).
+// §F item 5 (real git RULED, THEN REVERSED BY THE USER: this suite mocks
+// every external dependency, git included) is not relevant to this file
+// either way — it drives no git fact; workspaces here just need SOME
+// registered directory, provided by harness.NewRepo's scripted fake git.
 // docs/overhaul/daemon.md "Failure classification — where each failure
 // lives": "Entry-less residue (machinery/shim/internal/client-local) is
 // frontend.v1 failure.proto's vocabulary" and frontend/v1/failure.proto's own
@@ -45,7 +48,7 @@
 // hand-authored — see the grep gate in main_test.go) is to read back the
 // vendor transcript file at the path the store's own GetSidecarCursors
 // verb — a read, not a write, verb — names as durably advanced for this
-// turn's project directory. That is what transcriptRecordsUnderProject does
+// turn's project directory. That is what scTranscriptRecordsUnderProject does
 // below; the file is one the REAL shim (running --fake) actually wrote via
 // its own TranscriptWriter.append, never a test-authored fixture.
 package e2e
@@ -72,9 +75,9 @@ import (
 // Shared helpers, local to this file — no other area file touches it.
 // ---------------------------------------------------------------------------
 
-// openFeedRows fetches the workspace's root feed page in full. A read verb
+// scOpenFeedRows fetches the workspace's root feed page in full. A read verb
 // (OpenFeed), never a write — the grep gate's own discipline.
-func openFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
+func scOpenFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*frontendv1.FeedRow {
 	t.Helper()
 	resp, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
 	if err != nil {
@@ -87,10 +90,10 @@ func openFeedRows(t *testing.T, w *World, ws *workspacev1.WorkspaceRef) []*front
 	return success.GetPage().GetSuccess().GetRows()
 }
 
-// findRow answers the first row satisfying pred, failing the test loudly
+// scFindRow answers the first row satisfying pred, failing the test loudly
 // (naming every row's kind) when none does — so a mismatch names what WAS
 // there instead of just "not found".
-func findRow(t *testing.T, rows []*frontendv1.FeedRow, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
+func scFindRow(t *testing.T, rows []*frontendv1.FeedRow, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
 	t.Helper()
 	for _, row := range rows {
 		if pred(row) {
@@ -101,13 +104,13 @@ func findRow(t *testing.T, rows []*frontendv1.FeedRow, what string, pred func(*f
 	return nil
 }
 
-// answeringResponseProse walks a concluded turn's own FeedTurnEnded row to
+// scAnsweringResponseProse walks a concluded turn's own FeedTurnEnded row to
 // the answering response row (FeedTurnEndedConcluded.Answer) and answers its
 // settled markdown.
-func answeringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) string {
+func scAnsweringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, turn *conversationv1.TurnId) string {
 	t.Helper()
-	rows := openFeedRows(t, w, ws)
-	ended := findRow(t, rows, "turn "+turn.GetValue()+"'s FeedTurnEnded", func(r *frontendv1.FeedRow) bool {
+	rows := scOpenFeedRows(t, w, ws)
+	ended := scFindRow(t, rows, "turn "+turn.GetValue()+"'s FeedTurnEnded", func(r *frontendv1.FeedRow) bool {
 		return r.GetTurn().GetValue() == turn.GetValue() && r.GetTurnEnded() != nil
 	})
 	concluded := ended.GetTurnEnded().GetConcluded()
@@ -118,7 +121,7 @@ func answeringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceRef
 	if answerID.GetValue() == "" {
 		t.Fatalf("e2e: turn %s concluded with no answering response row", turn.GetValue())
 	}
-	answer := findRow(t, rows, "the answering response row "+answerID.GetValue(), func(r *frontendv1.FeedRow) bool {
+	answer := scFindRow(t, rows, "the answering response row "+answerID.GetValue(), func(r *frontendv1.FeedRow) bool {
 		return r.GetId().GetValue() == answerID.GetValue()
 	})
 	success := answer.GetActivity().GetResponse().GetSuccess()
@@ -128,13 +131,13 @@ func answeringResponseProse(t *testing.T, w *World, ws *workspacev1.WorkspaceRef
 	return success.GetProse().GetMarkdown()
 }
 
-// transcriptRecordsUnderProject reads back every non-blank line of every
+// scTranscriptRecordsUnderProject reads back every non-blank line of every
 // vendor transcript file the store's own GetSidecarCursors verb names as
 // living under this workspace's project directory, and answers them as raw
 // JSON bytes, one slice element per line. This is a READ of a file the real
 // shim (--fake) wrote itself; nothing here authors or mutates it (the grep
 // gate's forbidden shapes are os.MkdirAll/os.WriteFile/os.Create, none used).
-func transcriptRecordsUnderProject(t *testing.T, w *World, projectDir string) [][]byte {
+func scTranscriptRecordsUnderProject(t *testing.T, w *World, projectDir string) [][]byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(w.Ctx(), DefaultTimeout)
 	defer cancel()
@@ -160,18 +163,18 @@ func transcriptRecordsUnderProject(t *testing.T, w *World, projectDir string) []
 	return lines
 }
 
-// localCommandSystemRecord is the Shape B raw transcript shape SLASH_LOCAL
+// scLocalCommandSystemRecord is the Shape B raw transcript shape SLASH_LOCAL
 // appends (session.ts: `type: "system", subtype: "local_command"`).
-type localCommandSystemRecord struct {
+type scLocalCommandSystemRecord struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
 	Content string `json:"content"`
 	IsMeta  bool   `json:"isMeta"`
 }
 
-// shapeAUserRecord is the Shape A / Shape A unnamed raw transcript shape
+// scShapeAUserRecord is the Shape A / Shape A unnamed raw transcript shape
 // (session.ts: `type: "user", message: {role: "user", content: ...}`).
-type shapeAUserRecord struct {
+type scShapeAUserRecord struct {
 	Type    string `json:"type"`
 	Message struct {
 		Role    string `json:"role"`
@@ -200,7 +203,7 @@ type shapeAUserRecord struct {
 func TestVendorAnsweredSlashCommand(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act.
@@ -208,7 +211,7 @@ func TestVendorAnsweredSlashCommand(t *testing.T) {
 
 	// Assert.
 	const wantConclusion = "Answered the slash command locally."
-	if got := answeringResponseProse(t, w, ws, turn); got != wantConclusion {
+	if got := scAnsweringResponseProse(t, w, ws, turn); got != wantConclusion {
 		t.Errorf("answering response prose = %q, want %q", got, wantConclusion)
 	}
 }
@@ -231,7 +234,7 @@ func TestVendorAnsweredSlashCommand(t *testing.T) {
 func TestSlashShapeBViaSlash(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
 
@@ -239,9 +242,9 @@ func TestSlashShapeBViaSlash(t *testing.T) {
 	driveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "slash")
 
 	// Assert.
-	var found *localCommandSystemRecord
-	for _, line := range transcriptRecordsUnderProject(t, w, projectDir) {
-		var rec localCommandSystemRecord
+	var found *scLocalCommandSystemRecord
+	for _, line := range scTranscriptRecordsUnderProject(t, w, projectDir) {
+		var rec scLocalCommandSystemRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue // a differently-shaped line (prompt, turn record, ...); not this record
 		}
@@ -277,7 +280,7 @@ func TestSlashShapeBViaSlash(t *testing.T) {
 func TestSlashShapeANamed(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
 
@@ -286,9 +289,9 @@ func TestSlashShapeANamed(t *testing.T) {
 
 	// Assert: the raw Shape-A bookkeeping record landed with the given name.
 	const wantContent = "<command-message>merge</command-message>\n<command-name>/merge</command-name>\n<command-args></command-args>"
-	var found *shapeAUserRecord
-	for _, line := range transcriptRecordsUnderProject(t, w, projectDir) {
-		var rec shapeAUserRecord
+	var found *scShapeAUserRecord
+	for _, line := range scTranscriptRecordsUnderProject(t, w, projectDir) {
+		var rec scShapeAUserRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue
 		}
@@ -303,7 +306,7 @@ func TestSlashShapeANamed(t *testing.T) {
 
 	// Assert: the turn still concludes ordinarily.
 	const wantConclusion = "Recorded the Shape-A bookkeeping for /merge."
-	if got := answeringResponseProse(t, w, ws, turn); got != wantConclusion {
+	if got := scAnsweringResponseProse(t, w, ws, turn); got != wantConclusion {
 		t.Errorf("answering response prose = %q, want %q", got, wantConclusion)
 	}
 }
@@ -321,7 +324,7 @@ func TestSlashShapeANamed(t *testing.T) {
 func TestSlashShapeAUnnamed(t *testing.T) {
 	// Arrange.
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	projectDir := harness.ProjectDir(w.DefaultConfigDir, ws.GetDir())
 
@@ -330,9 +333,9 @@ func TestSlashShapeAUnnamed(t *testing.T) {
 
 	// Assert: the withheld-unnamed record landed, naming no command.
 	const wantContent = "<local-command-stdout>total 4\ndrwxr-xr-x</local-command-stdout>"
-	var found *shapeAUserRecord
-	for _, line := range transcriptRecordsUnderProject(t, w, projectDir) {
-		var rec shapeAUserRecord
+	var found *scShapeAUserRecord
+	for _, line := range scTranscriptRecordsUnderProject(t, w, projectDir) {
+		var rec scShapeAUserRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
 			continue
 		}
@@ -350,7 +353,7 @@ func TestSlashShapeAUnnamed(t *testing.T) {
 
 	// Assert: the turn still concludes ordinarily.
 	const wantConclusion = "Recorded the withheld-unnamed bookkeeping."
-	if got := answeringResponseProse(t, w, ws, turn); got != wantConclusion {
+	if got := scAnsweringResponseProse(t, w, ws, turn); got != wantConclusion {
 		t.Errorf("answering response prose = %q, want %q", got, wantConclusion)
 	}
 }
