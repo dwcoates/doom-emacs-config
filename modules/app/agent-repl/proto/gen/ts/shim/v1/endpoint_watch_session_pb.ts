@@ -7,7 +7,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
-import type { SessionUpdate } from "../../conversation/v1/session_pb";
+import type { SessionStarted, SessionUpdate } from "../../conversation/v1/session_pb";
 import { file_conversation_v1_session } from "../../conversation/v1/session_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_watch_session.proto.
  */
 export const file_shim_v1_endpoint_watch_session: GenFile = /*@__PURE__*/
-  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCJGChRXYXRjaFNlc3Npb25SZXNwb25zZRIuCgZ1cGRhdGUYASABKAsyHi5jb252ZXJzYXRpb24udjEuU2Vzc2lvblVwZGF0ZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
+  fileDesc("CiRzaGltL3YxL2VuZHBvaW50X3dhdGNoX3Nlc3Npb24ucHJvdG8SB3NoaW0udjEiFQoTV2F0Y2hTZXNzaW9uUmVxdWVzdCKNAQoUV2F0Y2hTZXNzaW9uUmVzcG9uc2USMAoGdXBkYXRlGAEgASgLMh4uY29udmVyc2F0aW9uLnYxLlNlc3Npb25VcGRhdGVIABI6Cg9zZXNzaW9uX3N0YXJ0ZWQYAiABKAsyHy5jb252ZXJzYXRpb24udjEuU2Vzc2lvblN0YXJ0ZWRIAEIHCgVmcmFtZUIgWh5hZ2VudHJlcGwvcHJvdG8vc2hpbS92MTtzaGltdjFiBnByb3RvMw", [file_conversation_v1_session]);
 
 /**
  * Nothing to say: the session is the connection's.
@@ -33,17 +33,38 @@ export const WatchSessionRequestSchema: GenMessage<WatchSessionRequest> = /*@__P
   messageDesc(file_shim_v1_endpoint_watch_session, 0);
 
 /**
- * One frame: the session update, whole. STANDING — no terminal arm; the
- * stream ends only with the session, and a stream ending otherwise is a
- * transport failure.
+ * One frame. STANDING — no terminal arm; the stream ends only with the
+ * session, and a stream ending otherwise is a transport failure.
  *
  * @generated from message shim.v1.WatchSessionResponse
  */
 export type WatchSessionResponse = Message<"shim.v1.WatchSessionResponse"> & {
   /**
-   * @generated from field: conversation.v1.SessionUpdate update = 1;
+   * @generated from oneof shim.v1.WatchSessionResponse.frame
    */
-  update?: SessionUpdate | undefined;
+  frame: {
+    /**
+     * A session-level fact as it manifests upstream.
+     *
+     * @generated from field: conversation.v1.SessionUpdate update = 1;
+     */
+    value: SessionUpdate;
+    case: "update";
+  } | {
+    /**
+     * RE-ANNOUNCEMENT: the session's original SessionStarted, recovered from
+     * the shim's own state, sent ONCE per watch right after the opening
+     * diagnostics — on EVERY new watch, not only the first. A daemon that
+     * adopts an already-started shim (crash boot, handover) attaches purely
+     * and still learns the identity, runtime, model, catalog and the live
+     * membership from the shim rather than from a durable record. (Landing
+     * 7, 2026-09-02.)
+     *
+     * @generated from field: conversation.v1.SessionStarted session_started = 2;
+     */
+    value: SessionStarted;
+    case: "sessionStarted";
+  } | { case: undefined; value?: undefined };
 };
 
 /**

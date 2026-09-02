@@ -102,7 +102,7 @@ export function mergeHead(
     | { case: "update" }
     | { case: "success"; endedAtMs: bigint; commit: string }
     | { case: "failed"; endedAtMs: bigint; summary: string }
-    | { case: "abandoned"; endedAtMs: bigint },
+    | { case: "abandoned"; endedAtMs: bigint; summary: string },
   opts: { icon?: string; startedAtMs?: bigint; label?: string } = {},
 ): FeedMerge {
   const arm =
@@ -125,7 +125,7 @@ export function mergeHead(
               case: "error" as const,
               value: {
                 endedAtMs: result.endedAtMs,
-                reason: { case: "abandoned" as const, value: {} },
+                reason: { case: "abandoned" as const, value: { summary: result.summary } },
               },
             };
   return create(FeedMergeSchema, {
