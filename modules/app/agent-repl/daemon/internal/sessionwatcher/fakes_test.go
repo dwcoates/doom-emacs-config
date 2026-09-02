@@ -504,9 +504,17 @@ func (s *sidebarSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	s.rec.emit(event{sink: "sidebar", method: "OnLiveWorkChanged", live: &held})
 }
 
-type lifecycleSink struct{ rec *recorder }
+type lifecycleSink struct {
+	rec *recorder
+	// onTurnEnded, when set, runs inside the sink's own turn-end call, which
+	// is how a test observes what had already happened by then.
+	onTurnEnded func()
+}
 
 func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how TurnClose) {
+	if s.onTurnEnded != nil {
+		s.onTurnEnded()
+	}
 	held := turn
 	s.rec.emit(event{sink: "lifecycle", method: "OnTurnEnded", turn: &held, close: how})
 }
@@ -552,6 +560,9 @@ type harness struct {
 	log    *dlog.TestLogger
 	w      *watcher
 
+	// lifecycle is the fake lifecycle sink, so a test can hook its turn end.
+	lifecycle *lifecycleSink
+
 	session *fakeStream[*conversationv1.SessionUpdate]
 	main    *fakeStream[*shimv1.WatchAgentResponse]
 	mainReq *shimv1.WatchAgentRequest
@@ -563,13 +574,14 @@ type harness struct {
 func newHarness(t *testing.T, session Session) *harness {
 	t.Helper()
 	h := &harness{t: t, client: newFakeClient(), rec: newRecorder(), log: dlog.NewTestLogger()}
+	h.lifecycle = &lifecycleSink{rec: h.rec}
 
 	started, err := Start(context.Background(), ids.WorkspaceID("ws-1"), h.client, session, Sinks{
 		Feed:      &feedSink{rec: h.rec},
 		Footer:    &footerSink{rec: h.rec},
 		Topbar:    &topbarSink{rec: h.rec},
 		Sidebar:   &sidebarSink{rec: h.rec},
-		Lifecycle: &lifecycleSink{rec: h.rec},
+		Lifecycle: h.lifecycle,
 	}, h.log)
 	if err != nil {
 		t.Fatalf("Start: %v", err)

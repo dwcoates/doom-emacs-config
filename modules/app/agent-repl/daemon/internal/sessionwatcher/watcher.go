@@ -746,9 +746,18 @@ func (w *watcher) flushTurnEnds() {
 	pending := w.pendingTurnEnds
 	w.pendingTurnEnds = nil
 	w.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 	}
+	// ONLY NOW is the workspace free: the sink has had its say, and if it
+	// delivered the next held prompt a turn is already back in flight, which
+	// signalFreenessLocked reads off w.turn and refuses to release on.
+	w.mu.Lock()
+	w.signalFreenessLocked()
+	w.mu.Unlock()
 }
 
 // stale reports whether a goroutine's generation has been superseded, which
