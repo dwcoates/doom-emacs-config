@@ -117,6 +117,16 @@ type DB interface {
 	CloseTurn(ctx context.Context, turn TurnID, at time.Time, how TurnClose) error
 	// OpenTurns loads a workspace's turns that have no terminal.
 	OpenTurns(ctx context.Context, id WorkspaceID) ([]Turn, error)
+	// AllDisplacedTurns loads every turn still marked displaced, across every
+	// workspace and REGARDLESS of whether the turn is still open: a merge
+	// displaces a turn by ending it, so the record a boot has to put back is
+	// normally a closed one. It is the boot recovery's whole input.
+	AllDisplacedTurns(ctx context.Context) ([]Turn, error)
+	// RetireDisplacedTurn clears a turn's displaced mark and, for a turn still
+	// open, stamps its close in the SAME transaction. Retiring is what makes
+	// the resubmission exactly-once: a record whose mark is down is nobody's
+	// to put back.
+	RetireDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) error
 	// ClaimIdempotencyKey binds a client's key to a turn. When the key is
 	// already claimed it returns the existing turn and mints nothing.
 	ClaimIdempotencyKey(ctx context.Context, id WorkspaceID, key string, turn TurnID) (*TurnID, error)
