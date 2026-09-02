@@ -77,13 +77,15 @@ func refuse(arm string, ws ids.WorkspaceID, format string, args ...any) *Refusal
 	return &RefusalError{Arm: arm, Workspace: ws, Reason: fmt.Sprintf(format, args...)}
 }
 
-// Refused reports the intended arm of a refusal, and false for any other error.
-// The server uses it to decide between an unlanded-arm answer and an ordinary
-// internal failure.
-func Refused(err error) (string, bool) {
+// Refused answers the refusal behind an error, and false for any other error.
+// It hands back the whole RefusalError rather than its arm alone: the server
+// puts the REASON after the arm on the answered message, so an extractor that
+// dropped it would leave every merge refusal with an empty sentence. The
+// shape matches workspace.AsRefusal, the other component's extractor.
+func Refused(err error) (*RefusalError, bool) {
 	var r *RefusalError
 	if errors.As(err, &r) {
-		return r.Arm, true
+		return r, true
 	}
-	return "", false
+	return nil, false
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+
+	"claude-repld/internal/sessionlock"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,5 +160,57 @@ func TestTheShimOnlyFakeHookCanOnlyTurnFakeOn(t *testing.T) {
 				t.Fatalf("fakeShims() with %s=%q = %v, want %v", FakeShimsEnv, tc.value, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestAdoptedDeathWitnessReportsAFreeLockAsDeath pins that a workspace lock
+// which reads free is the evidence that stops the redial loop.
+func TestAdoptedDeathWitnessReportsAFreeLockAsDeath(t *testing.T) {
+	// Arrange.
+	witness := adoptedDeathWitness(func(string) (sessionlock.State, error) {
+		return sessionlock.StateFree, nil
+	})
+
+	// Act.
+	free, err := witness("/w")
+
+	// Assert.
+	if err != nil || !free {
+		t.Fatalf("witness() = %t, %v, want true and no error", free, err)
+	}
+}
+
+// TestAdoptedDeathWitnessReportsAHeldLockAsAlive pins that a lock a shim still
+// holds is never read as a death.
+func TestAdoptedDeathWitnessReportsAHeldLockAsAlive(t *testing.T) {
+	// Arrange.
+	witness := adoptedDeathWitness(func(string) (sessionlock.State, error) {
+		return sessionlock.StateHeld, nil
+	})
+
+	// Act.
+	free, err := witness("/w")
+
+	// Assert.
+	if err != nil || free {
+		t.Fatalf("witness() = %t, %v, want false and no error", free, err)
+	}
+}
+
+// TestAdoptedDeathWitnessSurfacesACouldNotTellProbe pins the boot rule: a probe
+// that could not tell is never read as free, and its error is surfaced rather
+// than swallowed into a "not free" answer.
+func TestAdoptedDeathWitnessSurfacesACouldNotTellProbe(t *testing.T) {
+	// Arrange.
+	witness := adoptedDeathWitness(func(string) (sessionlock.State, error) {
+		return sessionlock.StateUnknown, errors.New("permission denied")
+	})
+
+	// Act.
+	free, err := witness("/w")
+
+	// Assert.
+	if free || err == nil {
+		t.Fatalf("witness() = %t, %v, want false and the probe error", free, err)
 	}
 }

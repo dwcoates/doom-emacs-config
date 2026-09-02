@@ -39,6 +39,7 @@ import (
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/scriptrunner"
 	"claude-repld/internal/server"
+	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/vocab"
@@ -210,7 +211,26 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			return nil, fmt.Errorf("claude-repld: build the external browser: %w", err)
 		}
 	}
-	supervisor, err := shimclient.NewSupervisor(p.Surfaces)
+	// THE ADOPTED-DEATH WITNESS. Without it an adopted shim whose socket is
+	// gone is redialed forever: no exit is ever published, so the workspace
+	// stays wedged on a process that is not there. The witness reads the
+	// workspace's kernel lock through the session fleet — the same probe
+	// rollout is handed below — and only a lock that reads FREE is evidence of
+	// death. A probe that could NOT TELL surfaces its error, and the client
+	// keeps redialing, per the boot rule that a could-not-tell probe is never
+	// read as free.
+	//
+	// The closure is late-bound over `fleet` because the fleet is built BELOW:
+	// it needs this supervisor. By the time a shim's link can break, the fleet
+	// exists; before then the witness refuses rather than concluding anything.
+	var fleet *workspace.Fleet
+	supervisor, err := shimclient.NewSupervisor(p.Surfaces,
+		shimclient.WithLockProbe(adoptedDeathWitness(func(workspaceDir string) (sessionlock.State, error) {
+			if fleet == nil {
+				return sessionlock.StateUnknown, errors.New("the session fleet is not built yet")
+			}
+			return fleet.ProbeLock(workspaceDir)
+		})))
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the shim supervisor: %w", err)
 	}
@@ -245,7 +265,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the feed resolver: %w", err)
 	}
-	footerResolver, err := footer.New(p.Surfaces)
+	footerResolver, err := footer.New(colors, p.Surfaces)
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the footer resolver: %w", err)
 	}
@@ -273,7 +293,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	healthRef := &healthForwarder{}
 	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, log: log}
 
-	fleet, err := workspace.NewFleet(workspace.FleetDeps{
+	fleet, err = workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
 		DB:          p.DB,
 		Accounts:    accounts,
@@ -916,4 +936,19 @@ func resolveHoldoutWarnEvery() (time.Duration, error) {
 		return 0, fmt.Errorf("claude-repld: %s=%q is not a positive duration", HoldoutWarnEnv, raw)
 	}
 	return d, nil
+}
+
+// adoptedDeathWitness renders a kernel-lock probe as the supervisor's
+// adopted-death witness. ONLY a lock that reads FREE is evidence that an
+// adopted shim is gone: StateUnknown and a probe error both answer "not free",
+// and the error is surfaced so the client records it and keeps redialing,
+// per the boot rule that a could-not-tell probe is never read as free.
+func adoptedDeathWitness(probe func(string) (sessionlock.State, error)) func(string) (bool, error) {
+	return func(workspaceDir string) (bool, error) {
+		state, err := probe(workspaceDir)
+		if err != nil {
+			return false, err
+		}
+		return state == sessionlock.StateFree, nil
+	}
 }
