@@ -18,6 +18,7 @@ import { WatchDaemonResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/en
 import { DrainReasonSchema } from "../../../proto/gen/ts/agentrepl/v1/drain_reason_pb";
 
 import { startHarness, type Harness } from "./harness";
+import { REFUSAL_FACTS, ROOT_FEED, type RpcName } from "./fake-daemon";
 import {
   DRAIN_REASON_ARMS,
   SHUTDOWN_CAUSE_ARMS,
@@ -25,7 +26,13 @@ import {
   WORKSPACE_ID,
   assertCoversOneof,
   drainReason,
+  feedId,
   footerView,
+  heldPromptItem,
+  holdTray,
+  permissionRow,
+  roster,
+  rosterRow,
 } from "./fixtures";
 
 let harness: Harness;
@@ -353,5 +360,156 @@ describe.each(SHUTDOWN_CAUSE_ARMS)("a %s shutdown cause", (cause) => {
     await harness.settle();
     // Assert
     expect(harness.$(`[data-shutdown-cause="${cause}"]`)).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE MOVE ARRIVES AS A REFUSAL, TOO (audit 1, item 18)
+//
+// RULED (the ONE refusal hook, src/rpc/refuse.ts): "any rpc's transferringAway
+// raises the moved notice, quiesces, cancels every stream." The arm is the same
+// fact `WatchWebWorkspace`'s `transferred` push carries, arriving as an ANSWER
+// to a click instead of as a push — and the hook raises the page-wide notice
+// itself (`crossCuttingSentence` → `moved.ts`) precisely so that no call site
+// can opt out of it. Drawing it only as a sentence beside one button would
+// leave the rest of the page looking live while nothing it shows can be true.
+//
+// So the same assertions the `transferred` push gets are made here, once per
+// rpc SHAPE the app calls: a footer control, a feed card, the tray, the
+// sidebar and the topbar.
+// ---------------------------------------------------------------------------
+
+/** How to provoke one rpc's `transferring_away`, and where its click is. */
+interface MoveSite {
+  name: string;
+  rpc: RpcName;
+  click: string;
+  arrange?(h: Harness): void;
+  before?(h: Harness): Promise<void>;
+}
+
+const MOVE_SITES: MoveSite[] = [
+  {
+    name: "Interrupt (the footer's stop)",
+    rpc: "interrupt",
+    click: ".footer-clock [data-interrupt]",
+    arrange: (h) => h.fake.setFooter(WORKSPACE_ID, footerView({ status: "thinking" })),
+  },
+  {
+    name: "AnswerPermission (a feed card)",
+    rpc: "answerPermission",
+    click: '[data-permission="allowOnce"]',
+    arrange: (h) =>
+      h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("open", undefined, { id: feedId("perm") })),
+  },
+  {
+    name: "UpdateHeldPrompt (the hold tray)",
+    rpc: "updateHeldPrompt",
+    click: '[data-held-action="drop"]',
+    arrange: (h) => h.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem()] })),
+  },
+  {
+    name: "CloseWorkspace (a sidebar verb)",
+    rpc: "closeWorkspace",
+    click: '[data-roster-row="ws-1"] [data-verb="close"]',
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "SetModel (the topbar picker)",
+    rpc: "setModel",
+    click: '[data-model-option="sonnet"]',
+    before: async (h) => {
+      await h.click(".topbar-model");
+    },
+  },
+];
+
+describe.each(MOVE_SITES)("$name refused as transferring_away", (site) => {
+  /** Boot, refuse this rpc with the move arm, and click its control. */
+  const refuseAsMoved = async (): Promise<void> => {
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.refuse(site.rpc, "transferringAway");
+    site.arrange?.(harness);
+    await harness.settle();
+    await site.before?.(harness);
+    await harness.click(site.click);
+  };
+
+  it("raises the page-wide moved notice", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.$(`[data-moved="${REFUSAL_FACTS.address}"]`)).not.toBeNull();
+  });
+
+  it("names the successor's address in the notice", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.$('[data-component="drain-banner"]')?.textContent).toContain(
+      REFUSAL_FACTS.address,
+    );
+  });
+
+  it("goes quiet", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.ctx.isQuiesced()).toBe(true);
+  });
+
+  it("cancels the view streams", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.fake.liveStreams("watchFooter", WORKSPACE_ID)).toBe(0);
+  });
+
+  it("cancels the feed's tail", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.fake.liveStreams("watchFeed", WORKSPACE_ID)).toBe(0);
+  });
+
+  it("cancels the global roster stream", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.fake.liveStreams("watchWorkspaceRoster")).toBe(0);
+  });
+
+  it("cancels its own web-link stream", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    // Assert
+    expect(harness.fake.liveStreams("watchWebWorkspace", WORKSPACE_ID)).toBe(0);
+  });
+
+  it("reports no transport failure, because the page cancelled them", async () => {
+    // Arrange / Act
+    await refuseAsMoved();
+    await harness.tick(10_000);
+    // Assert
+    expect(harness.failureArms()).not.toContain("daemonUnreachable");
+  });
+
+  it("still draws the refusal at the clicked control", async () => {
+    // Arrange / Act: the page-wide notice does not replace the call site's own
+    // answer — the user clicked here and is looking here.
+    await refuseAsMoved();
+    // Assert
+    expect(harness.refusalArms()).toContain("transferringAway");
+  });
+
+  it("does not reopen a stream after the move", async () => {
+    // Arrange
+    await refuseAsMoved();
+    const attempts = harness.fake.calls("watchFooter").length;
+    // Act
+    await harness.tick(30_000);
+    // Assert: the webapp never redials a successor.
+    expect(harness.fake.calls("watchFooter").length).toBe(attempts);
   });
 });

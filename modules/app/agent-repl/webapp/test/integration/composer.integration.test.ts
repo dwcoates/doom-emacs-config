@@ -673,3 +673,127 @@ describe("submission does not derive state", () => {
     expect(harness.row("answer")?.textContent).toContain("the answer");
   });
 });
+
+// ---------------------------------------------------------------------------
+// command_acted: A RECOGNIZED ACT THAT MINTS NO TURN (audit 1, item 6)
+//
+// The answer is EMPTY on purpose: the set arm is the whole assertion, and the
+// visible effect (the model change, restated authoritatively) arrives on the
+// component streams, never in this answer. So the box clears — the words are
+// spent — and the composer draws nothing at all.
+// ---------------------------------------------------------------------------
+
+describe("a command-acted answer", () => {
+  /** Submit a session-acting command whose answer mints no turn. */
+  const submitActed = async (): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "commandActed", value: {} } } },
+      }),
+    );
+    await type("/model opus");
+    await send();
+  };
+
+  it("clears the draft", async () => {
+    // Arrange / Act
+    await submitActed();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("draws no refusal", async () => {
+    // Arrange / Act: an act the daemon performed is an ANSWER, not a failure.
+    await submitActed();
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
+  it("draws no panel", async () => {
+    // Arrange / Act
+    await submitActed();
+    // Assert
+    expect(harness.$("[data-panel]")).toBeNull();
+  });
+
+  it("hands the composer no panel to draw", async () => {
+    // Arrange / Act
+    await submitActed();
+    // Assert
+    expect(harness.panels).toEqual([]);
+  });
+
+  it("draws no feed row of its own", async () => {
+    // Arrange / Act: the effect arrives on the component streams.
+    await submitActed();
+    // Assert
+    expect(harness.rowIds()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// duplicate_submission: THE KEY THE CLIENT MINTED WAS ALREADY ACCEPTED
+// (audit 1, item 7)
+//
+// The idempotency key is the ONE client-minted value, and it is STABLE across
+// a retry of the same submission — which is exactly how a retry provokes this
+// arm. The words stay in the box: the earlier submission stands, and the user
+// is told so at the control they pressed.
+// ---------------------------------------------------------------------------
+
+describe("a duplicate submission", () => {
+  /**
+   * Send once against a transport that drops the call (so the text stands and
+   * the key is kept), then send again against a daemon that refuses the key it
+   * has already accepted.
+   */
+  const retryDuplicate = async (): Promise<void> => {
+    harness = await startHarness({ composer: true });
+    harness.fake.failNext("submitPrompt", "the daemon dropped the call");
+    await type("a prompt");
+    await send();
+    harness.fake.refuse("submitPrompt", "duplicateSubmission");
+    await send();
+  };
+
+  it("retried with the same idempotency key", async () => {
+    // Arrange / Act
+    await retryDuplicate();
+    // Assert: the retry IS the same submission, which is what makes the
+    // daemon's refusal the right answer.
+    const keys = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt").map((r) => r.idempotencyKey);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("draws the refusal at the composer", async () => {
+    // Arrange / Act
+    await retryDuplicate();
+    // Assert
+    expect(harness.$('.composer-refusal[data-arm="duplicateSubmission"]')).not.toBeNull();
+  });
+
+  it("says the prompt was already submitted", async () => {
+    // Arrange / Act
+    await retryDuplicate();
+    // Assert
+    expect(harness.text(".composer-refusal")).toContain("already submitted");
+  });
+
+  it("keeps the text in the box", async () => {
+    // Arrange / Act
+    await retryDuplicate();
+    // Assert
+    expect((harness.$('[data-component="composer"] textarea') as HTMLTextAreaElement).value).toBe(
+      "a prompt",
+    );
+  });
+
+  it("draws no feed row for the refused resubmission", async () => {
+    // Arrange / Act
+    await retryDuplicate();
+    // Assert
+    expect(harness.rowIds()).toEqual([]);
+  });
+});
