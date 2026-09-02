@@ -682,3 +682,11 @@ every UX or contract gap you surfaced instead of improvising.
   `unknown_agent` arm on OpenAgentSessionFailure (proposed). Dispatched:
   remediation #3 (opus-low, shim-agents/engine3) for the nine engine
   failures; fable auditor #2 (read-only, fresh) over 3dc64a89b.
+- LEDGER: auditor #2 returned 61 items over 3dc64a89b; triaged at
+  docs/overhaul/reports/shim-audit-2.md (accept all; dispositions on 32/57
+  standing lever, 58 three declared-only terminals to mark, 59 label
+  synthetic, 56 never invent a cut, 61 keep the bounded re-drain and fix its
+  docstrings). Many are audit-1 carry-overs remediation #2 did not reach.
+  Remediation #4 = two opus-low agents (S: session/process/record/transport;
+  T: turn/gate/detached + goldens) dispatched after remediation #3 merges
+  (shared session/detached tests and engine files).
