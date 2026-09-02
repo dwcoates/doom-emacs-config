@@ -27,6 +27,15 @@ var (
 	// ErrStorage is the database itself failing. It always wraps the driver's
 	// own error so the cause survives to the log.
 	ErrStorage = errors.New("storage failure")
+
+	// ErrUnknownAgent is a well-formed agent id that names no book of this
+	// store — no agent row was ever recorded for it.
+	//
+	// IT IS NOT ErrInvalid: the request is perfectly well formed and the caller
+	// cannot fix it by respelling anything. It is its own class because it is
+	// its own wire arm (OpenAgentSessionFailure.unknown_agent), which the shim
+	// maps to NotFound.
+	ErrUnknownAgent = errors.New("unknown agent")
 )
 
 // The refusal SITES this package can produce.
@@ -52,6 +61,10 @@ const (
 	// SiteResidueRawUnset is residue that carries no verbatim record, which is
 	// the only thing it exists to carry.
 	SiteResidueRawUnset = "residue_raw_unset"
+	// SiteUnknownAgent is a well-formed agent id the store holds no agent row
+	// for. An agent the store HAS heard of but that has said nothing yet is not
+	// this: it is a legal, empty book.
+	SiteUnknownAgent = "unknown_agent"
 )
 
 // refusal is one refusal's STRUCTURED detail: the site, the store's own name
@@ -110,6 +123,12 @@ func invalidFieldf(field, format string, args ...any) error {
 // refusals this package owns, rather than the generic one.
 func invalidSitef(site, field, format string, args ...any) error {
 	return &refusal{site: site, field: field, detail: fmt.Sprintf(format, args...), class: ErrInvalid}
+}
+
+// unknownAgentf builds an ErrUnknownAgent naming the field that addressed the
+// book nobody kept.
+func unknownAgentf(field, format string, args ...any) error {
+	return &refusal{site: SiteUnknownAgent, field: field, detail: fmt.Sprintf(format, args...), class: ErrUnknownAgent}
 }
 
 // stalePointerf builds an ErrStalePointer with the detail a human reads.

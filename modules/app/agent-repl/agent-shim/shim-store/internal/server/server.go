@@ -156,6 +156,11 @@ func storeRefusal(err error) *refusal {
 	site := db.RefusalSite(err)
 	field := db.RefusalField(err)
 	switch {
+	case errors.Is(err, ErrUnknownAgent):
+		if site == "" {
+			site = SiteUnknownAgent
+		}
+		return refuseClass(classUnknownAgent, site, field, err.Error())
 	case errors.Is(err, ErrStalePointer):
 		if site == "" {
 			site = SiteStalePointer
@@ -187,7 +192,7 @@ func storeRefusal(err error) *refusal {
 // trace tying the rpc to it.
 func (s *Server) storeFailure(log *logging.Logger, operation string, err error, fields logging.Fields) *refusal {
 	ref := storeRefusal(err)
-	if ref.class == classInvalid || ref.class == classStalePointer {
+	if ref.class == classInvalid || ref.class == classStalePointer || ref.class == classUnknownAgent {
 		s.logRefusal(log, operation, ref, fields)
 		return ref
 	}
@@ -329,6 +334,8 @@ func (s *Server) OpenAgentSession(ctx context.Context, req *connect.Request[stor
 func openFailure(ref *refusal) *connect.Response[storev1.OpenAgentSessionResponse] {
 	failure := &storev1.OpenAgentSessionFailure{Detail: ref.detail}
 	switch ref.class {
+	case classUnknownAgent:
+		failure.Kind = &storev1.OpenAgentSessionFailure_UnknownAgent{UnknownAgent: &storev1.OpenAgentSessionUnknownAgent{}}
 	case classStalePointer:
 		failure.Kind = &storev1.OpenAgentSessionFailure_StalePointer{StalePointer: &storev1.OpenAgentSessionStalePointer{}}
 	case classStorage:
