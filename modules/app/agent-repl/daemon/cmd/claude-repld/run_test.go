@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"claude-repld/internal/boot"
 	"claude-repld/internal/daemonaddr"
 	"claude-repld/internal/rollout"
 	"claude-repld/internal/server"
@@ -49,8 +48,8 @@ type testHooks struct {
 func newTestHooks() *testHooks {
 	th := &testHooks{served: make(chan struct{}, 1)}
 	th.hooks = hooks{
-		Graph: func(context.Context, process) (server.Deps, boot.Deps, error) {
-			return server.Deps{}, boot.Deps{}, errServed
+		Graph: func(context.Context, process) (*graph, error) {
+			return nil, errServed
 		},
 		Server: func(server.Deps) (server.Server, error) { return nil, errServed },
 		Serve: func(context.Context, net.Listener, http.Handler) error {

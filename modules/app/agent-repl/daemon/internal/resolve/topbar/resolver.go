@@ -569,3 +569,23 @@ func saturatingSub(a, b uint64) uint64 {
 	}
 	return a - b
 }
+
+// PermissionModes answers EXACTLY the switchable mode set the daemon served
+// for this workspace, in the order it was served. It reports false when no
+// picker has been installed, which is the honest answer for a workspace whose
+// session never stated one: a SetPermissionMode validated against a set nobody
+// served would be validated against nothing.
+func (r *resolver) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.stateLocked(ws)
+	if s.picker == nil {
+		return nil, false
+	}
+	options := s.picker.GetOptions()
+	modes := make([]string, 0, len(options))
+	for _, option := range options {
+		modes = append(modes, option.GetMode())
+	}
+	return modes, true
+}

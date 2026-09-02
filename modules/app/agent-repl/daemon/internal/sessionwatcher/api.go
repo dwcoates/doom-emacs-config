@@ -247,6 +247,15 @@ type Watcher interface {
 	// Free reports freeness: no turn in flight AND an empty live-work set.
 	// Never judged except while holding the workspace's lease.
 	Free() bool
+	// AwaitFree blocks until the workspace is free, or until ctx ends. It is
+	// driven by the stream edges — OnTurnEnded and OnLiveWorkChanged — so a
+	// lease holder waits on an EVENT rather than on a poll. A watcher closed
+	// under a standing wait answers ErrWatcherClosed.
+	AwaitFree(ctx context.Context) error
+	// AwaitTurnEnd blocks until the named turn ends and reports how. A turn
+	// that ended just before the call is answered from the watcher's memory of
+	// recently closed turns, so the caller cannot miss the edge it submitted.
+	AwaitTurnEnd(ctx context.Context, turn ids.TurnID) (TurnClose, error)
 	// SetOutputAddress installs the address a lease holder wants this
 	// session's rows stamped with; nil restores the root feed.
 	SetOutputAddress(addr *OutputAddress)

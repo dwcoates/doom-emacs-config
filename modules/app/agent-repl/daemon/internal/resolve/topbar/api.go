@@ -85,6 +85,10 @@ type Resolver interface {
 	// EXACTLY the switchable set the daemon will accept. SetPermissionMode
 	// validates against what was served here.
 	SetPermissionModePicker(ws ids.WorkspaceID, picker *frontendv1.TopbarPermissionModePicker)
+	// PermissionModes answers exactly the switchable mode set that was served,
+	// in the order it was served, reporting false when no picker has been
+	// installed. It is what a mode switch is validated against.
+	PermissionModes(ws ids.WorkspaceID) ([]string, bool)
 	// SetAccount installs the account line read from the config root's
 	// .claude.json. An EMPTY email is the logged-out arm, which is a drawn
 	// warning rather than a blank label.
