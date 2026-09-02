@@ -69,7 +69,8 @@ import { renderMarkdown } from "../markdown.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { refusalSentence } from "../rpc/refusal.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { crossCuttingSentence } from "../rpc/refuse.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
 
@@ -476,7 +477,7 @@ function actionButton(action: HeldAction, label: string, spec: ActionSpec): HTML
   button.textContent = label;
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void run(action, spec, button);
+    void guardMalformed(spec.tc.ctx, "tray.held-prompt.action", run(action, spec, button));
   });
   return button;
 }
@@ -505,7 +506,7 @@ async function run(action: HeldAction, spec: ActionSpec, button: HTMLButtonEleme
         "UpdateHeldPromptError.cause",
       );
       const say =
-        refusalSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
+        crossCuttingSentence("UpdateHeldPrompt", cause) ?? updateHeldPromptRefusal(cause, action);
       drawRowRefusal(row, cause.case, say);
       log("warn", `UpdateHeldPrompt refused a ${action}`, {
         operation: "tray.held-prompt.action-refused",
