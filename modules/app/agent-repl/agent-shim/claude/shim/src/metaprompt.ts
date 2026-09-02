@@ -78,7 +78,7 @@ export function readMetaprompt(home: string = homedir()): string | undefined {
 }
 
 /** The SDK `systemPrompt` option shape, preset plus optional append. */
-export interface SystemPromptOption {
+interface SystemPromptOption {
   type: "preset";
   preset: "claude_code";
   append?: string;

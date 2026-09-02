@@ -1,0 +1,33 @@
+{
+  "scenario": "turn-stop-error-during-execution",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Count from 1 to 500 out loud.",
+  "prompts": [
+    {
+      "text": "Count from 1 to 500 out loud.",
+      "resume": false
+    }
+  ],
+  "world": "turn-stop-error-during-execution",
+  "cwd_init": null,
+  "vendor_session_id": "4e034c6f-ae81-492b-9222-6b1b4c576ae4",
+  "manual": null,
+  "expect": [
+    "result:error_during_execution"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-turn-stop-error-during-execution-kdTq5P-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:40:24.841Z",
+  "controls": [
+    {
+      "verb": "interrupt",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": [],
+  "reclassified_at": "2026-09-01T21:56:29.688Z",
+  "reclassified_by": "project lead, declared error-subtype allowance (outcome.mjs)"
+}

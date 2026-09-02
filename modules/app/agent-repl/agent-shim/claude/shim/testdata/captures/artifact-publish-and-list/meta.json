@@ -1,0 +1,28 @@
+{
+  "scenario": "artifact-publish-and-list",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Publish page.html as an artifact titled 'Capture Probe' with the favicon 📎, then list my artifacts.",
+  "prompts": [
+    {
+      "text": "Publish page.html as an artifact titled 'Capture Probe' with the favicon 📎, then list my artifacts.",
+      "resume": false
+    }
+  ],
+  "world": "artifact-publish-and-list",
+  "cwd_init": null,
+  "vendor_session_id": "98862a88-152c-4d2a-a6c3-167ab18a7c48",
+  "manual": null,
+  "expect": [
+    "tool:Artifact(publish)",
+    "tool_result:artifact(typed output)",
+    "tool:Artifact(list)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-artifact-publish-and-list-pguq5T-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:26:19.452Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

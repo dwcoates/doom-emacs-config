@@ -1,0 +1,27 @@
+{
+  "scenario": "question-multi-select",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Ask me exactly one multi-select question with the question tool: which of logging, metrics, tracing and profiling I want enabled.",
+  "prompts": [
+    {
+      "text": "Ask me exactly one multi-select question with the question tool: which of logging, metrics, tracing and profiling I want enabled.",
+      "resume": false
+    }
+  ],
+  "world": "question-multi-select",
+  "cwd_init": null,
+  "vendor_session_id": "d825250e-404f-4c18-b8e7-ca647688bde9",
+  "manual": null,
+  "expect": [
+    "tool:AskUserQuestion(multiSelect=true)",
+    "comma-joined answer string in the result"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-question-multi-select-zblzaI-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:20:51.318Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

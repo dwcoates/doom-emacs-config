@@ -1,0 +1,28 @@
+{
+  "scenario": "turn-stop-max-turns",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Repeatedly run `echo tick` one command at a time, forever, never stopping to summarize.",
+  "prompts": [
+    {
+      "text": "Repeatedly run `echo tick` one command at a time, forever, never stopping to summarize.",
+      "resume": false
+    }
+  ],
+  "world": "turn-stop-max-turns",
+  "cwd_init": null,
+  "vendor_session_id": "093defee-6e09-4745-9941-fff3168b10f2",
+  "manual": null,
+  "expect": [
+    "result:error_max_turns"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-turn-stop-max-turns-WEujcr-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:35:59.851Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": [],
+  "reclassified_at": "2026-09-01T21:56:29.685Z",
+  "reclassified_by": "project lead, declared error-subtype allowance (outcome.mjs)"
+}
