@@ -265,6 +265,18 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   /** Every open `WatchAgent` tail, so the teardown can conclude each honestly. */
   const watchers = new Set<OpenWatcher>();
 
+  // THE RECORD PLANE'S FAULTS ARE THE SESSION'S. `Persistence` raises a
+  // store_unreachable fault and opens a degraded window when the store stops
+  // answering, and nothing subscribing to them meant a store outage was visible
+  // only in the shim's own log -- the daemon's diagnostics stayed healthy while
+  // the conversation was being lost.
+  deps.persistence.onFault((fault) => {
+    pushes.fault(fault);
+  });
+  deps.persistence.onDegradedWindow((window) => {
+    pushes.recordDegradedWindow(window);
+  });
+
   const gate = new PermissionGate({
     mainAgentId: () => requireIdentity().agentId,
     persist: (entries) => deps.persistence.write(entries),

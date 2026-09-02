@@ -168,7 +168,13 @@ export class PersistenceError extends Error {
  * the store's latency.
  */
 export interface FlushOutcome {
-  /** How many rows this writer has dropped, loudly, over the whole process. */
+  /**
+   * How many rows this flush watched being dropped, loudly.
+   *
+   * Scoped to the flush and not to the writer's life: the stand-down's exit
+   * code answers "did the writes this flush waited for actually land", and an
+   * outage the session already recovered from is not a dirty exit.
+   */
   readonly lostRows: number;
 }
 

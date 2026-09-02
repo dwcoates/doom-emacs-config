@@ -210,8 +210,26 @@ export class TurnEngine {
       throw new Error("shim turn: StartTurn reached the engine without a turn id or a prompt");
     }
     const prompt = buildPrompt(turn, identity.agentId, said, request.origin);
+    const promptRow = promptEntry(prompt, identity.agentId, false);
     // R15: the prompt row is DURABLE before anything the turn does is written.
-    await this.session.persistence.writeDurable([promptEntry(prompt, identity.agentId, false)]);
+    try {
+      await this.session.persistence.writeDurable([promptRow]);
+    } catch (err) {
+      if (!(err instanceof PersistenceError)) throw err;
+      // A STORE OUTAGE IS NOT A REFUSED TURN. The daemon asked for work the
+      // vendor can do, and answering Code.Internal would leave it unable to
+      // tell an unreachable store from a shim defect; refusing the turn would
+      // make the record plane's availability the session's. So the row goes
+      // back through the ORDERED retry buffer, which owns the outage: it
+      // replays transiently, opens a degraded window, raises store_unreachable,
+      // and -- if it never lands -- drops loudly naming the key. The write id
+      // is deterministic, so a partially-landed batch absorbs the replay.
+      LOGGER.log(
+        { level: "error", turn_id: turn.value, upsert_key: promptRow.upsertKey, cause: err.message },
+        "the prompt row could not be made durable before the turn; re-queued it behind the retry buffer",
+      );
+      this.session.persistence.write([promptRow]);
+    }
     this.session.setOpenTurn({ id: turn, keepalive: false, startedAtMs: this.session.nowMs() });
     try {
       await this.session.submit(said, false);

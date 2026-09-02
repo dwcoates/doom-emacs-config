@@ -265,7 +265,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
       { level: "warn", reason },
       "the store is unreachable; writes are buffering and a degraded window is open",
     );
-    emitFault("store_unreachable", reason);
+    // THE WINDOW IS ANNOUNCED BEFORE THE FAULT. A fault restates the session's
+    // diagnostics, and a consumer reading the first unhealthy diagnostics has
+    // to see the window that explains it -- announcing the fault first would
+    // publish an unhealthy session whose degraded windows were still empty.
     for (const listener of windowListeners) {
       listener(
         create(conversationv1.SessionDegradedWindowSchema, {
@@ -276,6 +279,7 @@ export function createPersistence(options: PersistenceOptions): Persistence {
         }),
       );
     }
+    emitFault("store_unreachable", reason);
   };
 
   const closeDegraded = (): void => {
@@ -458,8 +462,13 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     },
 
     async flush(): Promise<FlushOutcome> {
+      // Counted ACROSS THIS FLUSH, not over the writer's life: the stand-down's
+      // exit code answers "did the writes this flush waited for land", and a
+      // lifetime count would report an outage the session already recovered
+      // from as a dirty exit.
+      const before = lostRows;
       while (draining !== undefined) await draining;
-      return { lostRows };
+      return { lostRows: lostRows - before };
     },
 
     openAgentPage(

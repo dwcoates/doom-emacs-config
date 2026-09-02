@@ -164,6 +164,46 @@ describe("the bounded retry buffer", () => {
     expect(windows[0]?.component).toBe("store-writer");
   });
 
+  it("announces the degraded window BEFORE the fault that reports it", async () => {
+    // A fault restates the session's diagnostics, and a consumer reading the
+    // first unhealthy diagnostics has to see the window that explains it.
+    const { store: fake, persistence: plane } = await persistence("degraded-order");
+    const order: string[] = [];
+    plane.onDegradedWindow(() => order.push("window"));
+    plane.onFault(() => order.push("fault"));
+    fake.failWrites("the store is down");
+
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+
+    expect(order[0]).toBe("window");
+  });
+
+  it("reports the rows THIS flush lost, not the writer's lifetime total", async () => {
+    // The stand-down's exit code answers "did the writes this flush waited for
+    // land"; an outage the session already recovered from is not a dirty exit.
+    const { store: fake, persistence: plane } = await persistence("flush-scoped");
+    fake.failWrites("the store is down");
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    await plane.flush();
+    fake.failWrites(null);
+
+    plane.write([readEntry(BOOK, "unit-2", "/tmp/b")]);
+    const outcome = await plane.flush();
+
+    expect(outcome.lostRows).toBe(0);
+  });
+
+  it("reports the rows a flush watched being dropped", async () => {
+    const { store: fake, persistence: plane } = await persistence("flush-lost");
+    fake.failWrites("the store is down");
+
+    plane.write([readEntry(BOOK, "unit-1", "/tmp/a")]);
+    const outcome = await plane.flush();
+
+    expect(outcome.lostRows).toBe(1);
+  });
+
   it("closes the degraded window with what was lost once a write succeeds again", async () => {
     const { store: fake, persistence: plane } = await persistence("degraded-close");
     const windows: conversationv1.SessionDegradedWindow[] = [];
