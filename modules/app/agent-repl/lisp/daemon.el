@@ -515,6 +515,12 @@ ON-READY receives the connection, or nil."
          (lambda (address)
            (if (null address)
                (agent-repl-daemon--settle on-ready nil)
+             ;; STATE whose daemon this is on the own-spawn path too.  The
+             ;; adopt path reports provenance from the probe verdict, but a
+             ;; cold start never probes -- and a log that only ever carries
+             ;; `foreign-adopted' would say the session attached to someone
+             ;; else's daemon every single time it started its own.
+             (agent-repl-daemon--report-provenance address)
              (agent-repl--info nil "elisp.daemon.linking address=%S" address)
              (agent-repl-daemon--settle on-ready (agent-repl-link-connect)))))))))
 
