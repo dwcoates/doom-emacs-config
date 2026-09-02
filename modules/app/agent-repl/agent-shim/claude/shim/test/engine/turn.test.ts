@@ -12,6 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { PersistenceError } from "../../src/store/persistence.js";
+import { ForegroundUnitTable } from "../../src/engine/foreground.js";
 import { PermissionGate } from "../../src/engine/permission-gate.js";
 import { LiveWorkTable } from "../../src/engine/detached.js";
 import { SessionIdentity, createAgentIdentityStore } from "../../src/engine/identity.js";
@@ -38,14 +39,18 @@ interface Harness {
   readonly query: ScriptedQuery;
   readonly live: LiveWorkTable;
   readonly gate: PermissionGate;
+  readonly foreground: ForegroundUnitTable;
   readonly submitted: { said: conversationv1.UserSaid; keepalive: boolean }[];
   open: OpenTurn | undefined;
   identity: SessionIdentity | undefined;
   submitRejects: Error | undefined;
+  /** Every store_unreachable the turn verbs reported to the session. */
+  readonly storeFaults: string[];
 }
 
 async function harness(): Promise<Harness> {
   const persistence = new RecordingPersistence();
+  const foreground = new ForegroundUnitTable();
   const query = new ScriptedQuery();
   const live = new LiveWorkTable();
   const identity = await SessionIdentity.fresh(
@@ -65,13 +70,16 @@ async function harness(): Promise<Harness> {
     query,
     live,
     gate,
+    foreground,
     submitted: [],
     open: undefined,
     identity,
     submitRejects: undefined,
+    storeFaults: [] as string[],
   };
   const context: SessionContext = {
     persistence,
+    foreground,
     gate,
     live,
     identity: () => state.identity,
@@ -79,6 +87,7 @@ async function harness(): Promise<Harness> {
     nowMs: () => 1,
     openTurn: () => state.open,
     watcherOpened: () => () => undefined,
+    reportStoreUnreachable: (detail: string) => state.storeFaults.push(detail),
     submit: (said, keepalive) => {
       if (state.submitRejects !== undefined) return Promise.reject(state.submitRejects);
       state.submitted.push({ said, keepalive });
@@ -584,6 +593,28 @@ describe("ReadHistory", () => {
     h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
 
     expect(failureKind(await h.turns.readHistory(first()))).toBe("storeUnavailable");
+  });
+
+  it("REPORTS an unreachable store as a session fault, not only to its caller", async () => {
+    // A refusal tells the caller its own call failed; every other consumer --
+    // the daemon deciding whether to trust what it is painting -- learns
+    // nothing from that.
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("store_unavailable", "the store is down");
+
+    await h.turns.readHistory(first());
+
+    expect(h.storeFaults).toHaveLength(1);
+  });
+
+  it("does NOT report a session fault for an unknown agent", async () => {
+    // A caller error is not the record plane being unreachable.
+    const h = await harness();
+    h.persistence.openError = new PersistenceError("unknown_agent", "no such agent");
+
+    await h.turns.readHistory(first());
+
+    expect(h.storeFaults).toEqual([]);
   });
 });
 
