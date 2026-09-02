@@ -390,7 +390,7 @@ func TestStartPublishesTheOpeningFacts(t *testing.T) {
 	// Assert.
 	assertNames(t, got, []string{
 		"topbar.OnSessionStarted", "sidebar.OnSessionStarted",
-		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink",
+		"footer.OnLink", "topbar.OnLink", "sidebar.OnLink", "lifecycle.OnLinkChanged",
 		"lifecycle.OnLiveWorkChanged", "sidebar.OnLiveWorkChanged",
 	})
 	if !h.w.Connected() {

@@ -149,6 +149,11 @@ type Deps struct {
 	// StartSession starts a session for a workspace that has none, under the
 	// lease, because a configured prompt needs one (revival-is-implicit).
 	StartSession StartSessionFunc
+	// PublishHost recomposes and republishes one workspace's HOST view. The
+	// composer gate on it is a function of the merge's own state -- merging,
+	// parked, or neither -- and the server cannot see a lease taken, parked
+	// or released. Nil means no host surface is wired yet.
+	PublishHost func(ids.WorkspaceID)
 	// Occupy takes the shim client's in-memory occupancy guard that backs the
 	// WSM lease row. The lock arbitrates; the row describes.
 	Occupy OccupancyFunc
