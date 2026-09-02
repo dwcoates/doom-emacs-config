@@ -218,7 +218,10 @@ others are squared away.
 
 ## Model tiers (binding for every dispatch)
 
-- TEAMLEADS are ALWAYS dispatched as FABLE at HIGH effort.
+- TEAMLEADS: Fable at HIGH effort for the ORIGINAL kickoff dispatch only.
+  From the 2026-08-31 pause onward, every RECREATED teamlead is Fable at
+  LOW effort (`fable-low`) — the contracts are settled and the work is
+  orchestration from the STOP files, not derivation.
 - IMPLEMENTATION SUBAGENTS: Opus at LOW effort (`opus-low`) for every
   dispatch from 2026-08-29 onward — yours (e2e and playtest remediation)
   and the teamleads' alike; relay this to every teamlead. (Agents
