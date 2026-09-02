@@ -47,6 +47,7 @@ import {
 } from "../service/failures.js";
 import type { PermissionGate } from "./permission-gate.js";
 import type { LiveWorkEntry, LiveWorkTable } from "./detached.js";
+import type { ForegroundUnitTable } from "./foreground.js";
 import type { SessionIdentity } from "./identity.js";
 import type { QueryLike } from "../sdk/types.js";
 
@@ -65,6 +66,8 @@ export interface SessionContext {
   readonly persistence: Persistence;
   readonly gate: PermissionGate;
   readonly live: LiveWorkTable;
+  /** The tool calls in flight, which is what tells DetachForeground's arms apart. */
+  readonly foreground: ForegroundUnitTable;
   /** The session's identity, or absence before StartSession. */
   identity(): SessionIdentity | undefined;
   /** The one live query, or absence when it is dead or not yet started. */
@@ -93,6 +96,16 @@ export interface SessionContext {
    * it finished.
    */
   watcherOpened(agent: conversationv1.AgentId, page: AgentPageSession): () => void;
+  /**
+   * Report that the record plane could not be reached.
+   *
+   * A REFUSAL IS NOT A REPORT. The caller of the verb learns its own call was
+   * refused; every OTHER consumer -- the daemon watching this session's health,
+   * deciding whether to trust what it is painting -- learns nothing from that.
+   * The fault is what tells them, and without it an unreachable store looked
+   * like a session in perfect health serving one odd refusal.
+   */
+  reportStoreUnreachable(detail: string): void;
 }
 
 /**
@@ -558,27 +571,54 @@ export class TurnEngine {
     }
     const known = this.session.live.byToolUseId(unit);
     const live = await query.backgroundTasks(unit);
-    if (!live && known === undefined) {
+    // THE FOREGROUND TABLE IS WHAT KEEPS THE FOUR REFUSALS APART. Without it
+    // the engine can only tell "the vendor holds background work for this id"
+    // from "it does not", and three of the four answers collapse onto
+    // `unknown_unit` -- which tells a consumer to stop offering an affordance
+    // for work that backgrounds itself routinely.
+    const verdict = this.session.foreground.verdict(unit);
+    LOGGER.logVerbose(
+      { unit, vendor_holds_background: live, known_detached: known !== undefined, foreground: verdict.kind },
+      "judging a DetachForeground against the foreground table",
+    );
+    // KIND BEFORE STATE: "this kind cannot be detached at all" stays true
+    // whether or not the unit finished, and saying `already_concluded` for it
+    // would invite the consumer to try again on the next one of its kind.
+    if (verdict.kind === "not_detachable") {
       return detachForegroundRefused(
-        { kind: "unknownUnit" },
-        `no live unit is addressed by ${JSON.stringify(unit)}`,
+        { kind: "notDetachable" },
+        `unit ${JSON.stringify(unit)} is of a kind that cannot be detached; ` +
+          "the detachable kinds are subagent, bash, workflow and monitor",
       );
     }
     if (!live) {
-      return detachForegroundRefused(
-        { kind: "alreadyConcluded" },
-        `unit ${JSON.stringify(unit)} has no live background work`,
-      );
+      if (known !== undefined || verdict.kind === "settled") {
+        return detachForegroundRefused(
+          { kind: "alreadyConcluded" },
+          `unit ${JSON.stringify(unit)} has no live background work`,
+        );
+      }
+      if (verdict.kind === "unknown") {
+        return detachForegroundRefused(
+          { kind: "unknownUnit" },
+          `no live unit is addressed by ${JSON.stringify(unit)}`,
+        );
+      }
     }
     // THE VENDOR MADE THIS DETACHMENT, NOT US. `backgroundTasks(unit)` is an
     // OBSERVATION: it says the vendor already holds live background work for
     // the unit, which is a detachment the shim can confirm. The pinned SDK
     // offers no verb to INITIATE one, so a unit that is detachable in kind and
-    // still in flight in the FOREGROUND is refused `unsupported` — never
+    // still in flight in the FOREGROUND is refused `unsupported` -- never
     // `notDetachable`, which would say its kind cannot detach at all and tell a
     // consumer to stop offering an affordance for work that backgrounds itself
     // routinely.
-    if (known !== undefined && known.backgrounded !== true) {
+    // `backgroundTasks(unit) === true` IS the confirmation: the vendor holding
+    // live background work for the unit is the detachment, observed. The live
+    // table's own `backgrounded` flag is a laggier restatement of the same fact
+    // (it arrives on a later `background_tasks_changed`), so requiring it too
+    // refused detachments the vendor had already made.
+    if (!live && verdict.kind === "live_detachable") {
       LOGGER.log(
         { level: "warn", unit, gap: "no_declared_detach_verb" },
         "REFUSED DetachForeground: the unit is detachable in kind and live, but the pinned SDK offers no verb to initiate a detachment",
@@ -663,6 +703,9 @@ export class TurnEngine {
               ? ({ kind: "stalePointer" } as const)
               : ({ kind: "storeUnavailable" } as const);
         LOGGER.log({ level: "warn", agent_id: target.value, kind: err.kind }, "ReadHistory refused");
+        if (kind.kind === "storeUnavailable") {
+          this.session.reportStoreUnreachable(`ReadHistory(${target.value}): ${err.message}`);
+        }
         return readHistoryRefused(kind, err.message);
       }
       throw err;
