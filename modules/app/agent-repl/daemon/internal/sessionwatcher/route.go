@@ -18,9 +18,15 @@ import (
 // and health are the topbar's, accounting and the rate-limit status are the
 // footer's, and the session's death is everyone's.
 func (w *watcher) routeSessionUpdateLocked(update *conversationv1.SessionUpdate) {
-	switch update.GetUpdate().(type) {
-	case *conversationv1.SessionUpdate_Diagnostics,
-		*conversationv1.SessionUpdate_ContextUsage,
+	switch u := update.GetUpdate().(type) {
+	case *conversationv1.SessionUpdate_Diagnostics:
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the topbar and the health reporter", dlog.Context{
+			"arm": sessionArm(update),
+		})
+		w.sinks.Topbar.OnSessionUpdate(w.ws, update)
+		w.sinks.Lifecycle.OnSessionDiagnostics(w.ws, u.Diagnostics)
+
+	case *conversationv1.SessionUpdate_ContextUsage,
 		*conversationv1.SessionUpdate_FastMode,
 		*conversationv1.SessionUpdate_McpServer,
 		*conversationv1.SessionUpdate_IdentityRotated:
