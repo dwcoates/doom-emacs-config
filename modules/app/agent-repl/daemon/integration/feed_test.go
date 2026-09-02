@@ -1199,7 +1199,7 @@ func TestContextCutCompactedDrawsASeparationWithFormattedTokens(t *testing.T) {
 	}
 }
 
-func TestContextCutCompactionFailedDrawsNoSeparationAndSurfacesTheError(t *testing.T) {
+func TestContextCutCompactionFailedDrawsTheCompactionFailedDivider(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-compactfail", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1212,13 +1212,23 @@ func TestContextCutCompactionFailedDrawsNoSeparationAndSurfacesTheError(t *testi
 		}},
 	}))
 
-	// Assert: no separation divider is drawn for a compaction that did not
-	// happen — the context is unchanged.
-	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "compaction_failed draws no separation divider")
+	// Assert: the divider that was offered and did not happen, in the slot the
+	// compacted divider would have taken, with tokens UNSET (nothing was cut).
+	row := awaitRow(t, f, tail, "the compaction-failed divider", func(r *frontendv1.FeedRow) bool {
+		return r.GetSeparation().GetCompactionFailed() != nil
+	})
+	if got := row.GetSeparation().GetCompactionFailed().GetError(); got != "vendor timeout" {
+		t.Fatalf("the divider's error = %q, want the producer's account verbatim", got)
+	}
+	if got := row.GetSeparation().GetLabel().GetText(); got != "compaction failed" {
+		t.Fatalf("the divider's label = %q, want the composed label", got)
+	}
+	if got := row.GetSeparation().Tokens; got != nil {
+		t.Fatalf("the divider's tokens = %v, want UNSET", got)
+	}
 	// separation.go logs daemon.feed.compaction_failed at WARN precisely on
-	// this arm ("a compaction failed, so no separation divider was drawn").
-	// The footer states the same failed compaction, and a context still over
-	// budget is a warning wherever it is stated.
+	// this arm. The footer states the same failed compaction, and a context
+	// still over budget is a warning wherever it is stated.
 	f.d.ExpectWarnings("daemon.feed.compaction_failed", "daemon.footer.on_context_cut")
 }
 
@@ -1717,6 +1727,59 @@ func TestApiRequestFailedMaxOutputTokensRespells(t *testing.T) {
 		return r.GetTurnEnded().GetErrored().GetMaxOutputTokens() != nil
 	})
 	_ = row
+}
+
+// THE RUN'S OWN TERMINALS (landing 8). One end-to-end path per arm family:
+// a FailureVendor* arm, which also resolves the workspace purple, and the
+// Stop-hook arm, which does not.
+
+func TestMaxTurnsDrawsTheRunsOwnTerminalArm(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-maxturns", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the run reached the round-trip ceiling it was given.
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Errors:  []string{"reached 12 turns"},
+		Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}},
+	}))
+
+	// Assert: its own arm, never vendor_unmodeled.
+	row := awaitRow(t, f, tail, "the max-turns terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetMaxTurns() != nil
+	})
+	errored := row.GetTurnEnded().GetErrored()
+	if got := errored.GetHeadline().GetText(); got != "stopped at the turn limit" {
+		t.Fatalf("the max-turns headline = %q, want the composed one", got)
+	}
+	if errored.GetMaxTurns().GetVendor() == nil {
+		t.Fatal("the max-turns arm carries no VendorFailureContext")
+	}
+	if got := errored.GetMessage().GetText(); got != "reached 12 turns" {
+		t.Fatalf("the max-turns message = %q, want the vendor's wording", got)
+	}
+}
+
+func TestStopHookPreventedDrawsTheStopHookTerminalArm(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-stophook", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: a configured Stop hook forbade the agent from continuing.
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_StopHookPrevented{
+			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the stop-hook terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetStopHookPrevented() != nil
+	})
+	if got := row.GetTurnEnded().GetErrored().GetHeadline().GetText(); got != "a Stop hook ended the run" {
+		t.Fatalf("the stop-hook headline = %q, want the composed one", got)
+	}
 }
 
 func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {

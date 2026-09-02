@@ -124,33 +124,76 @@ func TestAnAutomaticCompactionIsNotDrawnLikeARequestedOne(t *testing.T) {
 	}
 }
 
-func TestAFailedCompactionDrawsNoDividerAndRidesTheTurnsEvidence(t *testing.T) {
-	// Arrange: a turn in flight.
-	h := newHarness(t)
-	h.deliverPrompt("turn-1", "compact please")
-
-	// Act: NOTHING WAS CUT.
+// failedCompaction drives one failed compaction through the resolver.
+func failedCompaction(h *harness, reason string) {
 	h.cut(&conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_CompactionFailed{
-			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: "the summarizer refused"},
+			CompactionFailed: &conversationv1.ContextCompactionFailed{Error: reason},
 		},
 	})
+}
 
-	// Assert: no divider — it would claim a compaction that did not happen —
-	// but not silence either.
-	for _, row := range h.rows(rootFeed()) {
-		if row.GetSeparation() != nil {
-			t.Fatal("a failed compaction drew a divider")
-		}
+func TestAFailedCompactionDrawsTheCompactionFailedDivider(t *testing.T) {
+	// Arrange, Act: NOTHING WAS CUT (landing 8: the divider says so).
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+	failedCompaction(h, "the summarizer refused")
+
+	// Assert.
+	got := h.separationRow().GetSeparation().GetCompactionFailed()
+	if got.GetError() != "the summarizer refused" {
+		t.Fatalf("error = %q, want the producer's account verbatim", got.GetError())
 	}
+}
+
+func TestAFailedCompactionsDividerIsLabelled(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+	failedCompaction(h, "the summarizer refused")
+
+	// Assert.
+	if got := h.separationRow().GetSeparation().GetLabel().GetText(); got != "compaction failed" {
+		t.Fatalf("label = %q, want the composed label", got)
+	}
+}
+
+func TestAFailedCompactionsDividerCarriesNoTokens(t *testing.T) {
+	// Arrange, Act: no size changed, so no figure is drawn.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+	failedCompaction(h, "the summarizer refused")
+
+	// Assert.
+	if got := h.separationRow().GetSeparation().Tokens; got != nil {
+		t.Fatalf("tokens = %+v, want UNSET", got)
+	}
+}
+
+func TestAFailedCompactionWarns(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+	failedCompaction(h, "the summarizer refused")
+
+	// Assert.
 	if !h.hasRecord("warn", "daemon.feed.compaction_failed") {
 		t.Fatalf("records = %+v, want a WARN daemon.feed.compaction_failed", h.records())
 	}
+}
 
-	// …and it surfaces on the turn's own terminal.
+func TestAFailedCompactionAlsoRidesTheTurnsEvidence(t *testing.T) {
+	// Arrange: a turn in flight that then fails of something else.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "compact please")
+	failedCompaction(h, "the summarizer refused")
+
+	// Act.
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
 		Failure: &conversationv1.AgentFailure_PromptTooLong{PromptTooLong: &conversationv1.AgentPromptTooLong{}},
 	})
+
+	// Assert.
 	headline := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText()
 	if !contains(headline, "the summarizer refused") {
 		t.Fatalf("headline = %q, want the compaction failure as evidence", headline)
