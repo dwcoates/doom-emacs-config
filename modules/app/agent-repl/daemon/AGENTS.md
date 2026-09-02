@@ -36,6 +36,7 @@ environment. Every flag is optional.
 | `--multi-repo-config-dir <dir>` | the account root for workspaces under `$MULTI_REPO_ROOT` | unset = the default root |
 | `--idle-cutoff <duration>` | hibernate a session idle this long | the keep-alive idle cutoff |
 | `--pprof <unix path or 127.0.0.1:port>` | opt-in local profiling surface, opened BEFORE any dependency; a wildcard or routable bind is refused, not opened | off |
+| `--no-browser` | this daemon has NO external browser: `OpenExternal` answers `no_browser_configured` and nothing is launched. Without it the browser is still absent on a host where neither `$AGENT_REPL_BROWSER_CMD` nor the pinned default launcher exists | off |
 | `--self-repo <dir>` | override the daemon's own checkout identity, which is what the merge orchestrator's two methods key on | the checkout the binary was deployed from |
 
 ## Run and boot order (binding; `cmd/claude-repld`)

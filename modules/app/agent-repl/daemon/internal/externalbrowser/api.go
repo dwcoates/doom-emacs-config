@@ -15,6 +15,7 @@ package externalbrowser
 import (
 	"context"
 	"errors"
+	"os"
 	"time"
 
 	"claude-repld/internal/dlog"
@@ -25,6 +26,19 @@ import (
 // and no activation, so a test can point it at a script and an operator can
 // point it at a different browser.
 const EnvBrowserCmd = "AGENT_REPL_BROWSER_CMD"
+
+// DefaultLauncherConfigured reports whether the pinned DEFAULT launcher is
+// actually present on this machine.
+//
+// It exists so the composition root can tell "the operator configured no
+// browser at all" from "the browser refused the link": a daemon on a host with
+// neither $AGENT_REPL_BROWSER_CMD nor the pinned binary has nothing to hand a
+// url to, and OpenExternal answers no_browser_configured instead of pretending
+// a launch and failing.
+func DefaultLauncherConfigured() bool {
+	info, err := os.Stat(DefaultBinary)
+	return err == nil && !info.IsDir()
+}
 
 // Opener opens links externally.
 type Opener interface {

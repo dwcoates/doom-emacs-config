@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestOpenExternalRefusesARelativeUrl(t *testing.T) {
 	err := f.verbs.OpenExternal(context.Background(), "w1", "/not/a/url")
 
 	// Assert.
-	asRefusal(t, err, ArmUnservedAnswer)
+	asRefusal(t, err, ArmInvalidUrl)
 }
 
 func TestOpenExternalRefusesWithNoConfiguredBrowser(t *testing.T) {
@@ -46,7 +47,26 @@ func TestOpenExternalRefusesWithNoConfiguredBrowser(t *testing.T) {
 	err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x")
 
 	// Assert.
-	asRefusal(t, err, ArmUnservedAnswer)
+	asRefusal(t, err, ArmNoBrowserConfigured)
+}
+
+// TestOpenExternalRefusesWhenTheLauncherWillNotRun pins that a launcher
+// failure is the LANDED launch_failed arm carrying the launcher's own account
+// of it, not an internal error.
+func TestOpenExternalRefusesWhenTheLauncherWillNotRun(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.browser.err = errors.New("exit status 1")
+
+	// Act.
+	err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x")
+
+	// Assert.
+	r := asRefusal(t, err, ArmLaunchFailed)
+	if got := r.Fields["detail"]; got != "exit status 1" {
+		t.Fatalf("launch_failed.detail = %v, want the launcher's own account", got)
+	}
 }
 
 func TestOpenInEditorRelaysAnAbsolutePathInsideTheWorkspace(t *testing.T) {

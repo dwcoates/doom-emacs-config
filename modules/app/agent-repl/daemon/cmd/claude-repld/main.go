@@ -68,6 +68,12 @@ type options struct {
 	// idleCutoff is how long a session may go unengaged before the idle sweep
 	// hibernates it.
 	idleCutoff time.Duration
+	// noBrowser states that this daemon has NO external browser configured.
+	// It is the operator's explicit spelling of the condition
+	// OpenExternalError.no_browser_configured describes; without it the graph
+	// only reaches that state on a host where neither
+	// $AGENT_REPL_BROWSER_CMD nor the pinned default binary exists.
+	noBrowser bool
 	// selfRepo overrides the daemon's own checkout identity. It is a TEST
 	// HOOK: the merge orchestrator keys its two methods on whether a target is
 	// the same repository as this, and a test needs to say so explicitly.
@@ -118,6 +124,7 @@ func parseFlags(program string, args []string) (options, error) {
 	fs.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	fs.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
 	fs.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep hibernates it")
+	fs.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
 	fs.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
