@@ -264,6 +264,42 @@ func (c *client) CommonDir(ctx context.Context, dir string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
+// MainWorktree reports a directory's repository's MAIN WORKTREE, canonicalized.
+//
+// `git worktree list --porcelain` lists the main worktree FIRST -- git's own
+// documented order -- so its first `worktree <path>` line is the answer. It is
+// asked of git rather than derived from the common dir because `.git`'s parent
+// is the main worktree only for an ordinary checkout: a bare repository has no
+// main worktree at all, and `--separate-git-dir` puts the git dir somewhere
+// else entirely.
+func (c *client) MainWorktree(ctx context.Context, dir string) (string, error) {
+	const operation = "daemon.gitclient.main_worktree"
+
+	out, err := c.run(ctx, operation, dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		path, ok := strings.CutPrefix(strings.TrimSpace(line), "worktree ")
+		if !ok {
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			c.log.Global().Error(operation, "the main worktree could not be canonicalized", dlog.Context{
+				"dir": dir, "main_worktree": path, "cause": err.Error(),
+			})
+			return "", err
+		}
+		return filepath.Clean(resolved), nil
+	}
+	err = fmt.Errorf("gitclient: %s belongs to a repository with no worktree (a bare repository has none)", dir)
+	c.log.Global().Error(operation, "the repository has no main worktree", dlog.Context{
+		"dir": dir, "stdout": out,
+	})
+	return "", err
+}
+
 // SameRepo reports whether two directories belong to one repository, by the
 // canonicalized common dir and by nothing else. A worktree and its parent
 // checkout are the SAME repository here, which is the answer the merge

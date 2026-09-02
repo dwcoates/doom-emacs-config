@@ -75,7 +75,11 @@ type Workspace struct {
 // Repository is one repository's durable record.
 type Repository struct {
 	ID RepoID
-	// Dir is the repository's canonicalized common dir (symlinks resolved).
+	// Dir is the repository's canonicalized MAIN WORKTREE (symlinks resolved),
+	// which is what workspace.v1's RepositoryRef.dir means and what a
+	// top-level workspace's merge targets. It is not the common dir: two
+	// worktrees of one repository still map to one repository, because they
+	// share one main worktree.
 	Dir string
 	// Name is the repository's display name.
 	Name string

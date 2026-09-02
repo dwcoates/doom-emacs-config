@@ -243,6 +243,7 @@ type fakeGit struct {
 	gitclient.Git
 
 	commonDir     string
+	mainWorktree  string
 	commonDirErr  error
 	currentBranch string
 	branchErr     error
@@ -269,6 +270,13 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 
 func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
 	return g.commonDir, g.commonDirErr
+}
+
+// MainWorktree answers what registration derives the repository from. The
+// fixture keys it the same way CommonDir is keyed, since a fake repository has
+// exactly one of each.
+func (g *fakeGit) MainWorktree(context.Context, string) (string, error) {
+	return g.mainWorktree, g.commonDirErr
 }
 
 func (g *fakeGit) CurrentBranch(context.Context, string) (string, error) {
@@ -824,7 +832,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{
 		db:      newFakeDB(),
-		git:     &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo"},
+		git:     &fakeGit{defaultBranch: "master", currentBranch: "feature", commonDir: "/repo", mainWorktree: "/repo"},
 		account: &fakeAccounts{configDir: "/config"},
 		queue:   newFakeQueue(),
 		merge:   newFakeMerge(),

@@ -39,13 +39,19 @@ func (v *verbs) Register(ctx context.Context, dir string, facts wsm.RegisterFact
 	}
 
 	if facts.RepoDir == "" {
-		common, err := v.deps.Git.CommonDir(ctx, normalized)
+		// THE REPOSITORY IS ITS MAIN WORKTREE, not its common dir.
+		// workspace.v1's RepositoryRef.dir is "the repository's normalized
+		// main-worktree directory", and the merge geometry a top-level
+		// workspace targets is that same directory: keyed by the common dir,
+		// every merge ran `git -C <repo>/.git` and the self-repo comparison
+		// the rollout trigger keys on could never match.
+		main, err := v.deps.Git.MainWorktree(ctx, normalized)
 		if err != nil {
-			log.Error(opRegister, "could not resolve the repository common dir", dlog.Context{"cause": err.Error()})
-			return wsm.Workspace{}, fmt.Errorf("register %q: repository common dir: %w", normalized, err)
+			log.Error(opRegister, "could not resolve the repository's main worktree", dlog.Context{"cause": err.Error()})
+			return wsm.Workspace{}, fmt.Errorf("register %q: repository main worktree: %w", normalized, err)
 		}
-		facts.RepoDir = common
-		log.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": common})
+		facts.RepoDir = main
+		log.Debug(opRegister, "derived the repository from git", dlog.Context{"repo_dir": main})
 	}
 	if facts.Branch == "" {
 		branch, err := v.deps.Git.CurrentBranch(ctx, normalized)

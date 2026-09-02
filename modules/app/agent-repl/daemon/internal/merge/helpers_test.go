@@ -395,6 +395,11 @@ func (g *fakeGit) CommonDir(_ context.Context, dir string) (string, error) {
 	return dir + "/.git", nil
 }
 
+func (g *fakeGit) MainWorktree(_ context.Context, dir string) (string, error) {
+	g.record("main_worktree")
+	return dir, nil
+}
+
 func (g *fakeGit) SameRepo(context.Context, string, string) (bool, error) {
 	g.record("same_repo")
 	return g.sameRepo, g.sameRepoErr

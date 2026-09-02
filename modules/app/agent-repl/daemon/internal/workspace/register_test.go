@@ -57,10 +57,15 @@ func TestRegisterIsIdempotentByDirectory(t *testing.T) {
 	}
 }
 
-func TestRegisterDerivesTheRepositoryFromGit(t *testing.T) {
+// TestRegisterDerivesTheRepositoryFromGitsMainWorktree covers what a
+// repository IS to the contract: RepositoryRef.dir is "the repository's
+// normalized main-worktree directory", and it is what a top-level workspace's
+// merge targets -- never the common dir, which no git verb should be aimed at.
+func TestRegisterDerivesTheRepositoryFromGitsMainWorktree(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
-	f.git.commonDir = "/canonical/repo"
+	f.git.mainWorktree = "/canonical/repo"
+	f.git.commonDir = "/canonical/repo/.git"
 
 	// Act.
 	if _, err := f.verbs.Register(context.Background(), worktreeDir(t), wsm.RegisterFacts{}); err != nil {
@@ -69,7 +74,7 @@ func TestRegisterDerivesTheRepositoryFromGit(t *testing.T) {
 
 	// Assert.
 	if len(f.db.registered) != 1 || f.db.registered[0].RepoDir != "/canonical/repo" {
-		t.Fatalf("registered facts = %+v, want the git common dir", f.db.registered)
+		t.Fatalf("registered facts = %+v, want the repository's main worktree", f.db.registered)
 	}
 }
 
