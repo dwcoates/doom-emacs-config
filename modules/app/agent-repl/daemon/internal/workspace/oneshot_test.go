@@ -20,7 +20,7 @@ func TestDecorateOneShotBracketsWhatTheUserDidNotType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decorateOneShot: %v", err)
 	}
-	if !strings.Contains(got, MetaOpen+"PREAMBLE\n"+MetaClose+"USER TEXT"+MetaOpen) {
+	if !strings.Contains(got, prompts.MetaOpen+"PREAMBLE\n"+prompts.MetaClose+"USER TEXT"+prompts.MetaOpen) {
 		t.Fatalf("decorated prompt = %q, want the injected spans meta-wrapped around the user's words", got)
 	}
 }
@@ -238,5 +238,22 @@ func TestOpenPrFollowupNamesBothCommands(t *testing.T) {
 	}
 	if !strings.Contains(got, "--add-to-merge-queue") || !strings.Contains(got, WorkspaceSkill+" close") {
 		t.Fatalf("follow-up = %q, want the pr command and the wrap-up", got)
+	}
+}
+
+// TestOneShotMetaSentinelsAreTheCrossSystemLiterals pins the exact bytes the
+// one-shot decoration emits. The webapp and the elisp feed strip these same
+// markers, so a drifted spelling on this side would leave raw sentinels drawn
+// in the bubble. The literals are asserted here, not read from a constant.
+func TestOneShotMetaSentinelsAreTheCrossSystemLiterals(t *testing.T) {
+	// Arrange.
+	const want = "<!--agent-repl:meta-->span<!--/agent-repl:meta-->"
+
+	// Act.
+	got := prompts.Wrap("span")
+
+	// Assert.
+	if got != want {
+		t.Fatalf("prompts.Wrap = %q, want %q", got, want)
 	}
 }
