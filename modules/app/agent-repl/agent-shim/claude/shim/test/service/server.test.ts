@@ -11,7 +11,7 @@ import { connect as http2Connect } from "node:http2";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotImplementedEngine } from "../../src/engine/engine.js";
 import { shimv1 } from "../../src/proto.js";
 import { shimRoutes } from "../../src/service/routes.js";
@@ -406,12 +406,14 @@ describe("the streaming content-type judgement", () => {
 });
 
 describe("flushing a stream's head", () => {
-  function response(): { headersSent: boolean; head?: [number, Record<string, string>]; flushed: number; writeHead: (status: number, headers: Record<string, string>) => unknown; flushHeaders: () => void } {
+  function response(): { headersSent: boolean; head?: [number, Record<string, string> | string[]]; flushed: number; writeHead: (status: number, headers: Record<string, string> | string[]) => unknown; flushHeaders: () => void } {
     const state = {
       headersSent: false,
-      head: undefined as [number, Record<string, string>] | undefined,
+      head: undefined as [number, Record<string, string> | string[]] | undefined,
       flushed: 0,
-      writeHead(status: number, headers: Record<string, string>): unknown {
+      // BOTH HEADER SHAPES, because `writeHead` accepts both and the encoding
+      // guard has to read either one.
+      writeHead(status: number, headers: Record<string, string> | string[]): unknown {
         state.head = [status, headers];
         return state;
       },
@@ -445,6 +447,77 @@ describe("flushing a stream's head", () => {
     res.writeHead(500, {});
 
     expect(res.head).toEqual([200, { "content-type": "application/connect+proto" }]);
+  });
+
+  /**
+   * The records the shim wrote during this test, read off the stderr mirror.
+   *
+   * The durable sink is mocked away suite-wide, so the mirror is the observable
+   * — and every record this guard emits is `error`, which always mirrors.
+   */
+  function records(): Array<{ level: string; context: Record<string, unknown> }> {
+    return written.flatMap((line) => {
+      try {
+        return [JSON.parse(line) as { level: string; context: Record<string, unknown> }];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  let written: string[] = [];
+  beforeEach(() => {
+    written = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  it("REPORTS an encoding the adapter tried to announce after the head went out", () => {
+    // The head is already on the wire and cannot carry it, so a compressed body
+    // would be undecodable at the client. The server is configured never to
+    // compress; if that is ever lost, this record is where it is caught rather
+    // than in a daemon staring at an unreadable stream.
+    const res = response();
+    flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);
+
+    res.writeHead(200, { "connect-content-encoding": "gzip" });
+
+    expect(
+      records().some(
+        (record) =>
+          record.level === "error" && record.context.content_encoding === "gzip",
+      ),
+    ).toBe(true);
+  });
+
+  it("reads the encoding out of writeHead's FLAT-ARRAY header form too", () => {
+    // `writeHead` takes its headers either way, and a shape this missed would
+    // be a silent gap in the guard.
+    const res = response();
+    flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);
+
+    res.writeHead(200, ["connect-content-encoding", "br"]);
+
+    expect(
+      records().some(
+        (record) => record.level === "error" && record.context.content_encoding === "br",
+      ),
+    ).toBe(true);
+  });
+
+  it("says NOTHING when the adapter announces no encoding", () => {
+    // The absorption is the ordinary path and must stay quiet: a record per
+    // stream would bury the one that matters.
+    const res = response();
+    flushStreamHead({ headers: { "content-type": "application/connect+proto" } }, res);
+
+    res.writeHead(200, { "content-type": "application/connect+proto" });
+
+    expect(
+      records().some((record) => record.context.content_encoding !== undefined),
+    ).toBe(false);
   });
 
   it("leaves a unary request alone", () => {
