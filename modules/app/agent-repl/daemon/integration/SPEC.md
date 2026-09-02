@@ -134,11 +134,21 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_FORBID_VENDOR_CALLS) and
   cwd = the workspace dir
 - readiness gates on the first healthy diagnostics: with the fake told to
-  delay the diagnostics push, HostWorkspace shows `shim_attached:false`
-  until it arrives, then `true`
+  delay the diagnostics push, HostWorkspace carries NO session at all
+  (`host.none`) until bring-up finishes — Fleet.Start only calls f.remember
+  (what HostSessionFacts reads) after bringUpClient returns, and
+  Supervisor.Spawn itself blocks internally until the shim's first healthy
+  diagnostics arrives, so there is no session record for any arm — including
+  `existing.live.shim_attached:false` — to carry while diagnostics is
+  withheld. Once it arrives, HostWorkspace shows
+  `existing.live.shim_attached:true`.
 - a fake shim that exits during bring-up ends bring-up immediately with the
-  exit code and stderr in the host stream's faults and the footer's
-  `disconnected.start_failed`
+  footer's `disconnected.start_failed`; the exit code and stderr are NOT on
+  the host stream — bring-up died before any session record existed, so
+  there is no HostSessionLive arm to carry `faults` on — but they ARE
+  readable from SessionHealth, which needs only a registered workspace (not
+  a live session) and reports `shim_start_failed{exit_code, stderr_tail}`
+  among the unhealthy faults.
 - StartSession(fresh) is sent only for a workspace with no prior
   conversation; a workspace whose session record carries a vendor session
   id gets StartSession(resume{vendor_session_id})
@@ -386,6 +396,26 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   post-prompt
 - merge_actions recorded and read back by a later merge
 - ungated permission mode without allow_ungated refused
+
+## Settled behaviors the daemon states differently from an earlier reading
+
+These are recorded here rather than argued in a test comment, per the audit's
+ruling that a divergence between this spec and the daemon's settled behavior is
+a spec edit and never a rationalization in the suite.
+
+- A CORRUPTED `held_prompts` ROW FAILS THE WHOLE BOOT. The restore is
+  all-or-nothing AND the boot sequence fails every step loudly
+  (`internal/boot/sequence.go`), so the daemon does not come up with an empty
+  tray: it exits non-zero having logged exactly one ERROR under
+  `daemon.promptqueue.restore_holds`. The test asserts that.
+- EVERY `workspace`-package REFUSAL LOGS `daemon.refusal.unlanded_arm` AT
+  WARNING, landed arm or not: `internal/workspace/refusal.go`'s own
+  `refuse`/`refuseWith` helper logs it unconditionally, separately from
+  `server.UnlandedArm`. So a test whose refusal is raised in that package
+  declares that operation even when the arm is landed and the answer is typed.
+  (Recorded as a production concern for the teamlead: it makes the log
+  unusable for reconciling ERROR-ARMS.md, which is the operation's stated
+  purpose.)
 
 ## Log discipline
 Every test runs with the daemon at ≥WARNING terminal mirror; the harness
