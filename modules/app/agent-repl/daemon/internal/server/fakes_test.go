@@ -502,3 +502,38 @@ func connectCode(t *testing.T, err error) connect.Code {
 	}
 	return cerr.Code()
 }
+
+// logRecord is one record a recordingLogger captured.
+type logRecord struct {
+	Level     string
+	Operation string
+	Message   string
+	Context   dlog.Context
+}
+
+// recordingLogger captures every record so a test can assert BOTH the shape of
+// what was logged and that nothing was logged at a level it forbids.
+type recordingLogger struct {
+	records []logRecord
+}
+
+func (l *recordingLogger) Debug(op, msg string, c dlog.Context) { l.record("DEBUG", op, msg, c) }
+func (l *recordingLogger) Info(op, msg string, c dlog.Context)  { l.record("INFO", op, msg, c) }
+func (l *recordingLogger) Warn(op, msg string, c dlog.Context)  { l.record("WARN", op, msg, c) }
+func (l *recordingLogger) Error(op, msg string, c dlog.Context) { l.record("ERROR", op, msg, c) }
+func (l *recordingLogger) With(dlog.Context) dlog.Logger        { return l }
+
+func (l *recordingLogger) record(level, op, msg string, c dlog.Context) {
+	l.records = append(l.records, logRecord{Level: level, Operation: op, Message: msg, Context: c})
+}
+
+// at answers the records captured at one level.
+func (l *recordingLogger) at(level string) []logRecord {
+	var out []logRecord
+	for _, rec := range l.records {
+		if rec.Level == level {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
