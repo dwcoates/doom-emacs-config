@@ -264,11 +264,34 @@ export const PERM_NO_STANDING_OFFERED = scenario({
   },
 });
 
+export const PERM_HOLD = scenario({
+  name: "perm-hold",
+  prompt: "!perm-hold",
+  emits:
+    "a gated `Bash` ask, and then a turn that PARKS however the ask resolves: the scenario never concludes on " +
+    "its own, so the only terminal it can reach is an interrupt's. It exists so a teardown during an open ask " +
+    "has both obligations observable at once — the callback resolved, and the turn interrupted",
+  writes: "the tool_use line, the prompt line and (at the interrupt) the turn record",
+  arms: "AgentPermissionDenied by a teardown, then AgentInterrupted.by_user",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "perm-hold" }, "fake permission turn that PARKS after the ask");
+    const call = ctx.toolUse("Bash", { command: "sleep 600" });
+    // Not awaited as the turn's outcome: whatever the gate answers, the turn
+    // stays in flight until an interrupt lands, which is what makes the
+    // interrupted terminal the only one this scenario can produce.
+    void askPermission(ctx, call);
+    await ctx.awaitInterrupt();
+    ctx.log({ turn: ctx.turn }, "fake perm-hold turn released by an interrupt");
+    // No explicit result: the engine emits the interrupt terminal.
+  },
+});
+
 export const PERMISSION_SCENARIOS = [
   PERM_ALLOW_ONCE,
   PERM_ALLOW_STANDING,
   PERM_ALLOW_STANDING_MODE,
   PERM_NO_STANDING_OFFERED,
+  PERM_HOLD,
   PERM_DENY_USER,
   PERM_DENY_POLICY,
   PERM_UNDECIDABLE,

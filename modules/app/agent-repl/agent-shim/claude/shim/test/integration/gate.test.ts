@@ -18,12 +18,14 @@ import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
 import {
+  agentId,
   allowOnce,
   allowStanding,
   answerQuestion,
   denyPermission,
   freshSession,
   openStream,
+  permissionMode,
   startTurnRequest,
   stopAgent,
   watchAgentRequest,
@@ -31,6 +33,7 @@ import {
 import {
   entryFrame,
   sessionUpdate,
+  setPermissionModeAccepted,
   updateAccepted,
   updateAgentKind,
   watchAgentEntry,
@@ -139,7 +142,7 @@ describe("a permission ask", () => {
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-allow-once" }));
-    await awaitPermissionStart(stream);
+    const ask = await awaitPermissionStart(stream);
 
     // A second StartTurn resolves NOW and is refused for the open turn — the
     // round trip proves the shim is responsive while the turn is blocked, with
@@ -147,15 +150,36 @@ describe("a permission ask", () => {
     const second = await shim.clients.h1.startTurn(
       startTurnRequest({ turn: "t2", text: "!md" }),
     );
+    // THE BLOCK IS AN ORDERING, NOT A RACE. "No terminal yet" over the frames
+    // pulled so far only says this test has not pulled one — it would pass on a
+    // shim that terminated the turn before the ask. So the ask is ANSWERED, the
+    // stream is driven to the terminal, and the assertion is made over the
+    // COMPLETE served sequence: the terminal's index is after the answer's
+    // settled frame, and no terminal appears anywhere before it.
+    await shim.clients.h1.updateAgent(
+      allowOnce(create(conversationv1.AgentPermissionIdSchema, { value: ask.id?.value ?? "" })),
+    );
+    await stream.until((frame) => {
+      const agentFrame =
+        frame.frame.case === "entry" ? entryFrame(watchAgentEntry(frame)) : null;
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
+    const served = stream.frames();
+    const settledAt = served.findIndex((frame) => {
+      const update = updateOf(frame);
+      return (
+        update?.update.case === "permission" && update.update.value.result.case === "success"
+      );
+    });
+    const terminalAt = served.findIndex((frame) => {
+      const agentFrame =
+        frame.frame.case === "entry" ? entryFrame(watchAgentEntry(frame)) : null;
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
 
     expect(second.result.case).toBe("failure");
-    expect(
-      stream.frames().some((frame) => {
-        const agentFrame =
-          frame.frame.case === "entry" ? entryFrame(watchAgentEntry(frame)) : null;
-        return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
-      }),
-    ).toBe(false);
+    expect(settledAt).toBeGreaterThanOrEqual(0);
+    expect(terminalAt).toBeGreaterThan(settledAt);
     stream.close();
   });
 
@@ -230,10 +254,13 @@ describe("a permission ask", () => {
     stream.close();
   });
 
-  test("a standing grant carrying set_mode pushes permission_mode_changed", async () => {
-    // A standing grant can change the session's mode, and the change is
-    // restated AUTHORITATIVELY on WatchSession rather than left implicit in the
-    // grant the daemon happens to have sent.
+  test("the OFFERED standing carrying set_mode is accepted and pushes permission_mode_changed", async () => {
+    // A standing grant can change the session's mode — but only when the ask
+    // OFFERED that change. `!perm-allow-standing-mode` is the one lever whose
+    // offer carries `set_mode`, so this is the grounded path: the grant echoes
+    // the offer verbatim, the gate accepts it, and the mode change is restated
+    // AUTHORITATIVELY on WatchSession rather than left implicit in the grant
+    // the daemon happens to have sent.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const session = openStream((options) =>
@@ -242,13 +269,53 @@ describe("a permission ask", () => {
     await session.next();
     const stream = await openAgentStream(shim);
     await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!perm-allow-standing-mode" }),
+    );
+    const ask = await awaitPermissionStart(stream);
+    const offered =
+      ask.result.case === "start" ? ask.result.value.offeredStanding : undefined;
+    if (offered === undefined) throw new Error("the ask offered no standing to echo");
+    expect(
+      offered.changes.some((change) => change.change.case === "setMode"),
+    ).toBe(true);
+
+    const response = await shim.clients.h1.updateAgent(
+      allowStanding(
+        create(conversationv1.AgentPermissionIdSchema, { value: ask.id?.value ?? "" }),
+        offered,
+      ),
+    );
+    const pushed = await session.until((frame) => {
+      const update = sessionUpdate(frame);
+      return (
+        update.update.case === "permissionModeChanged" &&
+        update.update.value.permissionMode?.mode.case === "acceptEdits"
+      );
+    });
+
+    updateAccepted(response);
+    expect(sessionUpdate(pushed).update.case).toBe("permissionModeChanged");
+    stream.close();
+    session.close();
+  });
+
+  test("a standing ALTERED from the offer is refused answer_mismatch", async () => {
+    // ANSWER VALIDATION IS FREE, AND IT IS THE WHOLE PROTECTION HERE. The gate
+    // holds the ask it offered while the vendor blocks, so a grant that adds a
+    // change nobody offered is an answer to a question the shim is not holding.
+    // Accepting it would let a caller install permission rules and move the
+    // session's mode through a grant the vendor never proposed.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(
       startTurnRequest({ turn: "t1", text: "!perm-allow-standing" }),
     );
     const ask = await awaitPermissionStart(stream);
     const offered =
       ask.result.case === "start" ? ask.result.value.offeredStanding : undefined;
     if (offered === undefined) throw new Error("the ask offered no standing to echo");
-    const withMode = create(conversationv1.AgentPermissionStandingSchema, {
+    const altered = create(conversationv1.AgentPermissionStandingSchema, {
       changes: [
         ...offered.changes,
         create(conversationv1.AgentPermissionChangeSchema, {
@@ -268,23 +335,58 @@ describe("a permission ask", () => {
       ],
     });
 
-    await shim.clients.h1.updateAgent(
+    const response = await shim.clients.h1.updateAgent(
       allowStanding(
         create(conversationv1.AgentPermissionIdSchema, { value: ask.id?.value ?? "" }),
-        withMode,
+        altered,
       ),
     );
-    const pushed = await session.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "permissionModeChanged" &&
-        update.update.value.permissionMode?.mode.case === "acceptEdits"
-      );
-    });
 
-    expect(sessionUpdate(pushed).update.case).toBe("permissionModeChanged");
+    expect(updateAgentKind(response)).toBe("answerMismatch");
     stream.close();
-    session.close();
+  });
+
+  test("a standing grant on an ask that offered NONE is refused answer_mismatch", async () => {
+    // `!perm-no-standing` is the vendor shape where no standing rule could be
+    // written for the call, so the ask carries no `offered_standing` and the
+    // only decision it can produce is a once-allow.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!perm-no-standing" }),
+    );
+    const ask = await awaitPermissionStart(stream);
+    expect(
+      ask.result.case === "start" ? ask.result.value.offeredStanding : undefined,
+    ).toBeUndefined();
+
+    const response = await shim.clients.h1.updateAgent(
+      allowStanding(
+        create(conversationv1.AgentPermissionIdSchema, { value: ask.id?.value ?? "" }),
+        create(conversationv1.AgentPermissionStandingSchema, {
+          changes: [
+            create(conversationv1.AgentPermissionChangeSchema, {
+              destination: conversationv1.AgentPermissionDestination.SESSION,
+              change: {
+                case: "setMode",
+                value: create(conversationv1.AgentPermissionModeSetSchema, {
+                  mode: create(conversationv1.AgentPermissionModeSchema, {
+                    mode: {
+                      case: "bypass",
+                      value: create(conversationv1.AgentPermissionModeBypassSchema, {}),
+                    },
+                  }),
+                }),
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    expect(updateAgentKind(response)).toBe("answerMismatch");
+    stream.close();
   });
 
   test("a user deny settles denied.user, and the gated unit goes start → failure with no content", async () => {
@@ -426,6 +528,157 @@ describe("a permission ask", () => {
     );
 
     expect(updateAgentKind(response)).toBe("answerMismatch");
+    stream.close();
+  });
+});
+
+describe("an ask raised by a SUBAGENT", () => {
+  test("it is answered by naming the subagent as the target", async () => {
+    // `!subagent-detached-live` leaves a detached agent running past the turn
+    // and has it raise its OWN gated call, with the subagent's `agentID` on the
+    // vendor callback. The answer names that agent as `target` — the consumer
+    // is answering the agent it is watching, not the main thread — and the ask
+    // is keyed by its own AgentPermissionId either way, which is why the echo
+    // still validates.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!subagent-detached-live" }),
+    );
+    const announced = await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") {
+      throw new Error("expected the detached agent's announcement");
+    }
+    const subagent = detached.result.value.work?.value ?? "";
+    const ask = await awaitPermissionStart(stream);
+
+    const response = await shim.clients.h1.updateAgent(
+      allowOnce(
+        create(conversationv1.AgentPermissionIdSchema, { value: ask.id?.value ?? "" }),
+        agentId(subagent),
+      ),
+    );
+    const settled = await awaitPermissionSettled(stream);
+
+    updateAccepted(response);
+    if (settled.result.case !== "success" || settled.result.value.decision.case !== "allowed") {
+      throw new Error("the subagent's ask did not settle allowed");
+    }
+    expect(settled.result.value.decision.value.scope.case).toBe("once");
+    stream.close();
+  });
+});
+
+describe("the session's permission mode conditions the gate", () => {
+  // THE VENDOR APPLIES THE MODE, NOT THE SHIM. `SetSessionPermissionMode`
+  // relays it down and the vendor decides whether a gated call is asked about
+  // at all, so what is under test here is that the relay REACHES the decision:
+  // the same scenario asks, does not ask, or is refused, purely by mode.
+
+  /** Drive a gated turn to its terminal and return every frame served. */
+  const gatedTurn = async (
+    shim: Awaited<ReturnType<typeof spawnShim>>,
+    stream: AgentStream,
+    turn: string,
+  ): Promise<shimv1.WatchAgentResponse[]> => {
+    await shim.clients.h1.startTurn(startTurnRequest({ turn, text: "!perm-allow-once" }));
+    await stream.until((frame) => {
+      const agentFrame =
+        frame.frame.case === "entry" ? entryFrame(watchAgentEntry(frame)) : null;
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
+    return stream.frames();
+  };
+
+  test("bypass opens NO ask: the gated call runs without one", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    setPermissionModeAccepted(
+      await shim.clients.h1.setSessionPermissionMode(
+        create(shimv1.SetSessionPermissionModeRequestSchema, {
+          permissionMode: permissionMode("bypass"),
+        }),
+      ),
+    );
+
+    // The turn runs to its terminal, so every frame it will ever produce has
+    // been served before the negative below — this is an ordering over a
+    // COMPLETE sequence, not a snapshot of what happened to arrive.
+    const served = await gatedTurn(shim, stream, "t1");
+
+    expect(
+      served.some((frame) => updateOf(frame)?.update.case === "permission"),
+    ).toBe(false);
+    stream.close();
+  });
+
+  test("dont_ask settles denied.policy with no ask", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    setPermissionModeAccepted(
+      await shim.clients.h1.setSessionPermissionMode(
+        create(shimv1.SetSessionPermissionModeRequestSchema, {
+          permissionMode: permissionMode("dontAsk"),
+        }),
+      ),
+    );
+
+    const served = await gatedTurn(shim, stream, "t1");
+
+    const settled = served
+      .map(updateOf)
+      .filter((update): update is conversationv1.AgentUpdate => update !== null)
+      .filter((update) => update.update.case === "permission")
+      .map((update) =>
+        update.update.case === "permission" ? update.update.value : undefined,
+      );
+    const decision =
+      settled[0]?.result.case === "success" ? settled[0].result.value.decision : undefined;
+    if (decision?.case !== "denied") {
+      throw new Error("the mode-refused call did not settle a denial");
+    }
+    expect(decision.value.by.case).toBe("policy");
+    // And it settled without ever opening one.
+    expect(settled.some((permission) => permission?.result.case === "start")).toBe(false);
+    stream.close();
+  });
+
+  test("an ask OPEN at the change keeps the mode it was raised under", async () => {
+    // The mode is a property of the SESSION going forward, never a retroactive
+    // rewrite of an ask already in flight: a consumer looking at an open ask
+    // must not have it answered out from under them by a mode change.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-allow-once" }));
+    const ask = await awaitPermissionStart(stream);
+
+    setPermissionModeAccepted(
+      await shim.clients.h1.setSessionPermissionMode(
+        create(shimv1.SetSessionPermissionModeRequestSchema, {
+          permissionMode: permissionMode("bypass"),
+        }),
+      ),
+    );
+    // The ask is still the shim's to answer: a mode change that had swallowed
+    // it would make this a no_open_ask.
+    const response = await shim.clients.h1.updateAgent(
+      allowOnce(create(conversationv1.AgentPermissionIdSchema, { value: ask.id?.value ?? "" })),
+    );
+    const settled = await awaitPermissionSettled(stream);
+
+    updateAccepted(response);
+    if (settled.result.case !== "success" || settled.result.value.decision.case !== "allowed") {
+      throw new Error("the ask open at the mode change did not settle allowed");
+    }
+    expect(settled.result.value.decision.value.scope.case).toBe("once");
     stream.close();
   });
 });
@@ -647,6 +900,60 @@ describe("a question ask", () => {
 
     expect(updateAgentKind(response)).toBe("noOpenAsk");
   });
+
+  test("a two-question batch answered OUT OF BATCH ORDER round-trips by question TEXT", async () => {
+    // THE ANSWER MAP IS KEYED BY THE QUESTION'S OWN TEXT, never by position, so
+    // an answer list in the reverse of the batch's order must join correctly.
+    // A positional join would silently hand each question the other's chosen
+    // labels — an answer the user never gave.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!ask-multi" }));
+    const ask = await awaitQuestionStart(stream);
+    if (ask.result.case !== "start") throw new Error("expected the question's start arm");
+    const questions = ask.result.value.batch?.questions ?? [];
+    const inBatchOrder = questions.map((question) => {
+      const options =
+        question.choices.case === "multiSelect" || question.choices.case === "singleSelect"
+          ? question.choices.value.options
+          : [];
+      return {
+        question: question.question?.text ?? "",
+        labels: [options[0]?.label?.label ?? ""],
+      };
+    });
+
+    const response = await shim.clients.h1.updateAgent(
+      answerQuestion(
+        create(conversationv1.AgentQuestionIdSchema, { value: ask.id?.value ?? "" }),
+        [...inBatchOrder].reverse(),
+      ),
+    );
+    const settled = await stream.until((frame) => {
+      const update = updateOf(frame);
+      return update?.update.case === "question" && update.update.value.result.case === "success";
+    });
+
+    updateAccepted(response);
+    const update = updateOf(settled);
+    if (update?.update.case !== "question" || update.update.value.result.case !== "success") {
+      throw new Error("the question did not settle");
+    }
+    const outcome = update.update.value.result.value.outcome;
+    if (outcome.case !== "answered") throw new Error("the question did not settle answered");
+    // Each question got ITS OWN label back, whatever order the answers arrived in.
+    const byText = new Map(
+      outcome.value.answers.map((answer) => [
+        answer.question?.text ?? "",
+        answer.chosen.map((choice) => choice.label?.label ?? ""),
+      ]),
+    );
+    expect(inBatchOrder.map((selection) => byText.get(selection.question))).toEqual(
+      inBatchOrder.map((selection) => selection.labels),
+    );
+    stream.close();
+  });
 });
 
 describe("pending-callback liveness", () => {
@@ -673,6 +980,60 @@ describe("pending-callback liveness", () => {
       throw new Error("the abandoned ask did not settle");
     }
     expect(exit.code).toBe(0);
+    stream.close();
+  });
+
+  test("UpdateAgent.stop during an open ask denies it and interrupts the turn", async () => {
+    // A STOP IS A TEARDOWN PATH LIKE ANY OTHER. The stop resolves every pending
+    // callback as denied BEFORE it interrupts, because an unresolved
+    // `canUseTool` promise survives the interrupt and wedges the vendor — the
+    // turn would then never reach a terminal at all.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+    // `!perm-hold` PARKS after the ask however it resolves, so the interrupt
+    // is the only terminal it can reach — `!perm-allow-once` would race its own
+    // recovery against the stop and sometimes conclude completed.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-hold" }));
+    await awaitPermissionStart(stream);
+
+    updateAccepted(await shim.clients.h1.updateAgent(stopAgent()));
+    const settled = await awaitPermissionSettled(stream);
+    const terminal = await stream.until((frame) => {
+      const agentFrame =
+        frame.frame.case === "entry" ? entryFrame(watchAgentEntry(frame)) : null;
+      return agentFrame?.result.case === "success" || agentFrame?.result.case === "failure";
+    });
+
+    if (settled.result.case !== "success" || settled.result.value.decision.case !== "denied") {
+      throw new Error("the abandoned ask did not settle denied");
+    }
+    const frame = entryFrame(watchAgentEntry(terminal));
+    if (frame?.result.case !== "success" || frame.result.value.outcome.case !== "interrupted") {
+      throw new Error("the turn did not conclude AgentSuccess.interrupted");
+    }
+    expect(frame.result.value.outcome.value.cause.case).toBe("byUser");
+    stream.close();
+  });
+
+  test("a query that DIES mid-ask denies the ask rather than leaving it open", async () => {
+    // `!query-eof-mid-ask` opens the ask and then ends the iterable with the
+    // callback still pending. The vendor is gone, so nothing will ever answer
+    // it — and an ask left `start` forever is a feed showing a question that
+    // can never be resolved.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const stream = await openAgentStream(shim);
+
+    await shim.clients.h1.startTurn(
+      startTurnRequest({ turn: "t1", text: "!query-eof-mid-ask" }),
+    );
+    const settled = await awaitPermissionSettled(stream);
+
+    if (settled.result.case !== "success") {
+      throw new Error("the ask abandoned by a dead query did not settle");
+    }
+    expect(settled.result.value.decision.case).toBe("denied");
     stream.close();
   });
 
