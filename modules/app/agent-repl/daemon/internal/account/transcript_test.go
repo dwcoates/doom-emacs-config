@@ -223,13 +223,37 @@ func TestPortTranscriptCopiesAndLeavesTheSourceInPlace(t *testing.T) {
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, child)
+	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "uuid-2")
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("PortTranscript() = %v, want nil", err)
 	}
-	assertFileBody(t, account.TranscriptPath(f.multi, child, "uuid-1"), "body")
+	assertFileBody(t, account.TranscriptPath(f.multi, child, "uuid-2"), "body")
+	assertFileBody(t, src, "body")
+}
+
+// TestPortTranscriptFilesTheCopyUnderTheChildsOwnVendorSessionId covers the
+// fork's whole reason for renaming: a vendor session id is single-occupancy
+// under the shim's session lock, so the child's copy is filed under an id of
+// its own and the parent's file is left exactly where it was.
+func TestPortTranscriptFilesTheCopyUnderTheChildsOwnVendorSessionId(t *testing.T) {
+	// Arrange.
+	f := newTranscriptFixture(t)
+	src := plantTranscript(t, f.def, f.ws, "parent-uuid", "body")
+	child := filepath.Join(t.TempDir(), "child-ws")
+
+	// Act.
+	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "child-uuid")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PortTranscript() = %v, want nil", err)
+	}
+	assertFileBody(t, account.TranscriptPath(f.multi, child, "child-uuid"), "body")
+	if _, err := os.Stat(account.TranscriptPath(f.multi, child, "parent-uuid")); err == nil {
+		t.Fatal("the copy was also filed under the parent's id, want only the child's")
+	}
 	assertFileBody(t, src, "body")
 }
 
@@ -241,13 +265,13 @@ func TestPortTranscriptCarriesTheSidecarDirectory(t *testing.T) {
 	child := filepath.Join(t.TempDir(), "child-ws")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, child)
+	err := f.r.PortTranscript(context.Background(), src, f.multi, child, "uuid-2")
 
 	// Assert.
 	if err != nil {
 		t.Fatalf("PortTranscript() = %v, want nil", err)
 	}
-	dest := account.TranscriptPath(f.multi, child, "uuid-1")
+	dest := account.TranscriptPath(f.multi, child, "uuid-2")
 	assertFileBody(t, filepath.Join(dest[:len(dest)-len(".jsonl")], "note.json"), "sidecar")
 }
 
@@ -316,7 +340,7 @@ func TestPortTranscriptRefusesWhenTheSidecarDestinationExists(t *testing.T) {
 	plantSidecar(t, destExisting, "note.json", "already there")
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), src, f.multi, f.ws)
+	err := f.r.PortTranscript(context.Background(), src, f.multi, f.ws, "uuid-1")
 
 	// Assert.
 	if err == nil {
@@ -329,7 +353,7 @@ func TestPortTranscriptRefusesAMissingSource(t *testing.T) {
 	f := newTranscriptFixture(t)
 
 	// Act.
-	err := f.r.PortTranscript(context.Background(), filepath.Join(f.def, "nope.jsonl"), f.multi, f.ws)
+	err := f.r.PortTranscript(context.Background(), filepath.Join(f.def, "nope.jsonl"), f.multi, f.ws, "uuid-2")
 
 	// Assert.
 	if err == nil {
@@ -354,7 +378,7 @@ func TestPortTranscriptRejectsMissingInputs(t *testing.T) {
 			f := newTranscriptFixture(t)
 
 			// Act.
-			err := f.r.PortTranscript(context.Background(), tc.source, tc.destRoot, tc.destWSDir)
+			err := f.r.PortTranscript(context.Background(), tc.source, tc.destRoot, tc.destWSDir, "uuid-2")
 
 			// Assert.
 			if err == nil {

@@ -308,7 +308,7 @@ type fakeAccounts struct {
 	readErr error
 }
 
-type portedTranscript struct{ Path, ConfigDir, WorkspaceDir string }
+type portedTranscript struct{ Path, ConfigDir, WorkspaceDir, VendorSessionID string }
 
 func (a *fakeAccounts) ConfigDirFor(string) string { return a.configDir }
 
@@ -325,11 +325,11 @@ func (a *fakeAccounts) FindTranscript(context.Context, string, string) (account.
 	return a.transcript, a.transcriptErr
 }
 
-func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir string) error {
+func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, workspaceDir, vendorSessionID string) error {
 	if a.portErr != nil {
 		return a.portErr
 	}
-	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir})
+	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir, vendorSessionID})
 	return nil
 }
 

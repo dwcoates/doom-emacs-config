@@ -267,22 +267,33 @@ func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) 
 		},
 	}))
 
-	// Assert: the transcript is ported under the child's own project dir.
+	// Assert: the child resumes a conversation of its OWN. A vendor session id
+	// is single-occupancy -- the shim takes session-<id>.lock inside
+	// StartSession -- so a child resuming the live parent's id could never come
+	// up; the daemon mints a fresh id and files the copy under it.
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)
 	}
 	child := resp.Msg.GetSuccess().GetWorkspace()
-	childProject := createProjectDir(f.d.DefaultConfigDir, child.GetDir())
-	ported := filepath.Join(childProject, vendorID+".jsonl")
-	if _, err := os.Stat(ported); err != nil {
-		t.Fatalf("stat the ported transcript %s: %v, want the parent's transcript copied under the child's project dir", ported, err)
-	}
-
-	// Assert: the child resumes the ported vendor session.
 	childShim := f.d.Shim(child)
 	resume := childShim.ExpectStartSession().GetResume()
-	if resume == nil || resume.GetVendorSessionId() != vendorID {
-		t.Fatalf("the forked child's StartSession = %v, want resume of the parent's vendor session %q", resume, vendorID)
+	if resume == nil {
+		t.Fatalf("the forked child's StartSession = %v, want a resume", resume)
+	}
+	forked := resume.GetVendorSessionId()
+	if forked == "" || forked == vendorID {
+		t.Fatalf("the forked child resumes %q, want a fresh vendor session id and never the parent's %q", forked, vendorID)
+	}
+
+	// Assert: the parent's conversation is copied under the child's project
+	// dir, filed under the child's own id, and the parent keeps its own.
+	childProject := createProjectDir(f.d.DefaultConfigDir, child.GetDir())
+	ported := filepath.Join(childProject, forked+".jsonl")
+	if _, err := os.Stat(ported); err != nil {
+		t.Fatalf("stat the ported transcript %s: %v, want the parent's conversation copied under the child's own id", ported, err)
+	}
+	if _, err := os.Stat(transcript); err != nil {
+		t.Fatalf("stat the parent's transcript %s: %v, want it left in place", transcript, err)
 	}
 }
 
