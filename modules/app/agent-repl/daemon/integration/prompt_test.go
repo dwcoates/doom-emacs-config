@@ -61,7 +61,7 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 	}
 }
 
-func TestDuplicateIdempotencyKeyAnswersTheSameTurnIdAndSendsNoSecondStartTurn(t *testing.T) {
+func TestDuplicateIdempotencyKeyIsRefusedAndSendsNoSecondStartTurn(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 
@@ -69,11 +69,14 @@ func TestDuplicateIdempotencyKeyAnswersTheSameTurnIdAndSendsNoSecondStartTurn(t 
 	first := f.submit("do the thing", "dup-key", origin)
 	second := f.submit("do the thing", "dup-key", origin)
 
-	// Assert
-	t1 := first.GetSuccess().GetTurn().GetTurn()
-	t2 := second.GetSuccess().GetTurn().GetTurn()
-	if t1.GetValue() == "" || t1.GetValue() != t2.GetValue() {
-		t.Fatalf("first turn = %q, second turn = %q, want the same minted turn for a duplicate idempotency key", t1.GetValue(), t2.GetValue())
+	// Assert: the contract's arm is `duplicate_submission` -- "the earlier
+	// submission stands (its turn, hold or panel is already visible); nothing
+	// is submitted twice" -- not a second echo of the first turn.
+	if first.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("the first submission = %v, want a minted turn", first)
+	}
+	if second.GetError().GetDuplicateSubmission() == nil {
+		t.Fatalf("the duplicate submission = %v, want error.duplicate_submission", second)
 	}
 	if got := f.shim.Count(harness.RPCStartTurn); got != 1 {
 		t.Fatalf("StartTurn count = %d, want exactly 1 (the duplicate sends no second StartTurn)", got)
@@ -524,12 +527,21 @@ func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t
 			// Act
 			resp := f.submit(cmd, "k-cut", origin)
 
-			// Assert: routed as a session act, not an ordinary prompt turn.
+			// Assert: the cut goes down the queue's ONE delivery path and
+			// reaches the shim as a StartTurn carrying the literal -- shim.v1
+			// has no other verb for a context cut, and the vendor's own CLI is
+			// what answers /clear and /compact. It is answered with the TURN
+			// it runs as, not with command_acted: that arm is for an act that
+			// "mints no turn (/model <arg>)", and a cut mints and records one.
 			if resp.GetError() != nil {
 				t.Fatalf("SubmitPrompt(%s) = %v, want a success", cmd, resp)
 			}
-			if got := f.shim.Count(harness.RPCStartTurn); got != 0 {
-				t.Fatalf("StartTurn count after %s = %d, want 0 (a session act, not a prompt turn)", cmd, got)
+			if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+				t.Fatalf("SubmitPrompt(%s) = %v, want the turn the cut runs as", cmd, resp)
+			}
+			req := f.shim.ExpectStartTurn()
+			if got := text(req.GetSaid()); got != cmd {
+				t.Fatalf("StartTurn.said after %s = %q, want the command's literal", cmd, got)
 			}
 
 			// Act: the resulting cut arrives as a page line.
