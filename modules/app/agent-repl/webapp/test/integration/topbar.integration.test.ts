@@ -475,6 +475,19 @@ describe.each(WARNING_DETAILS)("the $arm warning's detail", ({ arm, expected }) 
   });
 });
 
+describe("the session-fault detail", () => {
+  it("draws the faulted component verbatim beside the detail", async () => {
+    // Arrange: the daemon projects a session fault into the PUSHED view; the
+    // strip is its only home, and the component names who faulted.
+    await withTopbar({ warnings: [topbarWarning("sessionFault")] });
+    await harness.click(".topbar-warnings");
+    // Act
+    await harness.click('.topbar-warning-row[data-arm="sessionFault"]');
+    // Assert
+    expect(harness.text('.topbar-reveal[data-reveal="warning-detail"]')).toContain("shim");
+  });
+});
+
 describe("the unmodeled-tool detail", () => {
   it("draws every argument line verbatim", async () => {
     // Arrange
