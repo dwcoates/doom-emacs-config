@@ -25,5 +25,15 @@ export default defineConfig({
     include: ["test/integration/**/*.test.ts"],
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,
+    // TIGHT ON PURPOSE. These tests boot the whole app against a real
+    // loopback fake daemon, but the daemon is in-process and instant to
+    // start: a healthy run's slowest test (measured across all 13 files) is
+    // 274.8ms, in refusals.integration.test.ts. Vitest's own defaults
+    // (5000ms/10000ms) would let a genuinely hung test burn 20-40x that
+    // before failing. ~3x the observed max, so real variance has headroom
+    // without masking a hang. If a test needs more, it gets its own
+    // `{ timeout: ... }` with a one-line reason, not a raised global.
+    testTimeout: 900,
+    hookTimeout: 900,
   },
 });
