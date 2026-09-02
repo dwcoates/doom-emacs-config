@@ -35,10 +35,10 @@ shapes stay inside it, and what crosses the boundary is `conversation.v1`.
 
 ```
 src/
-  main.ts              argv, env, the workspace lock, the log fd, signals, --version, wiring
+  main.ts              argv, env, the log fd, signals, --version, wiring (NO locks)
   build-identity.ts    SHIM_BUILD_SHA + sdk/agent-binary versions (SessionRuntime)
   log.ts               THE canonical JSONL logging API
-  locks.ts             the two kernel flocks (workspace at startup, session at StartSession)
+  locks.ts             the two kernel flocks (both taken inside StartSession)
   vendor-guard.ts      the ONLY dynamic import of the SDK; the FORBID_VENDOR_CALLS gate
   metaprompt.ts        the canonical metaprompt append
   proto.ts             THE single import site: shimv1 / storev1 / conversationv1 namespaces
@@ -103,10 +103,18 @@ means the daemon and this build disagree about the contract.
   - `AGENT_REPL_FAKE_TURN_GATE`, `AGENT_REPL_FAKE_TURN_GATE_TEXT`,
     `AGENT_REPL_FAKE_SPOOL_ROOT` — `--fake` only.
 - **Startup order**: parse argv → resolve env → configure the log on fd 3 →
-  take the WORKSPACE lock → bind the UDS → serve. The lock precedes the bind
-  because binding first leaves a window in which a duplicate shim is reachable
-  and already writing. The SESSION lock is taken inside `StartSession`, keyed by
-  the vendor session id, before the SDK is touched.
+  bind the UDS → serve. **NO LOCK IS TAKEN AT STARTUP.** A shim that has served
+  but has no session is **INERT** and holds neither kernel lock, which is what
+  lets the daemon prelaunch a replacement beside the live shim instead of
+  wedging it behind a lock the live shim holds for its lifetime.
+- **Both kernel locks are taken inside `StartSession`**, before the SDK is
+  touched and held for the process lifetime: the SESSION lock first (keyed by
+  the vendor session id), then the WORKSPACE lock (keyed by the cwd), in that
+  fixed order so two racing shims cannot take them in opposite orders. Either
+  conflict answers `StartSession` `conversation_owned` — one arm, because from
+  the daemon's side "someone else owns this conversation" is one fact — with
+  the contended lock path in the detail. The daemon's probe is unchanged: a
+  held lock still means a live shim owns the conversation.
 - **Signals**: SIGTERM is the one authorized shutdown and takes the
   `KillSession{force:true}` path, then exits 0 (nonzero if the stand-down
   failed). SIGINT is REFUSED and logged at error — an attached terminal's Ctrl-C
