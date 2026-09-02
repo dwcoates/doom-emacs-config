@@ -283,6 +283,15 @@ this file's verb — so the tab's whole birth is a perspective plus the
     (agent-repl--ws-create name dir)
     (agent-repl--ws-put name :ref ref)
     (agent-repl--ws-put name :dir dir)
+    ;; `:project-dir' is the identity key the REST of the system reads -- the
+    ;; durable log sink, history, the composer's attachment root, panels,
+    ;; magit.  `agent-repl--ws-create' seeds it only when persp-mode hands
+    ;; back a real perspective object, so a tab born without one (persp-mode
+    ;; absent, or the `persp-not-persp' sentinel) would be a project-dir-less
+    ;; `(no repo)' stub for the rest of its life.  The row's ref is the only
+    ;; authority on the directory, so the write happens here, unconditionally,
+    ;; from the same `dir' `:dir' gets.
+    (agent-repl--ws-put name :project-dir dir)
     (agent-repl--info name "elisp.roster.tab-open: ws=%s id=%s dir=%s"
                       name (plist-get desired :id) dir)
     (agent-repl-roster--subscribe-host name ref)
