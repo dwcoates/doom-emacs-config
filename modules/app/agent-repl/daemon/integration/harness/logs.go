@@ -357,14 +357,3 @@ func containsAll(order []string, verbs []string) bool {
 	}
 	return true
 }
-
-// IndexOfVerb answers the position of a verb's FIRST arrival in an order, or
-// -1 when it never arrived.
-func IndexOfVerb(order []string, verb string) int {
-	for i, got := range order {
-		if got == verb {
-			return i
-		}
-	}
-	return -1
-}
