@@ -303,16 +303,29 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 		return r.GetColdGate().GetStanding() != nil
 	})
 
+	// The answer names a model the gate ITSELF served: the compact menu is the
+	// closed set the daemon echoes against, so a model outside it is refused
+	// (its own test) and could never reach the shim to be echoed.
+	menu := gateRow.GetColdGate().GetStanding().GetCompact()
+	if len(menu.GetModels()) == 0 {
+		t.Fatalf("the cold gate's compact menu = %v, want at least one model offered", menu)
+	}
+	servedModel := menu.GetModels()[0].GetModel()
+
 	// Act
-	if _, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+	answered, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
 		Workspace: f.ws,
 		Gate:      gateRow.GetId(),
 		Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: &agentreplv1.AnswerColdGateCompact{
-			Model: &conversationv1.AgentModel{Name: "haiku"},
+			Model: &conversationv1.AgentModel{Name: servedModel.GetName()},
 			Scope: conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS,
 		}},
-	})); err != nil {
+	}))
+	if err != nil {
 		t.Fatalf("AnswerColdGate{compact} = error %v, want a success", err)
+	}
+	if answered.Msg.GetSuccess() == nil {
+		t.Fatalf("AnswerColdGate{compact} = %v, want a success", answered.Msg)
 	}
 
 	// Assert: the retry echoes the compact choice exactly.
@@ -321,8 +334,8 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	if compact == nil {
 		t.Fatalf("the retry's cold_remediation = %v, want {compact}", retry.GetResume().GetColdRemediation())
 	}
-	if compact.GetModel().GetName() != "haiku" {
-		t.Fatalf("compact.model = %q, want \"haiku\" echoed exactly", compact.GetModel().GetName())
+	if compact.GetModel().GetName() != servedModel.GetName() {
+		t.Fatalf("compact.model = %q, want the served %q echoed exactly", compact.GetModel().GetName(), servedModel.GetName())
 	}
 	if compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS {
 		t.Fatalf("compact.scope = %v, want SESSION_COMPACT_SCOPE_PROMPTS echoed exactly", compact.GetScope())
@@ -351,7 +364,7 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	})
 
 	// Act: SESSION_COMPACT_SCOPE_UNSPECIFIED is never a served menu value.
-	_, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
 		Workspace: f.ws,
 		Gate:      gateRow.GetId(),
 		Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: &agentreplv1.AnswerColdGateCompact{
@@ -360,12 +373,12 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 		}},
 	}))
 
-	// Assert
-	if err == nil {
-		t.Fatal("AnswerColdGate{compact} with an unserved model = success, want a refusal")
+	// Assert: unserved_remediation IS a landed arm, so it answers as one.
+	if err != nil {
+		t.Fatalf("AnswerColdGate{compact} with an unserved model = transport error %v, want the unserved_remediation arm", err)
 	}
-	if !namesIntendedArm(err, "AnswerColdGateError.unserved_remediation") && connectCode(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("AnswerColdGate refusal = %v, want it to name unserved_remediation", err)
+	if resp.Msg.GetError().GetUnservedRemediation() == nil {
+		t.Fatalf("AnswerColdGate = %v, want AnswerColdGateError.unserved_remediation", resp.Msg)
 	}
 	f.d.ExpectWarnings(harness.AllowAllWarnings)
 }

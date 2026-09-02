@@ -128,9 +128,44 @@ type fleetFixture struct {
 	footer     *fakeFooter
 	log        *fakeSurfaces
 	watcher    *fakeWatcher
+	links      *recordingLinkSink
 	probeState sessionlock.State
 	probeErr   error
 }
+
+// recordingLinkSink answers the three view sinks' OnLink and nothing else: the
+// fleet states the link itself only on the gate-parked bring-up, where no
+// watcher opens to state it.
+type recordingLinkSink struct {
+	links []sessionwatcher.LinkState
+}
+
+func (s *recordingLinkSink) note(link sessionwatcher.LinkState) {
+	s.links = append(s.links, link)
+}
+
+// The three view sinks are separate types because one type cannot embed all
+// three interfaces (their method sets overlap).
+type footerLinkSink struct {
+	sessionwatcher.FooterSink
+	rec *recordingLinkSink
+}
+
+func (s footerLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState) { s.rec.note(link) }
+
+type topbarLinkSink struct {
+	sessionwatcher.TopbarSink
+	rec *recordingLinkSink
+}
+
+func (s topbarLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState) { s.rec.note(link) }
+
+type sidebarLinkSink struct {
+	sessionwatcher.SidebarSink
+	rec *recordingLinkSink
+}
+
+func (s sidebarLinkSink) OnLink(_ ids.WorkspaceID, link sessionwatcher.LinkState) { s.rec.note(link) }
 
 // newFleetFixture arranges a fleet whose lock probe reports free and whose
 // bring-up succeeds.
@@ -144,6 +179,7 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 		footer:     newFakeFooter(),
 		log:        newFakeSurfaces(),
 		watcher:    &fakeWatcher{},
+		links:      &recordingLinkSink{},
 		probeState: sessionlock.StateFree,
 	}
 	f.supervisor = &fakeSupervisor{client: f.client}
@@ -151,6 +187,11 @@ func newFleetFixture(t *testing.T) *fleetFixture {
 	fleet, err := NewFleet(FleetDeps{
 		DB: f.db, Accounts: f.accounts, Supervisor: f.supervisor,
 		Feed: f.feed, Footer: f.footer, Log: f.log,
+		Sinks: sessionwatcher.Sinks{
+			Footer:  footerLinkSink{rec: f.links},
+			Topbar:  topbarLinkSink{rec: f.links},
+			Sidebar: sidebarLinkSink{rec: f.links},
+		},
 		SocketPath: func(ws ids.WorkspaceID) string { return "/sock/" + string(ws) + ".sock" },
 		LockDir:    t.TempDir(),
 		Probe:      func(string, string) (sessionlock.State, error) { return f.probeState, f.probeErr },
@@ -768,6 +809,35 @@ func TestBringUpRelaysTheShimsConversationOwnedRefusal(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmConversationOwned)
+}
+
+// TestAGateParkedBringUpStatesTheLinkItself pins the link restatement: no
+// watcher opens on the gate-parked path, so without this the surfaces keep
+// drawing the DEAD link of the shim that died before this one — which outranks
+// the gate in the footer's status tree and hides what the user must answer.
+func TestAGateParkedBringUpStatesTheLinkItself(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.client.response = coldResponse()
+
+	// Act
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start with a cold refusal: %v", err)
+	}
+
+	// Assert
+	want := []sessionwatcher.LinkState{
+		shimclient.LinkConnected, shimclient.LinkConnected, shimclient.LinkConnected,
+	}
+	if len(f.links.links) != len(want) {
+		t.Fatalf("OnLink calls = %v, want the footer, topbar and roster each told the link is connected", f.links.links)
+	}
+	for i, got := range f.links.links {
+		if got != want[i] {
+			t.Fatalf("OnLink call %d = %v, want %v", i, got, want[i])
+		}
+	}
 }
 
 // TestRunningAnswersQuietForAGateParkedSessionWithNoWatcher pins the nil-watcher
