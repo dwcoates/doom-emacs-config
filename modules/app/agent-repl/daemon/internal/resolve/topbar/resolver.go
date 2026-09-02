@@ -334,15 +334,6 @@ func (r *resolver) SetModelCatalog(ws ids.WorkspaceID, models []*conversationv1.
 		func(s *wsState) { s.catalog = models })
 }
 
-// SetPermissionModePicker installs exactly the switchable set the daemon will
-// accept.
-func (r *resolver) SetPermissionModePicker(ws ids.WorkspaceID, picker *frontendv1.TopbarPermissionModePicker) {
-	r.mutate(ws, "daemon.topbar.set_permission_mode_picker",
-		"the topbar took the permission-mode picker",
-		dlog.Context{"options": len(picker.GetOptions())},
-		func(s *wsState) { s.picker = picker })
-}
-
 // SetAccount installs the account read from the config root.
 func (r *resolver) SetAccount(ws ids.WorkspaceID, email string) {
 	r.mutate(ws, "daemon.topbar.set_account", "the topbar took the account",

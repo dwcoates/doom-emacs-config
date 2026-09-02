@@ -156,14 +156,6 @@ func (r *Repo) state(s *fakegit.State) *fakegit.Repo {
 	return repo
 }
 
-// Commit records a commit on the repository's current branch and answers its
-// sha. The file is written too, because the daemon reads some of them.
-func (r *Repo) Commit(file, content string) string {
-	r.t.Helper()
-	writeFile(r.t, filepath.Join(r.Dir, file), content)
-	return r.CommitIn(r.Dir, file, content)
-}
-
 // CommitIn records a commit inside one of the repository's worktrees.
 func (r *Repo) CommitIn(worktree, file, content string) string {
 	r.t.Helper()
@@ -207,12 +199,6 @@ func (r *Repo) Checkout(name string) {
 	})
 }
 
-// Head is the main worktree's current commit sha.
-func (r *Repo) Head() string {
-	r.t.Helper()
-	return r.state(r.w.read()).Worktree(r.Dir).Head
-}
-
 // Worktrees lists every worktree path the repository knows, main included.
 func (r *Repo) Worktrees() []string {
 	r.t.Helper()
@@ -239,32 +225,6 @@ func (r *Repo) HasBranch(name string) bool {
 func (r *Repo) HasWorktree(dir string) bool {
 	r.t.Helper()
 	return r.state(r.w.read()).Worktree(dir) != nil
-}
-
-// LogSubjects lists the subjects reachable from a ref, newest first.
-func (r *Repo) LogSubjects(ref string) []string {
-	r.t.Helper()
-	s := r.w.read()
-	repo := r.state(s)
-	sha := ref
-	if head, ok := repo.BranchHeads[ref]; ok {
-		sha = head
-	}
-	var out []string
-	seen := map[string]bool{}
-	for sha != "" && !seen[sha] {
-		seen[sha] = true
-		c := s.Commits[sha]
-		if c == nil {
-			break
-		}
-		out = append(out, c.Subject)
-		if len(c.Parents) == 0 {
-			break
-		}
-		sha = c.Parents[0]
-	}
-	return out
 }
 
 // AddWorktree cuts a branch off the default branch into a sibling worktree
@@ -298,18 +258,6 @@ func (r *Repo) ScriptFailure(dir string, exit int, stderr string, match ...strin
 	})
 }
 
-// SetDirty makes a worktree report uncommitted content.
-func (r *Repo) SetDirty(worktreeDir string, dirty bool) {
-	r.t.Helper()
-	r.edit(func(s *fakegit.State) {
-		wt := r.state(s).Worktree(worktreeDir)
-		if wt == nil {
-			r.t.Fatalf("harness: %s is not a worktree of %s", worktreeDir, r.Dir)
-		}
-		wt.Dirty = dirty
-	})
-}
-
 // SetPaths records the paths a commit touched, which is what the rollout
 // controller classifies subsystems from.
 func (r *Repo) SetPaths(sha string, paths ...string) {
@@ -321,14 +269,4 @@ func (r *Repo) SetPaths(sha string, paths ...string) {
 		}
 		c.Paths = paths
 	})
-}
-
-// ConflictedFiles lists the paths a worktree currently has in conflict.
-func (r *Repo) ConflictedFiles(worktreeDir string) []string {
-	r.t.Helper()
-	wt := r.state(r.w.read()).Worktree(worktreeDir)
-	if wt == nil {
-		return nil
-	}
-	return wt.Conflicted
 }

@@ -84,8 +84,6 @@ type planState struct {
 	row *frontendv1.FeedId
 	// feed is where the bubble landed.
 	feed placement
-	// turn is the turn the bubble belongs to.
-	turn *conversationv1.TurnId
 }
 
 // shellState is one detached shell's accumulation: the spool the daemon caps

@@ -262,16 +262,6 @@ func (o *orchestrator) layoutFor(ctx context.Context, ws ids.WorkspaceID) (wsm.C
 	return job, nil
 }
 
-// selfRepoDir resolves the daemon's own checkout. AGENT_REPL_SELF_REPO_DIR
-// overrides it for tests; the self-reload trigger STAYS ON under the override,
-// whose test safety is AGENT_REPL_DEPLOY_SCRIPT naming a fake deploy script.
-func SelfRepoDir(daemonCheckout string) string {
-	if override := os.Getenv("AGENT_REPL_SELF_REPO_DIR"); override != "" {
-		return override
-	}
-	return daemonCheckout
-}
-
 // TestCommandFor resolves the gate's command line. AGENT_REPL_TEST_ALL_SCRIPT
 // overrides the repository's own entrypoint for tests, and the script is run
 // through bash so a fixture script needs no execute bit.

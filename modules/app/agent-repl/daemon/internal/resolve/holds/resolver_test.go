@@ -11,6 +11,19 @@ import (
 	"claude-repld/internal/wsm"
 )
 
+// testMergeDequeueOffer builds a merge-dequeue offer shaped the way the merge
+// orchestrator's own dequeueOffer composes one, for tests whose subject is the
+// tray rather than the offer's prose.
+func testMergeDequeueOffer() *frontendv1.HeldOffer {
+	return &frontendv1.HeldOffer{
+		Offer: &frontendv1.HeldOffer_MergeDequeue{
+			MergeDequeue: &frontendv1.HeldOfferMergeDequeue{
+				Headline: &frontendv1.HeldOfferHeadline{Text: "interrupting — keep your merge's queue slot, or release it?"},
+			},
+		},
+	}
+}
+
 func TestNewRefusesWithoutLogSurfaces(t *testing.T) {
 	// Arrange, Act.
 	_, err := holds.New(nil)
@@ -38,7 +51,7 @@ func TestTrayComposesItsHeading(t *testing.T) {
 		{
 			name:  "an offer counts as a held thing",
 			held:  []wsm.HeldPrompt{hold("t1", "one")},
-			offer: holds.MergeDequeueOffer(),
+			offer: testMergeDequeueOffer(),
 			want:  "held (2)",
 		},
 	}
@@ -78,7 +91,7 @@ func TestTrayDrawsTheOfferAfterEveryPrompt(t *testing.T) {
 
 	// Act.
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
-	r.SetOffer(testWS, holds.MergeDequeueOffer())
+	r.SetOffer(testWS, testMergeDequeueOffer())
 
 	// Assert.
 	items := latest(t, r).GetItems()
@@ -93,7 +106,7 @@ func TestTrayDrawsTheOfferAfterEveryPrompt(t *testing.T) {
 func TestTrayClearsTheOffer(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)
-	r.SetOffer(testWS, holds.MergeDequeueOffer())
+	r.SetOffer(testWS, testMergeDequeueOffer())
 
 	// Act.
 	r.SetOffer(testWS, nil)
@@ -101,16 +114,6 @@ func TestTrayClearsTheOffer(t *testing.T) {
 	// Assert.
 	if got := latest(t, r).GetItems(); len(got) != 0 {
 		t.Fatalf("clearing the offer left %d items", len(got))
-	}
-}
-
-func TestMergeDequeueOfferComposesItsHeadline(t *testing.T) {
-	// Arrange, Act.
-	got := holds.MergeDequeueOffer().GetMergeDequeue().GetHeadline().GetText()
-
-	// Assert.
-	if got != holds.MergeDequeueHeadline {
-		t.Fatalf("headline = %q, want the daemon-composed sentence", got)
 	}
 }
 

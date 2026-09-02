@@ -48,10 +48,3 @@ func Bind(addrPath string, port int) (Claim, error) {
 func BindJoining(addrPath string, port int) (Claim, error) {
 	return bindJoining(addrPath, port)
 }
-
-// Read reads an existing daemon.addr file, which is how a joining successor
-// learns the incumbent's address when it is not given one. A missing file is
-// reported as an error, never as an empty address.
-func Read(addrPath string) (string, error) {
-	return read(addrPath)
-}

@@ -7,9 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net"
-	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -431,22 +429,6 @@ func (s *ShimControl) ExpectKillTurn() *shimv1.KillTurnRequest {
 	return msg
 }
 
-// ExpectKillSession pops the next KillSession request.
-func (s *ShimControl) ExpectKillSession() *shimv1.KillSessionRequest {
-	s.t.Helper()
-	msg := &shimv1.KillSessionRequest{}
-	s.expect(RPCKillSession, msg)
-	return msg
-}
-
-// ExpectHibernate pops the next Hibernate request.
-func (s *ShimControl) ExpectHibernate() *shimv1.HibernateRequest {
-	s.t.Helper()
-	msg := &shimv1.HibernateRequest{}
-	s.expect(RPCHibernate, msg)
-	return msg
-}
-
 // ExpectSetSessionModel pops the next SetSessionModel request.
 func (s *ShimControl) ExpectSetSessionModel() *shimv1.SetSessionModelRequest {
 	s.t.Helper()
@@ -482,14 +464,6 @@ func (s *ShimControl) ExpectWatchAgent() *shimv1.WatchAgentRequest {
 	s.t.Helper()
 	msg := &shimv1.WatchAgentRequest{}
 	s.expect(RPCWatchAgent, msg)
-	return msg
-}
-
-// ExpectWatchBash pops the next WatchBash open.
-func (s *ShimControl) ExpectWatchBash() *shimv1.WatchBashRequest {
-	s.t.Helper()
-	msg := &shimv1.WatchBashRequest{}
-	s.expect(RPCWatchBash, msg)
 	return msg
 }
 
@@ -569,20 +543,4 @@ func profileFileName(dir string) string {
 func WorkspaceLockPath(lockDir, dir string) string {
 	sum := md5.Sum([]byte(filepath.Clean(dir)))
 	return filepath.Join(lockDir, "workspace-"+hex.EncodeToString(sum[:])[:8]+".lock")
-}
-
-// LockFiles lists the kernel locks that currently exist.
-func (d *Daemon) LockFiles() []string {
-	d.t.Helper()
-	entries, err := os.ReadDir(d.LockDir)
-	if err != nil {
-		d.t.Fatalf("harness: read %s: %v", d.LockDir, err)
-	}
-	var out []string
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".lock") {
-			out = append(out, e.Name())
-		}
-	}
-	return out
 }

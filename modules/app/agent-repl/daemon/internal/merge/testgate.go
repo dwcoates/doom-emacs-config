@@ -167,12 +167,14 @@ func (o *orchestrator) paintSpans(text string) ([]*frontendv1.FeedMergeTestSpan,
 	return out, nil
 }
 
-// suiteState is one suite's standing as the run's own lines report it.
+// suiteState is one suite's standing as the run's own lines report it. The
+// zero value is a selected suite the output never settled (paintSuites'
+// switch default draws it running) and carries no name of its own: nothing
+// ever needs to name "still running" directly, only fall through to it.
 type suiteState int
 
 const (
-	// suiteStateRunning is a selected suite the output never settled.
-	suiteStateRunning suiteState = iota
+	_ suiteState = iota // the zero value: still running, named nowhere
 	// suiteStatePassed is a suite the script reported passing.
 	suiteStatePassed
 	// suiteStateFailed is a suite the script reported failing.
