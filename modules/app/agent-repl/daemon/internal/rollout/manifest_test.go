@@ -2,6 +2,7 @@ package rollout
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"claude-repld/internal/ids"
@@ -208,5 +209,85 @@ func TestWriteManifestRefusesWithNoConfiguredPath(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("writeManifest accepted an empty path")
+	}
+}
+
+// toggleReadOnlyDB is a state handle that answers read-only until it is
+// promoted, which is exactly the joining successor's handle.
+type toggleReadOnlyDB struct {
+	wsm.DB
+	mu       sync.Mutex
+	readOnly bool
+}
+
+func (d *toggleReadOnlyDB) ReadOnly() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.readOnly
+}
+
+func (d *toggleReadOnlyDB) Promote(ctx context.Context) error {
+	d.mu.Lock()
+	d.readOnly = false
+	d.mu.Unlock()
+	return d.DB.Promote(ctx)
+}
+
+func (d *toggleReadOnlyDB) OpenFault(ctx context.Context, f wsm.Fault) (ids.FaultID, error) {
+	if d.ReadOnly() {
+		return "", wsm.ErrReadOnly
+	}
+	return d.DB.OpenFault(ctx, f)
+}
+
+// TestABounceDispositionIsDeferredWhileTheHandleIsReadOnly covers the joining
+// successor's reconciliation: it reads the outgoing daemon's manifest before it
+// owns anything, while the incumbent is still the sole writer. The accounting
+// is a write, so it is HELD until the promotion rather than failed loudly on
+// every ordinary handover.
+func TestABounceDispositionIsDeferredWhileTheHandleIsReadOnly(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+	h.c.deps.DB = handle
+
+	// Act
+	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+
+	// Assert: nothing was written, and the accounting is standing.
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("open faults = %d, want none while the handle is read-only", len(open))
+	}
+	if got := len(h.c.pendingDispositions); got != 1 {
+		t.Fatalf("pending dispositions = %d, want the one the read-only handle deferred", got)
+	}
+}
+
+// TestTheDeferredBounceDispositionsAreWrittenAtThePromotion is the other half:
+// deferred is not dropped.
+func TestTheDeferredBounceDispositionsAreWrittenAtThePromotion(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	handle := &toggleReadOnlyDB{DB: h.c.deps.DB, readOnly: true}
+	h.c.deps.DB = handle
+	ws, _ := reconcileOne(t, h, IntentPreserve, sessionlock.StateFree)
+
+	// Act
+	if err := handle.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	h.c.flushDispositions(context.Background())
+
+	// Assert
+	open, err := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultBounceDisposition})
+	if err != nil {
+		t.Fatalf("OpenFaults: %v", err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open faults = %d, want the deferred disposition written at the promotion", len(open))
 	}
 }
