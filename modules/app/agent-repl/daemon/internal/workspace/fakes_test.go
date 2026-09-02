@@ -355,7 +355,12 @@ type fakeAccounts struct {
 	email string
 	// readErr makes Read fail, which registration must surface.
 	readErr error
+	// moved records MoveTranscript's account switches; moveErr fails them.
+	moved   []movedTranscript
+	moveErr error
 }
+
+type movedTranscript struct{ Path, ToConfigDir, WorkspaceDir string }
 
 type portedTranscript struct{ Path, ConfigDir, WorkspaceDir, VendorSessionID string }
 
@@ -379,6 +384,16 @@ func (a *fakeAccounts) PortTranscript(_ context.Context, path, configDir, worksp
 		return a.portErr
 	}
 	a.ported = append(a.ported, portedTranscript{path, configDir, workspaceDir, vendorSessionID})
+	return nil
+}
+
+// MoveTranscript records the account switch's port, which is what makes a
+// resume land under the root the workspace now routes to.
+func (a *fakeAccounts) MoveTranscript(_ context.Context, path, toConfigDir, workspaceDir string) error {
+	if a.moveErr != nil {
+		return a.moveErr
+	}
+	a.moved = append(a.moved, movedTranscript{path, toConfigDir, workspaceDir})
 	return nil
 }
 

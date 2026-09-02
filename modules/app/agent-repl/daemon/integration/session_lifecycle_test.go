@@ -606,25 +606,6 @@ func TestAForkedChildOutsideTheMultiRepoRootDoesNotInheritTheParentsAccount(t *t
 }
 
 func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
-	// UNEXPRESSIBLE against the current daemon: internal/workspace/sessions.go's
-	// Fleet.Start reads `configDir := session.ConfigDir` and reuses it VERBATIM
-	// whenever it is non-empty (see the `if configDir == ""` guard immediately
-	// below it) -- it never recomputes Accounts.ConfigDirFor(record.Dir) against
-	// the booting daemon's OWN $MULTI_REPO_ROOT on a later boot. Consequently
-	// internal/account/transcript.go's MoveTranscript, which exists and is
-	// exercised directly by internal/account's own unit tests, has NO caller
-	// anywhere in internal/ -- grepped and confirmed zero call sites outside its
-	// own definition and PortTranscript's sibling use in a fork.
-	//
-	// The exact hook this test needs: a reconciliation step inside Fleet.Start
-	// (or an equivalent bring-up path) that, before a RESUME is sent, recomputes
-	// Accounts.ConfigDirFor(record.Dir) against the CURRENT boot's routing,
-	// compares it against the session's STORED ConfigDir, and — when they
-	// disagree — calls Accounts.MoveTranscript to carry the transcript into the
-	// newly routed root and persists the new ConfigDir onto the session record
-	// before StartSession(resume) is sent. No such call site exists today.
-	t.Skip("no production hook reconciles a boot-to-boot MULTI_REPO_ROOT routing change against a session's stored ConfigDir and ports its transcript; see internal/workspace/sessions.go's Fleet.Start (configDir := session.ConfigDir, reused verbatim) and internal/account/transcript.go's MoveTranscript (zero production callers)")
-
 	// Arrange: a workspace OUTSIDE the multi-repo root, opened so it has a
 	// vendor transcript filed under the default root.
 	f := newOpened(t, harness.Opts{})

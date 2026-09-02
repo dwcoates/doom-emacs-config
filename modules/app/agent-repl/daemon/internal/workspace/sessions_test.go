@@ -952,3 +952,82 @@ func TestCloseWatchersOnAFleetWithNoSessionsDoesNothing(t *testing.T) {
 		t.Fatal("a watcher was closed on a fleet that has no live session")
 	}
 }
+
+// TestStartPortsTheTranscriptWhenTheAccountRoutingChanged pins daemon.md 10a:
+// the config dir is decided at every start, and a resume whose recorded root
+// is no longer the routed one carries its transcript across first.
+func TestStartPortsTheTranscriptWhenTheAccountRoutingChanged(t *testing.T) {
+	// Arrange: the session was filed under /old; this boot routes to /config.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.accounts.transcript = account.Transcript{Path: "/old/projects/w1/vendor-1.jsonl", ConfigDir: "/old"}
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/old"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.accounts.moved) != 1 || f.accounts.moved[0].ToConfigDir != "/config" {
+		t.Fatalf("moved transcripts = %+v, want one into the routed root /config", f.accounts.moved)
+	}
+}
+
+// TestStartSpawnsUnderTheRoutedRootAfterAnAccountSwitch pins the other half:
+// the shim is spawned under the newly routed root, not the recorded one.
+func TestStartSpawnsUnderTheRoutedRootAfterAnAccountSwitch(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.accounts.transcript = account.Transcript{Path: "/old/projects/w1/vendor-1.jsonl", ConfigDir: "/old"}
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/old"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if got := f.supervisor.spawns[0].ConfigDir; got != "/config" {
+		t.Fatalf("spawn ConfigDir = %q, want the routed root /config", got)
+	}
+}
+
+// TestStartPortsNothingForAFreshSession pins that a fresh start has no
+// conversation to carry: the new root is simply where this one is filed.
+func TestStartPortsNothingForAFreshSession(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, ConfigDir: "/old"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.accounts.moved) != 0 {
+		t.Fatalf("moved transcripts = %+v, want none for a fresh start", f.accounts.moved)
+	}
+}
+
+// TestStartPortsNothingWhenTheRoutingIsUnchanged pins that the ordinary start
+// -- the recorded root and the routed one agreeing -- touches no transcript.
+func TestStartPortsNothingWhenTheRoutingIsUnchanged(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", ConfigDir: "/config"}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.accounts.moved) != 0 {
+		t.Fatalf("moved transcripts = %+v, want none when the routing is unchanged", f.accounts.moved)
+	}
+}
