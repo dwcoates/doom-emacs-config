@@ -71,6 +71,10 @@ CREATE TABLE creation_jobs (
 
 CREATE TABLE sessions (
   workspace_id       TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+  -- The DAEMON-minted session identity the host stream echoes. It is not the
+  -- vendor's: sessions rotate under one workspace and Emacs correlates
+  -- transcripts, health probes and fault windows against this one.
+  host_session_id    TEXT NOT NULL,
   vendor_session_id  TEXT NOT NULL,
   config_dir         TEXT NOT NULL,
   model              TEXT NOT NULL,

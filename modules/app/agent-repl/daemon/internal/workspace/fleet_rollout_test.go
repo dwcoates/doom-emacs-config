@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"claude-repld/internal/wsm"
 )
 
 // TestRouteGuidanceRefusesAnUnspecifiedOrigin covers the origin the contract
@@ -134,5 +136,53 @@ func TestSessionBuildSHAReportsAnUnknownWorkspace(t *testing.T) {
 	// Assert
 	if known {
 		t.Fatal("SessionBuildSHA answered a build for a workspace with no session")
+	}
+}
+
+// TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts covers the seam the
+// host stream's HostSessionExisting arm is composed from.
+func TestHostSessionFactsAnswersTheDaemonsOwnSessionFacts(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	f.db.sessions["w1"] = wsm.Session{
+		Workspace:       "w1",
+		HostSessionID:   "host-1",
+		VendorSessionID: "vendor-1",
+		ConfigDir:       "/roots/default",
+	}
+
+	// Act.
+	facts, ok, err := f.fleet.HostSessionFacts(context.Background(), "w1")
+
+	// Assert.
+	if err != nil || !ok {
+		t.Fatalf("HostSessionFacts = (%+v, %v, %v), want the session's facts", facts, ok, err)
+	}
+	if facts.SessionID != "host-1" || facts.VendorSessionID != "vendor-1" || facts.ConfigDir != "/roots/default" {
+		t.Fatalf("facts = %+v, want the recorded identities", facts)
+	}
+	if facts.ShimAttached {
+		t.Fatal("facts report the shim attached with no live session, want false")
+	}
+	if facts.BackfillKnown {
+		t.Fatal("facts claim to know the backfill; the daemon holds no store client and can state none")
+	}
+}
+
+// TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone covers the host
+// stream's `none` arm: a registered workspace that never had a session.
+func TestHostSessionFactsAnswersNoSessionForAWorkspaceWithNone(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+
+	// Act.
+	_, ok, err := f.fleet.HostSessionFacts(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HostSessionFacts = error %v, want no session as an answer", err)
+	}
+	if ok {
+		t.Fatal("HostSessionFacts reports a session for a workspace that never had one")
 	}
 }

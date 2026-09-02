@@ -176,6 +176,12 @@ type MergeActions struct {
 // shim process.
 type Session struct {
 	Workspace WorkspaceID
+	// HostSessionID is the DAEMON-minted session identity the host stream
+	// echoes and Emacs correlates against. Sessions rotate under one
+	// workspace; this is what distinguishes them, and it is not the vendor's
+	// id (a fork mints a fresh vendor id for the same host session, and a
+	// fresh conversation on one workspace is a new host session).
+	HostSessionID string
 	// VendorSessionID is the vendor's session identity, for resume.
 	VendorSessionID string
 	// ConfigDir is the account root the session was spawned under.

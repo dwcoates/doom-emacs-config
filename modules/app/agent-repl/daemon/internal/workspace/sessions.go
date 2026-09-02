@@ -315,7 +315,21 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	udsPath := f.deps.SocketPath(ws)
 
-	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir)
+	// THE HOST SESSION IDENTITY IS DECIDED BEFORE THE SPAWN, because the shim
+	// is stamped with it (AGENT_REPL_SESSION_ID, for log correlation) and a
+	// stamp cannot be applied after the process is running. A RESUME keeps the
+	// identity it was given -- it is the same session -- and a FRESH start
+	// mints a new one, because a fresh conversation on one workspace is a new
+	// session and Emacs correlates fault windows against exactly this.
+	hostSessionID := session.HostSessionID
+	if hostSessionID == "" || src.Fresh {
+		hostSessionID = wsm.NewHostSessionID()
+		log.Debug(opBringUp, "minted the session's host identity", dlog.Context{
+			"host_session_id": hostSessionID, "fresh": src.Fresh,
+		})
+	}
+
+	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID)
 	if err != nil {
 		return err
 	}
@@ -348,7 +362,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	f.remember(ws, &live{client: client, watcher: watcher})
 
-	if err := f.recordFacts(ctx, log, ws, session, started, configDir, client.PID()); err != nil {
+	if err := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, client.PID()); err != nil {
 		return err
 	}
 	log.Info(opBringUp, "the session is up", dlog.Context{
@@ -361,7 +375,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 // that holds it or SPAWNS a new one. A probe that could not tell is never read
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
-func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir string) (shimclient.Client, bool, error) {
+func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string) (shimclient.Client, bool, error) {
 	lockPath := f.lockDir()
 	state, err := f.probe(lockPath, dir)
 	switch state {
@@ -386,6 +400,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			UDSPath:      udsPath,
 			StoreSocket:  f.deps.StoreSocket,
 			ConfigDir:    configDir,
+			SessionID:    hostSessionID,
 			ShimBuildSHA: f.deps.ShimBuildSHA,
 			NodeBin:      f.deps.NodeBin,
 			MainJS:       f.deps.MainJS,
@@ -511,10 +526,11 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 // vendor identity, the config dir it was spawned under, and the model and mode
 // in force. The shim pid and the shim's build are LOGGED rather than persisted,
 // because both belong to the process rather than to the session.
-func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, previous wsm.Session, started *conversationv1.SessionStarted, configDir string, pid int) error {
+func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, previous wsm.Session, started *conversationv1.SessionStarted, configDir, hostSessionID string, pid int) error {
 	now := f.now()
 	next := wsm.Session{
 		Workspace:        ws,
+		HostSessionID:    hostSessionID,
 		VendorSessionID:  started.GetVendorSessionId(),
 		ConfigDir:        configDir,
 		Model:            started.GetEffectiveModel().GetName(),
@@ -535,6 +551,7 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		return fmt.Errorf("start session for %q: record the session facts: %w", ws, err)
 	}
 	log.Debug(opBringUp, "recorded the session facts", dlog.Context{
+		"host_session_id":   next.HostSessionID,
 		"vendor_session_id": next.VendorSessionID,
 		"config_dir":        next.ConfigDir,
 		"model":             next.Model,

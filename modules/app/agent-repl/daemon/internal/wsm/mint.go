@@ -49,6 +49,12 @@ func NewTurnID() ids.TurnID { return ids.TurnID(mint()) }
 // the daemon mints one and files the copied transcript under it.
 func NewVendorSessionID() string { return uuid.New().String() }
 
+// NewHostSessionID mints one SESSION's host-facing identity: the echo token
+// the host stream carries and Emacs correlates transcripts, health probes and
+// fault windows against. Sessions rotate under one workspace, and this is what
+// distinguishes them; it is the daemon's own, never the vendor's.
+func NewHostSessionID() string { return mint() }
+
 // NewTaskID mints a task identity.
 func NewTaskID() ids.TaskID { return ids.TaskID(mint()) }
 
