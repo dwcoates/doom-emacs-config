@@ -84,6 +84,9 @@ export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTM
 
   const anchor = document.createElement("a");
   anchor.className = "external-link";
+  // The stable hook every outward link carries, whichever view drew it — the
+  // twin of `data-editor-link` below.
+  anchor.setAttribute("data-external-link", "");
   anchor.href = spec.url;
   anchor.textContent = label;
   anchor.addEventListener("click", (event: MouseEvent) => {
