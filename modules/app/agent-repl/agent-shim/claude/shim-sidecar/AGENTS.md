@@ -257,7 +257,10 @@ because neither spelling may make a spool invisible.
   the transcript is discovered, warned about ONCE, re-checked every rescan, and
   not tailed until the meta appears.
 - WORKFLOW IS KICKED this wave: journals and workflow per-agent transcripts are
-  discovered and cursor-tailed, but they convert to residue only.
+  discovered and cursor-tailed, but they convert to DECLARED residue only —
+  `workflow_journal/<type>` for the journal, `workflow/agent_transcript` for a
+  per-agent transcript. Never `unknown`: the two files share a discovery kind
+  and hold DIFFERENT record shapes, and the disposition follows the file.
 - EVERY DISCOVERED PATH AND EVERY ROOT IS SYMLINK-RESOLVED
   (`discover.Normalize`). macOS's `/tmp` -> `/private/tmp` otherwise makes one
   file read as two the moment a spool path is compared against an owner's
@@ -745,8 +748,14 @@ turn_duration / stop_hook_summary / away_summary / scheduled_task_fire /
 model-refusal / agents_killed system lines); context-cut exclusions and the other
 attachment machinery as `attachment/<type>`; the synthetic
 `"No response requested."` assistant record; unmodeled content blocks as
-`content_block/<type>`; workflow journal records and spools (workflow is KICKED
-this wave — discovered and tailed so nothing is lost, converted to nothing yet).
+`content_block/<type>`; workflow journal records (`workflow_journal/<type>`),
+workflow spools (`spool/workflow`) and a workflow run's PER-AGENT TRANSCRIPTS
+(`workflow/agent_transcript`) — workflow is KICKED this wave, so all three are
+discovered and tailed so nothing is lost, and converted to nothing yet. A
+per-agent transcript holds ORDINARY TRANSCRIPT RECORDS rather than the journal's
+two shapes, so running it through the journal converter filed every record as
+`unknown` — "we do not model this", which is false and which buries the real
+modelling gaps that query exists to find.
 
 R15: a FILE-PLANE USER PROMPT is `vendor_specific{kind:"user_prompt"}`, never a
 page line. `AgentPrompt` carries a `TurnId` and a `PromptOrigin`, both
