@@ -74,6 +74,106 @@ func TestDaemonHealthWithAnOpenFaultIsUnhealthy(t *testing.T) {
 	if unhealthy == nil || len(unhealthy.GetFaults()) == 0 {
 		t.Fatalf("DaemonHealth with a missing prompts dir = %v, want success{unhealthy{faults}}", resp.Msg)
 	}
+	// The KIND is the point: a missing prompts dir is CLOSURE-TYPED, and its
+	// own field carries the exact path that is not there.
+	missing := unhealthy.GetFaults()[0].GetPromptsDirMissing()
+	if missing == nil {
+		t.Fatalf("the reported fault = %v, want the prompts_dir_missing arm", unhealthy.GetFaults()[0])
+	}
+	if got := missing.GetPath(); got != d.PromptsDir {
+		t.Fatalf("prompts_dir_missing.path = %q, want the daemon's own PromptsDir %q", got, d.PromptsDir)
+	}
+}
+
+// TestRestoringThePromptsDirClosesTheFault expects the fault this daemon opened
+// above to CLOSE once the directory comes back and a brief reads again — the
+// symmetric half of "open" a fault record must have to be a record of a
+// CONDITION rather than a one-way trip.
+func TestRestoringThePromptsDirClosesTheFault(t *testing.T) {
+	// Arrange: open the fault exactly as the sibling test above does.
+	d := newDaemon(t, harness.Opts{})
+	d.ExpectWarnings("daemon.workspace.request_command_support",
+		"daemon.health.open_fault", "daemon.health.daemon")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	if err := os.RemoveAll(d.PromptsDir); err != nil {
+		t.Fatalf("removing the prompts dir: %v", err)
+	}
+	if _, err := d.Client().RequestCommandSupport(d.Ctx(), connect.NewRequest(&agentreplv1.RequestCommandSupportRequest{
+		Workspace: ws,
+		Command:   "/status",
+	})); err == nil {
+		t.Log("RequestCommandSupport succeeded before the dir was restored; the fault is asserted below regardless")
+	}
+	preRepair, err := d.Client().DaemonHealth(d.Ctx(), healthRequest())
+	if err != nil {
+		t.Fatalf("DaemonHealth before repair = error %v, want a success carrying the fault", err)
+	}
+	if preRepair.Msg.GetSuccess().GetUnhealthy() == nil {
+		t.Fatalf("DaemonHealth before repair = %v, want success{unhealthy}", preRepair.Msg)
+	}
+
+	// Act: the directory comes back, and a brief read through it succeeds.
+	harness.CopyPrompts(t, d.PromptsDir)
+	if _, err := d.Client().RequestCommandSupport(d.Ctx(), connect.NewRequest(&agentreplv1.RequestCommandSupportRequest{
+		Workspace: ws,
+		Command:   "/status2",
+	})); err != nil {
+		t.Fatalf("RequestCommandSupport after repair = error %v, want a success now that the brief reads", err)
+	}
+
+	// Assert
+	resp, err := d.Client().DaemonHealth(d.Ctx(), healthRequest())
+	if err != nil {
+		t.Fatalf("DaemonHealth after repair = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess().GetHealthy() == nil {
+		t.Fatalf("DaemonHealth after the prompts dir was restored = %v, want success{healthy}", resp.Msg)
+	}
+}
+
+// TestADaemonRestartDoesNotReopenAClosedPromptsDirFault checks the OTHER half
+// of closure being real: once a fault is closed, a fresh runtime reading the
+// same faults table must not resurrect it merely because it once stood.
+func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
+	// Arrange: open then close the prompts-dir fault, on a state root a
+	// restart will reuse.
+	d := newDaemon(t, harness.Opts{})
+	d.ExpectWarnings("daemon.workspace.request_command_support",
+		"daemon.health.open_fault", "daemon.health.daemon")
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	if err := os.RemoveAll(d.PromptsDir); err != nil {
+		t.Fatalf("removing the prompts dir: %v", err)
+	}
+	if _, err := d.Client().RequestCommandSupport(d.Ctx(), connect.NewRequest(&agentreplv1.RequestCommandSupportRequest{
+		Workspace: ws,
+		Command:   "/status",
+	})); err == nil {
+		t.Log("RequestCommandSupport succeeded before the dir was restored; the fault is asserted below regardless")
+	}
+	harness.CopyPrompts(t, d.PromptsDir)
+	if _, err := d.Client().RequestCommandSupport(d.Ctx(), connect.NewRequest(&agentreplv1.RequestCommandSupportRequest{
+		Workspace: ws,
+		Command:   "/status2",
+	})); err != nil {
+		t.Fatalf("RequestCommandSupport after repair = error %v, want a success", err)
+	}
+	stateDir := d.StateDir
+
+	// Act: stop this daemon and start a fresh one on the SAME state root, so
+	// the faults table (wsm.db) persists across the restart.
+	d.Stop()
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: stateDir})
+
+	// Assert
+	resp, err := nd.Client().DaemonHealth(nd.Ctx(), healthRequest())
+	if err != nil {
+		t.Fatalf("DaemonHealth after restart = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess().GetHealthy() == nil {
+		t.Fatalf("DaemonHealth after a restart following a closed fault = %v, want success{healthy}: a closed fault must not reopen across a restart", resp.Msg)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +234,112 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	}
 }
 
+// TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush is the
+// retraction half of TestSessionHealthRelaysAnUnhealthyDiagnosticsPush: the
+// shim's health verdict is the WHOLE verdict on every push
+// (cmd/claude-repld/lifecycle.go OnSessionDiagnostics), so a healthy push
+// closes the standing shim-reported fault and SessionHealth reads healthy
+// again without a restart.
+func TestSessionHealthReturnsToHealthyAfterAHealthyDiagnosticsPush(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session")
+	topbar := f.d.WatchTopbar(f.ws)
+	f.shim.PushUnhealthy(&conversationv1.SessionFault{
+		Component: "store client",
+		Detail:    "the store socket went away",
+		Kind: &conversationv1.SessionFault_StoreUnreachable{
+			StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{},
+		},
+	})
+	awaitTopbar(t, f, topbar, "a topbar warning for the session fault", func(v *frontendv1.TopbarView) bool {
+		return len(v.GetWarnings().GetWarnings()) > 0
+	})
+	pre, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
+	if err != nil || pre.Msg.GetSuccess().GetUnhealthy() == nil {
+		t.Fatalf("SessionHealth before the retraction = %v (err %v), want success{unhealthy}", pre.Msg, err)
+	}
+
+	// Act: the shim retracts by pushing a healthy diagnostics verdict.
+	f.shim.PushHealthy()
+	awaitTopbar(t, f, topbar, "the topbar warning retracted", func(v *frontendv1.TopbarView) bool {
+		return len(v.GetWarnings().GetWarnings()) == 0
+	})
+
+	// Assert
+	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
+	if err != nil {
+		t.Fatalf("SessionHealth after the retraction = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess().GetHealthy() == nil {
+		t.Fatalf("SessionHealth after a healthy diagnostics push = %v, want success{healthy}", resp.Msg)
+	}
+}
+
+// TestSessionHealthAfterTheShimExitsReportsShimDied is the SessionHealth
+// counterpart of TestFooterShimExitFlipsToDeadAndStopsRedials: a shim that
+// exits mid-session, rather than merely losing its link, is the shim_died
+// arm and carries the exit code.
+func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	f.d.ExpectWarnings("daemon.shimclient.exit",
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+
+	// Act: the fake shim process exits outright, mid-session.
+	f.shim.Exit(1, "simulated crash")
+	awaitFooter(t, f, footer, "disconnected.dead once the shim exits", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetDisconnected().GetDead() != nil
+	})
+
+	// Assert
+	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
+	if err != nil {
+		t.Fatalf("SessionHealth = error %v, want a success carrying the fault", err)
+	}
+	unhealthy := resp.Msg.GetSuccess().GetUnhealthy()
+	if unhealthy == nil || len(unhealthy.GetFaults()) == 0 {
+		t.Fatalf("SessionHealth after the shim exits = %v, want success{unhealthy{faults}}", resp.Msg)
+	}
+	died := unhealthy.GetFaults()[0].GetShimDied()
+	if died == nil {
+		t.Fatalf("the reported fault = %v, want the shim_died arm", unhealthy.GetFaults()[0])
+	}
+	if got := died.GetExitCode(); got != 1 {
+		t.Fatalf("shim_died.exit_code = %d, want 1", got)
+	}
+}
+
+// TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered is the
+// SessionHealth counterpart of TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials:
+// a live shim whose stream was severed (never exited) is the link_severed
+// arm, distinct from shim_died.
+func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act: sever the session stream without killing the shim process.
+	f.shim.DropStream(harness.StreamSession)
+	awaitFooter(t, f, footer, "disconnected.severed once the link dies", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetDisconnected().GetSevered() != nil
+	})
+
+	// Assert
+	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
+	if err != nil {
+		t.Fatalf("SessionHealth = error %v, want a success carrying the fault", err)
+	}
+	unhealthy := resp.Msg.GetSuccess().GetUnhealthy()
+	if unhealthy == nil || len(unhealthy.GetFaults()) == 0 {
+		t.Fatalf("SessionHealth with a severed link = %v, want success{unhealthy{faults}}", resp.Msg)
+	}
+	if got := unhealthy.GetFaults()[0].GetLinkSevered(); got == nil {
+		t.Fatalf("the reported fault = %v, want the link_severed arm", unhealthy.GetFaults()[0])
+	}
+}
+
 func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
@@ -148,12 +354,11 @@ func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 		Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()},
 	}))
 
-	// Assert
+	// Assert: the arm is LANDED, so the answer is always the in-band typed
+	// arm, never a transport error (settled by reading resolveRefLogging in
+	// internal/server/refuse.go, per critique 22).
 	if err != nil {
-		if connectCode(err) != connect.CodeNotFound {
-			t.Fatalf("SessionHealth(unknown) = error %v, want NotFound or the typed arm", err)
-		}
-		return
+		t.Fatalf("SessionHealth(unknown) = error %v, want a success carrying error{unknown_workspace}", err)
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("SessionHealth(unknown) = %v, want error{unknown_workspace}", resp.Msg)
@@ -195,6 +400,160 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	})
 	if !strings.Contains(rec.Message, "deferred a command") {
 		t.Fatalf("the persisted record = %q, want the client's own sentence", rec.Raw)
+	}
+	if rec.Level != "info" {
+		t.Fatalf("the persisted record's level = %q, want %q for an info record", rec.Level, "info")
+	}
+	if got := rec.Context["pane"]; got != "composer" {
+		t.Fatalf("the persisted record's context.pane = %v, want %q verbatim", got, "composer")
+	}
+}
+
+// TestClientLogAtWarnLandsAtWarnInTheWebappSink is the warn half of the level
+// discipline: the record's level arm, not any fixed level, is what the sink
+// persists.
+func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}},
+			Operation: "webapp.render.slow",
+			Message:   "a render took too long",
+		},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ClientLog = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
+	}
+	rec := f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's warn record", func(r harness.LogRecord) bool {
+		return r.Operation == "webapp.render.slow"
+	})
+	if rec.Level != "warn" {
+		t.Fatalf("the persisted record's level = %q, want %q", rec.Level, "warn")
+	}
+}
+
+// TestClientLogAtErrorLandsAtErrorInTheWebappSink is the error half.
+func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
+			Operation: "webapp.crash",
+			Message:   "the webview threw uncaught",
+		},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ClientLog = error %v, want a success", err)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("ClientLog = %v, want a success", resp.Msg)
+	}
+	rec := f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's error record", func(r harness.LogRecord) bool {
+		return r.Operation == "webapp.crash"
+	})
+	if rec.Level != "error" {
+		t.Fatalf("the persisted record's level = %q, want %q", rec.Level, "error")
+	}
+}
+
+// TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel is the
+// validation half: the level oneof is not optional, and an unset one is a
+// Connect InvalidArgument naming the field, never an arm.
+func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	_, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Operation: "webapp.something",
+			Message:   "a message with no level",
+		},
+	}))
+
+	// Assert
+	if err == nil {
+		t.Fatalf("ClientLog with no level = success, want InvalidArgument naming level")
+	}
+	if connectCode(err) != connect.CodeInvalidArgument {
+		t.Fatalf("ClientLog with no level = error %v, want CodeInvalidArgument", err)
+	}
+	if !containsField(err, "level") {
+		t.Fatalf("ClientLog with no level = error %v, want it to name the field", err)
+	}
+}
+
+// TestClientLogOnAnUnknownWorkspaceIsRefused: ClientLogError carries NO arms
+// at all (endpoint_client_log.proto: "EMPTY ON PURPOSE"), so an unknown
+// workspace can only answer through server.UnlandedArm's transport error —
+// there is no in-band shape to settle onto.
+func TestClientLogOnAnUnknownWorkspaceIsRefused(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	d.ExpectWarnings("daemon.refusal.unlanded_arm")
+
+	// Act
+	_, err := d.Client().ClientLog(d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()},
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Info{Info: &agentreplv1.ClientLogLevelInfo{}},
+			Operation: "webapp.something",
+			Message:   "a message",
+		},
+	}))
+
+	// Assert
+	if err == nil {
+		t.Fatalf("ClientLog(unknown) = success, want a refusal")
+	}
+	if connectCode(err) != connect.CodeNotFound {
+		t.Fatalf("ClientLog(unknown) = error %v, want CodeNotFound", err)
+	}
+}
+
+// TestClientLogNeverAppearsInTheDaemonRunLog confines a client's own record to
+// the workspace's webapp sink: the daemon's run log is the DAEMON's own
+// account of itself, and a client's diagnostic sentence is not that.
+func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	if _, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
+		Workspace: f.ws,
+		Record: &agentreplv1.ClientLogRecord{
+			Level:     &agentreplv1.ClientLogRecord_Error{Error: &agentreplv1.ClientLogLevelError{}},
+			Operation: "webapp.crash",
+			Message:   "a fatal client error",
+		},
+	})); err != nil {
+		t.Fatalf("ClientLog = error %v, want a success", err)
+	}
+	f.d.AwaitLogRecord(harness.ClientLogPath(f.ws), "the client's record", func(r harness.LogRecord) bool {
+		return r.Operation == "webapp.crash"
+	})
+
+	// Assert
+	for _, r := range f.d.RunLog() {
+		if r.Operation == "webapp.crash" {
+			t.Fatalf("the run log carries the client's own record %+v, want it confined to the workspace's webapp sink", r)
+		}
 	}
 }
 
@@ -277,12 +636,13 @@ func TestSendLoginInputWithNoLoginOpenIsRefused(t *testing.T) {
 		Input:     &agentreplv1.SendLoginInputRequest_Keystrokes{Keystrokes: &agentreplv1.LoginTerminalKeystrokes{Data: []byte("x")}},
 	}))
 
-	// Assert
+	// Assert: no_login_open is a LANDED SendLoginInputError arm — the
+	// in-band typed answer, never a transport error (settled by reading
+	// internal/server/login.go's SendLoginInput, per critique 22: the arm
+	// string "no_login_open" matches SendLoginInputError's own oneof field,
+	// so s.refuse's setArm succeeds and answers in band).
 	if err != nil {
-		if connectCode(err) != connect.CodeFailedPrecondition {
-			t.Fatalf("SendLoginInput with no login open = error %v, want the no_login_open refusal", err)
-		}
-		return
+		t.Fatalf("SendLoginInput with no login open = error %v, want a success carrying error{no_login_open}", err)
 	}
 	if resp.Msg.GetError().GetNoLoginOpen() == nil {
 		t.Fatalf("SendLoginInput with no login open = %v, want error{no_login_open}", resp.Msg)
@@ -374,15 +734,65 @@ func TestOpenInEditorOnAnUnknownWorkspaceIsRefused(t *testing.T) {
 		Path:      "README.md",
 	}))
 
-	// Assert
+	// Assert: the arm is LANDED, so the answer is always the in-band typed
+	// arm, never a transport error (settled per critique 22: same
+	// resolveRefLogging path as SessionHealth's unknown_workspace).
 	if err != nil {
-		if connectCode(err) != connect.CodeNotFound {
-			t.Fatalf("OpenInEditor(unknown) = error %v, want NotFound or the typed arm", err)
-		}
-		return
+		t.Fatalf("OpenInEditor(unknown) = error %v, want a success carrying error{unknown_workspace}", err)
 	}
 	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
 		t.Fatalf("OpenInEditor(unknown) = %v, want error{unknown_workspace}", resp.Msg)
+	}
+}
+
+// TestOpenInEditorWithAPathEscapingTheWorkspaceIsRefused is the containment
+// check OpenInEditor's own doc comment describes: a path that resolves
+// outside the workspace's worktree must never be relayed to the editor.
+func TestOpenInEditorWithAPathEscapingTheWorkspaceIsRefused(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
+		Workspace: f.ws,
+		Path:      "../../etc/passwd",
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenInEditor(escaping path) = error %v, want a success carrying error{path_escapes_workspace}", err)
+	}
+	if got := resp.Msg.GetError().GetPathEscapesWorkspace(); got == nil {
+		t.Fatalf("OpenInEditor(escaping path) = %v, want error{path_escapes_workspace}", resp.Msg)
+	}
+}
+
+// TestOpenInEditorOnADirectoryRelaysWithNoLine checks the "UNSET = the file's
+// top (or a directory)" half of HostOpenInEditor.line: a directory path is
+// relayed with no line at all, never a synthesized one.
+func TestOpenInEditorOnADirectoryRelaysWithNoLine(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	host := f.d.WatchHost(f.ws)
+
+	// Act: the workspace root itself is a directory, and no line is given.
+	if _, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
+		Workspace: f.ws,
+		Path:      ".",
+	})); err != nil {
+		t.Fatalf("OpenInEditor = error %v, want a success", err)
+	}
+
+	// Assert
+	push := harness.AwaitView(t, f.d.Ctx(), host, "the open_in_editor push", func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+		return r.GetOpenInEditor() != nil
+	})
+	got := push.GetOpenInEditor()
+	if got.GetPath() != "." {
+		t.Fatalf("the open_in_editor push path = %q, want %q verbatim", got.GetPath(), ".")
+	}
+	if got.Line != nil {
+		t.Fatalf("the open_in_editor push line = %v, want UNSET for a directory", got.Line)
 	}
 }
 
@@ -407,6 +817,83 @@ func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 	if !loginArgvHas(invocations[0].Argv, url) {
 		t.Fatalf("the launcher argv = %v, want it to carry %q", invocations[0].Argv, url)
 	}
+}
+
+// TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl exercises
+// OpenExternalError's invalid_url arm (endpoint_open_external.proto: "the url
+// does not parse").
+func TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	// internal/workspace/links.go's OpenExternal refuses an unparseable url
+	// under ArmUnservedAnswer ("unserved_answer"), which is not a field
+	// OpenExternalError carries: the arm the contract landed
+	// (endpoint_open_external.proto's invalid_url) is not the one the verb
+	// raises, so today's answer is server.UnlandedArm's transport error at
+	// WARN under daemon.refusal.unlanded_arm, not the typed arm below.
+	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
+
+	// Act
+	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+		Workspace: f.ws,
+		Url:       "::not a url",
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenExternal(unparseable url) = error %v, want a success carrying error{invalid_url}", err)
+	}
+	if got := resp.Msg.GetError().GetInvalidUrl(); got == nil {
+		t.Fatalf("OpenExternal(unparseable url) = %v, want error{invalid_url}", resp.Msg)
+	}
+}
+
+// TestOpenExternalWithAFailingLauncherAnswersLaunchFailed exercises
+// OpenExternalError's launch_failed{detail} arm.
+func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.d.Browser.SetExitCode(1)
+	// internal/workspace/links.go wraps a launcher failure as an ORDINARY
+	// error (fmt.Errorf), never a workspace.Refusal, so it never reaches
+	// setArm at all: today's answer is server.fail's CodeInternal, logged at
+	// ERROR under both daemon.workspace.open_external (the verb's own
+	// account) and OpenExternal (the transport's fail() call), not the typed
+	// arm below.
+	f.d.ExpectWarnings("daemon.workspace.open_external", "OpenExternal")
+
+	// Act
+	resp, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+		Workspace: f.ws,
+		Url:       "https://example.invalid/report",
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("OpenExternal(failing launcher) = error %v, want a success carrying error{launch_failed}", err)
+	}
+	got := resp.Msg.GetError().GetLaunchFailed()
+	if got == nil {
+		t.Fatalf("OpenExternal(failing launcher) = %v, want error{launch_failed}", resp.Msg)
+	}
+	if got.GetDetail() == "" {
+		t.Fatalf("launch_failed.detail = %q, want the launcher's own account of the failure", got.GetDetail())
+	}
+}
+
+// TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured would
+// exercise OpenExternalError's no_browser_configured arm
+// (internal/workspace/links.go: "if v.deps.Browser == nil"), but no daemon
+// this harness can start ever has a nil Browser dependency to trigger it
+// with.
+func TestOpenExternalWithNoBrowserConfiguredAnswersNoBrowserConfigured(t *testing.T) {
+	t.Skip("unexpressible: cmd/claude-repld/graph.go always calls externalbrowser.New(...) to build the " +
+		"daemon's Browser dependency, and externalbrowser.New always resolves to a non-nil opener " +
+		"(AGENT_REPL_BROWSER_CMD when set, else DefaultBinary/openDefault when unset) — see " +
+		"internal/externalbrowser/externalbrowser.go newOpener. internal/workspace/verbs.deps.Browser is " +
+		"therefore never nil in any daemon StartDaemon can produce. Exercising this arm needs a production " +
+		"hook that lets the graph wire a nil Browser (e.g. an env or flag such as AGENT_REPL_NO_BROWSER=1 " +
+		"that skips externalbrowser.New entirely) — no such hook exists today.")
 }
 
 // ---------------------------------------------------------------------------

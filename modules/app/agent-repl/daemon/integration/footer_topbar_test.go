@@ -189,13 +189,17 @@ func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-tok-dup", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
-	// Act: the response's first unit carries usage.
+	// Act: the response's first unit carries usage — 1000 input tokens (all
+	// misses), so the canonical formatter's cell text is exactly "1k in".
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-unit-1", ftUsage(1000, 0, 0))))
 	// The cell is ALWAYS populated (it reads "0 in" before any usage lands),
 	// so the usage-carrying push is the first one whose figure is not zero.
 	firstUnit := awaitFooter(t, f, footer, "the tokens cell after the usage-carrying unit", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetTokens().GetInput().GetText() != "" && v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
 	})
+	if firstUnit.GetStrip().GetTokens().GetInput().GetText() != "1k in" {
+		t.Fatalf("tokens cell = %q for 1000 input tokens, want the canonical formatter's exact \"1k in\"", firstUnit.GetStrip().GetTokens().GetInput().GetText())
+	}
 
 	// Act: the SAME response's second unit (a tool call in the same
 	// assistant message) carries NO usage.
@@ -438,13 +442,19 @@ func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 
-	// Act: the agent self-schedules a wakeup while idle.
+	// Act: the agent self-schedules a wakeup while idle, for the scheduled
+	// instant 1_700_000_060_000 (ftWakeupScheduleActivity's fixed WakeAtMs).
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftWakeupScheduleActivity("wake-1", 60)))
 
-	// Assert: the wakeup fallback stands because nothing else does.
-	awaitFooter(t, f, footer, "waiting.wakeup with nothing else standing", func(v *frontendv1.FooterView) bool {
+	// Assert: the wakeup fallback stands because nothing else does, and its
+	// activity carries the EXACT scheduled instant, not merely a non-nil arm.
+	got := awaitFooter(t, f, footer, "waiting.wakeup with nothing else standing", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWaiting().GetWakeup() != nil
 	})
+	if got.GetStrip().GetStatus().GetWaiting().GetActivity().GetWakeup().GetWakeAtMs() != 1_700_000_060_000 {
+		t.Fatalf("waiting.activity.wakeup.wake_at_ms = %d, want exactly 1_700_000_060_000 (the scheduled instant)",
+			got.GetStrip().GetStatus().GetWaiting().GetActivity().GetWakeup().GetWakeAtMs())
+	}
 }
 
 func TestFooterARealStatusWinsOverAPendingWakeup(t *testing.T) {
@@ -644,20 +654,27 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 	f := newOpened(t, harness.Opts{})
 	topbar := f.d.WatchTopbar(f.ws)
 
-	// Assert: the fake's default StartSession answer serves a three-model
-	// catalog, and the selector's `selected` names one of its own options.
+	// Assert: the fake's default StartSession answer serves the fixed
+	// [opus, sonnet, haiku] catalog with its display names verbatim, and the
+	// selector's `selected` is exactly the fake's effective model, "opus".
 	got := awaitTopbar(t, f, topbar, "the model selector resolved from the catalog", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetModelSelector().GetOptions()) > 0 && v.GetModelSelector().GetSelected() != nil
 	})
-	selected := got.GetModelSelector().GetSelected().GetModel().GetName()
-	found := false
-	for _, opt := range got.GetModelSelector().GetOptions() {
-		if opt.GetModel().GetName() == selected {
-			found = true
-		}
+	if got.GetModelSelector().GetSelected().GetModel().GetName() != "opus" {
+		t.Fatalf("model selector selected = %q, want the fake's effective model \"opus\"", got.GetModelSelector().GetSelected().GetModel().GetName())
 	}
-	if !found {
-		t.Fatalf("model selector selected = %q, want it among the served options %v", selected, got.GetModelSelector().GetOptions())
+	wantOptions := []struct{ name, display string }{
+		{"opus", "Opus"}, {"sonnet", "Sonnet"}, {"haiku", "Haiku"},
+	}
+	options := got.GetModelSelector().GetOptions()
+	if len(options) != len(wantOptions) {
+		t.Fatalf("model selector options = %v (%d), want exactly %d: opus, sonnet, haiku", options, len(options), len(wantOptions))
+	}
+	for i, want := range wantOptions {
+		if options[i].GetModel().GetName() != want.name || options[i].GetDisplayName() != want.display {
+			t.Fatalf("model selector options[%d] = {name:%q, display:%q}, want {name:%q, display:%q}",
+				i, options[i].GetModel().GetName(), options[i].GetDisplayName(), want.name, want.display)
+		}
 	}
 }
 
@@ -677,13 +694,50 @@ func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
 		}},
 	})
 
-	// Assert: the chip carries a formatted, non-empty figure and always ships
-	// a populated breakdown (no round-trip needed to open the hover).
+	// Assert: the chip's figure is EXACTLY the canonical formatter's output
+	// for 142_300 tokens (figures.Tokens, internal/figures/tokens.go), and the
+	// chip always ships a populated breakdown (no round-trip needed to open
+	// the hover).
 	got := awaitTopbar(t, f, topbar, "the context chip after context_usage", func(v *frontendv1.TopbarView) bool {
 		return v.GetContext().GetText() != ""
 	})
+	if got.GetContext().GetText() != "142.3k" {
+		t.Fatalf("context chip text = %q, want the canonical formatter's \"142.3k\" for 142_300 tokens", got.GetContext().GetText())
+	}
 	if got.GetContext().GetBreakdown() == nil {
 		t.Fatalf("context chip breakdown = nil, want it always populated on the push carrying context_usage")
+	}
+}
+
+func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T) {
+	// Arrange: a turn whose single usage-carrying unit fixes the session
+	// breakdown's basis at a round 1000 tokens (100 uncached input + 900
+	// cache read), so each row's share_permille is an exact, checkable figure.
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	f.submit("go", "k-breakdown-shares", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+
+	// Act
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-shares", ftUsage(100, 0, 900))))
+
+	// Assert: the session section's headline rows carry the section's own
+	// precomputed share (permille of its own basis) and are drawn emphasized;
+	// the nested detail row carries neither.
+	got := awaitTopbar(t, f, topbar, "the context chip's breakdown after the usage-carrying unit", func(v *frontendv1.TopbarView) bool {
+		return ftFindBreakdownRow(v.GetContext().GetBreakdown(), "uncached input") != nil
+	})
+	breakdown := got.GetContext().GetBreakdown()
+	uncached := ftFindBreakdownRow(breakdown, "uncached input")
+	if uncached.GetTokens() != 100 || uncached.GetSharePermille() != 100 || !uncached.GetEmphasized() {
+		t.Fatalf("\"uncached input\" row = %+v, want tokens=100, share_permille=100, emphasized=true", uncached)
+	}
+	cacheRead := ftFindBreakdownRow(breakdown, "cache read")
+	if cacheRead.GetTokens() != 900 || cacheRead.GetSharePermille() != 900 || !cacheRead.GetEmphasized() {
+		t.Fatalf("\"cache read\" row = %+v, want tokens=900, share_permille=900, emphasized=true", cacheRead)
+	}
+	freshInput := ftFindBreakdownRow(breakdown, "fresh input")
+	if freshInput.GetSharePermille() != 0 || freshInput.GetEmphasized() {
+		t.Fatalf("\"fresh input\" detail row = %+v, want no share_permille and not emphasized (it is a partition of the headline above it)", freshInput)
 	}
 }
 
@@ -747,9 +801,26 @@ func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing
 		Detail:    "could not model a record",
 		Kind:      &conversationv1.SessionFault_ConverterDefect{ConverterDefect: &conversationv1.SessionFaultConverterDefect{}},
 	})
-	awaitTopbar(t, f, topbar, "the session-fault warning", func(v *frontendv1.TopbarView) bool {
+	got := awaitTopbar(t, f, topbar, "the session-fault warning", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetWarnings().GetWarnings()) > 0
 	})
+
+	// Assert: exactly one warning is drawn for the one fault, carrying the
+	// pushed component and detail verbatim, with a non-empty list line.
+	warnings := got.GetWarnings().GetWarnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v (%d), want exactly 1 for the one pushed fault", warnings, len(warnings))
+	}
+	fault := warnings[0].GetSessionFault()
+	if fault.GetComponent().GetText() != "converter" {
+		t.Fatalf("session_fault.component.text = %q, want the pushed \"converter\"", fault.GetComponent().GetText())
+	}
+	if fault.GetDetail().GetText() != "could not model a record" {
+		t.Fatalf("session_fault.detail.text = %q, want the pushed \"could not model a record\"", fault.GetDetail().GetText())
+	}
+	if warnings[0].GetLine().GetText() == "" {
+		t.Fatal("warning.line.text is empty, want a non-empty dropdown-row sentence")
+	}
 
 	// Act: the next pull comes back healthy.
 	f.shim.PushHealthy()
@@ -758,6 +829,38 @@ func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing
 	awaitTopbar(t, f, topbar, "the warning retracted on the next healthy push", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetWarnings().GetWarnings()) == 0
 	})
+}
+
+func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Act: one unhealthy pull naming two distinct faults, in this order.
+	f.shim.PushUnhealthy(
+		&conversationv1.SessionFault{
+			Component: "store",
+			Detail:    "writes are buffering",
+			Kind:      &conversationv1.SessionFault_StoreUnreachable{StoreUnreachable: &conversationv1.SessionFaultStoreUnreachable{}},
+		},
+		&conversationv1.SessionFault{
+			Component: "converter",
+			Detail:    "could not model a record",
+			Kind:      &conversationv1.SessionFault_ConverterDefect{ConverterDefect: &conversationv1.SessionFaultConverterDefect{}},
+		},
+	)
+
+	// Assert: two warnings are drawn, the LATER-named fault (converter) first.
+	got := awaitTopbar(t, f, topbar, "both session-fault warnings", func(v *frontendv1.TopbarView) bool {
+		return len(v.GetWarnings().GetWarnings()) == 2
+	})
+	warnings := got.GetWarnings().GetWarnings()
+	if warnings[0].GetSessionFault().GetComponent().GetText() != "converter" {
+		t.Fatalf("warnings[0].session_fault.component.text = %q, want the newest fault (\"converter\") first", warnings[0].GetSessionFault().GetComponent().GetText())
+	}
+	if warnings[1].GetSessionFault().GetComponent().GetText() != "store" {
+		t.Fatalf("warnings[1].session_fault.component.text = %q, want the older fault (\"store\") second", warnings[1].GetSessionFault().GetComponent().GetText())
+	}
 }
 
 func TestTopbarDegradedWindowIsDrawnOpenThenClosed(t *testing.T) {
@@ -879,11 +982,15 @@ func TestTopbarPermissionModeChangedPushUpdatesTheCurrentMode(t *testing.T) {
 		}},
 	})
 
-	// Assert
+	// Assert: current.mode is exactly the wire spelling "accept_edits" — the
+	// session facts' own vocabulary, which SetPermissionMode echoes unchanged.
 	after := awaitTopbar(t, f, topbar, "the picker's current mode after permission_mode_changed", func(v *frontendv1.TopbarView) bool {
 		return v.GetPermissionModePicker().GetCurrent().GetMode() != before.GetPermissionModePicker().GetCurrent().GetMode()
 	})
-	_ = after
+	if after.GetPermissionModePicker().GetCurrent().GetMode() != "accept_edits" {
+		t.Fatalf("permission_mode_picker.current.mode = %q after permission_mode_changed{accept_edits}, want exactly \"accept_edits\"",
+			after.GetPermissionModePicker().GetCurrent().GetMode())
+	}
 }
 
 // ---------------------------------------------------------------------------
