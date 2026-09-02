@@ -68,3 +68,7 @@ Implementer-chosen UX (integration remediation, sidebar/tray; all currently at o
 - Nuke's typed-name guard: (a) the go button is always enabled and only styles itself "armed" on an exact name match (two-step drawer); (b) hard gate restored (button disabled until the name matches) and the suite types it through; (c) plain second confirm, no typed name.
 - Release on a hold arm that forbids the interrupt: (a) always offered, refused by the daemon at the control, reason in the button's title; (b) drawn disabled with the reason inline.
 - Task done/reopen: (a) both setDone and setOpen live in the task's menu while the visible check flips to whichever applies; (b) only the applicable one shown.
+
+Open questions (integration audit 1, feed reconnect):
+- A bubble sub-feed whose tail dies and whose re-OpenFeed is refused has no clicked control to draw at: (a) draw the refusal at the expand toggle as if clicked; (b) collapse the bubble and draw nothing; (c) report it through the failure sink as machinery (implementer's pick). The bubble reopen path still re-echoes its dead token (src/feed/bubble.ts) pending this answer; the root feed was fixed to re-OpenFeed.
+- A root-feed OpenFeed refused with a terminal arm (unknown_workspace) now retries on the stream's backoff and files daemon_unreachable each round: (a) keep (visible; not_yet_adopted retries correctly); (b) retry only not_yet_adopted and file a client-local failure for the rest (needs an arm the contract does not obviously carry).
