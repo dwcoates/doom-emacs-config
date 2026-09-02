@@ -124,9 +124,13 @@ describe("arrangeSubfeedRows", () => {
 describe("drawBreadcrumbTrail", () => {
   it("draws nothing at a feed's own top (R6)", () => {
     const { ctx } = harness();
+    const mount = document.createElement("div");
     const host = document.createElement("div");
-    drawBreadcrumbTrail(host, [], rowContext(ctx, userPromptRow("a", "x")));
-    expect(host.hidden).toBe(true);
+    mount.append(host);
+    drawBreadcrumbTrail(host, [], rowContext(ctx, userPromptRow("a", "x")), mount);
+    // An empty trail is NO trail: the line is taken out of the page rather than
+    // left standing empty.
+    expect(mount.children).toHaveLength(0);
   });
 
   it("draws the daemon-resolved labels, outermost first", () => {
