@@ -610,3 +610,81 @@ harness support, see below).
    what the daemon's own rewind does), or is directly writing a truncated
    transcript copy an accepted exception since it is modeling the DAEMON's
    own output rather than a vendor behavior?
+
+---
+
+## PROJECT-LEAD RULINGS (2026-09-02)
+
+The "needs a ruling" items above are SETTLED as follows. These rulings are
+binding on step 6; no agent re-litigates them.
+
+### 0. Precondition: the fake SDK arrives with the five-way merge
+
+The five-way merge carries the WHOLE shim branch into `overhaul/integration`,
+including `src/fake` and the `overhaul/shim-fakesdk` scenario additions (which
+the project lead merges into `overhaul/shim` first). Step 6 therefore needs NO
+separate landing step for the fake SDK. This resolves the blocker raised by the
+step-3 audit (`E2E-SCENARIO-COVERAGE.md`), which found 0/69 named scenarios
+reachable from `daemon/e2e` because the scenario registry was absent on that
+branch.
+
+### 1. `acceptOnceShim` — RULED: daemon/e2e never fakes one of our subsystems
+
+`daemon/e2e` is the CROSS-SYSTEM suite: every one of our subsystems in it is
+REAL. A hand-rolled Go double of the shim wire protocol has no place there. A
+test that needs a SCRIPTED shim belongs in `daemon/integration`, which fakes the
+shim by design and will be on `overhaul/integration` after the merge.
+
+In step 6, for each such test choose exactly one:
+- rewrite it against the real shim + fake SDK, if the behavior is reachable
+  that way;
+- move it to `daemon/integration` and express it with that suite's `fakeshim`;
+- delete it, IF `daemon/integration` already pins the same behavior — and cite
+  the specific test that does.
+
+Compile gate only, as always; the rewriting agent never runs the suite.
+
+### 2. `degradedStateEvent` — RULED: provoke a REAL store outage
+
+The degraded-state telemetry is produced by the REAL shim when the REAL store
+goes away, so the test drives that condition rather than fabricating its
+report. The step-5 harness gains a control to STOP and RESTART the test's store
+process; tests use it to open and close a genuine outage window. No fabricated
+telemetry survives.
+
+### 3. `storedAssistantEvent`-seeded bounce/cold tests — RULED: step 5 scope
+
+Not a fake-SDK gap. The step-5 harness gains a helper that drives a fake-SDK
+scenario through a REAL session to completion BEFORE the simulated daemon
+bounce, so the store holds real rows when the test reconnects. Seeding the
+store directly is retired.
+
+### 4. Duplicate-clear / store idempotency
+
+Covered by the general rule in ruling 5 and by ruling 1's disposition menu: a
+behavior that no real end-to-end flow can provoke is not a `daemon/e2e`
+behavior. Step 6 either drives it for real, moves it to the suite that owns the
+contract, or deletes it citing the test that already pins it.
+
+### 5. Hand-written vendor JSONL fixtures — RULED: same rule as everything else
+
+No exception for fixtures that model the daemon's own output. Each hand-written
+vendor transcript becomes a NAMED fake-SDK scenario, grounded by a golden or
+marked "ungrounded, invented" in the shim manifest with its reason. If a
+fixture's shape is one the vendor NEVER emits, DELETE the test and record that
+deletion, with the reason, in this inventory.
+
+### 6. `context_budget_warning` — RULED: the orchestrator's ruling stands
+
+Provisionally settled as implemented on `overhaul/shim-fakesdk`: a NEW,
+separately-named `!context-budget-warning` producer; the landing-5 pinned tests
+(`test/fake/scenarios/session.test.ts:166` and `:212`) untouched; the manifest
+entry marked ungrounded pending a grounding capture. LANDING 5 IS NOT
+OVERTURNED.
+
+### 7. Step-6 bookkeeping obligation
+
+The step-6 rewrites will be the FIRST `daemon/e2e` tests to name fake-SDK
+scenarios. Keep the per-scenario coverage table in
+`E2E-SCENARIO-COVERAGE.md` updated as each rewrite lands, so the 0/69 baseline
+moves with the work instead of being re-audited from scratch at the end.
