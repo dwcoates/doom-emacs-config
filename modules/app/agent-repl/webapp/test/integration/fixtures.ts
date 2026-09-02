@@ -1103,7 +1103,7 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
                 reason:
                   result === "failed"
                     ? { case: "failed", value: { summary: "tests failed twice" } }
-                    : { case: "abandoned", value: {} },
+                    : { case: "abandoned", value: { summary: "taken off the queue" } },
               },
             },
   },

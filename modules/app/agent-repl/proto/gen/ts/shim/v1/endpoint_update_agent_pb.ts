@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file shim/v1/endpoint_update_agent.proto.
  */
 export const file_shim_v1_endpoint_update_agent: GenFile = /*@__PURE__*/
-  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3VwZGF0ZV9hZ2VudC5wcm90bxIHc2hpbS52MSJ6ChJVcGRhdGVBZ2VudFJlcXVlc3QSLQoGdGFyZ2V0GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWRIAIgBARIqCgVpbnB1dBgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudElucHV0QgkKB190YXJnZXQifwoTVXBkYXRlQWdlbnRSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudEZhaWx1cmVIAEIICgZyZXN1bHQiFAoSVXBkYXRlQWdlbnRTdWNjZXNzIo8DChJVcGRhdGVBZ2VudEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjkKDXVua25vd25fYWdlbnQYAiABKAsyIC5zaGltLnYxLlVwZGF0ZUFnZW50VW5rbm93bkFnZW50SAASNAoLbm9fb3Blbl9hc2sYAyABKAsyHS5zaGltLnYxLlVwZGF0ZUFnZW50Tm9PcGVuQXNrSAASPQoPYW5zd2VyX21pc21hdGNoGAQgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudEFuc3dlck1pc21hdGNoSAASPQoPbm90aGluZ19ydW5uaW5nGAUgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudE5vdGhpbmdSdW5uaW5nSAASMwoKbm9fc2Vzc2lvbhgGIAEoCzIdLnNoaW0udjEuVXBkYXRlQWdlbnROb1Nlc3Npb25IABI9Cg9ub3RfZGVsaXZlcmFibGUYByABKAsyIi5zaGltLnYxLlVwZGF0ZUFnZW50Tm90RGVsaXZlcmFibGVIAEIGCgRraW5kIhkKF1VwZGF0ZUFnZW50VW5rbm93bkFnZW50IhYKFFVwZGF0ZUFnZW50Tm9PcGVuQXNrIhsKGVVwZGF0ZUFnZW50QW5zd2VyTWlzbWF0Y2giGwoZVXBkYXRlQWdlbnROb3RoaW5nUnVubmluZyIWChRVcGRhdGVBZ2VudE5vU2Vzc2lvbiIbChlVcGRhdGVBZ2VudE5vdERlbGl2ZXJhYmxlQiBaHmFnZW50cmVwbC9wcm90by9zaGltL3YxO3NoaW12MWIGcHJvdG8z", [file_conversation_v1_agent, file_conversation_v1_agent_activity]);
+  fileDesc("CiNzaGltL3YxL2VuZHBvaW50X3VwZGF0ZV9hZ2VudC5wcm90bxIHc2hpbS52MSJ6ChJVcGRhdGVBZ2VudFJlcXVlc3QSLQoGdGFyZ2V0GAEgASgLMhguY29udmVyc2F0aW9uLnYxLkFnZW50SWRIAIgBARIqCgVpbnB1dBgCIAEoCzIbLmNvbnZlcnNhdGlvbi52MS5BZ2VudElucHV0QgkKB190YXJnZXQifwoTVXBkYXRlQWdlbnRSZXNwb25zZRIuCgdzdWNjZXNzGAEgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudFN1Y2Nlc3NIABIuCgdmYWlsdXJlGAIgASgLMhsuc2hpbS52MS5VcGRhdGVBZ2VudEZhaWx1cmVIAEIICgZyZXN1bHQiFAoSVXBkYXRlQWdlbnRTdWNjZXNzIsQDChJVcGRhdGVBZ2VudEZhaWx1cmUSDgoGZGV0YWlsGAEgASgJEjkKDXVua25vd25fYWdlbnQYAiABKAsyIC5zaGltLnYxLlVwZGF0ZUFnZW50VW5rbm93bkFnZW50SAASNAoLbm9fb3Blbl9hc2sYAyABKAsyHS5zaGltLnYxLlVwZGF0ZUFnZW50Tm9PcGVuQXNrSAASPQoPYW5zd2VyX21pc21hdGNoGAQgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudEFuc3dlck1pc21hdGNoSAASPQoPbm90aGluZ19ydW5uaW5nGAUgASgLMiIuc2hpbS52MS5VcGRhdGVBZ2VudE5vdGhpbmdSdW5uaW5nSAASMwoKbm9fc2Vzc2lvbhgGIAEoCzIdLnNoaW0udjEuVXBkYXRlQWdlbnROb1Nlc3Npb25IABI9Cg9ub3RfZGVsaXZlcmFibGUYByABKAsyIi5zaGltLnYxLlVwZGF0ZUFnZW50Tm90RGVsaXZlcmFibGVIABIzCgphZ2VudF9idXN5GAggASgLMh0uc2hpbS52MS5VcGRhdGVBZ2VudEFnZW50QnVzeUgAQgYKBGtpbmQiFgoUVXBkYXRlQWdlbnRBZ2VudEJ1c3kiGQoXVXBkYXRlQWdlbnRVbmtub3duQWdlbnQiFgoUVXBkYXRlQWdlbnROb09wZW5Bc2siGwoZVXBkYXRlQWdlbnRBbnN3ZXJNaXNtYXRjaCIbChlVcGRhdGVBZ2VudE5vdGhpbmdSdW5uaW5nIhYKFFVwZGF0ZUFnZW50Tm9TZXNzaW9uIhsKGVVwZGF0ZUFnZW50Tm90RGVsaXZlcmFibGVCIFoeYWdlbnRyZXBsL3Byb3RvL3NoaW0vdjE7c2hpbXYxYgZwcm90bzM", [file_conversation_v1_agent, file_conversation_v1_agent_activity]);
 
 /**
  * The input and its address.
@@ -163,6 +163,16 @@ export type UpdateAgentFailure = Message<"shim.v1.UpdateAgentFailure"> & {
      */
     value: UpdateAgentNotDeliverable;
     case: "notDeliverable";
+  } | {
+    /**
+     * A prompt was sent to a subagent whose own turn is already running; the
+     * daemon relays it as SubmitPromptError.bubble_refused{agent_busy}.
+     * (Landing 7, 2026-09-02.)
+     *
+     * @generated from field: shim.v1.UpdateAgentAgentBusy agent_busy = 8;
+     */
+    value: UpdateAgentAgentBusy;
+    case: "agentBusy";
   } | { case: undefined; value?: undefined };
 };
 
@@ -172,6 +182,19 @@ export type UpdateAgentFailure = Message<"shim.v1.UpdateAgentFailure"> & {
  */
 export const UpdateAgentFailureSchema: GenMessage<UpdateAgentFailure> = /*@__PURE__*/
   messageDesc(file_shim_v1_endpoint_update_agent, 3);
+
+/**
+ * @generated from message shim.v1.UpdateAgentAgentBusy
+ */
+export type UpdateAgentAgentBusy = Message<"shim.v1.UpdateAgentAgentBusy"> & {
+};
+
+/**
+ * Describes the message shim.v1.UpdateAgentAgentBusy.
+ * Use `create(UpdateAgentAgentBusySchema)` to create a new message.
+ */
+export const UpdateAgentAgentBusySchema: GenMessage<UpdateAgentAgentBusy> = /*@__PURE__*/
+  messageDesc(file_shim_v1_endpoint_update_agent, 4);
 
 /**
  * @generated from message shim.v1.UpdateAgentUnknownAgent
@@ -184,7 +207,7 @@ export type UpdateAgentUnknownAgent = Message<"shim.v1.UpdateAgentUnknownAgent">
  * Use `create(UpdateAgentUnknownAgentSchema)` to create a new message.
  */
 export const UpdateAgentUnknownAgentSchema: GenMessage<UpdateAgentUnknownAgent> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_update_agent, 4);
+  messageDesc(file_shim_v1_endpoint_update_agent, 5);
 
 /**
  * @generated from message shim.v1.UpdateAgentNoOpenAsk
@@ -197,7 +220,7 @@ export type UpdateAgentNoOpenAsk = Message<"shim.v1.UpdateAgentNoOpenAsk"> & {
  * Use `create(UpdateAgentNoOpenAskSchema)` to create a new message.
  */
 export const UpdateAgentNoOpenAskSchema: GenMessage<UpdateAgentNoOpenAsk> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_update_agent, 5);
+  messageDesc(file_shim_v1_endpoint_update_agent, 6);
 
 /**
  * @generated from message shim.v1.UpdateAgentAnswerMismatch
@@ -210,7 +233,7 @@ export type UpdateAgentAnswerMismatch = Message<"shim.v1.UpdateAgentAnswerMismat
  * Use `create(UpdateAgentAnswerMismatchSchema)` to create a new message.
  */
 export const UpdateAgentAnswerMismatchSchema: GenMessage<UpdateAgentAnswerMismatch> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_update_agent, 6);
+  messageDesc(file_shim_v1_endpoint_update_agent, 7);
 
 /**
  * @generated from message shim.v1.UpdateAgentNothingRunning
@@ -223,7 +246,7 @@ export type UpdateAgentNothingRunning = Message<"shim.v1.UpdateAgentNothingRunni
  * Use `create(UpdateAgentNothingRunningSchema)` to create a new message.
  */
 export const UpdateAgentNothingRunningSchema: GenMessage<UpdateAgentNothingRunning> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_update_agent, 7);
+  messageDesc(file_shim_v1_endpoint_update_agent, 8);
 
 /**
  * @generated from message shim.v1.UpdateAgentNoSession
@@ -236,7 +259,7 @@ export type UpdateAgentNoSession = Message<"shim.v1.UpdateAgentNoSession"> & {
  * Use `create(UpdateAgentNoSessionSchema)` to create a new message.
  */
 export const UpdateAgentNoSessionSchema: GenMessage<UpdateAgentNoSession> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_update_agent, 8);
+  messageDesc(file_shim_v1_endpoint_update_agent, 9);
 
 /**
  * @generated from message shim.v1.UpdateAgentNotDeliverable
@@ -249,5 +272,5 @@ export type UpdateAgentNotDeliverable = Message<"shim.v1.UpdateAgentNotDeliverab
  * Use `create(UpdateAgentNotDeliverableSchema)` to create a new message.
  */
 export const UpdateAgentNotDeliverableSchema: GenMessage<UpdateAgentNotDeliverable> = /*@__PURE__*/
-  messageDesc(file_shim_v1_endpoint_update_agent, 9);
+  messageDesc(file_shim_v1_endpoint_update_agent, 10);
 

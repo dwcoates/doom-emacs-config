@@ -60,9 +60,16 @@ describe("drawFeedMerge: every result arm", () => {
   });
 
   it("says 'abandoned' for a run taken off the queue", () => {
-    const el = draw(mergeHead({ case: "abandoned", endedAtMs: 61_000n }));
+    const el = draw(mergeHead({ case: "abandoned", endedAtMs: 61_000n, summary: "dropped" }));
     expect(el.getAttribute("data-state")).toBe("abandoned");
     expect(el.querySelector(".merge-badge")?.textContent).toBe("abandoned");
+  });
+
+  it("draws the abandonment summary the daemon composed", () => {
+    const el = draw(
+      mergeHead({ case: "abandoned", endedAtMs: 61_000n, summary: "the user dropped it" }),
+    );
+    expect(el.querySelector(".merge-summary")?.textContent).toBe("the user dropped it");
   });
 
   it("holds to the schema: every result arm of FeedMerge is drawn", () => {
