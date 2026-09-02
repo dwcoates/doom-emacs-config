@@ -893,14 +893,18 @@ var (
 		"workflow/",      // workflow journals and spools — KICKED this wave
 	}
 	allowedVendorSpecificKinds = map[string]bool{
-		"mode":                   true,
-		"permission-mode":        true,
-		"queue-operation":        true,
-		"last-prompt":            true,
-		"ai-title":               true,
-		"pr-link":                true,
-		"frame-link":             true,
-		"attribution-snapshot":   true,
+		"mode":                 true,
+		"permission-mode":      true,
+		"queue-operation":      true,
+		"last-prompt":          true,
+		"ai-title":             true,
+		"pr-link":              true,
+		"frame-link":           true,
+		"attribution-snapshot": true,
+		// A harness-injected user record: the system reminder, and the
+		// `<local-command-caveat>` the `identity-rotation-clear` capture shows
+		// immediately before a slash command's envelope.
+		"user/meta":              true,
 		"no_response_requested":  true,
 		vendorSpecificUserPrompt: true, // R15: a file-plane user prompt is never a page line
 	}

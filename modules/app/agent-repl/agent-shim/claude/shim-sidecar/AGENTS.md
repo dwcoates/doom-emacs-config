@@ -785,7 +785,9 @@ join to a call.
 
 CLI bookkeeping and machinery (`mode`, `permission-mode`, `queue-operation`,
 `last-prompt`, `ai-title`, `pr-link`, `frame-link`, `file-history-*`,
-`attribution-snapshot`, `system/local_command`, and the informational /
+`attribution-snapshot`, `system/local_command`, harness-injected user records
+(`user/meta` — the system reminder and the `<local-command-caveat>` a slash
+command's envelope is preceded by), and the informational /
 turn_duration / stop_hook_summary / away_summary / scheduled_task_fire /
 model-refusal / agents_killed system lines); context-cut exclusions and the other
 attachment machinery as `attachment/<type>`; the synthetic
