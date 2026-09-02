@@ -638,6 +638,14 @@ that made it, so a scenario that dies mid-way cannot poison its successor."
     (agent-repl-itest--wait-until
      (lambda () (null (agent-repl-itest--subscribers daemon)))
      5 "the previous scenario's stream subscribers to drain")
+    ;; A SECOND reset, after the drain.  The previous scenario's transport
+    ;; children are killed asynchronously, so one of them can still land a
+    ;; request on the shared daemon between the first reset and its own death
+    ;; -- a call the next scenario would then read as its own.  A per-test
+    ;; process could not leak that because it died with the scenario; the
+    ;; shared one closes the window by clearing again once nothing is left
+    ;; subscribed.
+    (agent-repl-itest--reset daemon)
     (agent-repl-itest--sweep-state-dir daemon)
     (agent-repl-itest--republish-addr daemon)
     daemon))
