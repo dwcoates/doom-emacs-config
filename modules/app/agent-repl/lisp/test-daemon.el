@@ -649,6 +649,85 @@ stubbed too, which is the only external thing about this branch."
     (should (and agent-repl-test-daemon--shutdown-requests
                  agent-repl-test-daemon--build-runs))))
 
+(ert-deftest agent-repl-test-daemon-restart-does-not-ensure-while-the-daemon-is-still-there ()
+  "The ensure half waits: a daemon that still answers would be RE-ADOPTED."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange: the departing daemon has not removed its address yet.
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    ;; Act
+    (agent-repl-frontend-daemon-restart)
+    ;; Assert
+    (should (null agent-repl-test-daemon--build-runs))))
+
+(ert-deftest agent-repl-test-daemon-restart-ensures-once-the-address-goes-away ()
+  "The address's disappearance IS the departure, and it releases the ensure."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    (agent-repl-frontend-daemon-restart)
+    ;; Act: the daemon exits and removes `daemon.addr'.
+    (setq agent-repl-test-daemon--address nil)
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should agent-repl-test-daemon--build-runs)))
+
+(ert-deftest agent-repl-test-daemon-restart-abandoned-when-the-stop-is-refused ()
+  "A refused stop leaves the daemon serving, so no ensure may adopt it."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--shutdown-answer
+          (list :response (list :arm :error :value nil)))
+    ;; Act
+    (agent-repl-frontend-daemon-restart)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :error "elisp.daemon.restart-abandoned"))))
+
+(ert-deftest agent-repl-test-daemon-restart-refused-stop-runs-no-build ()
+  "The other half of an abandoned restart: nothing is built or started."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--shutdown-answer
+          (list :response (list :arm :error :value nil)))
+    ;; Act
+    (agent-repl-frontend-daemon-restart)
+    ;; Assert
+    (should (null agent-repl-test-daemon--build-runs))))
+
+(ert-deftest agent-repl-test-daemon-restart-without-a-link-just-ensures ()
+  "With no link standing there is nothing to stop; the restart is the ensure."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--link-conn nil)
+    ;; Act
+    (agent-repl-frontend-daemon-restart)
+    ;; Assert
+    (should (and (null agent-repl-test-daemon--shutdown-requests)
+                 agent-repl-test-daemon--build-runs))))
+
+(ert-deftest agent-repl-test-daemon-departure-timeout-is-surfaced ()
+  "An address that outlives the wait is a WARNING, never a silent pass."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    (agent-repl-frontend-daemon-restart)
+    ;; Act: the deadline has passed with the address still published.
+    (setq agent-repl-daemon--departure-deadline (- (float-time) 1))
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (agent-repl-test-daemon--logged-p :warn "elisp.daemon.departure-timeout"))))
+
+(ert-deftest agent-repl-test-daemon-departure-timeout-still-ensures ()
+  "A timed-out wait ensures anyway: the link is down and no daemon is worse."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address "127.0.0.1:9999")
+    (agent-repl-frontend-daemon-restart)
+    ;; Act
+    (setq agent-repl-daemon--departure-deadline (- (float-time) 1))
+    (agent-repl-daemon--departure-tick)
+    ;; Assert
+    (should (> agent-repl-test-daemon--link-connect-calls 0))))
+
 ;;;; ---- The sentinel ----
 
 (ert-deftest agent-repl-test-daemon-sentinel-forgets-the-dead-process ()

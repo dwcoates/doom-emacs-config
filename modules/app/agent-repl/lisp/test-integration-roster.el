@@ -1390,7 +1390,15 @@ workspace that no longer exists anywhere."
 fanout §8: \"workspace.el creates it with `:ref', `:dir' = ref.dir,
 `:name'\".  A path is never an identity, and a tab whose dir was derived
 anywhere but from the ref would send every later per-workspace rpc at the
-wrong directory."
+wrong directory.  `:project-dir' is asserted beside `:dir' because it is
+the identity key the rest of the system reads -- the durable log sink,
+history, the composer's attachment root, panels and magit all key on it.
+
+The ref is read off the WORKSPACE, which is the seam §8 gives tab creation
+\(\"workspace.el creates it with `:ref', `:dir' = ref.dir, `:name'\").
+host.el's own registry is not it: this fixture opens a bare conn and never
+makes it the link primary, so `agent-repl-roster--subscribe-host' correctly
+skips, and host.el is handed no ref to hold."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1404,8 +1412,9 @@ wrong directory."
        nil "the row's tab to be opened")
       (let ((ws (agent-repl--ws-by-ref-id "itest-ref")))
         (should (equal (agent-repl--ws-get ws :project-dir) "/tmp/itest-roster-itest-ref"))
-        (should (equal (plist-get (agent-repl-host-ref ws) :id) "itest-ref"))
-        (should (equal (plist-get (agent-repl-host-ref ws) :dir)
+        (should (equal (agent-repl--ws-get ws :dir) "/tmp/itest-roster-itest-ref"))
+        (should (equal (plist-get (agent-repl--ws-get ws :ref) :id) "itest-ref"))
+        (should (equal (plist-get (agent-repl--ws-get ws :ref) :dir)
                        "/tmp/itest-roster-itest-ref"))))))
 
 ;; audit-2 #19

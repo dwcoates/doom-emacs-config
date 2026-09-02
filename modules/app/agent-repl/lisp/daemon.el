@@ -156,6 +156,15 @@ successful build.  There is NO automatic retry — the interactive
 (defvar agent-repl-daemon--boot-continuation nil
   "The continuation the current boot wait will call, or nil.")
 
+(defvar agent-repl-daemon--departure-timer nil
+  "The pending poll waiting for a stopped daemon to remove `daemon.addr'.")
+
+(defvar agent-repl-daemon--departure-deadline nil
+  "`float-time' after which the departure wait gives up.")
+
+(defvar agent-repl-daemon--departure-continuation nil
+  "The function the departure wait calls once the daemon is gone.")
+
 (defvar agent-repl-daemon--ensure-in-flight nil
   "Non-nil while an ensure is between its start and its outcome.
 A second ensure while one is under way would spawn a second daemon,
@@ -391,6 +400,57 @@ dependence on the scheduler and no sleep anywhere."
             (run-with-timer agent-repl-daemon-boot-poll-interval-seconds nil
                             #'agent-repl-daemon--boot-tick))))))
 
+(defun agent-repl-daemon--cancel-departure-wait ()
+  "Cancel any pending departure poll and forget its continuation."
+  (when (timerp agent-repl-daemon--departure-timer)
+    (cancel-timer agent-repl-daemon--departure-timer))
+  (setq agent-repl-daemon--departure-timer nil
+        agent-repl-daemon--departure-deadline nil
+        agent-repl-daemon--departure-continuation nil))
+
+(defun agent-repl-daemon--await-departure (on-gone)
+  "Poll until the stopped daemon removes `daemon.addr', then call ON-GONE.
+ON-GONE receives non-nil when the file went away and nil when the wait
+timed out with it still there.  A TIMER poll, never a sleep, and the
+mirror image of `agent-repl-daemon--await-address': a daemon asked to
+shut down removes its address as the last thing it does, so the file's
+disappearance IS its departure."
+  (agent-repl-daemon--cancel-departure-wait)
+  (setq agent-repl-daemon--departure-deadline
+        (+ (float-time) agent-repl-daemon-boot-timeout-seconds)
+        agent-repl-daemon--departure-continuation on-gone)
+  (agent-repl-daemon--departure-tick))
+
+(defun agent-repl-daemon--departure-tick ()
+  "One poll of the departure wait: the timer's whole body.
+Named and argument-free so a test drives the wait by calling it, with no
+dependence on the scheduler and no sleep anywhere."
+  (setq agent-repl-daemon--departure-timer nil)
+  (let ((address (condition-case err
+                     (agent-repl-connect-read-daemon-addr)
+                   (error
+                    (agent-repl--warn nil "elisp.daemon.departure-addr-unreadable error=%S" err)
+                    nil)))
+        (on-gone agent-repl-daemon--departure-continuation)
+        (deadline (or agent-repl-daemon--departure-deadline 0)))
+    (cond
+     ((null address)
+      (agent-repl--info nil "elisp.daemon.departed")
+      (agent-repl-daemon--cancel-departure-wait)
+      (when on-gone (funcall on-gone t)))
+     ((>= (float-time) deadline)
+      (agent-repl--warn nil "elisp.daemon.departure-timeout seconds=%.1f address=%S file=%S"
+                        agent-repl-daemon-boot-timeout-seconds address
+                        (agent-repl-connect-daemon-addr-file))
+      (agent-repl-daemon--cancel-departure-wait)
+      (when on-gone (funcall on-gone nil)))
+     (t
+      (agent-repl--log nil "elisp.daemon.departure-waiting address=%S remaining=%.3f"
+                       address (- deadline (float-time)))
+      (setq agent-repl-daemon--departure-timer
+            (run-with-timer agent-repl-daemon-boot-poll-interval-seconds nil
+                            #'agent-repl-daemon--departure-tick))))))
+
 ;;;; ---- The start ----
 
 (defun agent-repl-daemon--sentinel (proc event)
@@ -577,12 +637,47 @@ leave it out."
   "Stop the daemon and ensure one again.
 Emacs's own restart, distinct from the daemon's blue-green rollout: the
 daemon is ASKED to exit, the link tears down, and the ensure brings a
-fresh one up from a fresh build."
+fresh one up from a fresh build.
+
+The three steps are SEQUENCED on the stop, not merely written in order.
+The stop is an async rpc, so an ensure fired beside it runs while the
+departing daemon is still answering -- and an ensure that finds a daemon
+ADOPTS it, because Emacs never kills a daemon that answers.  The restart
+would then re-adopt the daemon it had just asked to leave, no fresh build
+would ever run, and the only visible trace would be a daemon exiting some
+moments later with nothing left to reconnect to.  So: the stop's ack,
+then the teardown, then the wait for the address to go away, and only
+then the ensure.
+
+With no link standing there is nothing to stop, and the restart is just
+the ensure."
   (interactive)
   (agent-repl--info nil "elisp.daemon.restart")
-  (agent-repl-frontend-daemon-stop)
-  (agent-repl-link-teardown)
-  (agent-repl-daemon-ensure))
+  (if (null (agent-repl-link-primary))
+      (progn
+        (agent-repl--info nil "elisp.daemon.restart-nothing-to-stop reason=no-link")
+        (agent-repl-daemon-ensure))
+    (agent-repl-frontend-daemon-stop
+     (lambda (accepted)
+       (if (not accepted)
+           ;; The daemon refused or never answered; it is still serving.
+           ;; Ensuring here would adopt it and report a restart that did
+           ;; not happen, so the refusal stands and the link is left alone.
+           (progn
+             (agent-repl--error nil "elisp.daemon.restart-abandoned reason=stop-not-accepted accepted=%S"
+                                accepted)
+             (message "agent-repl: the daemon did not accept the stop; not restarting"))
+         (agent-repl--info nil "elisp.daemon.restart-stop-accepted")
+         (agent-repl-link-teardown)
+         (agent-repl-daemon--await-departure
+          (lambda (gone)
+            (unless gone
+              ;; The address outlived the wait.  Ensure anyway -- the link
+              ;; is already down, and leaving the user with no daemon at
+              ;; all is strictly worse than an ensure that may re-adopt.
+              (agent-repl--warn nil "elisp.daemon.restart-ensures-despite-timeout gone=%S" gone))
+            (agent-repl--info nil "elisp.daemon.restart-ensure gone=%S" gone)
+            (agent-repl-daemon-ensure))))))))
 
 (add-hook 'agent-repl-link-no-daemon-functions #'agent-repl-daemon-ensure)
 (agent-repl-daemon-install-segment)
