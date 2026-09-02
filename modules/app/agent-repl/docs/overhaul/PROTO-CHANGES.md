@@ -198,6 +198,35 @@ RULED, no change:
 - OpenWorkspaceTranscriptMissing.searched_paths stays a bare list this wave;
   the webapp renders the count. A composed sentence is deferred.
 
+## Landing 7 — overhaul/integration (2026-09-02; protos ab7e681f2, bindings c10714a41)
+
+OWN ACCORD (plain-data fields and arms, each with a recorded producer or
+refusal site; raised by the leads' final reports and the daemon handoff):
+- agentrepl SubmitPromptError.bubble_refused (tag 11) = SubmitPromptBubbleRefused
+  {detail; kind: not_deliverable (2) | agent_busy (3)} — the shim's refusal of
+  a bubble-addressed prompt, relayed by kind (the daemon never judges a
+  subagent's turn; why tag 8 retired).
+- shim.v1 StartSessionFresh.model is now `optional` — UNSET = SDK default;
+  SessionStarted.effective_model states what took effect.
+- shim.v1 WatchSessionResponse is now `oneof frame { update = 1;
+  session_started = 2 }` — the original SessionStarted re-announced ONCE per
+  watch, right after the opening diagnostics, on EVERY new watch, so an
+  adopting daemon (crash boot, handover) attaches purely. Tag 1 unchanged.
+- shim.v1 UpdateAgentFailure.agent_busy (tag 8, empty) — prompt to a subagent
+  whose own turn is running; the daemon relays it as bubble_refused{agent_busy}.
+- agentrepl CloseWorkspaceBlocked gains {bool turn_in_flight=1; uint32
+  live_work=2; uint32 held_prompts=3; bool merge_queued=4; string summary=5}
+  — the footer's close-blocked evidence, so a caller with no footer can say why.
+- store.v1 OpenAgentSessionFailure.unknown_agent (tag 5, empty) — a well-formed
+  agent id naming no book is refused, not served empty; shim maps to NotFound.
+  Cross-plane; store lead agreed at park.
+- frontend.v1 FeedMergeAbandoned.summary (string, tag 1) — the resolved
+  sentence for the collapsed line, as FeedMergeFailed carries.
+
+DEFERRED (no producer pressure yet): AgentToolFailure denied marker (only if
+the permission-id join proves awkward); OpenWorkspaceTranscriptMissing
+composed text.
+
 ## Cross-system ruling, no proto (2026-09-02)
 
 - KERNEL LOCKS: the shim takes the WORKSPACE lock inside StartSession (beside

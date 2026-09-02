@@ -1305,3 +1305,23 @@ its own file only when >1 endpoint needs it.
 - SubmitPromptError.turn_already_open is RETIRED (tag 8 reserved); delete promptqueue.ErrTurnAlreadyOpen and the server mapping.
 - /status uses the EXISTING SubmitPromptCommandPanel.status arm (tag 1); resolve the thin panel into StatusPanelView rows. AnswerQuestionError's ask_not_standing/unserved_value split already exists; drop the Refusal.NotFound workaround in favor of the two arms.
 - Watch* refusals stay transport-closed by ruling; record them as such, not as unlanded arms.
+
+## Landing 7 relay (2026-09-02, project lead)
+
+Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
+- SubmitPromptError.bubble_refused{detail, kind} REPLACES server.UnlandedArm
+  for both bubble refusals; server.bubbleRefused maps
+  UpdateAgentFailure.not_deliverable → kind.not_deliverable and
+  UpdateAgentFailure.agent_busy → kind.agent_busy. Delete the ERROR-ARMS
+  unlanded rows; the by-design red bubble test goes green.
+- StartSessionFresh.model optional: drop the DefaultModel fallback in
+  workspace/sessions.go; leave model UNSET when the user chose none and read
+  SessionStarted.effective_model.
+- WatchSessionResponse is a oneof: handle frame.session_started on every
+  watch open (adoption = pure attach; the facts come from the shim, not the
+  durable record); ignore a repeat on a watch that already has them. The
+  handover rendezvous test's last assertion goes green.
+- CloseWorkspaceBlocked: fill the five fields from the quiet check; the
+  footer's activity line and `summary` are the same composed sentence.
+- FeedMergeAbandoned.summary: compose from the abandon cause (user drop,
+  workspace closed, daemon shutdown).
