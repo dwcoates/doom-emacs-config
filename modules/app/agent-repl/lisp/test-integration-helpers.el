@@ -97,8 +97,15 @@ it wrote to that dir's `daemon.addr', and STDERR-BUFFER its structured
 JSON log."
   process state-dir address stderr-buffer)
 
-(defconst agent-repl-itest-default-timeout 15
-  "Seconds `agent-repl-itest--wait-until' waits before failing.")
+(defconst agent-repl-itest-default-timeout 14
+  "Seconds `agent-repl-itest--wait-until' waits before failing.
+Sized at ~3x the slowest healthy wait observed across a full run of every
+`test-integration-*.el' suite (the link suite's own handover/reconnect
+scenarios top out around 4.7s) -- see the bounds table in
+`modules/app/agent-repl/AGENTS.md's test section.  Do not raise this back
+toward its old, unmeasured 15s without re-measuring: a bound this close to
+the slowest suite's own \"needs longer\" cases (composer's ~2.4s outage
+drain, host's ~2.7s not-yet-adopted retry) is deliberate, not slack.")
 
 (defun agent-repl-itest--wait-until (pred &optional timeout description)
   "Block until PRED returns non-nil, or fail after TIMEOUT seconds.
@@ -197,6 +204,12 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
       ;; Ask for the orderly exit first, so daemon.addr removal is exercised
       ;; on the same path production takes.
       (ignore-errors (agent-repl-itest--exit daemon))
+      ;; Kept at 5s rather than tightened to ~3x the observed teardown time
+      ;; (well under 1s in every measured run): this runs after EVERY
+      ;; scenario in every suite, tearing down a REAL OS process via its own
+      ;; graceful-shutdown path, and a slow CI host reclaiming that process
+      ;; is exactly the "genuinely needs longer" case -- a spurious failure
+      ;; here just falls through to `delete-process' below anyway.
       (agent-repl-itest--wait-until
        (lambda () (not (process-live-p process)))
        5 "the fake daemon to exit")
