@@ -359,3 +359,46 @@ func loggedOperation(log *dlog.TestLogger, operation, level string) bool {
 	}
 	return false
 }
+
+// TestAnAbsentRecordIsReadAtDebug pins that a lookup finding nothing is an
+// ANSWER, not a failure. ErrNotFound is what every per-workspace rpc's
+// unknown-workspace refusal is built from, so an error line here would sit on
+// an ordinary refusal path and drown the reads that really did break.
+func TestAnAbsentRecordIsReadAtDebug(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+
+	// Act
+	_, err := s.Workspace(context.Background(), "no-such-workspace")
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Workspace(unknown) = %v, want ErrNotFound", err)
+	}
+	if loggedOperation(log, "daemon.wsm.workspace", "error") {
+		t.Fatalf("an absent record was recorded at error: %v", log.Records())
+	}
+	if !loggedOperation(log, "daemon.wsm.workspace", "debug") {
+		t.Fatalf("an absent record was not recorded at debug: %v", log.Records())
+	}
+}
+
+// TestAReadThatBreaksIsStillAnError pins that the ErrNotFound branch narrows
+// nothing else: a read that genuinely failed keeps its error record.
+func TestAReadThatBreaksIsStillAnError(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Act
+	if _, err := s.Workspace(context.Background(), "anything"); err == nil {
+		t.Fatal("a read on a closed handle = success, want an error")
+	}
+
+	// Assert
+	if !loggedOperation(log, "daemon.wsm.workspace", "error") {
+		t.Fatalf("a broken read was not recorded at error: %v", log.Records())
+	}
+}
