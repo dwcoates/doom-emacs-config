@@ -723,8 +723,14 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 // ---------------------------------------------------------------------------
 
 func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow(t *testing.T) {
-	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// Arrange: a DEPLOYED daemon, stated through AGENT_REPL_DEPLOY_STAMP. The
+	// harness builds the binary with `go build -o <tmp>`, so no deploy chain
+	// ever wrote daemon/bin/.built-sha and the daemon knows no version to put
+	// in the Version row.
+	// The stamp MATCHES the fake shim's own reported build, or the staleness
+	// check would bounce the shim out from under the test.
+	f := newOpened(t, harness.Opts{ExtraEnv: []string{
+		"AGENT_REPL_DEPLOY_STAMP=" + harness.FakeShimDefaultBuildSHA}})
 	feed := f.watchRootFeed()
 
 	// Act
@@ -758,7 +764,11 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	if got := status.GetRows()[0].GetValue(); got == "" {
 		t.Fatalf("status panel Version row value is empty, want the daemon's build stamp")
 	}
-	wantValues := map[string]string{"Account": "a@x", "Model": "opus", "Permission mode": "default"}
+	// The account is the harness's own default config root
+	// (harness.StartDaemon's DefaultConfigDir), not SPEC.md's illustrative
+	// "a@x" — that example names a shape, never this harness's value.
+	wantValues := map[string]string{
+		"Account": "default@example.invalid", "Model": "opus", "Permission mode": "default"}
 	for _, row := range status.GetRows()[1:] {
 		if want := wantValues[row.GetLabel()]; row.GetValue() != want {
 			t.Fatalf("status panel row %q value = %q, want %q", row.GetLabel(), row.GetValue(), want)
