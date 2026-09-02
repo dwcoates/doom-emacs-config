@@ -195,7 +195,29 @@ export async function serve(
   }
   if (verdict === "stale") unlinkSocketFile(socketPath, "stale predecessor");
 
-  const served = withEarlyStreamHeaders(connectNodeAdapter({ routes }));
+  // RESPONSE COMPRESSION IS OFF, AND IT HAS TO BE.
+  //
+  // The early-head ruling has this server write its own response head the
+  // moment it accepts a stream, which means the head goes out BEFORE the
+  // adapter has decided anything about the body — including whether to compress
+  // it. The adapter's own later `writeHead`, the one that would have carried
+  // `connect-content-encoding`, is necessarily absorbed. A compressed envelope
+  // would then reach a client that was never told how to read it, and the
+  // client says so: "received compressed envelope, but do not know how to
+  // decompress".
+  //
+  // It bit only once a payload crossed the default 1 KiB threshold, so early
+  // streams worked and later ones — reading a book that had grown — did not,
+  // which is the worst shape this failure could have taken.
+  //
+  // The two properties cannot both hold, and the early head is the one with a
+  // ruling behind it: acceptance must be observable before the first frame. So
+  // the server never compresses a response. `acceptCompression` is deliberately
+  // left alone — the server still UNDERSTANDS a compressed REQUEST, which no
+  // head of ours is involved in.
+  const served = withEarlyStreamHeaders(
+    connectNodeAdapter({ routes, compressMinBytes: Number.MAX_SAFE_INTEGER }),
+  );
   // In-flight UNARY responses, counted so the exit path can wait for the wire
   // to go quiet. `close` and not `finish`: an aborted response never finishes,
   // and a counter that only came down on success would wedge the exit.
@@ -334,7 +356,10 @@ export interface StreamableRequest {
 }
 export interface StreamableResponse {
   readonly headersSent: boolean;
-  writeHead(status: number, headers: Record<string, string>): unknown;
+  // BOTH HEADER SHAPES. `writeHead` accepts an object or a flat array, the
+  // adapter may use either, and a signature that admitted only one would let
+  // the encoding guard below be typed past rather than satisfied.
+  writeHead(status: number, headers: Record<string, string> | string[]): unknown;
   flushHeaders?: () => void;
 }
 type NodeHandler = (request: never, response: never) => void;
@@ -374,9 +399,51 @@ export function flushStreamHead(request: StreamableRequest, response: Streamable
   // The adapter WILL call writeHead again. Once the head is out that is an
   // ERR_HTTP_HEADERS_SENT throw, so the call is absorbed rather than allowed to
   // fail a healthy stream.
-  response.writeHead = (): unknown => response;
+  //
+  // ABSORBED, NOT IGNORED. Anything the adapter meant to say about the body's
+  // ENCODING is a statement the client needs and our head did not make, so a
+  // non-identity encoding here means the stream we are about to send is
+  // undecodable. The server is configured never to compress, so this can only
+  // fire if that configuration is lost — and a loud record is the difference
+  // between finding it here and finding it as an unreadable stream in the
+  // daemon.
+  response.writeHead = ((...args: unknown[]): unknown => {
+    const encoding = encodingAnnouncedBy(args);
+    if (encoding !== undefined && encoding !== "identity") {
+      LOGGER.log(
+        { level: "error", content_type: contentType, content_encoding: encoding },
+        "the adapter tried to announce a response encoding AFTER the stream head was flushed; the client cannot be told, so this stream would be undecodable",
+      );
+    }
+    return response;
+  }) as typeof response.writeHead;
   LOGGER.logVerbose({ content_type: contentType }, "flushed the response head on accepting a stream");
   return true;
+}
+
+/**
+ * The body encoding a `writeHead` call announces, if it announces one.
+ *
+ * `writeHead` takes its headers as the last argument, either as an object or as
+ * a flat array; both shapes are read, because a shape this missed would be a
+ * silent gap in the guard above.
+ */
+function encodingAnnouncedBy(args: readonly unknown[]): string | undefined {
+  const names = ["connect-content-encoding", "grpc-encoding", "content-encoding"];
+  for (const arg of args) {
+    if (arg === null || typeof arg !== "object") continue;
+    if (Array.isArray(arg)) {
+      for (let index = 0; index + 1 < arg.length; index += 2) {
+        const key = String(arg[index]).toLowerCase();
+        if (names.includes(key)) return String(arg[index + 1]);
+      }
+      continue;
+    }
+    for (const [key, value] of Object.entries(arg as Record<string, unknown>)) {
+      if (names.includes(key.toLowerCase())) return String(value);
+    }
+  }
+  return undefined;
 }
 
 /**
