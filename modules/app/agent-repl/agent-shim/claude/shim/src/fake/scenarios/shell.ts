@@ -58,6 +58,32 @@ export const BASH = scenario({
   },
 });
 
+export const BASH_HOLD = scenario({
+  name: "bash-hold",
+  prompt: "!bash-hold",
+  emits:
+    "a FOREGROUND `Bash` that never returns: the tool_use lands and the turn parks until an interrupt, so the " +
+    "unit stays live and foreground for as long as a caller needs it to",
+  writes: "the tool_use line, the prompt line and (at the interrupt) the turn record",
+  arms:
+    "no terminal at all while it holds — the lever for DetachForeground's `unsupported` refusal, which needs a " +
+    "GENUINELY LIVE foreground unit to refuse (`!bash` settles before the call can be made, so it answered " +
+    "`already_concluded` instead and the refusal under test was never reached)",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "bash-hold" }, "fake held foreground bash turn");
+    // NO startTask AND NO run_in_background: the vendor has no background work
+    // for this call, which is the whole point — the unit is detachable IN KIND
+    // and the pinned SDK offers no verb to initiate the detachment.
+    ctx.toolUse("Bash", { command: "tail -f /var/log/system.log" });
+    // Parked in the same synchronous run as the call above, so there is no
+    // window in which the unit is live and a stop has nothing to resolve.
+    await ctx.awaitInterrupt();
+    ctx.log({ turn: ctx.turn }, "fake held foreground bash turn released by an interrupt");
+    // No result and no explicit terminal: the engine emits the interrupt
+    // terminal, which is the ONE place that shape is spelled.
+  },
+});
+
 export const BASH_FAIL = scenario({
   name: "bash-fail",
   prompt: "!bash-fail",
@@ -302,6 +328,7 @@ export const CTRL_B = scenario({
 
 export const SHELL_SCENARIOS = [
   BASH,
+  BASH_HOLD,
   BASH_FAIL,
   BASH_TIMEOUT,
   BASH_SPILL,

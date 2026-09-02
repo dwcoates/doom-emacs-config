@@ -16,17 +16,18 @@
  * it — which is the real production path, not a shortcut around it.
  */
 import type { AccountUsageArm } from "../scenario.js";
-import { conclude, scenario } from "./support.js";
+import { conclude, scenario, withheldThinking } from "./support.js";
 
 export const ROTATE = scenario({
   name: "rotate",
   prompt: "!rotate",
   emits:
-    "a `/clear`: the retired identity's transcript gets a closing record, `conversation_reset` announces the new " +
-    "id, a fresh `system:init` follows, and the REST of the turn — its result included — belongs to the new identity",
+    "a `/clear` in the OBSERVED shape: ONE `conversation_reset` carrying the OLD `session_id` and a " +
+    "`new_conversation_id` nothing later uses, then a SECOND `system:init` whose `session_id` is the REAL new id " +
+    "(a third uuid), and the REST of the turn — its result included — belongs to that identity",
   writes:
-    "a closing system record on the OLD `<old-session>.jsonl` (left otherwise intact), then a NEW " +
-    "`<new-session>.jsonl` carrying everything after the reset",
+    "a NEW `<new-session>.jsonl` carrying everything after the reset; the OLD file simply STOPS, with no closing " +
+    "record of any kind",
   arms: "SessionIdentityRotated + AgentUpdate.context_cut(ContextCleared)",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "rotate" }, "fake identity-rotation turn");
@@ -43,7 +44,7 @@ export const SLASH_LOCAL = scenario({
     "a slash command the VENDOR answers itself: a `local_command_output` message, and the transcript's " +
     "`system:local_command` record wrapping the output in `<local-command-stdout>`",
   writes: "a `system:local_command` line and a `command_permissions` attachment line",
-  arms: "the vendor-answered slash-command family — no agent activity at all",
+  arms: "the vendor-answered slash-command family — no agent activity beyond the answer, and NO reasoning",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "slash" }, "fake vendor-answered slash-command turn");
     const output = "Session: offline\nModel: fake-opus-4-8\nPermission mode: default";
@@ -58,7 +59,13 @@ export const SLASH_LOCAL = scenario({
       timestamp: ctx.nowIso(),
     });
     ctx.attachment({ type: "command_permissions", allowedTools: [] });
-    conclude(ctx, "Answered the slash command locally.");
+    // NO REASONING PRELUDE, unlike every other turn: the vendor ANSWERED this
+    // one itself, and the `vendor-answered-slash-commands` capture folds into a
+    // response and nothing else. Going through `conclude` would put a thinking
+    // unit in front of an answer the model never composed.
+    const conclusion = "Answered the slash command locally.";
+    ctx.assistant([{ type: "text", text: conclusion }], { stopReason: "end_turn" });
+    ctx.result({ subtype: "success", result: conclusion });
   },
 });
 
@@ -153,7 +160,12 @@ function fastModeScenario(name: string, state: "on" | "off" | "cooldown", reason
       ctx.log({ turn: ctx.turn, branch: name, fast_mode_state: state }, "fake fast-mode turn");
       ctx.setFastMode(state, reason);
       const conclusion = `Fast mode is ${state}.`;
-      ctx.assistant([{ type: "text", text: conclusion }], { stopReason: "end_turn" });
+      // `[thinking, text]`, like every capture's closing API response — this one
+      // spells it out rather than going through `conclude` because the result
+      // carries the fast-mode fields.
+      ctx.assistant([withheldThinking(), { type: "text", text: conclusion }], {
+        stopReason: "end_turn",
+      });
       ctx.result({
         subtype: "success",
         result: conclusion,
@@ -364,6 +376,29 @@ export const CONTEXT_TIP = scenario({
   },
 });
 
+export const TOKENS_REMINDER = scenario({
+  name: "tokens-reminder",
+  prompt: "!tokens-reminder",
+  emits:
+    "prose only, plus the vendor's `total_tokens_reminder` ATTACHMENT — the ONE token-budget carrier any real " +
+    "capture holds (`artifact-publish-and-list`, once): a bare `text` field spelling " +
+    "`<total_tokens>N tokens left</total_tokens>` and nothing else. IT IS NOT the context-budget warning either " +
+    "— no capture carries a `context_budget_warning` record of any spelling, so that producer stays ungrounded " +
+    "rather than guessed",
+  writes: "a `total_tokens_reminder` attachment line",
+  arms: "residue `attachment/total_tokens_reminder` — recorded as itself, unconverted, and reaching no arm",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "tokens-reminder" }, "fake total-tokens-reminder turn");
+    ctx.attachment({
+      type: "total_tokens_reminder",
+      // VERBATIM SHAPE from the capture: one `text` field, the count inside a
+      // `<total_tokens>` element. No structured figure is offered anywhere.
+      text: "<total_tokens>15000000 tokens left</total_tokens>",
+    });
+    conclude(ctx, "The CLI restated the token budget.");
+  },
+});
+
 export const COMPACT = scenario({
   name: "compact",
   prompt: "!compact",
@@ -534,15 +569,23 @@ export const COLD_SEED = scenario({
   emits:
     "an ordinary turn whose TRANSCRIPT RECORDS are stamped TWO HOURS IN THE PAST, so the next resume of this " +
     "session trips the shim's own cold-context detection",
-  writes: "assistant and system lines carrying a two-hour-old `timestamp`",
+  writes: "the ASSISTANT line (with its usage) and the turn_duration line, both carrying a two-hour-old `timestamp`",
   arms: "SessionColdLapsed on the NEXT resume — this scenario only seeds the condition",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "cold-seed" }, "fake cold-context seeding turn");
     const twoHoursAgo = new Date(ctx.nowMs() - 2 * 60 * 60 * 1_000).toISOString();
-    ctx.assistant([{ type: "text", text: "An answer from two hours ago." }], { stopReason: "end_turn" });
-    // The stamp the cold gate reads. Written directly rather than through
-    // `assistant`, because the scenario is deliberately lying about WHEN, and
-    // only about when — every other field is the ordinary one.
+    // THE LINE THE COLD GATE ACTUALLY READS is the last ASSISTANT line: its
+    // `message.usage` is the context size and its `timestamp` is the request
+    // instant, read from the same record. Back-dating only the turn_duration
+    // line left a freshly-stamped assistant line as the newest one, so the gate
+    // saw a session seconds old and never lapsed.
+    ctx.assistant([{ type: "text", text: "An answer from two hours ago." }], {
+      stopReason: "end_turn",
+      timestamp: twoHoursAgo,
+    });
+    // Back-dated too, so nothing in the file contradicts it. Written directly
+    // rather than through a helper because the scenario is deliberately lying
+    // about WHEN, and only about when — every other field is the ordinary one.
     ctx.files.transcript.append({
       type: "system",
       subtype: "turn_duration",
@@ -577,6 +620,7 @@ export const SESSION_SCENARIOS = [
   RATE_LIMIT_FIVE_HOUR,
   RATE_LIMIT_SEVEN_DAY,
   CONTEXT_TIP,
+  TOKENS_REMINDER,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,

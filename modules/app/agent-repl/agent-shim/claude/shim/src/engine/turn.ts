@@ -243,6 +243,17 @@ export class TurnEngine {
       );
       this.session.persistence.write([promptRow]);
     }
+    // ONE CALL SUBMITS AND PAINTS — and the page is read BEFORE the prompt is
+    // delivered, not after. R15 (RULED) says a fresh session's opening page
+    // holds EXACTLY the prompt row, and the prompt row is already durable here,
+    // so reading now is what makes that deterministic. Reading after the submit
+    // instead made the page's contents a RACE against however fast the vendor
+    // answered: a turn whose first API response opened a reasoning block before
+    // the read returned painted two entries, and one whose vendor was a
+    // millisecond slower painted one. A consumer's first paint still carries
+    // the turn it just opened, and everything the turn goes on to produce
+    // reaches it on its own WatchAgent.
+    const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
     this.session.setOpenTurn({ id: turn, keepalive: false, startedAtMs: this.session.nowMs() });
     try {
       await this.session.submit(said, false);
@@ -252,10 +263,6 @@ export class TurnEngine {
       LOGGER.log({ level: "error", turn_id: turn.value, cause: detail }, "the vendor refused the prompt");
       return startTurnRefused({ kind: "vendorRefused" }, detail);
     }
-    // ONE CALL SUBMITS AND PAINTS. The page is read AFTER the prompt is
-    // delivered, so it already contains the prompt row and a consumer's first
-    // paint is never missing the turn it just opened.
-    const page = await this.openingPage(identity.agentId, request.pageSize, request.knownThrough);
     LOGGER.log(
       { turn_id: turn.value, origin: request.origin, page_entries: page.entries.length },
       "opened a turn, delivered its prompt, and painted the opening page",

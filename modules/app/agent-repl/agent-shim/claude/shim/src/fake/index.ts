@@ -78,7 +78,7 @@ import type {
   ToolCall,
   ToolResultOptions,
 } from "./scenario.js";
-import { FAKE_CLI_VERSION, VendorFiles } from "./vendor-files.js";
+import { FAKE_CLI_VERSION, FAKE_REASONING_SIGNATURE, VendorFiles } from "./vendor-files.js";
 
 /**
  * IS THIS TASK A SHELL RUN? The vendor's own distinction, read off the id.
@@ -397,6 +397,20 @@ export function createFakeQuery(
         break;
       }
     }
+  };
+
+  /**
+   * Close one block.
+   *
+   * SEPARATE FROM {@link emitBlockStream} because of the ORDER the real binary
+   * uses: with `includePartialMessages` the vendor emits the block's `assistant`
+   * line BEFORE that block's `content_block_stop` (observed in every streamed
+   * capture; `prose-streamed` is the smallest). The line RESTATES the block the
+   * stream is still streaming, and the fold reads it that way — so the mock
+   * cannot close the block first without making every streamed response's
+   * terminal land on a different unit than its start.
+   */
+  const emitBlockStop = (index: number): void => {
     emitStream({ type: "content_block_stop", index });
   };
 
@@ -409,7 +423,9 @@ export function createFakeQuery(
    * corpus shows one message's thinking block and tool_use block on two chained
    * transcript lines — and it is why `<message.id>:<block_index>` addresses a
    * BLOCK rather than a line. Every split carries the SAME usage, so the fold's
-   * "usage rides block 0" rule has a value to pick on the first one.
+   * "usage rides block 0" rule has a value to pick on the first one — and each
+   * line is emitted BEFORE its block's `content_block_stop`, which is the order
+   * the real binary uses and the order the fold's block identity depends on.
    */
   const assistant = (
     blocks: readonly FakeBlock[],
@@ -439,7 +455,9 @@ export function createFakeQuery(
       emitBlockStream(block, index);
       const uuid = opts.newUuid();
       uuids.push(uuid);
-      const timestamp = nowIso();
+      // A SCENARIO MAY LIE ABOUT WHEN, and about nothing else: see
+      // AssistantOptions.timestamp.
+      const timestamp = options.timestamp ?? nowIso();
       const message = {
         model: reportedModel,
         id: messageId,
@@ -467,17 +485,20 @@ export function createFakeQuery(
               task_description: options.agent.taskDescription,
             }),
       });
-      if (options.skipTranscript === true) return;
-      const record = {
-        message,
-        requestId,
-        type: "assistant",
-        uuid,
-        timestamp,
-        ...(options.effort === undefined ? {} : { effort: options.effort }),
-      };
-      if (options.agent === undefined) files.transcript.append(record);
-      else files.subagent(options.agent.agentId).append(record);
+      if (options.skipTranscript !== true) {
+        const record = {
+          message,
+          requestId,
+          type: "assistant",
+          uuid,
+          timestamp,
+          ...(options.effort === undefined ? {} : { effort: options.effort }),
+        };
+        if (options.agent === undefined) files.transcript.append(record);
+        else files.subagent(options.agent.agentId).append(record);
+      }
+      // AFTER the line, never before: see emitBlockStop.
+      emitBlockStop(index);
     });
     emitStream({
       type: "message_delta",
@@ -493,20 +514,44 @@ export function createFakeQuery(
     return { messageId, uuids };
   };
 
+  /**
+   * The reasoning block that precedes a tool call and a turn's conclusion.
+   *
+   * WITHHELD, which on the wire is a `thinking` block with an empty `thinking`
+   * string and a PRESENT signature (corpus: `content-blocks/thinking.jsonl`).
+   * The signature is what tells a consumer the reasoning existed and was not
+   * surfaced; a block without one would be a different fact.
+   */
+  const withheldReasoning = (): FakeBlock => ({
+    type: "thinking",
+    thinking: "",
+    signature: FAKE_REASONING_SIGNATURE,
+  });
+
   const toolUse = (
     name: string,
     input: Record<string, unknown>,
     options: AssistantOptions = {},
   ): ToolCall => {
     const toolUseId = mintToolUseId();
-    const emission = assistant([{ type: "tool_use", id: toolUseId, name, input }], options);
+    // THE OBSERVED SHAPE OF A TOOL TURN'S FIRST API RESPONSE: `[thinking,
+    // tool_use]` on ONE message id, each block its own assistant line. Every
+    // capture has it (`bash-foreground-completed` is the smallest), and a mock
+    // that announced a bare tool_use produced a turn with no reasoning unit at
+    // all — a shape the vendor never emits.
+    const blocks: FakeBlock[] =
+      options.noReasoning === true
+        ? [{ type: "tool_use", id: toolUseId, name, input }]
+        : [withheldReasoning(), { type: "tool_use", id: toolUseId, name, input }];
+    const emission = assistant(blocks, options);
     return {
       toolUseId,
       name,
       input,
-      // The tool_use block is the message's ONLY block here, so its record uuid
-      // is the one the answering user record names in `sourceToolAssistantUUID`.
-      assistantUuid: emission.uuids[0] ?? "",
+      // The tool_use block's OWN record uuid — the one the answering user record
+      // names in `sourceToolAssistantUUID`. It is the LAST line of the emission
+      // because the reasoning block precedes it.
+      assistantUuid: emission.uuids.at(-1) ?? "",
       messageId: emission.messageId,
     };
   };
@@ -677,23 +722,38 @@ export function createFakeQuery(
    * a `compact_boundary`-shaped system record on the retired file) rather than
    * an observed one — flagged in `docs/overhaul/shim.md`'s mock section.
    */
+  /**
+   * A `/clear`, in THE SHAPE THE REAL BINARY USES.
+   *
+   * Observed in the `identity-rotation-clear` capture (2026-09-01), and it is
+   * not what the mock used to do. THREE uuids are involved:
+   *
+   *   1. the OLD session id, which `conversation_reset.session_id` carries;
+   *   2. `new_conversation_id` — a uuid NOTHING LATER EVER USES, on that one
+   *      message and nowhere else. It is never adopted as an identity;
+   *   3. the REAL new id, which is the `session_id` of the SECOND `system:init`
+   *      that follows, and which every later turn's init repeats.
+   *
+   * On disk a new transcript file appears under the init id and THE OLD FILE
+   * SIMPLY STOPS. There is no closing record of any kind — the mock's invented
+   * `compact_boundary` "Conversation cleared" line was declared-not-observed
+   * and is gone; it also said the wrong thing, since compaction is IN PLACE and
+   * never rotates an id.
+   */
   const rotate = (): string => {
+    // Announced under the OLD identity: `emitWithUuid` stamps `session_id` from
+    // `sessionUuid`, so the reset must be pushed BEFORE the swap.
+    const announcedButUnused = opts.newUuid();
+    emit({ type: "conversation_reset", new_conversation_id: announcedButUnused });
     const next = opts.newUuid();
-    files.transcript.append({
-      type: "system",
-      subtype: "compact_boundary",
-      content: "Conversation cleared",
-      isMeta: false,
-      level: "info",
-      compactMetadata: { trigger: "manual", preTokens: 0, postTokens: 0 },
-      uuid: opts.newUuid(),
-      timestamp: nowIso(),
-    });
     sessionUuid = next;
     files.rotate(next);
-    emit({ type: "conversation_reset", new_conversation_id: next });
+    // THE SECOND INIT is where the real new id is stated.
     emitInit();
-    LOGGER.log({ claude_session_id: next }, "fake vendor session identity ROTATED");
+    LOGGER.log(
+      { claude_session_id: next, announced_conversation_id: announcedButUnused },
+      "fake vendor session identity ROTATED; new_conversation_id is announced and never used again",
+    );
     return next;
   };
 
