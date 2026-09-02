@@ -32,8 +32,25 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 		held.Hold = &kind
 		held.ScheduleID = lease.scheduleID
 	}
+	// AN UNINTERRUPTIBLE RUNNING TURN IS DECIDED HERE, before the entry is
+	// ever recorded: a context cut cannot be interrupted, so no classifier
+	// runs and none will. Stamping `classifying` first would push a verdict
+	// the daemon already knows is wrong and then replace it, and a tray that
+	// shows a decision being made when none is being made is a lie the client
+	// has to un-draw.
+	uninterruptible := conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED
 	if running != "" {
-		held.Classification = &wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}
+		uninterruptible = q.state(sub.WS).uninterruptible
+		if uninterruptible != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+			held.Classification = &wsm.Classification{
+				Arm:     wsm.ArmUninterruptibleTurn,
+				Reason:  "the running turn is a context cut and cannot be interrupted",
+				Command: uninterruptible,
+				At:      q.deps.Now(),
+			}
+		} else {
+			held.Classification = &wsm.Classification{Arm: wsm.ArmClassifying, At: q.deps.Now()}
+		}
 	}
 
 	if err := q.deps.DB.PutHeldPrompt(ctx, held); err != nil {
@@ -49,6 +66,12 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 
 	disposition := Disposition{Held: held.Hold, Classification: held.Classification}
 	if running == "" {
+		return disposition, nil
+	}
+	if uninterruptible != conversationv1.SessionCommand_SESSION_COMMAND_UNSPECIFIED {
+		log.Debug(opClassify, "the running turn is a context cut; no classifier runs", dlog.Context{
+			"command": uninterruptible.String(),
+		})
 		return disposition, nil
 	}
 
