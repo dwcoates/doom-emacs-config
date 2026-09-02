@@ -2,11 +2,13 @@ package drain
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -392,5 +394,35 @@ func TestTheHibernationReleaseTellsTheQueue(t *testing.T) {
 	}
 	if len(told) != 1 || told[0] != ws {
 		t.Fatalf("LeaseChanged calls = %v, want exactly the hibernated workspace %q", told, ws)
+	}
+}
+
+// TestTheSweepWritesItsPerWorkspaceRecordsToThatWorkspacesSink covers the
+// logging invariant: a record about one workspace's session belongs in that
+// workspace's own durable sink, never in the global run log.
+func TestTheSweepWritesItsPerWorkspaceRecordsToThatWorkspacesSink(t *testing.T) {
+	// Arrange: one idle, free session whose hibernate directive fails, so the
+	// sweep is guaranteed to record something about it.
+	h := newHarness(t)
+	ws := h.workspace(t, instant.Add(-2*time.Hour))
+	h.freeness.SetFree(ws, true)
+	h.stand.hibernateErr[ws] = errors.New("transport blew up")
+
+	// Act.
+	if _, err := h.c.Sweep(context.Background(), instant); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	// Assert: the deferral record was written through a workspace-resolved
+	// logger, which is what carries the workspace_dir key.
+	found := false
+	for _, r := range h.log.Records() {
+		if r.Operation != opSweep || r.Context[dlog.KeyWorkspaceDir] == nil {
+			continue
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("no %s record carried a workspace_dir; the sweep wrote its per-workspace records globally", opSweep)
 	}
 }

@@ -1503,7 +1503,10 @@ func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
 	// (successful) hibernate and forced a KillSession for real.
 	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
 	f.shim.ExpectStartSession()
-	f.d.ExpectWarnings("daemon.drain.sweep")
+	// The shim client records each refused call at ERROR of its own — that
+	// record IS the transport failure this test scripts — and the sweep then
+	// records the deferral.
+	f.d.ExpectWarnings("daemon.drain.sweep", "daemon.shimclient.hibernate")
 	for i := 0; i < 20; i++ {
 		f.shim.AnswerFailure(harness.RPCHibernate, "transport blew up")
 	}
