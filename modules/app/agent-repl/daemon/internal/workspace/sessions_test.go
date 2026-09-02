@@ -771,29 +771,28 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestModelOrDefaultAnswersTheRecordedModel(t *testing.T) {
-	// Arrange.
-	f := &Fleet{deps: FleetDeps{DefaultModel: "opus"}}
-
-	// Act.
-	got := f.modelOrDefault("sonnet")
+// TestFreshModelNamesTheRecordedModel pins that the user's choice is what a
+// fresh session names.
+func TestFreshModelNamesTheRecordedModel(t *testing.T) {
+	// Arrange / Act.
+	got := freshModel("sonnet")
 
 	// Assert.
-	if got != "sonnet" {
-		t.Fatalf("modelOrDefault(\"sonnet\") = %q, want the recorded model", got)
+	if got.GetName() != "sonnet" {
+		t.Fatalf("freshModel(\"sonnet\") = %v, want the recorded model", got)
 	}
 }
 
-func TestModelOrDefaultFallsBackWhenTheCreateNamedNoModel(t *testing.T) {
-	// Arrange.
-	f := &Fleet{deps: FleetDeps{DefaultModel: "opus"}}
-
-	// Act.
-	got := f.modelOrDefault("")
+// TestFreshModelLeavesTheModelUnsetWhenTheCreateNamedNone is the landing-7
+// contract: StartSessionFresh.model is optional and UNSET means the SDK's own
+// default, so the daemon substitutes nothing of its own.
+func TestFreshModelLeavesTheModelUnsetWhenTheCreateNamedNone(t *testing.T) {
+	// Arrange / Act.
+	got := freshModel("")
 
 	// Assert.
-	if got != "opus" {
-		t.Fatalf("modelOrDefault(\"\") = %q, want the daemon's default", got)
+	if got != nil {
+		t.Fatalf("freshModel(\"\") = %v, want an unset model", got)
 	}
 }
 
