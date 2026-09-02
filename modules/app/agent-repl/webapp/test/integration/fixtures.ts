@@ -1531,6 +1531,12 @@ type TopbarInit = {
   connectivityTitle?: string;
   models?: { name: string; displayName: string; description: string }[];
   selected?: string;
+  /**
+   * UNSET `TopbarModelSelector.selected`. The field is `optional` and absence
+   * is the legitimate "no model is selected" state, which the chip draws as
+   * its placeholder rather than guessing an option.
+   */
+  unselected?: boolean;
   contextText?: string;
   breakdown?: boolean;
   /** Omit the per-row share, which is `optional` and drawn only when set. */
@@ -1548,7 +1554,14 @@ export function topbarView(init?: TopbarInit): TopbarView {
     title: { text: init?.title ?? "port the webapp" },
     sessionLine: { text: init?.sessionLine ?? "session 3 of the overhaul" },
     modelSelector: {
-      selected: modelOption(init?.selected ?? models[0].name, models[0].displayName, models[0].description),
+      selected:
+        init?.unselected === true
+          ? undefined
+          : modelOption(
+              init?.selected ?? models[0].name,
+              models[0].displayName,
+              models[0].description,
+            ),
       options: models.map((m) => modelOption(m.name, m.displayName, m.description)),
     },
     connectivity: {
