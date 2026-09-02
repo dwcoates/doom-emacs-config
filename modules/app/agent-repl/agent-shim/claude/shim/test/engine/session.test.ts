@@ -7,7 +7,7 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +16,8 @@ import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { recordAgentBinaryVersion, resetAgentBinaryVersionForTest } from "../../src/build-identity.js";
 import { cwdSlug } from "../../src/engine/cold.js";
 import { createEngine, type QuerySpec, type SessionEngine } from "../../src/engine/session.js";
+import { agentIdPath } from "../../src/engine/identity.js";
+import { workspaceLockKey } from "../../src/locks.js";
 import { textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
@@ -360,6 +362,124 @@ describe("StartSession, fresh", () => {
     await engine.startSession(freshRequest());
 
     expect(h.released).toEqual(expect.arrayContaining([expect.stringMatching(/^workspace:/)]));
+  });
+
+  it("UN-NAMES the record plane's writer when the vendor start fails", async () => {
+    // A failed start settled an identity and named the writer from it, then
+    // abandoned the attempt. Leaving the name behind made the NEXT StartSession
+    // — which settles a different identity — hit setProducer's re-key guard and
+    // escape as an unhandled Internal, on a verb that has a typed refusal for
+    // every real condition.
+    const h = harness();
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    await engine.startSession(freshRequest());
+
+    expect(h.persistence.producer).toBeUndefined();
+  });
+
+  it("FORGETS the identity a failed start minted", async () => {
+    // The file is written before the query is created so a crash between the
+    // mint and the first record stays recoverable — but a start that never
+    // reached a query left no conversation for that identity to name, and
+    // keeping it would hand the next reader an AgentId for a conversation the
+    // vendor never opened.
+    const h = harness();
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    await engine.startSession(freshRequest());
+
+    expect(existsSync(agentIdPath(h.stateDir, workspaceLockKey(h.cwd)))).toBe(false);
+  });
+
+  it("keeps an identity an EARLIER session established when a later start fails", async () => {
+    // The abandonment path may only discard what THIS attempt minted. An
+    // identity a previous session persisted names a real conversation, and
+    // discarding it would split that conversation's book at the failed start.
+    const h = harness();
+    const persistedBefore = {
+      original_vendor_session_id: "established-by-an-earlier-session",
+      workspace_key: workspaceLockKey(h.cwd),
+      minted_at_ms: 1,
+    };
+    mkdirSync(path.dirname(agentIdPath(h.stateDir, workspaceLockKey(h.cwd))), {
+      recursive: true,
+    });
+    writeFileSync(
+      agentIdPath(h.stateDir, workspaceLockKey(h.cwd)),
+      JSON.stringify(persistedBefore),
+      "utf8",
+    );
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: () => Promise.reject(new Error("no")),
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+
+    await engine.startSession(freshRequest());
+
+    expect(existsSync(agentIdPath(h.stateDir, workspaceLockKey(h.cwd)))).toBe(true);
+  });
+
+  it("a retry after a failed start succeeds, settling its own identity", async () => {
+    // THE WHOLE POINT of leaving the engine as it was found: the shim the
+    // daemon already has can serve the conversation once the condition clears.
+    const h = harness();
+    let starts = 0;
+    const engine = createEngine({
+      persistence: h.persistence,
+      fold: h.fold,
+      createQuery: (spec) => {
+        starts += 1;
+        if (starts === 1) return Promise.reject(new Error("the vendor was not startable yet"));
+        const query = new ScriptedQuery();
+        h.queries.push({ spec, query });
+        return Promise.resolve(query);
+      },
+      runtime: { shimBuildSha: "sha", sdkVersion: "0.3.220" },
+      env: { stateDir: h.stateDir, configDir: h.configDir, cwd: h.cwd },
+      nowMs: () => 1,
+      scheduler: h.scheduler,
+      acquireLock: () => () => undefined,
+      acquireWorkspaceLock: () => () => undefined,
+    });
+    expect(failureCause(await engine.startSession(freshRequest()))).toBe("vendorStartFailed");
+
+    const pending = engine.startSession(freshRequest());
+    const created = await untilQuery(h, 0);
+    const sessionId =
+      created.spec.binding.kind === "fresh" ? created.spec.binding.sessionId : "";
+    created.query.emit(initMessage({ sessionId }));
+    const retried = await pending;
+
+    expect(retried.result.case).toBe("success");
+    expect(h.persistence.producer).toBe(sessionId);
   });
 
   it("refuses conversation_owned when another shim holds the WORKSPACE lock", async () => {

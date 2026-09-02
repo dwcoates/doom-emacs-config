@@ -1455,6 +1455,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
     }
     const brandNew = source.case === "fresh" || facts === undefined;
+    // WHETHER THIS WORKSPACE ALREADY HAD AN IDENTITY, read BEFORE one is
+    // settled. It is the only thing that tells an identity this attempt minted
+    // apart from one an earlier session established, and the abandonment path
+    // below may only discard the former.
+    const identityWasPersisted = (await identityStore.read()) !== undefined;
     identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
       : await SessionIdentity.resume(identityStore, vendorSessionId);
@@ -1463,14 +1468,6 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     // identity just settled — and a write attempted before this raises rather
     // than landing rows under a name no replay could absorb against.
     deps.persistence.setProducer(identity.originalVendorSessionId);
-    // THE HELD CUTS, NOW KEYABLE. First write after the producer is named, in
-    // the order they happened, so the compaction the cold gate just performed
-    // is on the first page a consumer opens.
-    if (pendingContextCuts.length > 0) {
-      const held = pendingContextCuts.splice(0, pendingContextCuts.length);
-      LOGGER.log({ held: held.length }, "writing the context cuts held until the session had an identity");
-      for (const cut of held) writeContextCut(cut);
-    }
     if (clearedTo !== undefined) {
       // The AgentId does not move; only the resume handle does, and the
       // rotation is announced exactly like a vendor-initiated one.
@@ -1486,14 +1483,38 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       );
       await initialized;
     } catch (err) {
+      // A FAILED START LEAVES THE ENGINE AS IT FOUND IT. The next StartSession
+      // is a fresh attempt that settles its OWN identity, so every trace of
+      // this one goes: both kernel claims, the writer's name, and — when this
+      // attempt is what minted it — the persisted identity. Leaving the writer
+      // named is what made the retry hit the re-key guard and escape as an
+      // unhandled `Internal` on a verb that has a typed refusal for every real
+      // condition.
+      //
+      // NOTHING WAS WRITTEN UNDER THE NAME YET: the held cuts are written after
+      // this block precisely so that stays true, and `clearProducer` refuses
+      // outright if it ever stops being.
       releaseLock?.();
       releaseLock = undefined;
       releaseWorkspaceLock?.();
       releaseWorkspaceLock = undefined;
+      deps.persistence.clearProducer();
+      if (!identityWasPersisted) await identityStore.forget();
       identity = undefined;
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.log({ level: "error", cause: detail }, "the vendor query could not be started");
       return startSessionRefused({ kind: "vendorStartFailed" }, detail);
+    }
+    // THE HELD CUTS, NOW KEYABLE AND NOW SAFE TO KEY. Written AFTER the query
+    // is up rather than before it: a row landed under a producer the failure
+    // path then abandons would strand one conversation's rows under a name
+    // nothing else ever uses again. They are still the FIRST rows this session
+    // writes, in the order they happened, so the compaction the cold gate just
+    // performed is on the first page a consumer opens.
+    if (pendingContextCuts.length > 0) {
+      const held = pendingContextCuts.splice(0, pendingContextCuts.length);
+      LOGGER.log({ held: held.length }, "writing the context cuts held until the session had an identity");
+      for (const cut of held) writeContextCut(cut);
     }
     started = true;
     const active = query;

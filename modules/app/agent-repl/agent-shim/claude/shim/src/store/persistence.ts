@@ -189,6 +189,24 @@ export interface Persistence {
    */
   setProducer(originalVendorSessionId: string): void;
   /**
+   * Un-name the writer, so a caller that named it and then FAILED can leave the
+   * plane exactly as it found it.
+   *
+   * StartSession names the producer from the identity it just settled and then
+   * starts the vendor query; when the query cannot be started, the whole attempt
+   * is abandoned and the next `fresh` StartSession settles a DIFFERENT identity.
+   * Without this the writer stayed named after the abandoned attempt and the
+   * retry hit {@link Persistence.setProducer}'s re-key guard — a correct guard
+   * answering a question nobody meant to ask, surfacing as an unhandled
+   * `Internal` on a verb that has a typed refusal for every real condition.
+   *
+   * THE GUARD ITSELF IS UNTOUCHED, and this is not a way around it: clearing is
+   * legal ONLY while nothing has been written under the current name. Once a row
+   * exists the name is load-bearing — its write ids are derived from it — and
+   * clearing THROWS rather than quietly splitting one conversation's namespace.
+   */
+  clearProducer(): void;
+  /**
    * Write these rows and resolve when the store says they are DURABLE.
    *
    * Rejects with a {@link PersistenceError} when the batch could not be landed
@@ -332,6 +350,7 @@ export function unavailablePersistence(): Persistence {
     );
   return {
     setProducer: () => undefined,
+    clearProducer: () => undefined,
     writeDurable: () => Promise.reject(refuse("writeDurable")),
     write: () => {
       throw refuse("write");

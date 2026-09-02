@@ -130,7 +130,8 @@ comma-separated:
 
 | Value | What the mocked vendor does | The arm it makes reachable |
 | --- | --- | --- |
-| `start` | `createFakeQuery` throws before any message | `StartSession{vendor_start_failed}` |
+| `start` | `createFakeQuery` throws before any message, every time | `StartSession{vendor_start_failed}` |
+| `start-once` | the FIRST `createFakeQuery` throws; every later one succeeds | a retry after `vendor_start_failed` succeeding on the same shim |
 | `set_model` | `setModel()` rejects | `SetSessionModel{vendor_refused}` |
 | `set_permission_mode` | `setPermissionMode()` rejects | `SetSessionPermissionMode{vendor_refused}` |
 
