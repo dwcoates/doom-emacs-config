@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -105,7 +106,18 @@ func run(args []string) error {
 
 	path, handler := shimv1connect.NewShimHandler(proc.srv)
 	mux := http.NewServeMux()
-	mux.Handle(path, handler)
+	// A STAND-DOWN ENDS THE PROCESS, exactly as the real shim's does: the
+	// daemon's relaunch gate is the old process being REAPED, and a fake that
+	// answered KillSession and kept running would leave every stand-down
+	// waiting out its window and then force-killing. The exit happens AFTER
+	// the handler has written its response, which is what makes it
+	// deterministic rather than a race with the reply.
+	mux.Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+		if strings.HasSuffix(r.URL.Path, "/KillSession") && proc.srv.killedSession() {
+			proc.die(0, "")
+		}
+	}))
 	httpSrv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
 
 	go proc.serveControl(ctlListener)

@@ -20,8 +20,9 @@ func TestRestartDelegatesToTheRelaunchEngine(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.rollout.relaunches) != 1 || f.rollout.relaunches[0].Reason != rollout.ReasonRestartVerb {
-		t.Fatalf("relaunches = %+v, want one restart-verb relaunch", f.rollout.relaunches)
+	f.rollout.awaitRelaunch(t)
+	if got := f.rollout.relaunchCalls(); len(got) != 1 || got[0].Reason != rollout.ReasonRestartVerb {
+		t.Fatalf("relaunches = %+v, want one restart-verb relaunch", got)
 	}
 }
 
@@ -89,23 +90,40 @@ func TestRestartPushesTheWebappReloadAfterTheRelaunch(t *testing.T) {
 	}
 
 	// Assert.
-	if len(f.rollout.reloads) != 1 {
-		t.Fatalf("webapp reloads = %v, want exactly one", f.rollout.reloads)
+	f.rollout.awaitRelaunch(t)
+	if got := f.rollout.reloadCalls(); len(got) != 1 {
+		t.Fatalf("webapp reloads = %v, want exactly one", got)
 	}
 }
 
-func TestRestartSurfacesARelaunchFailure(t *testing.T) {
+// TestRestartRecordsARelaunchFailure covers where a relaunch failure now goes.
+// The verb ACCEPTS and the engine runs behind it -- it waits for freeness,
+// forever if need be -- so nobody is waiting on the failure to be returned;
+// it is recorded at ERROR instead, and the relaunch's own fault carries it.
+func TestRestartRecordsARelaunchFailure(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.rollout.relaunchErr = errors.New("the shim would not stand down")
 
 	// Act.
-	err := f.verbs.Restart(context.Background(), "w1", false)
+	if err := f.verbs.Restart(context.Background(), "w1", false); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
 
 	// Assert.
-	if err == nil {
-		t.Fatal("Restart() = nil error, want the relaunch failure surfaced")
+	f.rollout.awaitRelaunch(t)
+	recorded := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == "error" && r.Operation == opRestart {
+			recorded = true
+		}
+	}
+	if !recorded {
+		t.Fatalf("records = %+v, want the relaunch failure recorded", f.log.logger.Records())
+	}
+	if got := f.rollout.reloadCalls(); len(got) != 0 {
+		t.Fatalf("webapp reloads = %v, want none after a failed relaunch", got)
 	}
 }
 

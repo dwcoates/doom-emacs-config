@@ -155,16 +155,38 @@ func (s *server) composeHostWorkspace(
 		// Registered, and no session was ever created for it. This is the one
 		// session arm that needs no live facts at all.
 		view.Session = &agentreplv1.HostWorkspace_None{None: &agentreplv1.HostSessionNone{}}
+	case session.HostSessionID != "":
+		// A SESSION THIS DAEMON DOES NOT OPERATE is an ordinary state, not a
+		// gap: it was killed, it was handed to a successor, or it has not
+		// been opened since this daemon booted. The record carries the
+		// identity the host stream correlates on, so the arm is composed from
+		// it -- terminal when the record carries a death, and live with the
+		// shim UNATTACHED otherwise, which is exactly what "live but
+		// momentarily unwired" means.
+		log.Debug(op, "the session is recorded but not operated here; composing from the record",
+			dlog.Context{"host_session_id": session.HostSessionID})
+		existing, ok := s.hostExisting(ctx, log, ws, session, hasSession, HostFacts{
+			SessionID: session.HostSessionID,
+			// The generation belongs to the party OPERATING the session, and
+			// nobody is; zero is the honest answer for "no controller".
+			Generation:   "0",
+			ShimAttached: false,
+			Backfill:     BackfillNone,
+		})
+		if !ok {
+			return nil, false
+		}
+		view.Session = &agentreplv1.HostWorkspace_Existing{Existing: existing}
 	default:
-		// A session record with no live facts: the session's identity lives
-		// with the party that minted it, and HostSessionExisting.id is not
-		// optional. An empty id would be a sentinel, and a client correlating
-		// on it would correlate wrongly, so the view is WITHHELD and the gap
-		// is recorded rather than papered over.
-		log.Error(op, "a session record has no live facts; the host view was withheld",
+		// A session record with NO IDENTITY AT ALL. The identity is minted
+		// where the session is created, and HostSessionExisting.id is not
+		// optional: an empty id would be a sentinel, and a client correlating
+		// on it would correlate wrongly. The view is WITHHELD and the gap is
+		// recorded rather than papered over.
+		log.Error(op, "a session record carries no host identity; the host view was withheld",
 			dlog.Context{
-				"invariant_violation": "the session's host identity is unknown to this daemon",
-				"remediation":         "the session fleet must answer HostSessionFacts for every session it holds",
+				"invariant_violation": "a session record exists with no host session id",
+				"remediation":         "mint the host session identity where the session is created",
 			})
 		return nil, false
 	}
