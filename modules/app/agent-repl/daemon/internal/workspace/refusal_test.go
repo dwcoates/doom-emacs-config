@@ -93,3 +93,46 @@ func TestRefuseLogsTheIntendedArmAtWarning(t *testing.T) {
 		t.Fatalf("record = %+v, want a warning under %s", records[0], opRefusal)
 	}
 }
+
+func TestRefuseWithCarriesTheArmsOwnFieldValues(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	r := refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false,
+		map[string]any{"ref": "origin/nope"})
+
+	// Assert.
+	if got := r.Fields["ref"]; got != "origin/nope" {
+		t.Fatalf("Fields[\"ref\"] = %v, want the ref the refusal named", got)
+	}
+}
+
+func TestRefuseWithDoesNotShareTheCallersFieldMap(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	fields := map[string]any{"ref": "origin/nope"}
+
+	// Act.
+	r := refuseWith(log, "CreateWorkspace", ArmBaseRefUnresolved, "no such ref", false, fields)
+	fields["ref"] = "mutated"
+
+	// Assert.
+	if got := r.Fields["ref"]; got != "origin/nope" {
+		t.Fatalf("Fields[\"ref\"] = %v, want the value at the refusal site", got)
+	}
+}
+
+func TestWithRpcKeepsTheArmsFieldValues(t *testing.T) {
+	// Arrange.
+	r := &Refusal{Arm: ArmBaseRefUnresolved, Reason: "no such ref",
+		Fields: map[string]any{"ref": "origin/nope"}}
+
+	// Act.
+	renamed := r.WithRpc("CreateWorkspace")
+
+	// Assert.
+	if got := renamed.Fields["ref"]; got != "origin/nope" {
+		t.Fatalf("WithRpc dropped the arm's fields: %v", renamed.Fields)
+	}
+}
