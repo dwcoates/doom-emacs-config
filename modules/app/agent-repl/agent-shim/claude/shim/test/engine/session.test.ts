@@ -22,6 +22,7 @@ import { textSaid } from "../../src/engine/turn.js";
 import { KEEPALIVE_INTERVAL_MS } from "../../src/engine/keepalive.js";
 import { toStanding } from "../../src/engine/permission-gate.js";
 import { SYNTHETIC_MODEL } from "../../src/model.js";
+import type { AccountUsageLike, McpServerStatusLike } from "../../src/sdk/types.js";
 import { ManualScheduler, RecordingFold, RecordingPersistence, ScriptedQuery, initMessage, resultMessage } from "./fakes.js";
 
 interface Harness {
@@ -87,6 +88,10 @@ function harness(
     backgroundTasks?: boolean;
     /** Make `backgroundTasks` reject, so the fail-open path is exercised. */
     backgroundTasksThrows?: boolean;
+    /** What the scripted query answers `mcpServerStatus` with. */
+    mcp?: McpServerStatusLike[];
+    /** What the scripted query answers the account-usage control verb with. */
+    accountUsage?: AccountUsageLike;
   } = {},
 ): Harness {
   const stateDir = scratch();
@@ -110,6 +115,8 @@ function harness(
       if (options.backgroundTasksThrows === true) {
         query.backgroundTasks = () => Promise.reject(new Error("the vendor cannot answer"));
       }
+      if (options.mcp !== undefined) query.mcp = options.mcp;
+      if (options.accountUsage !== undefined) query.accountUsage = options.accountUsage;
       queries.push({ spec, query });
       return Promise.resolve(query);
     },
@@ -2108,5 +2115,97 @@ describe("a standing grant's mode change, delivered through UpdateAgent", () => 
     expect(
       response.result.case === "failure" ? response.result.value.kind.case : undefined,
     ).toBe("noOpenAsk");
+  });
+});
+
+/**
+ * The account facts a scheduled beat pushes: mcpUpdate (pushMcpServerStatus,
+ * called once during StartSession) and usageWindow/optional
+ * (accountUsageUpdate, called on the account-usage interval's own beat).
+ * Neither had ever run: no test in this suite configures the scripted
+ * query's mcpServerStatus()/usage_EXPERIMENTAL... answers, or fires the
+ * account-usage interval ManualScheduler registers second (after the
+ * keepalive cadence).
+ */
+describe("mcp server status, pushed at StartSession", () => {
+  it("pushes one mcpServer update per declared server, each its own health arm", async () => {
+    const h = harness({
+      mcp: [
+        { name: "docs", status: "connected" },
+        { name: "search", status: "failed", error: "auth expired" },
+      ] as McpServerStatusLike[],
+    });
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    const seen: { name: string; health: string }[] = [];
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "mcpServer") {
+          seen.push({ name: update.value.name, health: update.value.health.case ?? "" });
+        }
+      }
+    })();
+
+    await started(h);
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await reading;
+
+    expect(seen).toEqual([
+      { name: "docs", health: "connected" },
+      { name: "search", health: "failed" },
+    ]);
+  });
+});
+
+describe("account usage, pushed on the account-usage interval", () => {
+  it("reports the five-hour window and echoes the offered seven-day window", async () => {
+    const h = harness({
+      accountUsage: {
+        session: {
+          total_cost_usd: 0,
+          total_api_duration_ms: 0,
+          total_duration_ms: 0,
+          total_lines_added: 0,
+          total_lines_removed: 0,
+          model_usage: {},
+        },
+        subscription_type: "max",
+        rate_limits_available: true,
+        rate_limits: {
+          five_hour: { utilization: 10, resets_at: "2026-01-01T00:00:00.000Z" },
+          seven_day: { utilization: 20, resets_at: "2026-01-02T00:00:00.000Z" },
+          seven_day_oauth_apps: null,
+          seven_day_opus: null,
+          seven_day_sonnet: null,
+          model_scoped: [],
+        },
+        behaviors: null,
+      } as AccountUsageLike,
+    });
+    const stream = h.engine.pushes.subscribe()[Symbol.asyncIterator]();
+    let seen: conversationv1.SessionAccountUsage | undefined;
+    const reading = (async () => {
+      for (;;) {
+        const step = await stream.next();
+        if (step.done === true) return;
+        const update = step.value.update;
+        if (update.case === "accountUsage") {
+          seen = update.value;
+          return;
+        }
+      }
+    })();
+
+    await started(h);
+    h.scheduler.fire(1);
+    await reading;
+
+    expect(seen?.outcome.case).toBe("available");
+    const available = seen?.outcome.value as conversationv1.SessionAccountUsageAvailable | undefined;
+    expect(available?.fiveHour?.utilizationPercent).toBe(10);
+    expect(available?.sevenDay?.utilizationPercent).toBe(20);
+    expect(available?.sevenDayOpus).toBeUndefined();
   });
 });
