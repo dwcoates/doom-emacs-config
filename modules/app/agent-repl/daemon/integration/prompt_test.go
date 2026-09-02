@@ -774,8 +774,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt held before the merge", "k-preheld", origin)
 	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
-	holds := f.d.WatchHolds(f.ws)
-	awaitView(t, f, holds, "the pre-merge held entry", func(tray *frontendv1.DaemonHoldTray) bool {
+	awaitView(t, f, f.d.WatchHolds(f.ws), "the pre-merge held entry", func(tray *frontendv1.DaemonHoldTray) bool {
 		return promptHeldEntry(tray, turn2) != nil
 	})
 
@@ -784,12 +783,15 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
 
-	// Assert: the held entry is unaffected.
-	got := awaitView(t, f, holds, "the held entry surviving the merge's start", func(tray *frontendv1.DaemonHoldTray) bool {
-		return promptHeldEntry(tray, turn2) != nil
-	})
+	// Assert: the held entry is unaffected. The read is a FRESH subscription
+	// taken once the merge holds its lease, not a wait for a further push on
+	// the standing one: the merge's start need not push the tray at all — the
+	// entry not moving is the whole point — and a late subscriber is replayed
+	// the current view, which is exactly the question being asked.
+	promptAwaitMergeLease(t, f)
+	got := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchHolds(f.ws), "the tray a late subscriber is replayed")
 	if promptHeldEntry(got, turn2) == nil {
-		t.Fatalf("a prompt held before the merge began was dropped once the merge started")
+		t.Fatalf("a prompt held before the merge began was dropped once the merge started: %v", got)
 	}
 }
 
