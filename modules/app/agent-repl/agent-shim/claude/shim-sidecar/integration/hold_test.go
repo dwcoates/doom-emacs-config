@@ -234,6 +234,33 @@ func TestABoundaryRedeliveredTwiceIsConvertedRegardless(t *testing.T) {
 	if got := recordsFor(records, "hold-exhausted"); len(got) != 0 {
 		t.Errorf("the handler held the boundary again on its forced redelivery; the tailer had to refuse %d hold(s)", len(got))
 	}
+	// GIVING UP ON THE SUMMARY IS STATED, and stated as a degradation: the cut a
+	// reader gets from here is missing prose the vendor may yet have written, so
+	// the bound expiring is a warning rather than a routine info beat.
+	if got := recordsAt(records, "hold", "warn"); len(got) != 1 {
+		t.Errorf("the summary-less conversion was stated %d time(s) at warn, want exactly one; the log held %v",
+			len(got), operationLevels(records))
+	}
+
+	// And the cut that landed is the COMPACTED arm with no summary — not a
+	// different arm, and not a fabricated one. A boundary whose summary never
+	// arrived is still a compaction; what it lacks is the prose.
+	e := entryByUpsertKey(fake.Entries(), wantKey)
+	cut := contextCutOf(e.GetAgentUpdate().GetServeableFrame())
+	if cut == nil {
+		t.Fatalf("the converted boundary carries no ContextCut: %v", e.GetAgentUpdate())
+	}
+	if cut.GetCompacted() == nil {
+		t.Fatalf("a compaction boundary produces the compacted arm even with no summary: %v", cut.GetCut())
+	}
+	// The summary's PROSE is what must be absent. The message itself is always
+	// present (internal/convert/contextcut.go builds it unconditionally, so the
+	// field's absence is not expressible), and the empty markdown IS the "no
+	// summary" statement: a reader renders a hole where the discarded history
+	// was, rather than prose the vendor never wrote.
+	if got := cut.GetCompacted().GetSummary().GetMarkdown(); got != "" {
+		t.Errorf("the cut carries summary prose %q; no summary line was ever written, and one must not be invented", got)
+	}
 }
 
 // TestABoundaryHeldOnceIsNotWrittenTwice asserts the redelivered record is
