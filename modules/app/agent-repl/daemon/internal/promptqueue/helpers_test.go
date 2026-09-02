@@ -622,6 +622,9 @@ type harness struct {
 	noSession  bool
 }
 
+// waitRevivals joins every background revival the queue started.
+func (h *harness) waitRevivals() { h.q.reviving.Wait() }
+
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
@@ -668,6 +671,22 @@ func newHarness(t *testing.T) *harness {
 		Now: func() time.Time { return instant },
 		Log: dlog.NewTestSurfaces(),
 	})
+	if err != nil {
+		t.Fatalf("newQueue: %v", err)
+	}
+	h.q = q
+	return h
+}
+
+// newHarnessWithoutRevival is the harness with NO revival wired at all, which
+// is the "a workspace with no live session simply refuses" configuration
+// (Deps.Revive's own doc).
+func newHarnessWithoutRevival(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	deps := h.q.deps
+	deps.Revive = nil
+	q, err := newQueue(deps)
 	if err != nil {
 		t.Fatalf("newQueue: %v", err)
 	}
