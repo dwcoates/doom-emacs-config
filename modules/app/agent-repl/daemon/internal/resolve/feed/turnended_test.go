@@ -211,6 +211,16 @@ func erroredArmWord(errored *frontendv1.FeedTurnEndedErrored) string {
 		return "query_died"
 	case *frontendv1.FeedTurnEndedErrored_ModelNotFound:
 		return "model_not_found"
+	case *frontendv1.FeedTurnEndedErrored_MaxTurns:
+		return "max_turns"
+	case *frontendv1.FeedTurnEndedErrored_MaxBudget:
+		return "max_budget"
+	case *frontendv1.FeedTurnEndedErrored_ExecutionError:
+		return "execution_error"
+	case *frontendv1.FeedTurnEndedErrored_TurnFailed:
+		return "turn_failed"
+	case *frontendv1.FeedTurnEndedErrored_StopHookPrevented:
+		return "stop_hook_prevented"
 	}
 	return "unset"
 }
@@ -289,16 +299,179 @@ func TestAProducerArmWithNoDrawnCounterpartIsKeptByName(t *testing.T) {
 	h := newHarness(t)
 	h.deliverPrompt("turn-1", "hello")
 	h.terminal("turn-1", nil, &conversationv1.AgentFailure{
-		Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}},
+		Failure: &conversationv1.AgentFailure_HookStopped{HookStopped: &conversationv1.AgentStoppedByHook{}},
 	})
 
 	// Assert: never flattened into a generic failure.
 	errored := h.terminalRow("turn-1").GetErrored()
-	if got := errored.GetVendorUnmodeled().GetType(); got != "max_turns" {
+	if got := errored.GetVendorUnmodeled().GetType(); got != "hook_stopped" {
 		t.Fatalf("type = %q, want the arm's own name", got)
 	}
-	if got := errored.GetHeadline().GetText(); got != "the run reached its ceiling on model round-trips" {
+	if got := errored.GetHeadline().GetText(); got != "a hook ended the run" {
 		t.Fatalf("headline = %q", got)
+	}
+}
+
+// THE RUN'S OWN TERMINALS (landing 8): five arms that had no wire path to any
+// frontend stream before, each with its own drawn arm and composed headline.
+func TestEachRunTerminalDrawsItsOwnArm(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+		wantArm string
+	}{
+		{"max_turns", maxTurnsFailure(), "max_turns"},
+		{"budget_exhausted", budgetExhaustedFailure(), "max_budget"},
+		{"execution_error", executionErrorFailure(), "execution_error"},
+		{"structured_output_retry_exhausted", structuredOutputFailure(), "turn_failed"},
+		{"stop_hook_prevented", stopHookFailure(), "stop_hook_prevented"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+			h.terminal("turn-1", nil, tc.failure)
+
+			// Assert.
+			if got := erroredArmWord(h.terminalRow("turn-1").GetErrored()); got != tc.wantArm {
+				t.Fatalf("arm = %q, want %q", got, tc.wantArm)
+			}
+		})
+	}
+}
+
+func TestEachRunTerminalComposesItsOwnHeadline(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure *conversationv1.AgentFailure
+		want    string
+	}{
+		{"max_turns", maxTurnsFailure(), "stopped at the turn limit"},
+		{"budget_exhausted", budgetExhaustedFailure(), "stopped at the budget"},
+		{"execution_error", executionErrorFailure(), "the run broke while executing"},
+		{"structured_output_retry_exhausted", structuredOutputFailure(), "the run ended: structured_output_retry_exhausted"},
+		{"stop_hook_prevented", stopHookFailure(), "a Stop hook ended the run"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+			h.terminal("turn-1", nil, tc.failure)
+
+			// Assert.
+			if got := h.terminalRow("turn-1").GetErrored().GetHeadline().GetText(); got != tc.want {
+				t.Fatalf("headline = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEachVendorRunTerminalCarriesItsVendorContext(t *testing.T) {
+	tests := []struct {
+		name   string
+		vendor func(*frontendv1.FeedTurnEndedErrored) *frontendv1.VendorFailureContext
+		fail   *conversationv1.AgentFailure
+	}{
+		{"max_turns", func(e *frontendv1.FeedTurnEndedErrored) *frontendv1.VendorFailureContext {
+			return e.GetMaxTurns().GetVendor()
+		}, maxTurnsFailure()},
+		{"max_budget", func(e *frontendv1.FeedTurnEndedErrored) *frontendv1.VendorFailureContext {
+			return e.GetMaxBudget().GetVendor()
+		}, budgetExhaustedFailure()},
+		{"execution_error", func(e *frontendv1.FeedTurnEndedErrored) *frontendv1.VendorFailureContext {
+			return e.GetExecutionError().GetVendor()
+		}, executionErrorFailure()},
+		{"turn_failed", func(e *frontendv1.FeedTurnEndedErrored) *frontendv1.VendorFailureContext {
+			return e.GetTurnFailed().GetVendor()
+		}, structuredOutputFailure()},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange, Act.
+			h := newHarness(t)
+			h.deliverPrompt("turn-1", "hello")
+			h.terminal("turn-1", nil, tc.fail)
+
+			// Assert: present, so the arm is whole on the wire.
+			if tc.vendor(h.terminalRow("turn-1").GetErrored()) == nil {
+				t.Fatal("the arm carried no VendorFailureContext")
+			}
+		})
+	}
+}
+
+func TestATurnFailedNamesTheVendorsOwnStopReason(t *testing.T) {
+	// Arrange, Act: the arm exists exactly where the vendor named no kind.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.terminal("turn-1", nil, structuredOutputFailure())
+
+	// Assert.
+	got := h.terminalRow("turn-1").GetErrored().GetTurnFailed().GetStopReason()
+	if got != "structured_output_retry_exhausted" {
+		t.Fatalf("stop_reason = %q", got)
+	}
+}
+
+func TestARunTerminalCarriesTheVendorsWordingWhenRecorded(t *testing.T) {
+	// Arrange, Act.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	failure := maxTurnsFailure()
+	failure.Errors = []string{"reached 12 turns"}
+	h.terminal("turn-1", nil, failure)
+
+	// Assert.
+	if got := h.terminalRow("turn-1").GetErrored().GetMessage().GetText(); got != "reached 12 turns" {
+		t.Fatalf("message = %q, want the vendor's wording", got)
+	}
+}
+
+func TestARunTerminalCarriesNoMessageWhenTheVendorRecordedNone(t *testing.T) {
+	// Arrange, Act: an empty message would be a sentinel for a state.
+	h := newHarness(t)
+	h.deliverPrompt("turn-1", "hello")
+	h.terminal("turn-1", nil, maxTurnsFailure())
+
+	// Assert.
+	if got := h.terminalRow("turn-1").GetErrored().Message; got != nil {
+		t.Fatalf("message = %+v, want UNSET", got)
+	}
+}
+
+func maxTurnsFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_MaxTurns{MaxTurns: &conversationv1.AgentMaxTurnsReached{}},
+	}
+}
+
+func budgetExhaustedFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_BudgetExhausted{
+			BudgetExhausted: &conversationv1.AgentBudgetExhausted{}},
+	}
+}
+
+func executionErrorFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ExecutionError{
+			ExecutionError: &conversationv1.AgentExecutionError{}},
+	}
+}
+
+func structuredOutputFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_StructuredOutputRetryExhausted{
+			StructuredOutputRetryExhausted: &conversationv1.AgentStructuredOutputRetriesExhausted{}},
+	}
+}
+
+func stopHookFailure() *conversationv1.AgentFailure {
+	return &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_StopHookPrevented{
+			StopHookPrevented: &conversationv1.AgentStoppedByStopHook{}},
 	}
 }
 

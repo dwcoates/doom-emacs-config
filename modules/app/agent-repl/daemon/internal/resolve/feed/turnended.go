@@ -256,8 +256,10 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 		errored.Error = unmodeledArm("malformed_tool_use_exhausted")
 		return "the model's tool calls could not be parsed and the attempts ran out"
 	case *conversationv1.AgentFailure_StopHookPrevented:
-		errored.Error = unmodeledArm("stop_hook_prevented")
-		return "a Stop hook forbade the agent from continuing"
+		errored.Error = &frontendv1.FeedTurnEndedErrored_StopHookPrevented{
+			StopHookPrevented: &frontendv1.FeedTurnErrorStopHookPrevented{},
+		}
+		return "a Stop hook ended the run"
 	case *conversationv1.AgentFailure_HookStopped:
 		errored.Error = unmodeledArm("hook_stopped")
 		return "a hook ended the run"
@@ -268,19 +270,32 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 		errored.Error = unmodeledArm("tool_deferred_unavailable")
 		return "the run ended on a tool call deferred to something unavailable"
 	case *conversationv1.AgentFailure_MaxTurns:
-		errored.Error = unmodeledArm("max_turns")
-		return "the run reached its ceiling on model round-trips"
+		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxTurns{
+			MaxTurns: &frontendv1.FailureVendorMaxTurns{Vendor: vendorFailureContext()},
+		}
+		return "stopped at the turn limit"
 	case *conversationv1.AgentFailure_BudgetExhausted:
-		errored.Error = unmodeledArm("budget_exhausted")
-		return "the run reached its spending ceiling"
+		errored.Error = &frontendv1.FeedTurnEndedErrored_MaxBudget{
+			MaxBudget: &frontendv1.FailureVendorMaxBudget{Vendor: vendorFailureContext()},
+		}
+		return "stopped at the budget"
 	case *conversationv1.AgentFailure_StructuredOutputRetryExhausted:
-		errored.Error = unmodeledArm("structured_output_retry_exhausted")
-		return "the model could not produce the structure it was asked for"
+		// The vendor's OWN word for an end it did not classify further is the
+		// arm name it arrived under; turn_failed exists to carry exactly that.
+		errored.Error = &frontendv1.FeedTurnEndedErrored_TurnFailed{
+			TurnFailed: &frontendv1.FailureVendorTurnFailed{
+				Vendor:     vendorFailureContext(),
+				StopReason: "structured_output_retry_exhausted",
+			},
+		}
+		return "the run ended: structured_output_retry_exhausted"
 	case *conversationv1.AgentFailure_TurnSetupFailed:
 		errored.Error = unmodeledArm("turn_setup_failed")
 		return "the run could not be set up and never reached the model"
 	case *conversationv1.AgentFailure_ExecutionError:
-		errored.Error = unmodeledArm("execution_error")
+		errored.Error = &frontendv1.FeedTurnEndedErrored_ExecutionError{
+			ExecutionError: &frontendv1.FailureVendorExecutionError{Vendor: vendorFailureContext()},
+		}
 		return "the run broke while executing"
 	case *conversationv1.AgentFailure_ContinuationPrevented:
 		errored.Error = unmodeledArm("continuation_prevented")
@@ -288,6 +303,16 @@ func producerErrorArm(errored *frontendv1.FeedTurnEndedErrored, failure *convers
 	}
 	errored.Error = unmodeledArm("unset")
 	return "the run ended on a failure with no stated cause"
+}
+
+// vendorFailureContext is the vendor correlation the run's own terminals carry.
+// PRESENT AND EMPTY on purpose: conversation.v1's AgentMaxTurnsReached,
+// AgentBudgetExhausted, AgentExecutionError, AgentStructuredOutputRetriesExhausted
+// and AgentStoppedByStopHook are all empty messages, and no vendor conversation,
+// request or message id reaches this seam — which failure.proto states is exactly
+// what an empty field means, rather than a figure invented here.
+func vendorFailureContext() *frontendv1.VendorFailureContext {
+	return &frontendv1.VendorFailureContext{}
 }
 
 // unmodeledArm keeps a producer arm BY NAME so it is never silently
