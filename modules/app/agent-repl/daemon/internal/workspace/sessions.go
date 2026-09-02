@@ -42,15 +42,22 @@ const LockDirEnv = "AGENT_REPL_LOCK_DIR"
 // flock.
 type ProbeFunc func(runDir, workspaceDir string) (sessionlock.State, error)
 
-// probeWorkspaceLock is the production probe: derive the path, take and release
-// the lock. Any error other than "held" is StateUnknown WITH the error, because
-// an unreadable lock is never reported as free.
-func probeWorkspaceLock(runDir, workspaceDir string) (sessionlock.State, error) {
-	path, err := sessionlock.WorkspaceLockPath(runDir, workspaceDir)
-	if err != nil {
-		return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
+// probeWorkspaceLock builds the production probe over log. Every probe result
+// — held, free, and could-not-tell — lands a record, because a lock probe is a
+// diagnosis-critical event and a silent one defeats the boot report. Any error
+// other than "held" is StateUnknown WITH the error, because an unreadable lock
+// is never reported as free.
+func probeWorkspaceLock(log dlog.Logger) ProbeFunc {
+	log = log.With(dlog.Context{"component": "daemon.workspace.probe_workspace_lock"})
+	return func(runDir, workspaceDir string) (sessionlock.State, error) {
+		path, err := sessionlock.WorkspaceLockPath(runDir, workspaceDir)
+		if err != nil {
+			log.Error("daemon.workspace.probe_workspace_lock", "could not derive the workspace lock path",
+				dlog.Context{"run_dir": runDir, "workspace_dir": workspaceDir, "error": err.Error()})
+			return sessionlock.StateUnknown, fmt.Errorf("derive the workspace lock path: %w", err)
+		}
+		return sessionlock.ProbeWithLog(log, path)
 	}
-	return sessionlock.Probe(path)
 }
 
 // WatcherStarter opens one workspace's watch fleet against its shim client.
@@ -162,7 +169,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	}
 	probe := deps.Probe
 	if probe == nil {
-		probe = probeWorkspaceLock
+		probe = probeWorkspaceLock(deps.Log.Global())
 	}
 	watch := deps.StartWatcher
 	if watch == nil {
