@@ -45,12 +45,23 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	fields := dlog.Context{"workspace": string(ws), "reason": string(reason)}
 
 	if reason == ReasonBuildStale {
-		stale, err := c.stale(ctx, ws, fields)
+		stale, reported, err := c.stale(ctx, ws, fields)
 		if err != nil {
 			return err
 		}
 		if !stale {
 			c.log.Debug(opRelaunch, "the shim is on the deployed build; nothing to bounce", fields)
+			return nil
+		}
+		// THE BOUNCE FIRES ONCE PER OBSERVED STAMP. A shim that comes back
+		// still reporting the stamp it was bounced for cannot be fixed by
+		// bouncing it again -- the deployed build simply is not what this
+		// workspace's shim reports -- and re-bouncing spawns a process per
+		// mount forever. The disagreement is stated once, loudly, and the
+		// session is served on the build it has.
+		if !c.claimStaleBounce(ws, reported) {
+			c.log.Debug(opStaleness, "this stamp was already bounced for; leaving the shim alone",
+				merge(fields, dlog.Context{"reported_sha": reported}))
 			return nil
 		}
 	}
@@ -259,34 +270,51 @@ func (c *controller) CheckStaleness(ctx context.Context, ws ids.WorkspaceID, rep
 // stale reports whether the workspace's recorded session is on an older build
 // than the deploy stamp. A stamp that cannot be read leaves the shim ALONE:
 // bouncing a session on a guess is worse than serving it on an older build.
-func (c *controller) stale(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (bool, error) {
+// claimStaleBounce records that this workspace is being bounced for `reported`
+// and answers whether that stamp is NEW. A stamp already bounced for answers
+// false, which is what makes the build-staleness bounce fire once per stamp
+// rather than once per mount.
+func (c *controller) claimStaleBounce(ws ids.WorkspaceID, reported string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.bouncedStamp == nil {
+		c.bouncedStamp = map[ids.WorkspaceID]string{}
+	}
+	if c.bouncedStamp[ws] == reported {
+		return false
+	}
+	c.bouncedStamp[ws] = reported
+	return true
+}
+
+func (c *controller) stale(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) (bool, string, error) {
 	deployed, err := c.deployStamp()
 	if err != nil {
 		c.log.Warn(opStaleness, "could not read the deploy stamp; leaving the shim alone", withCause(fields, err))
-		return false, nil
+		return false, "", nil
 	}
 	if deployed == "" {
 		c.log.Debug(opStaleness, "the deploy stamp is empty; leaving the shim alone", fields)
-		return false, nil
+		return false, "", nil
 	}
 	if c.deps.SessionBuildSHA == nil {
 		c.log.Debug(opStaleness, "no session build is reported; leaving the shim alone", fields)
-		return false, nil
+		return false, "", nil
 	}
 	reported, known := c.deps.SessionBuildSHA(ws)
 	fields["reported_sha"] = reported
 	fields["deployed_sha"] = deployed
 	if !known || reported == "" {
 		c.log.Debug(opStaleness, "the session reports no build; leaving the shim alone", fields)
-		return false, nil
+		return false, "", nil
 	}
 	if reported == deployed {
 		c.log.Debug(opStaleness, "the session is on the deployed build", fields)
-		return false, nil
+		return false, reported, nil
 	}
 	c.log.Info(opStaleness, "the session is on an older build than the deploy stamp", fields)
 	_ = ctx
-	return true, nil
+	return true, reported, nil
 }
 
 // deployStamp reads the deployed build's sha, or an empty answer when no reader

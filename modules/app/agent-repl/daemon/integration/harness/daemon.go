@@ -312,7 +312,12 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		t.Fatalf("harness: start daemon: %v", err)
 	}
 	d.cmd = cmd
-	t.Cleanup(d.Kill)
+	t.Cleanup(func() {
+		d.Kill()
+		// The daemon's group is gone; its shims are in groups of their own and
+		// would otherwise outlive the test.
+		d.ReapStrays()
+	})
 
 	if opts.ExpectEarlyExit {
 		return d
@@ -632,4 +637,50 @@ func (d *Daemon) ExpectFileUnchanged(path, want string, probe time.Duration) {
 		}
 		<-ticker.C
 	}
+}
+
+// ReapStrays kills every process whose command line names this run's state
+// directory, whatever process group it is in.
+//
+// IT IS THE ONLY THING THAT BOUNDS A TEST'S PROCESS TREE. The daemon runs in
+// its own process group and Kill ends that group, but every shim the daemon
+// spawns is put in a group of ITS own (the spawn's process-group discipline),
+// so a daemon that dies without standing its shims down leaves them running —
+// and a leaked daemon keeps prelaunching more. The state directory is unique to
+// this run and appears in both the daemon's argv and every shim's `--listen`
+// path, so it is an exact key for "processes this test started".
+func (d *Daemon) ReapStrays() {
+	for _, pid := range d.strayPIDs() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// StrayPIDs answers the live processes naming this run's state directory,
+// excluding the harness's own process. A test asserts on it; ReapStrays acts
+// on it.
+func (d *Daemon) StrayPIDs() []int { return d.strayPIDs() }
+
+func (d *Daemon) strayPIDs() []int {
+	if d.StateDir == "" {
+		return nil
+	}
+	out, err := exec.Command("ps", "-Ao", "pid=,args=").Output()
+	if err != nil {
+		return nil
+	}
+	self := os.Getpid()
+	var pids []int
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.Contains(line, d.StateDir) {
+			continue
+		}
+		fields := strings.Fields(line)
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid == self {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
 }
