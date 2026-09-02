@@ -460,15 +460,18 @@ const TOKENS_REMINDER = scenario({
 
 const COMPACT = scenario({
   name: "compact",
-  prompt: "!compact",
+  prompt: "!compact [summary]",
   emits:
     "a compaction: `status{compacting}`, a `compact_boundary` carrying the full corpus `compact_metadata` " +
     "(trigger, pre/post tokens, duration, the preserved segment AND the preserved-messages uuid list), then " +
-    "`status{compact_result:\"success\"}`",
+    "`status{compact_result:\"success\"}`. `ContextCompacted.Summary` is derived from the assistant prose that " +
+    "follows the boundary (`settleCompaction`), so a caller names its own distinctive summary as the prompt's " +
+    "argument instead of the fixed default",
   writes: "a `system:compact_boundary` line whose `logicalParentUuid` names the preserved head, plus a summary user line",
   arms: "SessionCompacting + AgentUpdate.context_cut(ContextCompacted) with trigger=requested",
   run(ctx) {
-    ctx.log({ turn: ctx.turn, branch: "compact" }, "fake compaction turn");
+    const summary = ctx.args === "" ? "Compacted the conversation." : ctx.args;
+    ctx.log({ turn: ctx.turn, branch: "compact", summary }, "fake compaction turn");
     ctx.systemMessage("status", { status: "compacting" });
     const head = ctx.files.transcript.chainHead ?? ctx.newUuid();
     ctx.emit({
@@ -504,7 +507,7 @@ const COMPACT = scenario({
       timestamp: ctx.nowIso(),
     });
     ctx.systemMessage("status", { status: null, compact_result: "success" });
-    conclude(ctx, "Compacted the conversation.");
+    conclude(ctx, summary);
   },
 });
 

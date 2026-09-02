@@ -148,3 +148,12 @@ each is graded against the grounding named below, or marked ungrounded.
   exercised as real vendor transcript bytes since before this fake-SDK
   addition existed. Retires: `machinery_e2e_test.go`'s and
   `slashdurability_e2e_test.go`'s hand-fabricated Shape-A call sites.
+
+- **`!compact [summary]`'s summary override** (`src/fake/scenarios/session.ts`).
+  GROUNDED: `compaction-directed` (this manifest, above) is the golden for the
+  whole `!compact` shape; `ContextCompacted.Summary`'s DERIVATION (the
+  assistant prose immediately following the boundary) is unchanged, only the
+  fixed conclusion string is now the prompt's own argument when one is given.
+  Retires every `sidecarCompactEvent(..., summary)` call site across
+  `clearcompact_e2e_test.go`, `phaseword_e2e_test.go`, `revive_e2e_test.go`,
+  `revivalhold_e2e_test.go` and `slashdurability_e2e_test.go`.

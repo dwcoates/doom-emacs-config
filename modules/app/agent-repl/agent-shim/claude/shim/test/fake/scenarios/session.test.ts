@@ -323,6 +323,24 @@ describe("compaction", () => {
     expect(typeof record?.logicalParentUuid).toBe("string");
   });
 
+  it("defaults the settled summary to the fixed conclusion", async () => {
+    // `ContextCompacted.Summary` is derived from the assistant prose FOLLOWING
+    // the boundary, which is what `conclude` writes.
+    // Arrange + Act
+    const driven = await driveScenario(["!compact"]);
+
+    // Assert
+    expect(theResult(driven).result).toBe("Compacted the conversation.");
+  });
+
+  it("lets a caller override the settled summary with a distinctive string", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!compact what the discarded history said"]);
+
+    // Assert
+    expect(theResult(driven).result).toBe("what the discarded history said");
+  });
+
   it("emits NO boundary when the compaction failed", async () => {
     // Arrange + Act
     const driven = await driveScenario(["!compact-failed"]);
