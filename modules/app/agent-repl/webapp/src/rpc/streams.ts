@@ -27,11 +27,14 @@
  * first push is the current truth; there are no fences, no epochs and no gap
  * to close.
  *
- * EVERY HANDLE RE-REGISTERS ON A NEW CLIENT. The graceful-rollout path hands
- * the page a new daemon to adopt, so each handle subscribes to
- * `ctx.onClientReplaced` and restarts itself on whatever `ctx.client` is by
- * then. The context's listener set IS the registry — a second one beside it
- * could disagree with it.
+ * A QUIESCED PAGE CANCELS EVERY HANDLE, and that is the ONLY thing besides an
+ * explicit `cancel()` that stops one. The graceful-rollout path does not hand
+ * this page a new daemon to move to — a successor on another loopback port is
+ * a different origin, so the host reloads the view instead — which means there
+ * is no "reopen on the adopted client" path here and deliberately no registry
+ * for one. What a handle does subscribe to is `ctx.onQuiesced`: the workspace
+ * has moved, so reopening would file a `daemon_unreachable` card every backoff
+ * for a link that is correctly gone.
  */
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
@@ -56,7 +59,14 @@ export interface StreamHandle {
 export interface StreamContext {
   readonly client: AgentReplClient;
   readonly failures: FailureSink;
-  onClientReplaced(fn: () => void): () => void;
+  /**
+   * The page going quiet, which every standing stream must obey.
+   *
+   * THE HANDLE CANCELS ITSELF rather than waiting to be told: the workspace has
+   * moved to a successor this page will never dial, so reopening would file a
+   * `daemon_unreachable` card every backoff for a link that is correctly gone.
+   */
+  onQuiesced(fn: () => void): () => void;
 }
 
 export interface WatchStreamOptions<Res extends Message> {
@@ -70,6 +80,14 @@ export interface WatchStreamOptions<Res extends Message> {
   onPush: (res: Res) => void;
   /** Observe how a run finished. Never required. */
   onEnd?: (end: StreamEnd) => void;
+  /**
+   * Called on the first push AFTER a run that ended without our cancel.
+   *
+   * The link coming back is a fact only this loop can observe, and the
+   * lifecycle needs it: an announced outage's banner comes down when the
+   * daemon is answering again, not when its own countdown says it should be.
+   */
+  onReconnected?: () => void;
   /** Injected by tests running on fake timers. */
   backoff?: BackoffOptions;
 }
@@ -114,17 +132,18 @@ export function watchStream<Res extends Message>(
     context: { rpc: opts.name },
   });
 
-  const unsubscribeFromClientReplacement = ctx.onClientReplaced(() => {
+  /** Filled in below; the quiet subscription cancels through the handle. */
+  let cancelSelf = (): void => undefined;
+  /** Set when the page was ALREADY quiet as this stream was being built. */
+  let quiesceRequested = false;
+  const unsubscribeFromQuiesce = ctx.onQuiesced(() => {
     if (cancelled) return;
-    // The page adopted a new daemon. Abort the run against the old client; the
-    // loop reopens on `ctx.client`, which is already the new one.
-    log("info", `${opts.name} is reopening on the adopted daemon`, {
-      operation: "rpc.stream-client-replaced",
+    quiesceRequested = true;
+    log("info", `${opts.name} is stopping: the workspace moved to another daemon`, {
+      operation: "rpc.stream-quiesced",
       context: { rpc: opts.name },
     });
-    backoffMs = initialMs;
-    controller.abort();
-    wakeFromBackoff?.();
+    cancelSelf();
   });
 
   /**
@@ -150,6 +169,7 @@ export function watchStream<Res extends Message>(
       });
       ctx.failures.retract("daemonUnreachable");
       unreachableFiled = false;
+      opts.onReconnected?.();
     }
     backoffMs = initialMs;
   };
@@ -213,9 +233,7 @@ export function watchStream<Res extends Message>(
     }
   };
 
-  void run();
-
-  return {
+  const handle: StreamHandle = {
     cancel(): void {
       if (cancelled) return;
       cancelled = true;
@@ -223,11 +241,21 @@ export function watchStream<Res extends Message>(
         operation: "rpc.stream-cancel",
         context: { rpc: opts.name },
       });
-      unsubscribeFromClientReplacement();
+      unsubscribeFromQuiesce();
       controller.abort();
       wakeFromBackoff?.();
     },
   };
+  cancelSelf = () => handle.cancel();
+  // A page that went quiet BEFORE this stream was opened must not get a run
+  // loop at all: `onQuiesced` fires immediately in that case, when `cancelSelf`
+  // was still the placeholder, so the flag it set is honored here instead.
+  if (quiesceRequested) {
+    handle.cancel();
+    return handle;
+  }
+  void run();
+  return handle;
 }
 
 /**

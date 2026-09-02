@@ -8,23 +8,23 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { ForwardingLogger, setLogger } from "../../src/log.js";
-import { createAgentReplClient, type AgentReplClient } from "../../src/rpc/client.js";
+import { createAgentReplClient } from "../../src/rpc/client.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { callUnary } from "../../src/rpc/unary.js";
+import { QUIESCED_MESSAGE, callUnary, type UnaryContext } from "../../src/rpc/unary.js";
 
 const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" });
 const UNKNOWN = [{ no: 999, wireType: 0, data: new Uint8Array([1]) }];
 
 /** A context whose client answers OpenExternal with whatever ANSWER builds. */
-function ctxAnswering(answer: () => OpenExternalResponse): { client: AgentReplClient } {
+function ctxAnswering(answer: () => OpenExternalResponse): UnaryContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, { openExternal: () => answer() });
   });
-  return { client: createAgentReplClient(transport) };
+  return { client: createAgentReplClient(transport), isQuiesced: () => false };
 }
 
 /** A context whose client throws THROWN from OpenExternal. */
-function ctxThrowing(thrown: unknown): { client: AgentReplClient } {
+function ctxThrowing(thrown: unknown): UnaryContext {
   const transport = createRouterTransport(({ service }) => {
     service(AgentRepl, {
       openExternal: () => {
@@ -32,10 +32,10 @@ function ctxThrowing(thrown: unknown): { client: AgentReplClient } {
       },
     });
   });
-  return { client: createAgentReplClient(transport) };
+  return { client: createAgentReplClient(transport), isQuiesced: () => false };
 }
 
-const call = (ctx: { client: AgentReplClient }): Promise<OpenExternalResponse> =>
+const call = (ctx: UnaryContext): Promise<OpenExternalResponse> =>
   callUnary(
     ctx,
     "OpenExternal",
@@ -130,5 +130,51 @@ describe("callUnary", () => {
     const ctx = ctxThrowing(new ConnectError("gone", Code.Unavailable));
     await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
     expect(lines.some(([, line]) => line.includes("rpc.unary-answered"))).toBe(false);
+  });
+});
+
+describe("the quiet window", () => {
+  it("refuses the call locally rather than sending it", async () => {
+    // ARRANGE
+    let sent = 0;
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        openExternal: () => {
+          sent += 1;
+          return create(OpenExternalResponseSchema, { result: { case: "success", value: {} } });
+        },
+      });
+    });
+    const ctx: UnaryContext = {
+      client: createAgentReplClient(transport),
+      isQuiesced: () => true,
+    };
+    // ACT
+    await expect(call(ctx)).rejects.toThrow(QUIESCED_MESSAGE);
+    // ASSERT
+    expect(sent).toBe(0);
+  });
+
+  it("refuses with Unavailable, so a call site draws its ordinary refusal", async () => {
+    // ARRANGE
+    const ctx: UnaryContext = { ...ctxAnswering(() => create(OpenExternalResponseSchema, {})), isQuiesced: () => true };
+    // ACT
+    const err = await call(ctx).catch((e: unknown) => e);
+    // ASSERT
+    expect(ConnectError.from(err).code).toBe(Code.Unavailable);
+  });
+
+  it("sends normally once the page is no longer quiet", async () => {
+    // ARRANGE
+    let quiet = true;
+    const base = ctxAnswering(() =>
+      create(OpenExternalResponseSchema, { result: { case: "success", value: {} } }),
+    );
+    const ctx: UnaryContext = { client: base.client, isQuiesced: () => quiet };
+    // ACT
+    quiet = false;
+    const response = await call(ctx);
+    // ASSERT
+    expect(response.result.case).toBe("success");
   });
 });
