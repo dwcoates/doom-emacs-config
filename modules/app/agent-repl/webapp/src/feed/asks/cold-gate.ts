@@ -146,18 +146,39 @@ export function drawFeedColdGateStanding(
   head.append(heading, drawFeedColdGateLastRequest(lastRequest, rc, `${path}.last_request`));
   card.append(head);
 
-  const lead = document.createElement("div");
-  lead.className = "hibernation-context";
-  lead.textContent = COLD_GATE_COPY.lead
-    .replace(
-      "{tokens}",
+  card.append(
+    drawLead(
       drawFeedColdGateContextTokens(tokens, `${path}.context_tokens`),
-    )
-    .replace("{model}", drawFeedColdGateModel(model, `${path}.model`));
-  card.append(lead);
+      drawFeedColdGateModel(model, `${path}.model`),
+    ),
+  );
 
   card.append(drawActions(rc, menu, `${path}.compact`));
   return card;
+}
+
+/**
+ * The lead sentence, with the token figure as an element of its own.
+ *
+ * The figure is the one number on this page the CLIENT scaled, so it is drawn
+ * in its own span rather than interpolated into a string: a reader can see what
+ * was formatted, and a test can hold that one figure to the ruled table without
+ * reading the sentence around it.
+ */
+function drawLead(tokens: string, model: string): HTMLElement {
+  const lead = document.createElement("div");
+  lead.className = "hibernation-context";
+  const [before, rest] = COLD_GATE_COPY.lead.split("{tokens}");
+  const figure = document.createElement("span");
+  figure.className = "cold-gate-tokens";
+  figure.setAttribute("data-context-tokens", "");
+  figure.textContent = tokens;
+  lead.append(
+    document.createTextNode(before),
+    figure,
+    document.createTextNode(rest.replace("{model}", model)),
+  );
+  return lead;
 }
 
 /** The token figure, formatted client-side from the raw count. */
@@ -217,7 +238,10 @@ export function drawFeedColdGateResolved(
 
   const el = document.createElement("div");
   el.className = "cold-gate-resolved";
-  el.setAttribute("data-state", "resolved");
+  // The card's state IS the resolution taken (preamble §5: a card carries its
+  // state/outcome arm), so a resolved gate reads `pay`, `clear` or `compact`
+  // rather than the word "resolved", which says nothing a reader needs.
+  el.setAttribute("data-state", choice.case);
   el.setAttribute("data-arm", choice.case);
 
   const word = document.createElement("span");
@@ -231,6 +255,9 @@ export function drawFeedColdGateResolved(
       break;
     case "compact":
       word.textContent = drawFeedColdGateResolvedCompact(choice.value, `${path}.compact`);
+      // The trace states WHICH scope was summarized as a datum of its own, so
+      // the choice is readable without parsing the sentence it was worded into.
+      word.setAttribute("data-compact-scope", String(choice.value.scope));
       break;
     default:
       return unreachableArm(`${path}.choice`, armName(choice as { case: string }));

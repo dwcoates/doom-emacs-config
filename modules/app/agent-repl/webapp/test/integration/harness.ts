@@ -39,6 +39,8 @@ import { mountTopbar } from "../../src/topbar/topbar";
 import { mountSidebar } from "../../src/sidebar/sidebar";
 import { mountHoldTray } from "../../src/tray/tray";
 import { mountComposer, createComposerGate } from "../../src/composer/composer";
+import { drawCommandPanel } from "../../src/panels/panels";
+import { forgetOwnTurns } from "../../src/composer/own-turns";
 import { mountLoginOverlay, type LoginHandle } from "../../src/login/login";
 import type { TerminalFactory } from "../../src/login/terminal";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
@@ -48,7 +50,7 @@ import { createFakeDaemon, type FakeDaemon } from "./fake-daemon";
 import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
 
 /** Where the page's clock starts: just after the fixtures' own timestamps. */
-const HARNESS_EPOCH_MS = 10_000;
+export const HARNESS_EPOCH_MS = 10_000;
 
 /** How many drain rounds `settle()` gives the DOM before it calls it a fault. */
 const SETTLE_ROUND_CAP = 60;
@@ -178,6 +180,20 @@ function installShell(doc: Document): void {
 }
 
 /**
+ * JSDOM HAS NO LAYOUT, so it implements no `Element.scrollIntoView`.
+ *
+ * The feed's reveal (a footer jump row, a breadcrumb) calls it, and without one
+ * the whole reveal throws before it has marked the row it landed on. Like
+ * `fetch`, this is a capability the environment is missing rather than a seam
+ * in the app: scrolling is not observable under jsdom either way, and every
+ * assertion about a jump is about what the page SAYS, not where it scrolled.
+ */
+function installScrollIntoView(): void {
+  if (typeof Element.prototype.scrollIntoView === "function") return;
+  Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+}
+
+/**
  * A TERMINAL FOR JSDOM, the second and last environment substitution.
  *
  * xterm.js is a browser bundle: it reads `self` at import time, measures the
@@ -258,6 +274,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   options.arrange?.(fake);
 
   installShell(document);
+  installScrollIntoView();
   const shell = shellElements(document);
 
   // jsdom's window carries no fetch; Node's global one reaches loopback.
@@ -281,6 +298,19 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const panels: SubmitPromptCommandPanel[] = [];
   const gate = createComposerGate();
   const handles: Handle[] = [failures];
+
+  /**
+   * PRODUCTION'S OWN PANEL SINK (main.ts): the answer to a slash command is
+   * DRAWN in the composer's area, replacing whatever panel stood there — a
+   * panel answers one submission, not the conversation. The harness keeps the
+   * panels it was handed as well, so a test can assert the callback and the
+   * drawing separately.
+   */
+  const showPanel = (panel: SubmitPromptCommandPanel): void => {
+    panels.push(panel);
+    for (const stale of shell.composer.querySelectorAll(":scope > [data-panel]")) stale.remove();
+    shell.composer.append(drawCommandPanel(panel, ctx));
+  };
 
   // PRODUCTION'S OWN BOOT ORDER, and it is load-bearing: adoption comes before
   // any stream (a daemon still finishing its rendezvous refuses every
@@ -306,8 +336,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
     composerFactory: composerEnabled
-      ? (host, bubble) =>
-          mountComposer(host, ctx, { feed: bubble, gate, onPanel: (p) => panels.push(p) })
+      ? (host, bubble) => mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
       : undefined,
   });
   handles.push(feed);
@@ -333,7 +362,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
 
   if (composerEnabled) {
     shell.composer.hidden = false;
-    handles.push(mountComposer(shell.composer, ctx, { gate, onPanel: (p) => panels.push(p) }));
+    handles.push(mountComposer(shell.composer, ctx, { gate, onPanel: showPanel }));
   }
 
   const $ = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
@@ -347,6 +376,27 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
    * "the markup stopped changing across two consecutive drains" waits for the
    * observable thing a test asserts on, and never sleeps a fixed interval.
    */
+  /**
+   * The markup, with THE CLOCKS MASKED.
+   *
+   * `shouldAdvanceTime` is on, so real seconds pass while `settle()` drains —
+   * and a page holding a ticking row (a permission's "waiting 0s", a tool
+   * call's "quiet for N", a cold gate's lapse) rewrites that one string every
+   * real second. Under load a drain round can take longer than the gap between
+   * two ticks, and a settle that compares raw markup then never sees four quiet
+   * rounds in a row and fails a page that is in fact idle.
+   *
+   * Every such element marks itself `data-ticking` (src/feed/ticking.ts), so
+   * their text is blanked in the comparison and nowhere else: a test that
+   * asserts a clock moved still reads the live DOM, and any OTHER change — a
+   * redraw, a new row, an attribute — still counts as the DOM moving.
+   */
+  const quietMarkup = (): string => {
+    const clone = document.body.cloneNode(true) as HTMLElement;
+    for (const clock of clone.querySelectorAll("[data-ticking]")) clock.textContent = "";
+    return clone.innerHTML;
+  };
+
   const settle = async (): Promise<void> => {
     let previous = "";
     let stable = 0;
@@ -354,7 +404,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       await vi.advanceTimersByTimeAsync(0);
       await yieldToIo();
       for (let flush = 0; flush < 5; flush += 1) await Promise.resolve();
-      const current = document.body.innerHTML;
+      const current = quietMarkup();
       // An unanswered request is a change that has not happened YET, so a
       // quiet DOM with one outstanding is not settled — it is early.
       stable = current === previous && inFlight.count === 0 ? stable + 1 : 0;
@@ -404,6 +454,19 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       for (const handle of [...handles].reverse()) handle.dispose();
       await fake.stop();
       await harness.secondFake?.stop();
+      // A FRESH BROWSER PROFILE PER TEST. The webview-local preferences (R14 —
+      // the open footer panel, the sidebar grouping, folds) live in
+      // `localStorage`, which jsdom shares across every test in a file. Left
+      // behind, one test's click decides what the NEXT test's page opens with,
+      // which is a dependency between tests and not a fact about the app.
+      // The page's claim on the turns IT submitted dies with the page, the
+      // same way it does on a reload (R14: nothing is persisted).
+      forgetOwnTurns();
+      try {
+        window.localStorage.clear();
+      } catch {
+        // A jsdom without storage is fine: there is then nothing to clear.
+      }
       vi.useRealTimers();
     },
 

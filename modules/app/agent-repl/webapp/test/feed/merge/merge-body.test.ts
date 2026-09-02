@@ -271,9 +271,9 @@ describe("a settled failure states its summary once, under the strip", () => {
 });
 
 describe("breadcrumbs draw only when non-empty (R6)", () => {
-  it("hides the header line when the trail is empty", () => {
+  it("draws no header line at all when the trail is empty", () => {
     const { host } = mount(new FakeSubfeed([tabRow("t1", { kind: "queue", state: "live" })]));
-    expect(host.querySelector("[data-breadcrumbs]")?.hasAttribute("hidden")).toBe(true);
+    expect(host.querySelector("[data-breadcrumbs]")).toBeNull();
   });
 
   it("draws the crumbs when the feed carries them", () => {

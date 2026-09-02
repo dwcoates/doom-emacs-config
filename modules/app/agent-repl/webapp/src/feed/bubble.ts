@@ -138,13 +138,26 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   function drawHead(): void {
     const previous = headSlot.firstElementChild;
     if (previous !== null) stopTicking(previous);
-    headSlot.replaceChildren(opts.head(row, { ...opts.rc, row }));
+    const head = opts.head(row, { ...opts.rc, row });
+    headSlot.replaceChildren(head);
+    // THE HEAD'S STATE IS THE BUBBLE'S. The head states the arm (live, settled
+    // succeeded, …); the bubble is the element the feed hands upward, so it
+    // repeats what the head said rather than deciding anything of its own.
+    const state = head.getAttribute("data-state");
+    if (state === null) el.removeAttribute("data-state");
+    else el.setAttribute("data-state", state);
   }
 
   /** Show or hide the sub-feed, and say so on the element and the toggle. */
   function applyExpanded(next: boolean): void {
     expanded = next;
     el.setAttribute("data-expanded", next ? "true" : "false");
+    // The ROW says it too. A fold is a fact about the row a reader is looking
+    // at, and every query — the reveal walk included — starts from the row
+    // rather than from the bubble element inside it. (The first call happens
+    // before the bubble is mounted; the feed copies the attribute up when it
+    // adopts the row, and this keeps the two agreeing on every toggle after.)
+    el.closest("[data-feed-row]")?.setAttribute("data-expanded", next ? "true" : "false");
     toggle.setAttribute("aria-expanded", next ? "true" : "false");
     toggle.textContent = next ? "▾" : "▸";
     panel.hidden = !next;

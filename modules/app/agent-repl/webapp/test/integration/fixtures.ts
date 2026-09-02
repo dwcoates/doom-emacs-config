@@ -1088,7 +1088,8 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
       glyph: { icon: "merge" },
       label: { text: "merging ws-1" },
       runtime: { startedAtMs: 1_000n },
-      fold: { folded: false },
+      // R2: the INITIAL fold. A bubble arrives collapsed, like every other.
+      fold: { folded: true },
     },
     result:
       result === "update"
@@ -1139,7 +1140,9 @@ export function feedPageError(): FeedPage {
     result: {
       case: "error",
       value: {
-        headline: { text: "history could not be replayed", tone: "warn" },
+        // The tone vocabulary is render-colors.json#topbar_tones; "warn" was a
+        // word from before the colors were the vocabulary.
+        headline: { text: "history could not be replayed", tone: "yellow" },
         kind: {
           case: "historyReplayTruncated",
           value: { fromSeq: 10n, stopAtSeq: 90n, delivered: 40n, reason: "store gap" },
@@ -1272,6 +1275,9 @@ export const FOOTER_STATUS_ACTIVITIES: Record<string, readonly string[]> = {
   loading: ["contextInjected", "notification", "rateLimited", "contextBudget"],
 };
 
+/** The status arms whose `activity` is NOT optional on the wire. */
+const STATUS_REQUIRING_ACTIVITY: readonly string[] = ["waiting", "loading"];
+
 /**
  * The status arm, built from the string tables above.
  *
@@ -1296,10 +1302,17 @@ export function footerStatus(
     const substatus = init?.substatus ?? substatuses[0];
     value.substatus = { case: substatus, value: substatusValue(substatus) };
   }
-  if (init?.activity) {
+  // TWO STATUSES REQUIRE AN ACTIVITY (footer.proto: waiting, loading — every
+  // such state has a composable line by construction). Elsewhere the field is
+  // `optional` and absence is a legitimate state, so it is set only when a case
+  // asks for one.
+  const kind = init?.activity ?? (STATUS_REQUIRING_ACTIVITY.includes(status)
+    ? FOOTER_STATUS_ACTIVITIES[status][0]
+    : undefined);
+  if (kind !== undefined) {
     value.activity = {
-      at: { atMs: init.activityAtMs ?? 3_000n },
-      kind: { case: init.activity, value: init.activityOverride ?? FOOTER_ACTIVITY_KINDS[init.activity] },
+      at: { atMs: init?.activityAtMs ?? 3_000n },
+      kind: { case: kind, value: init?.activityOverride ?? FOOTER_ACTIVITY_KINDS[kind] },
     };
   }
   return { case: status, value } as StatusArm;
@@ -1334,7 +1347,12 @@ export function footerView(init?: FooterInit): FooterView {
   return create(FooterViewSchema, {
     strip: {
       status: { status: footerStatus(init?.status ?? "thinking", init) },
-      clock: { turnStartedAtMs: init?.turnStartedAtMs ?? 1_000n },
+      // `turn_started_at_ms` is optional: an EXPLICIT undefined is the
+      // no-turn-is-live case, which a `??` default would quietly overwrite.
+      clock: {
+        turnStartedAtMs:
+          init !== undefined && "turnStartedAtMs" in init ? init.turnStartedAtMs : 1_000n,
+      },
       tokens: {
         input: { text: init?.tokensText ?? "42.1k" },
         alarm: init?.alarm ? {} : undefined,

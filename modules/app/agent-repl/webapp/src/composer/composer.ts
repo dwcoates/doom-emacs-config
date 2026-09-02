@@ -41,6 +41,7 @@ import type {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { log } from "../log.js";
+import { rememberOwnTurn } from "./own-turns.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -165,8 +166,11 @@ export function mountComposer(
 
   const applyGate = (state: ComposerGateState, reason?: string): void => {
     const closed = state === "closed";
-    // The TEXTAREA stays enabled on purpose: the draft remains editable while
-    // the gate is shut, exactly as the legacy merge gate left it.
+    // R7: the composer DISABLES while the footer reads merging, closing or
+    // disconnected — the whole control, not only its button. A box that still
+    // takes keystrokes while nothing can be sent invites a draft the reader
+    // then watches be refused.
+    input.disabled = closed;
     send.disabled = closed;
     notice.textContent = closed ? (reason ?? "composer closed") : "";
     root.toggleAttribute("data-gate-closed", closed);
@@ -237,6 +241,10 @@ export function mountComposer(
             return;
           }
           lastTurn = turn;
+          // THE PAGE'S CLAIM ON ITS OWN WORK: the feed marks the rows this
+          // turn carries, so the reader can tell what they submitted from what
+          // arrived while they watched.
+          rememberOwnTurn(turn);
           accepted();
           log("info", "SubmitPrompt minted a turn", {
             operation: "composer.submitted",
@@ -392,7 +400,10 @@ type SubmitPromptReason = NonNullable<SubmitPromptError["reason"]> & { case: str
  */
 export function drawSubmitRefusal(root: HTMLElement, arm: string, text: string): void {
   const refusal = document.createElement("div");
-  refusal.className = "composer-refusal";
+  // BOTH HOOKS: `.refusal` is the vocabulary every refusal surface shares
+  // (preamble §5 — a refusal drawn at the control that made the call), and
+  // `.composer-refusal` is this surface's own.
+  refusal.className = "refusal composer-refusal";
   refusal.setAttribute("data-arm", arm);
   refusal.textContent = text;
   root.appendChild(refusal);

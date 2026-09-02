@@ -65,16 +65,22 @@ export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLEleme
     context: { outcome: outcome.case },
   });
   const endedAtMs = msOf(msg.endedAtMs, `${PATH}.ended_at_ms`);
-  switch (outcome.case) {
-    case "concluded":
-      return drawFeedTurnEndedConcluded(outcome.value, rc);
-    case "errored":
-      return drawFeedTurnEndedErrored(outcome.value, endedAtMs, rc);
-    case "interrupted":
-      return drawFeedTurnEndedInterrupted(outcome.value);
-    default:
-      return unreachableArm(`${PATH}.outcome`, armName(outcome));
-  }
+  const el = ((): HTMLElement => {
+    switch (outcome.case) {
+      case "concluded":
+        return drawFeedTurnEndedConcluded(outcome.value, rc);
+      case "errored":
+        return drawFeedTurnEndedErrored(outcome.value, endedAtMs, rc);
+      case "interrupted":
+        return drawFeedTurnEndedInterrupted(outcome.value);
+      default:
+        return unreachableArm(`${PATH}.outcome`, armName(outcome));
+    }
+  })();
+  // The row's state is HOW THE TURN ENDED. The errored arm keeps its own
+  // `data-turn-error` for which failure it was; this is the outcome above it.
+  el.setAttribute("data-state", outcome.case);
+  return el;
 }
 
 /**

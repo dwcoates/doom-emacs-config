@@ -91,10 +91,13 @@ describe("arrangeSubfeedRows", () => {
     expect(host.children).toHaveLength(1);
   });
 
-  it("skips merge tabs, which are the merge body's and not rows of their own", () => {
+  it("lays out a merge tab like any other row when the body is not the strip", () => {
     const host = document.createElement("div");
+    // The MERGE body consumes its tabs itself and never reaches this arranger;
+    // the default body draws whatever the daemon served rather than dropping a
+    // row (src/feed/merge/tab-row.ts).
     arrangeSubfeedRows(host, viewOf([mergeTabRow("t1"), responseRow("a")]));
-    expect([...host.children].map((el) => el.getAttribute("data-feed-row"))).toEqual(["a"]);
+    expect([...host.children].map((el) => el.getAttribute("data-feed-row"))).toEqual(["t1", "a"]);
   });
 
   it("drops a row that stopped being in the feed, deletion being omission", () => {
@@ -121,9 +124,13 @@ describe("arrangeSubfeedRows", () => {
 describe("drawBreadcrumbTrail", () => {
   it("draws nothing at a feed's own top (R6)", () => {
     const { ctx } = harness();
+    const mount = document.createElement("div");
     const host = document.createElement("div");
-    drawBreadcrumbTrail(host, [], rowContext(ctx, userPromptRow("a", "x")));
-    expect(host.hidden).toBe(true);
+    mount.append(host);
+    drawBreadcrumbTrail(host, [], rowContext(ctx, userPromptRow("a", "x")), mount);
+    // An empty trail is NO trail: the line is taken out of the page rather than
+    // left standing empty.
+    expect(mount.children).toHaveLength(0);
   });
 
   it("draws the daemon-resolved labels, outermost first", () => {

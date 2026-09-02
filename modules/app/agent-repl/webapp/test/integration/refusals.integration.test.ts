@@ -389,12 +389,10 @@ describe("RequestCommandSupport", () => {
   });
 
   it("draws its refusal at the add-support button", async () => {
-    // Arrange
+    // Arrange: a TYPED cause. Since landing 4 an error with no cause set is a
+    // frame this build cannot read, not a refusal (see the unset-cause table).
     harness = await startHarness();
-    harness.fake.answer(
-      "requestCommandSupport",
-      create(RequestCommandSupportResponseSchema, { result: { case: "error", value: {} } }),
-    );
+    harness.fake.refuse("requestCommandSupport", "unknownWorkspace");
     await harness.fake.awaitStream("watchFeed");
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, commandRefusedRow());
     await harness.settle();
@@ -409,10 +407,8 @@ describe("OpenInEditor", () => {
   it("draws its refusal at the link that was clicked", async () => {
     // Arrange
     harness = await startHarness();
-    harness.fake.answer(
-      "openInEditor",
-      create(OpenInEditorResponseSchema, { result: { case: "error", value: {} } }),
-    );
+    // A TYPED cause: an unset one is an unreadable frame, not a refusal.
+    harness.fake.refuse("openInEditor", "unknownWorkspace");
     await harness.fake.awaitStream("watchFeed");
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(planUnit("planned")));
     await harness.settle();
@@ -533,6 +529,13 @@ const REFUSAL_SITES: RefusalSite[] = [
     click: "[data-question-submit]",
     site: '[data-feed-row="ask"]',
     arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, questionRow("open", { id: feedId("ask") })),
+    // The batch is answered WHOLE (src/feed/asks/question.ts: an unanswered
+    // question blocks submit in place rather than sending a partial batch), so
+    // every question is answered before the submit that provokes the refusal.
+    before: async (h) => {
+      for (const option of h.$$('[data-feed-row="ask"] .q-opts input')) option.click();
+      await h.settle();
+    },
   },
   {
     name: "AnswerColdGate",
