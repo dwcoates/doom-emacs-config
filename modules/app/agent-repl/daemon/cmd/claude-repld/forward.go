@@ -5,6 +5,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/merge"
 	"claude-repld/internal/rollout"
@@ -192,6 +193,25 @@ func (f *verbsForwarder) bind(target workspace.Verbs) {
 }
 
 func (f *verbsForwarder) verbs() (workspace.Verbs, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.target, f.target != nil
+}
+
+// healthForwarder carries the session watcher's diagnostics verdict to the
+// health reporter, which is built after the fleet the watchers live in.
+type healthForwarder struct {
+	mu     sync.RWMutex
+	target health.Reporter
+}
+
+func (f *healthForwarder) bind(target health.Reporter) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+func (f *healthForwarder) reporter() (health.Reporter, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.target, f.target != nil
