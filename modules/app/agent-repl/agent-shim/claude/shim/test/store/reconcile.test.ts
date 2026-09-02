@@ -17,6 +17,7 @@ import {
   createReconciler,
   findBashStart,
   reconciledCoordinate,
+  stoppedBashTerminal,
 } from "../../src/store/reconcile.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
@@ -387,5 +388,23 @@ describe("announceLiveWork", () => {
 
     // A kind absent from DetachableWork cannot claim to be detached.
     expect(announceLiveWork([read], [HANDLE])).toEqual([]);
+  });
+});
+
+describe("stoppedBashTerminal", () => {
+  it("closes the run as interrupted by the user, with the output unobserved", () => {
+    const command = create(conversationv1.AgentBashCommandSchema, { line: "sleep 100" });
+    const run = create(conversationv1.AgentActivityIdSchema, { value: "run-1" });
+
+    const entry = stoppedBashTerminal(agent("book-1"), run, command);
+
+    expect(entry.item.kind).toBe("bash_run");
+    const frame = entry.item.kind === "bash_run" ? entry.item.frame : undefined;
+    expect(frame?.result.case).toBe("success");
+    const success = frame?.result.value as conversationv1.AgentBashSuccess | undefined;
+    expect(success?.outcome.case).toBe("interrupted");
+    const interrupted = success?.outcome.value as conversationv1.AgentBashInterrupted | undefined;
+    expect(interrupted?.cause.case).toBe("byUser");
+    expect(interrupted?.output?.form.case).toBe("notObserved");
   });
 });
