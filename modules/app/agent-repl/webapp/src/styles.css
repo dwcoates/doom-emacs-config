@@ -4325,7 +4325,7 @@ body.draining #composer-input::placeholder {
 }
 #ws-sidebar .sb-menu-item:hover { background: var(--code-bg); }
 #ws-sidebar .sb-menu-item:disabled { color: var(--muted); cursor: default; }
-#ws-sidebar .sb-menu-destructive .sb-menu-item[data-verb="nuke"] { color: var(--err); }
+#ws-sidebar .sb-menu-destructive .sb-menu-item { color: var(--err); }
 #ws-sidebar .sb-confirm { padding: 0.3rem 0.6rem 0.5rem; }
 #ws-sidebar .sb-confirm-note { color: var(--muted); font-size: 0.72rem; margin-bottom: 0.3rem; }
 #ws-sidebar .sb-confirm-name { width: 100%; margin-bottom: 0.3rem; }
@@ -4339,7 +4339,15 @@ body.draining #composer-input::placeholder {
   padding: 0.1rem 0.5rem;
   cursor: pointer;
 }
-#ws-sidebar .sb-confirm-go:disabled { border-color: var(--border); color: var(--muted); cursor: default; }
+/* Unarmed until the workspace's name is typed back: the nuke button recedes
+   to the ordinary border until the typing matches, and only then wears the
+   error hue in full. */
+#ws-sidebar .sb-confirm-go { border-color: var(--border); color: var(--muted); }
+#ws-sidebar .sb-confirm-go.armed,
+#ws-sidebar .sb-menu-row:not(.sb-menu-destructive) .sb-confirm-go {
+  border-color: var(--err);
+  color: var(--err);
+}
 
 /* A refusal is said AT THE CONTROL that made the call, in the rail's error
    hue, and never anywhere else. */

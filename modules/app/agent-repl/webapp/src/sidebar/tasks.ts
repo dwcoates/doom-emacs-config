@@ -118,10 +118,11 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
   const host = document.createElement("div");
   host.className = "sb-task-create";
 
+  // The DISCLOSURE carries no hook: `[data-task-create]` is the control that
+  // actually issues CreateTask, which is the submit below.
   const open = document.createElement("button");
   open.type = "button";
   open.className = "sb-add";
-  open.setAttribute("data-task-create", "");
   open.textContent = "+ new task";
   host.appendChild(open);
 
@@ -136,6 +137,7 @@ export function drawCreateTaskControl(sc: SidebarContext): HTMLElement {
   const submit = document.createElement("button");
   submit.type = "button";
   submit.className = "sb-form-go";
+  submit.setAttribute("data-task-create", "");
   submit.textContent = "Create";
   const send = (): void => {
     const title = input.value.trim();
