@@ -152,6 +152,12 @@ export function mountBubble(opts: BubbleOptions): BubbleLike {
   function applyExpanded(next: boolean): void {
     expanded = next;
     el.setAttribute("data-expanded", next ? "true" : "false");
+    // The ROW says it too. A fold is a fact about the row a reader is looking
+    // at, and every query — the reveal walk included — starts from the row
+    // rather than from the bubble element inside it. (The first call happens
+    // before the bubble is mounted; the feed copies the attribute up when it
+    // adopts the row, and this keeps the two agreeing on every toggle after.)
+    el.closest("[data-feed-row]")?.setAttribute("data-expanded", next ? "true" : "false");
     toggle.setAttribute("aria-expanded", next ? "true" : "false");
     toggle.textContent = next ? "▾" : "▸";
     panel.hidden = !next;

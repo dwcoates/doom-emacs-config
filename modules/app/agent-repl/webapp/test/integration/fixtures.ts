@@ -1088,7 +1088,8 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
       glyph: { icon: "merge" },
       label: { text: "merging ws-1" },
       runtime: { startedAtMs: 1_000n },
-      fold: { folded: false },
+      // R2: the INITIAL fold. A bubble arrives collapsed, like every other.
+      fold: { folded: true },
     },
     result:
       result === "update"
@@ -1139,7 +1140,9 @@ export function feedPageError(): FeedPage {
     result: {
       case: "error",
       value: {
-        headline: { text: "history could not be replayed", tone: "warn" },
+        // The tone vocabulary is render-colors.json#topbar_tones; "warn" was a
+        // word from before the colors were the vocabulary.
+        headline: { text: "history could not be replayed", tone: "yellow" },
         kind: {
           case: "historyReplayTruncated",
           value: { fromSeq: 10n, stopAtSeq: 90n, delivered: 40n, reason: "store gap" },
