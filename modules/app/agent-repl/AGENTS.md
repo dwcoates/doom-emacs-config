@@ -102,6 +102,42 @@ the primary's address once the successor is reaped. Those two are the only
 sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
 isolation guarantee that makes the sharing safe.
 
+### A fixture workspace directory is process-private and swept per scenario
+
+Every `:project-dir` an integration scenario registers comes from
+`agent-repl-itest--fixture-dir`, under one pid-keyed root. Never write a
+literal `/tmp/itest-...` path into a suite again, and never let two scenarios
+inherit one directory's contents.
+
+Both rules exist because a REGISTERED WORKSPACE'S RECORDS ARE REACHABLE ONLY
+THROUGH THAT DIRECTORY'S CANONICAL `.claude/emacs/emacs.log` SYMLINK, and
+`agent-repl--workspace-emacs-log-target` re-points that link at its own
+runtime-owned target whenever it finds it naming someone else's:
+
+- **Across processes**, two suite runs sharing a fixed directory are two such
+  runtimes, each stealing the link back from the other, so every `--await-log`
+  reads a sink holding the other run's records and waits out its whole
+  deadline for a line that was written, findably, somewhere else.
+- **Across scenarios**, the log-target registry is scratch-bound per scenario,
+  so each scenario mints a fresh target — but the link still names the
+  previous scenario's target until this scenario writes its first
+  workspace-owned record. In that window `--await-log` is satisfied instantly
+  by the previous scenario's record for the same operation, and the assertion
+  behind it reads THAT record's arguments.
+
+`agent-repl-itest--begin-scenario` therefore sweeps the fixture root exactly
+as it sweeps the state root; production recreates the `.claude` tree the
+moment it routes a record.
+
+### A fixture that shortens the reconnect interval must cap its ceiling too
+
+`agent-repl-link--reconnect-tick` DOUBLES its interval on every poll that
+finds no daemon, up to `agent-repl-link-reconnect-max-interval-seconds`. A
+fixture that binds only `agent-repl-link-reconnect-interval-seconds` still
+pays the 5s production ceiling, so a scenario that stops a daemon and waits
+for a successor spends its deadline on backoff that has nothing to do with
+what it asserts. Bind both, at every site that binds either.
+
 ## Runtime investigations go through one skill
 
 For any current or historical agent-repl behavior, use the complete controller

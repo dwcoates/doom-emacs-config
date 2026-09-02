@@ -41,6 +41,7 @@
 (defvar agent-repl-link-up-functions)
 (defvar agent-repl-link-no-daemon-functions)
 (defvar agent-repl-link-reconnect-interval-seconds)
+(defvar agent-repl-link-reconnect-max-interval-seconds)
 
 ;;;; ---- Stub scripts ----
 
@@ -303,6 +304,7 @@ whole point is that Emacs stays responsive while the daemon boots."
                  (agent-repl-daemon-command (list start))
                  (agent-repl-daemon-boot-timeout-seconds 10)
                  (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-reconnect-max-interval-seconds 0.2)
                  (agent-repl-link-up-functions nil)
                  (agent-repl-link-no-daemon-functions nil))
             ;; Act.
@@ -1007,6 +1009,7 @@ effect is cold start's own build-and-start-and-link sequence."
                  (agent-repl-daemon-command (list start))
                  (agent-repl-daemon-boot-timeout-seconds 10)
                  (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-reconnect-max-interval-seconds 0.2)
                  (agent-repl-link-up-functions nil)
                  (agent-repl-link-no-daemon-functions nil))
             (should-not (agent-repl-link-up-p))
@@ -1075,6 +1078,7 @@ run exactly once and only one `WatchDaemon' subscriber ever stands."
                  (agent-repl-daemon-command (list start))
                  (agent-repl-daemon-boot-timeout-seconds 10)
                  (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-reconnect-max-interval-seconds 0.2)
                  (agent-repl-link-up-functions nil)
                  (agent-repl-link-no-daemon-functions nil))
             ;; Act: two back-to-back ensures, before the first has settled.
@@ -1159,6 +1163,7 @@ negative (never `foreign-adopted'), leaving the positive claim unpinned."
                  (agent-repl-daemon-command (list start))
                  (agent-repl-daemon-boot-timeout-seconds 10)
                  (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-reconnect-max-interval-seconds 0.2)
                  (agent-repl-link-up-functions nil)
                  (agent-repl-link-no-daemon-functions nil))
             ;; Act.

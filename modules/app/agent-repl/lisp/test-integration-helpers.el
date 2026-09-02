@@ -128,6 +128,43 @@ almost useless."
         ;; pending sentinel, then returns after the interval at the latest.
         (accept-process-output nil 0.02)))))
 
+(defconst agent-repl-itest--fixture-root
+  (expand-file-name (format "agent-repl-itest-fixtures-%d" (emacs-pid))
+                    temporary-file-directory)
+  "Root of this Emacs process's PRIVATE fixture directories.
+
+A FIXTURE DIRECTORY IS A WORKSPACE'S `:project-dir', AND PRODUCTION OWNS
+WHAT IT WRITES THERE.  A registered workspace's records route into
+`<project-dir>/.claude/emacs/emacs.log', a canonical SYMLINK
+`agent-repl--workspace-emacs-log-target' re-points at its own
+runtime-owned target whenever it finds the link naming someone else's --
+deliberately, because \"another Emacs runtime registering the same
+directory\" is exactly the case that rule exists for.
+
+Two suite runs on one machine are two such runtimes.  With a fixed
+`/tmp/itest-<suite>-ws' they share one canonical link and each re-points
+it under the other, so a scenario's `--await-log' reads a sink holding
+the OTHER process's records and waits out its whole deadline for a line
+that was written, findably, somewhere else.  That is a roaming timeout in
+whichever composer or verbs scenario happened to be running, which is
+indistinguishable from a flake and is not one.
+
+Keying the root by pid makes the sharing impossible rather than
+unlikely.")
+
+(defun agent-repl-itest--fixture-dir (name)
+  "Return this process's private fixture directory called NAME.
+The directory itself is NOT created: production creates a workspace's
+`.claude' tree the first time it routes a record there, and a scenario
+that needs the directory earlier makes it itself."
+  (expand-file-name name agent-repl-itest--fixture-root))
+
+(defun agent-repl-itest--delete-fixture-root ()
+  "Delete this process's fixture root.  Runs on `kill-emacs-hook'."
+  (ignore-errors (delete-directory agent-repl-itest--fixture-root t)))
+
+(add-hook 'kill-emacs-hook #'agent-repl-itest--delete-fixture-root)
+
 (defun agent-repl-itest--private-state-dir ()
   "Create and return a fresh private `AGENT_REPL_STATE_DIR'."
   (file-name-as-directory (make-temp-file "agent-repl-itest-state-" t)))
@@ -628,6 +665,26 @@ be exactly the leak a fresh process used to prevent."
               (delete-directory entry t)
             (delete-file entry)))))))
 
+(defun agent-repl-itest--sweep-fixture-root ()
+  "Empty this process\='s fixture root, so no scenario inherits a log sink.
+
+A FIXTURE WORKSPACE\='S RECORDS OUTLIVE THE SCENARIO THAT WROTE THEM.  The
+suites reuse one directory per suite, and a registered workspace\='s
+records reach a reader only through that directory\='s canonical
+`.claude/emacs/emacs.log\=' symlink.  The log-target registry is scratch-
+bound per scenario, so each scenario mints a FRESH target -- but the link
+still names the PREVIOUS scenario\='s target until this scenario writes
+its first workspace-owned record.
+
+In that window `agent-repl-itest--await-log\=' is satisfied instantly by
+the previous scenario\='s record for the same operation, and the assertion
+behind it then reads THAT record\='s arguments -- the refusal fields, the
+arm keyword -- and fails on a scenario whose own answer had not arrived
+yet.  Sweeping the root is what makes a record found a record this
+scenario wrote; production recreates the `.claude\=' tree the moment it
+routes one."
+  (ignore-errors (delete-directory agent-repl-itest--fixture-root t)))
+
 (defun agent-repl-itest--republish-addr (daemon)
   "Point DAEMON\='s state root at DAEMON, whatever last wrote `daemon.addr'.
 A cold-start scenario spawns a STUB daemon that publishes its own address
@@ -660,6 +717,7 @@ that made it, so a scenario that dies mid-way cannot poison its successor."
     ;; subscribed.
     (agent-repl-itest--reset daemon)
     (agent-repl-itest--sweep-state-dir daemon)
+    (agent-repl-itest--sweep-fixture-root)
     (agent-repl-itest--republish-addr daemon)
     daemon))
 
