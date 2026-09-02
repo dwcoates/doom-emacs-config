@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -220,5 +221,24 @@ func TestSetArmFillsTheBaseRefUnresolvedRef(t *testing.T) {
 	}
 	if got := resp.GetError().GetBaseRefUnresolved().GetRef(); got != "origin/nope" {
 		t.Fatalf("base_ref_unresolved.ref = %q, want origin/nope", got)
+	}
+}
+
+// TestAsRefusalUnwrapsAWrappedWorkspaceRefusal pins that the normalization goes
+// through workspace.AsRefusal, the package's canonical extractor, so a refusal
+// a verb wrapped on its way out still names its arm.
+func TestAsRefusalUnwrapsAWrappedWorkspaceRefusal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	err := fmt.Errorf("CreateWorkspace: %w",
+		&workspace.Refusal{Arm: workspace.ArmBaseRefUnresolved, Reason: "the base ref does not resolve"})
+
+	// Act.
+	got, ok := surface.asRefusal(err)
+
+	// Assert.
+	if !ok || got.Arm != workspace.ArmBaseRefUnresolved {
+		t.Fatalf("asRefusal = %+v, %t, want the wrapped arm", got, ok)
 	}
 }
