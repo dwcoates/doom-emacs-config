@@ -348,7 +348,16 @@ type UpdateAgentKind =
    * send a caller looking for a live agent that was live all along. The same
    * input to the main agent would deliver; the gap is the SDK's.
    */
-  | { readonly kind: "notDeliverable" };
+  | { readonly kind: "notDeliverable" }
+  /**
+   * A PROMPT reached a subagent whose OWN TURN IS ALREADY RUNNING.
+   *
+   * A fact about the agent's state, distinct from `notDeliverable`: the route
+   * question never arises, because the addressee is busy. The daemon relays it
+   * as `SubmitPromptError.bubble_refused{agent_busy}` — it is the one producer
+   * of that relay (landing 7, 2026-09-02).
+   */
+  | { readonly kind: "agentBusy" };
 
 /** The base constructor for `shim.v1.UpdateAgentFailure`. */
 export function updateAgentFailure(
@@ -358,7 +367,9 @@ export function updateAgentFailure(
   return create(shimv1.UpdateAgentFailureSchema, {
     detail,
     kind:
-      cause.kind === "unknownAgent"
+      cause.kind === "agentBusy"
+        ? { case: "agentBusy", value: create(shimv1.UpdateAgentAgentBusySchema, {}) }
+        : cause.kind === "unknownAgent"
         ? { case: "unknownAgent", value: create(shimv1.UpdateAgentUnknownAgentSchema, {}) }
         : cause.kind === "noOpenAsk"
           ? { case: "noOpenAsk", value: create(shimv1.UpdateAgentNoOpenAskSchema, {}) }
