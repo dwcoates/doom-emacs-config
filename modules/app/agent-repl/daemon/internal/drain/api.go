@@ -161,6 +161,12 @@ func New(deps Deps) (Controller, error) {
 		return nil, err
 	}
 	deps.IdleCutoff = cutoff
+	// A SWEEP THAT RUNS LESS OFTEN THAN THE CUTOFF CANNOT HONOR IT. The cadence
+	// is the resolution at which idleness is noticed, so a cutoff shorter than
+	// the cadence would be observed a whole cadence late — every time.
+	if deps.IdleCutoff > 0 && deps.SweepEvery > deps.IdleCutoff {
+		deps.SweepEvery = deps.IdleCutoff
+	}
 	c := &controller{deps: deps, log: deps.Log.Global(), rearm: make(chan struct{}, 1)}
 	c.log.Debug(opNew, "the drain controller is up", dlog.Context{
 		"idle_cutoff":    deps.IdleCutoff.String(),

@@ -284,6 +284,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Footer:         footerResolver,
 		Holds:          holdsResolver,
 		Client:         fleet.Sender,
+		Revive:         fleet.Start,
 		Watcher:        fleet.Watcher,
 		// A submission that arrives under a PARKED merge lease goes to the
 		// orchestrator as guidance. The queue never imports merge, so the
