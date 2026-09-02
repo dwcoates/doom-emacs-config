@@ -41,6 +41,14 @@ func NewLeaseID() ids.LeaseID { return ids.LeaseID(mint()) }
 // identifier.
 func NewTurnID() ids.TurnID { return ids.TurnID(mint()) }
 
+// NewVendorSessionID mints a VENDOR session id. It is the one identifier here
+// the daemon mints on the vendor's behalf rather than for itself, and it is a
+// full uuid because that is the shape the vendor's own transcript file names
+// use: a FORK never resumes the parent's id (shim.v1 StartSession has no fork
+// arm and a vendor session id is single-occupancy under the session lock), so
+// the daemon mints one and files the copied transcript under it.
+func NewVendorSessionID() string { return uuid.New().String() }
+
 // NewTaskID mints a task identity.
 func NewTaskID() ids.TaskID { return ids.TaskID(mint()) }
 
