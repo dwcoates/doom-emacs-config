@@ -647,3 +647,8 @@ every UX or contract gap you surfaced instead of improvising.
   (AgentToolFailure naming the permission id), no success/output; the gate
   test asserts start-then-denied-failure. Recorded in shim.md's gate section;
   code change rides the fakes/rebuild converter brief. No proto change.
+- RULING CLARIFIED (project lead, final): denied call settles `failure` with
+  content UNSET + settled_at; drawn denied via the permission unit's shared
+  id; no AgentToolFailure denied cause; starts never deferred. shim.md gate
+  section amended. Converter change + gate test amendment ride the
+  fakes/rebuild brief.

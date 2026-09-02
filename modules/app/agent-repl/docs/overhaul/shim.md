@@ -321,14 +321,17 @@ purpose).
   permission mode, restated authoritatively on WatchSession.
 - An allowed tool then runs as an ordinary unit under the SAME identity; a
   denied tool never starts and has no activity frames.
-  RULING (project lead, 2026-09-01): "never starts" is the RECORD's truth,
-  not a stream-ordering guarantee. The tool_use block (and so the unit's
-  `start`) is already on the stream when canUseTool fires, and tool starts
-  are NOT deferred (every tool's streaming latency is not the price of one
-  gate case). On denial the shim settles that unit's `failure` arm with the
-  denial as its cause (the shared AgentToolFailure payload naming the
-  permission id), never a success/output; the store row is superseded whole,
-  so the record reads "denied, never ran" while the stream self-corrects.
+  RULING (project lead, 2026-09-01, final): a denied tool has NO result;
+  its unit settles `failure` with content UNSET (the producer observed no
+  error content — the documented meaning) and settled_at stamped, and is
+  drawn denied via its permission unit: AgentPermission's id IS the gated
+  unit's AgentActivityId, and the permission unit already settles denied, so
+  a consumer joins the tool unit's failure terminal to the permission unit by
+  that shared id. Tool starts are NOT deferred (the tool_use block is on the
+  stream before canUseTool fires; moving every start to the gate answer is
+  rejected). No `denied` cause on AgentToolFailure — a landing-7 candidate
+  only if the daemon lead reports the join awkward. The gate test asserts
+  start → permission denied → failure(no content), no success/output.
 - Answer validation is free: the shim already holds the pending callback
   while the agent blocks, so echoes are checked against the ask in hand.
 
