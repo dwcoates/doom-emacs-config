@@ -32,15 +32,12 @@ import { PersistenceError, type AgentPageSession } from "./persistence.js";
 
 const LOGGER = bindLog({ component: "shim-store-reader", operation: "shim.store.reader" });
 
-/** The component name every fault from this half carries. */
-export const READER_COMPONENT = "store-reader";
-
 // ---------------------------------------------------------------------------
 // store.v1 → conversation.v1: one function per message (the proto→code mapping)
 // ---------------------------------------------------------------------------
 
 /** The store's pointer as the history pointer the daemon echoes. */
-export function toHistoryPointer(pointer: storev1.StoreItemPointer): conversationv1.HistoryPointer {
+function toHistoryPointer(pointer: storev1.StoreItemPointer): conversationv1.HistoryPointer {
   if (pointer.value === "") {
     throw new PersistenceError("stale_pointer", "the store served an empty item pointer");
   }
@@ -79,7 +76,7 @@ export function toHistoryEntry(line: storev1.StorePageLine): conversationv1.Hist
 }
 
 /** One stored line and its position. */
-export function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
+function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.HistoryEntryAt {
   if (line.at === undefined || line.line === undefined) {
     throw new PersistenceError(
       "store_unavailable",
@@ -93,7 +90,7 @@ export function toHistoryEntryAt(line: storev1.StoreLineAt): conversationv1.Hist
 }
 
 /** The page's completeness arm, in the history vocabulary. */
-export function toHistoryBoundary(
+function toHistoryBoundary(
   boundary: storev1.AgentSessionPage["boundary"] | storev1.ReadAgentPageSuccess["boundary"],
 ): conversationv1.HistoryPage["boundary"] {
   switch (boundary.case) {
@@ -121,7 +118,7 @@ export function toHistoryBoundary(
 }
 
 /** The opening page, whole. */
-export function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.HistoryPage {
+function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.HistoryPage {
   return create(conversationv1.HistoryPageSchema, {
     entries: page.lines.map(toHistoryEntryAt),
     boundary: toHistoryBoundary(page.boundary),
@@ -139,7 +136,7 @@ export function toHistoryPage(page: storev1.AgentSessionPage): conversationv1.Hi
  * realistic gap, and a gap that still exceeds it is reported LOUDLY rather than
  * silently skipped.
  */
-export const CATCHUP_PAGE_SIZE = 1024;
+const CATCHUP_PAGE_SIZE = 1024;
 
 // ---------------------------------------------------------------------------
 // Failure translation
@@ -204,7 +201,7 @@ export function transportFailure(error: unknown): PersistenceError {
 }
 
 /** Whether a thrown error is the store's "I do not know this token" refusal. */
-export function isNotFound(error: unknown): boolean {
+function isNotFound(error: unknown): boolean {
   return error instanceof ConnectError && error.code === Code.NotFound;
 }
 
@@ -213,7 +210,7 @@ export function isNotFound(error: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 /** The read half, plus the two notes the write half feeds it about shell runs. */
-export interface Reader {
+interface Reader {
   openAgentPage(
     agent: conversationv1.AgentId,
     pageSize: number,
@@ -233,7 +230,7 @@ export interface Reader {
 }
 
 /** What a reader needs to exist. */
-export interface ReaderOptions {
+interface ReaderOptions {
   readonly client: StoreClient;
 }
 

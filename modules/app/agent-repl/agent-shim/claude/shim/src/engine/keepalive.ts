@@ -58,7 +58,7 @@ export function isKeepalivePrompt(text: string): boolean {
 }
 
 /** What a rewind needs: the record to resume at, and why. */
-export interface RewindObligation {
+interface RewindObligation {
   /** The vendor record uuid the next query resumes THROUGH, inclusive. */
   readonly resumeSessionAt: string;
   /** How many keep-alive turns are being discarded. */

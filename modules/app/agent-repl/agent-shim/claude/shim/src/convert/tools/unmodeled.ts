@@ -86,7 +86,7 @@ const MCP_SEPARATOR = "__";
  * makes a server called `my__server` safe — its qualified names split wrongly,
  * every candidate misses, and the field stays unset instead of naming `my`.
  */
-export function resolveMcpServer(
+function resolveMcpServer(
   toolName: string,
   environment: ToolEnvironment | undefined,
 ): string | undefined {

@@ -61,7 +61,7 @@ async function ask(ctx: ScenarioContext, questions: FakeQuestion[]): Promise<{
   return { call, answers };
 }
 
-export const ASK_SINGLE = scenario({
+const ASK_SINGLE = scenario({
   name: "ask-single",
   prompt: "!ask-single",
   emits: "one single-select `AskUserQuestion` with four options, asked through the shim's own gate",
@@ -88,7 +88,7 @@ export const ASK_SINGLE = scenario({
   },
 });
 
-export const ASK_MULTI = scenario({
+const ASK_MULTI = scenario({
   name: "ask-multi",
   prompt: "!ask-multi",
   emits:
@@ -125,7 +125,7 @@ export const ASK_MULTI = scenario({
   },
 });
 
-export const ASK_FREE_TEXT = scenario({
+const ASK_FREE_TEXT = scenario({
   name: "ask-free",
   prompt: "!ask-free",
   emits:
@@ -158,7 +158,7 @@ export const ASK_FREE_TEXT = scenario({
   },
 });
 
-export const ASK_UNANSWERED = scenario({
+const ASK_UNANSWERED = scenario({
   name: "ask-unanswered",
   prompt: "!ask-unanswered",
   emits:

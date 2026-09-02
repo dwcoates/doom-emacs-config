@@ -42,7 +42,7 @@ import { conversationv1, shimv1 } from "../proto.js";
  * and the reason to offer the user a remediation, so a bare "it was cold" is
  * unactionable.
  */
-export type StartSessionCause =
+type StartSessionCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
   | { readonly kind: "vendorStartFailed" }
   | { readonly kind: "unknownSession" }
@@ -96,7 +96,7 @@ export function startSessionStarted(
 // ---------------------------------------------------------------------------
 
 /** Why the model could not be changed. */
-export type SetSessionModelCause =
+type SetSessionModelCause =
   | { readonly kind: "cold"; readonly cold: conversationv1.SessionCold }
   | { readonly kind: "modelNotInCatalog" }
   | { readonly kind: "noSession" }
@@ -135,7 +135,7 @@ export function setSessionModelRefused(
 // ---------------------------------------------------------------------------
 
 /** Why the permission mode could not be changed. */
-export type SetSessionPermissionModeKind =
+type SetSessionPermissionModeKind =
   | { readonly kind: "noSession" }
   | { readonly kind: "vendorRefused" };
 
@@ -174,7 +174,7 @@ export function setSessionPermissionModeRefused(
  * except `compactionFailed`, which carries the vendor's own wording in
  * `error`. So this is the one refusal whose human string lives inside an arm.
  */
-export type HibernateErrorKind =
+type HibernateErrorKind =
   | { readonly kind: "turnInFlight" }
   | { readonly kind: "compactionFailed"; readonly error: string }
   | { readonly kind: "noSession" };
@@ -218,7 +218,7 @@ export function hibernateAcked(): shimv1.HibernateResponse {
  * `live` is the refusal an unforced kill answers with, and it NAMES what is
  * live so the daemon can tell the user what forcing would destroy.
  */
-export type KillSessionCause =
+type KillSessionCause =
   | { readonly kind: "live"; readonly live: conversationv1.SessionLive }
   | { readonly kind: "noSession" }
   | { readonly kind: "queryRefusedToEnd" };
@@ -263,7 +263,7 @@ export function killSessionClosed(
 // ---------------------------------------------------------------------------
 
 /** Why a turn could not be started. */
-export type StartTurnKind =
+type StartTurnKind =
   | { readonly kind: "turnAlreadyOpen" }
   | { readonly kind: "noSession" }
   | { readonly kind: "vendorRefused" }
@@ -334,7 +334,7 @@ export function emptyOpeningPage(): conversationv1.HistoryPage {
  * echoed values do not match the pending callback the shim already holds is
  * rejected rather than guessed at.
  */
-export type UpdateAgentKind =
+type UpdateAgentKind =
   | { readonly kind: "unknownAgent" }
   | { readonly kind: "noOpenAsk" }
   | { readonly kind: "answerMismatch" }
@@ -397,7 +397,7 @@ export function updateAgentDelivered(): shimv1.UpdateAgentResponse {
 // ---------------------------------------------------------------------------
 
 /** Why the turn was not ended. `live` names the transitive refusal set. */
-export type KillTurnCause =
+type KillTurnCause =
   | { readonly kind: "live"; readonly live: conversationv1.TurnLive }
   | { readonly kind: "notTheOpenTurn" }
   | { readonly kind: "noTurnOpen" }
@@ -437,7 +437,7 @@ export function killTurnKilled(killed: conversationv1.TurnKilled): shimv1.KillTu
 // ---------------------------------------------------------------------------
 
 /** Why the backgrounded shell was not stopped. */
-export type StopBashKind = { readonly kind: "unknownWork" } | { readonly kind: "alreadyEnded" };
+type StopBashKind = { readonly kind: "unknownWork" } | { readonly kind: "alreadyEnded" };
 
 /** The base constructor for `shim.v1.StopBashFailure`. */
 export function stopBashFailure(cause: StopBashKind, detail: string): shimv1.StopBashFailure {
@@ -469,7 +469,7 @@ export function stopBashStopped(): shimv1.StopBashResponse {
 // ---------------------------------------------------------------------------
 
 /** Why the in-flight unit could not be moved onto its own stream. */
-export type DetachForegroundKind =
+type DetachForegroundKind =
   | { readonly kind: "unknownUnit" }
   | { readonly kind: "alreadyConcluded" }
   | { readonly kind: "notDetachable" }
@@ -530,7 +530,7 @@ export function detachForegroundDetached(): shimv1.DetachForegroundResponse {
 // ---------------------------------------------------------------------------
 
 /** Why a page of history could not be served. */
-export type ReadHistoryKind =
+type ReadHistoryKind =
   | { readonly kind: "unknownAgent" }
   | { readonly kind: "stalePointer" }
   | { readonly kind: "storeUnavailable" };
@@ -578,7 +578,7 @@ export function readHistoryPage(page: conversationv1.HistoryPage): shimv1.ReadHi
  * NOT a refusal of anything: a fault rides WatchSession as a diagnostics
  * change, so the daemon learns the shim is degraded even when no rpc failed.
  */
-export type SessionFaultKind =
+type SessionFaultKind =
   | { readonly kind: "storeUnreachable" }
   | { readonly kind: "converterDefect" }
   | { readonly kind: "logSinkPoisoned" }

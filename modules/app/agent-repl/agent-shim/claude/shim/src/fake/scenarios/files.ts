@@ -45,7 +45,7 @@ function readResult(fields: {
   };
 }
 
-export const READ_WHOLE = scenario({
+const READ_WHOLE = scenario({
   name: "read",
   prompt: "!read",
   emits: "a `Read` tool_use with only `file_path`, then a text tool_result whose `toolUseResult.file` spans the whole file",
@@ -63,7 +63,7 @@ export const READ_WHOLE = scenario({
   },
 });
 
-export const READ_HEAD = scenario({
+const READ_HEAD = scenario({
   name: "read-head",
   prompt: "!read-head",
   emits: "a `Read` with `limit` and no `offset`, answered with the first lines and a total that exceeds them",
@@ -78,7 +78,7 @@ export const READ_HEAD = scenario({
   },
 });
 
-export const READ_RANGE = scenario({
+const READ_RANGE = scenario({
   name: "read-range",
   prompt: "!read-range",
   emits: "a `Read` with both `offset` and `limit`, answered with a window whose `startLine` is not 1",
@@ -93,7 +93,7 @@ export const READ_RANGE = scenario({
   },
 });
 
-export const READ_TRUNCATED = scenario({
+const READ_TRUNCATED = scenario({
   name: "read-truncated",
   prompt: "!read-truncated",
   emits: "a `Read` cut at the token cap, plus the vendor's `read_truncation_notice` attachment naming the call",
@@ -115,7 +115,7 @@ export const READ_TRUNCATED = scenario({
   },
 });
 
-export const READ_IMAGE = scenario({
+const READ_IMAGE = scenario({
   name: "read-image",
   prompt: "!read-image",
   emits: "a `Read` of a png, answered with an image content block and an image `toolUseResult` carrying dimensions",
@@ -148,7 +148,7 @@ export const READ_IMAGE = scenario({
   },
 });
 
-export const WRITE_CREATE = scenario({
+const WRITE_CREATE = scenario({
   name: "write-create",
   prompt: "!write-create",
   emits: "a `Write` answered with `toolUseResult.type: \"create\"` and an empty `structuredPatch`",
@@ -169,7 +169,7 @@ export const WRITE_CREATE = scenario({
   },
 });
 
-export const WRITE_UPDATE = scenario({
+const WRITE_UPDATE = scenario({
   name: "write-update",
   prompt: "!write-update",
   emits: "a `Write` over an existing file, answered with `type: \"update\"`, the prior body and a structuredPatch",
@@ -198,7 +198,7 @@ export const WRITE_UPDATE = scenario({
   },
 });
 
-export const EDIT = scenario({
+const EDIT = scenario({
   name: "edit",
   prompt: "!edit",
   emits: "an `Edit` answered with the corpus edit shape — filePath, oldString, newString, structuredPatch, replaceAll",
@@ -233,7 +233,7 @@ export const EDIT = scenario({
   },
 });
 
-export const IDE_DIAGNOSTICS = scenario({
+const IDE_DIAGNOSTICS = scenario({
   name: "ide-diagnostics",
   prompt: "!ide-diagnostics",
   emits: "an `Edit`, then the vendor's `diagnostics` attachment reporting a typescript error in the edited file",
@@ -278,7 +278,7 @@ export const IDE_DIAGNOSTICS = scenario({
   },
 });
 
-export const GREP_CONTENT = scenario({
+const GREP_CONTENT = scenario({
   name: "grep-content",
   prompt: "!grep-content",
   emits: "a `Grep` in content mode answered with matching lines and a total that exceeds them",
@@ -305,7 +305,7 @@ export const GREP_CONTENT = scenario({
   },
 });
 
-export const GREP_FILES = scenario({
+const GREP_FILES = scenario({
   name: "grep-files",
   prompt: "!grep-files",
   emits: "a `Grep` in files_with_matches mode answered with paths only",
@@ -324,7 +324,7 @@ export const GREP_FILES = scenario({
   },
 });
 
-export const GREP_COUNT = scenario({
+const GREP_COUNT = scenario({
   name: "grep-count",
   prompt: "!grep-count",
   emits: "a `Grep` in count mode answered with per-file counts",
@@ -345,7 +345,7 @@ export const GREP_COUNT = scenario({
   },
 });
 
-export const GLOB = scenario({
+const GLOB = scenario({
   name: "glob",
   prompt: "!glob",
   emits: "a `Glob` answered with a truncated path list and a total larger than the list",

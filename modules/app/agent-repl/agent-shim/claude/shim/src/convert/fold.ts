@@ -113,7 +113,7 @@ export const EMPTY_FOLD_OUTPUT: FoldOutput = { entries: [] };
  * transport bookkeeping we HAVE modelled, as meaning nothing. Recording them
  * would fill the unserved table with keep-alive frames.
  */
-export const SILENTLY_IGNORED_TYPES: ReadonlySet<string> = new Set(["keep_alive"]);
+const SILENTLY_IGNORED_TYPES: ReadonlySet<string> = new Set(["keep_alive"]);
 
 /**
  * The fold, as the engine drives it.
@@ -122,7 +122,7 @@ export const SILENTLY_IGNORED_TYPES: ReadonlySet<string> = new Set(["keep_alive"
  * purpose: a fold that could await would be able to interleave two messages and
  * break the ordering every upsert depends on.
  */
-export interface Fold {
+interface Fold {
   /**
    * Convert one SDK message.
    *

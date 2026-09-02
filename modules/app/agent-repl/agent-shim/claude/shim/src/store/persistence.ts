@@ -127,7 +127,7 @@ export interface AgentPageSession {
  * unreachable store is waited out, an unknown agent is a caller error, a stale
  * pointer is a re-open, and unknown work is a refusal the caller reports.
  */
-export type PersistenceFailureKind =
+type PersistenceFailureKind =
   | "store_unavailable"
   | "unknown_agent"
   | "stale_pointer"

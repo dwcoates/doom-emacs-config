@@ -17,7 +17,7 @@
  */
 import { conclude, scenario } from "./support.js";
 
-export const TASK_CREATE = scenario({
+const TASK_CREATE = scenario({
   name: "task-create",
   prompt: "!task-create",
   emits: "two `TaskCreate` calls and a `TaskUpdate` that links the second as blocked by the first",
@@ -35,7 +35,7 @@ export const TASK_CREATE = scenario({
   },
 });
 
-export const TASK_CHANGE = scenario({
+const TASK_CHANGE = scenario({
   name: "task-change",
   prompt: "!task-change",
   emits: "a `TaskUpdate` answered with the corpus's `statusChange` shape (`from`/`to`)",
@@ -54,7 +54,7 @@ export const TASK_CHANGE = scenario({
   },
 });
 
-export const TASK_REJECT = scenario({
+const TASK_REJECT = scenario({
   name: "task-reject",
   prompt: "!task-reject",
   emits: "a `TaskUpdate` the board REFUSES, answered with `success: false` and an `error`",
@@ -73,7 +73,7 @@ export const TASK_REJECT = scenario({
   },
 });
 
-export const SEND_MESSAGE_QUEUED = scenario({
+const SEND_MESSAGE_QUEUED = scenario({
   name: "send-message",
   prompt: "!send-message",
   emits: "a `SendMessage` to a LIVE agent, answered WITHOUT `resumedAgentId` — the message queues for its next tool round",
@@ -91,7 +91,7 @@ export const SEND_MESSAGE_QUEUED = scenario({
   },
 });
 
-export const SEND_MESSAGE_RESUMED = scenario({
+const SEND_MESSAGE_RESUMED = scenario({
   name: "send-message-resumed",
   prompt: "!send-message-resumed",
   emits:
@@ -116,7 +116,7 @@ export const SEND_MESSAGE_RESUMED = scenario({
   },
 });
 
-export const SEND_MESSAGE_REFUSED = scenario({
+const SEND_MESSAGE_REFUSED = scenario({
   name: "send-message-refused",
   prompt: "!send-message-refused",
   emits: "a `SendMessage` to an agent the user stopped, answered with `success: false` and the vendor's refusal prose",
