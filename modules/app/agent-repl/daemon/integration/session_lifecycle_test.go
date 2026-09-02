@@ -476,6 +476,206 @@ func TestALoggedOutAccountRootDrawsLoggedOut(t *testing.T) {
 	})
 }
 
+// ---- critique 4: topbar account for a MULTI_REPO_ROOT workspace ----
+
+func TestATopbarInsideTheMultiRepoRootShowsTheMultiRepoAccountEmail(t *testing.T) {
+	// Arrange: a repository directly under $MULTI_REPO_ROOT, with the two
+	// account roots given DISTINCT emails so a topbar reading the wrong root
+	// cannot pass by accident.
+	d := harness.StartDaemon(t, harness.Opts{
+		DefaultAccountEmail:   "default-acct@example.invalid",
+		MultiRepoAccountEmail: "multi-acct@example.invalid",
+	})
+	repo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "inside-the-root"))
+	ws := harness.Register(t, d, repo.Dir)
+	topbar := d.WatchTopbar(ws)
+
+	// Act
+	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	}
+	d.Shim(ws).PushHealthy()
+
+	// Assert
+	view := awaitTopbar(t, &fixture{d: d, ws: ws, t: t}, topbar, "the account drawn logged_in with an email", func(v *frontendv1.TopbarView) bool {
+		return v.GetAccount().GetLoggedIn() != nil
+	})
+	if got := view.GetAccount().GetLoggedIn().GetEmail(); got != "multi-acct@example.invalid" {
+		t.Fatalf("topbar account email = %q for a workspace under MULTI_REPO_ROOT, want the multi-repo account's %q", got, "multi-acct@example.invalid")
+	}
+}
+
+func TestATopbarOutsideTheMultiRepoRootShowsTheDefaultAccountEmail(t *testing.T) {
+	// Arrange: a sibling repository OUTSIDE $MULTI_REPO_ROOT, with the two
+	// account roots given distinct emails.
+	d := harness.StartDaemon(t, harness.Opts{
+		DefaultAccountEmail:   "default-acct@example.invalid",
+		MultiRepoAccountEmail: "multi-acct@example.invalid",
+	})
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	topbar := d.WatchTopbar(ws)
+
+	// Act
+	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	}
+	d.Shim(ws).PushHealthy()
+
+	// Assert
+	view := awaitTopbar(t, &fixture{d: d, ws: ws, t: t}, topbar, "the account drawn logged_in with an email", func(v *frontendv1.TopbarView) bool {
+		return v.GetAccount().GetLoggedIn() != nil
+	})
+	if got := view.GetAccount().GetLoggedIn().GetEmail(); got != "default-acct@example.invalid" {
+		t.Fatalf("topbar account email = %q for a workspace outside MULTI_REPO_ROOT, want the default account's %q", got, "default-acct@example.invalid")
+	}
+}
+
+func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testing.T) {
+	// Arrange: a repository directly under $MULTI_REPO_ROOT.
+	d := harness.StartDaemon(t, harness.Opts{})
+	repo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "inside-the-root-vendor-claude"))
+	ws := harness.Register(t, d, repo.Dir)
+	host := d.WatchHost(ws)
+
+	// Act
+	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("OpenWorkspace = error %v, want a success", err)
+	}
+	d.Shim(ws).PushHealthy()
+
+	// Assert: the vendor arm's config_dir names the ROUTED root, not merely
+	// the env var the shim's own process saw.
+	view := harness.AwaitView(t, d.Ctx(), host, "the live session carrying a vendor claude arm",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetHost().GetExisting().GetLive().GetClaude() != nil
+		})
+	if got := view.GetHost().GetExisting().GetLive().GetClaude().GetConfigDir(); got != d.MultiRepoConfigDir {
+		t.Fatalf("HostVendorClaude.config_dir = %q for a workspace under MULTI_REPO_ROOT, want the multi-repo account root %q", got, d.MultiRepoConfigDir)
+	}
+}
+
+// ---- critique 5: account-switch transcript porting ----
+
+func TestAForkedChildOutsideTheMultiRepoRootDoesNotInheritTheParentsAccount(t *testing.T) {
+	// Arrange: a parent workspace INSIDE the multi-repo root, opened so it has
+	// a vendor conversation to fork.
+	d := harness.StartDaemon(t, harness.Opts{})
+	parentRepo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "fork-parent"))
+	parentWS := harness.Register(t, d, parentRepo.Dir)
+	if _, err := d.Client().OpenWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: parentWS})); err != nil {
+		t.Fatalf("OpenWorkspace(parent) = error %v, want a success", err)
+	}
+	parentShim := d.Shim(parentWS)
+	parentShim.ExpectStartSession()
+	if parentShim.Info().VendorSessionID == "" {
+		t.Fatal("the fake shim reports no vendor session id for the parent after StartSession(fresh)")
+	}
+
+	// A child repository OUTSIDE the multi-repo root -- a different repository
+	// entirely, since a fork's child worktree is always adjacent to ITS OWN
+	// repository directory and never to the parent's.
+	childRepo := harness.NewRepo(t)
+	childRepoRef := mergeRepositoryRef(t, d, childRepo)
+
+	// Act: create the child as a FORK of the parent.
+	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
+		Repository: childRepoRef,
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			Name: strPtr("forked-child-outside-root"),
+		}},
+		Parent: &agentreplv1.CreateWorkspaceParent{
+			Workspace: parentWS,
+			Fork:      &agentreplv1.CreateWorkspaceFork{},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("CreateWorkspace(fork) = error %v, want a success", err)
+	}
+	childWS := resp.Msg.GetSuccess().GetWorkspace()
+	if childWS.GetId() == "" {
+		t.Fatalf("CreateWorkspace(fork) = %v, want a success carrying a workspace ref", resp.Msg)
+	}
+
+	// Assert: the child spawns with the DEFAULT root -- its own directory
+	// decides its account, never the parent's.
+	childShim := d.Shim(childWS)
+	if got := childShim.Info().Env["CLAUDE_CONFIG_DIR"]; got != d.DefaultConfigDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q for a forked child outside MULTI_REPO_ROOT, want the default account root %q (no inheritance from a parent inside the root)", got, d.DefaultConfigDir)
+	}
+}
+
+func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
+	// UNEXPRESSIBLE against the current daemon: internal/workspace/sessions.go's
+	// Fleet.Start reads `configDir := session.ConfigDir` and reuses it VERBATIM
+	// whenever it is non-empty (see the `if configDir == ""` guard immediately
+	// below it) -- it never recomputes Accounts.ConfigDirFor(record.Dir) against
+	// the booting daemon's OWN $MULTI_REPO_ROOT on a later boot. Consequently
+	// internal/account/transcript.go's MoveTranscript, which exists and is
+	// exercised directly by internal/account's own unit tests, has NO caller
+	// anywhere in internal/ -- grepped and confirmed zero call sites outside its
+	// own definition and PortTranscript's sibling use in a fork.
+	//
+	// The exact hook this test needs: a reconciliation step inside Fleet.Start
+	// (or an equivalent bring-up path) that, before a RESUME is sent, recomputes
+	// Accounts.ConfigDirFor(record.Dir) against the CURRENT boot's routing,
+	// compares it against the session's STORED ConfigDir, and — when they
+	// disagree — calls Accounts.MoveTranscript to carry the transcript into the
+	// newly routed root and persists the new ConfigDir onto the session record
+	// before StartSession(resume) is sent. No such call site exists today.
+	t.Skip("no production hook reconciles a boot-to-boot MULTI_REPO_ROOT routing change against a session's stored ConfigDir and ports its transcript; see internal/workspace/sessions.go's Fleet.Start (configDir := session.ConfigDir, reused verbatim) and internal/account/transcript.go's MoveTranscript (zero production callers)")
+
+	// Arrange: a workspace OUTSIDE the multi-repo root, opened so it has a
+	// vendor transcript filed under the default root.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	vendorID := f.shim.Info().VendorSessionID
+	if vendorID == "" {
+		t.Fatal("the fake shim reports no vendor session id after StartSession(fresh)")
+	}
+	if !harness.HasTranscript(f.d.DefaultConfigDir, f.repo.Dir, vendorID) {
+		t.Fatalf("no transcript filed under the default root at %s, want the fake shim to have laid one down at StartSession",
+			harness.TranscriptPath(f.d.DefaultConfigDir, f.repo.Dir, vendorID))
+	}
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+
+	// Act: reboot on the SAME state root and account roots, but with
+	// $MULTI_REPO_ROOT now covering this workspace's directory -- the account
+	// switch across a boot.
+	f.d.Kill()
+	successor := harness.StartDaemon(t, harness.Opts{
+		StateDir: f.d.StateDir,
+		ExtraArgs: []string{
+			"--default-config-dir", f.d.DefaultConfigDir,
+			"--multi-repo-config-dir", f.d.MultiRepoConfigDir,
+		},
+		ExtraEnv: []string{
+			"AGENT_REPL_LOCK_DIR=" + f.d.LockDir,
+			"MULTI_REPO_ROOT=" + filepath.Dir(f.repo.Dir),
+		},
+	})
+	if _, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace after the routing switch = error %v, want a success", err)
+	}
+
+	// Assert: the transcript was MOVED into the newly routed root before the
+	// resume, and gone from the old one.
+	if harness.HasTranscript(f.d.DefaultConfigDir, f.repo.Dir, vendorID) {
+		t.Fatalf("the transcript is still under the old root %s after the account switch, want it moved", f.d.DefaultConfigDir)
+	}
+	if !harness.HasTranscript(f.d.MultiRepoConfigDir, f.repo.Dir, vendorID) {
+		t.Fatalf("the transcript was not found under the newly routed root %s after the account switch", f.d.MultiRepoConfigDir)
+	}
+
+	// Assert: CLAUDE_CONFIG_DIR flips to the newly routed root.
+	if got := successor.Shim(f.ws).Info().Env["CLAUDE_CONFIG_DIR"]; got != f.d.MultiRepoConfigDir {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q after the account switch, want the newly routed root %q", got, f.d.MultiRepoConfigDir)
+	}
+}
+
 func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
