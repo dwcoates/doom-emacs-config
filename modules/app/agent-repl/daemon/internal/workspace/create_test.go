@@ -608,3 +608,27 @@ func TestCreateRecordsTheOneShotFinishAction(t *testing.T) {
 		t.Fatalf("recorded finish = %q, want open_pr+add_to_merge_queue", f.db.putJobs[0].Finish)
 	}
 }
+
+func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *testing.T) {
+	// Arrange: the empty standard form, which the create contract calls an
+	// empty workspace rather than a refusal.
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "DWC")
+	t.Setenv(LegacyPrefixEnv, "")
+	spec := standardSpec(t)
+	spec.InitialPrompt = ""
+
+	// Act.
+	if _, err := f.verbs.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.created) != 1 {
+		t.Fatalf("created worktrees = %+v, want exactly one", f.git.created)
+	}
+	branch := f.git.created[0].Branch
+	if !strings.HasPrefix(branch, "DWC/"+UnnamedSlugPrefix) {
+		t.Fatalf("branch = %q, want it named after the minted workspace id", branch)
+	}
+}

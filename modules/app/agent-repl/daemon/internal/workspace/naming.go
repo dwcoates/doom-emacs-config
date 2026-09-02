@@ -12,6 +12,10 @@ import (
 // hyphenated, at most three words — plus the branch-name length bound the old
 // system used.
 const (
+	// UnnamedSlugPrefix leads the name a create with neither a supplied name
+	// nor an initial prompt is given: the workspace's own minted id, prefixed
+	// so the roster reads it as an unnamed workspace rather than a hash.
+	UnnamedSlugPrefix = "workspace-"
 	// SlugWordLimit is the "3 words max" the naming briefs state.
 	SlugWordLimit = 3
 	// SlugMaxLen bounds the slug's length in characters.
