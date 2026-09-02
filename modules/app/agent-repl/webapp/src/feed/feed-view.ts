@@ -151,7 +151,6 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   loadMore.className = "feed-load-more";
   loadMore.setAttribute("data-load-more", "");
   loadMore.textContent = "older";
-  loadMore.hidden = true;
 
   const errorSlot = document.createElement("div");
   errorSlot.className = "feed-page-error-slot";
@@ -159,7 +158,11 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
   const bodyMount = document.createElement("div");
   bodyMount.className = "feed-body";
 
-  opts.host.append(loadMore, errorSlot, bodyMount);
+  // THE WALK CONTROL IS PRESENT ONLY WHEN THERE IS A WALK. A feed that has
+  // reached its start offers no way back further, and an inert control the
+  // reader can see is a promise the feed cannot keep — so it is ATTACHED on
+  // `has_more` and detached otherwise, never merely hidden.
+  opts.host.append(errorSlot, bodyMount);
 
   const controller: FeedController = {
     element: opts.host,
@@ -241,7 +244,8 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
       case "success": {
         errorSlot.replaceChildren();
         const edge = requireCase(result.value.edge, "FeedPageSuccess.edge");
-        loadMore.hidden = edge.case !== "hasMore";
+        if (edge.case === "hasMore") opts.host.prepend(loadMore);
+        else loadMore.remove();
         crumbs = requireMessage(result.value.breadcrumbs, "FeedPageSuccess.breadcrumbs").crumbs;
         const anchor = capture();
         if (placement === "replace") clearRows();
@@ -409,13 +413,20 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
    * knows nothing about which arms exist and states only what the card stated.
    */
   function mirrorState(state: RowState): void {
-    const body = state.body;
-    const drawn = body?.getAttribute("data-state") ?? null;
+    mirror(state, "data-state");
+    // A bubble says whether it is open on itself; the row is what a reader —
+    // and the reveal walk — holds, so it says the same thing.
+    mirror(state, "data-expanded");
+  }
+
+  /** Copy one attribute from the row's body up onto its chrome. */
+  function mirror(state: RowState, attribute: string): void {
+    const drawn = state.body?.getAttribute(attribute) ?? null;
     if (drawn === null) {
-      state.element.removeAttribute("data-state");
+      state.element.removeAttribute(attribute);
       return;
     }
-    state.element.setAttribute("data-state", drawn);
+    state.element.setAttribute(attribute, drawn);
   }
 
   /**

@@ -216,12 +216,12 @@ export const defaultBubbleBody: BubbleBodyRenderer = (mount, view, rc) => {
   rows.className = "feed-rows";
 
   const draw = (): void => {
-    drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc);
+    drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
     arrangeSubfeedRows(rows, view);
     if (view.composerSlot !== undefined) mount.append(view.composerSlot);
   };
 
-  mount.append(breadcrumbs, rows);
+  mount.append(rows);
   draw();
   const unsubscribe = view.onChange(draw);
   return {
@@ -244,11 +244,18 @@ export function drawBreadcrumbTrail(
   host: HTMLElement,
   crumbs: readonly FeedBreadcrumb[],
   rc: RowContext,
+  mount?: HTMLElement,
 ): void {
   host.replaceChildren();
-  host.hidden = crumbs.length === 0;
-  if (crumbs.length === 0) return;
+  if (crumbs.length === 0) {
+    // AN EMPTY TRAIL IS NO TRAIL. R6 draws the header line only when there is
+    // something on it, and an empty element left in the DOM is a header the
+    // page still reserves room and meaning for.
+    host.remove();
+    return;
+  }
   for (const crumb of crumbs) host.append(drawFeedBreadcrumb(crumb, rc));
+  if (mount !== undefined && host.parentElement === null) mount.prepend(host);
 }
 
 /** One crumb: the daemon-resolved label, drawn verbatim, as a jump target. */

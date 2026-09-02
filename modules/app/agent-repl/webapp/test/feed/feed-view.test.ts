@@ -231,10 +231,13 @@ describe("createFeedController: the walk", () => {
     expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(false);
   });
 
-  it("hides it once the walk reaches the start", () => {
+  it("takes it away once the walk reaches the start", () => {
     const { controller, host } = fixture();
     controller.applyPage(page([responseRow("a")]), "replace");
-    expect(host.querySelector<HTMLElement>("[data-load-more]")?.hidden).toBe(true);
+    // A feed at its start offers no way further back, and an inert control the
+    // reader can see is a promise the feed cannot keep: it is detached, not
+    // merely hidden.
+    expect(host.querySelector("[data-load-more]")).toBeNull();
   });
 
   it("asks for the NEXT page, continuing the daemon's own walk", async () => {
