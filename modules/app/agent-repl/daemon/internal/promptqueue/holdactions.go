@@ -43,6 +43,17 @@ func (q *queue) Release(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID
 		log.Warn(opRelease, "the session is still coming up; the release is refused", nil)
 		return ErrReleaseRefused
 	}
+	// THE HOLD STAMP IS NOT THE ONLY EVIDENCE THE SESSION IS STILL COMING UP.
+	// releaseRevivalHolds un-stamps every revival-pending hold as soon as the
+	// bring-up reports a client, and only then delivers them; a release that
+	// lands inside that window finds no stamp but still has nothing live to
+	// send to. Answering "there is no session" there would be a lie about a
+	// workspace that is mid-revival, so the bring-up that stamped the hold is
+	// consulted directly and the domain-correct refusal stands.
+	if q.isReviving(ws) {
+		log.Warn(opRelease, "the session's bring-up is still running; the release is refused", nil)
+		return ErrReleaseRefused
+	}
 
 	watcher, ok := q.deps.Watcher(ws)
 	if !ok {

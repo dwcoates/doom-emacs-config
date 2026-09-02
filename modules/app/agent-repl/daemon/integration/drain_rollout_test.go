@@ -703,9 +703,17 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	host := d.WatchHost(f.ws)
 	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
 
+	// THE DAEMON STREAM IS SUBSCRIBED BEFORE THE HANDOVER IS FIRED. The
+	// daemon-level push topic replays only its own process's latest value to
+	// new subscribers, and the incumbent tears that process down as the
+	// handover completes -- so a subscription opened after the trigger races
+	// the announcement it is waiting for and, under load, opens too late to
+	// ever see it. Subscribing first is the rendezvous, exactly as the
+	// headless-transfer test above does it.
+	daemonStream := d.WatchDaemonStream()
+
 	// Act: fire the handover with no web stream ever opened.
 	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
-	daemonStream := d.WatchDaemonStream()
 	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()

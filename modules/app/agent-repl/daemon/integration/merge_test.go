@@ -1508,12 +1508,17 @@ func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 		"daemon.wsm.remove_merge_queue_entry", "daemon.wsm.workspace")
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	// THE FEED IS SUBSCRIBED BEFORE THE MERGE IS ENQUEUED. A landing tears the
+	// merged workspace's worktree down, and the feed resolves its log sink by
+	// stat-ing that directory -- so a subscription opened after the enqueue
+	// races the teardown and intermittently finds no such workspace to watch.
+	// Opening first is the rendezvous the assertion actually needs.
+	root := f.watchRootFeed()
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
 	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
