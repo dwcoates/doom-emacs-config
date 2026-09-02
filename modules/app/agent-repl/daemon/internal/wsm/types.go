@@ -170,9 +170,12 @@ type MergeLayout struct {
 // MergeActions are the configured prompts run in the workspace before and
 // after its merge.
 type MergeActions struct {
-	// Before are prompt names run in the source workspace before the merge.
+	// Before is the PROMPT TEXT run in the source workspace before the merge.
+	// CreateWorkspaceMergeActions carries the words themselves
+	// (conversation.v1.UserSaid), not the name of a file in the prompts
+	// directory, so this is what is submitted verbatim.
 	Before []string
-	// After are prompt names run after the merge lands.
+	// After is the prompt text run after the merge lands, on the same terms.
 	After []string
 }
 
