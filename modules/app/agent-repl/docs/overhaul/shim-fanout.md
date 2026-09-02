@@ -720,3 +720,24 @@ every UX or contract gap you surfaced instead of improvising.
   queue (no drain hook this wave); identity_rotated key has no file-plane
   join (accepted). S resumed for one fix: fresh StartSession retry after
   vendor_start_failed must not escape as Internal. Agent T still running.
+- LEDGER: remediation #4 agent T merged (tip f7051db55, no conflicts):
+  standing grants validated against the OFFERED standing (altered/unoffered
+  → answer_mismatch); UpdateAgent resolves a subagent target by its wire
+  AgentId (tool_use_id) via the spawn map; non-zero bash exit → completed +
+  exited(code); mock: parent_tool_use_id honored on stream events, error
+  results keep their terminal_reason, api_error_status rides error results;
+  levers !perm-allow-standing-mode, !perm-no-standing, !perm-hold,
+  !query-eof-mid-ask, !subagent-detached-live; permission mode conditions
+  the mock gate. Lead accepts T's deviations: 40 (Ctrl-B turn terminal is
+  completed, backgrounded is the whole-turn arm), 17 (a stopped subagent's
+  terminal is a page line of the spawning agent's book), 15 vendor_refused
+  todo (no lever: a closed prompt queue is query_dead), 8 (AgentUpdate.
+  api_error has NO stream-plane producer — system:api_error is a transcript
+  record, so it is the SIDECAR's arm; shim.md's "the shim may produce both"
+  is corrected to: context_cut yes, api_error no). RESUME QUEUE: item 2 —
+  the fake store must model relay (b) (post-terminal deltas served, then
+  end) and the test re-asserted against it. Recorded gaps: no stream-plane
+  producer for AgentResponseFailure.reason on refusals (fallback content
+  block, no response unit); billing/oauth_org/max_output_tokens
+  indistinguishable by HTTP status; continuation_prevented ungrounded.
+  h1 multi-stream compressed-envelope defect handed to agent S.
