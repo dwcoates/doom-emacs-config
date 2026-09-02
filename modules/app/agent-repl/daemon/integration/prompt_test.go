@@ -517,8 +517,9 @@ func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) 
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
 	// internal/promptqueue/classify.go's stripJump logs the failed-interject
-	// ERROR under opInterject; nothing else warns on this path.
-	f.d.ExpectWarnings("daemon.promptqueue.interject")
+	// ERROR under opInterject, and the refused shim call is recorded by the
+	// client that made it — the refusal IS the scenario.
+	f.d.ExpectWarnings("daemon.promptqueue.interject", "daemon.shimclient.kill_turn")
 
 	// Act: the interjecting prompt's KillTurn is refused by the shim.
 	f.shim.AnswerFailure(harness.RPCKillTurn, "the vendor refused the kill")
