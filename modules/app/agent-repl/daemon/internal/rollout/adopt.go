@@ -52,7 +52,7 @@ func (c *controller) Join(ctx context.Context) error {
 	}
 	for _, session := range m.Sessions {
 		expected := Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb}
-		c.rendezvous[session.Workspace] = &entry{expected: expected}
+		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
 		c.joining[session.Workspace] = true
 		if expected.Count() == 0 {
 			headless = append(headless, session.Workspace)
@@ -93,6 +93,7 @@ func (c *controller) armFromManifest() error {
 		}
 		c.rendezvous[session.Workspace] = &entry{
 			expected: Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb},
+			done:     make(chan struct{}),
 		}
 		if c.joining == nil {
 			c.joining = map[ids.WorkspaceID]bool{}
@@ -174,13 +175,37 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 			"expected_host": e.expected.Host, "expected_web": e.expected.Web,
 			"host_called": e.hostCalled, "web_called": e.webCalled,
 		}
+		done := e.done
 		c.mu.Unlock()
-		c.log.Debug(operation, "an expected participant has not called yet", merge(fields, outstanding))
-		return ErrNotYetAdopted
+		c.log.Debug(operation, "an expected participant has not called yet; waiting for the rendezvous",
+			merge(fields, outstanding))
+		// EVERY EXPECTED PARTICIPANT SUCCEEDS TOGETHER. The callers arrive
+		// concurrently and the one that arrives first has not failed: it
+		// waits for the one that completes the rendezvous. `not_yet_adopted`
+		// on an ADOPT call means only that this caller's own context expired
+		// first, which is the retry-with-backoff case.
+		select {
+		case <-done:
+			c.mu.Lock()
+			failed := e.failed
+			c.mu.Unlock()
+			if failed != nil {
+				return failed
+			}
+			c.log.Debug(operation, "the rendezvous completed while this caller waited", fields)
+			return nil
+		case <-ctx.Done():
+			c.log.Debug(operation, "the caller gave up before the rendezvous completed", fields)
+			return ErrNotYetAdopted
+		}
 	}
 	c.mu.Unlock()
 
-	if err := c.adopt(ctx, ws, operation); err != nil {
+	err := c.adopt(ctx, ws, operation)
+	c.mu.Lock()
+	e.settle(err)
+	c.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	c.log.Info(operation, "every expected participant called; the workspace is adopted", fields)
@@ -198,6 +223,14 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source string) error {
 	fields := dlog.Context{"workspace": string(ws), "source": source}
 
+	// THE HANDLE BECOMES A WRITING ONE HERE. A successor opens read-only
+	// because the incumbent is still the sole writer; adopting a workspace is
+	// the moment it starts writing that workspace's rows, and the incumbent
+	// stopped writing them at its transfer notice.
+	if err := c.deps.DB.Promote(ctx); err != nil {
+		c.log.Error(opAdopt, "the state handle could not be promoted to writing", withCause(fields, err))
+		return fmt.Errorf("rollout: adopt %q: promote the state handle: %w", ws, err)
+	}
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		c.log.Error(opAdopt, "could not read the workspace being adopted", withCause(fields, err))

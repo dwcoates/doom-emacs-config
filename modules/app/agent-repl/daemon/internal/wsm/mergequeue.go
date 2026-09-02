@@ -176,7 +176,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // undeclared state identically and number positions the same way. The rows
 // arrive in sequence order, so the position is the index within its repository.
 func (s *store) scanMergeQueue(ctx context.Context, query string, args ...any) (map[RepoKey][]MergeQueueEntry, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db().QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (s *store) MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error
 	}
 	var paused bool
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		err := s.db.QueryRowContext(ctx, `SELECT paused FROM merge_queue_repos WHERE repo_key = ?`, key).Scan(&paused)
+		err := s.db().QueryRowContext(ctx, `SELECT paused FROM merge_queue_repos WHERE repo_key = ?`, key).Scan(&paused)
 		if errors.Is(err, sql.ErrNoRows) {
 			paused = false
 			return nil

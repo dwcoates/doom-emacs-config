@@ -64,14 +64,13 @@ func run(args []string) error {
 	log := newLogSink(argv.LogFD)
 	defer log.close()
 
+	// NO LOCK IS TAKEN AT STARTUP. Both kernel locks are taken inside
+	// StartSession, before the SDK is touched, and released together on a kill
+	// or a stand-down (project-lead ruling, shim be119abbf). An INERT shim --
+	// one the relaunch engine prelaunched beside a live one -- therefore holds
+	// neither, which is what lets it come up beside its predecessor at all.
 	lockDir := LockDir(os.Getenv, os.Getenv("HOME"))
 	wsLockPath := WorkspaceLockPath(lockDir, absCwd)
-	wsLock, err := takeLock(wsLockPath)
-	if err != nil {
-		return err
-	}
-	defer wsLock.release()
-	log.write("workspace_lock_taken", map[string]any{"path": wsLockPath, "cwd": absCwd})
 
 	if profile.ExitOn == "startup" {
 		if profile.Stderr != "" {
@@ -91,6 +90,8 @@ func run(args []string) error {
 	proc.srv = newServer(proc.rec, profile, log)
 	proc.srv.exit = proc.die
 	proc.srv.onSessionStarted = proc.takeSessionLock
+	proc.srv.claimWorkspace = proc.takeWorkspaceLock
+	proc.srv.releaseLocks = proc.releaseLocks
 
 	rpcListener, err := listenUnix(argv.Listen)
 	if err != nil {
@@ -162,9 +163,49 @@ type process struct {
 	log     *logSink
 	srv     *server
 
-	mu          sync.Mutex
-	sessionLock *heldLock
-	sessionPath string
+	mu            sync.Mutex
+	workspaceLock *heldLock
+	sessionLock   *heldLock
+	sessionPath   string
+}
+
+// takeWorkspaceLock takes workspace-<hash>.lock, exactly as the real shim does
+// inside StartSession. It NEVER BLOCKS: a lock another shim holds is this
+// conversation being owned elsewhere, which StartSession answers with
+// `conversation_owned` rather than waiting on.
+func (p *process) takeWorkspaceLock() bool {
+	p.mu.Lock()
+	if p.workspaceLock != nil {
+		p.mu.Unlock()
+		return true
+	}
+	p.mu.Unlock()
+	held, err := tryLock(p.wsLock)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(3)
+	}
+	if held == nil {
+		p.log.write("workspace_lock_refused", map[string]any{"path": p.wsLock, "cwd": p.cwd})
+		return false
+	}
+	p.mu.Lock()
+	p.workspaceLock = held
+	p.mu.Unlock()
+	p.log.write("workspace_lock_taken", map[string]any{"path": p.wsLock, "cwd": p.cwd})
+	return true
+}
+
+// releaseLocks drops both kernel locks together, which is what a kill or a
+// stand-down does: the session is over, and neither lock outlives it.
+func (p *process) releaseLocks() {
+	p.mu.Lock()
+	ws, session := p.workspaceLock, p.sessionLock
+	p.workspaceLock, p.sessionLock, p.sessionPath = nil, nil, ""
+	p.mu.Unlock()
+	ws.release()
+	session.release()
+	p.log.write("locks_released", map[string]any{"cwd": p.cwd})
 }
 
 // takeSessionLock takes session-<vendor session id>.lock, exactly as the real

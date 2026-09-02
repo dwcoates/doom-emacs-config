@@ -81,7 +81,7 @@ func (s *store) CreationJob(ctx context.Context, id WorkspaceID) (CreationJob, b
 			before, after string
 			created       int64
 		)
-		row := s.db.QueryRowContext(ctx,
+		row := s.db().QueryRowContext(ctx,
 			`SELECT workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after,
 			        base_ref, materialized, one_shot, one_shot_finish, initial_prompt, consented_ungated_mode, created_at
 			 FROM creation_jobs WHERE workspace_id = ?`, id)

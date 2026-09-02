@@ -20,6 +20,11 @@ type DB interface {
 	Close() error
 	// ReadOnly reports whether this handle was opened read-only.
 	ReadOnly() bool
+	// Promote turns a READ-ONLY handle into a writing one, in place. It exists
+	// for the handover's successor, which opens read-only because the
+	// incumbent is still the sole writer and becomes a writer at its first
+	// adoption. Promoting a handle that already writes is success.
+	Promote(ctx context.Context) error
 
 	// RegisterWorkspace records a workspace, idempotent by normalized dir,
 	// minting a WorkspaceID and a RepoID on first sight. The bool reports

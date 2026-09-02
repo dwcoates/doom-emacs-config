@@ -99,7 +99,13 @@ type server struct {
 	// onSessionStarted is called once a vendor session id is assigned, so the
 	// process can take the session kernel lock inside StartSession.
 	onSessionStarted func(vendorSessionID string)
-	exit             func(code int, stderr string)
+	// claimWorkspace takes the WORKSPACE kernel lock inside StartSession,
+	// before anything else. False means another shim holds this conversation,
+	// which is the `conversation_owned` arm.
+	claimWorkspace func() bool
+	// releaseLocks drops both kernel locks; a kill or a stand-down calls it.
+	releaseLocks func()
+	exit         func(code int, stderr string)
 }
 
 type scriptedAnswer struct {
@@ -215,6 +221,18 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	}
 	if s.profile.ExitOn == "start_session" {
 		s.exit(s.profile.ExitCode, s.profile.Stderr)
+	}
+	// THE WORKSPACE LOCK IS TAKEN HERE, before the SDK would be touched. A
+	// conversation another shim owns is refused, never waited on.
+	if s.claimWorkspace != nil && !s.claimWorkspace() {
+		return connect.NewResponse(&shimv1.StartSessionResponse{
+			Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+				Detail: "another shim holds this workspace's conversation",
+				Cause: &shimv1.StartSessionFailure_ConversationOwned{
+					ConversationOwned: &shimv1.StartSessionConversationOwned{},
+				},
+			}},
+		}), nil
 	}
 	if resp, done, err := scripted[shimv1.StartSessionResponse, *shimv1.StartSessionResponse](s, RPCStartSession); done {
 		if err == nil {
@@ -466,6 +484,12 @@ func (s *server) KillSession(ctx context.Context, req *connect.Request[shimv1.Ki
 	s.mu.Lock()
 	s.sessionKilled = true
 	s.mu.Unlock()
+	// BOTH LOCKS GO WITH THE SESSION. The process exits right after this
+	// answer is written, but releasing them here is what the real shim does
+	// and is what a stand-down's successor waits on.
+	if s.releaseLocks != nil {
+		s.releaseLocks()
+	}
 	return connect.NewResponse(&shimv1.KillSessionResponse{
 		Result: &shimv1.KillSessionResponse_Success{Success: &shimv1.KillSessionSuccess{
 			Closed: &conversationv1.SessionKilled{How: &conversationv1.SessionKilled_Idle{Idle: &conversationv1.SessionKilledIdle{}}},

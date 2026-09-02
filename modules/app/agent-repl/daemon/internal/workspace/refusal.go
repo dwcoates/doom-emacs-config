@@ -42,6 +42,11 @@ const (
 	// ArmSessionDeleted is a bring-up of a session whose record is terminal by
 	// deletion: a deleted session refuses resurrection.
 	ArmSessionDeleted = "session_deleted"
+	// ArmConversationOwned is a StartSession the shim refused because ANOTHER
+	// shim holds this workspace's conversation: it took the workspace kernel
+	// lock first, and two vendor processes on one conversation is what that
+	// lock exists to prevent. OpenWorkspaceError has no arm for it.
+	ArmConversationOwned = "conversation_owned"
 	// ArmTranscriptMissing is a resume whose vendor transcript file is gone —
 	// refused BEFORE any process spawns.
 	ArmTranscriptMissing = "transcript_missing"

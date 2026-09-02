@@ -50,7 +50,7 @@ func testWorkspace(t *testing.T, s *store) Workspace {
 // exact malformed row a decoder must refuse.
 func corrupt(t *testing.T, s *store, query string, args ...any) {
 	t.Helper()
-	if _, err := s.db.ExecContext(context.Background(), query, args...); err != nil {
+	if _, err := s.db().ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("corrupt %q: %v", query, err)
 	}
 }
@@ -60,7 +60,7 @@ func corrupt(t *testing.T, s *store, query string, args ...any) {
 func scalar[T any](t *testing.T, s *store, query string, args ...any) T {
 	t.Helper()
 	var out T
-	if err := s.db.QueryRowContext(context.Background(), query, args...).Scan(&out); err != nil {
+	if err := s.db().QueryRowContext(context.Background(), query, args...).Scan(&out); err != nil {
 		t.Fatalf("scalar %q: %v", query, err)
 	}
 	return out
@@ -95,7 +95,7 @@ var instant = time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 func isNull(t *testing.T, s *store, query string, args ...any) bool {
 	t.Helper()
 	var out sql.NullString
-	if err := s.db.QueryRowContext(context.Background(), query, args...).Scan(&out); err != nil {
+	if err := s.db().QueryRowContext(context.Background(), query, args...).Scan(&out); err != nil {
 		t.Fatalf("isNull %q: %v", query, err)
 	}
 	return !out.Valid

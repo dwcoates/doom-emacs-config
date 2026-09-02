@@ -654,6 +654,17 @@ func TestRestartWorkspaceGracefulHoldsPromptsWithBuildRefreshAndDrainsAfterReadi
 		t.Fatalf("RestartWorkspace = %v, want a success", resp.Msg)
 	}
 
+	// The verb ACCEPTS and the relaunch engine runs behind it, so the
+	// restart-pending hold stands a moment later. The host composer's
+	// `restarting` arm is that moment, and it is what a prompt submitted
+	// "meanwhile" has to arrive after to be held for the RESTART rather than
+	// for the turn still running.
+	hostStream := f.d.WatchHost(f.ws)
+	harness.AwaitView(t, f.d.Ctx(), hostStream, "the host composer restarting",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetHost().GetExisting().GetLive().GetRestarting() != nil
+		})
+
 	// A prompt submitted meanwhile is held rather than forwarded.
 	held := f.submit("meanwhile", "k-restart-graceful-meanwhile", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	if held.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
