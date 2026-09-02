@@ -55,9 +55,10 @@ has NOT reached overhaul/integration yet.
    shim lead recreated later the same day once the sweep finished (68
    goldens; its brief carries the captures directory, the ruling above,
    the store relays, and two harness defects to fix).
-3. Landing 6 when the daemon's wave 3 lands: six pending ERROR-ARMS rows +
-   wave-3 server arms; retire landed-but-unused arms; FeedPermissionArguments'
-   wire source; consider FeedFindingsRow identity (position-keyed folds).
+3. DONE 2026-09-01 — Landing 6 (protos d46e601e7, bindings 8a98e4fca):
+   command_acted, duplicate_submission, unknown_repository; turn_already_open
+   retired. FeedPermissionArguments' wire source and FeedFindingsRow identity
+   deferred to the e2e loop (no producer asked).
 4. As each lead finishes: merge its branch into overhaul/integration
    (expect the vocab and shim.md merges to be non-trivial), delete worktrees.
 5. Run the cross-system e2e suite (~/.config/doom-overhaul/e2e worktree;
