@@ -312,12 +312,25 @@ func (f *Fleet) Install(ctx context.Context, ws ids.WorkspaceID, c shimclient.Cl
 // both halves of a handover; the probe finds the transferred shim's lock still
 // held, which is what selects the adopt path rather than a spawn.
 func (f *Fleet) Adopt(ctx context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
-	if err := f.Start(ctx, ws); err != nil {
+	if client, ok := f.Client(ws); ok {
+		return client, nil
+	}
+	record, err := f.deps.DB.Workspace(ctx, ws)
+	if err != nil {
 		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
-	client, ok := f.Client(ws)
-	if !ok {
-		return nil, fmt.Errorf("workspace: adopt %q: the bring-up left no shim client", ws)
+	client, err := f.deps.Supervisor.Adopt(ctx, ws, record.Dir, f.deps.SocketPath(ws))
+	if err != nil {
+		return nil, fmt.Errorf("workspace: adopt %q: dial the transferred shim: %w", ws, err)
+	}
+	// ATTACH ONLY. The transferred shim's session is ALREADY STARTED — the
+	// whole point of a handover is that the conversation never stopped — and
+	// StartSession on it would either be refused or, worse, start a second one.
+	// The contract offers no way to read a running shim's SessionStarted, so
+	// the opening level comes from the durable record and the shim's own
+	// pushes repopulate the rest.
+	if err := f.Install(ctx, ws, client); err != nil {
+		return nil, fmt.Errorf("workspace: adopt %q: %w", ws, err)
 	}
 	return client, nil
 }
