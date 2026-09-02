@@ -210,9 +210,20 @@ describe("the gate", () => {
     h.handle.dispose();
   });
 
-  it("leaves the draft editable while the gate is shut", () => {
+  it("disables the draft box while the gate is shut", () => {
     const h = mount();
     h.gate.set("closed", "merging");
+    // R7 disables the composer while the footer reads merging, closing or
+    // disconnected: a box that still takes keystrokes while nothing can be
+    // sent invites a draft the reader then watches be refused.
+    expect(h.input.disabled).toBe(true);
+    h.handle.dispose();
+  });
+
+  it("re-enables the draft box when the gate opens again", () => {
+    const h = mount();
+    h.gate.set("closed", "merging");
+    h.gate.set("open");
     expect(h.input.disabled).toBe(false);
     h.handle.dispose();
   });

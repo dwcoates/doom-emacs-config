@@ -38,6 +38,8 @@ import { mountTopbar } from "../../src/topbar/topbar";
 import { mountSidebar } from "../../src/sidebar/sidebar";
 import { mountHoldTray } from "../../src/tray/tray";
 import { mountComposer, createComposerGate } from "../../src/composer/composer";
+import { drawCommandPanel } from "../../src/panels/panels";
+import { forgetOwnTurns } from "../../src/composer/own-turns";
 import { mountLoginOverlay, type LoginHandle } from "../../src/login/login";
 import { adoptAtBoot, startLifecycle } from "../../src/lifecycle/lifecycle";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
@@ -249,6 +251,19 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const gate = createComposerGate();
   const handles: Handle[] = [failures];
 
+  /**
+   * PRODUCTION'S OWN PANEL SINK (main.ts): the answer to a slash command is
+   * DRAWN in the composer's area, replacing whatever panel stood there — a
+   * panel answers one submission, not the conversation. The harness keeps the
+   * panels it was handed as well, so a test can assert the callback and the
+   * drawing separately.
+   */
+  const showPanel = (panel: SubmitPromptCommandPanel): void => {
+    panels.push(panel);
+    for (const stale of shell.composer.querySelectorAll(":scope > [data-panel]")) stale.remove();
+    shell.composer.append(drawCommandPanel(panel, ctx));
+  };
+
   // PRODUCTION'S OWN BOOT ORDER, and it is load-bearing: adoption comes before
   // any stream (a daemon still finishing its rendezvous refuses every
   // per-workspace rpc), and the lifecycle comes IMMEDIATELY after it, before
@@ -260,8 +275,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
   const feed = mountFeed(shell.feed, ctx, {
     renderers: createRowRenderers(ctx),
     composerFactory: composerEnabled
-      ? (host, bubble) =>
-          mountComposer(host, ctx, { feed: bubble, gate, onPanel: (p) => panels.push(p) })
+      ? (host, bubble) => mountComposer(host, ctx, { feed: bubble, gate, onPanel: showPanel })
       : undefined,
   });
   handles.push(feed);
@@ -285,7 +299,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
 
   if (composerEnabled) {
     shell.composer.hidden = false;
-    handles.push(mountComposer(shell.composer, ctx, { gate, onPanel: (p) => panels.push(p) }));
+    handles.push(mountComposer(shell.composer, ctx, { gate, onPanel: showPanel }));
   }
 
   const $ = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
@@ -382,6 +396,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       // `localStorage`, which jsdom shares across every test in a file. Left
       // behind, one test's click decides what the NEXT test's page opens with,
       // which is a dependency between tests and not a fact about the app.
+      // The page's claim on the turns IT submitted dies with the page, the
+      // same way it does on a reload (R14: nothing is persisted).
+      forgetOwnTurns();
       try {
         window.localStorage.clear();
       } catch {

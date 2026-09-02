@@ -68,6 +68,7 @@ import { drawFeedAgentPrompt } from "./rows/agent-prompt.js";
 import { drawFeedTurnEnded } from "./rows/turn-ended.js";
 import { drawFeedSessionSeparation } from "./rows/separation.js";
 import { drawFeedMergeTabRow } from "./merge/tab-row.js";
+import { isOwnTurn } from "../composer/own-turns.js";
 
 /** A bubble, as the controller holds it: an element plus its own lifecycle. */
 export interface BubbleLike extends Handle {
@@ -526,7 +527,13 @@ export function createFeedController(opts: FeedControllerOptions): FeedControlle
     if (row.row.case === "activity" && row.row.value.unit.case !== undefined) {
       el.setAttribute("data-unit", row.row.value.unit.case);
     }
-    if (row.turn !== undefined) el.setAttribute("data-turn", row.turn.value);
+    if (row.turn !== undefined) {
+      el.setAttribute("data-turn", row.turn.value);
+      // THIS PAGE'S OWN SUBMISSION, claimed from the TurnId `SubmitPrompt`
+      // minted here and echoed back on the row — never guessed from the text.
+      if (isOwnTurn(row.turn)) el.setAttribute("data-mine", "true");
+      else el.removeAttribute("data-mine");
+    }
   }
 
   /** The compact stand-in for a row this build could not draw. */
