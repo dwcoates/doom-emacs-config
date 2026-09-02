@@ -655,6 +655,28 @@ func (f *fakeFeed) heads() []string {
 	return out
 }
 
+// lastMergeErrorArm names the error arm of the last head row that carried one.
+func (f *fakeFeed) lastMergeErrorArm() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	arm := ""
+	for _, row := range f.rows {
+		err := row.Row.GetActivity().GetMerge().GetError()
+		if err == nil {
+			continue
+		}
+		switch err.GetReason().(type) {
+		case *frontendv1.FeedMergeError_Failed:
+			arm = "failed"
+		case *frontendv1.FeedMergeError_Abandoned:
+			arm = "abandoned"
+		default:
+			arm = "unset"
+		}
+	}
+	return arm
+}
+
 // tabKindOf names a tab row's kind arm.
 func tabKindOf(tab *frontendv1.FeedMergeTab) string {
 	switch tab.GetKind().(type) {

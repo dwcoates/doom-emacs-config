@@ -7,6 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/promptqueue"
 	"claude-repld/internal/wsm"
@@ -203,10 +204,46 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // publishAbandoned draws the ABANDONED terminal: a merge taken off the queue
 // before it ever reached the front. It has no commit, no failure and no
 // teardown, because nothing of it ever ran.
-func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, summary string) {
+// ledger is the bubble's ledger identity, captured before the caller dropped
+// it: an empty one means no bubble was ever drawn and there is nothing to end.
+//
+// THE ABANDONED ARM IS THE ONLY EXPRESSIBLE CAUSE. `FeedMergeError` carries
+// `failed` and `abandoned` and nothing else, so an evict, a dequeue release and
+// a run's own give-up all end here with the same arm; distinguishing them is a
+// landing-7 shape, and the daemon states what it CAN state rather than
+// inventing an arm or leaving the bubble unterminated.
+func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, summary string) {
 	o.deps.Log.Global().Debug("daemon.merge.abandoned", "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "summary": summary})
+	if ledger != "" {
+		label := o.abandonedLabel(ctx, ws)
+		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
+			&frontendv1.FeedMergeError{
+				EndedAtMs: o.nowMS(),
+				// FeedMergeAbandoned is an EMPTY message: the cause has
+				// nowhere to ride on the wire, so the summary stays in the
+				// log record above and the arm carries only itself.
+				Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}},
+			}))
+	}
+	// The surfaces come AFTER the terminal, in the teardown's own order: the
+	// footer leaves its merging state and the roster sheds every merge arm
+	// only once the bubble a reader is looking at has ended.
 	o.forget(ws)
+}
+
+// abandonedLabel is the head's branch line for a merge that never ran. The
+// geometry is read where it is available and the workspace's own name stands in
+// where it is not: an unreadable label must not stop the bubble from ending.
+func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID) string {
+	job, err := o.layoutFor(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Debug("daemon.merge.abandoned",
+			"the abandoned merge's geometry could not be read for its label",
+			dlog.Context{"workspace": string(ws), "error": err.Error()})
+		return string(ws)
+	}
+	return branchLabel(job.Layout.SourceBranch, job.Layout.TargetDir)
 }
 
 // OnInterrupt raises the dequeue offer for a workspace whose merge is queued.
