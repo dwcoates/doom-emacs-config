@@ -143,9 +143,9 @@ func TestSetRepositoryScopesThePause(t *testing.T) {
 	}
 }
 
-// TestUnknownRepositoryIsAnUnlandedArm pins the ledger row: UpdateMergeQueue has
-// no unknown_repository arm, so the refusal answers the sentinel.
-func TestUnknownRepositoryIsAnUnlandedArm(t *testing.T) {
+// TestUnknownRepositoryIsAnAnswer pins the landed arm: a pause naming no
+// registered repository answers UpdateMergeQueueError.unknown_repository.
+func TestUnknownRepositoryIsAnAnswer(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Merge.pauseErr = &merge.RefusalError{
@@ -153,7 +153,7 @@ func TestUnknownRepositoryIsAnUnlandedArm(t *testing.T) {
 	}
 
 	// Act.
-	_, err := h.Client.UpdateMergeQueue(context.Background(),
+	resp, err := h.Client.UpdateMergeQueue(context.Background(),
 		connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
 			Action: &agentreplv1.UpdateMergeQueueRequest_Pause{
 				Pause: &agentreplv1.UpdateMergeQueuePause{
@@ -163,8 +163,11 @@ func TestUnknownRepositoryIsAnUnlandedArm(t *testing.T) {
 		}))
 
 	// Assert.
-	if code := connectCode(t, err); code != connect.CodeFailedPrecondition {
-		t.Fatalf("code = %v, want FailedPrecondition", code)
+	if err != nil {
+		t.Fatalf("UpdateMergeQueue: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownRepository() == nil {
+		t.Fatalf("result = %v, want unknown_repository", resp.Msg.GetResult())
 	}
 }
 

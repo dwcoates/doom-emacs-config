@@ -47,9 +47,8 @@ const (
 	// (UpdateMergeQueueError.already_paused).
 	ArmAlreadyPaused = "already_paused"
 	// ArmUnknownRepository refuses a pause or a resume whose repository ref
-	// matches no registered repository. UpdateMergeQueueError has NO arm for
-	// it yet, so the handler answers server.UnlandedArm; the row stands in
-	// daemon/ERROR-ARMS.md.
+	// matches no registered repository
+	// (UpdateMergeQueueError.unknown_repository, landed at landing 6).
 	ArmUnknownRepository = "unknown_repository"
 	// ArmNotPaused refuses an unpause of a queue that is not paused
 	// (UpdateMergeQueueError.not_paused).
