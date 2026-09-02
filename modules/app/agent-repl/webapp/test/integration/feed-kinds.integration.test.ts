@@ -33,7 +33,7 @@ import {
   FeedDiffLineSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-import { startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import { expectedPaintClass } from "./vocab";
 import { SessionCompactScope } from "../../../proto/gen/ts/conversation/v1/session_pb";
@@ -357,7 +357,14 @@ describe("a running tool call", () => {
     // Arrange
     harness = await startHarness();
     await harness.fake.awaitStream("watchFeed");
-    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(toolCallRunningUnit(0n)));
+    // `last_progress` is an ABSOLUTE instant, and the page's clock starts at
+    // the harness epoch (harness.ts, HARNESS_EPOCH_MS) — so a beat reported AT
+    // the epoch is what makes the figure read the time advanced since it.
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      ROOT_FEED,
+      activityRow(toolCallRunningUnit(BigInt(HARNESS_EPOCH_MS))),
+    );
     await harness.settle();
     // Act
     await harness.tick(7_000);
@@ -828,8 +835,10 @@ describe("a standing cold gate", () => {
   it("echoes the served model on a compact answer", async () => {
     // Arrange
     await drawRow(coldGateStandingRow());
-    // Act
+    // Act: the compact path needs a model AND a scope, so the submenu's send
+    // button is the verb's control — the radio only records the choice.
     await harness.click(`[data-compact-model="${COLD_GATE_MODELS[1]}"]`);
+    await harness.click('[data-cold-gate="compact"]');
     // Assert
     const [request] = harness.fake.calls<{ choice: { case?: string; value?: { model?: { name: string } } } }>(
       "answerColdGate",
@@ -1035,6 +1044,10 @@ describe("an open question", () => {
     // Arrange
     await drawRow(questionRow("open"));
     await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
+    // The batch is answered WHOLE (question.ts: an empty answer blocks submit
+    // rather than sending a partial batch), so the second question is answered
+    // too even though this case is about the first one's echoed text.
+    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
     // Act
     await harness.click("[data-question-submit]");
     // Assert
@@ -1047,6 +1060,7 @@ describe("an open question", () => {
     await drawRow(questionRow("open"));
     // Act
     await harness.click(`[data-question-option="${QUESTION_ONE.options[1]}"]`);
+    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
     await harness.click("[data-question-submit]");
     // Assert
     const [request] = harness.fake.calls<{ answers: { chosen: string[] }[] }>("answerQuestion");
@@ -1059,6 +1073,7 @@ describe("an open question", () => {
     // Act: click both options of the SINGLE-select question.
     await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
     await harness.click(`[data-question-option="${QUESTION_ONE.options[1]}"]`);
+    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
     await harness.click("[data-question-submit]");
     // Assert
     const [request] = harness.fake.calls<{ answers: { chosen: string[] }[] }>("answerQuestion");
@@ -1069,6 +1084,7 @@ describe("an open question", () => {
     // Arrange
     await drawRow(questionRow("open"));
     // Act
+    await harness.click(`[data-question-option="${QUESTION_ONE.options[0]}"]`);
     await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
     await harness.click(`[data-question-option="${QUESTION_TWO.options[1]}"]`);
     await harness.click("[data-question-submit]");
@@ -1083,6 +1099,7 @@ describe("an open question", () => {
     const field = harness.$$("[data-question-other]")[0] as HTMLInputElement;
     field.value = "something else entirely";
     field.dispatchEvent(new Event("input", { bubbles: true }));
+    await harness.click(`[data-question-option="${QUESTION_TWO.options[0]}"]`);
     // Act
     await harness.click("[data-question-submit]");
     // Assert
