@@ -364,12 +364,15 @@ never by its name."
 ;; COLD START.  Emacs owns bringing a daemon up and nothing after that:
 ;; `agent-repl-daemon-ensure' adopts any daemon that answers, and only
 ;; builds and starts one when `daemon.addr' names nobody.  Registered on
-;; `emacs-startup-hook' rather than run here, so the boot cost lands after
-;; the editor is usable — and GATED ON `noninteractive', because a batch
-;; run must never build or spawn anything.
+;; `emacs-startup-hook' rather than run here — and what the hook registers
+;; is `agent-repl-daemon-schedule-ensure', which only ARMS an idle timer:
+;; `emacs-startup-hook' runs before Doom's UI init and before the first
+;; redisplay, so an ensure run directly from it holds the frame back until
+;; the whole stack build finishes.  GATED ON `noninteractive' too, because
+;; a batch run must never build or spawn anything.
 (if (and agent-repl-frontend-auto-start (not noninteractive))
     (progn
-      (add-hook 'emacs-startup-hook #'agent-repl-daemon-ensure)
+      (add-hook 'emacs-startup-hook #'agent-repl-daemon-schedule-ensure)
       (agent-repl--boot-info "cold-start: registered daemon ensure on emacs-startup-hook"))
   (agent-repl--boot-info "cold-start: daemon ensure NOT registered auto-start=%s batch=%s"
                          agent-repl-frontend-auto-start noninteractive))

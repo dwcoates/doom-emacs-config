@@ -752,10 +752,18 @@ scenario."
          (agent-repl-daemon-build-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
          (agent-repl--frontend-daemon-process nil))
-     (cl-letf ,(mapcar (lambda (boundary)
-                         `((symbol-function ',boundary)
-                           (agent-repl-itest--real-boundary ',boundary)))
-                       agent-repl-itest--cold-start-boundaries)
+     (cl-letf (,@(mapcar (lambda (boundary)
+                           `((symbol-function ',boundary)
+                             (agent-repl-itest--real-boundary ',boundary)))
+                         agent-repl-itest--cold-start-boundaries)
+               ;; The elisp staleness pre-check is stubbed to "everything is
+               ;; stale" rather than restored: its artifacts are the REAL
+               ;; module's, so a real probe would make whether the stub build
+               ;; script runs at all depend on the developer's working tree.
+               ((symbol-function 'agent-repl--frontend-file-mtime)
+                (lambda (_path) nil))
+               ((symbol-function 'agent-repl--frontend-source-files)
+                (lambda (_dir _regexp) nil)))
        (unwind-protect (progn ,@body)
          (agent-repl-itest--reset-cold-start)))))
 
