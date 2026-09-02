@@ -113,17 +113,24 @@ out to real `git'."
 ;; ---- Loaded-version SHA ----
 ;;
 ;; `agent-repl--version' caches the git SHA of the doom config that this
-;; module was loaded from.  It is refreshed via `setq' (NOT `defvar') on
-;; every load below, so `M-x doom/reload' updates it to the freshly
-;; checked-out SHA instead of keeping the value captured at first startup.
+;; module was loaded from.  It is INVALIDATED via `setq' (NOT `defvar') on
+;; every load below, so `M-x doom/reload' recomputes it from the freshly
+;; checked-out worktree instead of keeping the value captured at first
+;; startup, and it is COMPUTED lazily on first use so no startup pays a
+;; synchronous `git rev-parse' before the frame appears.
 ;; `agent-repl-version' surfaces it interactively.
 
 (defvar agent-repl--version nil
   "Git SHA of the doom config this agent-repl module was last loaded from.
-Refreshed on every load (including `M-x doom/reload') by the
-`noninteractive'-gated `setq' below, so it always reflects the version
-actually running rather than a stale first-startup value.  nil when the
-SHA could not be determined.")
+Invalidated on every load (including `M-x doom/reload') by the `setq'
+below, so it always reflects the version actually running rather than a
+stale first-startup value.  nil when the SHA has not been computed yet,
+or could not be determined.")
+
+(defvar agent-repl--version-computed nil
+  "Non-nil once this load has tried to compute `agent-repl--version'.
+Distinguishes \"not asked yet\" from \"asked, and git had no answer\", so a
+repo that cannot resolve a SHA is not re-probed on every call.")
 
 (defun agent-repl--compute-version ()
   "Return the git SHA of the doom repo this module was loaded from, or nil.
@@ -141,22 +148,34 @@ config-loader top level, before `core.el' has loaded."
                 "rev-parse" "HEAD")))
       (and (not (string-empty-p sha)) sha))))
 
-;; Refresh on EVERY load so reloads pick up the new SHA.  Gated against
-;; `noninteractive' (mirroring core.el's startup log rotate) so batch ERT
-;; runs neither shell out to real `git' nor depend on the repo state.
-(unless noninteractive
-  (setq agent-repl--version (agent-repl--compute-version))
-  (agent-repl--boot-info "version: refreshed config-file=%S sha=%S"
-                         agent-repl--config-file agent-repl--version))
+;; INVALIDATE on every load so a reload picks up the new SHA — but do NOT
+;; compute it here.  This runs at module-load time, which on startup is
+;; before the first frame is painted, and `git rev-parse' is a synchronous
+;; subprocess: the SHA is wanted by an interactive command and nothing
+;; else, so it is computed on first use instead.
+(setq agent-repl--version nil
+      agent-repl--version-computed nil)
+
+(defun agent-repl--version-string ()
+  "Return the loaded config's git SHA, computing it once per load.
+LAZY BY DESIGN: the git probe is a synchronous subprocess, and paying it
+at load time cost every startup a `git rev-parse' before the frame
+appeared."
+  (unless agent-repl--version-computed
+    (setq agent-repl--version-computed t
+          agent-repl--version (agent-repl--compute-version))
+    (agent-repl--boot-info "version: computed config-file=%S sha=%S"
+                           agent-repl--config-file agent-repl--version))
+  agent-repl--version)
 
 (defun agent-repl-version ()
   "Display the git SHA of the loaded doom config in the echo area.
-Reads the cached `agent-repl--version', refreshed on every load, and
-returns the SHA string (or the sentinel \"unknown\" when undetermined)."
+Computes the SHA on first use (and caches it for the rest of this load),
+returning the SHA string (or the sentinel \"unknown\" when undetermined)."
   (interactive)
-  (let ((version (or agent-repl--version "unknown")))
+  (let ((version (or (agent-repl--version-string) "unknown")))
     (agent-repl--log nil "version command: cached-sha=%S display=%S"
-                      agent-repl--version version)
+                     agent-repl--version version)
     (message "agent-repl version: %s" version)
     version))
 
