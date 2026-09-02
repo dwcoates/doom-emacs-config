@@ -1341,6 +1341,7 @@ its own file only when >1 endpoint needs it.
   harness fake shim takes the workspace lock at StartSession. The shim's
   signal handlers now precede its "serving" record, so a supervisor keying
   off "serving" is safe.
+
 ## Landing 7 relay (2026-09-02, project lead)
 
 Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
