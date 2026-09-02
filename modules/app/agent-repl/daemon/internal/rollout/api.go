@@ -153,6 +153,11 @@ type Deps struct {
 	// DrainIntake releases the held intake IN ORDER once the successor owns the
 	// workspace.
 	DrainIntake DrainIntakeFunc
+	// LeaseChanged tells the prompt queue a workspace's lease set changed, so
+	// it re-evaluates every standing hold against it. RELEASING THE RESTART
+	// HOLD IS WHAT DRAINS THE INTAKE, and the release alone does not reach the
+	// queue: without this hook a bounce leaves the intake held forever.
+	LeaseChanged LeaseChangedFunc
 	// Freeness answers, and waits for, a workspace's freeness — the
 	// sessionwatcher's answer.
 	Freeness Freeness
@@ -272,6 +277,10 @@ func (p Participants) Count() int {
 // the transfer notice on the outgoing daemon does no work for it.
 type QuiesceFunc func(ctx context.Context, ws ids.WorkspaceID) error
 
+// LeaseChangedFunc re-evaluates one workspace's standing holds against its new
+// lease set. It is promptqueue.Queue.OnLeaseChanged.
+type LeaseChangedFunc func(ws ids.WorkspaceID)
+
 // DrainIntakeFunc releases a quiesced workspace's held intake IN ORDER, on the
 // daemon that now owns it.
 type DrainIntakeFunc func(ctx context.Context, ws ids.WorkspaceID) error
@@ -377,6 +386,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.DB == nil {
 		return nil, errors.New("rollout: a state client is required")
+	}
+	if deps.LeaseChanged == nil {
+		return nil, errors.New("rollout: a lease-changed hook is required; a bounce that releases the restart hold without it leaves the intake held")
 	}
 	if deps.Clock == nil {
 		deps.Clock = SystemClock{}

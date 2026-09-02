@@ -233,14 +233,13 @@ func (s *server) AnswerQuestion(
 		},
 	})
 	if err != nil {
-		// AnswerQuestion spells the two unserved conditions apart: a batch that
-		// is no longer standing is an UNKNOWN ID (`ask_not_standing`), while a
-		// value the batch never offered is `unserved_value{text}`.
-		rename := map[string]string{workspace.ArmUnservedAnswer: "unserved_value"}
-		if refusalIsNotFound(err) {
-			rename[workspace.ArmUnservedAnswer] = "ask_not_standing"
-		}
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, rename))
+		// AnswerQuestion spells the two conditions apart with TWO ARMS, and so
+		// does the verb: a card that is not standing raises
+		// workspace.ArmAskNotStanding, which AnswerQuestionError carries under
+		// that very name, and a value the standing batch never offered raises
+		// ArmUnservedAnswer, renamed here onto `unserved_value{text}`.
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err,
+			map[string]string{workspace.ArmUnservedAnswer: "unserved_value"}))
 	}
 	resp.Result = &agentreplv1.AnswerQuestionResponse_Success{
 		Success: &agentreplv1.AnswerQuestionSuccess{},

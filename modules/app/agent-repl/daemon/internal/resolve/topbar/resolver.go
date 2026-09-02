@@ -242,6 +242,27 @@ func (r *resolver) permissionModePicker(s *wsState) *frontendv1.TopbarPermission
 	return out
 }
 
+// SwitchableModes is the vendor's fixed switchable permission-mode set, in
+// display order — exactly the arms conversation.v1 AgentPermissionMode spells,
+// in their wire spelling. It is a CONSTANT rather than a catalog because the
+// vendor states no catalog: SessionStarted carries a model catalog and nothing
+// for modes.
+var SwitchableModes = []string{"default", "accept_edits", "plan", "bypass", "dont_ask", "auto"}
+
+// switchablePermissionModes builds the served picker from the fixed set. The
+// current option is filled in by permissionModePicker from the mode in force.
+func switchablePermissionModes() *frontendv1.TopbarPermissionModePicker {
+	out := &frontendv1.TopbarPermissionModePicker{
+		Options: make([]*frontendv1.TopbarPermissionModeOption, 0, len(SwitchableModes)),
+	}
+	for _, mode := range SwitchableModes {
+		out.Options = append(out.Options, &frontendv1.TopbarPermissionModeOption{
+			Mode: mode, DisplayName: displayMode(mode),
+		})
+	}
+	return out
+}
+
 // displayMode renders a mode's wire spelling for a reader: the schema spells
 // arms with underscores, and a label never does.
 func displayMode(mode string) string {
@@ -358,6 +379,14 @@ func (r *resolver) OnSessionStarted(ws ids.WorkspaceID, started *conversationv1.
 			s.vendorSessionID = started.GetVendorSessionId()
 			s.model = started.GetEffectiveModel().GetName()
 			s.permissionMode = permissionModeName(started.GetPermissionMode())
+			// THE PICKER IS SERVED HERE, from the vendor's fixed switchable
+			// set: `SessionStarted` carries a model catalog but NO
+			// permission-mode catalog, and nothing else in the daemon serves
+			// one, so before this the picker was never installed and every
+			// SetPermissionMode was refused as mode_not_served. The set is a
+			// constant of the vendor's contract (conversation.v1
+			// AgentPermissionMode's arms), not an inference.
+			s.picker = switchablePermissionModes()
 			if catalog := started.GetModelCatalog(); len(catalog) > 0 {
 				s.catalog = catalog
 			}
@@ -568,6 +597,23 @@ func saturatingSub(a, b uint64) uint64 {
 		return 0
 	}
 	return a - b
+}
+
+// StatusFacts answers the /status panel's spliced session facts. It reports
+// false until the session has started, because a status panel for a workspace
+// whose session never opened would state nothing the daemon actually knows.
+func (r *resolver) StatusFacts(ws ids.WorkspaceID) (StatusFacts, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.stateLocked(ws)
+	if !s.started {
+		return StatusFacts{}, false
+	}
+	return StatusFacts{
+		Account:        s.email,
+		Model:          s.model,
+		PermissionMode: s.permissionMode,
+	}, true
 }
 
 // PermissionModes answers EXACTLY the switchable mode set the daemon served

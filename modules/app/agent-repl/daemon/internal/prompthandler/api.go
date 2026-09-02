@@ -35,8 +35,8 @@ import (
 // FeedId before it reaches this package, so a value that does not decode never
 // becomes a handler call.
 //
-// The queue's own refusals (merging, no_session, turn_already_open) travel
-// through unchanged and are mapped where promptqueue documents them.
+// The queue's own refusals (merging, no_session) travel through unchanged and
+// are mapped where promptqueue documents them.
 var (
 	// ErrOriginRequired is a submission carrying PROMPT_ORIGIN_UNSPECIFIED. It
 	// is refused HERE, before anything is minted or mirrored.
