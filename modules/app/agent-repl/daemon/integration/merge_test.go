@@ -756,7 +756,10 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 	// not continue" (daemon.merge.abort, ERROR, the missing-brief failure this
 	// test is about) — read off internal/merge/phases.go's mergeTab Warn and
 	// internal/merge/terminal.go's abort Error call sites.
-	f.d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.abort")
+	// The scripted conflict is stated by the git client too, and the aborted
+	// run stops the admission pump: both are this failure, once each.
+	f.d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.abort",
+		"daemon.gitclient.merge_no_ff", "daemon.merge.pump")
 }
 
 // ---------------------------------------------------------------------------
