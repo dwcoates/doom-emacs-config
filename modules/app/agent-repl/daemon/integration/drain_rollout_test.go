@@ -670,6 +670,77 @@ func TestAHeadlessWorkspaceTransfersWithoutAnyAdoptCall(t *testing.T) {
 	}
 }
 
+// TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement
+// is critique 14's first arm: a client whose stream was NOT open at the
+// instant the handover was announced is refused with participant_not_expected
+// when it tries to join the rendezvous — verified against
+// AdoptWebWorkspaceParticipantNotExpected
+// (proto/src/agentrepl/v1/endpoint_adopt_web_workspace.proto) and
+// rollout.ErrParticipantNotExpected (internal/rollout/adopt.go).
+func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnouncement(t *testing.T) {
+	// Arrange: only the HOST stream is open when the handover fires, so the
+	// manifest's ExpectedWeb is false (internal/rollout/handover.go: the
+	// snapshot is taken at announcement) — no web participant was ever
+	// expected for this workspace.
+	selfRepo, d := drainSelfRepoDaemon(t)
+	f := drainOpenWorkspace(t, d)
+	f.shim.ExpectStartSession()
+	f.shim.ExpectWatchSession()
+	host := d.WatchHost(f.ws)
+	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+
+	// Act: fire the handover with no web stream ever opened.
+	drainTriggerRollout(t, d, selfRepo, "modules/app/agent-repl/daemon/cmd/claude-repld/main.go")
+	daemonStream := d.WatchDaemonStream()
+	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	successor := drainDial(announced.GetAddress())
+
+	// Act: the never-open web client attempts to join anyway.
+	resp, err := successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace for a client not open at announcement = error %v, want a typed participant_not_expected answer", err)
+	}
+	if resp.Msg.GetError().GetParticipantNotExpected() == nil {
+		t.Fatalf("AdoptWebWorkspace for a client not open at announcement = %v, want error.participant_not_expected", resp.Msg)
+	}
+}
+
+// TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo is
+// critique 14's second arm: AdoptWebWorkspace on a plain boot — no handover
+// ever announced — is refused with no_transfer_announced, and
+// internal/server/adopt.go marks this refusal Info (the ORDINARY case on
+// every non-handover page boot), never WARN.
+func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *testing.T) {
+	// Arrange: an ordinary opened workspace; no handover was ever announced on
+	// this daemon.
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().AdoptWebWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the typed refusal.
+	if err != nil {
+		t.Fatalf("AdoptWebWorkspace on a plain boot = error %v, want a typed no_transfer_announced answer", err)
+	}
+	if resp.Msg.GetError().GetNoTransferAnnounced() == nil {
+		t.Fatalf("AdoptWebWorkspace on a plain boot = %v, want error.no_transfer_announced", resp.Msg)
+	}
+
+	// Assert: logged at INFO, naming the arm, never WARN.
+	rec := f.d.AwaitRunLogOperation("AdoptWebWorkspace")
+	if strings.ToLower(rec.Level) != "info" {
+		t.Fatalf("AdoptWebWorkspace's no_transfer_announced refusal logged at %q, want info", rec.Level)
+	}
+	if got := rec.Context["arm"]; got != "no_transfer_announced" {
+		t.Fatalf("AdoptWebWorkspace refusal record's arm = %v, want no_transfer_announced", got)
+	}
+	f.d.ExpectWarnings()
+}
+
 // ---- Asset origin ----
 
 func TestAssetOriginServesIndexWithNoStoreCacheControl(t *testing.T) {
