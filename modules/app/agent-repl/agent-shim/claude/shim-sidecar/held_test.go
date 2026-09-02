@@ -36,7 +36,7 @@ func TestUnownedSpoolIsRetainedAcrossRescans(t *testing.T) {
 	}
 
 	// Act: the spawning call arrives on a later pass.
-	h.sc.TaskSpawned("b1", "call-1", "", "")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false)
 	h.sc.rescan()
 
 	// Assert: it was held, never dropped, so it is tailed the moment it is

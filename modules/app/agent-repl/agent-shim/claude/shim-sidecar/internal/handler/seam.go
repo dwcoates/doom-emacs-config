@@ -23,16 +23,16 @@ import (
 // asked for nothing, which is silence rather than a defect; the reader states
 // its own expectations at the plumbing site.
 type seamObserver struct {
-	spawned func(taskID, toolUseID, agentID, outputPath string)
+	spawned func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)
 	stopped func(taskID string)
 }
 
 // TaskSpawned implements convert.Observer.
-func (o *seamObserver) TaskSpawned(taskID, toolUseID, agentID, outputPath string) {
+func (o *seamObserver) TaskSpawned(taskID, toolUseID, agentID, outputPath string, backgrounded bool) {
 	if o.spawned == nil {
 		return
 	}
-	o.spawned(taskID, toolUseID, agentID, outputPath)
+	o.spawned(taskID, toolUseID, agentID, outputPath, backgrounded)
 }
 
 // TaskStopped implements convert.Observer.
@@ -48,14 +48,14 @@ func (o *seamObserver) TaskStopped(taskID string) {
 // A LAUNCH IS THE ONLY PLACE THE VENDOR STATES WHICH CALL OPENED WHICH SPOOL, and
 // only this package reads tool results — so without this the reader cannot claim
 // a spool at all and every one of them waits out its hold and goes to residue.
-func (h *SessionTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string)) {
+func (h *SessionTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)) {
 	h.obs.spawned = fn
 }
 
 // SetTaskObserver adopts the reader's spawn-observation sink. A sidechain can
 // itself launch detached work, so a subagent's transcript reports launches on the
 // same terms as a session's.
-func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string)) {
+func (h *AgentTranscriptHandler) SetTaskObserver(fn func(taskID, toolUseID, agentID, outputPath string, backgrounded bool)) {
 	h.obs.spawned = fn
 }
 

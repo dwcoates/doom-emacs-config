@@ -410,7 +410,7 @@ type recordingObserver struct {
 	stopped *[]string
 }
 
-func (o recordingObserver) TaskSpawned(string, string, string, string) {}
+func (o recordingObserver) TaskSpawned(string, string, string, string, bool) {}
 
 func (o recordingObserver) TaskStopped(taskID string) {
 	*o.stopped = append(*o.stopped, taskID)

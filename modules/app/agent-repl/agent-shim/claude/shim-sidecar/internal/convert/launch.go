@@ -21,8 +21,13 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 		return
 	}
 	taskID, output := "", ""
+	// A BACKGROUNDED SPAWN IS ONLY THE isAsync BRANCH. A detached shell run and a
+	// workflow run are backgrounded WORK, but neither is an AGENT, so neither
+	// makes a subagent its own top level.
+	backgrounded := false
 	switch {
 	case has(result, "isAsync"):
+		backgrounded = true
 		// A backgrounded subagent. Its transcript is the a* spool, and its
 		// prose reaches no stream at all — the path is the only place the work
 		// exists. The vendor's `agentId` is that FILE's locator, never the
@@ -59,5 +64,5 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 	// the spawning call's id and needs no separate report; what the reader
 	// genuinely cannot derive is WHOSE book the spawn happened in, which is what
 	// a detached run's frames are attributed to.
-	c.observer.TaskSpawned(taskID, call.activityID, call.agentID, output)
+	c.observer.TaskSpawned(taskID, call.activityID, call.agentID, output, backgrounded)
 }
