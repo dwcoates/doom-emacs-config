@@ -156,6 +156,14 @@ describe("drawFeedShell clocks", () => {
     expect(el.querySelector(".shell-quiet")?.textContent).toBe("quiet for 12s");
   });
 
+  it("reads the quiet-for's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the last append does not share the shared ticker's phase.
+    vi.setSystemTime(12_920);
+    const el = drawFeedShell(shell({ lastProgressMs: 8000n }), ctxFor().rc);
+    // Assert: five real seconds of silence reads 5s, not the lagging 4s.
+    expect(el.querySelector(".shell-quiet")?.textContent).toBe("quiet for 5s");
+  });
+
   it("draws no quiet-for reading before the first byte", () => {
     const el = drawFeedShell(shell(), ctxFor().rc);
     expect(el.querySelector(".shell-quiet")).toBeNull();
