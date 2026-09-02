@@ -242,13 +242,46 @@ the daemon accepted.")
         (setq agent-repl-input-notice text)
         (force-mode-line-update)))))
 
+(defun agent-repl--input-expire-flash (ws buffer text)
+  "Clear BUFFER's composer notice, but only while it still shows this TEXT.
+
+THE DWELL OUTLIVES THE FLASH THAT ARMED IT.  The timer fires seconds
+later, and by then WS may have a DIFFERENT composer buffer and that
+buffer a DIFFERENT notice -- the merge-parked badge, most of all, which
+`agent-repl--input-check-gate\=' sets on every submit while the merge\='s
+resolution agent owns the composer.  A dwell that resolved the buffer by
+name and cleared whatever it found would erase a badge it never set: a
+refusal flashed within `agent-repl-input-flash-seconds\=' of a parked
+send would silently take the one line telling the user their words are
+going somewhere else.
+
+So the expiry is bound to what it flashed on both axes -- the BUFFER it
+wrote to and the TEXT it wrote -- and clears nothing else.  WS is carried
+for the log line only."
+  (cond
+   ((not (buffer-live-p buffer))
+    (agent-repl--log ws "elisp.input.flash-expired-dead-buffer ws=%s text=%S" ws text))
+   ((not (equal (buffer-local-value 'agent-repl-input-notice buffer) text))
+    (agent-repl--log ws "elisp.input.flash-superseded ws=%s text=%S standing=%S"
+                     ws text (buffer-local-value 'agent-repl-input-notice buffer)))
+   (t
+    (with-current-buffer buffer
+      (setq agent-repl-input-notice nil)
+      (force-mode-line-update))
+    (agent-repl--log ws "elisp.input.flash-cleared ws=%s text=%S" ws text))))
+
 (defun agent-repl--input-flash (ws text)
-  "Show TEXT as WS's composer notice, clearing it after a short dwell.
+  "Show TEXT as WS\='s composer notice, clearing it after a short dwell.
 The dwell is presentation only: nothing downstream reads the notice, so a
-timer that never fires costs a stale badge and nothing else."
+timer that never fires costs a stale badge and nothing else.  What it must
+NOT cost is another notice: see `agent-repl--input-expire-flash\=', which
+is why the buffer and the text are captured here rather than resolved when
+the timer fires."
   (agent-repl--input-set-notice ws text)
-  (run-at-time agent-repl-input-flash-seconds nil
-               (lambda () (agent-repl--input-set-notice ws nil))))
+  (let ((buffer (agent-repl--input-buffer ws)))
+    (when buffer
+      (run-at-time agent-repl-input-flash-seconds nil
+                   #'agent-repl--input-expire-flash ws buffer text))))
 
 ;;;; ---- Attachments -----------------------------------------------------
 
