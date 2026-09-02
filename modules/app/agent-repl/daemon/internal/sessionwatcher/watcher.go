@@ -105,6 +105,10 @@ type watcher struct {
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
 	// to the lifecycle sink, which is told only once mu is released.
 	pendingTurnEnds []endedTurn
+
+	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
+	// can join it. It is a WaitGroup rather than a sleep.
+	dispatching sync.WaitGroup
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -418,6 +422,10 @@ func (w *watcher) Close() error {
 
 	w.cancel()
 	closeStreams(closing)
+	// The off-lock sink dispatch is JOINED here: a turn end still being handled
+	// reads the state client, and the daemon closes that client once every
+	// watcher is closed.
+	w.dispatching.Wait()
 	return nil
 }
 
@@ -745,6 +753,15 @@ func (w *watcher) flushTurnEnds() {
 	w.mu.Lock()
 	pending := w.pendingTurnEnds
 	w.pendingTurnEnds = nil
+	if len(pending) > 0 {
+		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
+		// off its own mutex, and the sinks it drives read the state client --
+		// so Close, which the daemon runs BEFORE closing that client, waits on
+		// exactly this rather than tearing the store out from under a turn end
+		// that is still being handled.
+		w.dispatching.Add(1)
+		defer w.dispatching.Done()
+	}
 	w.mu.Unlock()
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
