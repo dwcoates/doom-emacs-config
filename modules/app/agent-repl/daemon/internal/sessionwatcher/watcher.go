@@ -380,6 +380,10 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
 		// stream frame states that a turn was accepted.
 		w.sinks.Footer.OnTurnOpened(ws, turn)
+		// AND THE FEED, for the same reason: the turn's own terminal row for a
+		// query that died out from under it is drawn against the turn the feed
+		// believes is running, and nothing on the streams states it either.
+		w.sinks.Feed.OnTurnOpened(ws, turn)
 	} else {
 		w.log.Error("daemon.sessionwatcher.turn_opened_unidentified", "an opened turn named no id", dlog.Context{
 			"agent_id": prompt.GetAgent().GetValue(),

@@ -203,6 +203,19 @@ func (r *resolver) OnBash(ws ids.WorkspaceID, work *conversationv1.DetachedWorkI
 	r.drawDetachedShell(s, work, bash)
 }
 
+// OnTurnOpened records the turn the daemon just opened. IT DRAWS NOTHING: the
+// prompt queue's own mirror draws the user_prompt row, and this is only the
+// fact of which turn is running -- the fact drawQueryDied terminates against.
+func (r *resolver) OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	running := turn
+	s.turnInFlight = &running
+	r.logger(ws).Debug("daemon.feed.turn_opened",
+		"the feed took the turn the daemon opened", dlog.Context{"turn": string(turn)})
+}
+
 // OnSessionUpdate reacts to the session-scoped facts that change rows.
 func (r *resolver) OnSessionUpdate(ws ids.WorkspaceID, update *conversationv1.SessionUpdate) {
 	r.mu.Lock()

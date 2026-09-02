@@ -95,6 +95,13 @@ type HostNotification struct {
 // method carries the OutputAddress in force so the resolver places the row
 // without asking anyone.
 type FeedSink interface {
+	// OnTurnOpened is the TURN-OPEN EDGE: the prompt queue's accepted turn,
+	// handed over by the watcher. Nothing on the shim's streams states it for
+	// a turn the DAEMON opened -- StartTurn answers with the prompt rather
+	// than echoing it on the agent's stream -- so without this edge the feed
+	// does not know which turn is running, and a session-scoped death
+	// (query_died) has no turn to draw a terminal for.
+	OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnPrompt is a prompt one agent addressed to another.
 	OnPrompt(ws ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, addr OutputAddress)
 	// OnActivity is one unit of a turn's synchronous progress.
