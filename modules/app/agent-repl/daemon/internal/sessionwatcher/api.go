@@ -222,6 +222,10 @@ type LifecycleSink interface {
 	// OnNotification raises a host notification and the roster's attention
 	// marker.
 	OnNotification(ws ids.WorkspaceID, note HostNotification)
+	// OnLinkChanged reports the shim link's attachment. The VIEWS take the
+	// link on their own sinks; this arm exists because the HOST view's
+	// `shim_attached` is composed by the server, which cannot see the edge.
+	OnLinkChanged(ws ids.WorkspaceID, attached bool)
 }
 
 // Sinks is the set a watcher routes into.

@@ -36,6 +36,12 @@ type Git interface {
 	// CommonDir reports a directory's repository common dir, canonicalized
 	// with symlinks resolved. It is the repository's identity.
 	CommonDir(ctx context.Context, dir string) (string, error)
+	// MainWorktree reports a directory's repository's MAIN WORKTREE,
+	// canonicalized. It is what workspace.v1's RepositoryRef.dir means ("the
+	// repository's normalized main-worktree directory") and what a top-level
+	// workspace's merge targets. A bare repository has none, which is an
+	// error, never an empty answer.
+	MainWorktree(ctx context.Context, dir string) (string, error)
 	// SameRepo reports whether two directories belong to one repository. The
 	// merge orchestrator keys its two methods on it.
 	SameRepo(ctx context.Context, a, b string) (bool, error)

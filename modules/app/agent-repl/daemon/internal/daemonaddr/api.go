@@ -41,6 +41,14 @@ func Bind(addrPath string, port int) (Claim, error) {
 	return bind(addrPath, port)
 }
 
+// BindJoining binds a SUCCESSOR's listener WITHOUT the boot claim. The
+// incumbent holds that claim for as long as it serves, so a successor racing
+// for it would lose to its own predecessor and exit; it takes the claim at
+// Publish, when it takes over.
+func BindJoining(addrPath string, port int) (Claim, error) {
+	return bindJoining(addrPath, port)
+}
+
 // Read reads an existing daemon.addr file, which is how a joining successor
 // learns the incumbent's address when it is not given one. A missing file is
 // reported as an error, never as an empty address.

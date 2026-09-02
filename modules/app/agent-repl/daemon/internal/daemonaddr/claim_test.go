@@ -377,3 +377,51 @@ func TestReadRefusesAnAbsentOrUnusableFile(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// TestAJoiningBindDoesNotTakeTheBootClaim covers the successor's whole
+// premise: the INCUMBENT holds the claim for as long as it serves, so a
+// successor that raced for it would lose to its own predecessor and exit.
+func TestAJoiningBindDoesNotTakeTheBootClaim(t *testing.T) {
+	// Arrange: an incumbent holding the claim.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	defer incumbent.Close()
+
+	// Act.
+	successor, err := BindJoining(path, 0)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("BindJoining alongside an incumbent = %v, want a bound listener", err)
+	}
+	defer successor.Close()
+	if successor.Address() == incumbent.Address() {
+		t.Fatalf("the successor bound %q, the incumbent's own address", successor.Address())
+	}
+}
+
+// TestAJoiningClaimTakesTheBootClaimWhenItAdvertises covers the other half: a
+// successor becomes the daemon of the state root at Publish, and taking the
+// claim is what that means.
+func TestAJoiningClaimTakesTheBootClaimWhenItAdvertises(t *testing.T) {
+	// Arrange.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+
+	// Act.
+	if err := successor.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Assert: nobody else can take the claim now.
+	if _, err := Bind(path, 0); !errors.Is(err, ErrClaimed) {
+		t.Fatalf("Bind after the successor advertised = %v, want ErrClaimed", err)
+	}
+}

@@ -92,6 +92,7 @@ the only one a refused open makes.
 | WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
 | WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
 | WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace before it opens | server |
+| OpenWorkspace | `conversation_owned` | another shim holds this workspace's conversation: it took the workspace kernel lock first inside its own StartSession, and two vendor processes on one conversation is what that lock prevents. `shim.v1` spells the arm (`StartSessionFailure.conversation_owned`); `OpenWorkspaceError` has none, so the shim's verdict is relayed | workspace |
 
 ## Landing 6 batch, opened by the server handlers (wave 3a)
 

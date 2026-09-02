@@ -61,7 +61,11 @@ environment. Every flag is optional.
    it is waiting, and `daemon.addr` is written only once every workspace is
    adopted (the rollout's `WriteDaemonAddr` hook);
 7. the state client — `wsm.Open`, or `wsm.OpenReadOnly` for a joining daemon,
-   which owns no workspace and must not be a second writer;
+   which owns no workspace and must not be a second writer. That handle is
+   PROMOTED IN PLACE (`wsm.DB.Promote`) at the successor's first adoption:
+   adopting a workspace is the moment it starts writing that workspace's rows,
+   and the incumbent stopped writing them at its transfer notice, so the
+   one-writer invariant holds across the swap;
 8. the component graph, then `boot.Sequence.Run`: adopt the shims whose
    workspace lock is still held (never kill-and-restart), reconcile the intent
    manifest (all four dispositions persisted as faults), restore the holds
@@ -110,6 +114,13 @@ classified `interject`; every other prompt is `hold_for_turn_end`.
 `~/.cache/agent-repl/run/workspace-<md5hex(clean abs dir)[:8]>.lock` (probed
 with `open + flock(LOCK_EX|LOCK_NB)`, released at once) and
 `session-<vendor session id>.lock` (never probed by the daemon).
+
+BOTH ARE TAKEN INSIDE `StartSession`, before the SDK is touched, and released
+together on a kill or a stand-down (project-lead ruling). Nothing is locked at
+the shim's startup, which is what lets the rollout's relaunch engine PRELAUNCH
+an inert shim beside a live one: an inert shim holds neither lock. A workspace
+another shim already holds answers `StartSessionFailure.conversation_owned`,
+which the daemon relays as an intended arm (ERROR-ARMS.md).
 
 ## State root layout
 

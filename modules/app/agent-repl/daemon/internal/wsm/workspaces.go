@@ -185,7 +185,7 @@ func ensureRepo(ctx context.Context, tx *sql.Tx, repoDir, defaultBranch string) 
 func (s *store) Workspace(ctx context.Context, id WorkspaceID) (Workspace, error) {
 	var out Workspace
 	err := s.read(ctx, "daemon.wsm.workspace", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		ws, err := scanWorkspace(s.db.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))
+		ws, err := scanWorkspace(s.db().QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
 		}
@@ -205,7 +205,7 @@ func (s *store) WorkspaceByDir(ctx context.Context, dir string) (Workspace, erro
 	}
 	var out Workspace
 	err = s.read(ctx, op, dlog.Context{"dir": normalized}, func(ctx context.Context) error {
-		ws, err := scanWorkspace(s.db.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE dir = ?`, normalized))
+		ws, err := scanWorkspace(s.db().QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE dir = ?`, normalized))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: workspace at %q: %w", normalized, ErrNotFound)
 		}
@@ -219,7 +219,7 @@ func (s *store) WorkspaceByDir(ctx context.Context, dir string) (Workspace, erro
 func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	var out []Workspace
 	err := s.read(ctx, "daemon.wsm.list_workspaces", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db.QueryContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`)
+		rows, err := s.db().QueryContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY created_at, id`)
 		if err != nil {
 			return err
 		}
@@ -248,7 +248,7 @@ func (s *store) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 func (s *store) ListRepositories(ctx context.Context) ([]Repository, error) {
 	var out []Repository
 	err := s.read(ctx, "daemon.wsm.list_repositories", dlog.Context{}, func(ctx context.Context) error {
-		rows, err := s.db.QueryContext(ctx, `SELECT id, dir, name, default_branch FROM repositories ORDER BY dir`)
+		rows, err := s.db().QueryContext(ctx, `SELECT id, dir, name, default_branch FROM repositories ORDER BY dir`)
 		if err != nil {
 			return err
 		}
@@ -353,7 +353,7 @@ func (s *store) Current(ctx context.Context) (*WorkspaceID, error) {
 	var out *WorkspaceID
 	err := s.read(ctx, "daemon.wsm.current", dlog.Context{}, func(ctx context.Context) error {
 		var id WorkspaceID
-		err := s.db.QueryRowContext(ctx, `SELECT id FROM workspaces WHERE is_current = 1`).Scan(&id)
+		err := s.db().QueryRowContext(ctx, `SELECT id FROM workspaces WHERE is_current = 1`).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
 			out = nil
 			return nil

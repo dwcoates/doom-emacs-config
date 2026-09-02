@@ -109,7 +109,14 @@ func (w *watcher) registerTurnWaiter(turn ids.TurnID) (ch chan turnEnd, standing
 // freeness signal is raised.
 func (w *watcher) turnEndedLocked(turn ids.TurnID, how TurnClose) {
 	w.turn = nil
-	w.sinks.Lifecycle.OnTurnEnded(w.ws, turn, how)
+	// THE LIFECYCLE SINK IS TOLD OFF THE LOCK. It is the prompt queue, and a
+	// turn's end is what makes the queue DELIVER the next prompt -- which
+	// opens a turn back on this watcher and needs this very mutex. Told
+	// inside the lock it is a self-deadlock, and every hold waiting on a turn
+	// end (and every one-shot's finish action) simply never happened. The
+	// VIEW sinks stay inside the lock: they are pure consumers, and their
+	// ordering per stream is the reason mu is held across them.
+	w.pendingTurnEnds = append(w.pendingTurnEnds, endedTurn{turn: turn, how: how})
 	w.rememberClosedTurnLocked(turn, how)
 	for _, ch := range w.turnWaiters[turn] {
 		ch <- turnEnd{how: how}

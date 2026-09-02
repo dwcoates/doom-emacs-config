@@ -183,3 +183,51 @@ func TestSpawnClearsAStaleReportFromAnEarlierHandover(t *testing.T) {
 		t.Fatalf("the stale report survived; it would be dialed as this handover's successor")
 	}
 }
+
+// TestTheSuccessorInheritsTheIncumbentsArgv covers what a successor IS: the
+// same daemon, re-pointed. A successor assembled from a curated list of flags
+// would differ from its incumbent in exactly the ways nobody thought to list.
+func TestTheSuccessorInheritsTheIncumbentsArgv(t *testing.T) {
+	tests := []struct {
+		name      string
+		incumbent []string
+		want      []string
+	}{
+		{
+			name:      "no flags at all is just the joining flag",
+			incumbent: nil,
+			want:      []string{JoiningFlag, "127.0.0.1:1"},
+		},
+		{
+			name:      "every other flag is carried through",
+			incumbent: []string{"--default-config-dir", "/roots/default", "--prompts-dir", "/prompts"},
+			want:      []string{"--default-config-dir", "/roots/default", "--prompts-dir", "/prompts", JoiningFlag, "127.0.0.1:1"},
+		},
+		{
+			name:      "a separated joining flag is dropped with its value",
+			incumbent: []string{"--joining", "127.0.0.1:9", "--prompts-dir", "/prompts"},
+			want:      []string{"--prompts-dir", "/prompts", JoiningFlag, "127.0.0.1:1"},
+		},
+		{
+			name:      "an attached joining flag is dropped",
+			incumbent: []string{"-joining=127.0.0.1:9", "--node", "node"},
+			want:      []string{"--node", "node", JoiningFlag, "127.0.0.1:1"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act.
+			got := successorArgv(tc.incumbent, "127.0.0.1:1")
+
+			// Assert.
+			if len(got) != len(tc.want) {
+				t.Fatalf("argv = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("argv = %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

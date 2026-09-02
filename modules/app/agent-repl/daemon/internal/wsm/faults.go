@@ -127,7 +127,7 @@ func (s *store) OpenFaults(ctx context.Context, scope FaultScope) ([]Fault, erro
 
 	var out []Fault
 	err := s.read(ctx, "daemon.wsm.open_faults", fields, func(ctx context.Context) error {
-		rows, err := s.db.QueryContext(ctx, query, args...)
+		rows, err := s.db().QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -179,7 +179,7 @@ func (s *store) Fault(ctx context.Context, id FaultID) (Fault, error) {
 			opened   int64
 			resolved sql.NullInt64
 		)
-		err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, kind, detail, evidence, opened_at, resolved_at FROM faults WHERE id = ?`, id).
+		err := s.db().QueryRowContext(ctx, `SELECT id, workspace_id, kind, detail, evidence, opened_at, resolved_at FROM faults WHERE id = ?`, id).
 			Scan(&f.ID, &ws, &f.Kind, &f.Detail, &evidence, &opened, &resolved)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("wsm: fault %s: %w", id, ErrNotFound)

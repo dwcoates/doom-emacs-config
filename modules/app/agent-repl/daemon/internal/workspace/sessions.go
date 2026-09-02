@@ -98,6 +98,12 @@ type FleetDeps struct {
 	Log dlog.Surfaces
 	// Now supplies the instants the fleet stamps; nil means time.Now.
 	Now func() time.Time
+	// PublishHost recomposes and republishes one workspace's HOST view. The
+	// fleet owns the edges that move it and the server cannot see them: a
+	// session coming up, a session going away, a shim replaced. Nil means no
+	// host surface is wired yet (the boot sequence runs before the server),
+	// which is why every call goes through publishHost.
+	PublishHost func(ids.WorkspaceID)
 }
 
 // live is one workspace's live session: the client, its watcher, and the facts
@@ -105,6 +111,10 @@ type FleetDeps struct {
 type live struct {
 	client  shimclient.Client
 	watcher sessionwatcher.Watcher
+	// hostSessionID is the session's host-facing identity, remembered here so
+	// the host view's live half is answered from what this daemon IS
+	// operating rather than from a durable row that may outlive the session.
+	hostSessionID string
 }
 
 // Fleet brings sessions up and down. It is the SPAWN-ON-MOUNT semantics in one
@@ -173,6 +183,16 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		generation: map[ids.WorkspaceID]int{},
 		buildSHA:   map[ids.WorkspaceID]string{},
 	}, nil
+}
+
+// publishHost republishes the workspace's host view when a surface is wired.
+// Before the server exists there is nothing to publish onto, and that is not a
+// failure: the boot sequence deliberately runs first.
+func (f *Fleet) publishHost(ws ids.WorkspaceID) {
+	if f.deps.PublishHost == nil {
+		return
+	}
+	f.deps.PublishHost(ws)
 }
 
 // lockDir answers where the kernel locks live: the explicit setting, then the
@@ -299,23 +319,27 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 		"fresh": src.Fresh, "vendor_session_id": src.VendorSessionID,
 	})
 
-	if !src.Fresh {
-		if _, err := f.deps.Accounts.FindTranscript(ctx, record.Dir, src.VendorSessionID); err != nil {
-			return refuse(log, "OpenWorkspace", ArmTranscriptMissing,
-				fmt.Sprintf("the transcript for conversation %q is missing: %v", src.VendorSessionID, err), false)
-		}
-		log.Debug(opBringUp, "the resume guard found the transcript", dlog.Context{
-			"vendor_session_id": src.VendorSessionID,
-		})
-	}
-
 	configDir := session.ConfigDir
 	if configDir == "" {
 		configDir = f.deps.Accounts.ConfigDirFor(record.Dir)
 	}
 	udsPath := f.deps.SocketPath(ws)
 
-	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir)
+	// THE HOST SESSION IDENTITY IS DECIDED BEFORE THE SPAWN, because the shim
+	// is stamped with it (AGENT_REPL_SESSION_ID, for log correlation) and a
+	// stamp cannot be applied after the process is running. A RESUME keeps the
+	// identity it was given -- it is the same session -- and a FRESH start
+	// mints a new one, because a fresh conversation on one workspace is a new
+	// session and Emacs correlates fault windows against exactly this.
+	hostSessionID := session.HostSessionID
+	if hostSessionID == "" || src.Fresh {
+		hostSessionID = wsm.NewHostSessionID()
+		log.Debug(opBringUp, "minted the session's host identity", dlog.Context{
+			"host_session_id": hostSessionID, "fresh": src.Fresh,
+		})
+	}
+
+	client, adopted, err := f.bringUpClient(ctx, log, ws, record.Dir, udsPath, configDir, hostSessionID, src)
 	if err != nil {
 		return err
 	}
@@ -334,19 +358,36 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// The watcher is handed the opening LEVEL: the turn in flight and every
 	// live detached item are what it opens its watches for, and nothing else
 	// states them.
-	watcher, err := f.watch(ctx, ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
+	//
+	// Its context is DETACHED from the caller's: the watch fleet outlives the
+	// verb that brought the session up (an OpenWorkspace rpc, a create, the
+	// relaunch engine), and every stream it opens -- now and on every redial --
+	// is opened against this context. Bound to the request instead, the whole
+	// fleet is canceled the instant the rpc answers, and the session is then
+	// left with no standing WatchSession and no standing WatchAgent at all.
+	// THE SESSION IS REMEMBERED BEFORE ITS WATCHER OPENS. Starting the watcher
+	// publishes its opening facts synchronously -- the link among them -- and
+	// the host view is recomposed from that edge; a fleet that did not yet
+	// know the session would answer "no live facts" for a workspace whose
+	// session record already exists, and the host view would be withheld with
+	// an invariant violation for a session that is coming up perfectly well.
+	f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
+	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
 		return fmt.Errorf("start session for %q: start the watcher: %w", ws, err)
 	}
-	f.remember(ws, &live{client: client, watcher: watcher})
+	f.remember(ws, &live{client: client, watcher: watcher, hostSessionID: hostSessionID})
 
-	if err := f.recordFacts(ctx, log, ws, session, started, configDir, client.PID()); err != nil {
+	if err := f.recordFacts(ctx, log, ws, session, started, configDir, hostSessionID, client.PID()); err != nil {
 		return err
 	}
 	log.Info(opBringUp, "the session is up", dlog.Context{
 		"adopted": adopted, "vendor_session_id": started.GetVendorSessionId(), "shim_pid": client.PID(),
 	})
+	// A SESSION NOW EXISTS where none did: the host view's whole session arm
+	// changed, and nothing the server can see says so.
+	f.publishHost(ws)
 	return nil
 }
 
@@ -354,7 +395,7 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 // that holds it or SPAWNS a new one. A probe that could not tell is never read
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
-func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir string) (shimclient.Client, bool, error) {
+func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bool, error) {
 	lockPath := f.lockDir()
 	state, err := f.probe(lockPath, dir)
 	switch state {
@@ -367,6 +408,16 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		}
 		return client, true, nil
 	case sessionlock.StateFree:
+		// THE RESUME GUARD BELONGS TO THE SPAWN, and only to it. A resume
+		// whose vendor transcript is gone yields no death evidence and the
+		// redial ladder would loop forever on an unchangeable fact -- but that
+		// is true only of a process this daemon is about to START. An ADOPTED
+		// shim already holds the conversation open in a running process, and
+		// refusing it for a transcript on disk would refuse a session that is
+		// demonstrably alive.
+		if err := f.resumeGuard(ctx, log, dir, src); err != nil {
+			return nil, false, err
+		}
 		log.Debug(opBringUp, "the workspace lock is free; spawning a shim", dlog.Context{"lock": lockPath})
 		sink, err := f.deps.Log.ShimSink(dir)
 		if err != nil {
@@ -379,6 +430,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			UDSPath:      udsPath,
 			StoreSocket:  f.deps.StoreSocket,
 			ConfigDir:    configDir,
+			SessionID:    hostSessionID,
 			ShimBuildSHA: f.deps.ShimBuildSHA,
 			NodeBin:      f.deps.NodeBin,
 			MainJS:       f.deps.MainJS,
@@ -397,6 +449,23 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return nil, false, fmt.Errorf("start session for %q: the workspace lock at %q could not be probed: %w", ws, lockPath, err)
 	}
+}
+
+// resumeGuard refuses a RESUME whose vendor transcript is gone, before any
+// process spawns: a vanished file yields no death evidence and the redial
+// ladder would loop forever on an unchangeable fact.
+func (f *Fleet) resumeGuard(ctx context.Context, log dlog.Logger, dir string, src source) error {
+	if src.Fresh {
+		return nil
+	}
+	if _, err := f.deps.Accounts.FindTranscript(ctx, dir, src.VendorSessionID); err != nil {
+		return refuse(log, "OpenWorkspace", ArmTranscriptMissing,
+			fmt.Sprintf("the transcript for conversation %q is missing: %v", src.VendorSessionID, err), false)
+	}
+	log.Debug(opBringUp, "the resume guard found the transcript", dlog.Context{
+		"vendor_session_id": src.VendorSessionID,
+	})
+	return nil
 }
 
 // DefaultModelEnv names the model a session starts on when the create did not
@@ -447,6 +516,14 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 				"requested_model": cold.GetRequestedModel().GetName(),
 			})
 			return nil, nil
+		}
+		if failure.GetConversationOwned() != nil {
+			// ANOTHER SHIM HOLDS THIS CONVERSATION. It took the workspace
+			// kernel lock first, which is exactly what that lock is for: two
+			// vendor processes on one conversation is the state it prevents.
+			// The refusal is the shim's own verdict, relayed.
+			return nil, refuse(log, "OpenWorkspace", ArmConversationOwned,
+				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false)
 		}
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
 		return nil, fmt.Errorf("start session for %q: %s", ws, failure.GetDetail())
@@ -504,10 +581,11 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 // vendor identity, the config dir it was spawned under, and the model and mode
 // in force. The shim pid and the shim's build are LOGGED rather than persisted,
 // because both belong to the process rather than to the session.
-func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, previous wsm.Session, started *conversationv1.SessionStarted, configDir string, pid int) error {
+func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, previous wsm.Session, started *conversationv1.SessionStarted, configDir, hostSessionID string, pid int) error {
 	now := f.now()
 	next := wsm.Session{
 		Workspace:        ws,
+		HostSessionID:    hostSessionID,
 		VendorSessionID:  started.GetVendorSessionId(),
 		ConfigDir:        configDir,
 		Model:            started.GetEffectiveModel().GetName(),
@@ -528,6 +606,7 @@ func (f *Fleet) recordFacts(ctx context.Context, log dlog.Logger, ws ids.Workspa
 		return fmt.Errorf("start session for %q: record the session facts: %w", ws, err)
 	}
 	log.Debug(opBringUp, "recorded the session facts", dlog.Context{
+		"host_session_id":   next.HostSessionID,
 		"vendor_session_id": next.VendorSessionID,
 		"config_dir":        next.ConfigDir,
 		"model":             next.Model,
@@ -552,6 +631,10 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	if !ok {
 		return nil
 	}
+	// THE SESSION IS GONE from this daemon's point of view the moment it
+	// leaves the map: the host view's session arm changes here, whatever the
+	// teardown below then does.
+	defer f.publishHost(ws)
 	if session.watcher != nil {
 		if err := session.watcher.Close(); err != nil {
 			return fmt.Errorf("stop session for %q: close the watcher: %w", ws, err)

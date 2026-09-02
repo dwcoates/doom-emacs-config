@@ -95,7 +95,12 @@ type Resolver interface {
 	// which is what makes a forked workspace resumable. The daemon does this
 	// BEFORE StartSession(resume). It refuses when the destination exists:
 	// overwriting one conversation with another is never recovery.
-	PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir string) error
+	// The copy is filed under childVendorSessionID, NOT the parent's id: a
+	// vendor session id is single-occupancy (the shim takes
+	// session-<id>.lock inside StartSession), so a fork of a live parent that
+	// resumed the parent's own id could never come up. The conversation's
+	// CONTENT is untouched, its original agent id included.
+	PortTranscript(ctx context.Context, transcriptPath, childConfigDir, childWorkspaceDir, childVendorSessionID string) error
 	// MoveTranscript MOVES a transcript (and its sidecar directory) into
 	// toConfigDir's project dir for the same workspace. It is the
 	// account-switch spelling: the daemon ports the vendor transcript between

@@ -79,6 +79,10 @@ type controller struct {
 	// joining is the set of workspaces the manifest named, so the daemon.addr
 	// write happens exactly when the last one is owned.
 	joining map[ids.WorkspaceID]bool
+	// joiningMode reports that this daemon booted as a SUCCESSOR. It owns no
+	// workspace until it adopts one, whatever the intent manifest says or has
+	// not yet said.
+	joiningMode bool
 	// transferred is every workspace this daemon handed to a successor, mapped
 	// to the successor's address. It is what makes a per-workspace rpc refuse
 	// with `transferring_away{address}` instead of serving a workspace this
@@ -101,6 +105,28 @@ type entry struct {
 	// adopted records that the workspace is owned, so a later call succeeds
 	// immediately rather than re-adopting.
 	adopted bool
+	// done closes when the adoption completes. Every Adopt* call WAITS on it:
+	// the participants call concurrently and "all calls succeed together" is
+	// the rendezvous's whole meaning, so the caller that arrives first is not
+	// told not_yet_adopted -- it waits for the one that completes it.
+	done chan struct{}
+	// failed carries an adoption failure to the waiters, so a caller that did
+	// not run the adoption still learns why it did not happen.
+	failed error
+}
+
+// settle closes an entry's completion channel exactly once, with the outcome.
+func (e *entry) settle(err error) {
+	if e.done == nil {
+		return
+	}
+	select {
+	case <-e.done:
+		return
+	default:
+	}
+	e.failed = err
+	close(e.done)
 }
 
 // satisfied reports whether every expected participant has called.

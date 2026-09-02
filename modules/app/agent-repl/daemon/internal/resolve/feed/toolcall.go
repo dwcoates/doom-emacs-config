@@ -64,6 +64,14 @@ func runningOutcome(u *unitState) toolOutcome {
 // returnedOutcome builds the returned arm: the verdict badge, the output's
 // drawn form, the settled clock and any diagnostics raised against it.
 func returnedOutcome(u *unitState, ok bool, form returnedForm, settledAtMs int64) toolOutcome {
+	// A DENIED CALL'S TERMINAL IS NOT A FAILURE. The gate refuses, the vendor
+	// still settles the tool unit -- with a `failure` whose content is unset,
+	// because nothing ran -- and drawing that as a generic failure would tell
+	// the reader the tool tried and broke. The unit is joined to its
+	// permission by id, and the card keeps saying denied.
+	if u.denied && !ok {
+		return deniedOutcome()
+	}
 	returned := &frontendv1.FeedToolCallReturned{}
 	if ok {
 		returned.Verdict = &frontendv1.FeedToolCallReturned_Succeeded{Succeeded: &frontendv1.FeedToolCallSucceeded{}}

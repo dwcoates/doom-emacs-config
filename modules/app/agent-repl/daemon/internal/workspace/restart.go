@@ -15,7 +15,8 @@ import (
 // this verb adds only the two things the engine deliberately does not own.
 //
 // force sends KillTurn{force:true} FIRST, because the engine waits for freeness
-// and a wedged turn would otherwise never let it start.
+// and a wedged turn would otherwise never let it start. That much is
+// synchronous: the caller is told whether the interrupt could be sent at all.
 //
 // The verb also owns the WEBAPP's half of a restart: when the served webapp
 // asset build changed, the webview is told to reload, so the user is not left
@@ -32,9 +33,30 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) err
 		}
 	}
 
+	// THE VERB ACCEPTS; THE ENGINE RUNS BEHIND IT. The relaunch waits for
+	// FREENESS, forever if need be -- that wait is the whole design, and a
+	// graceful restart asked for while a turn is running is precisely the
+	// case it exists for. Answering only once the engine finished would make
+	// the verb's answer a function of how long the agent takes, and the
+	// restart-pending hold is what the caller watches instead: the tray shows
+	// the held intake, and the relaunch's own faults record its failures.
+	//
+	// The context is DETACHED from the request for the same reason the watch
+	// fleet's is: the engine outlives the rpc that asked for it.
+	go v.runRelaunch(context.WithoutCancel(ctx), log, ws, force)
+
+	log.Info(opRestart, "accepted the restart; the relaunch engine runs behind it",
+		dlog.Context{"force": force})
+	return nil
+}
+
+// runRelaunch drives the relaunch engine and the webapp reload that follows
+// it. It is the asynchronous half of Restart, so its failures are RECORDED
+// rather than returned: nobody is waiting on them.
+func (v *verbs) runRelaunch(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, force bool) {
 	if err := v.deps.Rollout.RelaunchShim(ctx, ws, rollout.ReasonRestartVerb); err != nil {
 		log.Error(opRestart, "the shim relaunch failed", dlog.Context{"force": force, "cause": err.Error()})
-		return fmt.Errorf("restart %q: %w", ws, err)
+		return
 	}
 
 	// The reload_webapp push follows the relaunch, not the other way round: a
@@ -47,7 +69,6 @@ func (v *verbs) Restart(ctx context.Context, ws ids.WorkspaceID, force bool) err
 	}
 
 	log.Info(opRestart, "restarted the workspace", dlog.Context{"force": force})
-	return nil
 }
 
 // forceEndTurn ends whatever turn is running so the relaunch engine's freeness

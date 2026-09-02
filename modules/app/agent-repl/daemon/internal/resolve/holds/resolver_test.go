@@ -165,9 +165,11 @@ func TestTrayRepublishesWhenTheHoldsChange(t *testing.T) {
 }
 
 func TestTrayDoesNotRepublishAnIdenticalRender(t *testing.T) {
-	// Arrange.
+	// Arrange. Binding publishes the EMPTY tray, which a subscriber is
+	// replayed on open; the assertions here are about what follows it.
 	r, _ := newResolver(t)
 	ch := subscribe(t, r)
+	<-ch
 	r.SetHeldPrompts(testWS, []wsm.HeldPrompt{hold("t1", "one")})
 	<-ch
 
