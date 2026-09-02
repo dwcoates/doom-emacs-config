@@ -223,9 +223,17 @@ type OccupancyFunc func(ws ids.WorkspaceID, holder string) (release func(), ok b
 // TurnWaiter blocks until one turn ends and reports how it ended.
 type TurnWaiter func(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error)
 
+// Displaced is the turn a merge took the session away from: its id, and the
+// text it carried, kept so the resubmission does not depend on the turn's
+// record still being open when the lease is released.
+type Displaced struct {
+	Turn ids.TurnID
+	Text string
+}
+
 // DisplacedCapture durably records the turn a merge displaced. The bool is
 // false when no turn was in flight, which is not a failure.
-type DisplacedCapture func(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error)
+type DisplacedCapture func(ctx context.Context, ws ids.WorkspaceID) (Displaced, bool, error)
 
 // ParkedRouter delivers one parked submission to the resolution agent as
 // guidance, addressed at the parked tab. It answers with the turn the guidance

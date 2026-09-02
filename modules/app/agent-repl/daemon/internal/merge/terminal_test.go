@@ -523,7 +523,7 @@ func TestRepositoryLockIsReleasedAtTeardown(t *testing.T) {
 // displaceTurn records a user turn the merge will displace.
 func (h *harness) displaceTurn(text string) {
 	turn := wsm.NewTurnID()
-	h.displaced = &turn
+	h.displaced = &Displaced{Turn: turn, Text: text}
 	h.db.mu.Lock()
 	h.db.turns[theWorkspace] = append(h.db.turns[theWorkspace], wsm.Turn{
 		ID: turn, Workspace: theWorkspace, Text: text, Displaced: true,

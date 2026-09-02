@@ -55,8 +55,9 @@ type run struct {
 	selfCheckout bool
 	// startedMS is the head's running clock.
 	startedMS int64
-	// displaced is the user turn this merge displaced, captured at admission.
-	displaced *ids.TurnID
+	// displaced is the user turn this merge displaced, captured at admission
+	// with the text it carried.
+	displaced *Displaced
 	// queueRound is the ledger round of the QUEUE tab, opened at admission and
 	// closed when the run leaves the queue for its first phase. The queue is a
 	// tab like every other, so its interval is recorded like every other's.
@@ -219,11 +220,11 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 		r.abort(ctx, fmt.Sprintf("could not open the merge ledger: %v", err))
 		return err
 	}
-	if turn, captured, err := o.deps.CaptureDisplaced(ctx, ws); err != nil {
+	if displaced, captured, err := o.deps.CaptureDisplaced(ctx, ws); err != nil {
 		r.abort(ctx, fmt.Sprintf("could not capture the displaced turn: %v", err))
 		return err
 	} else if captured {
-		r.displaced = &turn
+		r.displaced = &displaced
 	}
 	o.mu.Lock()
 	o.running[repo] = r
