@@ -212,7 +212,8 @@ offset, so a restart re-reads it too.
 `internal/discover`. BOTH account config roots are discovery roots
 (`--config-roots`, default `~/.claude,~/.claude-chesscom`): the second
 account's transcripts are invisible otherwise. A periodic `Scan` is the
-completeness backstop; fsnotify (`Watcher`) supplies latency.
+sidecar's only discovery path (`RescanInterval`) — there is no fsnotify
+watcher; a prior one existed with no caller and was deleted.
 
 Four kinds of file, all written by the vendor's agent binary:
 
