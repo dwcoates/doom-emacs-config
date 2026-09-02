@@ -242,6 +242,17 @@ const (
 	// agent) and then goes on waiting for the turn's terminal. Without this the
 	// turn parks forever and the mock writes only the records before the gate.
 	waitAnswer
+	// waitDetach — a scenario that BLOCKS ON THE USER'S CTRL-B: foreground work
+	// the user moves to the background mid-flight. The drive calls
+	// DetachForeground on the bash unit as its start frame arrives and then goes
+	// on waiting for the turn's terminal.
+	//
+	// WITHOUT THE DETACH THERE IS NO FIXTURE. The scenario parks on
+	// `awaitBackgrounded`, so its tool_result — the ONLY place the vendor states
+	// which task the spool belongs to — is never written, and the spool it
+	// already opened ages out unclaimed into residue. That is a drive that never
+	// performed the user's half of the scenario, not a sidecar defect.
+	waitDetach
 )
 
 // generateMock runs ONE scenario through the real mocked vendor and answers the
@@ -489,6 +500,9 @@ func awaitMockTurnEnd(
 			if wait == waitAnswer {
 				answerOpenAsk(ctx, t, c, target, entry, prompt, answered, tree)
 			}
+			if wait == waitDetach {
+				detachOpenBash(ctx, t, c, entry, prompt, answered, tree)
+			}
 		}
 		if wait == waitEntries && seen > 0 {
 			return
@@ -585,6 +599,41 @@ func answerOpenAsk(
 	}
 	if resp.Msg.GetSuccess() == nil {
 		t.Fatalf("the mocked vendor REFUSED the answer to %q: %v (log: %s)",
+			prompt, resp.Msg.GetFailure(), tree.LogPath)
+	}
+}
+
+// detachOpenBash performs the user's Ctrl-B on one announced foreground bash
+// unit, so a scenario parked on the detachment can reach its terminal.
+//
+// THE UNIT IS THE BASH'S OWN ACTIVITY ID, which is the vendor tool_use id the
+// mock's `backgroundTasks(toolUseId)` answers on — the same identity
+// DetachForeground's request field declares.
+func detachOpenBash(
+	ctx context.Context,
+	t *testing.T,
+	c shimv1connect.ShimClient,
+	entry *conversationv1.HistoryEntry,
+	prompt string,
+	detached map[string]bool,
+	tree *mockTree,
+) {
+	t.Helper()
+	activity := entry.GetAgentFrame().GetUpdate().GetActivity()
+	if activity.GetBash().GetStart() == nil {
+		return
+	}
+	unit := activity.GetActivityId()
+	if unit.GetValue() == "" || detached["detach:"+unit.GetValue()] {
+		return
+	}
+	detached["detach:"+unit.GetValue()] = true
+	resp, err := c.DetachForeground(ctx, connect.NewRequest(&shimv1.DetachForegroundRequest{Unit: unit}))
+	if err != nil {
+		t.Fatalf("DetachForeground on the bash unit of %q: %v (log: %s)", prompt, err, tree.LogPath)
+	}
+	if resp.Msg.GetSuccess() == nil {
+		t.Fatalf("the mocked vendor REFUSED the Ctrl-B on %q: %v (log: %s)",
 			prompt, resp.Msg.GetFailure(), tree.LogPath)
 	}
 }
