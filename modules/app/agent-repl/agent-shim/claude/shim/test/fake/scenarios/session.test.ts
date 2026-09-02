@@ -110,6 +110,69 @@ describe("a vendor-answered slash command", () => {
   });
 });
 
+describe("Shape-A slash-command bookkeeping", () => {
+  it("writes a user-typed record with a plain-string command-message/command-name/command-args body", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!slash-shape-a"]);
+    const record = recordsOfType(driven.transcript(), "user").find(
+      (l) => typeof (l.message as { content?: unknown })?.content === "string",
+    );
+
+    // Assert
+    expect((record?.message as { content: string }).content).toBe(
+      "<command-message>compact</command-message>\n<command-name>/compact</command-name>\n<command-args></command-args>",
+    );
+  });
+
+  it("parameterizes the command name from the prompt's argument", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!slash-shape-a clear"]);
+    const record = recordsOfType(driven.transcript(), "user").find(
+      (l) => typeof (l.message as { content?: unknown })?.content === "string",
+    );
+
+    // Assert
+    expect((record?.message as { content: string }).content).toBe(
+      "<command-message>clear</command-message>\n<command-name>/clear</command-name>\n<command-args></command-args>",
+    );
+  });
+
+  it("carries a promptId knob distinct from the ordinary prompt line's", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!slash-shape-a"]);
+    const lines = recordsOfType(driven.transcript(), "user");
+    const shapeA = lines.find((l) => typeof (l.message as { content?: unknown })?.content === "string");
+    const ordinary = lines.find((l) => Array.isArray((l.message as { content?: unknown })?.content));
+
+    // Assert
+    expect(shapeA?.promptId).toBeDefined();
+    expect(shapeA?.promptId).not.toBe(ordinary?.promptId);
+  });
+
+  it("emits NOTHING on the stream — this is a file-plane-only record", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!slash-shape-a"]);
+
+    // Assert. Only the ordinary assistant/result messages a `conclude` produces.
+    expect(driven.messages.some((m) => (m as { type: string }).type === "attachment")).toBe(false);
+  });
+});
+
+describe("the withheld-unnamed Shape-A variant", () => {
+  it("writes only local-command-stdout, with no command-name element at all", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!slash-shape-a-unnamed"]);
+    const record = recordsOfType(driven.transcript(), "user").find(
+      (l) => typeof (l.message as { content?: unknown })?.content === "string",
+    );
+
+    // Assert
+    const content = (record?.message as { content: string }).content;
+    expect(content).toMatch(/^<local-command-stdout>[\s\S]*<\/local-command-stdout>$/);
+    expect(content).not.toContain("<command-name>");
+  });
+});
+
 describe("fast mode", () => {
   it("reports each state on the turn's result", async () => {
     // Arrange + Act
