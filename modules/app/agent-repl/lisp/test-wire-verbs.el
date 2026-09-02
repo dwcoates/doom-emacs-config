@@ -1077,12 +1077,12 @@ logging rung returns normally, and the typed signal follows it."
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-outcome-arms-pinned ()
-  "SubmitPromptSuccess's outcome oneof has exactly the three arms decoded here."
+  "SubmitPromptSuccess's outcome oneof has exactly the four arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptSuccess")
                        #'string<)
-                 '("commandPanel" "commandRefused" "turn"))))
+                 '("commandActed" "commandPanel" "commandRefused" "turn"))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-panel-arms-pinned ()
   "SubmitPromptCommandPanel's panel oneof has exactly the six arms decoded
@@ -1099,8 +1099,8 @@ here."
                         "agentrepl/v1/endpoint_submit_prompt.pb.go"
                         "SubmitPromptError")
                        #'string<)
-                 '("feedNotInWorkspace" "feedUndecodable" "merging" "noSession"
-                   "notYetAdopted" "transferringAway" "turnAlreadyOpen"
+                 '("duplicateSubmission" "feedNotInWorkspace" "feedUndecodable"
+                   "merging" "noSession" "notYetAdopted" "transferringAway"
                    "unknownWorkspace" "workspaceRefMismatch"))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-action-arms-pinned ()
@@ -1749,6 +1749,22 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"notYetAdopted\":{}}"))
                    '(:reason (:arm :not-yet-adopted :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-submit-success-command-acted-arm ()
+  "SubmitPromptSuccess's `command_acted' arm decodes as the answer it is:
+empty, with nothing to await."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-submit-prompt-success
+                    (agent-repl-test-wire-verbs--parse "{\"commandActed\":{}}"))
+                   '(:arm :command-acted :value nil)))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-unknown-repository-arm ()
+  "UpdateMergeQueueError's `unknown_repository' arm decodes with everything it
+carries."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"unknownRepository\":{}}"))
+                   '(:cause (:arm :unknown-repository :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-submit-error-feed-not-in-workspace-arm ()
   "SubmitPromptError's `feed_not_in_workspace' arm decodes with everything it
 carries."
@@ -1765,13 +1781,21 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"feedUndecodable\":{}}"))
                    '(:reason (:arm :feed-undecodable :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-submit-error-turn-already-open-arm ()
-  "SubmitPromptError's `turn_already_open' arm decodes with everything it
+(ert-deftest agent-repl-test-wire-verbs-submit-error-turn-already-open-is-retired ()
+  "`turn_already_open' was retired at landing 6, so it is an unknown arm now
+and is refused loudly rather than decoded."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-submit-prompt-error
+                   (agent-repl-test-wire-verbs--parse "{\"turnAlreadyOpen\":{}}"))
+                  :type 'agent-repl-wire-error)))
+
+(ert-deftest agent-repl-test-wire-verbs-submit-error-duplicate-submission-arm ()
+  "SubmitPromptError's `duplicate_submission' arm decodes with everything it
 carries."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-submit-prompt-error
-                    (agent-repl-test-wire-verbs--parse "{\"turnAlreadyOpen\":{}}"))
-                   '(:reason (:arm :turn-already-open :value nil))))))
+                    (agent-repl-test-wire-verbs--parse "{\"duplicateSubmission\":{}}"))
+                   '(:reason (:arm :duplicate-submission :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-submit-error-no-session-arm ()
   "SubmitPromptError's `no_session' arm decodes with everything it carries."
@@ -1799,7 +1823,7 @@ breach."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_submit_prompt.pb.go" "SubmitPromptError")
                        #'string<)
-                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "turnAlreadyOpen" "noSession")
+                 (sort (list "merging" "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "feedNotInWorkspace" "feedUndecodable" "noSession" "duplicateSubmission")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-shutdown-error-nothing-scheduled-arm ()
@@ -1909,7 +1933,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()

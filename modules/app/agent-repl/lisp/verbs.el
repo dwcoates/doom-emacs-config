@@ -535,6 +535,21 @@ schedule and now: every client's drain banner names it."
    :on-success
    (lambda (_) (message "agent-repl: shutdown %s" (plist-get action :arm)))))
 
+(defun agent-repl-verbs--merge-queue-on-error (action value)
+  "Claim UpdateMergeQueue's `unknown_repository' refusal of ACTION, else nil.
+The arm is EMPTY -- the echoed ref is the only identity involved -- so the
+repository it names is the one this verb sent, and that is what the log
+context and the message carry.  Every other arm falls through to the
+arm-generic reporting by answering nil."
+  (let* ((arm (agent-repl-verbs--refusal-arm value))
+         (keyword (plist-get arm :arm)))
+    (when (eq keyword :unknown-repository)
+      (agent-repl--warn nil "elisp.verbs.merge-queue-unknown-repository action=%S repository=%S"
+                        (plist-get action :arm) (plist-get action :repository))
+      (message "merge-queue refused: the daemon's registry does not hold repository %S"
+               (plist-get action :repository))
+      t)))
+
 (defun agent-repl-verb-merge-queue (action)
   "Send ACTION to UpdateMergeQueue.
 ACTION is spelled FLAT: `(:arm :pause :repository REF)', `(:arm :resume
@@ -545,7 +560,9 @@ is the daemon-wide switch and is omitted from the encoding."
    (list :action (agent-repl-verbs--arm action))
    :op "merge-queue"
    :on-success
-   (lambda (_) (message "agent-repl: merge queue %s" (plist-get action :arm)))))
+   (lambda (_) (message "agent-repl: merge queue %s" (plist-get action :arm)))
+   :on-error
+   (lambda (value) (agent-repl-verbs--merge-queue-on-error action value))))
 
 ;;;; ---- Health -----------------------------------------------------------
 

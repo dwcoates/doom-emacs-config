@@ -33,7 +33,7 @@
 ;;
 ;;   success `turn'            a turn was minted -- clear the input, push
 ;;                             history, run the posthooks
-;;   success `command_panel' / `command_refused'
+;;   success `command_panel' / `command_refused' / `command_acted'
 ;;                             answered, nothing to await -- the webapp
 ;;                             draws the panel or the refusal card, so
 ;;                             Emacs logs it and clears the input
@@ -562,9 +562,10 @@ all -- an image-only submission is a legitimate thing to say, and an empty
 (defun agent-repl--input-accepted (ws raw arm)
   "Finish an ACCEPTED submission for WS: clear the composer, keep the record.
 ARM names which accepted arm answered, for the log.  Applies to every
-success arm: a minted turn, a resolved command panel and a
-recognized-but-unsupported command are all answers, and none of them
-leaves the user's text owed a resend."
+success arm: a minted turn, a resolved command panel, a
+recognized-but-unsupported command and a session-acting command the
+daemon acted on are all answers, and none of them leaves the user's text
+owed a resend."
   (let ((buf (agent-repl--input-buffer ws)))
     (when buf
       (with-current-buffer buf
@@ -585,7 +586,7 @@ SUCCESS is the decoded outcome oneof."
                        ws origin (plist-get (plist-get success :value) :turn))
      (agent-repl--input-accepted ws raw :turn)
      (agent-repl--run-send-posthooks ws raw))
-    ((and (or :command-panel :command-refused) arm)
+    ((and (or :command-panel :command-refused :command-acted) arm)
      ;; Answered, nothing to await.  The webapp draws the panel or the
      ;; refusal card; Emacs's whole reaction is to stop waiting.
      (agent-repl--info ws "elisp.input.command-answered ws=%s origin=%S arm=%S value=%S"
@@ -624,7 +625,9 @@ user is left able to see exactly what they wrote."
 ERROR is the decoded error message.  Its `merging' arm means the prompt
 arrived after a merge began and would be orphaned, so the user resubmits
 once the merge resolves.  Its two HANDOVER arms are not failures at all
-and are routed to host.el.  Every other arm is a refusal this composer
+and are routed to host.el.  Its `duplicate_submission' arm says the key
+was already accepted, so the earlier submission stands and nothing is
+resent.  Every other arm is a refusal this composer
 has no treatment for: it is recorded at ERROR naming the arm and drawn to
 the user, and the text stays where it is.
 
@@ -637,6 +640,16 @@ refusal can re-drive the very prompt that was refused."
        (agent-repl--warn ws "elisp.input.refused-merging ws=%s origin=%S" ws origin)
        (agent-repl--input-flash ws "refused: merge in flight")
        (message "agent-repl: refused -- a merge is in flight for this workspace"))
+      (:duplicate-submission
+       ;; The key was already accepted for this workspace, so the earlier
+       ;; submission stands.  Nothing landed twice and nothing is owed a
+       ;; resend: this is an ANSWER about identity, not a transport
+       ;; failure, so the prompt is NOT queued.  The text and the
+       ;; attachments stay put so the user can see what they wrote.
+       (agent-repl--warn ws "elisp.input.duplicate-submission ws=%s origin=%S arm=%S key=%s"
+                         ws origin arm key)
+       (agent-repl--input-flash ws "already submitted")
+       (message "agent-repl: this submission's key was already accepted; the earlier submission stands"))
       ((pred (lambda (a) (memq a agent-repl--input-handover-arms)))
        (agent-repl--input-on-handover-refusal ws said origin raw reason key))
       (_
