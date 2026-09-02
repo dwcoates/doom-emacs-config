@@ -238,6 +238,40 @@ answers a bare success, which is what almost every verb's success is."
     (should (agent-repl-test-verbs--messaged-p
              "close blocked -- see the workspace footer"))))
 
+(ert-deftest agent-repl-verbs-close-blocked-echoes-the-summary ()
+  "The daemon's own composed sentence is echoed verbatim when it sent one."
+  (agent-repl-test-verbs--with
+      '((:close . (:response (:arm :error
+                              :value (:cause (:arm :blocked
+                                              :value (:turn-in-flight t :live-work 0
+                                                      :held-prompts 0 :merge-queued nil
+                                                      :summary "a turn is running")))))))
+    (agent-repl-verb-close "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "close blocked -- a turn is running"))))
+
+(ert-deftest agent-repl-verbs-close-blocked-empty-summary-names-the-footer ()
+  "With no composed sentence the footer stays the place the reasons are read."
+  (agent-repl-test-verbs--with
+      '((:close . (:response (:arm :error
+                              :value (:cause (:arm :blocked
+                                              :value (:turn-in-flight nil :live-work 2
+                                                      :held-prompts 0 :merge-queued nil
+                                                      :summary "")))))))
+    (agent-repl-verb-close "ws-one")
+    (should (agent-repl-test-verbs--messaged-p
+             "close blocked -- see the workspace footer"))))
+
+(ert-deftest agent-repl-verbs-close-blocked-with-evidence-leaves-the-tab ()
+  "Evidence on the refusal does not make it any less a refusal."
+  (agent-repl-test-verbs--with
+      '((:close . (:response (:arm :error
+                              :value (:cause (:arm :blocked
+                                              :value (:turn-in-flight t :live-work 1
+                                                      :held-prompts 3 :merge-queued t
+                                                      :summary "busy")))))))
+    (agent-repl-verb-close "ws-one")
+    (should-not agent-repl-test-verbs--torn-down)))
+
 (ert-deftest agent-repl-verbs-close-transport-failure-leaves-the-tab ()
   "Nobody answering is not permission to tear the tab down."
   (agent-repl-test-verbs--with '((:close . (:failure (:kind :transport))))
