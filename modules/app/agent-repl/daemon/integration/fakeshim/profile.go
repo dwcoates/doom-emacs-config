@@ -44,6 +44,14 @@ type Profile struct {
 	// VendorSessionID pins the id a fresh StartSession mints, so a test can
 	// predict the session lock's path.
 	VendorSessionID string `json:"vendor_session_id,omitempty"`
+	// LiveWork is what the opening states is ALREADY RUNNING: each element is
+	// one binary-encoded conversation.v1 AgentDetachedWork, answered verbatim
+	// as SessionStarted.live_work.
+	//
+	// It is a PROFILE rather than a scripted answer because the opening is the
+	// daemon's very first request: a test that queued the answer over the
+	// control socket would be racing the spawn it is scripting.
+	LiveWork [][]byte `json:"live_work,omitempty"`
 }
 
 // ColdFacts are the shim's stated facts on a cold refusal.
