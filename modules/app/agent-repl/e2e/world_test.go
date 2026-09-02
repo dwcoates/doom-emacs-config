@@ -104,10 +104,12 @@ type World struct {
 }
 
 // WorldOpts configures one World. DaemonOpts is forwarded to
-// harness.StartDaemon verbatim EXCEPT for the four fields NewWorld always
-// sets itself (ShimNode, ShimMain, StoreSocket, SkipFakeGit) — a caller that
-// sets those is overridden, since this suite's whole point is exercising the
-// real shim against a real store with real git, never the fakes.
+// harness.StartDaemon verbatim EXCEPT for the three fields NewWorld always
+// sets itself (ShimNode, ShimMain, StoreSocket) — a caller that sets those is
+// overridden, since this suite's whole point is exercising the real shim and
+// real store against the daemon's scripted fake git, exactly as
+// daemon/integration does (SPEC.md section B, "Every external dependency is
+// MOCKED").
 //
 // DaemonOpts.ExtraEnv is the seam for a world-wide lever the real shim reads
 // from its OWN spawn environment. It reaches every shim this daemon spawns
@@ -162,7 +164,6 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 	daemonOpts.ShimNode = node
 	daemonOpts.ShimMain = shimMain
 	daemonOpts.StoreSocket = store.Socket
-	daemonOpts.SkipFakeGit = true
 	daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), "SHIM_BUILD_SHA="+shimBuildSHA)
 
 	d := harness.StartDaemon(t, daemonOpts)
@@ -665,103 +666,9 @@ func awaitCursorAdvance(t *testing.T, w *World, projectDir string, baseline map[
 	}
 }
 
-// ===========================================================================
-// Real git (SPEC.md section B, "Real git" — ruling 4). The daemon's
-// no-real-git directive is scoped to the daemon's OWN unit/integration
-// suites; its AGENTS.md hands the git facts this suite owns to "the
-// project lead's suite" — this one. NewWorld sets Opts.SkipFakeGit, so the
-// real `git` on PATH is what the daemon's own git invocations reach.
-// ===========================================================================
-
-// gitEnv is the hermetic environment every real-git child process runs
-// under: an isolated global config and HOME (so a test never depends on the
-// operator's own git identity or defaults), a fixed author/committer
-// identity and date (so a test's own assertions on commit metadata are
-// deterministic), and the repository-selecting variables a hook could leak
-// (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE) explicitly unset — the known
-// core.bare hazard from a leaked GIT_DIR.
-func gitEnv(t *testing.T) []string {
-	t.Helper()
-	home := t.TempDir()
-	globalConfig := filepath.Join(home, ".gitconfig-e2e")
-	body := "[user]\n\tname = agent-repl e2e\n\temail = e2e@example.invalid\n[init]\n\tdefaultBranch = " + harness.DefaultBranch + "\n"
-	if err := os.WriteFile(globalConfig, []byte(body), 0o644); err != nil {
-		t.Fatalf("e2e: write git global config: %v", err)
-	}
-	env := []string{
-		"GIT_CONFIG_GLOBAL=" + globalConfig,
-		"GIT_CONFIG_SYSTEM=/dev/null",
-		"HOME=" + home,
-		"GIT_AUTHOR_NAME=agent-repl e2e",
-		"GIT_AUTHOR_EMAIL=e2e@example.invalid",
-		"GIT_AUTHOR_DATE=2026-01-01T00:00:00Z",
-		"GIT_COMMITTER_NAME=agent-repl e2e",
-		"GIT_COMMITTER_EMAIL=e2e@example.invalid",
-		"GIT_COMMITTER_DATE=2026-01-01T00:00:00Z",
-	}
-	for _, kv := range os.Environ() {
-		key, _, _ := strings.Cut(kv, "=")
-		switch key {
-		case "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "HOME",
-			"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
-			"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE",
-			"GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "GIT_COMMITTER_DATE":
-			continue // superseded above; never inherited.
-		}
-		env = append(env, kv)
-	}
-	return env
-}
-
-// RealRepo is one real git repository, created fresh under the test's own
-// temp root. Nothing here is a fixture: every fact the daemon reads about
-// this repository comes from the REAL `git` on PATH, running against files
-// this type actually wrote.
-type RealRepo struct {
-	t   *testing.T
-	Dir string
-	env []string
-}
-
-// NewRealRepo runs real `git init` (and one commit, so the repository has a
-// default-branch head to build on) in a fresh temp directory, and answers
-// it. Skips loudly if `git` is absent from PATH; the harness never installs
-// it.
-func NewRealRepo(t *testing.T) *RealRepo {
-	t.Helper()
-	requireGit(t)
-	dir := t.TempDir()
-	r := &RealRepo{t: t, Dir: dir, env: gitEnv(t)}
-	r.git("init", "--initial-branch="+harness.DefaultBranch, dir)
-	readme := filepath.Join(dir, "README.md")
-	if err := os.WriteFile(readme, []byte("e2e repository\n"), 0o644); err != nil {
-		t.Fatalf("e2e: write README.md: %v", err)
-	}
-	r.git("-C", dir, "add", "README.md")
-	r.git("-C", dir, "commit", "-m", "add README.md")
-	return r
-}
-
-// git runs the real git binary with this repository's hermetic environment,
-// failing the test loudly on a non-zero exit. GIT_DIR/GIT_WORK_TREE/
-// GIT_INDEX_FILE are never inherited from the calling process's own
-// environment (see gitEnv) — the known core.bare hazard from a hook-leaked
-// GIT_DIR.
-func (r *RealRepo) git(args ...string) string {
-	r.t.Helper()
-	cmd := exec.Command(gitBin, args...)
-	cmd.Env = r.env
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		r.t.Fatalf("e2e: git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
-	return string(out)
-}
-
-// Git runs an arbitrary real git command against this repository (`-C
-// r.Dir` is NOT implied — pass it, or a subdirectory, explicitly, exactly
-// like a real invocation would need to), for the tests whose subject is a
-// specific git fact (a two-parent --no-ff merge, a conflicted index and
-// MERGE_HEAD, a revert, a worktree prune, porcelain markers, GIT_DIR
-// precedence, git version compatibility).
-func (r *RealRepo) Git(args ...string) string { return r.git(args...) }
+// Git is the daemon's own scripted fake (harness.GitWorld, installed on the
+// daemon's PATH exactly as daemon/integration installs it — SPEC.md section
+// B, "Every external dependency is MOCKED"). This suite never runs a real
+// `git` process: every git fact the daemon reads comes from the fixture the
+// harness's World(t) mints, reachable off the embedded *harness.Daemon as
+// w.Git.
