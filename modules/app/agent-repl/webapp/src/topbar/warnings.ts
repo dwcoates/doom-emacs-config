@@ -30,7 +30,7 @@ import type {
   TopbarWarning,
   TopbarWarningStrip,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { formatAge } from "../duration.js";
+import { formatAge, formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -223,7 +223,7 @@ export function drawDetachedUnmodeledDetail(
   const clock = document.createElement("div");
   clock.className = "topbar-warning-clock";
   tick(clock, tc.ctx.ticker, (nowMs) => {
-    clock.textContent = `running ${formatAge(nowMs - startedAt)}`;
+    clock.textContent = `running ${formatTickedAge(nowMs - startedAt)}`;
   });
   body.append(clock);
   return body;
