@@ -49,7 +49,7 @@ import {
   sidecarProducer,
   writtenKeys,
 } from "../integration-support/store.js";
-import { awaitSpoolExit, readSubagentMeta } from "../integration-support/vendor.js";
+import { awaitSpoolExit, findSubagentMetaByToolUseId } from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
 
@@ -449,8 +449,11 @@ describe("subagents", () => {
     if (subagent.result.case !== "start") throw new Error("expected the subagent's start");
 
     expect(subagent.result.value.createdAgentId?.value).toBe(update.value.activityId?.value);
-    // And the FILE plane agrees: the meta sidecar is named by the same id.
-    const meta = readSubagentMeta(
+    // And the FILE plane agrees — BY THE JOIN, not by the name. The vendor names
+    // its subagent files by its own 17-hex agentId and `meta.toolUseId` is the
+    // only link back to the spawning call, so the reader joins on that rather
+    // than guessing a file name from the wire identity.
+    const meta = findSubagentMetaByToolUseId(
       shim.dirs,
       started.vendorSessionId,
       subagent.result.value.createdAgentId?.value ?? "",
@@ -578,10 +581,16 @@ describe("DetachForeground", () => {
     // `unsupported` and NOT `not_detachable`: the unit is perfectly
     // detachable-in-kind, and the pinned SDK simply offers no verb to initiate
     // it — the wrong arm would have lied about the reason.
+    //
+    // `!bash-hold` RATHER THAN `!bash`: the refusal under test is only reachable
+    // while the unit is genuinely live, and `!bash` settles in the same tick it
+    // starts, so the call raced the settle and the table answered
+    // `already_concluded` instead. `!bash-hold` parks the foreground call until
+    // an interrupt, with no background work for it anywhere.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-hold" }));
     const running = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));

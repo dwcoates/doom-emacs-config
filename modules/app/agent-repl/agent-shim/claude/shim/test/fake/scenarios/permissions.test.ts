@@ -35,8 +35,13 @@ describe("the ask itself", () => {
 
     // Act
     const driven = await driveScenario(["!perm-allow-once"], { canUseTool: spy });
+    // THE tool_use LINE, not merely the first assistant line: the vendor's first
+    // API response of a tool turn is `[thinking, tool_use]`, one assistant line
+    // per block, so the reasoning line comes first.
     const toolUse = (driven.messages as unknown as Record<string, unknown>[]).find(
-      (m) => m.type === "assistant",
+      (m) =>
+        m.type === "assistant" &&
+        (m.message as { content?: { type?: string }[] }).content?.[0]?.type === "tool_use",
     );
     const blockId = ((toolUse?.message as { content: { id?: string }[] }).content[0] ?? {}).id;
 

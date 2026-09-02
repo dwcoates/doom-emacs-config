@@ -83,6 +83,36 @@ export function readSubagentTranscript(
   );
 }
 
+/**
+ * One subagent's metadata sidecar, FOUND BY THE SPAWNING CALL.
+ *
+ * THE TWO PLANES USE TWO KEYS, and this is the join between them. On the wire a
+ * subagent's `AgentId` IS the spawning call's `tool_use_id` (landing 3's minting
+ * rule). On disk the vendor names the files by its OWN 17-hex `agentId`, and
+ * `meta.toolUseId` is the only link back to the call — so a reader that guessed
+ * the file name from the wire id found nothing. Real captures are keyed that
+ * way and the mock's layout stays vendor-faithful, so the join belongs here, in
+ * the reader.
+ */
+export function findSubagentMetaByToolUseId(
+  dirs: ShimDirectories,
+  vendorSessionId: string,
+  toolUseId: string,
+): Record<string, unknown> {
+  const dir = path.dirname(
+    subagentMetaPath(dirs.configDir, workspaceRealPath(dirs), vendorSessionId, "probe"),
+  );
+  if (!existsSync(dir)) throw new Error(`no subagents directory at ${dir}`);
+  const metas = readdirSync(dir).filter((name) => name.endsWith(".meta.json"));
+  for (const name of metas) {
+    const meta = JSON.parse(readFileSync(path.join(dir, name), "utf8")) as Record<string, unknown>;
+    if (meta.toolUseId === toolUseId) return meta;
+  }
+  throw new Error(
+    `no subagent meta names tool_use_id ${toolUseId}; the directory holds ${metas.join(", ")}`,
+  );
+}
+
 /** One subagent's metadata sidecar — exactly four camelCase fields. */
 export function readSubagentMeta(
   dirs: ShimDirectories,
