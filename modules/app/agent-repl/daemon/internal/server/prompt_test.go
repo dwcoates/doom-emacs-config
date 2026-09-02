@@ -219,3 +219,50 @@ func TestSubmitPromptMapsTheDuplicateSubmissionRefusal(t *testing.T) {
 		t.Fatalf("result = %v, want duplicate_submission", resp.Msg.GetResult())
 	}
 }
+
+// TestBubbleRefusedFoldsNotDeliverable pins the shim's not_deliverable onto the
+// landing-7 candidate arm with its kind in the reason.
+func TestBubbleRefusedFoldsNotDeliverable(t *testing.T) {
+	// Arrange.
+	in := refusal{Arm: "not_deliverable", Reason: "the SDK has no route to agent \"a1\""}
+
+	// Act.
+	out := bubbleRefused(in)
+
+	// Assert.
+	if out.Arm != "bubble_refused" ||
+		out.Reason != "kind not_deliverable: the SDK has no route to agent \"a1\"" {
+		t.Fatalf("refusal = %+v, want bubble_refused with kind not_deliverable", out)
+	}
+}
+
+// TestBubbleRefusedFoldsTurnAlreadyOpenOntoAgentBusy pins the shim's
+// turn_already_open onto the same arm under the agent_busy kind.
+func TestBubbleRefusedFoldsTurnAlreadyOpenOntoAgentBusy(t *testing.T) {
+	// Arrange.
+	in := refusal{Arm: "turn_already_open", Reason: "the subagent's turn is running"}
+
+	// Act.
+	out := bubbleRefused(in)
+
+	// Assert.
+	if out.Arm != "bubble_refused" ||
+		out.Reason != "kind agent_busy: the subagent's turn is running" {
+		t.Fatalf("refusal = %+v, want bubble_refused with kind agent_busy", out)
+	}
+}
+
+// TestBubbleRefusedPassesOtherRefusalsThrough pins that no other refusal is
+// reinterpreted as a bubble refusal.
+func TestBubbleRefusedPassesOtherRefusalsThrough(t *testing.T) {
+	// Arrange.
+	in := refusal{Arm: "no_session", Reason: "no live session"}
+
+	// Act.
+	out := bubbleRefused(in)
+
+	// Assert.
+	if out.Arm != "no_session" || out.Reason != "no live session" {
+		t.Fatalf("refusal = %+v, want the input untouched", out)
+	}
+}
