@@ -183,7 +183,6 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	if !strings.Contains(startFailed.GetStderrTail(), "boom: fake bring-up death") {
 		t.Fatalf("shim_start_failed.stderr_tail = %q, want it to carry the fake's stderr", startFailed.GetStderrTail())
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestOpenWorkspaceWithNoPriorConversationStartsAFreshSession(t *testing.T) {
@@ -257,11 +256,6 @@ func TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawnsBefore {
 		t.Fatalf("shim spawn records = %d after the refusal, want the %d before it: the guard refuses BEFORE the spawn", got, spawnsBefore)
 	}
-	// internal/workspace/refusal.go's refuse() helper — what resumeGuard calls
-	// for ArmTranscriptMissing — logs WARN under this exact operation for
-	// EVERY refusal it raises, landed arm or not; it is not gated on the
-	// arm's landing status the way server.UnlandedArm is.
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing.T) {
@@ -425,10 +419,6 @@ func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	if resp.Msg.GetError().GetUnservedRemediation() == nil {
 		t.Fatalf("AnswerColdGate = %v, want AnswerColdGateError.unserved_remediation", resp.Msg)
 	}
-	// internal/workspace/refusal.go's refuse() helper — what raises
-	// ArmUnservedRemediation — logs WARN under this operation unconditionally,
-	// regardless of the arm's landing status.
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestTheConfigDirIsDeterminedByTheMultiRepoRoot(t *testing.T) {
@@ -617,12 +607,11 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	if resp.Msg.GetError().GetBlocked() == nil {
 		t.Fatalf("CloseWorkspace with a queued merge = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
-	// "daemon.merge.merge_tab" (the scripted conflict) and "daemon.merge.
-	// conflicts" (the resulting park) fire during Arrange; "daemon.workspace.
-	// close" fires on the Act's own blocked refusal. Needs a suite run to
-	// confirm no other operation is reached by the merge machinery this
-	// Arrange exercises.
-	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts", "daemon.workspace.close")
+	// The Arrange's scripted conflict is stated by the merge tab, the git
+	// client and the resulting park. The Act's own refusal names a LANDED arm,
+	// so it warns about nothing and is deliberately not declared here.
+	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts",
+		"daemon.gitclient.merge_no_ff")
 }
 
 func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {
@@ -864,11 +853,15 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawns {
 		t.Fatalf("shim spawns = %d after a second mount, want the %d already made: the stamp was already bounced for", got, spawns)
 	}
-	// A staleness bounce that runs to completion has no refusal on this path
-	// (internal/rollout/relaunch.go warns only on a stand-down-window
-	// timeout, which the fake's prompt KillSession acceptance never reaches);
-	// needs a suite run to confirm nothing else warns across two mounts.
-	f.d.ExpectWarnings()
+	// The bounce's stand-down is loud by design and the fake makes it louder:
+	// the fake shim EXITS on accepting KillSession, so the call it was
+	// answering fails, the client records the death, and each of the shim's two
+	// standing streams ends without the session ending. The relaunch then waits
+	// out its window before forcing. Every one of these is the same
+	// stand-down, honestly recorded once per observer.
+	f.d.ExpectWarnings("daemon.rollout.relaunch", "daemon.shimclient.exit",
+		"daemon.shimclient.kill_session", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent")
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
@@ -1046,15 +1039,28 @@ func TestRestartWorkspaceForcedDoesNotRedriveTheInterruptedTurn(t *testing.T) {
 
 // ---- critique 13: bounce accountability ----
 
-func TestCrashBootWithNoManifestProducesNoBounceFault(t *testing.T) {
-	t.Skip("unexpressible against current production code: internal/rollout/manifest.go's Reconcile() " +
-		"returns early with ZERO dispositions when no intent manifest is present (found=false at " +
-		"manifest.go:181-192), so a crash that leaves no manifest on disk never opens ANY fault -- " +
-		"bounce_unknown or otherwise -- for the surviving session. This is not a missing HARNESS " +
-		"capability; it is a missing PRODUCTION hook: Reconcile has no branch that treats an absent " +
-		"manifest as anything but an ordinary boot. SPEC.md's crash-boot-adoption note (\"the intent " +
-		"manifest absent -> reports UNKNOWN/PRESERVED per session in the host faults\") describes " +
-		"behavior this function does not implement; see the report for the proposed SPEC.md correction.")
+// TestCrashBootWithNoManifestRecordsBounceUnknown covers BOUNCE ACCOUNTABILITY
+// for the case the manifest cannot describe: the outgoing daemon crashed or was
+// force-killed, so it wrote NO manifest at all. Every session that survived
+// into this boot is one whose bounce nobody accounted for, and each is surfaced
+// per workspace as an OPEN bounce_unknown fault rather than passed over.
+func TestCrashBootWithNoManifestRecordsBounceUnknown(t *testing.T) {
+	// Arrange: an opened workspace whose shim SURVIVES the daemon's death, so
+	// the successor adopts it.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+
+	// Act: kill the daemon and leave the shim (and its workspace lock) alone,
+	// writing no manifest — which is exactly what a crash leaves behind.
+	f.d.Kill()
+	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
+
+	// Assert: the successor's host stream carries a bounce_unknown fault.
+	host := successor.WatchHost(f.ws)
+	awaitHostFault(t, successor, host, "a bounce_unknown fault", func(hf *agentreplv1.HostFault) bool {
+		return hf.GetBounceUnknown() != nil
+	})
+	successor.ExpectWarnings("daemon.rollout.reconcile")
 }
 
 func TestCrashBootWithADeadManifestPidRecordsBounceDied(t *testing.T) {
@@ -1147,7 +1153,10 @@ func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
 	// restored live-work set settles at zero rather than crashing bring-up.
 	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.sessionwatcher.detached_kind_unknown")
 	awaitLiveWork(t, f, 0)
-	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
+	// The feed resolver states the same unresolvable item a second time, from
+	// its own side, which is the second half of what the test asserts.
+	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown",
+		"daemon.feed.detached_unknown_unit")
 }
 
 // ---- critique 17 (this agent's share): AnswerColdGate{clear} ----

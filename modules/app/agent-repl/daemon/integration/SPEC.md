@@ -408,21 +408,19 @@ a spec edit and never a rationalization in the suite.
   (`internal/boot/sequence.go`), so the daemon does not come up with an empty
   tray: it exits non-zero having logged exactly one ERROR under
   `daemon.promptqueue.restore_holds`. The test asserts that.
-- EVERY `workspace`-package REFUSAL LOGS `daemon.refusal.unlanded_arm` AT
-  WARNING, landed arm or not: `internal/workspace/refusal.go`'s own
-  `refuse`/`refuseWith` helper logs it unconditionally, separately from
-  `server.UnlandedArm`. So a test whose refusal is raised in that package
-  declares that operation even when the arm is landed and the answer is typed.
-  (Recorded as a production concern for the teamlead: it makes the log
-  unusable for reconciling ERROR-ARMS.md, which is the operation's stated
-  purpose.)
+- A `workspace`-package REFUSAL LOGS `daemon.refusal.typed` AT INFO.
+  `internal/workspace/refusal.go`'s `refuse`/`refuseWith` records the verb's
+  refusal as the ordinary answer it is; `daemon.refusal.unlanded_arm` at
+  WARNING belongs to `server.UnlandedArm` alone, so that operation stays usable
+  for reconciling ERROR-ARMS.md. A test therefore declares that operation only
+  when the arm it exercises is genuinely unlanded per ERROR-ARMS.md.
 - THE MERGE LEDGER HAS NO WIRE SURFACE. No rpc serves it: it exists only as
   the `merge_ledger` / `merge_tab_intervals` rows in `wsm.db`. The tab-interval
   test therefore stops the daemon and reads the database through `d.WithDB`,
   which is that helper's documented contract. A clean landing records the
-  `merge` and `tests` intervals only — `TabQueue` never passes through
-  `openTab`/`closeTab` in `internal/merge/run.go`, so no queue interval is ever
-  written. Both are recorded for the teamlead as decisions owed, not as suite
+  `queue`, `merge` and `tests` intervals: the queue is a tab like every other,
+  opened at admission and closed when the run leaves it for its first phase.
+  The missing wire surface is recorded for the teamlead as a decision owed, not as suite
   defects.
 
 ## Log discipline

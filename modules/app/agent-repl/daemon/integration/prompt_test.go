@@ -517,8 +517,9 @@ func TestAFailedInterjectRevertsToClassificationErrorAndFifoOrder(t *testing.T) 
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
 	// internal/promptqueue/classify.go's stripJump logs the failed-interject
-	// ERROR under opInterject; nothing else warns on this path.
-	f.d.ExpectWarnings("daemon.promptqueue.interject")
+	// ERROR under opInterject, and the refused shim call is recorded by the
+	// client that made it — the refusal IS the scenario.
+	f.d.ExpectWarnings("daemon.promptqueue.interject", "daemon.shimclient.kill_turn")
 
 	// Act: the interjecting prompt's KillTurn is refused by the shim.
 	f.shim.AnswerFailure(harness.RPCKillTurn, "the vendor refused the kill")
@@ -722,8 +723,14 @@ func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersThe
 // ---------------------------------------------------------------------------
 
 func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow(t *testing.T) {
-	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// Arrange: a DEPLOYED daemon, stated through AGENT_REPL_DEPLOY_STAMP. The
+	// harness builds the binary with `go build -o <tmp>`, so no deploy chain
+	// ever wrote daemon/bin/.built-sha and the daemon knows no version to put
+	// in the Version row.
+	// The stamp MATCHES the fake shim's own reported build, or the staleness
+	// check would bounce the shim out from under the test.
+	f := newOpened(t, harness.Opts{ExtraEnv: []string{
+		"AGENT_REPL_DEPLOY_STAMP=" + harness.FakeShimDefaultBuildSHA}})
 	feed := f.watchRootFeed()
 
 	// Act
@@ -757,7 +764,11 @@ func TestStatusAnswersAStatusPanelViewInlineAndMirrorsANonDurableCommandPanelRow
 	if got := status.GetRows()[0].GetValue(); got == "" {
 		t.Fatalf("status panel Version row value is empty, want the daemon's build stamp")
 	}
-	wantValues := map[string]string{"Account": "a@x", "Model": "opus", "Permission mode": "default"}
+	// The account is the harness's own default config root
+	// (harness.StartDaemon's DefaultConfigDir), not SPEC.md's illustrative
+	// "a@x" — that example names a shape, never this harness's value.
+	wantValues := map[string]string{
+		"Account": "default@example.invalid", "Model": "opus", "Permission mode": "default"}
 	for _, row := range status.GetRows()[1:] {
 		if want := wantValues[row.GetLabel()]; row.GetValue() != want {
 			t.Fatalf("status panel row %q value = %q, want %q", row.GetLabel(), row.GetValue(), want)
@@ -995,7 +1006,6 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetNotInCatalog() == nil {
 		t.Fatalf("SetModel(not-a-real-model) = %v, want error.not_in_catalog", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
@@ -1068,7 +1078,6 @@ func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetModeNotServed() == nil {
 		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want error.mode_not_served", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
@@ -1093,7 +1102,6 @@ func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil {
 		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want exactly error.ungated_without_consent", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 // ---------------------------------------------------------------------------
@@ -1402,7 +1410,6 @@ func TestAllowStandingOnACardWithoutStandingOfferedIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetNoStandingOffer() == nil {
 		t.Fatalf("AnswerPermission{allow_standing} without standing_offered = %v, want error.no_standing_offer", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 // ---------------------------------------------------------------------------
@@ -1485,7 +1492,6 @@ func TestAnswerQuestionWithAnUnservedLabelIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetUnservedValue() == nil {
 		t.Fatalf("AnswerQuestion with an unserved label = %v, want error.unserved_value", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
@@ -1510,7 +1516,6 @@ func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetMultiPickOnSingleSelect() == nil {
 		t.Fatalf("AnswerQuestion multi-pick on a single_select = %v, want error.multi_pick_on_single_select", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {

@@ -276,7 +276,11 @@ func (m *manager) session(ws ids.WorkspaceID, verb string) (*session, string, er
 	m.mu.Unlock()
 
 	if !ok {
-		m.log.Warn("daemon.login."+verb, "no login session standing for this account root", dlog.Context{
+		// A LANDED TYPED REFUSAL IS AN ORDINARY ANSWER. SendLoginInputError
+		// carries `no_login_open` and WatchLoginTerminal's refused open is
+		// transport-closed by ruling, so neither is a warning: asking about a
+		// login nobody opened is a state the contract spells, not a fault.
+		m.log.Info("daemon.login."+verb, "no login session standing for this account root", dlog.Context{
 			"workspace":  string(ws),
 			"config_dir": configDir,
 			"branch":     "no-session",

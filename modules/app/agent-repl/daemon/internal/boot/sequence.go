@@ -146,7 +146,7 @@ func (s *sequence) adopt(ctx context.Context, log dlog.Logger, workspaces []wsm.
 // dispositions as faults; PRESERVED, ROLLED, DIED and UNKNOWN are never
 // collapsed, because WHICH sessions silently died is the whole point.
 func (s *sequence) reconcileManifest(ctx context.Context, log dlog.Logger, report *Report) error {
-	dispositions, err := s.deps.Rollout.Reconcile(ctx)
+	dispositions, err := s.deps.Rollout.Reconcile(ctx, report.Adopted)
 	if err != nil {
 		log.Error("daemon.boot.reconcile", "the intent manifest could not be reconciled", dlog.Context{
 			"error": err.Error(),

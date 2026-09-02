@@ -32,7 +32,9 @@ func (v *verbs) Close(ctx context.Context, ws ids.WorkspaceID) error {
 	}
 	if blocked != nil {
 		v.deps.Footer.SetClosing(ws, blocked)
-		log.Warn(opClose, "refused a close that is not quiet", dlog.Context{
+		// `blocked` IS A LANDED CloseWorkspaceError ARM, so this refusal is an
+		// ordinary answer the client reads, not a warning.
+		log.Info(opClose, "refused a close that is not quiet", dlog.Context{
 			"reason": blocked.Reason, "detail": blocked.Detail,
 		})
 		return &Refusal{Rpc: "CloseWorkspace", Arm: "blocked", Reason: blocked.Detail}

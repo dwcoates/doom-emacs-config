@@ -268,6 +268,13 @@ type wsState struct {
 	linkSeen bool
 	// everConnected distinguishes a shim that died from one that never started.
 	everConnected bool
+	// hostStream and webStream are the OTHER TWO HOPS of connectivity truth
+	// (daemon.md invariant 11): the workspace is connected only while its
+	// shim.v1 WatchSession, its WatchHostWorkspace and its WatchWebWorkspace
+	// are all live. The server states these two on every stream open and close
+	// edge; neither is ever inferred from silence.
+	hostStream bool
+	webStream  bool
 	// degraded reports an open degraded window on the last diagnostics push.
 	degraded bool
 

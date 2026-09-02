@@ -957,7 +957,9 @@ func TestContextCutCompactionFailedDrawsNoSeparationAndSurfacesTheError(t *testi
 	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "compaction_failed draws no separation divider")
 	// separation.go logs daemon.feed.compaction_failed at WARN precisely on
 	// this arm ("a compaction failed, so no separation divider was drawn").
-	f.d.ExpectWarnings("daemon.feed.compaction_failed")
+	// The footer states the same failed compaction, and a context still over
+	// budget is a warning wherever it is stated.
+	f.d.ExpectWarnings("daemon.feed.compaction_failed", "daemon.footer.on_context_cut")
 }
 
 // ==========================================================================

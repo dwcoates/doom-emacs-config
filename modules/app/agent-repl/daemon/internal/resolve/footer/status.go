@@ -11,8 +11,8 @@ import (
 // rather than forbidden by comment.
 //
 // STATUS PRECEDENCE, strongest claim first:
-//  1. disconnected — the daemon-to-shim link is not serving, so nothing else
-//     the footer could say is knowable right now.
+//  1. disconnected — one of the three connectivity hops is not serving, so
+//     nothing else the footer could say is knowable right now.
 //  2. closing — a close was requested; its refusal manifests here.
 //  3. interrupted — MOMENTARY, retired by the R1 dwell.
 //  4. loading — MOMENTARY, retired by the R1 dwell.
@@ -78,6 +78,13 @@ func (r *resolver) disconnected(s *wsState) *frontendv1.FooterStatus {
 	case s.link == shimclient.LinkDead:
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_StartFailed{
 			StartFailed: &frontendv1.FooterSubStatusDisconnectedStartFailed{}}
+	case !s.hostStream || !s.webStream:
+		// A HOP IS DOWN. The daemon-to-shim link serves, but one of the two
+		// client streams does not, so the workspace is not connected
+		// (daemon.md invariant 11) and the footer says so rather than drawing
+		// a status nobody is receiving.
+		arm.Substatus = &frontendv1.FooterStatusDisconnected_Severed{
+			Severed: &frontendv1.FooterSubStatusDisconnectedSevered{}}
 	case s.degraded:
 		arm.Substatus = &frontendv1.FooterStatusDisconnected_Degraded{
 			Degraded: &frontendv1.FooterSubStatusDisconnectedDegraded{}}
