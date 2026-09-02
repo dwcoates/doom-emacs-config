@@ -284,3 +284,38 @@ func TestASidechainWithNoIdentityConvertsNothing(t *testing.T) {
 		t.Fatalf("entries = %d, want 0: a book with no name must not be written", len(entries))
 	}
 }
+
+// secondBoundary and secondSummary are a SECOND compaction in the same file.
+// BOTH summaries' timestamps are earlier than BOTH boundaries', which is what
+// makes a timestamp-ordered assembly indistinguishable from a correct one in a
+// session that compacted once — and plainly wrong in one that compacted twice.
+const secondBoundary = `{"type":"system","subtype":"compact_boundary","uuid":"b-2","isSidechain":false,` +
+	`"timestamp":"2026-07-21T21:30:00.000Z","compactMetadata":{"trigger":"auto","preTokens":400000,"postTokens":9000,"durationMs":1000}}`
+
+const secondSummary = `{"type":"user","uuid":"s-2","isCompactSummary":true,"isSidechain":false,` +
+	`"timestamp":"2026-07-21T20:14:05.041Z","message":{"role":"user","content":"the story since then"}}`
+
+func TestTwoCompactionsEachCoalesceWithTheirOwnFollowingSummary(t *testing.T) {
+	// Arrange: b1, s1, b2, s2 in FILE order, with EVERY summary timestamped
+	// before BOTH boundaries. Pairing by timestamp would hand both boundaries the
+	// same earliest summary — or hand each the other's — and a session that
+	// compacted once could never tell the difference. File order is the ruling.
+	h := NewSessionTranscriptHandler(testLogger(t))
+	ctx := sessionContext("/p/s.jsonl", "s")
+	ctx.Redelivers = true
+
+	// Act.
+	entries := h.Handle(framesFrom(t, boundary+"\n"+summary+"\n"+secondBoundary+"\n"+secondSummary), ctx)
+
+	// Assert: each cut carries the summary that FOLLOWS it in the file.
+	first := frameOf(entryByKey(t, entries, convert.SessionKey("context_cut", "b-1"))).
+		GetUpdate().GetContextCut().GetCompacted()
+	if got := first.GetSummary().GetMarkdown(); got != "the story so far" {
+		t.Errorf("the first cut carries the summary %q, wanted the line that follows IT, %q", got, "the story so far")
+	}
+	second := frameOf(entryByKey(t, entries, convert.SessionKey("context_cut", "b-2"))).
+		GetUpdate().GetContextCut().GetCompacted()
+	if got := second.GetSummary().GetMarkdown(); got != "the story since then" {
+		t.Errorf("the second cut carries the summary %q, wanted the line that follows IT, %q", got, "the story since then")
+	}
+}
