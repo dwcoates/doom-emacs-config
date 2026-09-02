@@ -28,6 +28,7 @@ import {
   resumeSession,
   startTurnRequest,
   startTurnRequest as turnFor,
+  turnId,
   watchAgentRequest,
   workId,
 } from "../integration-support/client.js";
@@ -49,7 +50,7 @@ import {
   sidecarProducer,
   writtenKeys,
 } from "../integration-support/store.js";
-import { awaitSpoolExit, findSubagentMetaByToolUseId } from "../integration-support/vendor.js";
+import { awaitSpoolExit, findSubagentMetaByToolUseId, readTranscript } from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
 
@@ -319,6 +320,23 @@ describe("StopBash", () => {
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
+    // EVERY BYTE OF A DETACHED SHELL COMES FROM THE SIDECAR, which no
+    // integration harness runs — so the run's rows are seeded here exactly as
+    // the WatchBash tests above seed theirs. `exitCode: null` leaves the run
+    // UNTERMINATED, which is what gives the stop something live to conclude.
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "sleep 600",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["running\n"],
+        exitCode: null,
+        topLevel: started.vendorSessionId,
+      },
+    );
     const bash = openStream((options) =>
       shim.clients.h1.watchBash(
         create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
@@ -355,11 +373,26 @@ describe("StopBash", () => {
 
   test("a run that already ended is refused already_ended", async () => {
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
+    // The sidecar's rows, seeded as everywhere else in this file — and this
+    // seed CARRIES A TERMINAL, so the drain below reaches the run's own end.
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "echo done",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["done\n"],
+        exitCode: 0,
+        topLevel: started.vendorSessionId,
+      },
+    );
     // Drive the run to its own terminal before asking to stop it.
     const bash = openStream((options) =>
       shim.clients.h1.watchBash(
@@ -409,15 +442,29 @@ describe("subagents", () => {
         }
       }
     }
-    const own = await stream.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      return entryFrame(watchAgentEntry(frame))?.agentId?.value === created;
-    });
-
     expect(created).not.toBe("");
     expect(created).not.toBe(started.vendorSessionId);
+
+    // FLAT MEANS FLAT. The subagent's own frames are never nested in the
+    // spawn's stream -- `AgentFrame.agent_id` is the whole of attribution, and
+    // `created_agent_id` is the key a consumer opens a SECOND WatchAgent on.
+    // The daemon owns that fan-out: one WatchAgent per created_agent_id it
+    // learns from a spawn, never a child fan-out inside the parent's stream.
+    const child = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest({ target: agentId(created) }), options),
+    );
+    await child.next();
+    const own = await child.until((frame) => frame.frame.case === "entry");
+
     expect(entryFrame(watchAgentEntry(own))?.agentId?.value).toBe(created);
+    // AND NOTHING OF THE CHILD'S IS ON THE PARENT'S STREAM: every frame the
+    // spawning agent's book served names the spawning agent.
+    for (const frame of stream.frames()) {
+      if (frame.frame.case !== "entry") continue;
+      expect(entryFrame(watchAgentEntry(frame))?.agentId?.value).not.toBe(created);
+    }
     stream.close();
+    child.close();
   });
 
   test("the subagent's AgentId IS the spawning call's activity id", async () => {
@@ -708,9 +755,12 @@ describe("reconciliation at session start", () => {
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     stream.close();
-    await first.clients.h1.killSession(
-      create(shimv1.KillSessionRequestSchema, { force: true }),
-    );
+    // THE SHIM DIES WITHOUT STANDING DOWN, which is the whole premise: an
+    // ORDERLY kill stops every live item and writes its terminal, leaving
+    // nothing to re-adopt. A crash stops nothing — the backgrounded shell keeps
+    // running, its spool keeps no `EXIT=` line, and the record keeps an open
+    // obligation for the revived session to reconcile.
+    first.child.kill("SIGKILL");
     await first.exited;
 
     const second = await spawnShim({ reuse: first.dirs });
@@ -791,10 +841,20 @@ describe("reconciliation at session start", () => {
 
 describe("a fan-wide cancel", () => {
   test("!cancel-all concludes every live item", async () => {
-    // Emptying the vendor's live set is the signal, and the shim consumes that
-    // LEVEL rather than diffing it or pairing edges into a retained set.
+    // THE CANCEL IS OURS, NOT THE MOCK'S. `!cancel-all` only ESTABLISHES the
+    // fan — two agents and a shell, left live and unterminated — because the
+    // vendor has no fan-wide verb: the cancel is a `stopTask` per item, which
+    // is what `KillTurn{force}` issues over the turn's whole spawn set. The
+    // mock then empties its live set and writes the `agents_killed` record,
+    // which states a fact about the SET that no single stop could know.
+    //
+    // EACH ITEM CONCLUDES ON ITS OWN STREAM, which is the flatness rule again:
+    // an agent's terminal is a page line on the spawning agent's book, and a
+    // shell run's is a LIFECYCLE row served by `WatchBash` — never a page line
+    // — so looking for all three in one place would be looking in the wrong
+    // one for the shell.
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(turnFor({ turn: "t1", text: "!cancel-all" }));
@@ -807,30 +867,49 @@ describe("a fan-wide cancel", () => {
       }
       return announcements.length >= 3;
     });
-    const concluded = new Set<string>();
+
+    await shim.clients.h1.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: true }),
+    );
+
+    // THE TWO AGENTS: `stopped_by_user`, on the spawning agent's own book.
+    const stoppedAgents = new Set<string>();
     await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
-      if (agentFrame?.result.case === "update") {
-        const update = agentFrame.result.value.update;
-        if (update.case === "activity") {
-          const item = update.value.item;
-          const settled =
-            item.case !== undefined &&
-            typeof item.value === "object" &&
-            "result" in item.value &&
-            ["success", "failure"].includes(
-              (item.value as { result: { case?: string } }).result.case ?? "",
-            );
-          if (settled && announcements.includes(update.value.activityId?.value ?? "")) {
-            concluded.add(update.value.activityId?.value ?? "");
-          }
-        }
-      }
-      return concluded.size >= announcements.length;
+      if (agentFrame?.result.case !== "update") return false;
+      const update = agentFrame.result.value.update;
+      if (update.case !== "activity") return false;
+      const item = update.value.item;
+      if (item.case !== "subagent" || item.value.result.case !== "failure") return false;
+      if (item.value.result.value.cause.case !== "stoppedByUser") return false;
+      stoppedAgents.add(update.value.activityId?.value ?? "");
+      return stoppedAgents.size >= 2;
     });
+    for (const agent of stoppedAgents) expect(announcements).toContain(agent);
 
-    expect([...concluded].sort()).toEqual([...announcements].sort());
+    // THE SHELL: whatever the two agents were not, concluding `interrupted` on
+    // the stream a shell run has — its own.
+    const shells = announcements.filter((work) => !stoppedAgents.has(work));
+    expect(shells).toHaveLength(1);
+    const bash = openStream((options) =>
+      shim.clients.h1.watchBash(
+        create(shimv1.WatchBashRequestSchema, { work: workId(shells[0] ?? "") }),
+        options,
+      ),
+    );
+    const terminal = (await bash.drain()).map(bashFrame).at(-1);
+    expect(terminal?.result.case).toBe("success");
+    if (terminal?.result.case === "success") {
+      expect(terminal.result.value.outcome.case).toBe("interrupted");
+      if (terminal.result.value.outcome.case === "interrupted") {
+        expect(terminal.result.value.outcome.value.cause.case).toBe("byUser");
+      }
+    }
+
+    // AND THE SET EMPTIED. `agents_killed` is the vendor's record of that fact.
+    const records = readTranscript(shim.dirs, started.vendorSessionId);
+    expect(records.some((record) => record.subtype === "agents_killed")).toBe(true);
     stream.close();
   });
 });

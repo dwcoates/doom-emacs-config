@@ -217,6 +217,71 @@ export function closingBashTerminal(
 
 
 /**
+ * The terminal for a run THIS SHIM ENDED, by a stop it issued itself.
+ *
+ * # Why the shim writes it, when the sidecar writes every other bash row
+ *
+ * A detached shell's output rows are the sidecar's, read off the spool. Its
+ * TERMINAL normally is too — the spool's `EXIT=` line. But a run the shim
+ * stops during a teardown may have no sidecar left to read that line, and the
+ * contract is unconditional: every stream concludes with a terminal frame, and
+ * every started thing eventually gets a terminal row. The act was ours, so the
+ * record of the act is ours.
+ *
+ * `by_user` and not `lost`: a stop the shim issued on a caller's behalf is a
+ * cause we OBSERVED, not a run we merely lost sight of. Re-writing the same key
+ * is absorbed by the store, so a sidecar that does later see the `EXIT=` line
+ * cannot produce a second, conflicting terminal.
+ */
+export function stoppedBashTerminal(
+  agent: conversationv1.AgentId,
+  run: conversationv1.AgentActivityId,
+  command: conversationv1.AgentBashCommand,
+): PersistEntry {
+  LOGGER.log(
+    { agent: agent.value, run: run.value },
+    "closing a shell run the shim stopped, as interrupted by the user",
+  );
+  const frame = create(conversationv1.AgentBashSchema, {
+    result: {
+      case: "success",
+      value: create(conversationv1.AgentBashSuccessSchema, {
+        command,
+        outcome: {
+          case: "interrupted",
+          value: create(conversationv1.AgentBashInterruptedSchema, {
+            // WHAT WE SAW OF THE OUTPUT IS NOTHING: every byte of a detached
+            // run is read from the spool by the sidecar, and this shim read
+            // none of it. `not_observed` is the producer saying so, rather
+            // than an empty `partial` claiming the run printed nothing.
+            output: create(conversationv1.AgentBashOutputSchema, {
+              form: {
+                case: "notObserved",
+                value: create(conversationv1.AgentBashOutputNotObservedSchema, {}),
+              },
+            }),
+            cause: {
+              case: "byUser",
+              value: create(conversationv1.AgentBashInterruptedByUserSchema, {}),
+            },
+          }),
+        },
+      }),
+    },
+  });
+  return {
+    agentId: agent,
+    upsertKey: bashTerminalUpsertKey(run),
+    source: {
+      vendorUuid: reconciledCoordinate(run.value),
+      discriminator: "agent_bash.success.interrupted.by_user",
+    },
+    keepalive: false,
+    item: { kind: "bash_run", run, frame },
+  };
+}
+
+/**
  * The one arm a RECONCILIATION may ever state.
  *
  * `swept_up` is the reconciliation's own word for what it did: it found the run
