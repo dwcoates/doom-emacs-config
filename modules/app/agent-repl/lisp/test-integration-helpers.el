@@ -292,10 +292,17 @@ producer-side end that is a transport failure rather than a close."
 
 (defun agent-repl-itest--gate (daemon method)
   "Make DAEMON withhold METHOD\='s ANSWER until released.
-The request is still recorded and validated; only the response waits.
+The request is still recorded and validated; only the answer waits.
 This is how a scenario pins an ORDER — the handover\='s \"call
 AdoptHostWorkspace ... THEN cancel the old stream and re-subscribe\" is
-only observable while the adopt is in flight."
+only observable while the adopt is in flight.
+
+METHOD may also be one of Emacs\='s three STREAMS
+(`WatchHostWorkspace\=', `WatchDaemon\=', `WatchWorkspaceRoster\='), and
+then the withheld answer is the stream\='s ACCEPTANCE: a gated stream is
+DIALLED but not accepted, flushes no headers and lists no subscriber
+(fanout §3 STANDING-STREAM ACCEPTANCE).  That is the only way to stage a
+client that must wait for acceptance before it acts."
   (agent-repl-itest--control-ok
    daemon "/_fake/gate" (json-serialize `((method . ,method)))))
 
