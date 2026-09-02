@@ -349,6 +349,7 @@ func (p *process) apply(line []byte) Reply {
 			agent = f.GetAgentId().GetValue()
 		}
 		p.srv.rememberPushedBash(f)
+		p.srv.rememberPushedPermission(agent, f)
 		p.srv.agents.publish(agentFrame{agent: agent, frame: f})
 		return Reply{OK: true, Count: p.srv.agents.count()}
 
