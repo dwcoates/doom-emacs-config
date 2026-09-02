@@ -198,6 +198,14 @@ RULED, no change:
 - OpenWorkspaceTranscriptMissing.searched_paths stays a bare list this wave;
   the webapp renders the count. A composed sentence is deferred.
 
+## Cross-system ruling, no proto (2026-09-02)
+
+- KERNEL LOCKS: the shim takes the WORKSPACE lock inside StartSession (beside
+  the session lock), not at process startup. Reason: the rollout's shim
+  relaunch prelaunches an inert shim beside the live one; a startup flock
+  blocked it forever. An inert shim holds no lock; probe semantics unchanged.
+  Supersedes the kickoff text "shim-held from startup" in every plan doc.
+
 ## Explicitly NOT changed (rulings recorded instead)
 
 - WatchAgentSession / WatchFeed refusals: no failure frame — a refused open
