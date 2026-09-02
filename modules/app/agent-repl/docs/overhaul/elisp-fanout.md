@@ -308,6 +308,18 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   more production defects (see its report; follow-up R-AUDIT2-PROD-2).
   R-DEADCODE-2 resumed by message (five commits landed). Worktrees left:
   deadcode2 only.
+- RUN at ed395b804: connect 25/25, link 31/31, host 62/68, roster 55/56,
+  daemon 20/21, verbs 72/73, composer 52/54; all-suite 3395/3406 (the same
+  11, no order dependence). Dispatched (`opus-low`, off ed395b804):
+  R-RED-HOST (elisp-agents/red-host: the six host reds — not_yet_adopted
+  retry, webview redial at the successor, naming.title renames the input
+  buffer, select refusal does not record the selection, transferring_away
+  redial via Select, transferring_away without address is a breach) and
+  R-RED-MISC (elisp-agents/red-misc: roster tab carries the row's own
+  ref; daemon restart-then-ensure; verbs fork-without-parent refuses
+  before send; composer merge_parked badge + merging-refusal mode-line
+  flash). Triage rule: payload against the codec first. Running:
+  deadcode2, red-host, red-misc.
 
 ## 1. Module map (final tree of lisp/)
 
