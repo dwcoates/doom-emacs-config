@@ -27,6 +27,7 @@ import type {
   FeedContextCutCleared,
   FeedContextCutColdRead,
   FeedContextCutCompacted,
+  FeedContextCutCompactionFailed,
   FeedContextCutTokens,
   FeedSessionSeparation,
   FeedSessionSeparationLabel,
@@ -45,6 +46,7 @@ const ACCENTS = {
   compacted: "sep-accent-compacted",
   worktreeEntered: "sep-accent-worktree",
   worktreeLeft: "sep-accent-worktree",
+  compactionFailed: "sep-accent-compaction-failed",
 } as const satisfies Record<string, string>;
 
 /** Every separation arm this build draws, for the suite to hold to the schema. */
@@ -94,6 +96,8 @@ export function drawFeedSessionSeparation(
         return drawFeedWorktreeEntered(kind.value, rc);
       case "worktreeLeft":
         return drawFeedWorktreeLeft(kind.value, rc);
+      case "compactionFailed":
+        return drawFeedContextCutCompactionFailed(kind.value);
       default:
         return unreachableArm(`${PATH}.kind`, armName(kind));
     }
@@ -206,6 +210,29 @@ export function drawFeedContextCutColdRead(coldRead: FeedContextCutColdRead): HT
   log("warn", "a compaction re-read the whole conversation at the uncached rate", {
     operation: "feed.separation-cold-read",
     context: { uncached_input_tokens: evidence.uncachedInputTokens.toString() },
+  });
+  return el;
+}
+
+/**
+ * The compaction that was OFFERED AND DID NOT HAPPEN, drawn in the slot the
+ * compacted divider would have taken.
+ *
+ * Nothing was cut, so there is no size change to draw beside the label (the
+ * wire leaves `tokens` unset) and no summary to fold open. The producer's own
+ * account of the failure is the only evidence anyone has, so it is STATED
+ * verbatim rather than reworded here.
+ */
+export function drawFeedContextCutCompactionFailed(
+  failed: FeedContextCutCompactionFailed,
+): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "sep-compaction-failed";
+  el.setAttribute("data-compaction-failed", "true");
+  el.textContent = failed.error;
+  log("warn", "a compaction was offered and did not happen", {
+    operation: "feed.separation-compaction-failed",
+    context: { error: failed.error },
   });
   return el;
 }

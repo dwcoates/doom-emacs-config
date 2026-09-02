@@ -53,6 +53,10 @@ const ARMS: ReadonlyArray<[string, SeparationInit["kind"]]> = [
     "worktreeLeft",
     { case: "worktreeLeft", value: { outcome: { case: "removed", value: {} } } },
   ],
+  [
+    "compactionFailed",
+    { case: "compactionFailed", value: { error: "the summarizing request was refused" } },
+  ],
 ];
 
 describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
@@ -90,6 +94,40 @@ describe("drawFeedSessionSeparation: ONE renderer for every arm", () => {
 
   it("refuses a divider with no label", () => {
     const msg = create(FeedSessionSeparationSchema, { kind: { case: "cleared", value: {} } });
+    expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);
+  });
+});
+
+describe("drawFeedSessionSeparation: the compaction that did not happen", () => {
+  const failed: SeparationInit["kind"] = {
+    case: "compactionFailed",
+    value: { error: "the summarizing request was refused" },
+  };
+
+  it("takes the FAILURE accent, not the compacted one it stands in for", () => {
+    const el = drawFeedSessionSeparation(separation(failed), ctxFor());
+    expect(el.querySelector(".sep-rule")?.className).toContain("sep-accent-compaction-failed");
+  });
+
+  it("states the producer's own account of the failure verbatim", () => {
+    const el = drawFeedSessionSeparation(separation(failed), ctxFor());
+    expect(el.querySelector(".sep-compaction-failed")?.textContent).toBe(
+      "the summarizing request was refused",
+    );
+  });
+
+  it("draws no size change, nothing having been cut", () => {
+    const el = drawFeedSessionSeparation(separation(failed), ctxFor());
+    expect(el.querySelector(".sep-tokens")).toBeNull();
+  });
+
+  it("draws no summary to fold, no compaction having happened", () => {
+    const el = drawFeedSessionSeparation(separation(failed), ctxFor());
+    expect(el.querySelector(".sep-fold-toggle")).toBeNull();
+  });
+
+  it("refuses a failed compaction with no label", () => {
+    const msg = create(FeedSessionSeparationSchema, { kind: failed });
     expect(() => drawFeedSessionSeparation(msg, ctxFor())).toThrow(MalformedView);
   });
 });
