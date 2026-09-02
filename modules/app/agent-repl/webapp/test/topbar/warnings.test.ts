@@ -175,6 +175,27 @@ describe("the detail overlay", () => {
     );
   });
 
+  it("reads the degraded window's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the window's start does not share the shared ticker's phase.
+    const host = openDetail(
+      strip(
+        warning("a", {
+          case: "degradedWindow",
+          value: {
+            component: { text: "watcher" },
+            reason: { text: "backpressure" },
+            beganAtMs: BigInt(NOW - 4920),
+            extent: { case: "open", value: {} },
+          },
+        }),
+      ),
+    );
+    // Assert: five real seconds degraded reads 5s, not the lagging 4s.
+    expect(openPanel(host)?.querySelector(".topbar-warning-span")?.textContent).toBe(
+      "degraded since 5s",
+    );
+  });
+
   it("reports a CLOSED degraded window's span and what it cost", () => {
     const host = openDetail(
       strip(
