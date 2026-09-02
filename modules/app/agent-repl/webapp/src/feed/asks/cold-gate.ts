@@ -27,7 +27,7 @@
  * UNSPECIFIED is never offered and never sent, and a resolved trace carrying it
  * is a MALFORMED VIEW rather than a scope this end quietly words as "everything".
  */
-import { formatAge } from "../../duration.js";
+import { formatAge, formatTickedAge } from "../../duration.js";
 import { formatTokens } from "../../format.js";
 import { log } from "../../log.js";
 import {
@@ -219,7 +219,7 @@ export function drawFeedColdGateLastRequest(
   const el = document.createElement("span");
   el.className = "hibernation-since";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = COLD_GATE_COPY.lapse.replace("{age}", formatAge(nowMs - at));
+    el.textContent = COLD_GATE_COPY.lapse.replace("{age}", formatTickedAge(nowMs - at));
   });
   return el;
 }
