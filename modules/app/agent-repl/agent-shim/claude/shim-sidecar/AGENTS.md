@@ -608,8 +608,12 @@ the suite rather than quietly shrinking what the feed can show.
   `<session>.jsonl` basename). NEVER the per-record `sessionId`, which diverges
   from the runtime's answer in ~22% of records; that divergence never rides the
   wire.
-- SUBAGENT: the vendor `agentId` of sidechain records, which the `agent-<id>`
-  file name repeats.
+- SUBAGENT: `AgentId.value` == the `toolUseId` of the companion
+  `agent-<id>.meta.json` — the `tool_use_id` of the call that SPAWNED the agent
+  (the cross-plane minting rule; see "Identity and keys"). The vendor `agentId`
+  of sidechain records, which the `agent-<id>` file name repeats, is a LOCATOR
+  and NEVER an identity. There is no fallback: a meta that is missing,
+  unparsable, or names no `toolUseId` HOLDS its transcript.
 - `top_level`: the main agent for main-agent and sync-subagent frames; the
   subagent ITSELF when the spawn was backgrounded (its stream outlives the turn).
   UNSET only when genuinely unresolvable — residue naming no agent.
