@@ -361,6 +361,11 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   title); the webview buffer name stays a lookup key (ruled: correct — the
   contract asks for a name in every standing, not for every buffer to
   carry it). Worktrees left: regress.
+- RUN at d8a074c49: connect 25, link 31, host 68, roster 56, daemon 21,
+  verbs 73 all green; composer 52/54 standalone (submit-log-carries-the-
+  origin, turn-already-open-refusal-names-its-arm — the load-correlated
+  `--await-log` family R-REGRESS holds) but 54/54 inside the all-suite run
+  (3348/3348 green). Only R-REGRESS in flight.
 
 ## 1. Module map (final tree of lisp/)
 
