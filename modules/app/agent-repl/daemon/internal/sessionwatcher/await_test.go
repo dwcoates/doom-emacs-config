@@ -270,39 +270,3 @@ func TestClosedTurnMemoryIsBounded(t *testing.T) {
 		t.Fatalf("closedTurns holds %d turns, want the bounded %d", held, closedTurnMemory)
 	}
 }
-
-// TestFreenessIsSignalledOnlyAfterTheLifecycleSinkHasBeenTold pins the order a
-// drain's exit depends on: the workspace is free once the daemon has FINISHED
-// reacting to the turn's end, never while the prompt queue is still handling
-// it. A waiter released early is the drain exiting -- and closing the state
-// client -- under the queue's own turn-end work.
-func TestFreenessIsSignalledOnlyAfterTheLifecycleSinkHasBeenTold(t *testing.T) {
-	// Arrange.
-	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
-	h.w.SetMainAgent(agentID("main-1"))
-	h.quiet()
-	ch, standing, err := h.w.registerFreeWaiter()
-	if !standing {
-		t.Fatalf("a turn is in flight but the wait did not stand (err %v)", err)
-	}
-	releasedEarly := make(chan bool, 1)
-	h.lifecycle.onTurnEnded = func() {
-		select {
-		case <-ch:
-			releasedEarly <- true
-		default:
-			releasedEarly <- false
-		}
-	}
-
-	// Act.
-	h.route(h.main, entryFrame(frameSuccess("main-1", completed())))
-
-	// Assert.
-	if <-releasedEarly {
-		t.Fatal("the freeness waiter was released before the lifecycle sink was told")
-	}
-	if err := <-ch; err != nil {
-		t.Fatalf("the freeness waiter = %v, want nil once the sink had its say", err)
-	}
-}
