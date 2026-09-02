@@ -16,7 +16,7 @@
  * it — which is the real production path, not a shortcut around it.
  */
 import type { AccountUsageArm } from "../scenario.js";
-import { conclude, scenario } from "./support.js";
+import { conclude, scenario, withheldThinking } from "./support.js";
 
 export const ROTATE = scenario({
   name: "rotate",
@@ -44,7 +44,7 @@ export const SLASH_LOCAL = scenario({
     "a slash command the VENDOR answers itself: a `local_command_output` message, and the transcript's " +
     "`system:local_command` record wrapping the output in `<local-command-stdout>`",
   writes: "a `system:local_command` line and a `command_permissions` attachment line",
-  arms: "the vendor-answered slash-command family — no agent activity at all",
+  arms: "the vendor-answered slash-command family — no agent activity beyond the answer, and NO reasoning",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "slash" }, "fake vendor-answered slash-command turn");
     const output = "Session: offline\nModel: fake-opus-4-8\nPermission mode: default";
@@ -59,7 +59,13 @@ export const SLASH_LOCAL = scenario({
       timestamp: ctx.nowIso(),
     });
     ctx.attachment({ type: "command_permissions", allowedTools: [] });
-    conclude(ctx, "Answered the slash command locally.");
+    // NO REASONING PRELUDE, unlike every other turn: the vendor ANSWERED this
+    // one itself, and the `vendor-answered-slash-commands` capture folds into a
+    // response and nothing else. Going through `conclude` would put a thinking
+    // unit in front of an answer the model never composed.
+    const conclusion = "Answered the slash command locally.";
+    ctx.assistant([{ type: "text", text: conclusion }], { stopReason: "end_turn" });
+    ctx.result({ subtype: "success", result: conclusion });
   },
 });
 
@@ -154,7 +160,12 @@ function fastModeScenario(name: string, state: "on" | "off" | "cooldown", reason
       ctx.log({ turn: ctx.turn, branch: name, fast_mode_state: state }, "fake fast-mode turn");
       ctx.setFastMode(state, reason);
       const conclusion = `Fast mode is ${state}.`;
-      ctx.assistant([{ type: "text", text: conclusion }], { stopReason: "end_turn" });
+      // `[thinking, text]`, like every capture's closing API response — this one
+      // spells it out rather than going through `conclude` because the result
+      // carries the fast-mode fields.
+      ctx.assistant([withheldThinking(), { type: "text", text: conclusion }], {
+        stopReason: "end_turn",
+      });
       ctx.result({
         subtype: "success",
         result: conclusion,

@@ -13,9 +13,16 @@
  */
 import type { PermissionResultLike } from "../../sdk/types.js";
 import type { Scenario, ScenarioContext, ToolCall } from "../scenario.js";
+import { FAKE_REASONING_SIGNATURE } from "../vendor-files.js";
 
-/** A thinking signature shaped like the corpus's (opaque, truncated there too). */
-export const FAKE_SIGNATURE = "EqICCokBCBAYAipA7QezsC7A4qgwYLQJ7i3E1wpsSpekzx1YfakeSignature==";
+/**
+ * A thinking signature shaped like the corpus's (opaque, truncated there too).
+ *
+ * Re-exported from the mock's own module: the emitters there need it for the
+ * reasoning prelude every tool call and turn conclusion carries, so one
+ * constant serves both and the two cannot drift.
+ */
+export const FAKE_SIGNATURE = FAKE_REASONING_SIGNATURE;
 
 /** Declare one scenario. The metadata is required, so the table cannot rot. */
 export function scenario(spec: Scenario): Scenario {
@@ -31,7 +38,13 @@ export function scenario(spec: Scenario): Scenario {
  * still pass.
  */
 export function conclude(ctx: ScenarioContext, conclusion: string): void {
-  ctx.assistant([{ type: "text", text: conclusion }], { stopReason: "end_turn" });
+  // THE OBSERVED SHAPE OF A TURN'S CLOSING API RESPONSE: `[thinking, text]` on
+  // one message id, one assistant line per block (every capture; the smallest
+  // is `bash-foreground-completed`). The vendor reasons before it answers, so a
+  // conclusion emitted as a bare text block was a shape no capture shows.
+  ctx.assistant([withheldThinking(), { type: "text", text: conclusion }], {
+    stopReason: "end_turn",
+  });
   ctx.result({ subtype: "success", result: conclusion });
 }
 

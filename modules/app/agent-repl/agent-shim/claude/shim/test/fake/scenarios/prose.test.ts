@@ -94,11 +94,13 @@ describe("the markdown showcase", () => {
     expect(theResult(driven).result).toBe(MARKDOWN_SHOWCASE);
   });
 
-  it("emits exactly one block, unlike the default turn", async () => {
+  it("emits one PROSE block, behind the reasoning every turn opens with", async () => {
+    // The vendor's closing API response is `[thinking, text]` in every capture,
+    // so the showcase is one TEXT block rather than one block full stop.
     // Arrange + Act
     const driven = await driveScenario(["!md"]);
 
     // Assert
-    expect(blockTypes(driven)).toEqual(["text"]);
+    expect(blockTypes(driven)).toEqual(["thinking", "text"]);
   });
 });
