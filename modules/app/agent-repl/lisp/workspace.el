@@ -615,6 +615,39 @@ no-silent-fallback rule).  Returns nil on success."
                      ws context)
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
 
+(defun agent-repl--ws-revive (ws)
+  "Clear WS's tombstone so the name is LIVE again, returning non-nil when it moved.
+The counterpart of `agent-repl--ws-del' and the only sanctioned way to
+un-tombstone a name.  `--ws-del' does not `remhash' -- it stamps
+`:killed-at' -- so a name that is closed and later REOPENED under the
+same daemon identity would otherwise stay tombstoned forever: every
+filtered iterator, `--ws-live-p', `--live-ws-names' and
+`--ws-by-ref-id' skip it, which means the reopened workspace has no tab
+and nothing to answer with.  fanout §8 makes a `closed = false' row an
+ensure-a-tab, so the reopen path must be able to bring the name back.
+
+Only `:killed-at' is cleared.  `:last-killed-at' SURVIVES on purpose: it
+is the historical record of the previous close and the picker sorts on
+it; a revive is not a claim the close never happened.  The runtime keys
+`--ws-del' cleared stay cleared, because the reopened workspace's
+buffers, timers and session state are genuinely gone and the reopen
+re-establishes them.
+
+Nothing to revive is not a failure: an unknown name and a live name both
+answer nil, so a caller may call this unconditionally before it opens."
+  (cond
+   ((not (agent-repl--ws-known-p ws))
+    (agent-repl--log ws "ws-revive: SKIP ws=%s reason=unknown" ws)
+    nil)
+   ((null (agent-repl--ws-get ws :killed-at))
+    (agent-repl--log ws "ws-revive: SKIP ws=%s reason=already-live" ws)
+    nil)
+   (t
+    (agent-repl--ws-put ws :killed-at nil)
+    (agent-repl--info ws "ws-revive: REVIVED ws=%s last-killed-at-kept=%s"
+                      ws (if (agent-repl--ws-get ws :last-killed-at) "t" "nil"))
+    t)))
+
 (defun agent-repl--ws-tombstoned-p (ws)
   "Return non-nil iff WS is known AND has `:killed-at' set.
 Complementary to `--ws-live-p' over `--ws-known-p': a known ws is
