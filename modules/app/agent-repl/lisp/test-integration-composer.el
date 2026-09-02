@@ -1225,6 +1225,7 @@ gate\" -- both facts, not just link-up, must hold before a drain sends."
 (defvar agent-repl-input-notice)
 (defvar agent-repl--input-merge-parked-badge)
 (defvar agent-repl-link-reconnect-interval-seconds)
+(defvar agent-repl-link-reconnect-max-interval-seconds)
 
 (defun agent-repl-itest-composer--notice (ws)
   "Return WS's composer notice as its mode line actually renders it.
@@ -1362,6 +1363,7 @@ successor is the only trigger."
   ;; host.el re-registers and prompt-queue.el drains for real.
   (agent-repl-itest--with-fake-daemon primary
     (let ((agent-repl-link-reconnect-interval-seconds 0.05)
+          (agent-repl-link-reconnect-max-interval-seconds 0.2)
           (successor nil))
       (agent-repl--ws-put agent-repl-itest-composer--ws
                           :project-dir agent-repl-itest-composer--dir)
@@ -1615,6 +1617,7 @@ regression could hide in; nothing here is stubbed."
   ;; Arrange: a real link to the primary; host.el's own register+subscribe.
   (agent-repl-itest--with-fake-daemon primary
     (let ((agent-repl-link-reconnect-interval-seconds 0.05)
+          (agent-repl-link-reconnect-max-interval-seconds 0.2)
           (failed-key nil)
           (buf nil))
       (agent-repl--ws-put agent-repl-itest-composer--ws
