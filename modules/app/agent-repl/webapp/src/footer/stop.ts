@@ -280,6 +280,19 @@ function drawConfirm(
     operation: `${spec.operation}-confirm-required`,
     context: { target: spec.target, live_agent_count: String(liveAgentCount) },
   });
+  // THE REFUSAL IS STATED FIRST. The daemon refused this stop, and it refused
+  // it for a reason the user is entitled to read in words — the confirm button
+  // is the ANSWER to that refusal, not a substitute for stating it.
+  drawRefusal(
+    wrapper,
+    "confirmRequired",
+    interruptErrorSentence(
+      { case: "confirmRequired", value: { liveAgentCount } } as Parameters<
+        typeof interruptErrorSentence
+      >[0],
+      "InterruptError.kind",
+    ),
+  );
   const confirm = document.createElement("button");
   confirm.type = "button";
   confirm.className = "footer-stop-confirm";
