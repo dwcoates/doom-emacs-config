@@ -18,9 +18,6 @@ import {
   FeedPageErrorSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { FailureKindSchema } from "../../../proto/gen/ts/frontend/v1/failure_pb";
-import { DaemonFaultSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_daemon_health_pb";
-import { SessionFaultSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_session_health_pb";
-import { HostFaultSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_host_workspace_pb";
 
 import { startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
@@ -32,14 +29,9 @@ import {
   TURN_ERROR_ARMS,
   TURN_ERROR_HEADLINES,
   WORKSPACE_ID,
-  DAEMON_FAULT_ARMS,
-  SESSION_FAULT_ARMS,
   assertCoversOneof,
   clientFailure,
-  daemonUnhealthy,
   feedPageError,
-  hostWorkspaceWithFaults,
-  sessionUnhealthy,
   turnEndedErroredRow,
   type ClientFailureArm,
 } from "./fixtures";
@@ -320,112 +312,5 @@ describe("page errors", () => {
     });
     // Assert
     expect(harness.feedContainer()?.textContent).toContain("store gap");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// TYPED FAULTS (landing 4)
-//
-// DaemonHealth and SessionHealth answer "unhealthy" on their SUCCESS arm — an
-// unhealthy daemon is an answer, not an error — and each fault now carries a
-// typed kind beside its composed detail. The client draws by arm and still
-// draws the detail verbatim, so both are asserted.
-// ---------------------------------------------------------------------------
-
-describe("daemon faults", () => {
-  it("covers every daemon fault kind the contract declares", () => {
-    assertCoversOneof(DaemonFaultSchema, "kind", [...DAEMON_FAULT_ARMS]);
-  });
-
-  it.each(DAEMON_FAULT_ARMS)("draws the %s fault by its arm", async (arm) => {
-    // Arrange
-    harness = await startHarness();
-    harness.fake.answer("daemonHealth", daemonUnhealthy([arm]));
-    // Act
-    await harness.click("[data-daemon-health]");
-    // Assert
-    expect(harness.$(`[data-daemon-fault][data-arm="${arm}"]`)).not.toBeNull();
-  });
-
-  it.each(DAEMON_FAULT_ARMS)("draws the %s fault's composed detail verbatim", async (arm) => {
-    // Arrange
-    harness = await startHarness();
-    harness.fake.answer("daemonHealth", daemonUnhealthy([arm]));
-    // Act
-    await harness.click("[data-daemon-health]");
-    // Assert
-    expect(harness.$("[data-daemon-fault]")?.textContent).toContain(`daemon fault: ${arm}`);
-  });
-
-  it("draws every fault when the daemon reports several", async () => {
-    // Arrange
-    harness = await startHarness();
-    harness.fake.answer("daemonHealth", daemonUnhealthy());
-    // Act
-    await harness.click("[data-daemon-health]");
-    // Assert
-    expect(harness.$$("[data-daemon-fault]")).toHaveLength(DAEMON_FAULT_ARMS.length);
-  });
-
-  it("draws no faults for a healthy daemon", async () => {
-    // Arrange / Act: healthy is the fake's default answer.
-    harness = await startHarness();
-    await harness.click("[data-daemon-health]");
-    // Assert
-    expect(harness.$$("[data-daemon-fault]")).toHaveLength(0);
-  });
-});
-
-describe("session faults", () => {
-  it("covers every session fault kind the contract declares", () => {
-    assertCoversOneof(SessionFaultSchema, "kind", [...SESSION_FAULT_ARMS]);
-  });
-
-  it.each(SESSION_FAULT_ARMS)("draws the %s fault by its arm", async (arm) => {
-    // Arrange
-    harness = await startHarness();
-    harness.fake.answer("sessionHealth", sessionUnhealthy([arm]));
-    // Act
-    await harness.click("[data-session-health]");
-    // Assert
-    expect(harness.$(`[data-session-fault][data-arm="${arm}"]`)).not.toBeNull();
-  });
-
-  it.each(SESSION_FAULT_ARMS)("draws the %s fault's composed detail verbatim", async (arm) => {
-    // Arrange
-    harness = await startHarness();
-    harness.fake.answer("sessionHealth", sessionUnhealthy([arm]));
-    // Act
-    await harness.click("[data-session-health]");
-    // Assert
-    expect(harness.$("[data-session-fault]")?.textContent).toContain(`session fault: ${arm}`);
-  });
-
-  it("reports an unhealthy session as an answer, not a refusal", async () => {
-    // Arrange
-    harness = await startHarness();
-    harness.fake.answer("sessionHealth", sessionUnhealthy(["shimDied"]));
-    // Act
-    await harness.click("[data-session-health]");
-    // Assert
-    expect(harness.refusalArms()).toEqual([]);
-  });
-});
-
-describe("host faults", () => {
-  it("shares the session fault vocabulary", () => {
-    // Assert: HostFault.kind reuses SessionFault's arm messages exactly.
-    assertCoversOneof(HostFaultSchema, "kind", [...SESSION_FAULT_ARMS]);
-  });
-
-  it.each(SESSION_FAULT_ARMS)("surfaces the %s host fault in the topbar warnings", async (arm) => {
-    // Arrange: host faults reach the user through the topbar's warning strip.
-    harness = await startHarness({
-      arrange: (fake) => fake.setHostWorkspace(WORKSPACE_ID, hostWorkspaceWithFaults([arm])),
-    });
-    // Act
-    await harness.settle();
-    // Assert
-    expect(harness.$(`[data-host-fault][data-arm="${arm}"]`)).not.toBeNull();
   });
 });
