@@ -150,6 +150,14 @@ describe("the standing gate", () => {
     expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 1m 5s ago");
   });
 
+  it("reads the lapse's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the last request does not share the shared ticker's phase.
+    vi.setSystemTime(4920);
+    const el = drawFeedColdGate(gate(standing({ lastRequestMs: 0n })), askHarness().rc);
+    // Assert: five real seconds of lapse reads 5s, not the lagging 4s.
+    expect(el.querySelector(".hibernation-since")?.textContent).toBe("last vendor request 5s ago");
+  });
+
   it("draws the pay and clear buttons", () => {
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     expect(
