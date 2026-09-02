@@ -1,0 +1,29 @@
+{
+  "scenario": "read-whole-head-range",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Read notes.txt in full. Then read only its first 5 lines. Then read lines 20 through 30. Report what you saw after each read.",
+  "prompts": [
+    {
+      "text": "Read notes.txt in full. Then read only its first 5 lines. Then read lines 20 through 30. Report what you saw after each read.",
+      "resume": false
+    }
+  ],
+  "world": "conversation-history",
+  "cwd_init": null,
+  "vendor_session_id": "ef9ffcf7-dacb-4400-a021-578bf4befbed",
+  "manual": null,
+  "expect": [
+    "tool:Read",
+    "tool_result:read",
+    "tool:Read(limit)",
+    "tool:Read(offset+limit)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-TcFrqH-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:18:57.129Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

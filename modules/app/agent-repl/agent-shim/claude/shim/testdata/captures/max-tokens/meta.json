@@ -1,0 +1,27 @@
+{
+  "scenario": "max-tokens",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Reproduce, verbatim and in full, the complete text of the GNU General Public License version 3. Do not summarize and do not stop early.",
+  "prompts": [
+    {
+      "text": "Reproduce, verbatim and in full, the complete text of the GNU General Public License version 3. Do not summarize and do not stop early.",
+      "resume": false
+    }
+  ],
+  "world": "max-tokens",
+  "cwd_init": null,
+  "vendor_session_id": "1d9dbcb5-37dd-4b69-8d9d-6a01c2bc067b",
+  "manual": null,
+  "expect": [
+    "stream_event:message_delta with stop_reason max_tokens",
+    "result carrying the truncated response"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-max-tokens-9bed4N-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:58:44.023Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

@@ -11,7 +11,11 @@
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../../src/proto.js";
+import type { SdkMessage } from "../../src/sdk/types.js";
 import {
+  convertDetached,
+  createTaskKindRegistry,
+  TASK_KIND_CAPACITY,
   lostAgentEntry,
   lostBashEntry,
   lostSubagentEntry,
@@ -153,5 +157,83 @@ describe("outputPathFromProse", () => {
   it("yields no path when there is no content at all", () => {
     // Arrange, Act, Assert.
     expect(outputPathFromProse(undefined)).toBeUndefined();
+  });
+});
+
+describe("a settling task's KIND decides whether it settles a subagent", () => {
+  /** The vendor's `task_started`, as the stream states one. */
+  function taskStarted(taskType: string): Extract<SdkMessage, { type: "system" }> {
+    return {
+      type: "system",
+      subtype: "task_started",
+      uuid: "uuid-started",
+      session_id: "session-1",
+      task_id: "task-1",
+      tool_use_id: "toolu_1",
+      description: "the work",
+      task_type: taskType,
+    } as unknown as Extract<SdkMessage, { type: "system" }>;
+  }
+
+  /** The vendor's `task_notification`, which states NO kind of its own. */
+  function taskNotification(): Extract<SdkMessage, { type: "system" }> {
+    return {
+      type: "system",
+      subtype: "task_notification",
+      uuid: "uuid-notified",
+      session_id: "session-1",
+      task_id: "task-1",
+      tool_use_id: "toolu_1",
+      status: "completed",
+      output_file: "/tmp/task-1.output",
+      summary: "done",
+    } as unknown as Extract<SdkMessage, { type: "system" }>;
+  }
+
+  /** The arms one start-then-notify pair produces. */
+  function armsFor(taskType: string | undefined): string[] {
+    const registry = createTaskKindRegistry();
+    const context = foldContext();
+    const entries =
+      taskType === undefined
+        ? []
+        : [...convertDetached(taskStarted(taskType), context, registry)];
+    entries.push(...convertDetached(taskNotification(), context, registry));
+    return entries.map((entry) => entry.source.discriminator);
+  }
+
+  it("settles an agent run as a subagent", () => {
+    expect(armsFor("local_agent")).toContain("activity.subagent.success");
+  });
+
+  it("never settles a backgrounded SHELL command as a subagent", () => {
+    // The `Bash` unit already settled on its own tool result saying it moved to
+    // the background; a subagent terminal here would restate a shell command as
+    // an agent run and invent an empty spawn prompt for it.
+    expect(armsFor("local_bash")).not.toContain("activity.subagent.success");
+  });
+
+  it("still announces the shell task's detachment", () => {
+    expect(armsFor("local_bash")).toContain("agent_frame.detached_work.detached.requested");
+  });
+
+  it("settles a task whose kind was never stated, rather than losing the terminal", () => {
+    expect(armsFor(undefined)).toContain("activity.subagent.success");
+  });
+
+  it("forgets a task once it settles, so the table empties itself", () => {
+    const registry = createTaskKindRegistry();
+    registry.remember("task-1", "local_bash");
+    expect(registry.settlesAsSubagent("task-1")).toBe(false);
+    expect(registry.settlesAsSubagent("task-1")).toBe(true);
+  });
+
+  it("forgets the oldest task when the cap is reached", () => {
+    const registry = createTaskKindRegistry();
+    registry.remember("oldest", "local_bash");
+    for (let index = 0; index < TASK_KIND_CAPACITY; index += 1) {
+      registry.remember(`task-${index}`, "local_bash");
+    }
+    expect(registry.settlesAsSubagent("oldest")).toBe(true);
   });
 });
