@@ -395,3 +395,22 @@ func TestATerminalForAReadSpoolIsIdentifiedByTheFileItWasReadFrom(t *testing.T) 
 		t.Fatalf("write id = %q, want the digest of the coordinates it was read at (%q)", got, want)
 	}
 }
+
+func TestAFourDigitExitIsNotReadAsTheMarker(t *testing.T) {
+	// Arrange. A shell exit code is 0-255, so maxExitMarkerDigits is 3 and a
+	// longer run of digits is ORDINARY OUTPUT — a script echoing a build id, a
+	// line-start `EXIT=1234`. Reading it as the terminator would end a run early
+	// and wrongly, and the run would then never carry what it said afterwards.
+	h := NewShellOutputHandler(testLogger(t))
+
+	// Act: the marker-shaped line begins the file, so it genuinely starts a line.
+	entries := h.Handle(spoolFrames("EXIT=1234\n", 0), spoolContext("/t/b4.output", "b4", "toolu_run4"))
+
+	// Assert: the bytes land as a delta and NOTHING settles the run.
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want exactly the delta: a four-digit EXIT= is output, not the terminator (keys: %v)", len(entries), allKeys(entries))
+	}
+	if got := entries[0].GetUpsertKey(); got != convert.BashDeltaKey("toolu_run4", 0) {
+		t.Fatalf("upsert_key = %q, want the run's delta key", got)
+	}
+}
