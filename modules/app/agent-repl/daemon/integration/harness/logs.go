@@ -135,19 +135,16 @@ func readLog(t *testing.T, path string) []LogRecord {
 var warningLevels = map[string]bool{"warn": true, "warning": true, "error": true, "fatal": true}
 
 // ExpectWarnings declares the operations whose WARN or ERROR records this test
-// intends to produce. Anything else at that level fails the test at cleanup,
-// which is what drives the daemon's warning count to zero.
+// intends to produce. It WIDENS the sweep StartDaemon already armed; it does
+// not arm it. Anything not declared fails the test at cleanup, which is what
+// drives the daemon's warning count to zero.
 func (d *Daemon) ExpectWarnings(operations ...string) {
 	d.t.Helper()
 	d.mu.Lock()
-	first := len(d.expected) == 0
 	for _, op := range operations {
 		d.expected[op] = true
 	}
 	d.mu.Unlock()
-	if first {
-		d.t.Cleanup(d.assertNoUnexpectedWarnings)
-	}
 }
 
 func (d *Daemon) assertNoUnexpectedWarnings() {
@@ -158,18 +155,9 @@ func (d *Daemon) assertNoUnexpectedWarnings() {
 	}
 	d.mu.Unlock()
 
-	var unexpected []LogRecord
-	for _, r := range d.RunLog() {
-		if warningLevels[strings.ToLower(r.Level)] && !expected[r.Operation] {
-			unexpected = append(unexpected, r)
-		}
-	}
+	unexpected := unexpectedWarnings(d.RunLog(), expected)
 	for _, dir := range d.watchedWorkspaceDirs() {
-		for _, r := range d.WorkspaceLog(dir, "daemon") {
-			if warningLevels[strings.ToLower(r.Level)] && !expected[r.Operation] {
-				unexpected = append(unexpected, r)
-			}
-		}
+		unexpected = append(unexpected, unexpectedWarnings(d.WorkspaceLog(dir, "daemon"), expected)...)
 	}
 	if len(unexpected) == 0 {
 		return
@@ -356,4 +344,17 @@ func containsAll(order []string, verbs []string) bool {
 		}
 	}
 	return true
+}
+
+// unexpectedWarnings answers the records at a warning level whose operation the
+// test did not declare. An EMPTY expected set flags every one of them, which is
+// what makes the sweep StartDaemon arms an assertion rather than a no-op.
+func unexpectedWarnings(records []LogRecord, expected map[string]bool) []LogRecord {
+	var out []LogRecord
+	for _, r := range records {
+		if warningLevels[strings.ToLower(r.Level)] && !expected[r.Operation] {
+			out = append(out, r)
+		}
+	}
+	return out
 }

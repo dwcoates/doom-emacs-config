@@ -108,6 +108,8 @@ func TestCreateWorkspaceHonorsAnExplicitBaseRef(t *testing.T) {
 func TestCreateWorkspaceWithABadBaseRefIsRefused(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the bad base ref the test stages.
+	d.ExpectWarnings("daemon.gitclient.resolve_ref")
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	bad := "does-not-exist"
@@ -235,7 +237,6 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	// conflict) reaches none of internal/merge's WARN sites, and the parent's
 	// worktree is not this daemon's own checkout, so selfReload never fires
 	// either.
-	d.ExpectWarnings()
 }
 
 func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) {
@@ -368,7 +369,6 @@ func TestCreateWorkspaceOneShotSelfMergeEnqueuesOnCompletion(t *testing.T) {
 	// real layout facts and the enqueue succeeds without internal/merge's
 	// no_layout_facts WARN; this repo is not the daemon's own checkout, so no
 	// test gate and no selfReload run either.
-	d.ExpectWarnings()
 }
 
 func TestCreateWorkspaceOneShotOpenPrRunsThePrPostPrompt(t *testing.T) {
@@ -574,7 +574,6 @@ func TestCreateWorkspaceMergeActionsAreRecordedAndReadBackByALaterMerge(t *testi
 	}
 	// Created through CreateWorkspace (real layout facts), so the enqueue and
 	// pre-prompt admission reach none of internal/merge's WARN sites.
-	d.ExpectWarnings()
 }
 
 // ---- NukeWorkspace: kill-before-destroy ordering, and a git failure ----
@@ -590,6 +589,8 @@ func TestNukeWorkspaceKillsTheLiveSessionBeforeAnyGitCommandRuns(t *testing.T) {
 	// on the arrangement rather than on anything the daemon did; the subject
 	// here is the ORDER of the kill against the git commands.
 	f := newOpenedWorktree(t, harness.Opts{}, "nuke-order")
+	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
+	f.d.ExpectWarnings("daemon.health.open_fault")
 	f.shim.ExpectStartSession()
 	f.shim.Hang()
 

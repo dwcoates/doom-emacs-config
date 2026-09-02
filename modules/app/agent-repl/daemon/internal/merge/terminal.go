@@ -295,7 +295,11 @@ func (o *orchestrator) AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, ke
 		o.log(ctx, ws).Debug(op, "kept a queued merge's slot", dlog.Context{"workspace": string(ws)})
 		return nil
 	}
-	o.log(ctx, ws).Warn(op, "releasing a queued merge's slot on the user's answer", dlog.Context{"workspace": string(ws)})
+	// AN ANSWERED MENU IS AN ORDINARY OUTCOME. Both arms of this answer are
+	// the user working the offer the daemon itself raised; the keep arm is
+	// DEBUG and the release arm is no more of a warning than it is. The work
+	// actually abandoned is recorded by dropQueued's own WARN below.
+	o.log(ctx, ws).Debug(op, "releasing a queued merge's slot on the user's answer", dlog.Context{"workspace": string(ws)})
 	return o.dropQueued(ctx, ws, "dequeued", "the user released this merge's queue slot")
 }
 

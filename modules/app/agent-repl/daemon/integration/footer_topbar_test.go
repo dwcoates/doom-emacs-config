@@ -534,6 +534,8 @@ func TestFooterNotificationOutranksRateLimitedAndContextBudget(t *testing.T) {
 func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the vendor failure the test feeds.
+	f.d.ExpectWarnings("daemon.feed.api_error", "daemon.sessionwatcher.api_error")
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-api-error", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {
@@ -572,6 +574,9 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_session", "daemon.shimclient.redial")
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	awaitFooter(t, f, footer, "idle before the link dies", func(v *frontendv1.FooterView) bool {
@@ -636,7 +641,7 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// "redial stopped" -- which is precisely the stop this test asserts.
 	// Before the witness was wired the redials looped forever instead; both
 	// records are failure-path evidence and stay loud.
-	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.redial",
+	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.shimclient.exit", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
@@ -810,6 +815,8 @@ func ftFindContextCategory(panel *frontendv1.ContextPanelView, label string) *fr
 func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
+	f.d.ExpectWarnings("daemon.health.open_fault")
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act: an unhealthy diagnostics pull surfaces a warning.
@@ -851,6 +858,8 @@ func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing
 func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared record is evidence of the session faults the test pushes.
+	f.d.ExpectWarnings("daemon.health.open_fault")
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act: one unhealthy pull naming two distinct faults, in this order.

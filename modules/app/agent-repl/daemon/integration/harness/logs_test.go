@@ -56,3 +56,51 @@ func TestWorkspaceLogPathIsTheContractedSymlink(t *testing.T) {
 		t.Fatalf("WorkspaceLogPath = %q, want %q", got, want)
 	}
 }
+
+func TestUnexpectedWarningsWithNothingDeclaredFlagsEveryWarningRecord(t *testing.T) {
+	// Arrange: the set StartDaemon arms every daemon with.
+	records := []LogRecord{
+		{Level: "warn", Operation: "daemon.shimclient.redial"},
+		{Level: "error", Operation: "daemon.workspace.open"},
+	}
+
+	// Act
+	got := unexpectedWarnings(records, map[string]bool{})
+
+	// Assert
+	if len(got) != 2 {
+		t.Fatalf("unexpectedWarnings with nothing declared = %d records, want 2", len(got))
+	}
+}
+
+func TestUnexpectedWarningsSkipsADeclaredOperation(t *testing.T) {
+	// Arrange
+	records := []LogRecord{
+		{Level: "warn", Operation: "daemon.shimclient.redial"},
+		{Level: "error", Operation: "daemon.workspace.open"},
+	}
+
+	// Act
+	got := unexpectedWarnings(records, map[string]bool{"daemon.shimclient.redial": true})
+
+	// Assert
+	if len(got) != 1 || got[0].Operation != "daemon.workspace.open" {
+		t.Fatalf("unexpectedWarnings with one declared = %v, want only daemon.workspace.open", got)
+	}
+}
+
+func TestUnexpectedWarningsIgnoresRecordsBelowAWarningLevel(t *testing.T) {
+	// Arrange
+	records := []LogRecord{
+		{Level: "debug", Operation: "daemon.merge.answer_dequeue"},
+		{Level: "info", Operation: "daemon.rollout.relaunch"},
+	}
+
+	// Act
+	got := unexpectedWarnings(records, map[string]bool{})
+
+	// Assert
+	if len(got) != 0 {
+		t.Fatalf("unexpectedWarnings over debug and info records = %v, want none", got)
+	}
+}
