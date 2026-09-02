@@ -1091,6 +1091,9 @@ func (h *harness) routeNow(apply func(w *watcher)) []event {
 	h.w.mu.Lock()
 	apply(h.w)
 	h.w.mu.Unlock()
+	// The turn ends recorded under mu reach the lifecycle sink only once it is
+	// released, exactly as every stream goroutine does it.
+	h.w.flushTurnEnds()
 	return h.drainNow()
 }
 
