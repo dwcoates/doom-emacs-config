@@ -127,10 +127,6 @@ type Opts struct {
 	// REAL running shim-store, so shims spawned by this daemon persist and
 	// read real events.
 	StoreSocket string
-	// SkipFakeGit omits the scripted fake `git` from PATH (default: false,
-	// install it, as today). The e2e suite sets this: it exercises the real
-	// git facts the daemon's AGENTS.md hands to "the project lead's suite".
-	SkipFakeGit bool
 }
 
 // Daemon is one running claude-repld process and the client dialed to it.
@@ -276,12 +272,9 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
 	// daemon reads comes out of this test's fixture file and the real binary is
-	// never reached. SkipFakeGit omits the install (but the world is still
-	// minted; it is simply unused by a test that never reads d.Git).
+	// never reached.
 	d.Git = World(t)
-	if !opts.SkipFakeGit {
-		installFakeGit(t, fakeBin)
-	}
+	installFakeGit(t, fakeBin)
 
 	multiRoot := opts.MultiRepoRoot
 	if multiRoot == "" {
