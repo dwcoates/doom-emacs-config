@@ -34,7 +34,6 @@ import (
 //
 //	ErrMerging           → SubmitPromptError.merging
 //	ErrNoSession         → SubmitPromptError.no_session
-//	ErrTurnAlreadyOpen   → SubmitPromptError.turn_already_open
 //	ErrNoSuchHold        → UpdateHeldPromptError.no_such_hold
 //	ErrAlreadyDelivered  → UpdateHeldPromptError.already_delivered
 //	ErrAcceptNotApplicable → UpdateHeldPromptError.accept_not_applicable
@@ -46,14 +45,6 @@ var (
 	ErrMerging = errors.New("promptqueue: a merge is in flight for this workspace")
 	// ErrNoSession is a submission to a workspace with no live shim.
 	ErrNoSession = errors.New("promptqueue: the workspace has no session to submit to")
-	// ErrTurnAlreadyOpen is a bubble-addressed submit while that agent's turn
-	// runs. One turn in flight per agent is structural.
-	//
-	// NO SITE PRODUCES IT YET: the session watcher answers the MAIN turn's
-	// flight, and nothing in the daemon tracks a subagent's own. The shim
-	// answers UpdateAgent for a busy agent, so the refusal is respelled from
-	// that failure — the arm is kept named here so the mapping has one home.
-	ErrTurnAlreadyOpen = errors.New("promptqueue: a turn is already open on the addressed agent")
 	// ErrNoSuchHold names a turn the queue holds nothing under.
 	ErrNoSuchHold = errors.New("promptqueue: no hold stands under that turn")
 	// ErrAlreadyDelivered is an action on a hold that already went to the shim.

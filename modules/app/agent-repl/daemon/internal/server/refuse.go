@@ -93,8 +93,6 @@ func (s *server) asRefusal(err error) (refusal, bool) {
 		return s.fill(refusal{Arm: "merging", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNoSession):
 		return s.fill(refusal{Arm: "no_session", Reason: err.Error()}), true
-	case errors.Is(err, promptqueue.ErrTurnAlreadyOpen):
-		return s.fill(refusal{Arm: "turn_already_open", Reason: err.Error()}), true
 	case errors.Is(err, promptqueue.ErrNoSuchHold):
 		return s.fill(refusal{Arm: "no_such_hold", Reason: err.Error(), NotFound: true}), true
 	case errors.Is(err, promptqueue.ErrAlreadyDelivered):

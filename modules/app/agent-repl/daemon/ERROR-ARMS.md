@@ -79,10 +79,17 @@ Each answers through `server.UnlandedArm`.
 | WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
 | WatchFooter / WatchTopbar / WatchDaemonHolds / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace, but a `Watch*` rpc has NO `<Rpc>Error` message — a refused open is a Connect error before any frame — so all four ownership arms are unlanded for the streams | server |
 
-The `turn_already_open` arm on `SubmitPromptError` HAS NO PRODUCER: the sentinel
-`promptqueue.ErrTurnAlreadyOpen` is declared and documented but is never
-returned by any code path in the daemon. The server maps it if it ever appears;
-the arm is a candidate for retirement.
+One consequence is recorded as a row rather than lost: the SHIM still refuses a
+bubble-addressed submit with its own `turn_already_open`, propagated by name.
+
+| rpc | arm | condition | package |
+| --- | --- | --- | --- |
+| SubmitPrompt (the bubble path) | `turn_already_open` | the shim's `StartTurnFailure.turn_already_open` for a subagent whose turn runs, propagated by NAME rather than collapsed into a sentence. `SubmitPromptError` no longer carries the arm | workspace |
+
+`SubmitPromptError.turn_already_open` is RETIRED (landing 6, tag 8 reserved):
+it never had a producer — the session watcher answers the MAIN turn's flight and
+nothing in the daemon tracks a subagent's own — so the sentinel, the mapping and
+the arm all went away together.
 
 ## Panel commands with no producer (server, wave 3a)
 
