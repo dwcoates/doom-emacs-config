@@ -811,6 +811,11 @@ type fakeHealth struct {
 	health.Reporter
 
 	opened []wsm.Fault
+	// closed records the faults CloseFault was called with, and a closed
+	// fault leaves the standing list.
+	closed []ids.FaultID
+	// closeErr fails every CloseFault.
+	closeErr error
 	// openErr fails every OpenFault.
 	openErr error
 	// listErr fails every OpenFaults.
@@ -825,6 +830,21 @@ func (h *fakeHealth) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, err
 	f.ID = id
 	h.opened = append(h.opened, f)
 	return id, nil
+}
+
+func (h *fakeHealth) CloseFault(_ context.Context, id ids.FaultID) error {
+	if h.closeErr != nil {
+		return h.closeErr
+	}
+	h.closed = append(h.closed, id)
+	kept := h.opened[:0]
+	for _, f := range h.opened {
+		if f.ID != id {
+			kept = append(kept, f)
+		}
+	}
+	h.opened = kept
+	return nil
 }
 
 func (h *fakeHealth) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
