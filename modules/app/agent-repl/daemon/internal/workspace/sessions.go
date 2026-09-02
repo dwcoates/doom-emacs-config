@@ -375,6 +375,13 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	// is opened against this context. Bound to the request instead, the whole
 	// fleet is canceled the instant the rpc answers, and the session is then
 	// left with no standing WatchSession and no standing WatchAgent at all.
+	// THE SESSION IS REMEMBERED BEFORE ITS WATCHER OPENS. Starting the watcher
+	// publishes its opening facts synchronously -- the link among them -- and
+	// the host view is recomposed from that edge; a fleet that did not yet
+	// know the session would answer "no live facts" for a workspace whose
+	// session record already exists, and the host view would be withheld with
+	// an invariant violation for a session that is coming up perfectly well.
+	f.remember(ws, &live{client: client, hostSessionID: hostSessionID})
 	watcher, err := f.watch(context.WithoutCancel(ctx), ws, client, sessionwatcher.Session{Started: started}, f.deps.Sinks, log)
 	if err != nil {
 		log.Error(opBringUp, "could not start the session watcher", dlog.Context{"cause": err.Error()})
