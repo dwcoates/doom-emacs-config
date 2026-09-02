@@ -150,10 +150,6 @@ func (d *Daemon) ExpectWarnings(operations ...string) {
 	}
 }
 
-// AllowAllWarnings is the escape hatch for the tests whose subject IS the
-// daemon's own loud failure and whose operation names are not yet knowable.
-const AllowAllWarnings = "*"
-
 func (d *Daemon) assertNoUnexpectedWarnings() {
 	d.mu.Lock()
 	expected := make(map[string]bool, len(d.expected))
@@ -161,9 +157,6 @@ func (d *Daemon) assertNoUnexpectedWarnings() {
 		expected[k] = v
 	}
 	d.mu.Unlock()
-	if expected[AllowAllWarnings] {
-		return
-	}
 
 	var unexpected []LogRecord
 	for _, r := range d.RunLog() {

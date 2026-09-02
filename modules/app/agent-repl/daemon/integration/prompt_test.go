@@ -1434,8 +1434,9 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 		t.Fatalf("Interrupt{turn} with only a detached shell = confirm_required(%d), want no challenge", challenge.GetLiveAgentCount())
 	}
 	f.shim.ExpectKillTurn()
-	// Audit-2 critique 25: the exact operation set, not the AllowAllWarnings
-	// wildcard. A detached SHELL needs no confirmation (live_agent_count
+	// Audit-2 critique 25: the exact operation set, asserted with
+	// ExpectWarnings rather than any wildcard escape hatch. A detached SHELL
+	// needs no confirmation (live_agent_count
 	// counts agents only), so interruptTurn takes its plain success path
 	// (internal/workspace/interrupt.go): the confirm-challenge Warn at line
 	// ~105 never fires because liveAgents is 0, stopDetachedForConfirm logs
