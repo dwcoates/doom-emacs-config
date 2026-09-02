@@ -75,10 +75,13 @@ func (s *server) SubmitPrompt(
 // A HOLD IS AN ANSWER: a prompt the queue parked still answers with the turn it
 // minted, because the composer matches its own row against that turn id.
 //
-// A SESSION-ACT command (/clear, /compact, /model <arg>) has NO success arm
-// yet: `SubmitPromptSuccess.command_acted` is accepted for landing 6 (project
-// lead), and until it lands an acted command answers the LOUD unlanded-arm
-// sentinel naming it — never a fabricated turn and never a fabricated panel.
+// A SESSION-ACT command answers by WHAT IT DID. The two context cuts (/clear,
+// /compact) reach the vendor AS TURNS, so they answer with the minted turn the
+// composer matches its own row against; an act that mints no turn (/model
+// <arg>, and the topbar picker's setter path that meets recognition here)
+// answers `SubmitPromptSuccess.command_acted`, which is empty because the set
+// arm is the whole assertion — the visible effect arrives on the component
+// streams. (Landing 6.)
 func (s *server) encodeSubmitOutcome(
 	log dlog.Logger,
 	resp *agentreplv1.SubmitPromptResponse,
@@ -107,9 +110,30 @@ func (s *server) encodeSubmitOutcome(
 		}
 		return nil
 	case prompthandler.RecognizedAct:
-		return UnlandedArm(log, "SubmitPrompt", "command_acted",
-			fmt.Sprintf("the daemon acted on session command %q; the success arm lands in landing 6",
-				outcome.Act.Kind), false)
+		if outcome.Turn != "" {
+			log.Debug("daemon.server.submit_prompt", "answered the turn a context-cutting act runs as",
+				dlog.Context{"act": outcome.Act.Kind, "turn": string(outcome.Turn)})
+			resp.Result = &agentreplv1.SubmitPromptResponse_Success{
+				Success: &agentreplv1.SubmitPromptSuccess{
+					Outcome: &agentreplv1.SubmitPromptSuccess_Turn{
+						Turn: &agentreplv1.SubmitPromptTurn{
+							Turn: &conversationv1.TurnId{Value: string(outcome.Turn)},
+						},
+					},
+				},
+			}
+			return nil
+		}
+		log.Debug("daemon.server.submit_prompt", "answered an acted session command",
+			dlog.Context{"act": outcome.Act.Kind})
+		resp.Result = &agentreplv1.SubmitPromptResponse_Success{
+			Success: &agentreplv1.SubmitPromptSuccess{
+				Outcome: &agentreplv1.SubmitPromptSuccess_CommandActed{
+					CommandActed: &agentreplv1.SubmitPromptCommandActed{},
+				},
+			},
+		}
+		return nil
 	default:
 		if arm := outcome.Disposition.RefusedArm; arm != "" {
 			return s.refuse(log, "SubmitPrompt", resp, s.fill(refusal{

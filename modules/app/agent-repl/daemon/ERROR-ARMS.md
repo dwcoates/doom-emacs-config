@@ -74,7 +74,6 @@ Each answers through `server.UnlandedArm`.
 
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
-| SubmitPrompt | `command_acted` | a session-act command (`/clear`, `/compact`, `/model <arg>`) the handler reports as ACTED. `SubmitPromptSuccess` has `turn`, `command_panel` and `command_refused` and nothing for an act, so the daemon answers the loud sentinel rather than fabricating a turn or a panel (project-lead ruling; accepted for landing 6) | server |
 | WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted, or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
 | WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
 | WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |

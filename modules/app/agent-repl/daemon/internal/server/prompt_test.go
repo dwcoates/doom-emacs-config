@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -117,10 +116,9 @@ func TestSubmitPromptAnswersARecognizedRefusal(t *testing.T) {
 	}
 }
 
-// TestSubmitPromptRefusesASessionActLoudly pins the project-lead ruling:
-// `command_acted` lands in landing 6, and until then an ACTED session command
-// answers the loud sentinel naming the arm — never a fabricated turn or panel.
-func TestSubmitPromptRefusesASessionActLoudly(t *testing.T) {
+// TestSubmitPromptAnswersATurnMintingSessionAct pins that a context cut, which
+// reaches the vendor AS A TURN, answers with the turn it minted.
+func TestSubmitPromptAnswersATurnMintingSessionAct(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Prompts.outcome = prompthandler.Outcome{
@@ -130,14 +128,36 @@ func TestSubmitPromptRefusesASessionActLoudly(t *testing.T) {
 	}
 
 	// Act.
-	_, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
 
 	// Assert.
-	if err == nil {
-		t.Fatal("an acted session command answered a success; it must answer the sentinel")
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
 	}
-	if !strings.Contains(err.Error(), "SubmitPromptError.command_acted") {
-		t.Fatalf("error = %v, want the command_acted sentinel", err)
+	if got := resp.Msg.GetSuccess().GetTurn().GetTurn().GetValue(); got != "turn-9" {
+		t.Fatalf("turn = %q, want turn-9", got)
+	}
+}
+
+// TestSubmitPromptAnswersCommandActedForATurnlessAct pins the landed arm: an
+// act that mints no turn (/model <arg>) answers `command_acted`.
+func TestSubmitPromptAnswersCommandActedForATurnlessAct(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Prompts.outcome = prompthandler.Outcome{
+		Recognition: prompthandler.RecognizedAct,
+		Act:         promptqueue.Act{Kind: "ActSetModel", Value: "opus"},
+	}
+
+	// Act.
+	resp, err := h.Client.SubmitPrompt(context.Background(), connect.NewRequest(submitRequest()))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	if resp.Msg.GetSuccess().GetCommandActed() == nil {
+		t.Fatalf("outcome = %v, want command_acted", resp.Msg.GetSuccess().GetOutcome())
 	}
 }
 

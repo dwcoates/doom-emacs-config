@@ -137,10 +137,10 @@ func TestAsRefusalRejectsAnOrdinaryFailure(t *testing.T) {
 // prescribes, because the ledger reconciles against it.
 func TestUnlandedArmSpellsTheLedgerMessage(t *testing.T) {
 	// Arrange.
-	const want = "intended arm: SubmitPromptError.command_acted: the model changed"
+	const want = "intended arm: WatchFeedError.unknown_token: the token was never minted"
 
 	// Act.
-	cerr := UnlandedArm(fakeLogger{}, "SubmitPrompt", "command_acted", "the model changed", false)
+	cerr := UnlandedArm(fakeLogger{}, "WatchFeed", "unknown_token", "the token was never minted", false)
 
 	// Assert.
 	if got := cerr.Message(); got != want {
