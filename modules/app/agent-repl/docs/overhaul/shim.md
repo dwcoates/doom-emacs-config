@@ -760,3 +760,7 @@ Five families joined the mocked vendor for the e2e suite. Each is a registered
 - SessionUpdate.rate_limit_status maps the SDK's `rate_limit_event` (seconds→ms, fraction→percent, presence never sentinels).
 - SessionUpdate tag 24 retired; the budget warning is the sidecar's AgentUpdate page line.
 - SessionStarted.live_work always announces `created`-origin; DetachedWorkId.value == the unit's AgentActivityId.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- No shim.v1 or conversation.v1 change. For awareness: SubmitPromptError.turn_already_open (daemon side) is retired because YOUR UpdateAgentFailure refusal of a busy subagent is the one producer; keep that refusal typed and named.
