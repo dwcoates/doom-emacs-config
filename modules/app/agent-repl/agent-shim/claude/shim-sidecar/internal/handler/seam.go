@@ -177,3 +177,81 @@ func (h *ShellOutputHandler) terminalAttribution(taskID, ownerAgentID, run strin
 		Offset:          h.coords.Offset,
 	}
 }
+
+// LostTerminal spells the reader's LOST conclusion as the BACKGROUNDED
+// SUBAGENT's terminal.
+//
+// A BACKGROUNDED AGENT IS A DETACHED RUN TOO. Its transcript is delivered
+// through an `a*` task spool, and when that spool vanishes or goes quiet the
+// reader concludes LOST exactly as it does for a shell spool — but until this
+// existed only the shell handler could spell one, so the seam wrote
+// `lost-terminal-unsupported` and the SPAWN UNIT stayed open forever in every
+// consumer downstream.
+//
+// WHAT IT SETTLES IS THE SPAWN, NOT THE AGENT'S BOOK. The subagent's own
+// constituents are its own book and nothing there is left open by silence; the
+// unit that is left open is the CALL that spawned it, `activity:<tool_use_id>`,
+// which is a line in the PARENT's book. That is what this upserts, with
+// AgentSubagent.failure.cause.lost naming the arm the reader concluded.
+//
+// The reason is the reader's own vocabulary and convert.DetachedLostArm RAISES
+// on one it does not know, rather than leaving the oneof unset.
+func (h *AgentTranscriptHandler) LostTerminal(taskID, runActivityID, ownerAgentID, reason string) []*storev1.StoreEntry {
+	// THE RUN IS THE SPAWNING CALL AND NOTHING ELSE, for the same reason the
+	// shell terminal refuses without one: keying a settle on the vendor task id
+	// would name a row no reader of the conversation can join to the call.
+	run := runActivityID
+	if run == "" {
+		h.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
+			Log("no terminal minted for a LOST subagent: no spawning-call activity id was supplied, so the settle would name no unit (reason=%s)", reason)
+		return nil
+	}
+	if ownerAgentID == "" {
+		// The spawn unit is a line in the PARENT's book, and a page line with no
+		// book is residue. Refused loudly rather than mis-filed.
+		h.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, ActivityID: run}).
+			Log("no terminal minted for a LOST subagent: no owning agent was supplied, so the spawn unit's settle would name no book (reason=%s)", reason)
+		return nil
+	}
+	at := h.terminalAttribution(taskID, ownerAgentID, run)
+	return []*storev1.StoreEntry{h.conv.SubagentLost(at, run, ownerAgentID, convert.LostReason(reason))}
+}
+
+// terminalAttribution states WHERE a reader-concluded subagent terminal is
+// written from. It is the shell handler's rule, for the shell handler's reason
+// (R-S1): a terminal built with neither a file id nor a run scope would digest
+// ONE write identity for every such terminal in the process, and the store —
+// whose absorption IS write_id equality — would swallow all but the first.
+//
+// It NEVER refuses: a refused terminal is a spawn left open forever.
+func (h *AgentTranscriptHandler) terminalAttribution(taskID, ownerAgentID, run string) convert.Attribution {
+	main := h.mainAgent
+	if main == "" {
+		// The spool was never read, so nothing told us whose stream carried the
+		// spawn. The owner is the agent whose book the spawn unit is a line in,
+		// which is the closest true answer available.
+		main = ownerAgentID
+	}
+	if h.coords.FileID == "" {
+		h.log.With(logging.Context{
+			Operation: "terminal-attribution", TaskID: taskID,
+			AgentID: ownerAgentID, ActivityID: run, Path: h.coords.Path,
+		}).LogVerbose("this handler read no batch of the subagent's spool, so its terminal is identified by the run")
+		return convert.Attribution{
+			VendorSessionID: ownerAgentID,
+			MainAgentID:     main,
+			AgentID:         ownerAgentID,
+			TaskID:          taskID,
+			WriteScope:      convert.RunScope(run),
+		}
+	}
+	return convert.Attribution{
+		VendorSessionID: ownerAgentID,
+		MainAgentID:     main,
+		AgentID:         ownerAgentID,
+		TaskID:          taskID,
+		Path:            h.coords.Path,
+		FileID:          h.coords.FileID,
+		Offset:          h.coords.Offset,
+	}
+}
