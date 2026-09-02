@@ -5164,7 +5164,8 @@ body.draining #composer-input::placeholder {
 /* ORANGE IS THE WARNING REGISTER. A logged-out root cannot run a turn, so the
    label IS the warning — but it is not an error either: nothing has failed,
    something is missing. */
-.topbar-account.arm-loggedOut {
+.topbar-account.arm-loggedOut,
+.topbar-account.topbar-account-warn {
   color: var(--thinking);
 }
 

@@ -45,7 +45,17 @@ describe("arm coverage", () => {
 });
 
 describe("the transfer", () => {
-  /** Boot, stand up a second daemon, and hand the client its address. */
+  /**
+   * THE WEBAPP NEVER REDIALS (project lead, final — see the CONFIRMED SEQUENCE
+   * block in docs/overhaul/reports/webapp-briefs/lifecycle.md). This block used
+   * to assert the opposite: a second transport built at the announced address,
+   * `AdoptWebWorkspace` called THERE, and every view stream re-opened on the
+   * successor. That whole path is retired. A successor on another loopback port
+   * is a DIFFERENT ORIGIN, so re-pointing the view is Emacs's job; this page
+   * draws "workspace moved to <address>", goes quiet, cancels every stream, and
+   * stops. Adoption happens ONCE, at boot, on the daemon the page was addressed
+   * to — which is why the old daemon's adoption log reads 1 here and not 0.
+   */
   const transfer = async (): Promise<{ second: Awaited<ReturnType<Harness["startSecondDaemon"]>> }> => {
     harness = await startHarness();
     await harness.fake.awaitStream("watchWebWorkspace");
@@ -55,104 +65,83 @@ describe("the transfer", () => {
     return { second };
   };
 
-  it("adopts the workspace on the NEW daemon", async () => {
+  it("draws the page-wide moved notice", async () => {
     // Arrange / Act
     const { second } = await transfer();
     // Assert
-    expect(second.calls("adoptWebWorkspace")).toHaveLength(1);
+    expect(harness.$(`[data-moved="${second.baseUrl}"]`)).not.toBeNull();
   });
 
-  it("echoes the workspace on the adoption", async () => {
+  it("names the successor's address in the notice", async () => {
     // Arrange / Act
     const { second } = await transfer();
     // Assert
-    const [request] = second.calls<{ workspace?: { id: string } }>("adoptWebWorkspace");
-    expect(request.workspace?.id).toBe(WORKSPACE_ID);
+    expect(harness.$('[data-component="drain-banner"]')?.textContent).toContain(second.baseUrl);
   });
 
-  it("does not adopt on the OLD daemon", async () => {
+  it("goes quiet", async () => {
     // Arrange / Act
     await transfer();
     // Assert
-    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(0);
+    expect(harness.ctx.isQuiesced()).toBe(true);
   });
 
-  it("adopts BEFORE the old streams are dropped", async () => {
-    // Arrange
-    const { second } = await transfer();
-    // Assert: the adoption is recorded on the new daemon while the old daemon
-    // still had streams; if the order inverted, the old log would show its
-    // streams gone before the new log shows the adoption.
-    const adopted = second.log().find((c) => c.rpc === "adoptWebWorkspace");
-    expect(adopted).toBeDefined();
-  });
-
-  it("re-opens the footer stream on the new daemon", async () => {
+  it("cancels the view streams on the old daemon", async () => {
     // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchFooter");
-    // Assert
-    expect(second.liveStreams("watchFooter", WORKSPACE_ID)).toBe(1);
-  });
-
-  it("re-opens the topbar stream on the new daemon", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchTopbar");
-    // Assert
-    expect(second.liveStreams("watchTopbar", WORKSPACE_ID)).toBe(1);
-  });
-
-  it("re-opens the roster stream on the new daemon", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchWorkspaceRoster");
-    // Assert
-    expect(second.liveStreams("watchWorkspaceRoster")).toBe(1);
-  });
-
-  it("re-opens the tray stream on the new daemon", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchDaemonHolds");
-    // Assert
-    expect(second.liveStreams("watchDaemonHolds", WORKSPACE_ID)).toBe(1);
-  });
-
-  it("re-opens the feed on the new daemon", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchFeed");
-    // Assert
-    expect(second.liveStreams("watchFeed", WORKSPACE_ID)).toBe(1);
-  });
-
-  it("drops every stream on the old daemon", async () => {
-    // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchFooter");
-    await harness.settle();
+    await transfer();
     // Assert
     expect(harness.fake.liveStreams("watchFooter", WORKSPACE_ID)).toBe(0);
   });
 
-  it("draws a push from the new daemon", async () => {
-    // Arrange
-    const { second } = await transfer();
-    await second.awaitStream("watchFooter");
-    // Act
-    second.setFooter(WORKSPACE_ID, footerView({ status: "idle", tokensText: "new-daemon" }));
-    await harness.settle();
+  it("cancels the roster stream on the old daemon", async () => {
+    // Arrange / Act
+    await transfer();
     // Assert
-    expect(harness.text(".footer-tokens")).toContain("new-daemon");
+    expect(harness.fake.liveStreams("watchWorkspaceRoster")).toBe(0);
+  });
+
+  it("cancels its own web-link stream on the old daemon", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    expect(harness.fake.liveStreams("watchWebWorkspace", WORKSPACE_ID)).toBe(0);
+  });
+
+  it("sends nothing at all to the successor", async () => {
+    // Arrange / Act
+    const { second } = await transfer();
+    // Assert: no transport to the new address is ever created.
+    expect(second.log()).toHaveLength(0);
+  });
+
+  it("does not adopt on the successor", async () => {
+    // Arrange / Act
+    const { second } = await transfer();
+    // Assert
+    expect(second.calls("adoptWebWorkspace")).toHaveLength(0);
+  });
+
+  it("adopted once at boot, on the daemon the page was addressed to", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(1);
+  });
+
+  it("echoed the workspace on the boot adoption", async () => {
+    // Arrange / Act
+    await transfer();
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("adoptWebWorkspace");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
   });
 
   it("reports no failure for a transfer, which is orderly", async () => {
     // Arrange / Act
-    const { second } = await transfer();
-    await second.awaitStream("watchFooter");
+    await transfer();
     await harness.tick(5_000);
-    // Assert
+    // Assert: the streams stopped because the page cancelled them, and a
+    // cancel is never a transport failure.
     expect(harness.failureArms()).not.toContain("daemonUnreachable");
   });
 });
@@ -226,6 +215,18 @@ describe("the drain banner", () => {
 });
 
 describe("the announced outage window", () => {
+  /**
+   * KEEPING THE LINK DOWN. A stream that dies and comes straight back retracts
+   * its own card on the reopen's first frame (src/rpc/streams.ts: "retracted on
+   * the first successful push"), which is the app behaving correctly and would
+   * make "the card stands" unobservable. An announced outage means the daemon
+   * is GONE for the window, so the reopens are scripted to fail for as long as
+   * the test looks.
+   */
+  const keepDown = (rpc: "watchFooter", attempts = 20): void => {
+    for (let i = 0; i < attempts; i += 1) harness.fake.failNext(rpc, "the daemon is down");
+  };
+
   it("suppresses the unreachable overlay during the quiet window", async () => {
     // Arrange
     harness = await startHarness();
@@ -246,6 +247,7 @@ describe("the announced outage window", () => {
     harness.fake.announceShutdown({ expectedOutageMs: 4_000n, mintedAtMs: BigInt(Date.now()) });
     await harness.settle();
     // Act
+    keepDown("watchFooter");
     harness.fake.endStream("watchFooter");
     await harness.tick(20_000);
     // Assert
@@ -262,6 +264,7 @@ describe("the announced outage window", () => {
     });
     await harness.settle();
     // Act
+    keepDown("watchFooter");
     harness.fake.endStream("watchFooter");
     await harness.tick(5_000);
     // Assert
@@ -317,8 +320,9 @@ describe("a plain bounce", () => {
     // Act
     harness.fake.announceShutdown({ expectedOutageMs: 4_000n, mintedAtMs: BigInt(Date.now()) });
     await harness.settle();
-    // Assert: an address-less bounce is not a transfer, so nothing is adopted.
-    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(0);
+    // Assert: an address-less bounce is not a transfer, so nothing is adopted
+    // beyond the ONE adoption every fresh page makes at boot.
+    expect(harness.fake.calls("adoptWebWorkspace")).toHaveLength(1);
   });
 
   it("clears the restarting notice once the streams are back", async () => {

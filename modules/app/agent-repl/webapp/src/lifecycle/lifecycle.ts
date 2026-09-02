@@ -119,6 +119,12 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   };
   const unregisterMoved = registerWorkspaceMoved(onMoved);
 
+  // THE LINK ANSWERING AGAIN IS WHAT ENDS AN OUTAGE, not the countdown, and
+  // any stream's frame is that answer: a bounce takes them all down together,
+  // so the first one back is the daemon being back. A no-op while no restart
+  // notice stands.
+  const unsubscribeFromPushes = ctx.onPush(() => banner.clearRestarting());
+
   const webLink = watchStream(ctx, {
     name: "WatchWebWorkspace",
     schema: WatchWebWorkspaceResponseSchema,
@@ -168,6 +174,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
     dispose(): void {
       log("debug", "disposing the page lifecycle", { operation: "lifecycle.dispose" });
       unregisterMoved();
+      unsubscribeFromPushes();
       webLink.cancel();
       daemon.cancel();
       banner.dispose();
@@ -388,12 +395,25 @@ export function drawDrainNotice(scheduled: DaemonDrainScheduled): {
   element.classList.add("lifecycle-drain");
   element.setAttribute("data-drain-scheduled", "");
   const words = drainReasonText(reason, "DaemonDrainScheduled.reason");
+  // THE ARM RIDES THE REASON, drawn as its own element: the words are the
+  // daemon's sentence, and the arm is the fact behind them.
+  const lead = document.createElement("span");
+  lead.className = "lifecycle-banner-lead";
+  const reasonElement = document.createElement("span");
+  reasonElement.className = "lifecycle-banner-reason";
+  reasonElement.setAttribute(
+    "data-arm",
+    requireCase(reason.kind, "DaemonDrainScheduled.reason.kind").case,
+  );
+  reasonElement.textContent = words;
+  const when = document.createElement("span");
+  when.className = "lifecycle-banner-when";
+  lead.textContent = "daemon restart scheduled · ";
+  element.append(lead, reasonElement, when);
   const tick = (nowMs: number): void => {
     const remaining = atMs - nowMs;
-    element.textContent =
-      remaining > 0
-        ? `daemon restart scheduled · ${words} · in ${formatElapsed(remaining)}`
-        : `daemon restart scheduled · ${words} · any moment now`;
+    when.textContent =
+      remaining > 0 ? ` · in ${formatElapsed(remaining)}` : " · any moment now";
   };
   return { element, tick };
 }

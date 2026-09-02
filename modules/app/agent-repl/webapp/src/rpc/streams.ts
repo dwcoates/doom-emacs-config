@@ -67,6 +67,12 @@ export interface StreamContext {
    * `daemon_unreachable` card every backoff for a link that is correctly gone.
    */
   onQuiesced(fn: () => void): () => void;
+  /**
+   * Publish that a frame arrived and was read, for the page-wide observers of
+   * the link's health (the lifecycle's restarting notice). Optional so a unit
+   * test's minimal context need not carry one.
+   */
+  notePush?: () => void;
 }
 
 export interface WatchStreamOptions<Res extends Message> {
@@ -153,6 +159,10 @@ export function watchStream<Res extends Message>(
   const consume = (response: Res): void => {
     try {
       assertNoUnknownFields(opts.schema, response);
+      // ANNOUNCED BEFORE IT IS DRAWN, so a push that itself puts a notice up
+      // (the shutdown announcement) is not immediately taken back down by its
+      // own arrival.
+      ctx.notePush?.();
       opts.onPush(response);
     } catch (err) {
       if (!isMalformedView(err)) throw err;
