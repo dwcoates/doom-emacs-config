@@ -496,6 +496,17 @@ describe("the resolved trace", () => {
     expect(el.querySelector(".cold-gate-when")?.textContent).toBe("1m ago");
   });
 
+  it("reads the resolution's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the resolution instant does not share the ticker's phase.
+    vi.setSystemTime(4920);
+    const el = drawFeedColdGate(
+      gate({ case: "resolved", value: { atMs: 0n, choice: { case: "pay", value: {} } } }),
+      askHarness().rc,
+    );
+    // Assert: five real seconds ago reads 5s, not the lagging 4s.
+    expect(el.querySelector(".cold-gate-when")?.textContent).toBe("5s ago");
+  });
+
   it("offers no buttons once the gate is resolved", () => {
     const el = drawFeedColdGate(
       gate({ case: "resolved", value: { atMs: 0n, choice: { case: "pay", value: {} } } }),
