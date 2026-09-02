@@ -604,3 +604,41 @@ func TestBashStreamReachesRouting(t *testing.T) {
 	// Assert.
 	h.rec.until(t, "footer.OnBash")
 }
+
+// TestASyncSubagentSpawnOpensItsOwnWatch covers the sub-feed's supply: a
+// spawned subagent's frames are addressed to the created agent and only ever
+// reach the daemon on a watch opened for it.
+func TestASyncSubagentSpawnOpensItsOwnWatch(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Activity{Activity: subagentActivity("spawn-1", "sub-1")},
+	})))
+
+	// Assert.
+	open := h.client.nextAgentOpen(t)
+	if open.req.GetTarget().GetValue() != "sub-1" {
+		t.Fatalf("the spawn opened a watch on %q, want the created agent sub-1", open.req.GetTarget().GetValue())
+	}
+}
+
+// TestASyncSubagentIsNotLiveWork covers freeness: an in-turn subagent is the
+// turn's own progress, so its watch must not hold the workspace unfree.
+func TestASyncSubagentIsNotLiveWork(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.route(h.main, entryFrame(frameUpdate("main-1", &conversationv1.AgentUpdate{
+		Update: &conversationv1.AgentUpdate_Activity{Activity: subagentActivity("spawn-1", "sub-1")},
+	})))
+
+	// Assert.
+	if live := h.w.LiveWork(); len(live.Agents) != 0 {
+		t.Fatalf("live work = %v, want no agents: a sync subagent is not detached work", live.Agents)
+	}
+}

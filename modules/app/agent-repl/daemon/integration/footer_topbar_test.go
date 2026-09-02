@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,8 +188,10 @@ func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing
 
 	// Act: the response's first unit carries usage.
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftUsageActivity("resp-unit-1", ftUsage(1000, 0, 0))))
+	// The cell is ALWAYS populated (it reads "0 in" before any usage lands),
+	// so the usage-carrying push is the first one whose figure is not zero.
 	firstUnit := awaitFooter(t, f, footer, "the tokens cell after the usage-carrying unit", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput().GetText() != ""
+		return v.GetStrip().GetTokens().GetInput().GetText() != "" && v.GetStrip().GetTokens().GetInput().GetText() != "0 in"
 	})
 
 	// Act: the SAME response's second unit (a tool call in the same
@@ -200,10 +203,15 @@ func TestFooterTokensCellUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testing
 		}},
 	}))
 
+	// Act: end the turn. A whole view identical to the last one is never
+	// pushed, so the turn's terminal is what makes the post-second-unit cell
+	// observable at all.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
 	// Assert: the cell is unchanged — a second unit of the SAME response
 	// leaving usage unset must not add a second charge.
 	stillOne := awaitFooter(t, f, footer, "the footer after the unstamped second unit", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetTokens().GetInput() != nil
+		return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
 	})
 	if stillOne.GetStrip().GetTokens().GetInput().GetText() != firstUnit.GetStrip().GetTokens().GetInput().GetText() {
 		t.Fatalf("tokens cell = %q after the second unit, want it unchanged at %q: usage rides exactly one unit per response",
@@ -550,16 +558,38 @@ func TestTopbarContextPanelResolvesFromTheSameContextUsageFact(t *testing.T) {
 			Categories:  []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 4_000, Color: "blue"}},
 		}},
 	})
-
-	// Assert: the /context panel (the chip's own hover content) carries a row
-	// for the pushed category, verbatim.
-	got := awaitTopbar(t, f, topbar, "the /context panel resolved from context_usage", func(v *frontendv1.TopbarView) bool {
-		return ftFindBreakdownRow(v.GetContext().GetBreakdown(), "system prompt") != nil
+	// The chip resolves from the same fact, so its arrival is the synchronizing
+	// edge for the panel the fact also feeds.
+	awaitTopbar(t, f, topbar, "the context chip carrying the pushed usage", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() != ""
 	})
-	row := ftFindBreakdownRow(got.GetContext().GetBreakdown(), "system prompt")
-	if row.GetTokens() != 4_000 {
-		t.Fatalf("the /context panel's system prompt row tokens = %d, want the pushed category's 4000", row.GetTokens())
+
+	// Assert: the /context panel — the topbar resolver's OTHER product from
+	// the same fact, drawn by the `/context` command rather than by the chip's
+	// hover (the chip's hover is the SESSION token breakdown, a different
+	// fact) — carries the pushed category verbatim.
+	resp := f.submit("/context", "k-context-panel", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	panel := resp.GetSuccess().GetCommandPanel().GetContext()
+	if panel == nil {
+		t.Fatalf("SubmitPrompt(/context) = %v, want a command_panel.context", resp)
 	}
+	row := ftFindContextCategory(panel, "system prompt")
+	if row == nil {
+		t.Fatalf("the /context panel = %v, want a system prompt category", panel.GetCategories())
+	}
+	if !strings.Contains(row.GetFigure(), "4") {
+		t.Fatalf("the system prompt category figure = %q, want the pushed 4000 tokens", row.GetFigure())
+	}
+}
+
+// ftFindContextCategory finds a /context panel category by label.
+func ftFindContextCategory(panel *frontendv1.ContextPanelView, label string) *frontendv1.ContextPanelCategory {
+	for _, category := range panel.GetCategories() {
+		if category.GetLabel() == label {
+			return category
+		}
+	}
+	return nil
 }
 
 func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing.T) {

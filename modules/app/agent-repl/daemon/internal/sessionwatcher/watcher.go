@@ -466,6 +466,12 @@ func (w *watcher) takeStreamsLocked() []func() {
 func (w *watcher) liveWorkLocked() LiveWorkSet {
 	var live LiveWorkSet
 	for _, a := range w.agents {
+		if a.work == nil {
+			// A SYNC subagent's watch carries no detached-work handle: it is
+			// the turn's own progress, not live work, and freeness must not
+			// wait on it.
+			continue
+		}
 		live.Agents = append(live.Agents, a.id)
 	}
 	for _, s := range w.shells {
