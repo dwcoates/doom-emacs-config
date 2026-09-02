@@ -1045,7 +1045,8 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	f.d.ExpectWarnings("daemon.rollout.relaunch", "daemon.shimclient.exit",
 		"daemon.shimclient.kill_session", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session",
-		"daemon.sessionwatcher.watch_agent")
+		"daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
@@ -1154,7 +1155,8 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	f.d.ExpectWarnings("daemon.workspace.close",
 		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
 		"daemon.shimclient.redial", "daemon.workspace.bring_up",
-		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
 
 // ---- critique 12: relaunch mechanics ----
