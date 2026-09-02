@@ -1971,40 +1971,6 @@ export const sessionUnhealthy = (arms: readonly SessionFaultArm[] = SESSION_FAUL
     },
   });
 
-/** A host push whose live session carries one fault of each named arm. */
-export const hostWorkspaceWithFaults = (
-  arms: readonly SessionFaultArm[] = SESSION_FAULT_ARMS,
-): WatchHostWorkspaceResponse =>
-  create(WatchHostWorkspaceResponseSchema, {
-    push: {
-      case: "host",
-      value: {
-        session: {
-          case: "existing",
-          value: {
-            id: { value: "session-1" },
-            standing: {
-              case: "live",
-              value: {
-                generation: { value: "gen-1" },
-                shimAttached: true,
-                vendorInfo: { case: "claude", value: { sessionId: "vendor-1", configDir: "/tmp/config" } },
-                backfill: { state: { case: "done", value: {} } },
-                composer: { case: "open", value: {} },
-                faults: arms.map((a) => ({
-                  detail: `host fault: ${a}`,
-                  openedAtMs: 1_000n,
-                  kind: { case: a, value: {} },
-                })),
-              },
-            },
-          },
-        },
-        naming: { slug: "webapp-integration-suite", title: "the integration suite" },
-      },
-    },
-  });
-
 // ---------------------------------------------------------------------------
 // Command panels (SubmitPrompt success arms and the feed's panel row)
 // ---------------------------------------------------------------------------
