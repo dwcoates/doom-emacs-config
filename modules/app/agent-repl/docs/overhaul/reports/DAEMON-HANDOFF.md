@@ -1,3 +1,10 @@
+> SUPERSEDED, 2026-09-02. Every item this handoff queued has landed: the
+> confirming integration run, the dead-code pass, landing 7's five adaptations
+> and a duplication remediation. The six landing-7 sentinels in the table below
+> are LANDED, not owed. Read
+> `docs/overhaul/reports/STOP-daemon.md` for the current state; this file is
+> kept as the record of how the tip got here.
+
 # DAEMON HANDOFF — overhaul/daemon, 2026-09-02
 
 For an opus-medium agent with none of the outgoing lead's context. Read this,
