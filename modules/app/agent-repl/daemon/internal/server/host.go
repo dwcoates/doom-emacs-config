@@ -69,21 +69,6 @@ const (
 	BackfillFailed
 )
 
-// unwiredSessionFacts is the facts source a daemon has when NONE was wired. It
-// is an explicit named type rather than a nil check so the absence is a thing
-// the code says out loud, and it answers `false` — "this daemon operates no
-// session for this workspace" — which is the only answer it can honestly give.
-//
-// It is not a fallback that hides the gap: New records the missing seam at
-// ERROR, and every session that HAS a record then withholds its host view with
-// its own ERROR naming the remediation. A daemon in this state serves no host
-// state at all, loudly, rather than serving an invented one.
-type unwiredSessionFacts struct{}
-
-func (unwiredSessionFacts) HostSessionFacts(ids.WorkspaceID) (HostFacts, bool) {
-	return HostFacts{}, false
-}
-
 // hostStateTopic answers a workspace's host STATE topic, minting it on first
 // use exactly as hostTopic mints the event one.
 func (s *server) hostStateTopic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.HostWorkspace] {
