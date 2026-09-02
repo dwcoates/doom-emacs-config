@@ -87,6 +87,23 @@
   (should-not (agent-repl--extract-panel-id "*Messages*"))
   (should-not (agent-repl--extract-panel-id "config.el")))
 
+(ert-deftest agent-repl-test-panels-extract-id-from-titled-input ()
+  "The identity segment ends at the space that introduces the display title."
+  (should (equal (agent-repl--extract-panel-id
+                  "*agent-panel-input-my-workspace Refactor the codec*")
+                 "my-workspace")))
+
+(ert-deftest agent-repl-test-panels-titled-input-buffer-is-an-agent-panel ()
+  "A titled composer is still an agent panel to the name predicates."
+  (should (agent-repl--agent-panel-buffer-p
+           (get-buffer-create "*agent-panel-input-my-workspace Refactor the codec*"))))
+
+(ert-deftest agent-repl-test-panels-partner-of-frontend-finds-the-titled-input ()
+  "The partner input buffer's name is READ off the live buffer, not rebuilt."
+  (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234 A title*"
+    (should (equal (agent-repl--partner-buffer-name "*agent-frontend-abcd1234*" "abcd1234")
+                   "*agent-panel-input-abcd1234 A title*"))))
+
 ;;;; ---- Tests: Partner buffer name ----
 
 (ert-deftest agent-repl-test-panels-partner-of-frontend-buffer ()
@@ -544,14 +561,6 @@ path must not error."
 
 ;;;; ---- Tests: non-agent-panel-window-p ----
 
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p ()
-  "non-agent-panel-window-p returns t for non-agent windows."
-  (let ((win (selected-window)))
-    ;; The selected window should be showing *scratch* or similar
-    (should (agent-repl--non-agent-panel-window-p win))))
-
-;;;; ---- Tests: on-close (single close audit point) ----
-
 (ert-deftest agent-repl-test-panels-on-close-calls-hide-panels ()
   "on-close invokes hide-panels for a VTERM workspace.
 The teardown is dispatched through the workspace's own frontend, so the
@@ -574,26 +583,6 @@ the gui default and tears down a webview instead."
 ;; of the bookkeeping a close carries — no `:repl-state', so the sidebar
 ;; still read it as live, and on `SPC o C' no deprio and no session kill
 ;; either.
-
-(ert-deftest agent-repl-test-panels-gui-simple-close-marks-inactive ()
-  "`SPC o c' on a gui workspace records the close as `:inactive'."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'gui)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--frontend-dispatch-hide) #'ignore))
-      (agent-repl--on-simple-close)
-      (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
-
-(ert-deftest agent-repl-test-panels-gui-close-marks-inactive ()
-  "`SPC o C' on a gui workspace records the close as `:inactive'."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'gui)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--frontend-dispatch-hide) #'ignore)
-              ((symbol-function 'agent-repl--save-tab-index) #'ignore)
-              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
-      (agent-repl--on-close)
-      (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
 
 (ert-deftest agent-repl-test-panels-gui-close-tears-down-the-webview ()
   "A gui close puts the WEBVIEW away, never the vterm panels it does not have."
@@ -644,13 +633,43 @@ removed via the restored work layout rather than stranding a panel."
         (should-not (agent-repl--ws-get "test-ws" :fullscreen-config))))))
 
 (ert-deftest agent-repl-test-panels-on-close-with-explicit-ws ()
-  "on-close accepts an explicit WS argument."
+  "on-close accepts an explicit WS argument and closes THAT workspace's view."
+  ;; Arrange
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ignored"))
-              ((symbol-function 'agent-repl--hide-panels) (lambda () nil)))
-      (agent-repl--on-close "specific-ws")
-      (should (eq (agent-repl--ws-get "specific-ws" :repl-state) :inactive))
-      (should-not (agent-repl--ws-get "ignored" :repl-state)))))
+    (let ((closed nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ignored"))
+                ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
+                ((symbol-function 'agent-repl--close-view)
+                 (lambda (ws _teardown) (setq closed ws))))
+        ;; Act
+        (agent-repl--on-close "specific-ws")
+        ;; Assert
+        (should (equal closed "specific-ws"))))))
+
+(ert-deftest agent-repl-test-panels-on-close-writes-no-lifecycle-state ()
+  "Closing the panels is a LOCAL presentation act and says nothing about
+the workspace's lifecycle, which is the roster's."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
+              ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
+              ((symbol-function 'agent-repl--close-view) #'ignore))
+      ;; Act
+      (agent-repl--on-close "test-ws")
+      ;; Assert
+      (should-not (agent-repl--ws-get "test-ws" :repl-state)))))
+
+(ert-deftest agent-repl-test-panels-on-simple-close-writes-no-lifecycle-state ()
+  "The plain close writes no state either."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+              ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-dispatch-hide) #'ignore))
+      ;; Act
+      (agent-repl--on-simple-close "test-ws")
+      ;; Assert
+      (should-not (agent-repl--ws-get "test-ws" :repl-state)))))
 
 (ert-deftest agent-repl-test-panels-on-close-nil-ws-still-hides ()
   "on-close with nil workspace hides panels but skips bookkeeping."
@@ -661,28 +680,6 @@ removed via the restored work layout rather than stranding a panel."
                  (lambda () (setq hide-called t))))
         (agent-repl--on-close)
         (should hide-called)))))
-
-(ert-deftest agent-repl-test-panels-on-close-sets-repl-state-inactive ()
-  "on-close (deprio path) writes :repl-state :inactive, exactly like
-on-simple-close: the deprio close no longer marks the workspace for a
-sweep, it just closes it."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
-      (agent-repl--on-close)
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :inactive)))))
-
-(ert-deftest agent-repl-test-panels-on-close-preserves-agent-state ()
-  "on-close does not touch :agent-state — mid-task :thinking survives close."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "test-ws" :thinking)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
-      (agent-repl--on-close)
-      (should (eq (agent-repl--ws-agent-state "test-ws") :thinking))
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :inactive)))))
 
 (ert-deftest agent-repl-test-panels-on-close-pushes-current-ws-to-back ()
   "on-close calls `agent-repl-workspace-push-to-back' when WS is the current workspace."
@@ -742,14 +739,6 @@ sweep, it just closes it."
         (should (equal (reverse calls) '(save push)))))))
 
 ;;;; ---- Tests: on-simple-close (no-deprio variant) ----
-
-(ert-deftest agent-repl-test-panels-on-simple-close-sets-inactive ()
-  "on-simple-close writes :repl-state :inactive."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--hide-panels) (lambda () nil)))
-      (agent-repl--on-simple-close)
-      (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
 
 (ert-deftest agent-repl-test-panels-on-simple-close-hides-panels ()
   "on-simple-close calls hide-panels when a saved layout is restored.
@@ -991,26 +980,6 @@ are the alternative if the view isn't visible)."
 
 ;;;; ---- Tests: hide-and-preserve-status ----
 
-(ert-deftest agent-repl-test-panels-hide-and-preserve-marks-inactive ()
-  "hide-and-preserve-status routes through on-close (deprio path) and sets
-:repl-state :inactive, re-asserting it after the session kill."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "test-ws" :frontend 'vterm)
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-              ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
-              ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore)
-              ;; SPC o C now also kills through the registry; resolve a
-              ;; probe frontend so no real teardown runs (the struct
-              ;; accessor itself resists cl-letf via its compiler macro).
-              ((symbol-function 'agent-repl--ws-frontend)
-               (lambda (_ws) (agent-repl-frontend-create
-                              :name 'probe :open-fn #'ignore
-                              :kill-fn #'ignore :send-fn #'ignore
-                              :interrupt-fn #'ignore :running-p-fn #'ignore
-                              :supported-backends '(claude)))))
-      (agent-repl--hide-and-preserve-status)
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :inactive)))))
-
 (ert-deftest agent-repl-test-panels-hide-and-preserve-no-workspace-errors ()
   "hide-and-preserve-status errors when no workspace is active."
   (agent-repl-test--with-clean-state
@@ -1027,8 +996,7 @@ are the alternative if the view isn't visible)."
                 ((symbol-function 'agent-repl--ws-frontend)
                (lambda (_ws) (agent-repl-frontend-create
                               :name 'probe :open-fn #'ignore
-                              :kill-fn #'ignore :send-fn #'ignore
-                              :interrupt-fn #'ignore :running-p-fn #'ignore
+                              :kill-fn #'ignore :running-p-fn #'ignore
                               :supported-backends '(claude)))))
         (agent-repl--hide-and-preserve-status)
         (should (equal on-close-ws "test-ws"))))))
@@ -1089,48 +1057,32 @@ Selection-handling stays orthogonal to the always-close hide path."
                  (lambda () (setq hidden t)))
                 ((symbol-function 'agent-repl--send-to-agent)
                  (lambda (text origin)
-                   (should (equal origin "PROMPT_ORIGIN_PANEL_SELECTION"))
+                   (should (equal origin :user-sent))
                    (setq sent-text text))))
         (agent-repl)
         (should (equal sent-text "hello world"))
         (should-not hidden)))))
 
-(ert-deftest agent-repl-test-panels-gui-show-wakes-before-presentation ()
-  "`SPC o c' show wakes a hibernated session before mounting its webview."
+(ert-deftest agent-repl-test-panels-selection-origin-is-in-the-closed-vocabulary ()
+  "`agent-repl--send' refuses an origin Emacs never spells, so this site's must be one.
+The old string named a `PromptOrigin' that does not exist, which would
+have been fatal at the first region send."
+  ;; Arrange
   (agent-repl-test--with-clean-state
-    (let ((buf (get-buffer-create " *agent-repl-wake-test*"))
-          (events nil))
-      (unwind-protect
-           (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                      (lambda (ws on-success _on-failure)
-                       (push (list :wake ws) events)
-                       (funcall on-success)
-                       :ready))
-                    ((symbol-function 'agent-repl--ws-get)
-                     (lambda (_ws key)
-                       (and (eq key :frontend-buffer) buf)))
-                    ((symbol-function 'agent-repl--frontend-display-webview)
-                     (lambda (ws displayed)
-                       (push (list :display ws displayed) events))))
-            (agent-repl--gui-show "ws1")
-            (should (equal
-                     (nreverse events)
-                     (list (list :wake "ws1")
-                           (list :display "ws1" buf)))))
-        (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-gui-show-wake-failure-does-not-present ()
-  "A failed hibernation wake signals before display mutates the UI."
-  (agent-repl-test--with-clean-state
-    (let ((displayed nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
-                 (lambda (_ws _on-success on-failure)
-                   (funcall on-failure "wake failed")
-                   :failed))
-                ((symbol-function 'agent-repl--frontend-display-webview)
-                 (lambda (&rest _) (setq displayed t))))
-        (should (eq :pending (agent-repl--gui-show "ws1")))
-        (should-not displayed)))))
+    (let ((origin nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'use-region-p) (lambda () t))
+                ((symbol-function 'region-beginning) (lambda () 1))
+                ((symbol-function 'region-end) (lambda () 12))
+                ((symbol-function 'buffer-substring-no-properties)
+                 (lambda (_beg _end) "hello world"))
+                ((symbol-function 'deactivate-mark) (lambda () nil))
+                ((symbol-function 'agent-repl--send-to-agent)
+                 (lambda (_text o) (setq origin o))))
+        ;; Act
+        (agent-repl))
+      ;; Assert
+      (should (memq origin agent-repl--input-origins)))))
 
 (ert-deftest agent-repl-test-panels-entry-point-simple-not-running-initializes ()
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
@@ -1140,12 +1092,17 @@ nothing is running, it opens the agent through the workspace's frontend
     (let ((opened nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                 ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'agent-repl-host-ref)
+                 (lambda (_ws) '(:id "ws-1" :dir "/w/1")))
+                ((symbol-function 'agent-repl-host-state) (lambda (_ws) t))
+                ((symbol-function 'agent-repl--open-progress-show)
+                 (lambda (_ws buf) buf))
                 ((symbol-function 'agent-repl--ws-frontend)
                  (lambda (_ws)
                    (agent-repl-frontend-create
                     :name 'probe
                     :open-fn (lambda (ws) (setq opened ws))
-                    :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                    :kill-fn #'ignore
                     :running-p-fn (lambda (_ws) nil)
                     :supported-backends '(claude)))))
         (agent-repl-simple)
@@ -1165,8 +1122,7 @@ hides)."
                  (lambda (_ws)
                    (agent-repl-frontend-create
                     :name 'probe
-                    :open-fn #'ignore :kill-fn #'ignore :send-fn #'ignore
-                    :interrupt-fn #'ignore
+                    :open-fn #'ignore :kill-fn #'ignore
                     :running-p-fn (lambda (_ws) t)
                     :show-fn (lambda (ws) (setq shown ws))
                     :supported-backends '(claude)))))
@@ -1189,6 +1145,11 @@ placeholder's teardown — arrives from a continuation."
      (let ((opened nil) (shown nil))
        (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
                  ((symbol-function 'use-region-p) (lambda () nil))
+                 ;; The open path ensures the workspace's host subscription
+                 ;; before mounting; a ref is what makes one possible.
+                 ((symbol-function 'agent-repl-host-ref)
+                  (lambda (_ws) '(:id "ws-1" :dir "/w/1")))
+                 ((symbol-function 'agent-repl-host-state) (lambda (_ws) t))
                  ((symbol-function 'agent-repl--open-progress-show)
                   (lambda (_ws buf) buf))
                  ((symbol-function 'agent-repl--ws-frontend)
@@ -1196,7 +1157,7 @@ placeholder's teardown — arrives from a continuation."
                     (agent-repl-frontend-create
                      :name 'probe
                      :open-fn (lambda (ws) (setq opened ws) :pending)
-                     :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                     :kill-fn #'ignore
                      :running-p-fn (lambda (_ws) ,running-p)
                      :show-fn (lambda (ws) (setq shown ws) :pending)
                      :supported-backends '(claude)))))
@@ -1208,6 +1169,9 @@ placeholder's teardown — arrives from a continuation."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'use-region-p) (lambda () nil))
+              ((symbol-function 'agent-repl-host-ref)
+               (lambda (_ws) '(:id "ws-1" :dir "/w/1")))
+              ((symbol-function 'agent-repl-host-state) (lambda (_ws) t))
               ((symbol-function 'agent-repl--open-progress-show)
                (lambda (_ws buf) buf))
               ((symbol-function 'agent-repl--ws-frontend)
@@ -1216,7 +1180,7 @@ placeholder's teardown — arrives from a continuation."
                   :name 'probe
                   ;; No `:pending': this capability finished here.
                   :open-fn (lambda (_ws) t)
-                  :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                  :kill-fn #'ignore
                   :running-p-fn (lambda (_ws) nil)
                   :show-fn #'ignore
                   :supported-backends '(claude)))))
@@ -1545,131 +1509,12 @@ foreign directory."
       ;; Should not error -- the when guard skips mark-viewed
       (agent-repl--on-workspace-switch))))
 
-(ert-deftest agent-repl-test-panels-on-workspace-switch-flips-ws-loaded ()
-  "Tail of `--on-workspace-switch' flips the `:ws-loaded' latch bit
-on the ws plist (via `--latch-and-maybe-fire-loaded')."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-              ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-              ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-      (agent-repl--on-workspace-switch "ws1")
-      ;; :agent-ready is nil so latch hasn't fired+cleared; bit stays set.
-      (should (eq (agent-repl--ws-get "ws1" :ws-loaded) t)))))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-notifies-the-daemon ()
-  "`--on-workspace-switch' asks the daemon to ensure the switched-to ws.
-This is the SWITCH half of the never-blue requirement: without this call
-the daemon's eager bring-up fires only on an explicit open, so a workspace
-the user merely switches to stays blue despite having a transcript."
-  (agent-repl-test--with-clean-state
-    (let ((notified nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-                  ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
-                ((symbol-function 'agent-repl--frontend-ensure-workspace)
-                 (lambda (ws) (setq notified ws))))
-        ;; Act
-        (agent-repl--on-workspace-switch "ws1")
-        ;; Assert — keyed by the ws the hook captured, not whatever is current.
-        (should (equal notified "ws1"))))))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-notifies-before-the-latch ()
-  "The daemon notify runs BEFORE the `:ws-loaded' latch tail.
-Ordering matters: the notify is what starts the backfill, so it must not
-sit behind anything that could return early."
-  (agent-repl-test--with-clean-state
-    (let ((latched-at-notify nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-                  ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
-                ((symbol-function 'agent-repl--frontend-ensure-workspace)
-                 (lambda (_ws)
-                   (setq latched-at-notify (agent-repl--ws-get "ws1" :ws-loaded)))))
-        ;; Act
-        (agent-repl--on-workspace-switch "ws1")
-        ;; Assert — unset at notify time, set once the tail ran.
-        (should-not latched-at-notify)
-        (should (eq (agent-repl--ws-get "ws1" :ws-loaded) t))))))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-nil-ws-skips-latch ()
-  "When `--on-workspace-switch' is called with nil ws (and current-name
-also returns nil), the latch flip is skipped — guards against poisoning
-the ws-plist hash with a nil key in test/init environments."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-              ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-              ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-      ;; Should not error and should not touch the hash table.
-      (agent-repl--on-workspace-switch nil)
-      (should-not (gethash nil agent-repl--workspaces)))))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-snaps-webview-to-tail ()
-  "Switching to a workspace snaps its gui webview feed to the newest message,
-the gui counterpart of the vterm window's snap to the cursor."
-  (agent-repl-test--with-clean-state
-    (let (snapped)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
-                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
-                 (lambda (ws) (setq snapped ws))))
-        (agent-repl--on-workspace-switch "ws1")
-        (should (equal snapped "ws1"))))))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-snaps-after-show-drain ()
-  "The webview snap runs AFTER the pending-show drain, so a webview that
-just became visible on the switch is snapped to its tail too."
-  (agent-repl-test--with-clean-state
-    (let (order)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-show-panels)
-                 (lambda (_ws) (push 'show order)))
-                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
-                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
-                 (lambda (_ws) (push 'snap order))))
-        (agent-repl--on-workspace-switch "ws1")
-        (should (equal (nreverse order) '(show snap)))))))
-
 (ert-deftest agent-repl-test-panels-on-workspace-switch-stamps-no-ack ()
   "Switching to a :done workspace records no viewed-acknowledgment.
 The stamp existed only to start the removed decay's dwell countdown."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :agent-state :done)
     (should (null (agent-repl--ws-get "ws1" :done-acked-at)))))
-
-(ert-deftest agent-repl-test-panels-on-workspace-switch-non-done-does-not-stamp ()
-  "Switching to a workspace records no viewed-acknowledgment at all."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-              ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-      (agent-repl--ws-set-agent-state "ws1" :thinking)
-      (agent-repl--on-workspace-switch "ws1")
-      (should-not (agent-repl--ws-get "ws1" :done-acked))
-      (should-not (agent-repl--ws-get "ws1" :done-acked-at)))))
 
 (ert-deftest agent-repl-test-panels-clear-done-ack-helper-is-gone ()
   "The switch-away dwell reset went with the decay it paced."
@@ -1869,28 +1714,6 @@ classified separately and never reach this predicate as an anomaly."
 
 ;;;; ---- Tests: non-agent-panel-window-p with agent buffers ----
 
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-frontend-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing the agent frontend (webview) buffer."
-  (let ((buf (get-buffer-create "*agent-frontend-abcd1234*")))
-    (unwind-protect
-        (progn
-          (switch-to-buffer buf)
-          (should-not (agent-repl--non-agent-panel-window-p (selected-window))))
-      (switch-to-buffer "*scratch*")
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-(ert-deftest agent-repl-test-panels-non-agent-panel-window-p-input-buffer ()
-  "non-agent-panel-window-p returns nil for a window showing an agent input buffer."
-  (let ((buf (get-buffer-create "*agent-panel-input-abcd1234*")))
-    (unwind-protect
-        (progn
-          (switch-to-buffer buf)
-          (should-not (agent-repl--non-agent-panel-window-p (selected-window))))
-      (switch-to-buffer "*scratch*")
-      (when (buffer-live-p buf) (kill-buffer buf)))))
-
-;;;; ---- Tests: redirect-from-agent-before-save ----
-
 (ert-deftest agent-repl-test-panels-redirect-non-agent-noop ()
   "redirect-from-agent-before-save is a no-op when selected window is non-agent."
   (agent-repl-test--with-clean-state
@@ -1972,6 +1795,45 @@ classified separately and never reach this predicate as an anomaly."
             (should (eq (agent-repl--ws-get "test-ws" :input-buffer) buf)))
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
+(ert-deftest agent-repl-test-initialize-input-buffer-carries-an-already-pushed-title ()
+  "A title the daemon pushed BEFORE the composer existed still names it.
+`agent-repl-host--apply-naming' runs on a push, so a buffer born after
+the last one would otherwise wear the bare canonical name forever."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal))
+          (buf (generate-new-buffer "*agent-panel-input-test-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--create-buffer)
+                     (lambda (_ws &optional _s) buf))
+                    ((symbol-function 'agent-repl-input-mode) #'ignore)
+                    ((symbol-function 'agent-repl--history-restore) #'ignore))
+            ;; Arrange
+            (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
+            (agent-repl-host--put "test-ws" :host (list :naming (list :title "the title")))
+            ;; Act
+            (agent-repl--initialize-input-buffer "test-ws")
+            ;; Assert
+            (should (equal (buffer-name buf) "*agent-panel-input-test-ws the title*")))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-initialize-input-buffer-without-a-title-is-canonical ()
+  "No naming pushed yet is the ordinary early state, not a failure."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-host--by-name (make-hash-table :test 'equal))
+          (buf (generate-new-buffer "*agent-panel-input-test-ws*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--create-buffer)
+                     (lambda (_ws &optional _s) buf))
+                    ((symbol-function 'agent-repl-input-mode) #'ignore)
+                    ((symbol-function 'agent-repl--history-restore) #'ignore))
+            ;; Arrange
+            (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
+            ;; Act
+            (agent-repl--initialize-input-buffer "test-ws")
+            ;; Assert
+            (should (equal (buffer-name buf) "*agent-panel-input-test-ws*")))
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
 (ert-deftest agent-repl-test-initialize-input-buffer-already-initialized ()
   "initialize-input-buffer errors when the buffer is already in agent-repl-input-mode."
   (agent-repl-test--with-clean-state
@@ -2009,15 +1871,11 @@ puts the view away."
                                 :name 'probe
                                 :open-fn #'ignore
                                 :kill-fn (lambda (_ws) (setq killed t))
-                                :send-fn #'ignore
-                                :interrupt-fn #'ignore
                                 :running-p-fn #'ignore
                                 :supported-backends '(claude)))))
         (agent-repl--hide-and-preserve-status)
         (should closed)
-        (should killed)
-        ;; The closed marker survives the kill's state reset.
-        (should (eq (agent-repl--ws-get "ws1" :repl-state) :inactive))))))
+        (should killed)))))
 
 (ert-deftest agent-repl-test-panels-on-close-never-kills ()
   "on-close itself must NOT kill: send-and-hide hides sessions that
@@ -2034,7 +1892,6 @@ keep running."
                  (lambda (_ws) (agent-repl-frontend-create
                                 :name 'probe :open-fn #'ignore
                                 :kill-fn (lambda (_ws) (setq killed t))
-                                :send-fn #'ignore :interrupt-fn #'ignore
                                 :running-p-fn #'ignore
                                 :supported-backends '(claude)))))
         (agent-repl--on-close "ws1")
@@ -2249,7 +2106,6 @@ restart-fn the workspace's frontend registers."
                  (lambda (_ws)
                    (agent-repl-frontend-create
                     :name 'probe :open-fn #'ignore :kill-fn #'ignore
-                    :send-fn #'ignore :interrupt-fn #'ignore
                     :running-p-fn #'ignore
                     :restart-fn (lambda (ws) (setq restarted ws))
                     :supported-backends '(claude)))))
@@ -2269,8 +2125,7 @@ restart-fn the workspace's frontend registers."
 the workspace's frontend registers, which is what actually resets the
 state axes."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
-    (agent-repl--ws-set-repl-state "ws1" :inactive)
+    (agent-repl--ws-put "ws1" :frontend-buffer nil)
     (let ((killed-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
                 ((symbol-function 'agent-repl--ws-frontend)
@@ -2281,7 +2136,6 @@ state axes."
                                (setq killed-ws ws)
                                (agent-repl--ws-put ws :agent-state nil)
                                (agent-repl--ws-put ws :repl-state nil))
-                    :send-fn #'ignore :interrupt-fn #'ignore
                     :running-p-fn #'ignore
                     :supported-backends '(claude)))))
         (agent-repl-kill)
@@ -3375,7 +3229,7 @@ owns a `:project-dir', so a record attributed to one is unroutable and
                             (unless (or (null ws) (agent-repl--ws-log-routable-p ws))
                               (push ws unroutable))))
                  ((symbol-function '+workspace-current-name) (lambda () "main"))
-                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                 ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
                  ((symbol-function 'agent-repl--log) collect)
                  ((symbol-function 'agent-repl--log-verbose) collect)
                  ((symbol-function 'agent-repl--info) collect)
@@ -3396,7 +3250,7 @@ Screening the log name must not demote records that legitimately own a sink."
           (progn
             (agent-repl--ws-put "ws1" :project-dir project)
             (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                      ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                      ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
                       ((symbol-function 'agent-repl--log)
                        (lambda (ws &rest _)
                          (when (eq logged 'no-record) (setq logged ws)))))
@@ -3407,3 +3261,95 @@ Screening the log name must not demote records that legitimately own a sink."
       (should (equal logged "ws1")))))
 
 ;;; test-panels.el ends here
+
+;;;; ---- Tests: the panels entry ensures the host subscription ----
+
+(ert-deftest agent-repl-test-panels-entry-subscribes-the-host-stream ()
+  "Opening the panels is Emacs saying it is looking at this workspace, and
+the host stream is what it looks at it through."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((subscribed nil))
+      (cl-letf (((symbol-function 'agent-repl-host-ref)
+                 (lambda (_ws) '(:id "ws-1" :dir "/w/1")))
+                ((symbol-function 'agent-repl-host-state) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+                ((symbol-function 'agent-repl-host-subscribe)
+                 (lambda (_conn ws _ref) (setq subscribed ws))))
+        ;; Act
+        (agent-repl--panels-ensure-host-subscription "test-ws")
+        ;; Assert
+        (should (equal subscribed "test-ws"))))))
+
+(ert-deftest agent-repl-test-panels-entry-does-not-resubscribe ()
+  "host.el keeps ONE subscription per open workspace; re-entering re-uses it."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((subscribed nil))
+      (cl-letf (((symbol-function 'agent-repl-host-ref)
+                 (lambda (_ws) '(:id "ws-1" :dir "/w/1")))
+                ((symbol-function 'agent-repl-host-state) (lambda (_ws) '(:naming nil)))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) 'conn))
+                ((symbol-function 'agent-repl-host-subscribe)
+                 (lambda (_conn ws _ref) (setq subscribed ws))))
+        ;; Act
+        (agent-repl--panels-ensure-host-subscription "test-ws")
+        ;; Assert
+        (should (null subscribed))))))
+
+(ert-deftest agent-repl-test-panels-entry-without-a-ref-subscribes-nothing ()
+  "No ref means no identity to subscribe with — the roster brings one."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((subscribed nil))
+      (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-host-subscribe)
+                 (lambda (_conn ws _ref) (setq subscribed ws))))
+        ;; Act
+        (should (null (agent-repl--panels-ensure-host-subscription "test-ws")))
+        ;; Assert
+        (should (null subscribed))))))
+
+(ert-deftest agent-repl-test-panels-entry-without-a-link-subscribes-nothing ()
+  "No connection means no stream to open; the link-up edge will bring one."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((subscribed nil))
+      (cl-letf (((symbol-function 'agent-repl-host-ref)
+                 (lambda (_ws) '(:id "ws-1" :dir "/w/1")))
+                ((symbol-function 'agent-repl-host-state) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-link-primary) (lambda () nil))
+                ((symbol-function 'agent-repl-host-subscribe)
+                 (lambda (_conn ws _ref) (setq subscribed ws))))
+        ;; Act
+        (should (null (agent-repl--panels-ensure-host-subscription "test-ws")))
+        ;; Assert
+        (should (null subscribed))))))
+
+(ert-deftest agent-repl-test-panels-open-without-a-ref-shows-the-input-only ()
+  "A workspace with no ref yet gets its composer, not a refusal: the user
+asked for the panels, and the half that does not need an identity is
+available now."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((opened nil) (input nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
+                ((symbol-function 'use-region-p) (lambda () nil))
+                ((symbol-function 'agent-repl-host-ref) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl--open-progress-show)
+                 (lambda (_ws buf) buf))
+                ((symbol-function 'agent-repl--ensure-input-buffer)
+                 (lambda (ws) (setq input ws)))
+                ((symbol-function 'agent-repl--ws-frontend)
+                 (lambda (_ws)
+                   (agent-repl-frontend-create
+                    :name 'probe
+                    :open-fn (lambda (ws) (setq opened ws) :pending)
+                    :kill-fn #'ignore
+                    :running-p-fn (lambda (_ws) nil)
+                    :supported-backends '(claude)))))
+        ;; Act
+        (agent-repl-simple)
+        ;; Assert
+        (should (and (equal input "test-ws") (null opened)))))))
