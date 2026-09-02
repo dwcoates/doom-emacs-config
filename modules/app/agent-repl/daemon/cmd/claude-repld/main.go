@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -74,6 +75,11 @@ type options struct {
 	// only reaches that state on a host where neither
 	// $AGENT_REPL_BROWSER_CMD nor the pinned default binary exists.
 	noBrowser bool
+	// feedTailRetention is how many published rows one feed retains for a
+	// tail's replay. It is what makes WatchFeed's `token_expired` refusal
+	// reachable at all: below it a re-opened tail's pinned start is still in
+	// the log, above it the token is expired and the client must re-open.
+	feedTailRetention int
 	// selfRepo overrides the daemon's own checkout identity. It is a TEST
 	// HOOK: the merge orchestrator keys its two methods on whether a target is
 	// the same repository as this, and a test needs to say so explicitly.
@@ -124,13 +130,46 @@ func parseFlags(program string, args []string) (options, error) {
 	fs.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	fs.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
 	fs.DurationVar(&opts.idleCutoff, "idle-cutoff", 0, "how long a session may go unengaged before the idle sweep hibernates it")
+	fs.IntVar(&opts.feedTailRetention, "feed-tail-retention", 0, "how many published rows one feed retains for a tail's replay (0 uses the built-in default)")
 	fs.BoolVar(&opts.noBrowser, "no-browser", false, "this daemon has no external browser: OpenExternal answers no_browser_configured")
 	fs.StringVar(&opts.selfRepo, "self-repo", "", "override the daemon's own checkout identity (test hook)")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
 	opts.storeSocket = resolveStoreSocket(opts.storeSocket, os.Getenv(envStoreSocket))
+	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))
+	if err != nil {
+		return options{}, err
+	}
+	opts.feedTailRetention = retention
 	return opts, nil
+}
+
+// envFeedTailRetention is the feed tail retention's test knob. It BEATS the
+// flag: a test that sets it must not also have to know how the daemon was
+// launched.
+const envFeedTailRetention = "AGENT_REPL_FEED_TAIL_RETENTION"
+
+// resolveFeedTailRetention applies the retention's precedence: the environment
+// beats the flag, and zero means the resolver's own default.
+//
+// A MALFORMED OR NON-POSITIVE VALUE IS A REFUSAL, never a fall-through: a test
+// knob that silently did nothing would make the suite it was set for lie.
+func resolveFeedTailRetention(flagValue int, envValue string) (int, error) {
+	if envValue != "" {
+		rows, err := strconv.Atoi(envValue)
+		if err != nil {
+			return 0, fmt.Errorf("claude-repld: %s=%q is not a whole number of rows: %w", envFeedTailRetention, envValue, err)
+		}
+		if rows <= 0 {
+			return 0, fmt.Errorf("claude-repld: %s=%q is not a positive number of rows", envFeedTailRetention, envValue)
+		}
+		return rows, nil
+	}
+	if flagValue < 0 {
+		return 0, fmt.Errorf("claude-repld: -feed-tail-retention=%d is not a positive number of rows", flagValue)
+	}
+	return flagValue, nil
 }
 
 // resolveStoreSocket applies the store socket's precedence: the flag beats the
