@@ -625,6 +625,18 @@ signals."
                 (agent-repl-host--by-name (make-hash-table :test 'equal))
                 (agent-repl--prompt-queue (make-hash-table :test 'equal))
                 (agent-repl--prompt-queue-draining (make-hash-table :test 'equal))
+                ;; The log-target registry belongs in this list for the SAME
+                ;; reason as the others, and for one more: it is what decides
+                ;; where a scenario's workspace-owned records LAND.  Left
+                ;; process-global, every scenario using one fixture directory
+                ;; appends to the one target the first scenario minted, so a
+                ;; later scenario's `--await-log' is satisfied by an EARLIER
+                ;; scenario's record for the same operation and the assertion
+                ;; behind it races the reply that was supposed to produce one.
+                ;; Binding it here gives each scenario its own target and its
+                ;; own canonical link, so a record found is a record this
+                ;; scenario wrote.
+                (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
                 (process-environment
                  (append (list (concat "AGENT_REPL_STATE_DIR="
                                        (agent-repl-itest-daemon-state-dir ,var))

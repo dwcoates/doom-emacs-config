@@ -4332,6 +4332,77 @@ an orphan."
                               (agent-repl--workspace-emacs-log-path project))))))
         (delete-directory project t)))))
 
+(ert-deftest agent-repl-test-reuse-repoints-a-stolen-canonical-link ()
+  "A reuse of the owned target re-establishes a canonical link that was stolen.
+Another runtime registering the same directory replaces the symlink; the
+registry keeps returning the owned target, so every record written after
+the theft would land in a file no reader opens."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-stolen-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (let (target interloper canonical)
+            (agent-repl--ws-put "ws" :project-dir project)
+            (setq target (agent-repl--workspace-emacs-log-target "ws")
+                  canonical (agent-repl--workspace-emacs-log-path project)
+                  interloper (make-temp-file "agent-repl-interloper-" nil ".log"))
+            (make-symbolic-link interloper canonical t)
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "ws")
+            ;; Assert
+            (should (equal target (file-symlink-p canonical)))
+            (delete-file interloper))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-reuse-restores-a-deleted-canonical-link ()
+  "A reuse of the owned target re-creates a canonical link that was removed."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-deleted-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (let (target canonical)
+            (agent-repl--ws-put "ws" :project-dir project)
+            (setq target (agent-repl--workspace-emacs-log-target "ws")
+                  canonical (agent-repl--workspace-emacs-log-path project))
+            (delete-file canonical)
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "ws")
+            ;; Assert
+            (should (equal target (file-symlink-p canonical))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-reuse-keeps-an-intact-canonical-link-untouched ()
+  "A reuse leaves an already-correct canonical link exactly as it stands."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-intact-link-" t))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (let (target canonical attrs)
+            (agent-repl--ws-put "ws" :project-dir project)
+            (setq target (agent-repl--workspace-emacs-log-target "ws")
+                  canonical (agent-repl--workspace-emacs-log-path project)
+                  attrs (file-attributes canonical))
+            ;; Act
+            (agent-repl--workspace-emacs-log-target "ws")
+            ;; Assert
+            (should (equal target (file-symlink-p canonical)))
+            (should (equal (file-attribute-inode-number attrs)
+                           (file-attribute-inode-number
+                            (file-attributes canonical)))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-link-current-p-rejects-a-plain-file ()
+  "A canonical path that is a regular file is not a current link."
+  ;; Arrange
+  (let ((plain (make-temp-file "agent-repl-plain-canonical-" nil ".log")))
+    (unwind-protect
+        ;; Act / Assert
+        (should-not (agent-repl--workspace-log-link-current-p plain plain))
+      (delete-file plain))))
+
 (ert-deftest agent-repl-test-a-different-directory-gets-its-own-target ()
   "The sharing is scoped to one identity; two directories stay independent."
   ;; Arrange
