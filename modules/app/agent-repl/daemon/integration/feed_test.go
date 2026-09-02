@@ -308,6 +308,39 @@ func TestALostResponseFragmentSelfCorrectsOnTheTerminal(t *testing.T) {
 	}
 }
 
+func TestAResponseWithASynthesizedNoticeDrawsItsComposedHeading(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-notice", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the vendor synthesized this prose as an allowance notice rather
+	// than the agent's own words.
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("resp-notice"),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{
+				Prose: &conversationv1.AgentResponseProse{Markdown: "you have run out of allowance"},
+				Authorship: &conversationv1.AgentResponseSuccess_SynthesizedNotice{SynthesizedNotice: &conversationv1.AgentResponseSynthesizedNotice{
+					Subject: &conversationv1.AgentResponseSynthesizedNotice_UsageLimit{UsageLimit: &conversationv1.AgentNoticeUsageLimit{}},
+				}},
+			},
+		}}},
+	}))
+
+	// Assert: the bubble carries a composed heading, putting it in the notice
+	// register rather than drawing it as the agent's own answer.
+	row := awaitRow(t, f, tail, "the notice-register response", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetNotice() != nil
+	})
+	if row.GetActivity().GetResponse().GetNotice().GetHeading() == "" {
+		t.Fatal("the synthesized-notice bubble carries no composed heading")
+	}
+	if md := row.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown(); md != "you have run out of allowance" {
+		t.Fatalf("the notice bubble's prose = %q, want the vendor's text kept verbatim (no spliced heading)", md)
+	}
+}
+
 // ==========================================================================
 // Tool cards.
 // ==========================================================================
@@ -922,7 +955,9 @@ func TestContextCutCompactionFailedDrawsNoSeparationAndSurfacesTheError(t *testi
 	// Assert: no separation divider is drawn for a compaction that did not
 	// happen — the context is unchanged.
 	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "compaction_failed draws no separation divider")
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// separation.go logs daemon.feed.compaction_failed at WARN precisely on
+	// this arm ("a compaction failed, so no separation divider was drawn").
+	f.d.ExpectWarnings("daemon.feed.compaction_failed")
 }
 
 // ==========================================================================
@@ -1235,6 +1270,42 @@ func TestDetachedShellSettledDrawsCompletedWithExit(t *testing.T) {
 	}
 }
 
+func TestADetachedShellSettledWithNotObservedOutputLeavesTheSpoolUnset(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-notobserved", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedShell("work-notobs-1", "long-forgotten")))
+	head := awaitRow(t, f, tail, "the detached_shell head", func(r *frontendv1.FeedRow) bool { return r.GetDetachedShell() != nil })
+
+	// Act: the run settles, but nothing observed its output at all -- no
+	// WatchBash delta ever arrived, and the settle itself carries
+	// not_observed rather than text.
+	f.shim.PushBash("work-notobs-1", &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Success{
+		Success: &conversationv1.AgentBashSuccess{
+			Command: &conversationv1.AgentBashCommand{Line: "long-forgotten"},
+			Outcome: &conversationv1.AgentBashSuccess_Completed{Completed: &conversationv1.AgentBashCompleted{
+				Output:      &conversationv1.AgentBashOutput{Form: &conversationv1.AgentBashOutput_NotObserved{NotObserved: &conversationv1.AgentBashOutputNotObserved{}}},
+				Termination: &conversationv1.AgentBashTermination{How: &conversationv1.AgentBashTermination_Exited{Exited: &conversationv1.AgentBashExited{Code: 0}}},
+			}},
+			SettledAt: settledAt(2),
+		},
+	}})
+
+	// Assert: settled, but the spool stays UNSET -- nothing observed the
+	// output, and drawing an empty spool would claim the command printed
+	// nothing when the truth is that nobody knows.
+	settled := awaitRow(t, f, tail, "the settled detached shell with unobserved output", func(r *frontendv1.FeedRow) bool {
+		return r.GetId().GetValue() == head.GetId().GetValue() && r.GetDetachedShell().GetShell().GetSettled() != nil
+	})
+	if settled.GetDetachedShell().GetShell().GetSpool() != nil {
+		t.Fatalf("the settled shell's spool = %v, want unset when the output was never observed", settled.GetDetachedShell().GetShell().GetSpool())
+	}
+	if settled.GetDetachedShell().GetShell().GetSettled().GetCompleted() == nil {
+		t.Fatalf("the settled shell's outcome = %v, want completed even with unobserved output", settled.GetDetachedShell().GetShell().GetSettled().GetOutcome())
+	}
+}
+
 func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -1251,7 +1322,9 @@ func TestADetachedBashSpoolGapIsRefusedAndLogged(t *testing.T) {
 
 	// Assert: the gap is refused — the spool does not silently jump ahead.
 	harness.ExpectNoPush(t, tail, harness.ProbeWindow, "a spool gap must not upsert the shell's row")
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// subagent.go logs daemon.feed.spool_gap at ERROR precisely on a refused
+	// gap ("a detached shell's output frame did not continue the spool").
+	f.d.ExpectWarnings("daemon.feed.spool_gap")
 }
 
 // ==========================================================================
@@ -1338,6 +1411,78 @@ func TestApiRequestFailedAuthenticationFailedRespells(t *testing.T) {
 		return r.GetTurnEnded().GetErrored().GetAuthenticationFailed() != nil
 	})
 	_ = row
+}
+
+func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-refusal", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the vendor refused the request outright as malformed.
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Message: "the request was refused",
+			Kind:    &conversationv1.ApiRequestFailed_InvalidRequest{InvalidRequest: &conversationv1.ApiInvalidRequest{}},
+		}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the invalid-request (refusal) terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetInvalidRequest() != nil
+	})
+	if row.GetTurnEnded().GetErrored().GetHeadline().GetText() == "" {
+		t.Fatal("the refused terminal carries no composed headline")
+	}
+}
+
+func TestApiRequestFailedMaxOutputTokensRespells(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-maxtokens", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the request asked for more output than the model will produce.
+	f.shim.PushAgentFrame(mainAgent, failureFrame(mainAgent, &conversationv1.AgentFailure{
+		Failure: &conversationv1.AgentFailure_ApiRequestFailed{ApiRequestFailed: &conversationv1.ApiRequestFailed{
+			Message: "max output tokens exceeded",
+			Kind:    &conversationv1.ApiRequestFailed_MaxOutputTokens{MaxOutputTokens: &conversationv1.ApiMaxOutputTokens{}},
+		}},
+	}))
+
+	// Assert
+	row := awaitRow(t, f, tail, "the max-output-tokens terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetMaxOutputTokens() != nil
+	})
+	_ = row
+}
+
+func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
+	// Arrange: a turn in flight when the query dies out from under it.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-querydied", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+
+	// Act: the shim reports the session's query died, rather than the agent
+	// stream ending with its own success/failure frame.
+	f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_QueryDied{QueryDied: &conversationv1.SessionQueryDied{
+			Cause: &conversationv1.SessionQueryDied_UnexpectedEof{UnexpectedEof: &conversationv1.SessionQueryUnexpectedEof{}},
+		}},
+	})
+
+	// Assert
+	row := awaitRow(t, f, tail, "the query-died terminal", func(r *frontendv1.FeedRow) bool {
+		return r.GetTurnEnded().GetErrored().GetQueryDied() != nil
+	})
+	if row.GetTurnEnded().GetErrored().GetHeadline().GetText() == "" {
+		t.Fatal("the query-died terminal carries no composed headline")
+	}
+	// The query's death is logged from two places per route.go/turnended.go:
+	// the session watcher's own routing (daemon.sessionwatcher.query_died,
+	// ERROR) and the feed resolver's terminal draw (daemon.feed.query_died,
+	// WARN).
+	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 }
 
 // ==========================================================================
