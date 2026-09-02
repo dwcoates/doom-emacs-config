@@ -83,8 +83,6 @@
 (declare-function agent-repl--ws-choose-frontend "agent-repl-frontends" (ws name))
 (declare-function agent-repl-register-frontend "agent-repl-frontends" (frontend))
 (declare-function agent-repl-frontend-create "agent-repl-frontends")
-(declare-function agent-repl--gui-send-turn "agent-repl-frontend-client" (ws input raw prompt-origin &optional on-settle))
-(declare-function agent-repl--gui-interrupt "agent-repl-frontend-client" (ws kind))
 (declare-function agent-repl--gui-cancel-detached-agents "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
@@ -310,9 +308,9 @@ missing decoration.")
 
 (defun agent-repl--frontend-adopt-webview-buffer (buf name owner)
   "Make webview BUF an agent-repl panel called NAME owned by OWNER, and return it.
-Every mount site (the workspace gui panel, the explain-config popup)
-adopts its webview through here, so the four properties that make a
-webview OURS never drift apart:
+Every mount site (the workspace gui panel) adopts its webview through
+here, so the four properties that make a webview OURS never drift
+apart:
   - the buffer name is pinned via the buffer-local
     `xwidget-webkit-buffer-name-format' (itself the fixed NAME, with no
     %-constructs), so the webapp's `document.title' changes never rename it;
@@ -329,9 +327,7 @@ workspace may tear down.  An unstamped webview reads as owned by nobody,
 so a background panel build was free to take the window the user was
 watching ANOTHER workspace's page in and mount its own page there.
 Passing the owner at the sole adoption chokepoint is what makes an
-unowned workspace webview unrepresentable rather than merely unlikely.
-It is nil for the explain-config popup, which is a singleton belonging
-to no workspace and is therefore foreign to none."
+unowned workspace webview unrepresentable rather than merely unlikely."
   (with-current-buffer buf
     (setq-local agent-repl--owning-workspace owner)
     (setq-local xwidget-webkit-buffer-name-format name)
@@ -920,8 +916,6 @@ which is not what closing a panel says."
   :open-fn #'agent-repl--gui-open
   :boot-fn #'agent-repl--gui-boot
   :kill-fn #'agent-repl--gui-kill
-  :send-fn #'agent-repl--gui-send-turn
-  :interrupt-fn #'agent-repl--gui-interrupt
   :cancel-detached-fn #'agent-repl--gui-cancel-detached-agents
   :running-p-fn #'agent-repl--gui-running-p
   :show-fn #'agent-repl--gui-show

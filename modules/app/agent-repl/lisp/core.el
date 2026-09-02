@@ -182,10 +182,6 @@ elsewhere (tracked command ids, in-flight reservations).
 TIMERS is an alist of (KEY . TIMER); see `agent-repl--latch-set-timer'."
   settled timers cleanup)
 
-(defun agent-repl--latch-settled-p (latch)
-  "Return non-nil once LATCH has been claimed."
-  (and (agent-repl--latch-settled latch) t))
-
 (defun agent-repl--latch-set-timer (latch key timer)
   "Hold TIMER on LATCH under KEY, cancelling any timer already held there.
 KEY is a symbol naming the ROLE the timer plays for the operation
@@ -575,17 +571,6 @@ set to obtain a prefix."
                           "workspace-prefix: source=CLAUDE_WORKSPACE_PREFIX value=%S"
                           result)
         result))))
-
-(defun agent-repl--workspace-prefix-slash ()
-  "Return the workspace-name prefix in `<prefix>/' form, or \"\" when unset.
-Builds on `agent-repl--workspace-prefix': when a non-empty prefix is
-set this appends a single trailing slash so callers can concatenate a
-bare slug directly; when no prefix is set this returns the empty string
-so names are generated without any leading slash."
-  (let ((prefix (agent-repl--workspace-prefix)))
-    (if (string-empty-p prefix)
-        ""
-      (concat prefix "/"))))
 
 ;;; Kill-cause attribution
 
@@ -1619,11 +1604,6 @@ functionality that are worth flagging in the log but are not fatal."
 (defvar agent-repl--warn-once-order nil
   "FIFO order for `agent-repl--warn-once-fingerprints'.")
 
-(defun agent-repl--reset-warn-once-state ()
-  "Clear process-local deduplication state used by `agent-repl--warn-once'."
-  (setq agent-repl--warn-once-fingerprints (make-hash-table :test 'equal)
-        agent-repl--warn-once-order nil))
-
 (defun agent-repl--warn-once (ws fingerprint fmt &rest args)
   "Log a warning once for stable causal FINGERPRINT and return whether emitted.
 WS, FMT, and ARGS have the same identity-complete logging contract as
@@ -1654,40 +1634,6 @@ to emit again rather than allowing unbounded diagnostic state."
 
 (defconst agent-repl--log-transition-capacity 4096
   "Maximum process-local transition keys retained for hot diagnostics.")
-
-(defun agent-repl--diagnostic-fingerprint (text)
-  "Return the nonreversible SHA-256 identity for diagnostic TEXT.
-TEXT must be a string because callers use this helper at data-minimizing
-boundaries where a coerced object representation could be unstable."
-  (unless (stringp text)
-    (agent-repl--log nil "diagnostic-fingerprint: rejected text-type=%S" (type-of text))
-    (error "agent-repl--diagnostic-fingerprint: text must be a string"))
-  (secure-hash 'sha256 text))
-
-(defun agent-repl--log-on-transition (ws key state fmt &rest args)
-  "Log FMT once for KEY's initial STATE and each later STATE transition.
-KEY must be a nonempty stable string identifying the observed operation.
-STATE is compared with `equal'; callers supply only minimized diagnostic
-state.  Returns non-nil exactly when a record was emitted."
-  (unless (and (stringp key) (not (string-empty-p key)))
-    (agent-repl--log ws "log-on-transition: rejected key=%S reason=empty-or-nonstring" key)
-    (error "agent-repl--log-on-transition: key must be a nonempty string"))
-  (let ((absent (make-symbol "absent"))
-        prior)
-    (setq prior (gethash key agent-repl--log-transition-states absent))
-    (unless (equal prior state)
-      (when (eq prior absent)
-        (when (= (hash-table-count agent-repl--log-transition-states)
-                 agent-repl--log-transition-capacity)
-          (remhash (car agent-repl--log-transition-order)
-                   agent-repl--log-transition-states)
-          (setq agent-repl--log-transition-order
-                (cdr agent-repl--log-transition-order)))
-        (setq agent-repl--log-transition-order
-              (append agent-repl--log-transition-order (list key))))
-      (puthash key state agent-repl--log-transition-states)
-      (apply #'agent-repl--log-verbose ws fmt args)
-      t)))
 
 ;;;; ---- Runtime log-verbosity controls ----
 ;;
@@ -1938,18 +1884,6 @@ workspace, global otherwise.  Returns the echoed text."
     (agent-repl--emit-message text t)
     text))
 
-(cl-defun agent-repl--user-message-for-error (ws verb error-text &key detail)
-  "Echo translated user copy for ERROR-TEXT about VERB in WS, filing the raw text.
-
-The composition of `agent-repl--user-copy-for-error' and
-`agent-repl--user-message' that nearly every daemon-refusal call site
-wants: the echo area gets the sentence, the log gets the sentence AND the
-chain.  DETAIL defaults to ERROR-TEXT, and is given explicitly only when a
-call site holds MORE evidence than the error string alone."
-  (agent-repl--user-message
-   ws (agent-repl--user-copy-for-error error-text verb) nil
-   :detail (or detail (and (stringp error-text) error-text))))
-
 (defconst agent-repl--backend-output-tail-lines 5
   "Nonblank captured lines a backend-initiation echo line may carry.")
 
@@ -2131,14 +2065,6 @@ caught and surfaced as a message — the rollover must not block startup."
   "Return non-nil if directory D contains a .git directory or file."
   (let ((git (expand-file-name ".git" d)))
     (or (file-directory-p git) (file-regular-p git))))
-
-(defun agent-repl--git-root (&optional dir)
-  "Find the git root by walking up from DIR (default `default-directory').
-Checks for both .git directory and .git file (worktrees)."
-  (let* ((dir (or dir default-directory))
-         (root (locate-dominating-file dir #'agent-repl--dir-has-git-p)))
-    (agent-repl--log-verbose nil "git-root: dir=%s root=%s" dir root)
-    (when root (agent-repl--path-canonical root))))
 
 (defun agent-repl--capture-process-output (program args &optional suppress-stderr timeout)
   "Run PROGRAM with ARGS, capture stdout, return its trimmed contents.
@@ -2448,32 +2374,6 @@ raw subprocess calls is the only enforcement.")
 Populated lazily on first call; remains nil until then.  Do not rely
 on this being set at load time.")
 
-(defun agent-repl--resolve-current-git-root ()
-  "Resolve the git root for the caller's current context.
-Prefers the current workspace's `:project-dir' when one is registered,
-otherwise falls back to `default-directory'.  Signals `user-error' when
-the resolved directory is not inside a git repository.
-
-Intended to be called exactly once per workspace, at creation time, so
-new worktrees are always rooted at the repository the user is currently
-working in (rather than wherever Emacs happened to be launched)."
-  (let* ((ws (agent-repl--ws-current-name))
-         (ws-dir (ignore-errors (agent-repl--ws-dir ws)))
-         (dir (or ws-dir default-directory))
-         (default-directory dir)
-         (raw (agent-repl--git-string-quiet "rev-parse" "--show-toplevel")))
-    (agent-repl--log ws
-                      "resolve-current-git-root: ws-dir=%S default-directory=%S resolved-dir=%S raw=%S"
-                      ws-dir default-directory dir raw)
-    (when (string-empty-p raw)
-      (agent-repl--log ws
-                        "resolve-current-git-root: FAILED ws-dir=%S resolved-dir=%S reason=not-a-git-repository"
-                        ws-dir dir)
-      (user-error "agent-repl: %s is not inside a git repository" dir))
-    (let ((root (file-name-as-directory raw)))
-      (agent-repl--log ws "resolve-current-git-root: SUCCESS root=%S" root)
-      root)))
-
 (defun agent-repl-print-git-branch ()
   "Print the git branch that was active when agent-repl config was loaded.
 Lazily computes and caches the value on first invocation."
@@ -2547,22 +2447,6 @@ expected to only invoke this from contexts where a workspace is active."
 ;; cycle because `--ws-put' itself calls `--do-log' on stub-create.
 ;; Treat these as part of the encapsulation boundary (they live
 ;; immediately upstream of the wrapper API rather than downstream).
-
-(defun agent-repl--active-inst (ws)
-  "Return the active `agent-repl-instantiation' for workspace WS.
-Signals an error if the environment or instantiation struct is
-missing — both must be initialized by `agent-repl--initialize-ws-env'
-before this is called."
-  (let ((env (agent-repl--ws-get ws :active-env)))
-    (unless env
-      (agent-repl--log ws "active-inst: FAILED env=nil reason=missing-active-env")
-      (error "agent-repl--active-inst: workspace %s has no :active-env (initialize-ws-env not called?)" ws))
-    (let ((inst (agent-repl--ws-get ws env)))
-      (unless inst
-        (agent-repl--log ws "active-inst: FAILED env=%S reason=missing-instantiation" env)
-        (error "agent-repl--active-inst: no instantiation struct for ws=%s env=%s (initialize-ws-env not called?)" ws env))
-      (agent-repl--log-verbose ws "active-inst: SUCCESS env=%S inst=%S" env inst)
-      inst)))
 
 (declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (workspace))
 
@@ -2741,25 +2625,18 @@ BUF may be a buffer object or a name string."
         (agent-repl--agent-panel-buffer-p b)
         (string-match-p "^ \\*Minibuf" name))))
 
-(defun agent-repl--non-agent-buffers (buffers)
-  "Return BUFFERS with agent panels, minibuffers, and dead buffers removed.
-BUFFERS may be buffer objects or name strings."
-  (cl-remove-if #'agent-repl--non-user-buffer-p buffers))
-
 ;;; Buffer background color
 ;;
 ;; Moved here from the now-deleted overlay.el, which otherwise existed
 ;; only for the vterm hide-overlay / font-scale / color-advice machinery.
-;; These two survive because `agent-repl-input-mode' (input.el) calls
+;; This survives because `agent-repl-input-mode' (input.el) calls
 ;; `agent-repl--set-buffer-background' to tint the input composer.
+;; `agent-repl--grey-hex' (its only production caller) was deleted as
+;; dead code, so `agent-repl--rgb-hex' is now used directly.
 
 (defun agent-repl--rgb-hex (r g b)
   "Return a #rrggbb hex color string for channel values R, G, B (0-255 each)."
   (format "#%02x%02x%02x" r g b))
-
-(defun agent-repl--grey-hex (n)
-  "Return a hex color string for greyscale value N (0=black, 255=white)."
-  (agent-repl--rgb-hex n n n))
 
 (defun agent-repl--set-buffer-background (color)
   "Set default and fringe background to COLOR in the current buffer.

@@ -32,8 +32,6 @@ env-axis REJECTION now that every registered frontend runs `:bare-metal'."
                        :open-fn #'ignore
                        :boot-fn #'ignore
                        :kill-fn #'ignore
-                       :send-fn #'ignore
-                       :interrupt-fn #'ignore
                        :running-p-fn #'ignore
                        :show-fn #'ignore
                        :hide-fn #'ignore
@@ -74,7 +72,7 @@ must signal rather than resolve to anything."
 
 (ert-deftest agent-repl-test-frontends-register-rejects-missing-slot ()
   "Registering a frontend without a required capability signals."
-  ;; Arrange — no :send-fn.
+  ;; Arrange — no :running-p-fn.
   (agent-repl-test--with-frontend-registry
    (should-error
     (agent-repl-register-frontend
@@ -82,8 +80,6 @@ must signal rather than resolve to anything."
       :name 'broken
       :open-fn #'ignore
       :kill-fn #'ignore
-      :interrupt-fn #'ignore
-      :running-p-fn #'ignore
       :supported-backends '(claude))))))
 
 (ert-deftest agent-repl-test-frontends-register-rejects-missing-boot-fn ()
@@ -98,8 +94,6 @@ would detonate at the next workspace creation, not here."
       :name 'broken
       :open-fn #'ignore
       :kill-fn #'ignore
-      :send-fn #'ignore
-      :interrupt-fn #'ignore
       :running-p-fn #'ignore
       :supported-backends '(claude)
       :supported-envs '(:bare-metal))))))
@@ -115,8 +109,6 @@ would detonate at the next workspace creation, not here."
       :open-fn #'ignore
       :boot-fn #'ignore
       :kill-fn #'ignore
-      :send-fn #'ignore
-      :interrupt-fn #'ignore
       :running-p-fn #'ignore
       :supported-backends '(claude))))))
 
@@ -294,36 +286,6 @@ that forgot to pass `:active-env' would silently accept it."
 
 ;;;; ---- Dispatch ---------------------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontends-dispatch-send-routes-by-ws ()
-  "Send dispatch reaches the workspace's frontend capability."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-frontend-registry
-     (let ((got nil))
-       (agent-repl-register-frontend
-        (agent-repl-test--make-frontend
-         'probe :send-fn (lambda (ws input raw origin settle)
-                           (setq got (list ws input raw origin settle)))))
-       (agent-repl--ws-put "ws1" :frontend 'probe)
-       ;; Act
-       (agent-repl--frontend-dispatch-send "ws1" "in" "raw" "PROMPT_ORIGIN_USER_SENT" 'settle)
-       ;; Assert
-       (should (equal got '("ws1" "in" "raw" "PROMPT_ORIGIN_USER_SENT" settle)))))))
-
-(ert-deftest agent-repl-test-frontends-dispatch-interrupt-carries-kind ()
-  "Interrupt dispatch forwards the gesture kind."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-frontend-registry
-     (let ((got nil))
-       (agent-repl-register-frontend
-        (agent-repl-test--make-frontend
-         'probe :interrupt-fn (lambda (ws kind) (setq got (list ws kind)) t)))
-       (agent-repl--ws-put "ws1" :frontend 'probe)
-       ;; Act / Assert
-       (should (agent-repl--frontend-dispatch-interrupt "ws1" 'escape))
-       (should (equal got '("ws1" escape)))))))
-
 (ert-deftest agent-repl-test-frontends-dispatch-cancel-detached-routes-by-ws ()
   "Detached-agent cancel dispatch reaches the workspace's own capability."
   ;; Arrange
@@ -339,20 +301,14 @@ that forgot to pass `:active-env' would silently accept it."
        (should (equal got "ws1"))))))
 
 (ert-deftest agent-repl-test-frontends-dispatch-cancel-detached-without-capability-is-nil ()
-  "A frontend with NO cancel capability answers nil rather than falling back.
-The whole point of the command is that an interrupt cannot reach detached
-work, so quietly sending one instead would report a stop that did nothing."
+  "A frontend with NO cancel capability answers nil rather than falling back."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-frontend-registry
-     (let ((interrupted nil))
-       (agent-repl-register-frontend
-        (agent-repl-test--make-frontend
-         'probe :interrupt-fn (lambda (_ws _kind) (setq interrupted t) t)))
-       (agent-repl--ws-put "ws1" :frontend 'probe)
-       ;; Act / Assert
-       (should-not (agent-repl--frontend-dispatch-cancel-detached "ws1"))
-       (should-not interrupted)))))
+     (agent-repl-register-frontend (agent-repl-test--make-frontend 'probe))
+     (agent-repl--ws-put "ws1" :frontend 'probe)
+     ;; Act / Assert
+     (should-not (agent-repl--frontend-dispatch-cancel-detached "ws1")))))
 
 (ert-deftest agent-repl-test-frontends-register-accepts-a-frontend-without-cancel-detached ()
   "The cancel capability is OPTIONAL: registration does not require it.

@@ -979,8 +979,7 @@ are the alternative if the view isn't visible)."
                 ((symbol-function 'agent-repl--ws-frontend)
                (lambda (_ws) (agent-repl-frontend-create
                               :name 'probe :open-fn #'ignore
-                              :kill-fn #'ignore :send-fn #'ignore
-                              :interrupt-fn #'ignore :running-p-fn #'ignore
+                              :kill-fn #'ignore :running-p-fn #'ignore
                               :supported-backends '(claude)))))
         (agent-repl--hide-and-preserve-status)
         (should (equal on-close-ws "test-ws"))))))
@@ -1065,7 +1064,7 @@ nothing is running, it opens the agent through the workspace's frontend
                    (agent-repl-frontend-create
                     :name 'probe
                     :open-fn (lambda (ws) (setq opened ws))
-                    :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                    :kill-fn #'ignore
                     :running-p-fn (lambda (_ws) nil)
                     :supported-backends '(claude)))))
         (agent-repl-simple)
@@ -1085,8 +1084,7 @@ hides)."
                  (lambda (_ws)
                    (agent-repl-frontend-create
                     :name 'probe
-                    :open-fn #'ignore :kill-fn #'ignore :send-fn #'ignore
-                    :interrupt-fn #'ignore
+                    :open-fn #'ignore :kill-fn #'ignore
                     :running-p-fn (lambda (_ws) t)
                     :show-fn (lambda (ws) (setq shown ws))
                     :supported-backends '(claude)))))
@@ -1121,7 +1119,7 @@ placeholder's teardown — arrives from a continuation."
                     (agent-repl-frontend-create
                      :name 'probe
                      :open-fn (lambda (ws) (setq opened ws) :pending)
-                     :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                     :kill-fn #'ignore
                      :running-p-fn (lambda (_ws) ,running-p)
                      :show-fn (lambda (ws) (setq shown ws) :pending)
                      :supported-backends '(claude)))))
@@ -1144,7 +1142,7 @@ placeholder's teardown — arrives from a continuation."
                   :name 'probe
                   ;; No `:pending': this capability finished here.
                   :open-fn (lambda (_ws) t)
-                  :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                  :kill-fn #'ignore
                   :running-p-fn (lambda (_ws) nil)
                   :show-fn #'ignore
                   :supported-backends '(claude)))))
@@ -1796,8 +1794,6 @@ puts the view away."
                                 :name 'probe
                                 :open-fn #'ignore
                                 :kill-fn (lambda (_ws) (setq killed t))
-                                :send-fn #'ignore
-                                :interrupt-fn #'ignore
                                 :running-p-fn #'ignore
                                 :supported-backends '(claude)))))
         (agent-repl--hide-and-preserve-status)
@@ -1819,7 +1815,6 @@ keep running."
                  (lambda (_ws) (agent-repl-frontend-create
                                 :name 'probe :open-fn #'ignore
                                 :kill-fn (lambda (_ws) (setq killed t))
-                                :send-fn #'ignore :interrupt-fn #'ignore
                                 :running-p-fn #'ignore
                                 :supported-backends '(claude)))))
         (agent-repl--on-close "ws1")
@@ -2034,7 +2029,6 @@ restart-fn the workspace's frontend registers."
                  (lambda (_ws)
                    (agent-repl-frontend-create
                     :name 'probe :open-fn #'ignore :kill-fn #'ignore
-                    :send-fn #'ignore :interrupt-fn #'ignore
                     :running-p-fn #'ignore
                     :restart-fn (lambda (ws) (setq restarted ws))
                     :supported-backends '(claude)))))
@@ -2065,7 +2059,6 @@ state axes."
                                (setq killed-ws ws)
                                (agent-repl--ws-put ws :agent-state nil)
                                (agent-repl--ws-put ws :repl-state nil))
-                    :send-fn #'ignore :interrupt-fn #'ignore
                     :running-p-fn #'ignore
                     :supported-backends '(claude)))))
         (agent-repl-kill)
@@ -3276,7 +3269,7 @@ available now."
                    (agent-repl-frontend-create
                     :name 'probe
                     :open-fn (lambda (ws) (setq opened ws) :pending)
-                    :kill-fn #'ignore :send-fn #'ignore :interrupt-fn #'ignore
+                    :kill-fn #'ignore
                     :running-p-fn (lambda (_ws) nil)
                     :supported-backends '(claude)))))
         ;; Act
