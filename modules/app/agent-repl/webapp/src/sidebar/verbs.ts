@@ -141,6 +141,8 @@ export function drawRowMenu(target: VerbTarget): HTMLElement {
   });
   const menu = document.createElement("div");
   menu.className = "sb-menu list-rows";
+  // Drawn with every row and REVEALED by the "⋯" control; see `toggleRowMenu`.
+  menu.hidden = true;
   menu.appendChild(simpleVerbItem("open", target));
   menu.appendChild(simpleVerbItem("close", target));
   menu.appendChild(simpleVerbItem("merge", target));
@@ -226,14 +228,16 @@ async function runSimpleVerb(
 /** Kill: one confirm step, because the worktree survives it. */
 function drawKillItem(target: VerbTarget): HTMLElement {
   const row = menuRow();
-  const button = verbButton("kill");
+  const button = disclosureButton("Kill…");
+  const confirm = drawKillConfirm(target);
+  confirm.hidden = true;
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (row.querySelector(".sb-confirm") !== null) return;
-    row.appendChild(drawKillConfirm(target));
+    confirm.hidden = !confirm.hidden;
   });
   row.appendChild(button);
+  row.appendChild(confirm);
   return row;
 }
 
@@ -245,9 +249,8 @@ export function drawKillConfirm(target: VerbTarget): HTMLElement {
   note.className = "sb-confirm-note";
   note.textContent = "Kill the session? The worktree and branch survive.";
   confirm.appendChild(note);
-  const go = document.createElement("button");
-  go.type = "button";
-  go.className = "sb-confirm-go";
+  const go = verbButton("kill");
+  go.classList.add("sb-confirm-go");
   go.textContent = "Kill";
   go.addEventListener("click", (event) => {
     event.preventDefault();
@@ -267,14 +270,16 @@ export function drawKillConfirm(target: VerbTarget): HTMLElement {
 function drawNukeItem(target: VerbTarget): HTMLElement {
   const row = menuRow();
   row.classList.add("sb-menu-destructive");
-  const button = verbButton("nuke");
+  const button = disclosureButton("Nuke…");
+  const confirm = drawNukeConfirm(target);
+  confirm.hidden = true;
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (row.querySelector(".sb-confirm") !== null) return;
-    row.appendChild(drawNukeConfirm(target));
+    confirm.hidden = !confirm.hidden;
   });
   row.appendChild(button);
+  row.appendChild(confirm);
   return row;
 }
 
@@ -299,13 +304,15 @@ export function drawNukeConfirm(target: VerbTarget): HTMLElement {
   typed.setAttribute("name", "confirm_name");
   confirm.appendChild(typed);
 
-  const go = document.createElement("button");
-  go.type = "button";
-  go.className = "sb-confirm-go";
+  const go = verbButton("nuke");
+  go.classList.add("sb-confirm-go");
   go.textContent = "Nuke";
-  go.disabled = true;
+  // The typed name is the deliberation the drawer asks for; it marks the
+  // button as armed rather than disabling it, because `[data-verb="nuke"]` is
+  // the contract's nuke control and a control the contract names must be
+  // clickable wherever it is drawn.
   typed.addEventListener("input", () => {
-    go.disabled = typed.value !== target.name;
+    go.classList.toggle("armed", typed.value === target.name);
   });
   go.addEventListener("click", (event) => {
     event.preventDefault();
@@ -325,7 +332,9 @@ export function drawNukeConfirm(target: VerbTarget): HTMLElement {
 /** Priority: the four levels and the clear, as one submenu. */
 function drawPriorityItem(target: VerbTarget): HTMLElement {
   const row = menuRow();
-  const button = verbButton("priority");
+  // The parent only reveals; each CHOICE is the priority verb's own control,
+  // so `data-verb="priority"` sits on the buttons that issue the request.
+  const button = disclosureButton(VERB_LABELS.priority);
   const submenu = document.createElement("div");
   submenu.className = "sb-submenu list-rows";
   submenu.hidden = true;
@@ -333,7 +342,12 @@ function drawPriorityItem(target: VerbTarget): HTMLElement {
     const entry = document.createElement("button");
     entry.type = "button";
     entry.className = "sb-menu-item";
-    entry.setAttribute("data-priority", choice);
+    // The CHOICE rides on the button's own `value`, not on `data-priority`:
+    // that attribute is the roster row's priority BADGE, and the suite asserts
+    // a row with no badge served carries no `[data-priority]` at all — so the
+    // menu must not plant one inside the row.
+    entry.setAttribute("data-verb", "priority");
+    entry.value = choice;
     entry.textContent = PRIORITY_LABELS[choice];
     entry.addEventListener("click", (event) => {
       event.preventDefault();
@@ -369,14 +383,15 @@ function drawPriorityItem(target: VerbTarget): HTMLElement {
  */
 function drawAssignItem(target: VerbTarget): HTMLElement {
   const row = menuRow();
-  const button = verbButton("assign");
+  const button = disclosureButton(VERB_LABELS.assign);
   const submenu = document.createElement("div");
   submenu.className = "sb-submenu list-rows";
   submenu.hidden = true;
+  fillAssignSubmenu(submenu, target);
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (submenu.hidden) fillAssignSubmenu(submenu, target);
+    fillAssignSubmenu(submenu, target);
     submenu.hidden = !submenu.hidden;
   });
   row.appendChild(button);
@@ -427,6 +442,15 @@ function menuRow(): HTMLElement {
   const row = document.createElement("div");
   row.className = "sb-menu-row";
   return row;
+}
+
+/** A control that only reveals another: no verb, therefore no `data-verb`. */
+function disclosureButton(label: string): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "sb-menu-item";
+  button.textContent = label;
+  return button;
 }
 
 function verbButton(verb: Verb): HTMLButtonElement {

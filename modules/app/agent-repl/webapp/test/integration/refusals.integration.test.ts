@@ -231,11 +231,17 @@ describe("CloseWorkspace refused as blocked", () => {
 });
 
 /**
- * Most `<Method>Error` messages are still EMPTY today. An empty error is not
- * "no error": the click failed, and the user is entitled to know which verb
- * failed even when the daemon offered no words.
+ * An `<Method>Error` whose CAUSE IS UNSET.
+ *
+ * Landing 4 typed every error: each carries a `cause` oneof with the four
+ * cross-cutting arms plus its own. So an error with no cause set is not "an
+ * empty error the daemon had no words for" — it is a frame this build cannot
+ * read, and the ruling on unset oneofs applies to it exactly as it applies to
+ * an unset `result`: a MALFORMED VIEW, reported as `frameUndecodable`, with no
+ * refusal invented at the control. (This table previously asserted the
+ * pre-landing-4 behaviour, when these messages really were empty.)
  */
-const EMPTY_ERROR_CASES = [
+const UNSET_CAUSE_CASES = [
   {
     name: "SetModel",
     rpc: "setModel" as const,
@@ -266,8 +272,8 @@ const EMPTY_ERROR_CASES = [
   },
 ];
 
-describe.each(EMPTY_ERROR_CASES)("$name's empty error", (testCase) => {
-  it("draws a refusal naming the rpc rather than nothing", async () => {
+describe.each(UNSET_CAUSE_CASES)("$name's unset error cause", (testCase) => {
+  it("reports a malformed view rather than inventing a refusal", async () => {
     // Arrange
     harness = await startHarness();
     harness.fake.answer(testCase.rpc, testCase.response());
@@ -276,12 +282,10 @@ describe.each(EMPTY_ERROR_CASES)("$name's empty error", (testCase) => {
     // Act
     await harness.click(testCase.click);
     // Assert
-    expect(harness.$(`${testCase.site} .refusal`)?.textContent?.toLowerCase()).toContain(
-      testCase.rpc.toLowerCase(),
-    );
+    expect(harness.failureArms()).toContain("frameUndecodable");
   });
 
-  it("draws the refusal at the call site", async () => {
+  it("draws no refusal at the call site", async () => {
     // Arrange
     harness = await startHarness();
     harness.fake.answer(testCase.rpc, testCase.response());
@@ -290,7 +294,7 @@ describe.each(EMPTY_ERROR_CASES)("$name's empty error", (testCase) => {
     // Act
     await harness.click(testCase.click);
     // Assert
-    expect(harness.$(`${testCase.site} .refusal`)).not.toBeNull();
+    expect(harness.$(`${testCase.site} .refusal`)).toBeNull();
   });
 });
 

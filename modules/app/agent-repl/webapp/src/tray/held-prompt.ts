@@ -126,6 +126,12 @@ export function drawHeldPrompt(u: HeldPrompt, tc: TrayContext): HTMLElement {
   card.appendChild(head);
 
   const verdict = drawClassification(classification, `${path}.classification`);
+  // The acceptance is STATE OF THE CARD, not of a marker that only exists once
+  // it is true: the arm that has an acceptance says which way it stands, and
+  // the arms that have none say nothing at all.
+  if (verdict.acceptedState !== null) {
+    card.setAttribute("data-accepted", verdict.acceptedState ? "true" : "false");
+  }
   head.appendChild(verdict.badge);
   if (verdict.accepted !== null) head.appendChild(verdict.accepted);
   head.appendChild(
@@ -190,6 +196,8 @@ export function drawHeldPromptQueuedAt(
 /** What one classification arm contributes to the card. */
 interface Verdict {
   badge: HTMLElement;
+  /** Whether this arm's acceptance stands, or null where it has none. */
+  acceptedState: boolean | null;
   /** The confirmed marker, on an accepted hold. */
   accepted: HTMLElement | null;
   /** The rationale or failure detail, when the arm carries one. */
@@ -240,6 +248,7 @@ export function drawHeldPromptClassifying(_u: HeldPromptClassifying, path: strin
   });
   return {
     badge: badge("queued — classifying", "queued-badge classifying"),
+    acceptedState: null,
     accepted: null,
     detail: null,
     offersAccept: false,
@@ -254,6 +263,7 @@ export function drawHeldPromptInterject(u: HeldPromptInterject, path: string): V
   });
   return {
     badge: badge("interjects", "queued-badge interrupt"),
+    acceptedState: null,
     accepted: null,
     detail: rationale(u.rationale),
     offersAccept: false,
@@ -283,6 +293,7 @@ export function drawHeldPromptHoldForTurnEnd(u: HeldPromptHoldForTurnEnd, path: 
   }
   return {
     badge: badge("after this turn", "queued-badge"),
+    acceptedState: confirmed,
     accepted,
     detail: rationale(u.rationale),
     offersAccept: !confirmed,
@@ -306,7 +317,8 @@ export function drawHeldPromptUninterruptibleTurn(
     context: { path, command: literal },
   });
   return {
-    badge: badge(`waits for ${literal} to finish`, "queued-badge uninterruptible"),
+    badge: uninterruptibleBadge(literal),
+    acceptedState: null,
     accepted: null,
     detail: null,
     offersAccept: false,
@@ -327,6 +339,7 @@ export function drawHeldPromptClassificationError(
   detail.textContent = u.detail;
   return {
     badge: badge("unclassified", "queued-badge unclassified"),
+    acceptedState: null,
     accepted: null,
     detail,
     offersAccept: false,
@@ -348,6 +361,24 @@ export function sessionCommandLiteral(command: SessionCommand, path: string): st
     throw new MalformedView(path, `no session command has number ${command}`);
   }
   return getOption(value, session_command_spec).literal;
+}
+
+/**
+ * The badge that names the cut.
+ *
+ * The command is its OWN element (`[data-command]`), because it is the turn's
+ * own token rather than a word in this sentence — the same hook a command row
+ * carries in the feed.
+ */
+function uninterruptibleBadge(literal: string): HTMLElement {
+  const element = badge("waits for ", "queued-badge uninterruptible");
+  const command = document.createElement("code");
+  command.className = "queued-command";
+  command.setAttribute("data-command", "");
+  command.textContent = literal;
+  element.appendChild(command);
+  element.appendChild(document.createTextNode(" to finish"));
+  return element;
 }
 
 /** The hold's own standing explanation, per arm. */
@@ -382,8 +413,9 @@ export function drawHeldPromptShutdownHold(u: HeldPromptShutdownHold, path: stri
     operation: "tray.held-prompt.shutdown-hold",
     context: { path, schedule_id: u.scheduleId },
   });
-  const line = holdLine("held for the scheduled restart");
-  line.title = `schedule ${u.scheduleId}`;
+  // The schedule id is DRAWN, not only titled: it is the token that joins this
+  // card to the shutdown it should explain, and a hover cannot be read back.
+  const line = holdLine(`held for the scheduled restart (${u.scheduleId})`);
   line.setAttribute("data-schedule-id", u.scheduleId);
   return line;
 }
@@ -458,11 +490,18 @@ export function drawHeldPromptActions(spec: ActionSpec): HTMLElement {
 
   const actions = document.createElement("div");
   actions.className = "queued-actions";
-  if (noReleaseTitle !== undefined) actions.title = noReleaseTitle;
 
-  if (noReleaseTitle === undefined) {
-    actions.appendChild(actionButton("release", "Release", spec));
+  // EVERY ENTRY OFFERS A RELEASE. Where an arm forbids the interrupt a release
+  // needs, the daemon refuses it and the refusal is said at this control —
+  // which is the contract's own answer to a verb that cannot run. Withholding
+  // the button instead hid the reason in a hover and left the reader guessing
+  // whether the tray had simply failed to draw it.
+  const release = actionButton("release", "Release", spec);
+  if (noReleaseTitle !== undefined) {
+    release.title = noReleaseTitle;
+    release.classList.add("queued-action-unlikely");
   }
+  actions.appendChild(release);
   actions.appendChild(actionButton("drop", "Drop", spec));
   if (spec.accept) actions.appendChild(actionButton("accept", "Accept", spec));
   return actions;

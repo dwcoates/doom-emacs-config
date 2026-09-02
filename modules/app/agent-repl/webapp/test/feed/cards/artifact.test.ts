@@ -156,7 +156,11 @@ describe("drawFeedArtifact", () => {
     const anchor = el.querySelector<HTMLAnchorElement>(".artifact-url a");
     anchor?.click();
     await settle();
-    expect(anchor?.getAttribute("data-arm")).toBe("invalidUrl");
+    // The refusal is the shared `.refusal[data-arm]` ELEMENT beside the link,
+    // not a mark on the anchor: the arm's own facts need somewhere to be read.
+    expect(
+      anchor?.parentElement?.querySelector(".refusal")?.getAttribute("data-arm"),
+    ).toBe("invalidUrl");
   });
 
   it("draws the failed reason where the url would have been", () => {

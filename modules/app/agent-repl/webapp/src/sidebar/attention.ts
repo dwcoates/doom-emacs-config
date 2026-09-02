@@ -47,8 +47,15 @@ export const WINDOW_TIMERS: BlinkTimers = {
   clearTimeout: (handle) => globalThis.clearTimeout(handle),
 };
 
-/** What `data-blink` says while the cadence runs, and after it settles. */
-export type BlinkState = "on" | "off" | "steady";
+/**
+ * What `data-blink` says.
+ *
+ * THE SETTLED MARKER IS LIT, not a third visual state: the cadence is two
+ * blinks and then a STEADY marker, and steady means the marker STANDS — so it
+ * reads `on` like every other lit phase. That the cadence is over is a
+ * separate fact, reported on `data-settled`, and no surface paints it.
+ */
+export type BlinkState = "on" | "off";
 
 interface Entry {
   /** How many phases have elapsed; `ATTENTION_PHASES` means settled. */
@@ -146,7 +153,11 @@ export class AttentionRegistry {
 
   private paint(entry: Entry): void {
     const state = blinkState(entry.phase);
-    for (const element of entry.elements) element.setAttribute("data-blink", state);
+    const settled = entry.phase >= ATTENTION_PHASES;
+    for (const element of entry.elements) {
+      element.setAttribute("data-blink", state);
+      element.setAttribute("data-settled", settled ? "true" : "false");
+    }
   }
 
   private stop(entry: Entry): void {
@@ -156,8 +167,8 @@ export class AttentionRegistry {
   }
 }
 
-/** Which state a phase index draws: even on, odd off, settled steady. */
+/** Which state a phase index draws: even on, odd off, and settled lit. */
 export function blinkState(phase: number): BlinkState {
-  if (phase >= ATTENTION_PHASES) return "steady";
+  if (phase >= ATTENTION_PHASES) return "on";
   return phase % 2 === 0 ? "on" : "off";
 }
