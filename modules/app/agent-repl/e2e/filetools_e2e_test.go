@@ -43,12 +43,9 @@ package e2e
 import (
 	"testing"
 
-	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
-
-	"connectrpc.com/connect"
 
 	"claude-repld/integration/harness"
 )
@@ -62,33 +59,6 @@ func newFileToolsWorkspace(t *testing.T) (*World, *workspacev1.WorkspaceRef) {
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 	return w, ws
-}
-
-// awaitFeedRow opens ws's root feed and answers the first row satisfying
-// pred, checking the already-materialized page first (by the time a test
-// calls this, driveScenarioToCompletion has already waited for the turn's
-// own terminal row, so a tool call's settled row is normally already in the
-// page) and falling back to the tail otherwise. This mirrors
-// AwaitTurnEnded's page-then-watch shape in world_test.go; duplicated here
-// rather than shared because this file may not edit world_test.go.
-func awaitFeedRow(t *testing.T, w *World, ws *workspacev1.WorkspaceRef, what string, pred func(*frontendv1.FeedRow) bool) *frontendv1.FeedRow {
-	t.Helper()
-	opened, err := w.Client().OpenFeed(w.Ctx(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
-	if err != nil {
-		t.Fatalf("OpenFeed: %v", err)
-	}
-	success := opened.Msg.GetSuccess()
-	if success == nil {
-		t.Fatalf("OpenFeed = %v, want success", opened.Msg)
-	}
-	for _, row := range success.GetPage().GetSuccess().GetRows() {
-		if pred(row) {
-			return row
-		}
-	}
-	stream := w.WatchFeedOn(w.Client(), success.GetWatch())
-	defer stream.Close()
-	return harness.AwaitView(t, w.Ctx(), stream, what, pred)
 }
 
 // toolCallSettled matches a SimpleToolCall row for the given turn and tool
