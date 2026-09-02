@@ -121,6 +121,25 @@ func TestTheEngineTakesTheRestartPendingHold(t *testing.T) {
 	}
 }
 
+func TestReleasingTheRestartHoldTellsTheQueueItsLeasesChanged(t *testing.T) {
+	// Arrange: releasing the hold changes a row the queue is not watching, so
+	// without this call the held intake never drains after a bounce.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	if err := runRelaunch(t, h, ws, ReasonShimChanged); err != nil {
+		t.Fatalf("RelaunchShim: %v", err)
+	}
+
+	// Assert
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.leaseChanged) != 1 || h.leaseChanged[0] != ws {
+		t.Fatalf("lease-changed calls = %v, want exactly [%s]", h.leaseChanged, ws)
+	}
+}
+
 func TestTheReapIsTheGateBeforeTheNewShimIsInstalled(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

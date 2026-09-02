@@ -340,6 +340,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Participants:    pushes,
 		Quiesce:         intake.Quiesce,
 		DrainIntake:     intake.DrainIntake,
+		LeaseChanged:    queue.OnLeaseChanged,
 		Freeness:        fleet.Freeness(),
 		Shims:           fleet,
 		LockProbe:       fleet.ProbeLock,
