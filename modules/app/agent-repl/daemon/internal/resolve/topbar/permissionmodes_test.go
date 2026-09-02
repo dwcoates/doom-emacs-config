@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
-	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/ids"
@@ -38,35 +37,6 @@ func TestPermissionModesReportsFalseBeforeAPickerIsServed(t *testing.T) {
 	// Assert.
 	if ok {
 		t.Fatalf("PermissionModes = %v, true before any picker was served, want false", modes)
-	}
-}
-
-// TestPermissionModesAnswersExactlyTheServedSet covers the served set: the
-// picker's options are what a switch is checked against, in the order served.
-func TestPermissionModesAnswersExactlyTheServedSet(t *testing.T) {
-	// Arrange.
-	r, ws := newModesResolver(t)
-	r.SetPermissionModePicker(ws, &frontendv1.TopbarPermissionModePicker{
-		Options: []*frontendv1.TopbarPermissionModeOption{
-			{Mode: "default"}, {Mode: "plan"}, {Mode: "accept_edits"},
-		},
-	})
-
-	// Act.
-	modes, ok := r.PermissionModes(ws)
-
-	// Assert.
-	if !ok {
-		t.Fatal("PermissionModes reported no set after a picker was served")
-	}
-	want := []string{"default", "plan", "accept_edits"}
-	if len(modes) != len(want) {
-		t.Fatalf("PermissionModes = %v, want %v", modes, want)
-	}
-	for i := range want {
-		if modes[i] != want[i] {
-			t.Fatalf("PermissionModes = %v, want %v in the served order", modes, want)
-		}
 	}
 }
 

@@ -13,7 +13,8 @@
 //	OnSessionStarted       the vendor session id and the effective model
 //	SetAccount             the account arm (a logged-out root is a DRAWN
 //	                       warning, so "not yet read" is not the same fact)
-//	SetPermissionModePicker the switchable set the daemon will accept
+//	OnSessionStarted       (also) the permission-mode picker, served from the
+//	                       vendor's fixed switchable set
 //	SessionContextUsage    the context chip's figure and its breakdown
 //
 // Connectivity and the warning strip need nothing: an unobserved link is
@@ -88,10 +89,6 @@ type Resolver interface {
 	// SetModelCatalog installs the switchable model set the selector renders,
 	// in display order.
 	SetModelCatalog(ws ids.WorkspaceID, models []*conversationv1.ModelOption)
-	// SetPermissionModePicker installs the picker: the mode in force plus
-	// EXACTLY the switchable set the daemon will accept. SetPermissionMode
-	// validates against what was served here.
-	SetPermissionModePicker(ws ids.WorkspaceID, picker *frontendv1.TopbarPermissionModePicker)
 	// PermissionModes answers exactly the switchable mode set that was served,
 	// in the order it was served, reporting false when no picker has been
 	// installed. It is what a mode switch is validated against.
