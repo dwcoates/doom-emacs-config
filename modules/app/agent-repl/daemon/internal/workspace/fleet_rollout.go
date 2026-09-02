@@ -99,23 +99,34 @@ func (f *Fleet) Occupy(ws ids.WorkspaceID, holder string) (func(), bool, error) 
 	return release, true, nil
 }
 
+// Displaced is the turn a lease holder took the session away from: its id and
+// the text it carried, so the resubmission at lease release does not depend on
+// the turn's record still being open.
+type Displaced struct {
+	Turn ids.TurnID
+	Text string
+}
+
 // CaptureDisplaced durably marks the turn a lease holder displaced, so it is
-// resubmitted EXACTLY ONCE at lease release even across a daemon bounce. It
-// reports false when nothing was in flight, which is the ordinary case.
-func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error) {
+// resubmitted EXACTLY ONCE at lease release even across a daemon bounce, and
+// ENDS that turn: the holder is about to drive the session itself, and a user
+// turn left running underneath it would be racing the holder for the same
+// conversation. It reports false when nothing was in flight, which is the
+// ordinary case.
+func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (Displaced, bool, error) {
 	f.mu.RLock()
 	session, ok := f.sessions[ws]
 	f.mu.RUnlock()
 	if !ok || session.watcher == nil {
-		return "", false, nil
+		return Displaced{}, false, nil
 	}
 	inFlight := session.watcher.TurnInFlight()
 	if inFlight == nil {
-		return "", false, nil
+		return Displaced{}, false, nil
 	}
 	open, err := f.deps.DB.OpenTurns(ctx, ws)
 	if err != nil {
-		return "", false, fmt.Errorf("workspace: capture the displaced turn %q: %w", *inFlight, err)
+		return Displaced{}, false, fmt.Errorf("workspace: capture the displaced turn %q: %w", *inFlight, err)
 	}
 	record, found := wsm.Turn{}, false
 	for _, t := range open {
@@ -131,16 +142,25 @@ func (f *Fleet) CaptureDisplaced(ctx context.Context, ws ids.WorkspaceID) (ids.T
 		f.deps.Log.Global().Warn(opFleetRollout, "the in-flight turn has no open durable record to displace", dlog.Context{
 			"workspace": string(ws), "turn": string(*inFlight),
 		})
-		return "", false, nil
+		return Displaced{}, false, nil
 	}
 	record.Displaced = true
 	if err := f.deps.DB.PutTurn(ctx, record); err != nil {
-		return "", false, fmt.Errorf("workspace: record the displaced turn %q: %w", *inFlight, err)
+		return Displaced{}, false, fmt.Errorf("workspace: record the displaced turn %q: %w", *inFlight, err)
+	}
+	// THE MARK GOES DOWN BEFORE THE KILL. A kill that landed with no durable
+	// mark would end the user's turn and leave nothing to put back.
+	if err := (&shimAdapter{client: session.client}).KillTurn(ctx, *inFlight, true); err != nil {
+		// The kill failing does NOT unmark the turn: it is still the turn the
+		// holder displaced, and putting it back at release is right either way.
+		f.deps.Log.Global().Warn(opFleetRollout, "the displaced turn could not be ended", dlog.Context{
+			"workspace": string(ws), "turn": string(*inFlight), "cause": err.Error(),
+		})
 	}
 	f.deps.Log.Global().Debug(opFleetRollout, "captured the displaced turn", dlog.Context{
 		"workspace": string(ws), "turn": string(*inFlight),
 	})
-	return *inFlight, true, nil
+	return Displaced{Turn: *inFlight, Text: record.Text}, true, nil
 }
 
 // Prelaunch brings up a NEW shim for the workspace on a FRESH socket, INERT BY
