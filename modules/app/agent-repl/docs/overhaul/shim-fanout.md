@@ -629,3 +629,16 @@ every UX or contract gap you surfaced instead of improvising.
   sonnet-medium dead-code pass, final report with both dead-code lists and
   the capture-checklist answers — then parks: no dispatch after the report,
   STOP-shim.md rewritten to the resumption state, lead stays resident.
+- LEDGER: engine remediation #2 merged at 062aaeda5 (worktree/branch
+  retired): buckets 1,2,3-rem,5 fixed; 8/10/12 engine halves 3/4 each; R15
+  applied; store relay (a) via per-row backgroundTasks; rotation = post-clear
+  init id; Persistence.onFault/onDegradedWindow were never subscribed (fixed);
+  dead query now writes the open turn's failure terminal; ReadHistory store
+  outage → session fault. Integration on the merged tree: 169 / 25 / 1 in
+  184 s. RULING PENDING (project lead): denied tool's START frame — defer
+  start until the gate speaks (a) vs eager start + denied terminal (b).
+  Hand-over to the fakes/rebuild brief: `!bash` foreground park scenario for
+  the unsupported-detach test; `!cold-seed` must stamp the last ASSISTANT
+  line old; convert/detached.ts hard-codes `requested` on task_started /
+  task_notification (ctrl-b by_user preceded by a requested announcement;
+  outputReadable unset on !bash-detach); the fold drops the usage carrier.
