@@ -20,20 +20,9 @@
     "useDefineForClassFields": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  // `legacy/` holds the pre-Connect renderers as READ-ONLY reference for the
-  // look the new components port. It does not compile (it imports the deleted
-  // transport and store modules) and is never imported, so it is excluded here
-  // as well as from vitest and the vite build. The final seam agent deletes it.
-  //
-  // `test/integration` is excluded TEMPORARILY. Its harness mounts every
-  // component, so it cannot compile until the last of them lands
-  // (src/topbar/topbar.ts, src/login/login.ts, src/lifecycle/lifecycle.ts are
-  // still missing, and src/feed/renderers.ts exposes no registry assembler
-  // yet), and until then it would keep `npm run typecheck` red for a reason
-  // that has nothing to do with the code under change. The suite is
-  // type-checked on its own meanwhile: `tsconfig.integration-check.json`
-  // covers the fake daemon, the fixtures and the vocabulary loader, and the
-  // vitest integration config runs it. THE WIRING AGENT REMOVES THIS ENTRY
-  // once the components are all present.
-  "exclude": ["legacy", "node_modules", "dist", "test/integration"]
+  // The integration suite compiles WITH everything else: its harness mounts
+  // every component through that component's own published signature, so a
+  // renamed mount, a changed deps object or a dropped DOM hook fails the
+  // typecheck rather than waiting for a slow suite to notice at runtime.
+  "exclude": ["node_modules", "dist"]
 }
