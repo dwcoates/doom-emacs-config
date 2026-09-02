@@ -86,9 +86,34 @@ without shelling out to git."
       (should (null (agent-repl--compute-version)))
       (should-not git-called))))
 
+(ert-deftest agent-repl-config-test-version/load-computes-nothing ()
+  "LOADING the module must not shell out to git: the load happens before the
+first frame is painted, and `git rev-parse' is a synchronous subprocess."
+  (should-not agent-repl--version-computed))
+
+(ert-deftest agent-repl-config-test-version-string/computes-on-first-use ()
+  "The SHA is computed when it is first asked for, not when the file loads."
+  (let ((agent-repl--version nil)
+        (agent-repl--version-computed nil))
+    (cl-letf (((symbol-function 'agent-repl--compute-version)
+               (lambda () "cafebabe0001")))
+      (should (equal (agent-repl--version-string) "cafebabe0001")))))
+
+(ert-deftest agent-repl-config-test-version-string/computes-only-once ()
+  "A repo that cannot answer is not re-probed on every call."
+  (let ((agent-repl--version nil)
+        (agent-repl--version-computed nil)
+        (calls 0))
+    (cl-letf (((symbol-function 'agent-repl--compute-version)
+               (lambda () (setq calls (1+ calls)) nil)))
+      (agent-repl--version-string)
+      (agent-repl--version-string)
+      (should (= calls 1)))))
+
 (ert-deftest agent-repl-config-test-version-command/messages-and-returns-sha ()
   "`agent-repl-version' messages and returns the cached SHA."
   (let ((agent-repl--version "feedface1234")
+        (agent-repl--version-computed t)
         (messaged nil))
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq messaged (apply #'format fmt args)))))
@@ -99,6 +124,7 @@ without shelling out to git."
   "`agent-repl-version' reports the \"unknown\" sentinel when the cached
 SHA is nil."
   (let ((agent-repl--version nil)
+        (agent-repl--version-computed t)
         (messaged nil))
     (cl-letf (((symbol-function 'message)
                (lambda (fmt &rest args) (setq messaged (apply #'format fmt args)))))

@@ -97,8 +97,15 @@ it wrote to that dir's `daemon.addr', and STDERR-BUFFER its structured
 JSON log."
   process state-dir address stderr-buffer)
 
-(defconst agent-repl-itest-default-timeout 15
-  "Seconds `agent-repl-itest--wait-until' waits before failing.")
+(defconst agent-repl-itest-default-timeout 14
+  "Seconds `agent-repl-itest--wait-until' waits before failing.
+Sized at ~3x the slowest healthy wait observed across a full run of every
+`test-integration-*.el' suite (the link suite's own handover/reconnect
+scenarios top out around 4.7s) -- see the bounds table in
+`modules/app/agent-repl/AGENTS.md's test section.  Do not raise this back
+toward its old, unmeasured 15s without re-measuring: a bound this close to
+the slowest suite's own \"needs longer\" cases (composer's ~2.4s outage
+drain, host's ~2.7s not-yet-adopted retry) is deliberate, not slack.")
 
 (defun agent-repl-itest--wait-until (pred &optional timeout description)
   "Block until PRED returns non-nil, or fail after TIMEOUT seconds.
@@ -136,6 +143,11 @@ almost useless."
       (with-temp-buffer
         (insert-file-contents path)
         (string-trim (buffer-string))))))
+
+(defvar agent-repl-itest--shared-state-dir nil
+  "State root of the ONE fake daemon this Emacs process shares.
+Created on first use and never deleted while the process lives; see
+`agent-repl-itest--shared-daemon'.")
 
 (defun agent-repl-itest--start-daemon (&optional state-dir)
   "Start one fake daemon in STATE-DIR (a fresh private dir by default).
@@ -197,6 +209,12 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
       ;; Ask for the orderly exit first, so daemon.addr removal is exercised
       ;; on the same path production takes.
       (ignore-errors (agent-repl-itest--exit daemon))
+      ;; Kept at 5s rather than tightened to ~3x the observed teardown time
+      ;; (well under 1s in every measured run): this runs after EVERY
+      ;; scenario in every suite, tearing down a REAL OS process via its own
+      ;; graceful-shutdown path, and a slow CI host reclaiming that process
+      ;; is exactly the "genuinely needs longer" case -- a spurious failure
+      ;; here just falls through to `delete-process' below anyway.
       (agent-repl-itest--wait-until
        (lambda () (not (process-live-p process)))
        5 "the fake daemon to exit")
@@ -204,7 +222,14 @@ Unless KEEP-STATE-DIR, deletes its private state dir."
         (delete-process process)))
     (let ((stderr (agent-repl-itest-daemon-stderr-buffer daemon)))
       (when (buffer-live-p stderr) (kill-buffer stderr))))
-  (unless keep-state-dir
+  ;; THE SHARED STATE ROOT OUTLIVES EVERY DAEMON THAT EVER BOUND IT.  A
+  ;; scenario that stops the shared daemon (cold start's "no daemon.addr"
+  ;; cases do exactly that) must not take the root with it: the next
+  ;; scenario respawns into the same root, and a deleted one would leave
+  ;; production's discovery pointed at a directory that no longer exists.
+  (unless (or keep-state-dir
+              (equal (agent-repl-itest-daemon-state-dir daemon)
+                     agent-repl-itest--shared-state-dir))
     (ignore-errors (delete-directory (agent-repl-itest-daemon-state-dir daemon) t))))
 
 ;;;; ---- The control plane ----
@@ -346,6 +371,12 @@ STREAM filters by stream name and WORKSPACE-ID by workspace."
        (and (or (null stream) (equal (alist-get 'stream sub) stream))
             (or (null workspace-id) (equal (alist-get 'workspace_id sub) workspace-id))))
      subs)))
+
+(defun agent-repl-itest--reset (daemon)
+  "Return DAEMON to its start-of-process state and report what was cleared.
+Drops the recording, the scripted table, the stored snapshots and every
+armed gate, and ends every standing stream with a clean end frame."
+  (agent-repl-itest--control-ok daemon "/_fake/reset" "{}"))
 
 (defun agent-repl-itest--exit (daemon)
   "Ask DAEMON to exit orderly (removing its `daemon.addr')."
@@ -541,6 +572,97 @@ into the NEXT one\='s daemon."
   (ignore-errors (agent-repl-link-teardown))
   (ignore-errors (agent-repl-link--cancel-reconnect)))
 
+;;;; ---- The ONE fake daemon a suite run shares ----
+;;
+;; A fake-daemon process costs seconds to boot, and the integration suites run
+;; hundreds of scenarios.  ONE daemon therefore serves the whole batch Emacs
+;; process: it is started lazily on the first scenario that needs it, RESET
+;; between scenarios, and reaped at process exit.
+;;
+;; A RESET IS NOT A WEAKER TEARDOWN.  What a fresh process used to guarantee
+;; was that no scenario could see another\='s state, and that comes from three
+;; things, all of which the reset does: the fake\='s own tables are cleared and
+;; its standing streams ended (`/_fake/reset\='), the shared state root is swept
+;; back to nothing but `daemon.addr\=', and `daemon.addr\=' is re-published so a
+;; scenario that pointed it at a stub daemon cannot misdirect the next one.
+
+(defvar agent-repl-itest--shared-daemon nil
+  "The one fake daemon this Emacs process shares, or nil before the first.
+A scenario may legitimately STOP it (cold start\='s absent-address cases
+do), so the accessor treats a dead process as an absent one and respawns
+into the same state root.")
+
+(defun agent-repl-itest--shutdown-shared-daemon ()
+  "Reap the shared daemon and its state root.  Runs on `kill-emacs-hook'."
+  (when agent-repl-itest--shared-daemon
+    (let ((daemon agent-repl-itest--shared-daemon))
+      (setq agent-repl-itest--shared-daemon nil)
+      (ignore-errors (agent-repl-itest--stop-daemon daemon t))))
+  (when agent-repl-itest--shared-state-dir
+    (let ((dir agent-repl-itest--shared-state-dir))
+      (setq agent-repl-itest--shared-state-dir nil)
+      (ignore-errors (delete-directory dir t)))))
+
+(defun agent-repl-itest--shared-daemon ()
+  "Return the shared fake daemon, starting or restarting it when needed."
+  (unless agent-repl-itest--shared-state-dir
+    (setq agent-repl-itest--shared-state-dir (agent-repl-itest--private-state-dir))
+    (add-hook 'kill-emacs-hook #'agent-repl-itest--shutdown-shared-daemon))
+  (unless (and agent-repl-itest--shared-daemon
+               (process-live-p
+                (agent-repl-itest-daemon-process agent-repl-itest--shared-daemon)))
+    (setq agent-repl-itest--shared-daemon
+          (agent-repl-itest--start-daemon agent-repl-itest--shared-state-dir)))
+  agent-repl-itest--shared-daemon)
+
+(defun agent-repl-itest--sweep-state-dir (daemon)
+  "Empty DAEMON\='s state root of everything but `daemon.addr'.
+Production writes into the state root (the JSONL log, the notes state
+file), and a scenario that read another scenario\='s leftovers there would
+be exactly the leak a fresh process used to prevent."
+  (let ((dir (agent-repl-itest-daemon-state-dir daemon)))
+    (dolist (entry (directory-files dir t directory-files-no-dot-files-regexp t))
+      (unless (equal (file-name-nondirectory entry) "daemon.addr")
+        (ignore-errors
+          (if (file-directory-p entry)
+              (delete-directory entry t)
+            (delete-file entry)))))))
+
+(defun agent-repl-itest--republish-addr (daemon)
+  "Point DAEMON\='s state root at DAEMON, whatever last wrote `daemon.addr'.
+A cold-start scenario spawns a STUB daemon that publishes its own address
+into the shared root; left there, production\='s discovery in the next
+scenario would dial a process that no longer exists."
+  (let ((path (agent-repl-itest--addr-file (agent-repl-itest-daemon-state-dir daemon)))
+        (address (agent-repl-itest-daemon-address daemon)))
+    (unless (equal (agent-repl-itest--read-addr-file
+                    (agent-repl-itest-daemon-state-dir daemon))
+                   address)
+      (with-temp-file path (insert address "\n")))))
+
+(defun agent-repl-itest--begin-scenario ()
+  "Hand the next scenario a shared daemon indistinguishable from a fresh one.
+Returns it.  Everything the previous scenario could have left behind — the
+fake\='s tables, its standing streams, the state root\='s contents and the
+published address — is cleared here rather than at the end of the scenario
+that made it, so a scenario that dies mid-way cannot poison its successor."
+  (let ((daemon (agent-repl-itest--shared-daemon)))
+    (agent-repl-itest--reset daemon)
+    (agent-repl-itest--wait-until
+     (lambda () (null (agent-repl-itest--subscribers daemon)))
+     5 "the previous scenario's stream subscribers to drain")
+    ;; A SECOND reset, after the drain.  The previous scenario's transport
+    ;; children are killed asynchronously, so one of them can still land a
+    ;; request on the shared daemon between the first reset and its own death
+    ;; -- a call the next scenario would then read as its own.  A per-test
+    ;; process could not leak that because it died with the scenario; the
+    ;; shared one closes the window by clearing again once nothing is left
+    ;; subscribed.
+    (agent-repl-itest--reset daemon)
+    (agent-repl-itest--sweep-state-dir daemon)
+    (agent-repl-itest--republish-addr daemon)
+    daemon))
+
 ;;;; ---- Boundary mocks the suite installs ----
 
 (defun agent-repl-itest--real-boundary (symbol)
@@ -611,7 +733,7 @@ Inside BODY:
 The daemon is always stopped and its state dir removed, even when BODY
 signals."
   (declare (indent 1) (debug (symbolp body)))
-  `(let ((,var (agent-repl-itest--start-daemon)))
+  `(let ((,var (agent-repl-itest--begin-scenario)))
      (unwind-protect
          (let* ((agent-repl-itest-notifications nil)
                 (agent-repl-itest-webview-urls nil)
@@ -669,8 +791,12 @@ signals."
        ;; leaves an armed reconnect timer that fires into the next
        ;; scenario.  Tearing it down is the only thing that actually ends
        ;; it -- the same reason the cold-start reset exists.
-       (agent-repl-itest--teardown-link)
-       (agent-repl-itest--stop-daemon ,var))))
+       ;; The daemon is NOT stopped: it is the one this whole run shares, and
+       ;; `agent-repl-itest--begin-scenario' is what hands the next scenario a
+       ;; clean one.  Doing the cleaning on the way IN rather than on the way
+       ;; out is deliberate — a scenario that dies mid-way still cannot poison
+       ;; its successor.
+       (agent-repl-itest--teardown-link))))
 
 (defmacro agent-repl-itest--with-second-daemon (primary var &rest body)
   "Run BODY with VAR bound to a SECOND fake daemon sharing PRIMARY's state dir.
@@ -684,9 +810,14 @@ address is already published and recorded before it is replaced."
                 (agent-repl-itest-daemon-state-dir ,primary))))
      (unwind-protect
          (progn ,@body)
-       ;; The state dir belongs to PRIMARY's `with-fake-daemon'; only the
-       ;; successor process is reaped here.
-       (agent-repl-itest--stop-daemon ,var t))))
+       ;; The state dir belongs to the SHARED daemon; only the successor
+       ;; process is reaped here.  Its orderly exit removes `daemon.addr',
+       ;; which is PRIMARY's discovery file too, so the primary re-publishes
+       ;; its own address afterwards — a scenario after this one must find the
+       ;; daemon that is still running, not the file the successor took away.
+       (agent-repl-itest--stop-daemon ,var t)
+       (when (process-live-p (agent-repl-itest-daemon-process ,primary))
+         (agent-repl-itest--republish-addr ,primary)))))
 
 (defalias 'agent-repl-itest--start-second-daemon #'agent-repl-itest--start-daemon
   "Start a second fake daemon; pass the primary's state dir to stage a handover.")
@@ -752,10 +883,18 @@ scenario."
          (agent-repl-daemon-build-failure nil)
          (agent-repl-daemon-mode-line-segment nil)
          (agent-repl--frontend-daemon-process nil))
-     (cl-letf ,(mapcar (lambda (boundary)
-                         `((symbol-function ',boundary)
-                           (agent-repl-itest--real-boundary ',boundary)))
-                       agent-repl-itest--cold-start-boundaries)
+     (cl-letf (,@(mapcar (lambda (boundary)
+                           `((symbol-function ',boundary)
+                             (agent-repl-itest--real-boundary ',boundary)))
+                         agent-repl-itest--cold-start-boundaries)
+               ;; The elisp staleness pre-check is stubbed to "everything is
+               ;; stale" rather than restored: its artifacts are the REAL
+               ;; module's, so a real probe would make whether the stub build
+               ;; script runs at all depend on the developer's working tree.
+               ((symbol-function 'agent-repl--frontend-file-mtime)
+                (lambda (_path) nil))
+               ((symbol-function 'agent-repl--frontend-source-files)
+                (lambda (_dir _regexp) nil)))
        (unwind-protect (progn ,@body)
          (agent-repl-itest--reset-cold-start)))))
 

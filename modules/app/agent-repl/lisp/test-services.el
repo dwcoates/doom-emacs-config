@@ -117,9 +117,9 @@
                       "sha-of-installed")))
                ((symbol-function 'agent-repl--frontend-artifact-exists-p) (lambda (_p) t))
                ((symbol-function 'agent-repl-daemon--build)
-                (lambda (&optional targets)
+                (lambda (targets continuation)
                   (push targets agent-repl-test-services--builds)
-                  agent-repl-test-services--build-failure))
+                  (funcall continuation agent-repl-test-services--build-failure)))
                ((symbol-function 'agent-repl-frontend-daemon-stop)
                 (lambda (&optional on-done)
                   (setq agent-repl-test-services--daemon-stops

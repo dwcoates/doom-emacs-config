@@ -44,7 +44,7 @@
 (declare-function agent-repl--latch-set-timer "core" (latch key timer))
 
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
-(declare-function agent-repl-daemon--build "daemon" (&optional targets))
+(declare-function agent-repl-daemon--build "daemon" (targets continuation))
 (declare-function agent-repl-daemon-ensure "daemon" (&optional on-ready))
 (declare-function agent-repl-frontend-daemon-stop "daemon" (&optional on-done))
 (declare-function agent-repl-link-teardown "daemon-link" ())
@@ -290,11 +290,27 @@ both jobs before building any runtime artifact."
       (agent-repl--log nil "elisp.services.bounce-preflight-inherited")
     (agent-repl--log nil "elisp.services.bounce-preflight-own")
     (agent-repl--shim-services-assert-launchd-loaded))
-  (let ((build-failure (agent-repl-daemon--build agent-repl--shim-service-build-targets)))
-    (when build-failure
-      (agent-repl--error nil "elisp.services.build-failed detail=%s" build-failure)
-      (funcall on-failure build-failure)
-      (cl-return-from agent-repl--shim-services-build-and-bounce :failed)))
+  ;; The build is ASYNCHRONOUS, so everything downstream of it lives in
+  ;; `agent-repl--shim-services-after-build', which the continuation calls.
+  (agent-repl-daemon--build
+   agent-repl--shim-service-build-targets
+   (lambda (build-failure)
+     (if build-failure
+         (progn
+           (agent-repl--error nil "elisp.services.build-failed detail=%s" build-failure)
+           (funcall on-failure build-failure))
+       ;; A signal raised inside a sentinel-driven continuation has no
+       ;; caller left to catch it, so it is converted to the failure
+       ;; channel here rather than escaping into the timer machinery.
+       (condition-case err
+           (agent-repl--shim-services-after-build on-success on-failure)
+         (error (funcall on-failure (error-message-string err)))))))
+  :pending)
+
+(cl-defun agent-repl--shim-services-after-build (on-success on-failure)
+  "Kickstart the store and sidecar launchd jobs once their build has landed.
+Split out of `agent-repl--shim-services-build-and-bounce' only because
+the build in front of it is asynchronous; the sequencing is unchanged."
   (let ((store-present (agent-repl--frontend-artifact-exists-p
                         agent-repl--shim-store-binary))
         (sidecar-present (agent-repl--frontend-artifact-exists-p
@@ -418,11 +434,17 @@ dir."
       (condition-case err
           (progn
             (agent-repl--shim-services-assert-launchd-loaded)
-            (let ((build-failure (agent-repl-daemon--build)))
-              (when build-failure
-                (fail build-failure)
-                (cl-return-from agent-repl--runtime-prepare :failed)))
-            (agent-repl--shim-services-build-and-bounce t #'replace-daemon #'fail))
+            (agent-repl-daemon--build
+             nil
+             (lambda (build-failure)
+               (if build-failure
+                   (fail build-failure)
+                 ;; Same reason as above: the outer `condition-case' has
+                 ;; already returned by the time this continuation runs.
+                 (condition-case err
+                     (agent-repl--shim-services-build-and-bounce
+                      t #'replace-daemon #'fail)
+                   (error (fail (error-message-string err))))))))
         (error (fail (error-message-string err))))
       :pending)))
 

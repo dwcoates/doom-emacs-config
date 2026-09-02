@@ -2370,6 +2370,8 @@ introducing a sibling raw `make-process' site."
     agent-repl--async-gh
     agent-repl--signal-process
     agent-repl--frontend-run-build-script
+    agent-repl--frontend-file-mtime
+    agent-repl--frontend-source-files
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
     agent-repl--launchctl-call

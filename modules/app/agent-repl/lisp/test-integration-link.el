@@ -608,7 +608,9 @@ indicator at all, which is how a decode failure would show up here."
              (lambda () (and agent-repl-link-drain-segment
                              (string-match-p (regexp-quote expected)
                                              agent-repl-link-drain-segment)))
-             2 (format "the indicator to name %S" expected))
+             ;; The whole multi-case loop this sits in runs in ~0.2s
+             ;; end-to-end, so 1s is already >3x any one case's share.
+             1 (format "the indicator to name %S" expected))
             (should (string-match-p (regexp-quote expected)
                                     agent-repl-link-drain-segment))))))))
 

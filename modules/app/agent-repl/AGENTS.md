@@ -31,6 +31,34 @@ emacs -batch -Q -l ert -l lisp/test-agent-repl.el -f ert-run-tests-batch-and-exi
 emacs -batch -Q -l ert -l lisp/test-<module>.el   -f ert-run-tests-batch-and-exit   # one suite
 ```
 
+### Test wait/timeout bounds are measured, not guessed
+
+Every synchronization wait in `test-integration-*.el` funnels through
+`agent-repl-itest--wait-until` (`lisp/test-integration-helpers.el`), which
+polls via `accept-process-output` — never `sleep-for`/`sit-for`, which would
+block the very process I/O a predicate is waiting on. Its bounds were sized
+by running all seven `test-integration-*.el` suites plus the full
+`test-agent-repl.el` unit run once, recording each test's own ERT-reported
+duration, and setting each bound to roughly 3x the slowest HEALTHY case it
+has to cover (never to fix a flake — a bound that only just barely passes on
+a slow run is a race, not a bound, and gets a code fix instead of a bigger
+number).
+
+| bound | site | old | new | basis |
+|---|---|---|---|---|
+| `agent-repl-itest-default-timeout` | shared default for every unadorned `wait-until`/`await-*` call | 15s | 14s | slowest healthy wait observed anywhere in the suite run was the link suite's own handover/reconnect scenarios (~4.7s); 3x ≈ 14s |
+| boot-timeout logged/surfaced (3 sites, `test-integration-daemon.el`) | `agent-repl-itest--wait-until` after `agent-repl-daemon-boot-timeout-seconds` fires | 5s | 4s | those scenarios' own boot-timeout fixtures run 1.0–2.0s; observed wait tops out at ~1.4s; 3x ≈ 4.2s |
+| restart's own ensure build/start-ran (4 sites, `test-integration-daemon.el`) | file-flag checks after a restart's cold-start ensure | 5s | 3s | the flag file is touched synchronously once `agent-repl-daemon-ensure` proceeds; no observed case needs more than a fraction of a second |
+| restart-abandonment message (`test-integration-daemon.el`) | echo-area message after a refused stop | 5s | 3s | same shape as the build/start-ran checks above |
+| indicator-names-the-cause loop (`test-integration-link.el`) | per-case wait inside a `dolist` whose whole multi-case test runs in ~0.2s | 2s | 1s | still >3x any single case's real share of that 0.2s |
+| fake-daemon exit on teardown (`test-integration-helpers.el`) | `agent-repl-itest--stop-daemon`, runs after EVERY scenario in every suite | 5s | 5s (unchanged) | genuinely needs longer: this reclaims a REAL OS process via its own graceful-shutdown path after every single test, and a slow CI host is exactly the case a bound exists to tolerate — a spurious failure here still falls through to `delete-process` |
+| fake daemon's own HTTP graceful-shutdown grace (`lisp/testsupport/fakedaemon/main.go`) | `context.WithTimeout` around `httpServer.Shutdown` | 2s | 2s (unchanged) | reviewed; already well under the suite's own bounds and never observed as a bottleneck |
+
+Re-measure before loosening any of these: `git log -p` on this section names
+the run that produced each number, and a bound that creeps back up without a
+new measurement behind it is exactly the kind of unexamined slack this table
+exists to prevent.
+
 ### Integration suites restore a REGISTERED boundary, by name and per scenario
 
 The batch harness replaces every entry of
@@ -48,6 +76,31 @@ through the harness's own restore path
 every other guard stays armed. This is the sanctioned way to write an
 integration scenario, not a bypass of the guard: an unregistered boundary
 cannot be restored at all, and a scenario that reaches for one fails loudly.
+
+### ONE fake daemon serves a whole suite run
+
+`agent-repl-itest--with-fake-daemon` hands every scenario the SAME fake-daemon
+process — started lazily on the first scenario, reaped on `kill-emacs-hook`.
+A process boot costs seconds and the integration suites run hundreds of
+scenarios, so a per-test spawn is the single largest cost in the run.
+
+The saving is only allowed to exist because the cleaning is TOTAL, and it
+happens on the way IN (`agent-repl-itest--begin-scenario`), never on the way
+out, so a scenario that dies mid-way cannot poison its successor:
+`/_fake/reset` clears the recording, the scripted table, the snapshots and
+every armed gate and ends every standing stream; the shared state root is
+swept back to nothing but `daemon.addr`; that address is re-published so a
+scenario which pointed it at a stub daemon cannot misdirect the next one; and
+a second reset after the subscribers drain closes the window in which the
+previous scenario's dying transport children can still land a request.
+
+A scenario may still stop the shared daemon — cold start's absent-address
+cases must — and the accessor respawns into the same state root next time.
+A scenario that needs TWO live daemons (a handover) still spawns its own
+successor through `agent-repl-itest--with-second-daemon`, which re-publishes
+the primary's address once the successor is reaped. Those two are the only
+sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
+isolation guarantee that makes the sharing safe.
 
 ## Runtime investigations go through one skill
 
