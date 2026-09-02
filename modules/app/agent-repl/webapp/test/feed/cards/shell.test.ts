@@ -382,7 +382,10 @@ describe("the stop control", () => {
     const el = drawFeedShell(shell(), rc);
     el.querySelector<HTMLButtonElement>("[data-interrupt]")?.click();
     await settle();
-    expect(el.querySelector(".shell-stop .refusal")?.getAttribute("data-arm")).toBe("malformed");
+    // An error with no cause set is a frame this build cannot read, not a
+    // refusal with no words: it is reported through the failure sink, and no
+    // sentence is invented at the control (src/rpc/refuse.ts).
+    expect(el.querySelector(".shell-stop .refusal")).toBeNull();
   });
 });
 

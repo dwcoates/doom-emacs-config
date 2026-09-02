@@ -201,7 +201,7 @@ describe("drawMalformedRefusal", () => {
     expect(sink.reports.map((k) => k.kind.case)).toEqual(["frameUndecodable"]);
   });
 
-  it("states the unreadable refusal at the control", () => {
+  it("draws no refusal at the control for a frame it could not read", () => {
     const host = document.createElement("div");
     drawMalformedRefusal(
       { failures: recordingSink() },
@@ -209,6 +209,9 @@ describe("drawMalformedRefusal", () => {
       "op",
       new MalformedView("A.b", "the oneof sets no arm"),
     );
-    expect(host.querySelector(".refusal")?.getAttribute("data-arm")).toBe("malformed");
+    // Since landing 4 every error carries a typed cause, so an unset one is an
+    // unreadable frame rather than a wordless refusal: inventing a sentence
+    // here would state a refusal the daemon never made.
+    expect(host.querySelector(".refusal")).toBeNull();
   });
 });
