@@ -3,6 +3,7 @@ package topbar
 import (
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -66,5 +67,51 @@ func TestPermissionModesAnswersExactlyTheServedSet(t *testing.T) {
 		if modes[i] != want[i] {
 			t.Fatalf("PermissionModes = %v, want %v in the served order", modes, want)
 		}
+	}
+}
+
+// TestSessionStartServesTheFixedSwitchableSet pins that the session's opening
+// installs the picker: nothing else serves one, so without this every
+// SetPermissionMode would be refused as mode_not_served.
+func TestSessionStartServesTheFixedSwitchableSet(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+
+	// Act.
+	r.OnSessionStarted(ws, &conversationv1.SessionStarted{VendorSessionId: "vendor-1"})
+
+	// Assert.
+	modes, ok := r.PermissionModes(ws)
+	if !ok {
+		t.Fatal("PermissionModes reported false after the session started")
+	}
+	if len(modes) != len(SwitchableModes) {
+		t.Fatalf("modes = %v, want %v", modes, SwitchableModes)
+	}
+	for i, mode := range modes {
+		if mode != SwitchableModes[i] {
+			t.Fatalf("modes = %v, want %v", modes, SwitchableModes)
+		}
+	}
+}
+
+// TestTheServedPickerCarriesTheModeInForceAsCurrent pins that the mode the
+// session opened with is the picker's current option.
+func TestTheServedPickerCarriesTheModeInForceAsCurrent(t *testing.T) {
+	// Arrange.
+	r, ws := newModesResolver(t)
+
+	// Act.
+	r.OnSessionStarted(ws, &conversationv1.SessionStarted{
+		VendorSessionId: "vendor-1",
+		PermissionMode: &conversationv1.AgentPermissionMode{
+			Mode: &conversationv1.AgentPermissionMode_Plan{Plan: &conversationv1.AgentPermissionModePlan{}},
+		},
+	})
+
+	// Assert.
+	facts, ok := r.StatusFacts(ws)
+	if !ok || facts.PermissionMode != "plan" {
+		t.Fatalf("permission mode = %q (held %v), want plan", facts.PermissionMode, ok)
 	}
 }
