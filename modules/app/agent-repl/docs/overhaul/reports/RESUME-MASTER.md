@@ -59,6 +59,14 @@ has NOT reached overhaul/integration yet.
 - Webapp: no pull-driven health surface; session faults via pushed topbar warnings; UpdateMergeQueue has no webapp surface.
 - Compaction summary line still ungrounded (cheap-model capture never compacted); needs a user-approved longer-history capture.
 
+## USER RULING 2026-09-02: leads are finished once parked
+
+A parked lead is DONE. The project lead takes it home: landing 7, the
+five-way merge into overhaul/integration, the e2e suite, playtests, and
+EVERY remediation are dispatched by the project lead directly to opus-low
+(or sonnet-medium for rote) implementers in worktrees off
+overhaul/integration. No lead is re-woken for any of it.
+
 ## Project lead's own queue, in order
 
 1. DONE 2026-09-01 — shim's parked ruling: R15 WINS. On a fresh session the
