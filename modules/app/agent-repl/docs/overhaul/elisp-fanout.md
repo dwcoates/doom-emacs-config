@@ -423,6 +423,9 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   would have been fatal) → sends as `:user-sent` (user-composed text;
   existing UX kept) — same agent, follow-up commit. Running: suite3,
   audit3-prod (follow-up).
+- R-AUDIT3-PROD follow-up MERGED (4ba5884f5): panels.el region-selection
+  send uses `:user-sent`; test pins the origin is in the closed vocabulary.
+  Only R-SUITE-3 in flight; worktrees left: suite3.
 
 ## 1. Module map (final tree of lisp/)
 
