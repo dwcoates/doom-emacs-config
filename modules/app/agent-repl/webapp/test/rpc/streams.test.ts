@@ -407,83 +407,6 @@ describe("watchStream: cancel", () => {
   });
 });
 
-describe("watchStream: client replacement", () => {
-  it("reopens on the adopted client", async () => {
-    // ARRANGE
-    const sink = new RecordingSink();
-    const first = scriptedClient([[push(), push(), push()]]);
-    const second = scriptedClient([[push()]]);
-    const ctx = contextFor(first.client, sink);
-    const handle = open(ctx, () => {});
-    await settle();
-    // ACT
-    ctx.replaceClient(second.client);
-    await settle();
-    handle.cancel();
-    // ASSERT
-    expect(second.state.openCount).toBe(1);
-  });
-
-  it("does not reopen on the OLD client after adoption", async () => {
-    const sink = new RecordingSink();
-    const first = scriptedClient([[]]);
-    const second = scriptedClient([[push()]]);
-    const ctx = contextFor(first.client, sink);
-    const handle = open(ctx, () => {});
-    await settle();
-    const opensBefore = first.state.openCount;
-    ctx.replaceClient(second.client);
-    await settle();
-    await advance(250);
-    handle.cancel();
-    expect(first.state.openCount).toBe(opensBefore);
-  });
-
-  it("reopens IMMEDIATELY on adoption rather than waiting out a backoff", async () => {
-    // ARRANGE: the first client has already failed, so a backoff is running.
-    const sink = new RecordingSink();
-    const first = scriptedClient([[]]);
-    const second = scriptedClient([[push()]]);
-    const ctx = contextFor(first.client, sink);
-    const handle = open(ctx, () => {});
-    await settle();
-    // ACT
-    ctx.replaceClient(second.client);
-    await settle();
-    handle.cancel();
-    // ASSERT
-    expect(second.state.openCount).toBe(1);
-  });
-
-  it("a CANCELLED handle does not reopen on adoption", async () => {
-    const sink = new RecordingSink();
-    const first = scriptedClient([[]]);
-    const second = scriptedClient([[push()]]);
-    const ctx = contextFor(first.client, sink);
-    const handle = open(ctx, () => {});
-    await settle();
-    handle.cancel();
-    ctx.replaceClient(second.client);
-    await settle();
-    expect(second.state.openCount).toBe(0);
-  });
-
-  it("moves EVERY live handle, not merely the first", async () => {
-    const sink = new RecordingSink();
-    const first = scriptedClient([[push(), push(), push()]]);
-    const second = scriptedClient([[push(), push(), push()]]);
-    const ctx = contextFor(first.client, sink);
-    const a = open(ctx, () => {});
-    const b = open(ctx, () => {});
-    await settle();
-    ctx.replaceClient(second.client);
-    await settle();
-    a.cancel();
-    b.cancel();
-    expect(second.state.openCount).toBe(2);
-  });
-});
-
 describe("watchStream: logging", () => {
   it("logs a skipped frame at error, so the evidence is not only a card", async () => {
     // ARRANGE
@@ -521,5 +444,107 @@ describe("watchStream: logging", () => {
     await advance(250);
     handle.cancel();
     expect(lines.some(([, line]) => line.includes("rpc.stream-recovered"))).toBe(true);
+  });
+});
+
+/**
+ * A client whose WatchFooter yields one push and then STANDS — the shape a
+ * component stream actually has, so nothing but a cancel can end it.
+ */
+function standingClient() {
+  const state = { openCount: 0 };
+  const transport = createRouterTransport(({ service }) => {
+    service(AgentRepl, {
+      watchFooter: async function* () {
+        state.openCount += 1;
+        yield push();
+        await new Promise<never>(() => undefined);
+      },
+    });
+  });
+  return { client: createAgentReplClient(transport), state };
+}
+
+describe("watchStream: the page going quiet", () => {
+  it("stops the stream, since the workspace moved to a daemon this page never dials", async () => {
+    // ARRANGE
+    const { client, state } = standingClient();
+    const ctx = contextFor(client, new RecordingSink());
+    open(ctx, () => undefined);
+    await settle();
+    // ACT
+    ctx.quiesce();
+    await advance(10_000);
+    // ASSERT: one open only — no reopen, no backoff.
+    expect(state.openCount).toBe(1);
+  });
+
+  it("files no unreachable card for the run the quiesce ended", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = standingClient();
+    const ctx = contextFor(client, sink);
+    open(ctx, () => undefined);
+    await settle();
+    // ACT
+    ctx.quiesce();
+    await advance(10_000);
+    // ASSERT
+    expect(sink.reported).not.toContain("daemonUnreachable");
+  });
+
+  it("never opens at all when the page was already quiet", async () => {
+    // ARRANGE
+    const { client, state } = standingClient();
+    const ctx = contextFor(client, new RecordingSink());
+    ctx.quiesce();
+    // ACT
+    open(ctx, () => undefined);
+    await advance(10_000);
+    // ASSERT
+    expect(state.openCount).toBe(0);
+  });
+});
+
+describe("watchStream: onReconnected", () => {
+  it("fires on the first push after a run that ended without our cancel", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[], [push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const reconnected = vi.fn();
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (c, signal) => c.watchFooter({ workspace: WORKSPACE }, { signal }),
+      onPush: () => undefined,
+      onReconnected: reconnected,
+      backoff: BACKOFF,
+    });
+    // ACT
+    await settle();
+    await advance(250);
+    handle.cancel();
+    // ASSERT
+    expect(reconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire on a first run that never dropped", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[push()]]);
+    const ctx = contextFor(client, new RecordingSink());
+    const reconnected = vi.fn();
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (c, signal) => c.watchFooter({ workspace: WORKSPACE }, { signal }),
+      onPush: () => undefined,
+      onReconnected: reconnected,
+      backoff: BACKOFF,
+    });
+    // ACT
+    await settle();
+    handle.cancel();
+    // ASSERT
+    expect(reconnected).not.toHaveBeenCalled();
   });
 });
