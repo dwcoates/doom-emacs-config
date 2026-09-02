@@ -584,16 +584,19 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 
 func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testing.T) {
 	// Arrange
-	f, d, _, script := mergeCleanRepo(t)
+	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	// THE BRANCH HAS TO CARRY A COMMIT. The self-reload fires off what the
+	// merge LANDED -- the classifier reads the changed paths -- so a merge
+	// that brought in nothing triggers nothing, correctly.
+	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
-	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
+	f.awaitRowInFeed(nil, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 
@@ -601,6 +604,9 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 	// fires after the terminal push as part of teardown, so wait for its own
 	// log record rather than racing the push.
 	d.AwaitRunLogOperation("daemon.merge.self_reload")
+	// The deploy chain runs BEYOND the trigger call, so its own record is the
+	// synchronization point; the trigger's record only says it was asked for.
+	d.AwaitRunLogOperation("daemon.rollout.deploy")
 	if got := len(d.Deploy.Invocations()); got == 0 {
 		t.Fatalf("deploy script invocations = %d, want at least one from the self-repo landing's rollout trigger", got)
 	}
