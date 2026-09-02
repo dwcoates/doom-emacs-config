@@ -227,6 +227,29 @@ DEFERRED (no producer pressure yet): AgentToolFailure denied marker (only if
 the permission-id join proves awkward); OpenWorkspaceTranscriptMissing
 composed text.
 
+## Landing 8 — overhaul/integration (2026-09-02; protos 1fdf85e63, bindings 3791cd630; USER-APPROVED)
+
+Raised by the rebuilt e2e suite's writers reading the contract; both are wire
+homes for behavior already ruled:
+- frontend.v1 FeedSessionSeparation.kind.compaction_failed (tag 7) =
+  FeedContextCutCompactionFailed{error} — a compaction that was offered
+  (/compact, the cold gate's compact remedy) and did not happen, drawn in the
+  slot the compacted divider would have taken; `tokens` UNSET. Relays
+  conversation.v1.ContextCut.compaction_failed. Previously: nothing drawn.
+- frontend.v1 FeedTurnEndedErrored.error gains the run's own terminals,
+  importing failure.proto's evidence messages as that file prescribes:
+  max_turns (19, FailureVendorMaxTurns), max_budget (20, FailureVendorMaxBudget),
+  execution_error (21, FailureVendorExecutionError), turn_failed (22,
+  FailureVendorTurnFailed, also carries structured_output_retry_exhausted via
+  stop_reason), stop_hook_prevented (23, new empty FeedTurnErrorStopHookPrevented).
+  Previously: AgentFailure.max_turns / budget_exhausted / execution_error /
+  structured_output_retry_exhausted / stop_hook_prevented had NO wire path to
+  any frontend stream.
+
+RULED, no proto: context_budget_warning gets no feed row (footer only). Ctrl-b
+detach of foreground work has no daemon verb; out of scope for the overhaul,
+recorded as a follow-up; the two e2e tests stay skipped pointing here.
+
 ## Cross-system ruling, no proto (2026-09-02)
 
 - KERNEL LOCKS: the shim takes the WORKSPACE lock inside StartSession (beside
