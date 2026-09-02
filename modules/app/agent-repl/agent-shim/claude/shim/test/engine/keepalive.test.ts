@@ -6,7 +6,7 @@
  * context whose last several exchanges are keep-alives — the model reads them,
  * the user paid for them, and nothing on any surface says they are there.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isKeepalivePrompt,
   KEEPALIVE_INTERVAL_MS,
@@ -14,6 +14,7 @@ import {
   KeepaliveCadence,
   KeepaliveRewind,
   keepalivePromptText,
+  REAL_SCHEDULER,
 } from "../../src/engine/keepalive.js";
 import { CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import { ManualScheduler } from "./fakes.js";
@@ -155,5 +156,41 @@ describe("the cadence", () => {
     new KeepaliveCadence(() => undefined, 1, scheduler).stop();
 
     expect(scheduler.cleared).toBe(0);
+  });
+});
+
+/**
+ * REAL_SCHEDULER is the cadence's default (every unit test above injects
+ * ManualScheduler instead), wired in production whenever `createEngine` is
+ * not handed a scheduler override. Pin the real setInterval/clearInterval
+ * wiring directly rather than only through the fake.
+ */
+describe("REAL_SCHEDULER", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("setInterval beats the handler on the given cadence", () => {
+    const beats: number[] = [];
+    REAL_SCHEDULER.setInterval(() => beats.push(1), 10);
+
+    vi.advanceTimersByTime(35);
+
+    expect(beats.length).toBe(3);
+  });
+
+  it("clearInterval stops further beats", () => {
+    const beats: number[] = [];
+    const handle = REAL_SCHEDULER.setInterval(() => beats.push(1), 10);
+
+    vi.advanceTimersByTime(15);
+    REAL_SCHEDULER.clearInterval(handle);
+    vi.advanceTimersByTime(100);
+
+    expect(beats.length).toBe(1);
   });
 });
