@@ -21,6 +21,8 @@ import { ROOT_FEED } from "./fake-daemon";
 import {
   WORKSPACE_ID,
   drainReason,
+  feedId,
+  feedPageSuccess,
   footerView,
   holdTray,
   heldPromptItem,
@@ -53,12 +55,21 @@ interface StreamCase {
   drawn(marker: string): string;
   /** Feed streams need their tail opened before anything can be pushed. */
   needsOpenFeed?: boolean;
+  /**
+   * Whether the fake can serve this stream a frame with a REQUIRED FIELD
+   * UNSET (see `injectUnsetField`). Only three of the streams have a stripper,
+   * because those three are the three shapes the contract names — an unset
+   * oneof on a row, an unset message field on a whole view, an unset oneof on
+   * a repeated element — and a fourth would be a fourth copy of the same case.
+   */
+  unsettable?: boolean;
 }
 
 const STREAM_CASES: StreamCase[] = [
   {
     name: "WatchFooter",
     rpc: "watchFooter",
+    unsettable: true,
     push: (fake, marker) =>
       fake.setFooter(WORKSPACE_ID, footerView({ status: "idle", substatus: "ready", tokensText: marker })),
     selector: ".footer-tokens",
@@ -74,6 +85,7 @@ const STREAM_CASES: StreamCase[] = [
   {
     name: "WatchWorkspaceRoster",
     rpc: "watchWorkspaceRoster",
+    unsettable: true,
     push: (fake, marker) => fake.setRoster(roster({ rows: [rosterRow({ name: marker })] })),
     selector: `[data-roster-row="${WORKSPACE_ID}"]`,
     drawn: (marker) => marker,
@@ -89,6 +101,7 @@ const STREAM_CASES: StreamCase[] = [
   {
     name: "WatchFeed",
     rpc: "watchFeed",
+    unsettable: true,
     needsOpenFeed: true,
     push: (fake, marker) => fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow(marker)),
     selector: '[data-feed-row="row-1"]',
@@ -188,6 +201,68 @@ describe.each(STREAM_CASES)("$name", (streamCase) => {
   });
 });
 
+/**
+ * THE OTHER MALFORMED SHAPE: a frame whose REQUIRED FIELD IS UNSET.
+ *
+ * The table above poisons frames with an unknown field — a NEWER daemon saying
+ * something extra. This one serves a frame the daemon composed WRONG: a
+ * `FeedRow` with no `row` arm, a `FooterStrip` with no `status`, a roster row
+ * with no `status`. The contract refuses both ("TYPED ARMS, NO FALLBACKS: an
+ * unset oneof, an unset non-optional message field ... is a MalformedView"),
+ * but through different code, so both need their own frame.
+ *
+ * Only the streams the fake has a stripper for appear here (`unsettable`):
+ * those three are the three shapes the contract names, and a fourth would be a
+ * fourth copy of one of them.
+ */
+describe.each(STREAM_CASES.filter((c) => c.unsettable === true))(
+  "$name's incomplete frame",
+  (streamCase) => {
+  it("refuses a frame with a required field unset", async () => {
+    // Arrange: an unset oneof or message field is the OTHER malformed shape —
+    // a daemon that composed the view wrong rather than one that said more
+    // than this build reads.
+    harness = await startHarness();
+    await harness.fake.awaitStream(streamCase.rpc);
+    // Act
+    harness.fake.injectUnsetField(streamCase.rpc);
+    streamCase.push(harness.fake, "incomplete");
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toContain("frameUndecodable");
+  });
+
+  it("skips the incomplete frame rather than drawing it", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream(streamCase.rpc);
+    // Act
+    harness.fake.injectUnsetField(streamCase.rpc);
+    streamCase.push(harness.fake, "incomplete");
+    await harness.settle();
+    // Assert
+    expect(harness.$(streamCase.selector)?.textContent ?? "").not.toContain("incomplete");
+  });
+
+  it("renders the next frame after an incomplete one", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream(streamCase.rpc);
+    harness.fake.injectUnsetField(streamCase.rpc);
+    streamCase.push(harness.fake, "incomplete");
+    await harness.settle();
+    // Act
+    streamCase.push(harness.fake, "recovered-whole");
+    await harness.settle();
+    // Assert
+    expect(harness.$(streamCase.selector)?.textContent).toContain(
+      streamCase.drawn("recovered-whole"),
+    );
+  });
+
+  },
+);
+
 describe("WatchWebWorkspace", () => {
   it("opens the standing web-link stream at boot", async () => {
     // Arrange / Act
@@ -218,6 +293,57 @@ describe("WatchWebWorkspace", () => {
     await harness.tick(5_000);
     // Assert
     expect(harness.fake.calls("watchWebWorkspace").length).toBeGreaterThan(before);
+  });
+
+  it("refuses a transfer push carrying an unknown field", async () => {
+    // Arrange: the web-link stream pushes nothing a component draws, so its
+    // decode contract is asserted through the ONE effect its push has.
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    // Act
+    harness.fake.injectUnknown("watchWebWorkspace");
+    harness.fake.transfer(WORKSPACE_ID, "http://127.0.0.1:9999");
+    await harness.settle();
+    // Assert
+    expect(harness.failureArms()).toContain("frameUndecodable");
+  });
+
+  it("raises no moved notice from an undecodable transfer push", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    // Act
+    harness.fake.injectUnknown("watchWebWorkspace");
+    harness.fake.transfer(WORKSPACE_ID, "http://127.0.0.1:9999");
+    await harness.settle();
+    // Assert: a frame this build cannot read is never acted on.
+    expect(harness.$('[data-moved="http://127.0.0.1:9999"]')).toBeNull();
+  });
+
+  it("does not quiesce on an undecodable transfer push", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    // Act
+    harness.fake.injectUnknown("watchWebWorkspace");
+    harness.fake.transfer(WORKSPACE_ID, "http://127.0.0.1:9999");
+    await harness.settle();
+    // Assert
+    expect(harness.ctx.isQuiesced()).toBe(false);
+  });
+
+  it("acts on the next transfer push after an undecodable one", async () => {
+    // Arrange
+    harness = await startHarness();
+    await harness.fake.awaitStream("watchWebWorkspace");
+    harness.fake.injectUnknown("watchWebWorkspace");
+    harness.fake.transfer(WORKSPACE_ID, "http://127.0.0.1:9999");
+    await harness.settle();
+    // Act
+    harness.fake.transfer(WORKSPACE_ID, "http://127.0.0.1:9998");
+    await harness.settle();
+    // Assert
+    expect(harness.$('[data-moved="http://127.0.0.1:9998"]')).not.toBeNull();
   });
 });
 
@@ -280,6 +406,39 @@ describe("the feed's own tail", () => {
     // Assert: the token WatchFeed echoed is the one OpenFeed minted.
     const [request] = harness.fake.calls<{ watch?: { value: string } }>("watchFeed");
     expect(request.watch?.value).toBe(harness.fake.mintedTokens(WORKSPACE_ID, ROOT_FEED)[0]);
+  });
+
+  it("replaces the rows with the fresh page after a reconnect", async () => {
+    // Arrange: one row from the cold page, one that arrived on the tail.
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([userPromptRow("cold", { id: feedId("cold") })])),
+    });
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "live", { id: feedId("live") }));
+    await harness.settle();
+    // Act: the reconnect re-opens the feed, and the fresh page no longer
+    // carries the tail row.
+    harness.fake.endStream("watchFeed");
+    await harness.tick(5_000);
+    // Assert: a whole-view page REPLACES its unit; nothing accumulates.
+    expect(harness.rowIds()).toEqual(["cold"]);
+  });
+
+  it("drops a row the fresh page omits", async () => {
+    // Arrange
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setPage(WORKSPACE_ID, ROOT_FEED, feedPageSuccess([userPromptRow("cold", { id: feedId("cold") })])),
+    });
+    await harness.fake.awaitStream("watchFeed");
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "live", { id: feedId("live") }));
+    await harness.settle();
+    // Act
+    harness.fake.endStream("watchFeed");
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.row("live")).toBeNull();
   });
 
   it("re-opens the feed after a transport death rather than reusing the dead token", async () => {
