@@ -418,9 +418,9 @@ a spec edit and never a rationalization in the suite.
   the `merge_ledger` / `merge_tab_intervals` rows in `wsm.db`. The tab-interval
   test therefore stops the daemon and reads the database through `d.WithDB`,
   which is that helper's documented contract. A clean landing records the
-  `merge` and `tests` intervals only — `TabQueue` never passes through
-  `openTab`/`closeTab` in `internal/merge/run.go`, so no queue interval is ever
-  written. Both are recorded for the teamlead as decisions owed, not as suite
+  `queue`, `merge` and `tests` intervals: the queue is a tab like every other,
+  opened at admission and closed when the run leaves it for its first phase.
+  The missing wire surface is recorded for the teamlead as a decision owed, not as suite
   defects.
 
 ## Log discipline

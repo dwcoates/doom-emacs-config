@@ -1184,9 +1184,8 @@ func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	d.Stop()
 
 	// Assert: the ledger's merge_tab_intervals table carries one succeeded
-	// interval each for "merge" and "tests" (the two phases this clean,
-	// no-configured-action landing actually opens; TabQueue is never recorded
-	// through openTab/closeTab at all — see the report).
+	// interval each for "queue", "merge" and "tests" — the queue wait plus the
+	// two phases this clean, no-configured-action landing opens.
 	type interval struct {
 		kind               string
 		startedAt, endedAt int64
@@ -1215,7 +1214,7 @@ func TestALandedMergesLedgerRecordsEachTabsInterval(t *testing.T) {
 	for _, iv := range got {
 		byKind[iv.kind] = iv
 	}
-	for _, kind := range []string{"merge", "tests"} {
+	for _, kind := range []string{"queue", "merge", "tests"} {
 		iv, ok := byKind[kind]
 		if !ok {
 			t.Fatalf("merge_tab_intervals holds no %q row, want one; got %+v", kind, got)

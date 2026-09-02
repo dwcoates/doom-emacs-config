@@ -310,7 +310,7 @@ func TestLedgerRecordsEveryTabInterval(t *testing.T) {
 	for _, interval := range entries[0].Intervals {
 		kinds = append(kinds, interval.Kind)
 	}
-	want := []string{TabMerge, TabMerge, TabTests, TabTests}
+	want := []string{TabQueue, TabQueue, TabMerge, TabMerge, TabTests, TabTests}
 	if !equal(kinds, want) {
 		t.Fatalf("the ledger recorded %v, want an open and a close per tab: %v", kinds, want)
 	}
@@ -341,7 +341,7 @@ func TestLedgerRecordsEachRoundsOutcome(t *testing.T) {
 			outcomes = append(outcomes, interval.Kind+":"+interval.Outcome)
 		}
 	}
-	want := []string{TabMerge + ":conflicted", TabConflicts + ":succeeded", TabTests + ":succeeded"}
+	want := []string{TabQueue + ":succeeded", TabMerge + ":conflicted", TabConflicts + ":succeeded", TabTests + ":succeeded"}
 	if !equal(outcomes, want) {
 		t.Fatalf("the ledger's outcomes are %v, want %v", outcomes, want)
 	}
@@ -555,3 +555,38 @@ func (f *fakeFeed) terminalPrecedes(g *fakeGit, call string) bool {
 
 // unusedIDs keeps the id alias named in this file's imports honest.
 var _ ids.WorkspaceID = theWorkspace
+
+// TestLedgerRecordsTheQueueInterval covers that the QUEUE is a tab like every
+// other: its interval opens at admission and closes when the run leaves the
+// queue for its first phase.
+func TestLedgerRecordsTheQueueInterval(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	entries, err := h.db.MergeLedger(context.Background(), theWorkspace)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("the ledger holds %d entries, want one per lease: %v", len(entries), err)
+	}
+	var closed *wsm.TabInterval
+	for i, interval := range entries[0].Intervals {
+		if interval.Kind == TabQueue && interval.EndedAt != nil {
+			closed = &entries[0].Intervals[i]
+		}
+	}
+	if closed == nil {
+		t.Fatalf("the ledger holds no closed queue interval: %+v", entries[0].Intervals)
+	}
+	if closed.EndedAt.Before(closed.StartedAt) {
+		t.Fatalf("the queue interval = %+v, want a well-formed [started, ended] interval", closed)
+	}
+}

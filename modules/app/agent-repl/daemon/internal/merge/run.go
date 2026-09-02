@@ -57,6 +57,10 @@ type run struct {
 	startedMS int64
 	// displaced is the user turn this merge displaced, captured at admission.
 	displaced *ids.TurnID
+	// queueRound is the ledger round of the QUEUE tab, opened at admission and
+	// closed when the run leaves the queue for its first phase. The queue is a
+	// tab like every other, so its interval is recorded like every other's.
+	queueRound int
 
 	mu sync.Mutex
 	// rounds counts each tab kind's opened rounds, which is what makes a second
@@ -226,10 +230,9 @@ func (o *orchestrator) start(ctx context.Context, repo wsm.RepoKey, ws ids.Works
 	o.runsByWorkspace[ws] = r
 	o.mu.Unlock()
 
-	r.mu.Lock()
-	r.tab = TabQueue
-	r.rounds[TabQueue] = 1
-	r.mu.Unlock()
+	// THE QUEUE IS A TAB. Opening it through openTab is what puts its interval
+	// in the ledger; setting the fields by hand recorded nothing at all.
+	r.queueRound = r.openTab(ctx, TabQueue)
 	r.head(nil)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		r.abort(ctx, fmt.Sprintf("could not publish the queue: %v", err))
@@ -272,6 +275,9 @@ func sameDir(a, b string) bool {
 // execute runs the method the target selects, and lands whatever end it
 // reaches on the one terminal path.
 func (r *run) execute(ctx context.Context) error {
+	// The run leaves the queue here: the wait is over and the first phase
+	// begins, so the queue interval ends.
+	r.closeTab(ctx, TabQueue, r.queueRound, "succeeded")
 	outcome, err := r.method(ctx)
 	if err != nil {
 		r.abort(ctx, err.Error())
