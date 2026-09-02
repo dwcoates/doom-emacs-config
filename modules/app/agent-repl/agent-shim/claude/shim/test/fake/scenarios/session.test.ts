@@ -179,6 +179,40 @@ describe("the generic context tip", () => {
   });
 });
 
+describe("the total-tokens reminder", () => {
+  it("carries the ONE token-budget shape any capture holds", async () => {
+    // From `artifact-publish-and-list`, the only capture with it: a bare `text`
+    // field spelling the count inside a `<total_tokens>` element, and no
+    // structured figure anywhere.
+    // Arrange + Act
+    const driven = await driveScenario(["!tokens-reminder"]);
+    const attachment = recordsOfType(driven.transcript(), "attachment")[0]?.attachment as Record<
+      string,
+      unknown
+    >;
+
+    // Assert
+    expect(attachment).toEqual({
+      type: "total_tokens_reminder",
+      text: "<total_tokens>15000000 tokens left</total_tokens>",
+    });
+  });
+
+  it("is NOT dressed as the context-budget warning", async () => {
+    // No capture carries a `context_budget_warning` record of any spelling, so
+    // that producer stays ungrounded. Mapping the nearest carrier to it would
+    // make every suite agree with a mapping the vendor never made.
+    // Arrange + Act
+    const driven = await driveScenario(["!tokens-reminder"]);
+    const types = recordsOfType(driven.transcript(), "attachment").map(
+      (line) => (line.attachment as { type?: string }).type,
+    );
+
+    // Assert
+    expect(types).not.toContain("context_budget_warning");
+  });
+});
+
 describe("compaction", () => {
   it("brackets the boundary with a compacting status and a success status", async () => {
     // Arrange + Act

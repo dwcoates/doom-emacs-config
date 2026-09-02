@@ -376,6 +376,29 @@ export const CONTEXT_TIP = scenario({
   },
 });
 
+export const TOKENS_REMINDER = scenario({
+  name: "tokens-reminder",
+  prompt: "!tokens-reminder",
+  emits:
+    "prose only, plus the vendor's `total_tokens_reminder` ATTACHMENT — the ONE token-budget carrier any real " +
+    "capture holds (`artifact-publish-and-list`, once): a bare `text` field spelling " +
+    "`<total_tokens>N tokens left</total_tokens>` and nothing else. IT IS NOT the context-budget warning either " +
+    "— no capture carries a `context_budget_warning` record of any spelling, so that producer stays ungrounded " +
+    "rather than guessed",
+  writes: "a `total_tokens_reminder` attachment line",
+  arms: "residue `attachment/total_tokens_reminder` — recorded as itself, unconverted, and reaching no arm",
+  run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "tokens-reminder" }, "fake total-tokens-reminder turn");
+    ctx.attachment({
+      type: "total_tokens_reminder",
+      // VERBATIM SHAPE from the capture: one `text` field, the count inside a
+      // `<total_tokens>` element. No structured figure is offered anywhere.
+      text: "<total_tokens>15000000 tokens left</total_tokens>",
+    });
+    conclude(ctx, "The CLI restated the token budget.");
+  },
+});
+
 export const COMPACT = scenario({
   name: "compact",
   prompt: "!compact",
@@ -597,6 +620,7 @@ export const SESSION_SCENARIOS = [
   RATE_LIMIT_FIVE_HOUR,
   RATE_LIMIT_SEVEN_DAY,
   CONTEXT_TIP,
+  TOKENS_REMINDER,
   COMPACT,
   COMPACT_AUTO,
   COMPACT_FAILED,
