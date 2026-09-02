@@ -9,7 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
 	"claude-repld/integration/harness"
+
+	"connectrpc.com/connect"
 )
 
 func TestBootWritesAndRemovesTheAddressFile(t *testing.T) {
@@ -203,4 +207,22 @@ func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
 	// no WARN/ERROR record at all: pprof.disabled is logged at DEBUG
 	// (internal/pprofsurface/surface.go), and nothing else runs.
 	d.ExpectWarnings()
+}
+
+// TestJSONCodecServesRegisterAndAPerWorkspaceVerb proves the daemon serves
+// BOTH codecs off the same listener: a full rpc round trip — a registration
+// and a per-workspace verb — dialed with the JSON codec instead of the
+// default binary one.
+func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
+	// Arrange
+	d := harness.StartDaemon(t, harness.Opts{JSONCodec: true})
+	repo := harness.NewRepo(t)
+
+	// Act: RegisterWorkspace over the JSON-codec client.
+	ws := harness.Register(t, d, repo.Dir)
+
+	// Assert: a per-workspace verb round-trips too.
+	if _, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
+		t.Fatalf("SelectWorkspace over the JSON codec = error %v, want a success", err)
+	}
 }
