@@ -1,0 +1,31 @@
+{
+  "scenario": "subagent-sync-nested-activity",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Spawn one subagent that reads every .txt file in this directory, greps them for 'target', and reports back what it found. Wait for it.",
+  "prompts": [
+    {
+      "text": "Spawn one subagent that reads every .txt file in this directory, greps them for 'target', and reports back what it found. Wait for it.",
+      "resume": false
+    }
+  ],
+  "world": "subagent-sync-nested-activity",
+  "cwd_init": null,
+  "vendor_session_id": "8bd73ff1-004f-4acb-9601-bb1ec2dda567",
+  "manual": null,
+  "expect": [
+    "tool:Agent",
+    "forwarded subagent assistant text",
+    "forwarded subagent thinking",
+    "tool_result:agent with AgentToolStats",
+    "file:subagents/agent-<id>.jsonl",
+    "file:subagents/agent-<id>.meta.json"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-subagent-sync-nested-activity-wx0UD1-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:24:10.746Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
