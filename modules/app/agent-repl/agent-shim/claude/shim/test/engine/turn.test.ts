@@ -835,10 +835,13 @@ describe("DetachForeground on a live foreground unit", () => {
   }
 
   it("refuses unsupported: the pinned SDK offers no verb to INITIATE a detachment", async () => {
+    // The unit is detachable in kind and STILL IN THE FOREGROUND -- the vendor
+    // holds no background work for it, so there is nothing to confirm and no
+    // verb to start one with.
     const h = await harness();
     await h.turns.startTurn(startTurn());
-    liveForeground(h);
-    h.query.backgroundTaskAnswer = true;
+    h.foreground.note("toolu_f", "bash", false);
+    h.query.backgroundTaskAnswer = false;
 
     const response = await h.turns.detachForeground(
       create(shimv1.DetachForegroundRequestSchema, {
@@ -852,6 +855,25 @@ describe("DetachForeground on a live foreground unit", () => {
   it("never says not_detachable, which would deny a kind that backgrounds routinely", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
+    h.foreground.note("toolu_f", "bash", false);
+    h.query.backgroundTaskAnswer = false;
+
+    const response = await h.turns.detachForeground(
+      create(shimv1.DetachForegroundRequestSchema, {
+        unit: create(conversationv1.AgentActivityIdSchema, { value: "toolu_f" }),
+      }),
+    );
+
+    expect(failureKind(response)).not.toBe("notDetachable");
+  });
+
+  it("CONFIRMS on backgroundTasks alone, without waiting for the live table's flag", async () => {
+    // `backgroundTasks(unit) === true` IS the observation of the detachment;
+    // the table's own `backgrounded` flag is a laggier restatement that arrives
+    // on a later background_tasks_changed, and requiring it too refused
+    // detachments the vendor had already made.
+    const h = await harness();
+    await h.turns.startTurn(startTurn());
     liveForeground(h);
     h.query.backgroundTaskAnswer = true;
 
@@ -861,7 +883,7 @@ describe("DetachForeground on a live foreground unit", () => {
       }),
     );
 
-    expect(failureKind(response)).not.toBe("notDetachable");
+    expect(response.result.case).toBe("success");
   });
 
   it("CONFIRMS a detachment the vendor made on its own", async () => {
