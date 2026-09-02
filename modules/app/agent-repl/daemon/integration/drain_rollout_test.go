@@ -213,8 +213,12 @@ func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *te
 	// Enrichment (critique 15): minted_at_ms is minted only once fire() runs,
 	// which cannot happen before the deadline it is waiting on, and this
 	// assertion's own wall clock bounds it from above.
+	// The wire stamp is MILLISECONDS, so both bounds are compared in
+	// milliseconds too: a nanosecond-precision `deadline` is otherwise
+	// strictly after its own truncated stamp whenever they share a
+	// millisecond, which fails a run that is in fact exactly on time.
 	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
-	if mintedAt.Before(deadline) || mintedAt.After(after) {
+	if mintedAt.Before(deadline.Truncate(time.Millisecond)) || mintedAt.After(after) {
 		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between the deadline %d and now %d", announced.GetMintedAtMs(), deadline.UnixMilli(), after.UnixMilli())
 	}
 	// A scheduled drain states no bounded outage either (see the immediate-
