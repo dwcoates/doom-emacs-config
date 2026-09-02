@@ -171,6 +171,20 @@ function freshRequest(): shimv1.StartSessionRequest {
   });
 }
 
+/** A fresh start naming NO model: the SDK's own default takes effect. */
+function freshRequestNoModel(): shimv1.StartSessionRequest {
+  return create(shimv1.StartSessionRequestSchema, {
+    source: {
+      case: "fresh",
+      value: create(shimv1.StartSessionFreshSchema, {
+        permissionMode: create(conversationv1.AgentPermissionModeSchema, {
+          mode: { case: "default", value: create(conversationv1.AgentPermissionModeDefaultSchema, {}) },
+        }),
+      }),
+    },
+  });
+}
+
 function resumeRequest(
   vendorSessionId: string,
   remediation?: conversationv1.SessionColdRemediation,
@@ -279,6 +293,42 @@ describe("StartSession, fresh", () => {
         ? response.result.value.session?.runtime?.agentBinaryVersion
         : undefined,
     ).toBe("2.1.999");
+  });
+
+  it("passes NO model to the SDK when the fresh start named none", async () => {
+    // Optional since landing 7: UNSET means the SDK's own default, and naming
+    // an empty model would override that default with nothing.
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoModel());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: "claude-sonnet-5",
+      }),
+    );
+    await pending;
+
+    expect(h.queries[0]?.spec.model).toBeUndefined();
+  });
+
+  it("reports the model the SDK chose as effective_model when none was named", async () => {
+    const h = harness();
+    const pending = h.engine.startSession(freshRequestNoModel());
+    const first = await untilQuery(h, 0);
+    first.query.emit(
+      initMessage({
+        sessionId: first.spec.binding.kind === "fresh" ? first.spec.binding.sessionId : "",
+        model: "claude-sonnet-5",
+      }),
+    );
+    const response = await pending;
+
+    expect(
+      response.result.case === "success"
+        ? response.result.value.session?.effectiveModel?.name
+        : undefined,
+    ).toBe("claude-sonnet-5");
   });
 
   it("reports the model catalog from the vendor", async () => {

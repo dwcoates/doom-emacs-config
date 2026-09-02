@@ -46,7 +46,14 @@ export function validateStartSessionRequest(request: shimv1.StartSessionRequest)
     switch (request.source.case) {
       case "fresh": {
         const fresh = request.source.value;
-        validateAgentModel(fresh.model, "start_session.fresh.model");
+        // OPTIONAL SINCE LANDING 7: an UNSET model means "the SDK's own
+        // default", and SessionStarted.effective_model states what took
+        // effect. A model that IS named still has to be named properly — an
+        // empty name is a caller that meant to say something and said nothing,
+        // which is not the same request as saying nothing at all.
+        if (fresh.model !== undefined) {
+          validateAgentModel(fresh.model, "start_session.fresh.model");
+        }
         validateAgentPermissionMode(fresh.permissionMode, "start_session.fresh.permission_mode");
         return;
       }
