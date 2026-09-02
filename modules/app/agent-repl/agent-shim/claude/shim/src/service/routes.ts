@@ -22,7 +22,7 @@ import type { ConnectRouter } from "@connectrpc/connect";
 import { bindLog } from "../log.js";
 import type { Engine } from "../engine/engine.js";
 import { shimv1 } from "../proto.js";
-import { unimplemented } from "./failures.js";
+import { internalFromUnknown, unimplemented } from "./failures.js";
 import {
   validateDetachForegroundRequest,
   validateHibernateRequest,
@@ -48,6 +48,54 @@ function entered(rpc: string): void {
 }
 
 /**
+ * Answer one unary rpc, mapping an UNANTICIPATED exception to a logged
+ * `Internal` that carries its detail.
+ *
+ * A `ConnectError` is a refusal the shim meant to make and travels unchanged.
+ * Anything else is a defect: without this the transport answers a bare
+ * `[internal] internal error` and the evidence dies inside the process.
+ */
+async function answering<T>(rpc: string, act: () => Promise<T>): Promise<T> {
+  try {
+    return await act();
+  } catch (error) {
+    throw reportUnhandled(rpc, error);
+  }
+}
+
+/**
+ * Serve one server-stream rpc under the same rule.
+ *
+ * A stream's response type is the frame it carries, so a refusal — anticipated
+ * or not — can only reach the caller as the stream's error. Letting an
+ * unanticipated one through unmapped closes the stream with no detail at all.
+ */
+async function* streaming<T>(rpc: string, frames: () => AsyncIterable<T>): AsyncIterable<T> {
+  try {
+    yield* frames();
+  } catch (error) {
+    throw reportUnhandled(rpc, error);
+  }
+}
+
+/** Log an unanticipated exception once, at the boundary, and type it. */
+function reportUnhandled(rpc: string, error: unknown): unknown {
+  const mapped = internalFromUnknown(rpc, error);
+  if (mapped !== error) {
+    LOGGER.log(
+      {
+        level: "error",
+        rpc,
+        detail: mapped.rawMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      `shim.v1.${rpc} threw an exception no handler anticipated`,
+    );
+  }
+  return mapped;
+}
+
+/**
  * Register every shim.v1 handler against one engine.
  *
  * Returns the router callback `connectNodeAdapter` consumes, so the wiring is
@@ -62,37 +110,37 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
       async startSession(request) {
         entered("StartSession");
         validateStartSessionRequest(request);
-        return engine.startSession(request);
+        return answering("StartSession", () => engine.startSession(request));
       },
 
       async *watchSession(request) {
         entered("WatchSession");
         validateWatchSessionRequest(request);
-        yield* engine.watchSession(request);
+        yield* streaming("WatchSession", () => engine.watchSession(request));
       },
 
       async setSessionModel(request) {
         entered("SetSessionModel");
         validateSetSessionModelRequest(request);
-        return engine.setSessionModel(request);
+        return answering("SetSessionModel", () => engine.setSessionModel(request));
       },
 
       async setSessionPermissionMode(request) {
         entered("SetSessionPermissionMode");
         validateSetSessionPermissionModeRequest(request);
-        return engine.setSessionPermissionMode(request);
+        return answering("SetSessionPermissionMode", () => engine.setSessionPermissionMode(request));
       },
 
       async hibernate(request) {
         entered("Hibernate");
         validateHibernateRequest(request);
-        return engine.hibernate(request);
+        return answering("Hibernate", () => engine.hibernate(request));
       },
 
       async killSession(request) {
         entered("KillSession");
         validateKillSessionRequest(request);
-        return engine.killSession(request);
+        return answering("KillSession", () => engine.killSession(request));
       },
 
       // ---- Agent ----
@@ -100,25 +148,25 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
       async startTurn(request) {
         entered("StartTurn");
         validateStartTurnRequest(request);
-        return engine.startTurn(request);
+        return answering("StartTurn", () => engine.startTurn(request));
       },
 
       async *watchAgent(request) {
         entered("WatchAgent");
         validateWatchAgentRequest(request);
-        yield* engine.watchAgent(request);
+        yield* streaming("WatchAgent", () => engine.watchAgent(request));
       },
 
       async updateAgent(request) {
         entered("UpdateAgent");
         validateUpdateAgentRequest(request);
-        return engine.updateAgent(request);
+        return answering("UpdateAgent", () => engine.updateAgent(request));
       },
 
       async killTurn(request) {
         entered("KillTurn");
         validateKillTurnRequest(request);
-        return engine.killTurn(request);
+        return answering("KillTurn", () => engine.killTurn(request));
       },
 
       // ---- Detached work ----
@@ -126,19 +174,19 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
       async *watchBash(request) {
         entered("WatchBash");
         validateWatchBashRequest(request);
-        yield* engine.watchBash(request);
+        yield* streaming("WatchBash", () => engine.watchBash(request));
       },
 
       async stopBash(request) {
         entered("StopBash");
         validateStopBashRequest(request);
-        return engine.stopBash(request);
+        return answering("StopBash", () => engine.stopBash(request));
       },
 
       async detachForeground(request) {
         entered("DetachForeground");
         validateDetachForegroundRequest(request);
-        return engine.detachForeground(request);
+        return answering("DetachForeground", () => engine.detachForeground(request));
       },
 
       // ---- Workflow: IN the contract, NOT in this wave ----
@@ -174,7 +222,7 @@ export function shimRoutes(engine: Engine): (router: ConnectRouter) => void {
       async readHistory(request) {
         entered("ReadHistory");
         validateReadHistoryRequest(request);
-        return engine.readHistory(request);
+        return answering("ReadHistory", () => engine.readHistory(request));
       },
     });
   };

@@ -224,7 +224,10 @@ export interface Reader {
     pageSize: number,
     after: conversationv1.HistoryPointer,
   ): Promise<conversationv1.HistoryPage>;
-  openBashRun(work: conversationv1.DetachedWorkId): Promise<AsyncIterable<conversationv1.AgentBash>>;
+  openBashRun(
+    work: conversationv1.DetachedWorkId,
+    stillLive?: () => boolean,
+  ): Promise<AsyncIterable<conversationv1.AgentBash>>;
   /** Relay one shell-run frame to whoever is watching that run. */
   noteBashFrame(runValue: string, frame: conversationv1.AgentBash): void;
 }
@@ -234,8 +237,58 @@ export interface ReaderOptions {
   readonly client: StoreClient;
 }
 
+/**
+ * How long a waiter sleeps before re-asking the store for a run it is waiting
+ * on, when no in-process note has woken it.
+ *
+ * The note from {@link Reader.noteBashFrame} is the real signal and needs no
+ * timer: it fires the instant THIS shim's writer commits a row. The SIDECAR
+ * writes rows in another process, though, and its commits reach no listener
+ * here — so a waiter also re-asks the store on this cadence. That is polling an
+ * external resource for a fact only it holds, not a sleep standing in for
+ * synchronization.
+ */
+const BASH_ROW_RECHECK_MS = 25;
+
 export function createReader(options: ReaderOptions): Reader {
   const client = options.client;
+
+  /**
+   * Who is waiting for a given run's FIRST stored row, by run value.
+   *
+   * `WatchBashRun` answers `NotFound` until the run has a row, and the daemon
+   * opens a watch the moment the announcement reaches it — so an eager,
+   * correct consumer routinely arrives first. The announcement is a promise
+   * that the run exists, so that race is waited out rather than refused.
+   */
+  const firstRowWaiters = new Map<string, Set<() => void>>();
+
+  /** Wake everyone waiting on this run; the store now holds a row for it. */
+  const wakeFirstRowWaiters = (runValue: string): void => {
+    const waiters = firstRowWaiters.get(runValue);
+    if (waiters === undefined) return;
+    firstRowWaiters.delete(runValue);
+    for (const wake of waiters) wake();
+  };
+
+  /** Wait for this run's first row to land, or for the recheck cadence. */
+  const awaitFirstRow = (runValue: string): Promise<void> =>
+    new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        firstRowWaiters.get(runValue)?.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, BASH_ROW_RECHECK_MS);
+      // Never hold the process open for a wait nobody is blocked on.
+      timer.unref?.();
+      const waiters = firstRowWaiters.get(runValue) ?? new Set<() => void>();
+      waiters.add(finish);
+      firstRowWaiters.set(runValue, waiters);
+    });
 
   const openSession = async (
     agent: conversationv1.AgentId,
@@ -442,7 +495,7 @@ export function createReader(options: ReaderOptions): Reader {
       });
     },
 
-    async openBashRun(work) {
+    async openBashRun(work, stillLive) {
       // THE HANDLE IS THE RUN (ruling, landing 3): `DetachedWorkId.value ==
       // AgentActivityId.value`, the spawning call's own `tool_use_id`. So there
       // is no side table to consult and no way for a lookup to go stale — and a
@@ -465,19 +518,41 @@ export function createReader(options: ReaderOptions): Reader {
       return {
         async *[Symbol.asyncIterator]() {
           try {
-            for await (const push of client.watchBashRun(
-              create(storev1.WatchBashRunRequestSchema, { run }),
-              abort.signal,
-            )) {
-              opened = true;
-              const frame = push.row?.frame;
-              if (frame === undefined) {
-                throw new PersistenceError(
-                  "store_unavailable",
-                  "the store pushed a bash row with no frame",
+            // A REFUSED OPEN IS A RACE, NOT AN ANSWER, while the shim still
+            // believes the run is live. `WatchBashRun` answers `NotFound`
+            // until the run has its first row, and the daemon opens its watch
+            // the instant the announcement lands — so re-ask until a row
+            // exists or the run leaves the live set. Refusing here would tell
+            // a consumer that work it was just told to follow does not exist.
+            for (;;) {
+              try {
+                for await (const push of client.watchBashRun(
+                  create(storev1.WatchBashRunRequestSchema, { run }),
+                  abort.signal,
+                )) {
+                  opened = true;
+                  const frame = push.row?.frame;
+                  if (frame === undefined) {
+                    throw new PersistenceError(
+                      "store_unavailable",
+                      "the store pushed a bash row with no frame",
+                    );
+                  }
+                  yield frame;
+                }
+                return;
+              } catch (error) {
+                // Only a refusal BEFORE the first row is a race; once rows have
+                // been served the run plainly exists and the failure is real.
+                if (opened || !isNotFound(error)) throw error;
+                if (stillLive !== undefined && !stillLive()) throw error;
+                if (abort.signal.aborted) throw error;
+                LOGGER.logVerbose(
+                  { run: runValue, work: work.value },
+                  "the store has no row for this shell run yet; waiting for its first row",
                 );
+                await awaitFirstRow(runValue);
               }
-              yield frame;
             }
           } catch (error) {
             if (isNotFound(error)) {
@@ -506,6 +581,10 @@ export function createReader(options: ReaderOptions): Reader {
     },
 
     noteBashFrame(runValue, frame) {
+      // THE FIRST-ROW SIGNAL. A watcher that arrived before this run had a row
+      // is blocked on exactly this commit, so waking it here is what makes the
+      // wait a synchronization rather than a poll.
+      wakeFirstRowWaiters(runValue);
       // NOTHING TO RELAY ANY MORE. A run is served from the store's own rows,
       // so a frame this shim wrote reaches a watcher the same way the sidecar's
       // do — through `WatchBashRun`. Kept as the writer's one observation point
