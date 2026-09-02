@@ -460,6 +460,35 @@ export class TurnEngine {
         ),
       );
     }
+    // THE ADDRESSEE'S STATE IS ANSWERED FIRST. A subagent whose own turn is
+    // still running is BUSY, and the route question never arises: the daemon
+    // relays this as SubmitPromptError.bubble_refused{agent_busy}, and this
+    // refusal is that relay's one producer (landing 7). The live table holds
+    // only running work -- an entry retires the moment its task settles -- so
+    // an entry addressed by the target IS the running turn.
+    //
+    // `local_agent` (or an unstated kind, which the vendor leaves unset for a
+    // spawned agent) is the AGENT kind; a `local_bash` shell under the same
+    // handle is not an agent and is left to the route refusal below.
+    const busy = this.session.live
+      .all()
+      .find((item) => item.taskId === target.value || item.toolUseId === target.value);
+    if (
+      busy !== undefined &&
+      (busy.taskType === undefined || busy.taskType === "" || busy.taskType === "local_agent")
+    ) {
+      LOGGER.log(
+        { level: "warn", agent_id: target.value, task_id: busy.taskId },
+        "REFUSED UpdateAgent.prompt to a subagent whose own turn is already running",
+      );
+      return Promise.resolve(
+        updateAgentRefused(
+          { kind: "agentBusy" },
+          `agent ${JSON.stringify(target.value)} has a turn of its own already running; ` +
+            "a prompt to a busy subagent is refused rather than queued",
+        ),
+      );
+    }
     LOGGER.log(
       { level: "warn", agent_id: target.value, gap: "no_declared_subagent_prompt_route" },
       "REFUSED UpdateAgent.prompt to a subagent: the pinned SDK declares no route that delivers a prompt to a named agent",
