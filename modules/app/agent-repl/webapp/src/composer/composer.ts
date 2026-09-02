@@ -112,9 +112,6 @@ export interface ComposerOptions {
   onPanel: (panel: SubmitPromptCommandPanel) => void;
 }
 
-/** How a composer factory is called for a bubble's own box. */
-export type ComposerFactory = (host: HTMLElement, feed: FeedId) => Handle;
-
 /**
  * Mount a composer on HOST.
  *
