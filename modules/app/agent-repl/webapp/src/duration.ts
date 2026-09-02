@@ -162,3 +162,18 @@ export function formatCountdown(ms: number): string {
 export function formatTickedAge(ms: number): string {
   return formatAge(Math.max(0, Math.round(ms / 1000)) * 1000);
 }
+
+/**
+ * A LIVE elapsed timer that is repainted once per shared tick, at second
+ * resolution and ROUNDED to the nearest second: `0s`, `45s`, `5m 30s`.
+ *
+ * The same sampling argument as `formatTickedAge`: a timer whose start does
+ * not share the shared ticker's phase is repainted at an arbitrary offset
+ * inside each second, so truncating the sample leaves the reading up to a
+ * whole second behind the time that has actually elapsed. `formatElapsed`
+ * keeps its truncation for a span that is not being sampled by the ticker.
+ */
+export function formatTickedElapsed(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return seconds === 0 ? "0s" : formatDuration(seconds * 1000);
+}
