@@ -46,7 +46,7 @@ export interface Handle {
 
 export interface TopbarDeps {
   /** Raise the login overlay — the logged-out account chip's click. */
-  openLogin(): void;
+  openLogin(control: HTMLElement): void;
   /** Injected by tests, where jsdom reports every rect as zero. */
   geometry?: RevealGeometry;
 }

@@ -23,7 +23,10 @@ import { log } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { TopbarContext } from "./context.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { isMalformedView } from "../rpc/malformed.js";
 import {
+  clearRefusals,
   drawTransportRefusal,
   drawTypedRefusal,
   drawUnreadableRefusal,
@@ -114,6 +117,10 @@ export async function pickPermissionMode(
     operation: "topbar.permission-mode-picked",
     context: { mode: option.mode },
   });
+  // CLEARED BEFORE THE CALL, never after: a refusal from the previous pick
+  // standing beside the control the reader just clicked again reads as the
+  // answer to the NEW click.
+  clearRefusals(wrap);
   const answered = await whileInFlight([row, button], () =>
     callUnary(
       tc.ctx,
@@ -123,6 +130,13 @@ export async function pickPermissionMode(
     ),
   );
   if ("failed" in answered) {
+    // AN ANSWER THIS BUILD CANNOT READ IS MACHINERY, not the daemon refusing:
+    // it is filed as `frame_undecodable` through the one click guard and
+    // nothing is drawn at the control, because there is no refusal to state.
+    if (isMalformedView(answered.failed)) {
+      await guardMalformed(tc.ctx, "topbar.permission-mode-pick", Promise.reject(answered.failed));
+      return;
+    }
     drawTransportRefusal(wrap);
     return;
   }

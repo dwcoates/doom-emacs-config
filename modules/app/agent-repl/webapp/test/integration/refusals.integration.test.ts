@@ -242,6 +242,9 @@ const EMPTY_ERROR_CASES = [
     response: () =>
       create(SetModelResponseSchema, { result: { case: "error", value: {} } }),
     arrange: (h: Harness) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
+    // The options live in the picker's reveal, so the picker is opened first —
+    // the same step the REFUSAL_SITES table below takes for this control.
+    before: async (h: Harness) => await h.click(".topbar-model"),
     click: '[data-model-option="sonnet"]',
     site: ".topbar-model",
   },
@@ -252,6 +255,7 @@ const EMPTY_ERROR_CASES = [
       create(AnswerPermissionResponseSchema, { result: { case: "error", value: {} } }),
     arrange: (h: Harness) =>
       h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("open", undefined, { id: feedId("perm") })),
+    before: undefined,
     click: '[data-permission="allowOnce"]',
     site: '[data-feed-row="perm"]',
   },
@@ -261,6 +265,7 @@ const EMPTY_ERROR_CASES = [
     response: () =>
       create(UpdateHeldPromptResponseSchema, { result: { case: "error", value: {} } }),
     arrange: (h: Harness) => h.fake.setTray(WORKSPACE_ID, holdTray({ items: [heldPromptItem()] })),
+    before: undefined,
     click: "[data-held-action='drop']",
     site: '[data-component="hold-tray"]',
   },
@@ -273,6 +278,7 @@ describe.each(EMPTY_ERROR_CASES)("$name's empty error", (testCase) => {
     harness.fake.answer(testCase.rpc, testCase.response());
     testCase.arrange(harness);
     await harness.settle();
+    await testCase.before?.(harness);
     // Act
     await harness.click(testCase.click);
     // Assert
@@ -287,6 +293,7 @@ describe.each(EMPTY_ERROR_CASES)("$name's empty error", (testCase) => {
     harness.fake.answer(testCase.rpc, testCase.response());
     testCase.arrange(harness);
     await harness.settle();
+    await testCase.before?.(harness);
     // Act
     await harness.click(testCase.click);
     // Assert
@@ -301,6 +308,7 @@ describe("a response with no result arm", () => {
       arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView()),
     });
     harness.fake.answer("setModel", create(SetModelResponseSchema, {}));
+    await harness.click(".topbar-model");
     // Act
     await harness.click('[data-model-option="sonnet"]');
     // Assert
@@ -313,6 +321,7 @@ describe("a response with no result arm", () => {
       arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView()),
     });
     harness.fake.answer("setModel", create(SetModelResponseSchema, {}));
+    await harness.click(".topbar-model");
     // Act
     await harness.click('[data-model-option="sonnet"]');
     // Assert: a malformed frame is a machinery fault, not the daemon refusing.
@@ -327,6 +336,7 @@ describe("a transport failure on a unary call", () => {
       arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView()),
     });
     harness.fake.failNext("setModel", "the daemon dropped the call");
+    await harness.click(".topbar-model");
     // Act
     await harness.click('[data-model-option="sonnet"]');
     // Assert
@@ -339,6 +349,7 @@ describe("a transport failure on a unary call", () => {
       arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView()),
     });
     harness.fake.failNext("setModel", "the daemon dropped the call");
+    await harness.click(".topbar-model");
     await harness.click('[data-model-option="sonnet"]');
     // Act
     await harness.click('[data-model-option="sonnet"]');
@@ -715,20 +726,46 @@ describe("per-rpc refusal arms", () => {
 });
 
 describe("AdoptWebWorkspace's refusals", () => {
-  it.each(CROSS_CUTTING_ARMS)("reports the %s arm as a client-local failure", async (arm) => {
-    // Arrange: the adoption has no clicked control — it happens during a
-    // transfer — so its refusal is machinery failing, not a user's click.
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchWebWorkspace");
-    const second = await harness.startSecondDaemon();
-    second.refuse("adoptWebWorkspace", arm);
-    // Act
-    harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
-    await harness.tick(5_000);
+  /**
+   * ADOPTION HAPPENS ONCE, AT BOOT, on the daemon the page was addressed to
+   * (project lead's CONFIRMED SEQUENCE in the lifecycle brief). This block used
+   * to arrange a SECOND daemon and refuse the adoption there, which was the
+   * retired redial path — the webapp never dials a successor.
+   *
+   * The refusal has no clicked control, so it is machinery failing rather than
+   * a user's click: `controlPlaneFailed` is filed, and the boot throws so no
+   * view is ever mounted over a workspace this page could not adopt. The
+   * `notYetAdopted` arm is the RETRY arm and never reaches this path; its
+   * backoff and its budget are covered under fake timers in
+   * test/lifecycle/lifecycle.test.ts.
+   */
+  const TERMINAL_ARMS = CROSS_CUTTING_ARMS.filter((arm) => arm !== "notYetAdopted");
+
+  it.each(TERMINAL_ARMS)("reports the %s arm as a client-local failure", async (arm) => {
+    // Arrange / Act
+    await expect(
+      startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", arm) }),
+    ).rejects.toThrow();
     // Assert
-    expect(harness.failureArms()).toContain("controlPlaneFailed");
+    expect(overlayArms()).toContain("controlPlaneFailed");
+  });
+
+  it.each(TERMINAL_ARMS)("fails the boot on the %s arm", async (arm) => {
+    // Arrange / Act
+    await expect(
+      startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", arm) }),
+    ).rejects.toThrow();
+    // Assert
+    expect(overlayArms()).toContain("bootFailed");
   });
 });
+
+/** The failure overlay's arms, read off the document rather than a harness. */
+function overlayArms(): string[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-component="failure-overlay"] [data-arm]')].map(
+    (el) => el.dataset.arm ?? "",
+  );
+}
 
 // ---------------------------------------------------------------------------
 // UpdateMergeQueue's repository scope (landing 5)

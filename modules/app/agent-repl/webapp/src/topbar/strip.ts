@@ -68,7 +68,8 @@ export function drawTopbarAccount(u: TopbarAccount, tc: TopbarContext): HTMLElem
         log("info", "the reader opened the login from the account chip", {
           operation: "topbar.account-login-clicked",
         });
-        tc.openLogin();
+        // The chip is the call site: its refusal renders on the chip.
+        tc.openLogin(button);
       });
       return button;
     default: {
