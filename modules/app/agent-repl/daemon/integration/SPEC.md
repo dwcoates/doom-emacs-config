@@ -416,6 +416,14 @@ a spec edit and never a rationalization in the suite.
   (Recorded as a production concern for the teamlead: it makes the log
   unusable for reconciling ERROR-ARMS.md, which is the operation's stated
   purpose.)
+- THE MERGE LEDGER HAS NO WIRE SURFACE. No rpc serves it: it exists only as
+  the `merge_ledger` / `merge_tab_intervals` rows in `wsm.db`. The tab-interval
+  test therefore stops the daemon and reads the database through `d.WithDB`,
+  which is that helper's documented contract. A clean landing records the
+  `merge` and `tests` intervals only — `TabQueue` never passes through
+  `openTab`/`closeTab` in `internal/merge/run.go`, so no queue interval is ever
+  written. Both are recorded for the teamlead as decisions owed, not as suite
+  defects.
 
 ## Log discipline
 Every test runs with the daemon at ≥WARNING terminal mirror; the harness
