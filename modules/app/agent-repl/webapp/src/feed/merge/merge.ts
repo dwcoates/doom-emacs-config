@@ -144,20 +144,26 @@ export function drawFeedMergeError(
   el.className = "merge-error";
   el.append(settledClock(runtime, msOf(error.endedAtMs, `${PATH}.error.ended_at_ms`)));
   switch (reason.case) {
-    case "failed": {
-      el.append(badge("failed", "is-failed"));
-      const summary = document.createElement("span");
-      summary.className = "merge-summary";
-      summary.textContent = reason.value.summary;
-      el.append(summary);
+    case "failed":
+      el.append(badge("failed", "is-failed"), summaryOf(reason.value.summary));
       return el;
-    }
     case "abandoned":
-      el.append(badge("abandoned", "is-abandoned"));
+      // Landing 7: `abandoned` carries the daemon's resolved sentence too (the
+      // cause — a user drop, a closed workspace, a shutdown — otherwise lives
+      // only in the daemon's log), and it is drawn exactly as `failed`'s is.
+      el.append(badge("abandoned", "is-abandoned"), summaryOf(reason.value.summary));
       return el;
     default:
       return unreachableArm(`${PATH}.error.reason`, armName(reason));
   }
+}
+
+/** The daemon's resolved sentence for a settled merge, drawn verbatim. */
+function summaryOf(summary: string): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "merge-summary";
+  el.textContent = summary;
+  return el;
 }
 
 /** The head's badge: the word for the merge as a whole. No counts (R5). */
