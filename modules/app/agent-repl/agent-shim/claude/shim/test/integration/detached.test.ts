@@ -49,7 +49,7 @@ import {
   sidecarProducer,
   writtenKeys,
 } from "../integration-support/store.js";
-import { awaitSpoolExit, readSubagentMeta } from "../integration-support/vendor.js";
+import { awaitSpoolExit, findSubagentMetaByToolUseId } from "../integration-support/vendor.js";
 
 afterEach(cleanupShims);
 
@@ -449,8 +449,11 @@ describe("subagents", () => {
     if (subagent.result.case !== "start") throw new Error("expected the subagent's start");
 
     expect(subagent.result.value.createdAgentId?.value).toBe(update.value.activityId?.value);
-    // And the FILE plane agrees: the meta sidecar is named by the same id.
-    const meta = readSubagentMeta(
+    // And the FILE plane agrees — BY THE JOIN, not by the name. The vendor names
+    // its subagent files by its own 17-hex agentId and `meta.toolUseId` is the
+    // only link back to the spawning call, so the reader joins on that rather
+    // than guessing a file name from the wire identity.
+    const meta = findSubagentMetaByToolUseId(
       shim.dirs,
       started.vendorSessionId,
       subagent.result.value.createdAgentId?.value ?? "",
