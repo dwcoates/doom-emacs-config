@@ -108,6 +108,21 @@ type World struct {
 // sets itself (ShimNode, ShimMain, StoreSocket, SkipFakeGit) — a caller that
 // sets those is overridden, since this suite's whole point is exercising the
 // real shim against a real store with real git, never the fakes.
+//
+// DaemonOpts.ExtraEnv is the seam for a world-wide lever the real shim reads
+// from its OWN spawn environment. It reaches every shim this daemon spawns
+// unchanged: StartDaemon appends it onto the daemon process's own env, and
+// the daemon's shimclient.spawnEnv copies the daemon's os.Environ() forward
+// to each spawned shim verbatim except for a fixed, small override set
+// (CLAUDE_CONFIG_DIR, SHIM_BUILD_SHA, state dir, session id,
+// forbid-vendor-calls) — never an allowlist. Known consumer: the fake SDK's
+// `AGENT_REPL_FAKE_REFUSE` (src/fake/index.ts) — "start" refuses every
+// StartSession the whole process makes; "start-once" refuses only the
+// FIRST one, for retry-recovery coverage. This is how the refusals area
+// (test #54, StartSessionVendorStartFailed) provokes
+// StartSessionFailure.cause.vendor_start_failed for real, since
+// StartSession resolves before any prompt exists and so cannot be reached
+// by a scenario prompt.
 type WorldOpts struct {
 	DaemonOpts harness.Opts
 }
