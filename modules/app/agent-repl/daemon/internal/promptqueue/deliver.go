@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/feedid"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/feed"
+	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/wsm"
 )
 
@@ -38,8 +39,15 @@ func (q *queue) deliver(ctx context.Context, sub Submission, sender Sender, watc
 	// rather than drawing the prompt twice.
 	q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 
+	// THE ROSTER'S TURN FACT IS THE DAEMON'S OWN. Nothing on the shim's streams
+	// says a turn was accepted — its first frame is an activity, by which time
+	// `submitting` is over — so a roster left to infer it reads `ready` for a
+	// workspace whose turn is running.
+	q.deps.Sidebar.SetTurn(sub.WS, &footer.TurnStarted{At: q.deps.Now(), Act: footer.ActPrompt})
+
 	success, err := sender.StartTurn(ctx, sub.Turn, sub.Said, sub.Origin)
 	if err != nil {
+		q.deps.Sidebar.SetTurn(sub.WS, nil)
 		log.Error(opDeliver, "the shim refused the turn", dlog.Context{"cause": err.Error()})
 		return Disposition{}, fmt.Errorf("start turn %q on %q: %w", sub.Turn, sub.WS, err)
 	}

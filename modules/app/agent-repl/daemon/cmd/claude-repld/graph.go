@@ -282,6 +282,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Judge:          judge,
 		Feed:           feedResolver,
 		Footer:         footerResolver,
+		Sidebar:        sidebarResolver,
 		Holds:          holdsResolver,
 		Client:         fleet.Sender,
 		Revive:         fleet.Start,

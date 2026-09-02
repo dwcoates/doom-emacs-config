@@ -21,6 +21,7 @@ import (
 	"claude-repld/internal/resolve/feed"
 	"claude-repld/internal/resolve/footer"
 	"claude-repld/internal/resolve/holds"
+	"claude-repld/internal/resolve/sidebar"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
@@ -179,6 +180,11 @@ type Deps struct {
 	// Footer carries the waiting-interrupting status, which fires the MOMENT
 	// an interrupt registers rather than when the turn actually ends.
 	Footer footer.Resolver
+	// Sidebar carries the roster's own turn facts. The roster draws
+	// `submitting` and `thinking` from the SAME edge the footer does — the
+	// daemon's acceptance of a turn — because nothing on the shim's streams
+	// states it, and a roster left to infer it reads `ready` while a turn runs.
+	Sidebar sidebar.Resolver
 	// Holds is the tray the queue publishes its holds to.
 	Holds holds.Resolver
 	// Client resolves a workspace's shim client; the queue never dials one
