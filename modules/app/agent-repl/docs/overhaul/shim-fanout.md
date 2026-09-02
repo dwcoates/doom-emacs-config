@@ -652,3 +652,15 @@ every UX or contract gap you surfaced instead of improvising.
   id; no AgentToolFailure denied cause; starts never deferred. shim.md gate
   section amended. Converter change + gate test amendment ride the
   fakes/rebuild brief.
+- LEDGER (2026-09-02): fakes remediation merged at 1768697c7 (worktree/branch
+  retired): buckets 4,6,7,8(mock),9(reader-side join),11,12 done; unit 3764
+  green; SMOKE red at the seam (no store in the smoke + new session-row
+  producers + ruled exit-1 on unacked rows) → item 0 of the rebuild brief.
+  Integration run #4 started on 1768697c7 (scratch shim-itest-run4.log).
+  Dispatched REBUILD (opus-low, shim-agents/rebuild, overhaul/shim-rebuild):
+  smoke fake store; scenario scripts rebuilt from the 69 goldens with a
+  golden-conformance test (declared-only scenarios marked in AGENTS.md;
+  compaction helper stays synthetic); converter: denied tool → failure with
+  no content, usage carrier, detached causes, SourceCoordinates unification;
+  engine hand-over levers (parking foreground bash; !cold-seed assistant
+  stamp); then every remaining integration failure.
