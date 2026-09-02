@@ -129,6 +129,12 @@ type FeedSink interface {
 // FooterSink receives what the footer's status tree, live-work chips and
 // tokens cell resolve from.
 type FooterSink interface {
+	// OnTurnOpened is the TURN-OPEN EDGE: the prompt queue's accepted turn,
+	// handed over by the watcher. Nothing on the shim's streams states it —
+	// the first frame of a turn is an activity, by which time `submitting` is
+	// already over — so the footer is told here, and this is what raises
+	// `thinking submitting` and starts the strip's clock.
+	OnTurnOpened(ws ids.WorkspaceID, turn ids.TurnID)
 	// OnActivity advances the status tree and the activity line.
 	OnActivity(ws ids.WorkspaceID, agent *conversationv1.AgentId, act *conversationv1.AgentActivity)
 	// OnQuestion moves the footer to waiting.
