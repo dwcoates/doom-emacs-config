@@ -258,6 +258,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		NodeBin:      p.Opts.node,
 		MainJS:       paths.ShimMain,
 		ShimBuildSHA: paths.ShimBuildSHA,
+		DefaultModel: os.Getenv(workspace.DefaultModelEnv),
 		Fake:         p.Contracts.Fake(),
 		ForbidVendor: p.Contracts.ForbidVendorCalls(),
 		Log:          p.Surfaces,
