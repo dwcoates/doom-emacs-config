@@ -99,7 +99,7 @@ func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterA
 	// Arrange / Act
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 
 	// Assert: roster arm.
 	roster := behind.d.WatchRoster()
@@ -140,7 +140,7 @@ func TestUpdateMergeQueuePauseThenResumeToggleTheQueueStateAndRefuseNoOps(t *tes
 	// Arrange
 	_, _, repo, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes, the merge conflict the test stages.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause",
+	d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab", "daemon.merge.pause",
 		"daemon.merge.unpause")
 	repoRef := mergeRepositoryRef(t, d, repo)
 
@@ -189,7 +189,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
 		"daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
 	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
@@ -267,7 +267,7 @@ func TestAnswerHeldOfferReleaseEvictsTheQueuedMerge(t *testing.T) {
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff",
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
 		"daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
@@ -370,7 +370,7 @@ func TestAnEvictedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 	// Arrange
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
 		"daemon.merge.merge_tab")
 	root := behind.watchRootFeed()
 	footer := behind.d.WatchFooter(behind.ws)
@@ -424,7 +424,7 @@ func TestADequeuedQueuedMergeEndsAsFeedMergeAbandonedWithTheFooterAndRosterLeavi
 	// section comment above).
 	_, behind, _, _ := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff",
+	behind.d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff",
 		"daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
