@@ -1214,3 +1214,47 @@ func TestBootTimeMillisNeverReturnsNegative(t *testing.T) {
 		t.Fatalf("bootTimeMillis() = %d, want >= 0", got)
 	}
 }
+
+func TestALaunchObservedAfterAFileIsWatchedStillMarksItBackgrounded(t *testing.T) {
+	// Arrange. DISCOVERY ORDER IS NOT CAUSAL ORDER: a subagent's sidechain
+	// transcript is routinely discovered before the parent transcript's launch
+	// result has been read — on a restart it usually is. The flag was frozen at
+	// watch time, so that file named the wrong top_level for the life of the
+	// process while the same agent's task spool named the right one.
+	h := newHarness(t, &fakeStore{})
+	ctx := &tail.Context{Path: "/p/s/subagents/agent-a15.jsonl", AgentID: "toolu_spawn"}
+	h.sc.watchers[ctx.Path] = &watched{
+		target: discover.Target{Path: ctx.Path, AgentID: "toolu_spawn", SessionID: "s", TaskID: "a15locator"},
+		ctx:    ctx,
+	}
+
+	// Act: the launch is read only now.
+	h.sc.owners.observe(observation{taskID: "a15", activityID: "toolu_spawn", backgrounded: true})
+	h.sc.refreshSpawnFacts()
+
+	// Assert.
+	if !ctx.SpawnBackgrounded {
+		t.Fatal("a file watched before its launch was read never learns the spawn was backgrounded")
+	}
+}
+
+func TestAFileWatchedWithNoBackgroundedLaunchStaysForeground(t *testing.T) {
+	// Arrange. The launch is the sole evidence either way; a refresh that turned
+	// the flag on without one would move every synchronous subagent's frames
+	// into a top_level of its own.
+	h := newHarness(t, &fakeStore{})
+	ctx := &tail.Context{Path: "/p/s/subagents/agent-a16.jsonl", AgentID: "toolu_sync"}
+	h.sc.watchers[ctx.Path] = &watched{
+		target: discover.Target{Path: ctx.Path, AgentID: "toolu_sync", SessionID: "s", TaskID: "a16locator"},
+		ctx:    ctx,
+	}
+
+	// Act.
+	h.sc.owners.observe(observation{taskID: "a16", activityID: "toolu_sync", backgrounded: false})
+	h.sc.refreshSpawnFacts()
+
+	// Assert.
+	if ctx.SpawnBackgrounded {
+		t.Fatal("a foreground spawn was refreshed into a backgrounded one")
+	}
+}

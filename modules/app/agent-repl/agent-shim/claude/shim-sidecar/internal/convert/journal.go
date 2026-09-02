@@ -34,3 +34,29 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID s
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
+
+// workflowAgentTranscriptKind is the DECLARED disposition of a record read from
+// a workflow's per-agent transcript (`wf_<id>/agent-<id>.jsonl`).
+//
+// IT IS DECLARED, NOT A CLASSIFICATION FAILURE. These files hold ordinary
+// TRANSCRIPT records — assistant, user, system — not the two journal shapes, so
+// running them through JournalRecord filed every one of them as `unknown`:
+// "we parsed this and do not model it", which is false twice over. The shapes
+// ARE modeled; what is missing is the workflow FEATURE, and `unknown` is the
+// query built to find real modelling gaps. The day workflow ingestion lands,
+// every one of these rows is findable by this kind.
+const workflowAgentTranscriptKind = "workflow/agent_transcript"
+
+// WorkflowAgentRecord converts one record of a workflow's PER-AGENT transcript
+// as declared workflow residue.
+//
+// WORKFLOW IS KICKED, so nothing here is converted into a feed row and nothing
+// reaches a page. The bytes land whole, keyed by the vendor's own record uuid
+// where it has one, so the stream plane's copy of the same record collapses onto
+// the same row rather than standing beside it.
+func (c *Converter) WorkflowAgentRecord(record map[string]any, at Attribution) []*storev1.StoreEntry {
+	at.RecordUUID = str(record["uuid"])
+	c.log.With(at.ctxFor("workflow-agent-record")).
+		LogVerbose("workflow per-agent transcript record type=%q held as declared residue (workflow is kicked this wave)", str(record["type"]))
+	return []*storev1.StoreEntry{VendorSpecificEntry(at, workflowAgentTranscriptKind, record)}
+}

@@ -27,6 +27,18 @@ type AgentTranscriptHandler struct {
 	// converter once, at construction: a converter has exactly one observer, and
 	// two independent adoptions must not overwrite each other.
 	obs *seamObserver
+	// coords are the FILE COORDINATES of the last batch this handler read, and
+	// mainAgent the agent whose stream the file belongs to.
+	//
+	// THEY EXIST FOR THE SEAM-MINTED TERMINAL, exactly as the shell handler's
+	// do. A backgrounded subagent arrives through an `a*` task spool, and a
+	// terminal the READER concludes for it (a LOST sweep) is built from an
+	// attribution that must carry a real write identity: without one, every such
+	// terminal in the process would digest "producer||0|settle:<run>" and the
+	// store — whose absorption IS write_id equality — would swallow the second
+	// as a replay of the first.
+	coords    fileCoords
+	mainAgent string
 }
 
 // NewAgentTranscriptHandler builds a handler with its own converter.
@@ -42,6 +54,11 @@ func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
+	// WHERE WE READ IS A READER FACT, not a conversion outcome, so it is
+	// remembered before the identity check below: a spool whose book never
+	// resolved was still READ, and a terminal minted for it must say so at a
+	// real position.
+	h.rememberCoords(ctx)
 	if ctx.AgentID == "" {
 		// A SIDECHAIN'S BOOK IS ITS AGENT, and its agent is the spawning call
 		// named in the meta file. A transcript whose meta has not been read is
@@ -57,4 +74,14 @@ func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 	h.log.With(handleCtx("agent-handle", ctx)).
 		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
 	return out
+}
+
+// rememberCoords records where this handler has read to, so a terminal the
+// READER concludes can be stated at a real file position rather than at the
+// zero value every such terminal would otherwise share.
+func (h *AgentTranscriptHandler) rememberCoords(ctx *Context) {
+	h.coords = fileCoords{Path: ctx.Path, FileID: ctx.FileID, Offset: ctx.BytesObserved}
+	if ctx.MainAgentID != "" {
+		h.mainAgent = ctx.MainAgentID
+	}
 }
