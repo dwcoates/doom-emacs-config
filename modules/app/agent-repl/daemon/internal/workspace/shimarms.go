@@ -45,6 +45,12 @@ const (
 	// ArmShimUnspecified is a failure whose kind oneof is unset, which is
 	// illegal on the wire and is surfaced rather than guessed at.
 	ArmShimUnspecified = "unspecified"
+	// ArmShimRefused is InterruptError.shim_refused: the shim would not perform
+	// the kill and named no arm the contract carries — an unset kind oneof, or
+	// a failure at the transport under it. It carries the shim's own words as
+	// `detail`, and is the FALLTHROUGH, never a substitute for an arm the shim
+	// did name.
+	ArmShimRefused = "shim_refused"
 )
 
 // ShimRefusal is one shim verb's TYPED refusal, carried up to the verb that
