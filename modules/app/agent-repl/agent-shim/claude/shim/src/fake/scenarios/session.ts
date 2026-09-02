@@ -26,8 +26,10 @@ const ROTATE = scenario({
     "`new_conversation_id` nothing later uses, then a SECOND `system:init` whose `session_id` is the REAL new id " +
     "(a third uuid), and the REST of the turn — its result included — belongs to that identity",
   writes:
-    "a NEW `<new-session>.jsonl` carrying everything after the reset; the OLD file simply STOPS, with no closing " +
-    "record of any kind",
+    "a NEW `<new-session>.jsonl` opening with the harness's local-command trio — the `<local-command-caveat>` " +
+    "isMeta record, the `<command-name>/clear</command-name>` ENVELOPE (the clear's only file-plane record), and " +
+    "an empty `system:local_command` — and carrying everything after the reset; the OLD file simply STOPS, with " +
+    "no closing record of any kind",
   arms: "SessionIdentityRotated + AgentUpdate.context_cut(ContextCleared)",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "rotate" }, "fake identity-rotation turn");
