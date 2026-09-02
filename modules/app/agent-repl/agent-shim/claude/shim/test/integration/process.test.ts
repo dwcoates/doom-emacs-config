@@ -33,7 +33,7 @@ import { parseRecords } from "../integration-support/log.js";
 import {
   connectCode,
   freshSession,
-  openStream,
+  openStream, openSessionUpdates,
   readHistoryFirst,
 } from "../integration-support/client.js";
 import {
@@ -440,7 +440,7 @@ describe("the durable log sink", () => {
     // swallowed and never fatal.
     const shim = await spawnShim({ logPipe: true });
     await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
+    const watch = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     // The opening frame is the current health verdict; the fault comes later.
