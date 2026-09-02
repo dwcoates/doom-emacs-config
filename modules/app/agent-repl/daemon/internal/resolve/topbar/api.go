@@ -99,6 +99,12 @@ type Resolver interface {
 	SetDetachedUnmodeled(ws ids.WorkspaceID, items []DetachedUnmodeled)
 	// Topic is the workspace's topbar publication.
 	Topic(ws ids.WorkspaceID) *publish.Topic[*frontendv1.TopbarView]
+	// StatusFacts answers the session facts the /status panel splices —
+	// account, model and permission mode — reporting false before the session
+	// has stated them. THE PANEL DEGRADES BY DESIGN: with the vendor handshake
+	// deferred there is no cwd, auth, plugin or memory fact to state, so these
+	// three plus the daemon's version are the whole panel.
+	StatusFacts(ws ids.WorkspaceID) (StatusFacts, bool)
 	// ContextPanel resolves the /context panel from the SAME
 	// SessionContextUsage fact the context chip resolves from, reporting false
 	// when the vendor has answered none yet.
@@ -148,4 +154,17 @@ func (SystemClock) Now() time.Time { return time.Now() }
 // which the resolver asserts its emitted tones against.
 func New(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (Resolver, error) {
 	return newResolver(colors, log, opts...)
+}
+
+// StatusFacts are the session facts the /status panel splices beside the
+// daemon's own version. Each is stated exactly as the session stated it; an
+// EMPTY value is a fact the session has not stated, and the panel OMITS its
+// row rather than drawing a blank one.
+type StatusFacts struct {
+	// Account is the logged-in email, empty when the config root is logged out.
+	Account string
+	// Model is the effective model, the vendor's own spelling.
+	Model string
+	// PermissionMode is the mode in force, in its wire spelling.
+	PermissionMode string
 }

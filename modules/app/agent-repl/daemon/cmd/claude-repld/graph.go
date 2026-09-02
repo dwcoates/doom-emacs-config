@@ -457,7 +457,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Queue:    queue,
 		Feed:     feedResolver,
 		DB:       p.DB,
-		Panels:   server.Panels(topbarResolver, log),
+		Panels:   server.Panels(topbarResolver, deployStamp(paths.BuiltSHA), log),
 		MintTurn: wsm.NewTurnID,
 		Log:      p.Surfaces,
 	})

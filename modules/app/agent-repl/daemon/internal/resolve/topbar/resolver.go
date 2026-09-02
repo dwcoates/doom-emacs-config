@@ -570,6 +570,23 @@ func saturatingSub(a, b uint64) uint64 {
 	return a - b
 }
 
+// StatusFacts answers the /status panel's spliced session facts. It reports
+// false until the session has started, because a status panel for a workspace
+// whose session never opened would state nothing the daemon actually knows.
+func (r *resolver) StatusFacts(ws ids.WorkspaceID) (StatusFacts, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.stateLocked(ws)
+	if !s.started {
+		return StatusFacts{}, false
+	}
+	return StatusFacts{
+		Account:        s.email,
+		Model:          s.model,
+		PermissionMode: s.permissionMode,
+	}, true
+}
+
 // PermissionModes answers EXACTLY the switchable mode set the daemon served
 // for this workspace, in the order it was served. It reports false when no
 // picker has been installed, which is the honest answer for a workspace whose
