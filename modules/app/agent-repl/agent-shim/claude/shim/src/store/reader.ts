@@ -545,7 +545,11 @@ export function createReader(options: ReaderOptions): Reader {
                 // Only a refusal BEFORE the first row is a race; once rows have
                 // been served the run plainly exists and the failure is real.
                 if (opened || !isNotFound(error)) throw error;
-                if (stillLive !== undefined && !stillLive()) throw error;
+                // WAITING NEEDS A REASON. A caller with no belief about the run
+                // has given none, so the store's refusal stands — only a caller
+                // that says "I still hold this run" turns the refusal into a
+                // race worth waiting out.
+                if (stillLive === undefined || !stillLive()) throw error;
                 if (abort.signal.aborted) throw error;
                 LOGGER.logVerbose(
                   { run: runValue, work: work.value },
