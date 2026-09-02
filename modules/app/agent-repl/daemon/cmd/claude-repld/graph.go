@@ -242,7 +242,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	mergeRef := &mergeForwarder{}
 
 	var queue promptqueue.Queue
-	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, log: log}
+	healthRef := &healthForwarder{}
+	lifecycle := &lifecycleSink{verbs: verbsRef, relay: relay, health: healthRef, log: log}
 
 	fleet, err := workspace.NewFleet(workspace.FleetDeps{
 		PublishHost: relay.PublishHostWorkspace,
@@ -435,6 +436,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claude-repld: build the health reporter: %w", err)
 	}
+	healthRef.bind(healthReporter)
 	loginManager, err := login.New(guard, "", func(ws ids.WorkspaceID) (string, error) {
 		dir, err := workspaceDir(ws)
 		if err != nil {

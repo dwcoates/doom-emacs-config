@@ -124,6 +124,12 @@ func (s *wsState) asyncLive() bool {
 // what makes a closed workspace `inactive` — no open perspective and nothing
 // running behind it.
 func (s *wsState) live(session *wsm.Session) bool {
+	// A PARKED session is live: the idle sweep stood the shim down and a
+	// prompt brings it back, so the workspace is not "nothing running behind
+	// it" in the sense `inactive` means.
+	if parked(session) {
+		return true
+	}
 	if session != nil && session.Terminal != nil {
 		return false
 	}

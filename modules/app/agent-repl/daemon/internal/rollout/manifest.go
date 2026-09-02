@@ -27,6 +27,14 @@ const (
 	IntentPreserve Intent = "preserve"
 	// IntentStandDown is a session the outgoing daemon deliberately ended.
 	IntentStandDown Intent = "stand_down"
+	// IntentNoSession is a workspace handed over with NO SHIM AT ALL: it was
+	// registered and never opened, or its session was already gone when the
+	// manifest was written. It carries an entry because the entry is what arms
+	// the successor's rendezvous, and it is a DISTINCT intent because there is
+	// no process whose survival could be judged — reading a free lock for one
+	// of these as a session that silently died would raise a fault on the most
+	// ordinary handover there is.
+	IntentNoSession Intent = "no_session"
 )
 
 // DispositionKind is what actually became of one session. THE FOUR ARE NEVER
@@ -203,11 +211,21 @@ func (c *controller) Reconcile(ctx context.Context) ([]Disposition, error) {
 			}
 			state = probed
 		}
+		// AN ENTRY WITH NO PID NAMES NO PROCESS, whatever intent it carries.
+		// The write site records IntentNoSession for these, and this
+		// normalization is what makes a manifest written by an older daemon —
+		// which spelled every entry `preserve` — reconcile to the same
+		// disposition rather than raising a fault over a workspace that never
+		// had a shim.
+		intent := session.Intent
+		if session.ShimPID == 0 && intent != IntentStandDown {
+			intent = IntentNoSession
+		}
 		d := Disposition{
 			Workspace: session.Workspace,
-			Intent:    session.Intent,
+			Intent:    intent,
 			Lock:      state,
-			Kind:      disposition(session.Intent, state),
+			Kind:      disposition(intent, state),
 		}
 		out = append(out, d)
 		c.recordDisposition(ctx, session, d)
@@ -220,6 +238,12 @@ func (c *controller) Reconcile(ctx context.Context) ([]Disposition, error) {
 // disposition names what an intent and a lock state together mean.
 func disposition(intent Intent, state sessionlock.State) DispositionKind {
 	switch {
+	case intent == IntentNoSession:
+		// NOTHING WAS TO BE PRESERVED, so nothing failed to be. The lock is
+		// not consulted: there is no shim behind it either way, and an
+		// undetermined probe over a workspace with no process is not an
+		// unknown disposition.
+		return DispositionPreserved
 	case state == sessionlock.StateUnknown:
 		return DispositionUnknown
 	case intent == IntentPreserve && state == sessionlock.StateHeld:
@@ -233,10 +257,45 @@ func disposition(intent Intent, state sessionlock.State) DispositionKind {
 	}
 }
 
+// pendingDisposition is one deferred accounting write.
+type pendingDisposition struct {
+	session ManifestSession
+	d       Disposition
+}
+
+// flushDispositions writes the dispositions reconciled while the handle was
+// read-only. The successor calls it the moment its handle is promoted, so the
+// bounce accounting is deferred by exactly the read-only window and by nothing
+// else.
+func (c *controller) flushDispositions(ctx context.Context) {
+	c.mu.Lock()
+	pending := c.pendingDispositions
+	c.pendingDispositions = nil
+	c.mu.Unlock()
+	for _, p := range pending {
+		c.recordDisposition(ctx, p.session, p.d)
+	}
+	if len(pending) > 0 {
+		c.log.Debug(opReconcile, "wrote the bounce dispositions deferred by the read-only window",
+			dlog.Context{"dispositions": len(pending)})
+	}
+}
+
 // recordDisposition writes one session's disposition as a WSM fault. It is
 // never collapsed into a count: one record per session, naming the workspace.
 func (c *controller) recordDisposition(ctx context.Context, session ManifestSession, d Disposition) {
 	ws := session.Workspace
+	// A READ-ONLY HANDLE IS NOT A FAILURE HERE, it is the joining successor's
+	// ordinary state: the incumbent is still the sole writer. The accounting
+	// is HELD, not dropped, and flushDispositions writes it at the promotion.
+	if c.deps.DB.ReadOnly() {
+		c.mu.Lock()
+		c.pendingDispositions = append(c.pendingDispositions, pendingDisposition{session: session, d: d})
+		c.mu.Unlock()
+		c.log.Debug(opReconcile, "deferred a bounce disposition until the state handle writes",
+			dlog.Context{"workspace": string(ws), "disposition": string(d.Kind)})
+		return
+	}
 	fields := dlog.Context{
 		"workspace":   string(ws),
 		"intent":      string(d.Intent),

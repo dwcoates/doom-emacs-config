@@ -427,9 +427,9 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 		want   []string
 	}{
 		{
-			name:   "diagnostics is the topbar's",
+			name:   "diagnostics is the topbar's and the health reporter's",
 			update: diagnosticsUpdate(),
-			want:   []string{"topbar.OnSessionUpdate"},
+			want:   []string{"topbar.OnSessionUpdate", "lifecycle.OnSessionDiagnostics"},
 		},
 		{
 			name:   "context usage is the topbar's",
