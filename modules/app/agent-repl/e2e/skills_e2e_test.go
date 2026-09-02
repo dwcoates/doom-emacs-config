@@ -138,11 +138,14 @@ func TestSkillNamedAndArgsParameterized(t *testing.T) {
 func runSkillScenarioCase(t *testing.T, tc skillScenarioCase) {
 	t.Helper()
 
-	// Arrange: one real daemon+store+sidecar+shim world, one real git
-	// repository registered as the workspace (SPEC.md §B "Real git" --
-	// ruling 4: this suite never uses the scripted fake git).
+	// Arrange: one real daemon+store+sidecar+shim world, one fake-git
+	// repository registered as the workspace. Only the systems this suite
+	// owns (claude-repld, the shim, shim-store, shim-sidecar) run for real;
+	// git is an external dependency and stays mocked via the daemon
+	// harness's own scripted fakegit world, exactly as daemon/integration's
+	// own tests register a workspace (harness.NewRepo + harness.Register).
 	w := NewWorld(t, WorldOpts{})
-	repo := NewRealRepo(t)
+	repo := harness.NewRepo(t)
 	ws := harness.Register(t, w.Daemon, repo.Dir)
 
 	// Act: drive the real `!skill ...` prompt through the daemon's real
