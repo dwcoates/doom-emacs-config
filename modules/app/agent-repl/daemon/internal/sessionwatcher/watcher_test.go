@@ -754,3 +754,85 @@ func TestADeadLinkIsNeverWalkedBackToRedialing(t *testing.T) {
 		t.Fatalf("the link after a post-death stream break = %v, want LinkDead", got)
 	}
 }
+
+// TestASeveredStreamRaisesASeveredLinkFault pins the evidence half of a broken
+// standing stream: the views get the link state, and the lifecycle sink gets
+// the fault the session's health answer is built from.
+func TestASeveredStreamRaisesASeveredLinkFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.session.fail(errors.New("connection reset"))
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultSevered {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultSevered)
+	}
+	if got.ExitCode != nil {
+		t.Fatalf("link fault exit code = %d, want none: the shim is still running", *got.ExitCode)
+	}
+}
+
+// TestADeadLinkRaisesAShimDiedFaultCarryingTheExitCode pins that the reap's
+// own decoding travels with the fault, which is what the two booleans of the
+// liveness probe could never carry.
+func TestADeadLinkRaisesAShimDiedFaultCarryingTheExitCode(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	h.client.setReaped(shimclient.ExitInfo{PID: 4242, Code: 3})
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.Kind != LinkFaultDead {
+		t.Fatalf("link fault kind = %q, want %q", got.Kind, LinkFaultDead)
+	}
+	if got.ExitCode == nil || *got.ExitCode != 3 {
+		t.Fatalf("link fault exit code = %v, want 3", got.ExitCode)
+	}
+}
+
+// TestADeadLinkWithNoDecodedExitRaisesNoExitCode pins presence over sentinels:
+// an exit nothing decoded is ABSENT, never a zero that reads as a clean exit.
+func TestADeadLinkWithNoDecodedExitRaisesNoExitCode(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.client.links <- shimclient.LinkDead
+
+	// Assert.
+	got := h.awaitLinkFault(t)
+	if got.ExitCode != nil {
+		t.Fatalf("link fault exit code = %d, want none", *got.ExitCode)
+	}
+}
+
+// TestTheLinkComingBackRaisesNoFault pins that only a LOST link is evidence: a
+// link that connects is the ordinary path.
+func TestTheLinkComingBackRaisesNoFault(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act.
+	h.client.links <- shimclient.LinkDialing
+	h.client.links <- shimclient.LinkConnected
+
+	// Assert: the connected edge reaches the views, and no fault rides with it.
+	h.rec.until(t, "lifecycle.OnLinkChanged")
+	select {
+	case e := <-h.rec.ch:
+		if e.name() == "lifecycle.OnLinkFault" {
+			t.Fatalf("a link coming back raised %+v, want no fault", e.linkFault)
+		}
+	default:
+	}
+}

@@ -96,6 +96,16 @@ func (c *client) PID() int {
 // Exited yields exactly one ExitInfo when the process is gone, then closes.
 func (c *client) Exited() <-chan ExitInfo { return c.exit }
 
+// Reaped answers the decoded exit without consuming Exited.
+func (c *client) Reaped() (ExitInfo, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.exitInfo == nil {
+		return ExitInfo{}, false
+	}
+	return *c.exitInfo, true
+}
+
 // Connectivity yields every link state change: dialing, connected, redialing,
 // dead.
 func (c *client) Connectivity() <-chan LinkState { return c.link.states() }

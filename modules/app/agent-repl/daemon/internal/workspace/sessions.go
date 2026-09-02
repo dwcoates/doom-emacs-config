@@ -358,6 +358,12 @@ func (f *Fleet) Start(ctx context.Context, ws ids.WorkspaceID) error {
 	if err != nil {
 		return err
 	}
+	// THE HEALTHY ATTACH CLOSES THE LOST-LINK FAULTS. Bring-up gates on the
+	// shim's first healthy diagnostics, so reaching here IS the repair of
+	// whatever shim_died or link_severed the previous attachment recorded. A
+	// mid-stream redial is NOT this moment: the link coming back on a stream
+	// the daemon never re-attached leaves the evidence standing.
+	f.closeLinkFaults(ctx, log, ws)
 
 	started, err := f.startSession(ctx, log, ws, client, src, session)
 	if err != nil {
@@ -507,6 +513,35 @@ func (f *Fleet) noteStartFailed(ctx context.Context, log dlog.Logger, ws ids.Wor
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkDead)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkDead)
 	f.publishHost(ws)
+}
+
+// linkFaultKinds are the fault kinds a lost daemon-to-shim link records, and
+// the ones a healthy attach retracts.
+var linkFaultKinds = []string{health.KindShimDied, health.KindLinkSevered}
+
+// closeLinkFaults retracts the lost-link faults of one workspace.
+func (f *Fleet) closeLinkFaults(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) {
+	workspace := ws
+	for _, kind := range linkFaultKinds {
+		open, err := f.deps.DB.OpenFaults(ctx, wsm.FaultScope{Workspace: &workspace, Kind: kind})
+		if err != nil {
+			log.Error(opBringUp, "could not read the standing link faults", dlog.Context{
+				"kind": kind, "cause": err.Error(),
+			})
+			continue
+		}
+		for _, fault := range open {
+			if err := f.deps.DB.CloseFault(ctx, fault.ID, f.now()); err != nil {
+				log.Error(opBringUp, "could not close a standing link fault", dlog.Context{
+					"kind": kind, "fault": string(fault.ID), "cause": err.Error(),
+				})
+				continue
+			}
+			log.Info(opBringUp, "a healthy attach retracted a lost-link fault", dlog.Context{
+				"kind": kind, "fault": string(fault.ID),
+			})
+		}
+	}
 }
 
 // resumeGuard refuses a RESUME whose vendor transcript is gone, before any
