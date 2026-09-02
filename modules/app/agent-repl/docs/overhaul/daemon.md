@@ -1306,3 +1306,11 @@ its own file only when >1 endpoint needs it.
   history already published stays as feed content, the new run appends
   its rounds. Rationale: the git state after a crash is only trustworthy
   from a clean re-run; re-entering mid-tab would guess at partial state.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- SubmitPromptSuccess.command_acted lands: the act path answers it instead of the notimpl sentinel; retire that ERROR-ARMS row.
+- SubmitPromptError.duplicate_submission lands for the idempotency_key repeat; UpdateMergeQueueError.unknown_repository lands for pause/resume on an unknown RepositoryRef.
+- SubmitPromptError.turn_already_open is RETIRED (tag 8 reserved); delete promptqueue.ErrTurnAlreadyOpen and the server mapping.
+- /status uses the EXISTING SubmitPromptCommandPanel.status arm (tag 1); resolve the thin panel into StatusPanelView rows. AnswerQuestionError's ask_not_standing/unserved_value split already exists; drop the Refusal.NotFound workaround in favor of the two arms.
+- Watch* refusals stay transport-closed by ruling; record them as such, not as unlanded arms.
