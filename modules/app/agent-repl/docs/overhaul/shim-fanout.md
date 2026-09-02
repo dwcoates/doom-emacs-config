@@ -604,3 +604,15 @@ every UX or contract gap you surfaced instead of improvising.
   kind, per-block assistant line before content_block_stop). The scenario
   rebuild brief must emit assistant lines per block BEFORE content_block_stop
   and the observed /clear shape.
+- LEDGER: goldens merged at eb7930399 (worktree/branch retired): 69 real
+  captures under agent-shim/claude/shim/testdata/captures/ (7.8 MB; the
+  241 MB turn-stop-max-turns spool excluded) + MANIFEST with an
+  evidence-gaps section; golden suites test/convert/goldens/*; converter
+  fixes in convert/detached.ts (task kind only on task_started) and
+  convert/stream-events.ts (per-block assistant line before
+  content_block_stop); unit 3682 green. Arms no capture exercises (asserted
+  nowhere, not faked): glob, grep, artifact, scheduleWakeup, worktree,
+  contextInjected; no failed subagent; no compact_boundary. Queued fix:
+  unify the two `SourceCoordinates` types (store/keys.ts vs
+  store/persistence.ts) into one shared declaration (rides the scenario
+  rebuild brief).
