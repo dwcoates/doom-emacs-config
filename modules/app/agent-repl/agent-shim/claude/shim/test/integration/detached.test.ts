@@ -755,9 +755,12 @@ describe("reconciliation at session start", () => {
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     stream.close();
-    await first.clients.h1.killSession(
-      create(shimv1.KillSessionRequestSchema, { force: true }),
-    );
+    // THE SHIM DIES WITHOUT STANDING DOWN, which is the whole premise: an
+    // ORDERLY kill stops every live item and writes its terminal, leaving
+    // nothing to re-adopt. A crash stops nothing — the backgrounded shell keeps
+    // running, its spool keeps no `EXIT=` line, and the record keeps an open
+    // obligation for the revived session to reconcile.
+    first.child.kill("SIGKILL");
     await first.exited;
 
     const second = await spawnShim({ reuse: first.dirs });
