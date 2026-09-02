@@ -33,6 +33,7 @@ import {
   WORKSPACE_ID,
   activityRow,
   artifactUnit,
+  subagentUnit,
   coldGateStandingRow,
   commandRefusedRow,
   feedId,
@@ -657,6 +658,40 @@ const REFUSAL_SITES: RefusalSite[] = [
     arrange: (h) => h.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(planUnit("planned"))),
   },
   {
+    name: "RestartWorkspace (forced)",
+    rpc: "restartWorkspace",
+    click: '[data-roster-row="ws-1"] [data-verb="restartForce"]',
+    site: '[data-roster-row="ws-1"]',
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+  },
+  {
+    name: "SelectWorkspace",
+    rpc: "selectWorkspace",
+    click: '[data-roster-row="ws-other"] [data-select]',
+    site: '[data-roster-row="ws-other"]',
+    arrange: (h) => h.fake.setRoster(roster({ rows: [rosterRow({ id: "ws-other" })] })),
+  },
+  {
+    name: "SetModel",
+    rpc: "setModel",
+    click: '[data-model-option="sonnet"]',
+    site: ".topbar-model",
+    arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
+    before: async (h) => {
+      await h.click(".topbar-model");
+    },
+  },
+  {
+    name: "SetPermissionMode",
+    rpc: "setPermissionMode",
+    click: '[data-mode-option="plan"]',
+    site: ".topbar-mode",
+    arrange: (h) => h.fake.setTopbar(WORKSPACE_ID, topbarView()),
+    before: async (h) => {
+      await h.click(".topbar-mode");
+    },
+  },
+  {
     name: "RequestCommandSupport",
     rpc: "requestCommandSupport",
     click: "[data-add-support]",
@@ -770,3 +805,250 @@ function overlayArms(): string[] {
     (el) => el.dataset.arm ?? "",
   );
 }
+
+// ---------------------------------------------------------------------------
+// A BUBBLE COMPOSER'S REFUSAL IS THE BUBBLE'S (audit 1, item 8)
+//
+// "EVERY CLICK IS AN RPC, and its refusal renders AT the clicked control." A
+// bubble composer is a control inside a row, so its refusal belongs inside that
+// row — drawing it at the root composer would tell a reader their ROOT prompt
+// was refused, which is a different fact about a different submission.
+// ---------------------------------------------------------------------------
+
+describe("a bubble composer's refusal", () => {
+  /** Expand a bubble, type into ITS box, and send against a refusing daemon. */
+  const sendFromBubble = async (arm: string): Promise<void> => {
+    harness = await startHarness({
+      composer: true,
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    harness.fake.refuse("submitPrompt", arm);
+    const input = harness.$('[data-feed-row="bubble"] textarea') as HTMLTextAreaElement;
+    input.value = "into the bubble";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await harness.settle();
+    await harness.click('[data-feed-row="bubble"] [data-composer-send]');
+  };
+
+  it("draws the refusal inside the bubble", async () => {
+    // Arrange / Act
+    await sendFromBubble("noSession");
+    // Assert
+    expect(harness.$('[data-feed-row="bubble"] .composer-refusal')).not.toBeNull();
+  });
+
+  it("draws no refusal at the root composer", async () => {
+    // Arrange / Act
+    await sendFromBubble("noSession");
+    // Assert
+    expect(harness.shell.composer.querySelector(":scope > .composer-box .composer-refusal")).toBeNull();
+  });
+
+  it("draws exactly one refusal on the page", async () => {
+    // Arrange / Act
+    await sendFromBubble("noSession");
+    // Assert
+    expect(harness.refusalArms()).toEqual(["noSession"]);
+  });
+
+  it("keeps the bubble's own text", async () => {
+    // Arrange / Act
+    await sendFromBubble("noSession");
+    // Assert
+    expect((harness.$('[data-feed-row="bubble"] textarea') as HTMLTextAreaElement).value).toBe(
+      "into the bubble",
+    );
+  });
+
+  it("draws a cross-cutting arm inside the bubble too", async () => {
+    // Arrange / Act
+    await sendFromBubble("unknownWorkspace");
+    // Assert
+    expect(
+      harness.$('[data-feed-row="bubble"] .composer-refusal[data-arm="unknownWorkspace"]'),
+    ).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE CREATE FORM AND THE TASK VERBS (audit 1, item 9)
+//
+// CreateWorkspace is addressed to a REPOSITORY rather than to an existing
+// workspace, so none of the cross-cutting four can reach it: every arm is the
+// endpoint's own, and this table IS the whole vocabulary. The same is true of
+// CreateTask and UpdateTask, which are addressed to a task.
+// ---------------------------------------------------------------------------
+
+describe("the create-workspace form", () => {
+  /** Open the "+" form in the repository section. */
+  const openForm = async (refusal?: string): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+    });
+    if (refusal !== undefined) harness.fake.refuse("createWorkspace", refusal);
+    await harness.click(".sb-add");
+  };
+
+  it("declares none of the cross-cutting four", () => {
+    // Assert: a creation names no existing workspace, so it cannot be refused
+    // for one — read off the descriptor so a landed arm shows up here.
+    const shared = refusalArmsOf("createWorkspace").filter((arm) =>
+      (CROSS_CUTTING_ARMS as readonly string[]).includes(arm),
+    );
+    expect(shared).toEqual([]);
+  });
+
+  it("echoes the section's own repository", async () => {
+    // Arrange
+    await openForm();
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    const [request] = harness.fake.calls<{ repository?: { id: string } }>("createWorkspace");
+    expect(request.repository?.id).toBe("repo-1");
+  });
+
+  it("sends the standard form by default", async () => {
+    // Arrange
+    await openForm();
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    const [request] = harness.fake.calls<{ form: { case?: string } }>("createWorkspace");
+    expect(request.form.case).toBe("standard");
+  });
+
+  it("carries a typed field into the request", async () => {
+    // Arrange
+    await openForm();
+    const name = harness.$('[data-create-form] [name="name"]') as HTMLInputElement;
+    name.value = "audit-1";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    const [request] = harness.fake.calls<{ form: { value?: { name?: string } } }>("createWorkspace");
+    expect(request.form.value?.name).toBe("audit-1");
+  });
+
+  it("sends the one-shot form when that mode is picked", async () => {
+    // Arrange
+    await openForm();
+    const prompt = harness.$('[data-create-form] [name="one_shot_prompt"]') as HTMLTextAreaElement;
+    prompt.value = "do the thing";
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    await harness.click('[data-create-form] [name="form"][value="one_shot"]');
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    const [request] = harness.fake.calls<{ form: { case?: string } }>("createWorkspace");
+    expect(request.form.case).toBe("oneShot");
+  });
+
+  it.each(refusalArmsOf("createWorkspace"))("draws the %s arm at the form", async (arm) => {
+    // Arrange
+    await openForm(arm);
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    expect(harness.$(`[data-create-form] .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it("names the unresolved base ref the arm carries", async () => {
+    // Arrange
+    await openForm("baseRefUnresolved");
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    expect(harness.$("[data-create-form] .refusal")?.textContent).toContain(REFUSAL_FACTS.ref);
+  });
+
+  it("keeps the form open on a refusal", async () => {
+    // Arrange: the form's next move depends on which arm it was, so it stays.
+    await openForm("noSlug");
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    expect(harness.$("[data-create-form]")).not.toBeNull();
+  });
+
+  it("closes the form on a success", async () => {
+    // Arrange: the new row arrives on the roster push.
+    await openForm();
+    // Act
+    await harness.click("[data-create-submit]");
+    // Assert
+    expect(harness.$("[data-create-form]")).toBeNull();
+  });
+});
+
+describe("the task verbs' refusals", () => {
+  /** Boot with a roster and a refusing task verb. */
+  const withRefusal = async (rpc: RpcName, arm: string): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => fake.setRoster(roster({ rows: [rosterRow({ id: WORKSPACE_ID })] })),
+    });
+    harness.fake.refuse(rpc, arm);
+  };
+
+  /**
+   * Type a title into the new-task form.
+   *
+   * A BLANK TITLE IS NEVER SENT (src/sidebar/tasks.ts: the contract says the
+   * title is non-blank, so the refusal is avoided rather than provoked), so a
+   * test that clicked with an empty box would provoke no rpc at all and
+   * observe no refusal for the wrong reason.
+   */
+  const typeTitle = async (title: string): Promise<void> => {
+    const input = harness.$("[data-task-title]") as HTMLInputElement;
+    input.value = title;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await harness.settle();
+  };
+
+  it.each(refusalArmsOf("createTask"))("draws CreateTask's %s arm at its control", async (arm) => {
+    // Arrange
+    await withRefusal("createTask", arm);
+    await typeTitle("a new task");
+    // Act
+    await harness.click("[data-task-create]");
+    // Assert
+    expect(harness.$(`[data-component="sidebar"] .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it.each(refusalArmsOf("updateTask"))("draws UpdateTask's %s arm at its control", async (arm) => {
+    // Arrange
+    await withRefusal("updateTask", arm);
+    // Act
+    await harness.click('[data-task-change="setDone"]');
+    // Assert
+    expect(harness.$(`[data-component="sidebar"] .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it("draws exactly one refusal for a refused task create", async () => {
+    // Arrange
+    await withRefusal("createTask", "blankTitle");
+    await typeTitle("a new task");
+    // Act
+    await harness.click("[data-task-create]");
+    // Assert
+    expect(harness.refusalArms()).toEqual(["blankTitle"]);
+  });
+
+  it("draws no task refusal in the feed", async () => {
+    // Arrange
+    await withRefusal("updateTask", "unknownTask");
+    // Act
+    await harness.click('[data-task-change="setDone"]');
+    // Assert
+    expect(harness.feedContainer()?.querySelector(".refusal")).toBeNull();
+  });
+});

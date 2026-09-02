@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   InterruptErrorSchema,
@@ -6,6 +6,7 @@ import {
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
+import { registerWorkspaceMoved } from "../src/rpc/moved.js";
 import {
   INTERRUPT_ERROR_ARMS,
   interruptErrorSentence,
@@ -118,5 +119,55 @@ describe("logInterruptRefusal: the one line a refused stop leaves behind", () =>
           line.includes("footer.turn-stop-refused"),
       ),
     ).toBe(true);
+  });
+});
+
+/**
+ * THE STOP GOES THROUGH THE ONE REFUSAL HOOK.
+ *
+ * The cross-cutting four are not this module's to word, and the hook that
+ * words them is also the one that raises the page-wide "workspace moved"
+ * notice. This module used to spell those four out itself, which meant a stop
+ * refused as `transferring_away` drew a sentence beside the stop button and
+ * told the rest of the page nothing. (Audit 1 item 18, ruled.)
+ */
+describe("interruptErrorSentence: the cross-cutting four go through the hook", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("raises the page-wide moved notice on transferring_away", () => {
+    // Arrange
+    const moved = vi.fn();
+    const unregister = registerWorkspaceMoved(moved);
+    // Act
+    interruptErrorSentence(
+      kindOf("transferringAway", { address: "127.0.0.1:9931" }),
+      "InterruptError.kind",
+    );
+    unregister();
+    // Assert
+    expect(moved).toHaveBeenCalledWith("127.0.0.1:9931");
+  });
+
+  it("raises no moved notice for any other arm", () => {
+    // Arrange
+    const moved = vi.fn();
+    const unregister = registerWorkspaceMoved(moved);
+    // Act
+    for (const arm of SCHEMA_ARMS.filter((a) => a !== "transferringAway")) {
+      interruptErrorSentence(kindOf(arm), "InterruptError.kind");
+    }
+    unregister();
+    // Assert
+    expect(moved).not.toHaveBeenCalled();
+  });
+
+  it("words the cross-cutting arms exactly as the shared hook does", () => {
+    // Arrange / Act / Assert: one vocabulary, so a stop and a sidebar verb
+    // refused the same way read the same way.
+    expect(interruptErrorSentence(kindOf("unknownWorkspace"), "InterruptError.kind")).toBe(
+      "the daemon does not know this workspace",
+    );
   });
 });
