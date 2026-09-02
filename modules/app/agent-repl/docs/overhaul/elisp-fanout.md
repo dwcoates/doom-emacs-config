@@ -366,6 +366,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   origin, turn-already-open-refusal-names-its-arm — the load-correlated
   `--await-log` family R-REGRESS holds) but 54/54 inside the all-suite run
   (3348/3348 green). Only R-REGRESS in flight.
+- LANDING 6 MERGED (93e071ef0, from overhaul/integration: protos
+  d46e601e7, bindings 8a98e4fca, docs bc0a07bae). Relay (elisp.md
+  "Landing 6 relay"): SubmitPromptSuccess.command_acted = third non-turn
+  success arm (composer clears, INFO `elisp.input.command-answered`);
+  SubmitPromptError.duplicate_submission keeps the text and says the key
+  was already accepted; SubmitPromptError.turn_already_open RETIRED (drop
+  from the decoder's arm table; the composer suite's turn-already-open
+  test retargets to another declared arm); UpdateMergeQueueError.
+  unknown_repository on pause/resume/evict → WARN + message naming the
+  repository. R-LANDING6 dispatched (`opus-low`, elisp-agents/landing6).
+  Running: regress, landing6.
 
 ## 1. Module map (final tree of lisp/)
 
