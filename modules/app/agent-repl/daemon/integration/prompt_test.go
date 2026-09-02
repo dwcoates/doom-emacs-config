@@ -1807,6 +1807,70 @@ func TestAQuestionThatExpiresIsDrawnExpired(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// The displaced user turn: captured durably at lease acquisition, resubmitted
+// exactly once at lease release. merge_test.go's own
+// TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce covers the
+// OTHER half -- the crash-window case that survives a daemon bounce -- and
+// stays skipped there as unexpressible without a harness hook (see its own
+// doc comment). This is the ordinary, no-crash half: a ready-and-waiting
+// resubmission the moment the merge that displaced the turn tears down.
+// ---------------------------------------------------------------------------
+
+// TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRelease
+// covers audit-3 critique 24's non-bounce half: internal/workspace/fleet_rollout.go's
+// CaptureDisplaced marks the workspace's own still-in-flight turn at the
+// merge's admission (internal/merge/run.go), and
+// internal/merge/terminal.go's resubmitDisplaced puts it back with a fresh
+// TurnId at teardown. A clean self-repo merge with a passing test gate (the
+// mergeCleanRepo fixture, merge_test.go) submits nothing of its own before
+// landing, so the resubmission is the ONLY further StartTurn this
+// workspace's shim ever sees -- which is what lets the count below name the
+// resubmission exactly, with no race against the merge's own traffic.
+func TestADisplacedTurnIsCapturedAtLeaseAcquisitionAndResubmittedExactlyOnceAtRelease(t *testing.T) {
+	// Arrange: a clean self-repo merge target with a turn of its own still
+	// open when the merge takes the lease.
+	f, d, _, script := mergeCleanRepo(t)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	resp := f.submit("keep going", "k-displace", origin)
+	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
+		t.Fatalf("SubmitPrompt = %v, want a minted TurnId for the turn the merge will displace", resp)
+	}
+	displaced := f.shim.ExpectStartTurn()
+	if got := text(displaced.GetSaid()); got != "keep going" {
+		t.Fatalf("the displaced turn's StartTurn.said = %q, want %q", got, "keep going")
+	}
+	// No terminal frame is ever pushed for it: it is still the workspace's
+	// in-flight turn when MergeWorkspace is called below, which is exactly
+	// what CaptureDisplaced reads (sessionwatcher's TurnInFlight()).
+	beforeMerge := f.shim.Count(harness.RPCStartTurn)
+
+	// Act: the merge admits, captures the still-open turn as displaced, and
+	// lands with no conflict and a passing gate.
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	// ExpectStartTurn BLOCKS for the next request, so this is the
+	// resubmission's own arrival -- not a race against the merge's teardown.
+	resubmit := f.shim.ExpectStartTurn()
+
+	// Assert: exactly one further StartTurn arrived -- the resubmission --
+	// and the count read right after it is the negative probe for a third.
+	if got := f.shim.Count(harness.RPCStartTurn); got != beforeMerge+1 {
+		t.Fatalf("StartTurn count once the resubmission arrived = %d, want exactly %d (beforeMerge+1: the one resubmission, never a third)", got, beforeMerge+1)
+	}
+	if got := text(resubmit.GetSaid()); got != "keep going" {
+		t.Fatalf("the resubmitted turn's StartTurn.said = %q, want the displaced turn's own text %q", got, "keep going")
+	}
+	if resubmit.GetOrigin() != mergeDisplacedResumeOrigin {
+		t.Fatalf("the resubmitted turn's StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME (%d)", resubmit.GetOrigin(), mergeDisplacedResumeOrigin)
+	}
+	if resubmit.GetTurn().GetValue() == displaced.GetTurn().GetValue() {
+		t.Fatalf("the resubmitted turn's id = the displaced turn's own id %q, want a fresh TurnId (resubmitDisplaced mints one)", displaced.GetTurn().GetValue())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // prompt_test.go helpers
 // ---------------------------------------------------------------------------
 

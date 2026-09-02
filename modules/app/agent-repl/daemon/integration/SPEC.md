@@ -86,6 +86,24 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - LAUNCHER FAILURE: the fake browser and every other recorder executable take
   `SetExitCode(n)`, so `OpenExternal`'s `launch_failed` arm is driven by a
   launcher that really exits non-zero rather than by a stub.
+- VENDOR-GUARD REFUSAL SITES: `Opts.NoFake` starts the daemon WITHOUT `--fake`
+  and withholds `AGENT_REPL_CLAUDE_BIN`, so the classifier's headless run and
+  the login pty reach their real implementations and `envc.VendorGuard` refuses
+  them naming the site. It is the only way to exercise a guarded site; the fake
+  shim is unaffected, since `--node` still names it.
+- THE Watch* FAMILY AS ONE TABLE: `harness.WatchKinds()` reduces every view
+  stream to `{Name, PerWorkspace, Open}` with the pushes type-erased to
+  `proto.Message`, so an invariant stated over the WHOLE family (the
+  subscription invariant; flush-on-accept) is one table-driven test rather than
+  seven copies. `WatchFeed` and `WatchLoginTerminal` are deliberately outside
+  it: the first is a tail from a minted token and the second carries pty bytes,
+  so "the first push is the last-published view" is not their contract.
+- FLUSH-ON-ACCEPT: `Stream.AwaitHeaders` reads Connect's response headers,
+  which arrive only when the server FLUSHES them. Nothing else on the wire
+  separates a stream that is open with no view yet from one that never
+  answered.
+- `harness.DialAt(t, addr)` builds a client against an address other than
+  `daemon.addr`, for the joining daemon that publishes its own `joining.addr`.
 
 ## Suites and tests (one `_test.go` file per suite; one edge case per test)
 
@@ -447,6 +465,80 @@ audit's charge can be reconciled against the files.
 - EITHER/OR REFUSALS SETTLED: the unknown-workspace and no-login-open refusals
   and bare `/model` each assert one outcome, never "an error or an arm".
 
+### Coverage the third adversarial audit added
+
+Folded into the suites above rather than listed twice; recorded here so the
+audit's charge can be reconciled against the files.
+
+- THE SUBSCRIPTION INVARIANT AND FLUSH-ON-ACCEPT ARE STATED OVER THE WHOLE
+  FAMILY, in `subscriptions_test.go`, table-driven over `harness.WatchKinds()`:
+  a late subscriber's first push is the last-published view and everything
+  after it arrives in order; the response headers flush at accept before any
+  push. `WatchWebWorkspace` is skipped in the first table, naming why: its only
+  push arm is `transferred`, and by the time one is published
+  `resolveStreamRef` has already flipped the workspace to `transferring_away`,
+  so no reachable window has a late subscriber and a standing view at once.
+- PUSH CADENCE IS ASSERTED NEGATIVELY: an identical `context_usage` re-push
+  produces no topbar push, a repeated hold accept produces no second tray, and
+  a re-composed identical host view produces no host push.
+- PER-WORKSPACE Watch* TRANSPORT-CLOSED REFUSALS are table-driven over Footer,
+  Topbar, DaemonHolds, Host, Web and LoginTerminal, for a bogus id and for a
+  ref whose `dir` disagrees with the registry: the refusal lands before any
+  frame and logs `daemon.refusal.transport_closed` at INFO, never WARN.
+- STATE-DATABASE CORRUPTION AT BOOT is one test per table: a bumped
+  `layout.version`, a corrupt `tasks` row, a corrupt `sessions` row of an
+  adopted workspace and a corrupt `creation_jobs` row of an admitted merge.
+- THE SOCKET-PATH BUDGET REFUSES THE BOOT: a state root past the unix-socket
+  path limit exits non-zero with stderr naming `sock/`. The long root is passed
+  as a second `--state-dir` through `ExtraArgs`, because the harness's own
+  pre-flight would otherwise fatal the test rather than the daemon.
+- THE JOINING DAEMON REALLY SERVES: it is dialed at its own `joining.addr` and
+  answers `DaemonHealth`, rather than only being observed to leave
+  `daemon.addr` alone. The JSON codec likewise carries a SERVER STREAM
+  (`WatchWorkspaceRoster`), not just unary verbs.
+- A REFUSED HIBERNATE DEFERS THE STAND-DOWN: both a transport failure and a
+  typed `turn_in_flight` refusal leave `KillSession` uncalled.
+- SPAWN-ON-MOUNT REVIVAL: `OpenWorkspace` on a hibernated row sends
+  `StartSession(resume)`; on a terminally deleted record it answers
+  `session_deleted`.
+- COLD-GATE AND INTERRUPT ARMS: `no_cold_gate` on a resolved gate, `no_session`
+  on a shim reporting none, and `shim_refused{detail}` for a refused
+  `KillTurn`.
+- LOGIN IS IDEMPOTENT PER ACCOUNT, not per workspace: two workspaces under one
+  account root share one pty and one banner; one inside `MULTI_REPO_ROOT` and
+  one outside get two. `CloseLogin` with nothing open succeeds, and a vendor
+  binary that cannot be spawned answers `spawn_failed`.
+- THE VENDOR GUARD'S TWO REFUSAL SITES are exercised under `Opts.NoFake`: a
+  prompt needing classification is HELD with `classification_error` and an
+  ERROR naming "classifier"; `OpenLogin` is refused naming "login".
+- SELF-RELOAD NEEDS BOTH HALVES: a sibling worktree of the self repository runs
+  the Emacs method but triggers no deploy, and a one-shot self-merge on any
+  other repository triggers none either.
+- NUKEWORKSPACE KILLS BEFORE IT REMOVES: `KillSession` reaches the shim with no
+  `worktree remove` yet recorded by the scripted git, and a scripted failure of
+  that removal answers `git_failed{detail}`.
+- CLOSEWORKSPACE IS BLOCKED BY LIVE DETACHED WORK even with no turn open.
+- ONE-SHOT FINISH: the `self_certified` and `add_to_merge_queue` flags are
+  spliced into the PR post-prompt text, a FAILURE terminal fires no finish, and
+  a missing `oneshot-create-pr-then-close-followup.md` reaches `brief_missing`.
+- THE ROSTER'S STATUS ARMS ARE ASSERTED ONE PER TEST, never inside a
+  disjunction: `submitting`, `clearing`, `compacting`, `interrupted`,
+  `degraded`, `vendor_blocked` and `merge_failed`, each driven from its own
+  real cause.
+- THE DISPLACED TURN'S NON-BOUNCE HALF is expressed by count: the displaced
+  turn is captured at lease acquisition and resubmitted EXACTLY ONCE at release
+  (`StartTurn` reaches exactly two, never three), with the resubmission's
+  origin `PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME`. Only the crash-window
+  half stays skipped.
+- HANDOVER ARMS: `participant_not_expected` for a client that was not open at
+  the announcement, and `no_transfer_announced` for an `AdoptWebWorkspace` on a
+  plain boot, logged at INFO.
+- `shutdown_announced` ENRICHMENT: `expected_outage_ms`, `minted_at_ms` and the
+  `scheduled_drain` cause are asserted, including a schedule that actually
+  fires.
+- NITS: no `.daemon.addr.*` temp sibling survives a boot, pprof serves over a
+  unix socket, and `AGENT_REPL_SESSION_ID` is asserted in the spawn env.
+
 ## Settled behaviors the daemon states differently from an earlier reading
 
 These are recorded here rather than argued in a test comment, per the audit's
@@ -502,6 +594,58 @@ a spec edit and never a rationalization in the suite.
   opened at admission and closed when the run leaves it for its first phase.
   The missing wire surface is recorded for the teamlead as a decision owed, not as suite
   defects.
+
+- FEEDMERGEERROR IS A STALE SHAPE (owed to landing 7). A queued merge can end
+  three distinct ways -- evicted by another merge, dequeued by its own release,
+  or abandoned by the run giving up -- and `FeedMergeError` carries only
+  `failed` and `abandoned`, so the three causes are NOT distinguishable on the
+  wire. The suite asserts exactly what IS expressible (the `abandoned`
+  terminal, the footer leaving its merging state, and the roster shedding every
+  merge arm) and names the limitation in the tests rather than inventing an
+  arm. The third cause has no reachable producer at all: `dropQueued`'s only
+  callers are Evict and the dequeue release, and `FeedMergeAbandoned` is
+  constructed nowhere under `internal/`, so the feed-bubble half of those tests
+  is RED and the abandon case is skipped naming that trace. A landing-7 arm per
+  cause is the change owed.
+
+- TWO FURTHER CONTRACT CLAIMS HAVE NO PRODUCTION HOOK, recorded with the three
+  above rather than silently dropped:
+  - A DRAIN SCHEDULE DOES NOT SURVIVE A RESTART. `wsm.DB` persists it and
+    `internal/drain/sweep.go`'s `Run` reads it every pass, but it ACTS only on
+    a deadline already passed; a schedule still in the future is absorbed into
+    the wait and never handed to `Announcer.DrainScheduled`, so a fresh
+    process's daemon topic is empty and a reconnecting client loses a schedule
+    still in force. The hook owed: a boot-time read of `DrainSchedule()` after
+    `drain.New` in `cmd/claude-repld/graph.go` that republishes a standing
+    schedule before the server serves. The test asserting the contract is RED.
+  - A FEED WATCH TOKEN CANNOT BE EXPIRED ON PURPOSE. `token_expired`
+    (`feed.ErrTokenExpired`) fires only when a token's pinned start falls out
+    of the retained publication log, and `feed.Deps.TailRetention` -- the knob
+    that would make that reachable -- is never set: `cmd/claude-repld/graph.go`
+    builds `feed.Deps` without it, so retention is fixed at
+    `DefaultTailRetention` (4096) and no flag or environment variable reaches
+    it. The hook owed: a `--feed-tail-retention` flag (or the equivalent
+    environment knob) wired into that one `feed.New` call. Until it exists the
+    arm is untestable at this level and no test pretends otherwise.
+
+- A CORRUPT `creation_jobs` ROW IS SWALLOWED. `internal/merge/recover.go`'s
+  `recoverAdmitted` folds ANY `layoutFor` error -- a genuine
+  `*wsm.DecodeError` included -- into "the workspace's merge geometry is gone",
+  which fails that one merge and lets the boot serve on. Data corruption is
+  thereby downgraded to an ordinary unmergeable outcome. The suite asserts the
+  contract (a loud non-zero refusal, as for every other table) and is RED.
+
+- `InterruptError.shim_refused` HAS NO PRODUCER. A transport-level failure of
+  `KillTurn` is never a `*ShimRefusal`, so `AsShimRefusal` cannot match it, and
+  where a real refusal does arrive `server/refuse.go` switches onto the
+  CONCRETE arm the shim named. Nothing anywhere sets the arm string
+  `shim_refused`. The test asserting it is RED.
+
+- `Fleet.Shim` READS LIVENESS FROM MAP PRESENCE. A workspace whose shim process
+  is gone but whose `sessions` entry remains is treated as live, so a verb
+  proceeds over a dead connection and returns a raw transport error instead of
+  the typed `no_session` refusal. The `AnswerColdGate` test for that split is
+  RED.
 
 ## Log discipline
 Every test runs with the daemon at ≥WARNING terminal mirror; the harness

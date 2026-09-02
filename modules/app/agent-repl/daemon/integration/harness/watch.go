@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"syscall"
 	"testing"
@@ -21,9 +22,33 @@ type Stream[T any] struct {
 	// C carries every push in order.
 	C <-chan T
 
-	t      *testing.T
-	cancel context.CancelFunc
-	errCh  chan error
+	t       *testing.T
+	cancel  context.CancelFunc
+	errCh   chan error
+	headers chan http.Header
+}
+
+// AwaitHeaders answers the stream's response headers, which Connect delivers
+// as soon as the server FLUSHES them — before any push.
+//
+// It is the suite's FLUSH-ON-ACCEPT probe. A handler that builds its first
+// view before writing anything leaves the client with no response at all until
+// something happens to publish; a handler that flushes at accept hands the
+// client its headers immediately, so a stream with no view yet is still
+// visibly OPEN. Nothing else on the wire can tell those two apart.
+func (s *Stream[T]) AwaitHeaders(t *testing.T, ctx context.Context, what string) http.Header {
+	t.Helper()
+	if s.headers == nil {
+		t.Fatalf("stream %s was not opened with header capture", what)
+		return nil
+	}
+	select {
+	case h := <-s.headers:
+		return h
+	case <-ctx.Done():
+		t.Fatalf("waiting for %s to flush its response headers: %v", what, ctx.Err())
+		return nil
+	}
 }
 
 // Err answers the stream's terminal error once its channel has closed.
@@ -100,8 +125,13 @@ func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(
 	}
 	ch := make(chan Push, 256)
 	errCh := make(chan error, 1)
+	headers := make(chan http.Header, 1)
 	go func() {
 		defer close(ch)
+		// Connect's ResponseHeader blocks until the server's headers arrive,
+		// and the request is already in flight on its own goroutine, so this
+		// costs nothing and never depends on a push.
+		headers <- stream.ResponseHeader()
 		for stream.Receive() {
 			select {
 			case ch <- pick(stream.Msg()):
@@ -112,7 +142,7 @@ func runStream[Resp any, Push any](t *testing.T, ctx context.Context, open func(
 		}
 		errCh <- stream.Err()
 	}()
-	return &Stream[Push]{C: ch, t: t, cancel: cancel, errCh: errCh}
+	return &Stream[Push]{C: ch, t: t, cancel: cancel, errCh: errCh, headers: headers}
 }
 
 // WatchFooter opens the workspace's footer stream.
