@@ -227,6 +227,106 @@ const BASH_DETACH = scenario({
   },
 });
 
+/**
+ * The `toolUseResult` shape an explicit `TaskOutput` poll answers with.
+ *
+ * UNGROUNDED, INVENTED (see `testdata/captures/MANIFEST.md`): `TaskOutput` is
+ * a declared vendor tool name (every capture's `init.tools` lists it) but NO
+ * capture ever calls it — the recorded runs always retrieved a backgrounded
+ * task's output by re-reading its spool path instead. This shape mirrors the
+ * daemon/e2e Go harness's own invented `bashTaskOutcome` (`RetrievalStatus`,
+ * `Task{TaskId, TaskType, Status, Description, Output, ExitCode,
+ * ExitCodeSet}`) in the mock's camelCase spelling, since no vendor recording
+ * exists to spell it from.
+ */
+function taskOutputResult(fields: {
+  taskId: string;
+  command: string;
+  status: "RUNNING" | "COMPLETED";
+  output: string;
+  exitCode?: number;
+  exitCodeSet?: boolean;
+}): Record<string, unknown> {
+  return {
+    retrievalStatus: "SUCCESS",
+    task: {
+      taskId: fields.taskId,
+      taskType: "local_bash",
+      status: fields.status,
+      description: fields.command,
+      output: fields.output,
+      exitCode: fields.exitCode ?? null,
+      exitCodeSet: fields.exitCodeSet ?? false,
+    },
+  };
+}
+
+const BASH_DETACH_POLL = scenario({
+  name: "bash-detach-poll",
+  prompt: "!bash-detach-poll [command]",
+  emits:
+    "a `Bash` with `run_in_background`, then — in the SAME turn — explicit `TaskOutput` poll tool_use/tool_result " +
+    "pairs: two reporting RUNNING with growing output, then one reporting a terminal exit code and status. " +
+    "UNGROUNDED, INVENTED: no capture ever calls `TaskOutput`, only lists it in `init.tools`",
+  writes: "the tool_use/tool_result lines for the background and for each poll, and the spool terminated by `EXIT=0`",
+  arms: "AgentBash detached_work; the polls themselves reach no converter arm — `TaskOutput` is unregistered and folds to AgentUnmodeled",
+  async run(ctx) {
+    ctx.log({ turn: ctx.turn, branch: "bash-detach-poll" }, "fake explicit-poll detached-bash turn");
+    const command = ctx.args === "" ? "tail -f build.log" : ctx.args;
+    const call = ctx.toolUse("Bash", { command, run_in_background: true });
+    const taskId = ctx.mintShellTaskId();
+    ctx.startTask({ taskId, toolUseId: call.toolUseId, kind: "local_bash", description: command });
+    ctx.announceLiveTasks();
+    const spool = ctx.files.spool(taskId);
+    ctx.toolResult(
+      call,
+      backgroundingProse(taskId, ctx.files.spoolPathFor(taskId)),
+      bashResult({ stdout: "", extra: { backgroundTaskId: taskId } }),
+    );
+
+    // Poll #1: RUNNING, partial output.
+    spool.appendLine("compiling");
+    await ctx.tick();
+    const poll1 = ctx.toolUse("TaskOutput", { task_id: taskId, block: false, timeout: 0 });
+    ctx.toolResult(
+      poll1,
+      "compiling\n",
+      taskOutputResult({ taskId, command, status: "RUNNING", output: "compiling\n" }),
+    );
+
+    // Poll #2: RUNNING, GROWING output — the delta a tailer would observe.
+    spool.appendLine("linking");
+    await ctx.tick();
+    const poll2 = ctx.toolUse("TaskOutput", { task_id: taskId, block: false, timeout: 0 });
+    ctx.toolResult(
+      poll2,
+      "compiling\nlinking\n",
+      taskOutputResult({ taskId, command, status: "RUNNING", output: "compiling\nlinking\n" }),
+    );
+
+    // Poll #3: the TERMINAL retrieval — a completed status and an exit code.
+    spool.appendLine("done");
+    spool.finish(0);
+    await ctx.tick();
+    const poll3 = ctx.toolUse("TaskOutput", { task_id: taskId, block: false, timeout: 0 });
+    ctx.toolResult(
+      poll3,
+      "compiling\nlinking\ndone\n",
+      taskOutputResult({
+        taskId,
+        command,
+        status: "COMPLETED",
+        output: "compiling\nlinking\ndone\n",
+        exitCode: 0,
+        exitCodeSet: true,
+      }),
+    );
+    ctx.endTask(taskId);
+    ctx.announceLiveTasks();
+    conclude(ctx, "Polled the background command to completion.");
+  },
+});
+
 const BASH_DETACH_FAIL = scenario({
   name: "bash-detach-fail",
   prompt: "!bash-detach-fail",
@@ -334,6 +434,7 @@ export const SHELL_SCENARIOS = [
   BASH_SPILL,
   BASH_IMAGE,
   BASH_DETACH,
+  BASH_DETACH_POLL,
   BASH_DETACH_FAIL,
   BASH_DETACH_LIVE,
   CTRL_B,
