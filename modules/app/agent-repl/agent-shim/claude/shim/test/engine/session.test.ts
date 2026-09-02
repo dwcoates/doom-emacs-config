@@ -875,6 +875,31 @@ describe("Hibernate", () => {
   });
 });
 
+describe("the record plane's faults", () => {
+  it("restates the diagnostics as unhealthy when the store raises a fault", async () => {
+    // The record plane's faults are the SESSION's: nothing subscribing to them
+    // meant a store outage was visible only in the shim's own log while the
+    // daemon's diagnostics stayed healthy.
+    const h = harness();
+    await started(h);
+    const before = h.engine.pushes.faultCount;
+
+    h.persistence.raiseFault("the store is down");
+
+    expect(h.engine.pushes.faultCount).toBe(before + 1);
+  });
+
+  it("carries a degraded window the record plane opened into the diagnostics", async () => {
+    const h = harness();
+    await started(h);
+
+    h.persistence.raiseDegradedWindow("the store is down");
+
+    const update = h.engine.pushes.diagnostics().update;
+    expect(update.case === "diagnostics" ? update.value.degradedWindows.length : 0).toBe(1);
+  });
+});
+
 describe("KillSession", () => {
   it("refuses when no session has been started", async () => {
     const h = harness();

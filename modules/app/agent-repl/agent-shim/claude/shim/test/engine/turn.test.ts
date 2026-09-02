@@ -224,6 +224,27 @@ describe("StartTurn", () => {
     expect(order).toEqual(["durable", "submit"]);
   });
 
+  it("re-queues the prompt row behind the retry buffer when the store cannot take it", async () => {
+    // A STORE OUTAGE IS NOT A REFUSED TURN: the vendor can still do the work,
+    // and letting the PersistenceError escape answered Code.Internal, which
+    // the daemon cannot tell from a shim defect.
+    const h = await harness();
+    h.persistence.writeDurable = () =>
+      Promise.reject(new PersistenceError("store_unavailable", "the store is down"));
+
+    const response = await h.turns.startTurn(startTurn());
+
+    expect(response.result.case).toBe("success");
+    expect(h.persistence.buffered.map((entry) => entry.upsertKey)).toContain("prompt:turn-1");
+  });
+
+  it("does NOT swallow a non-persistence failure of the prompt write", async () => {
+    const h = await harness();
+    h.persistence.writeDurable = () => Promise.reject(new Error("a defect, not an outage"));
+
+    await expect(h.turns.startTurn(startTurn())).rejects.toThrow("a defect, not an outage");
+  });
+
   it("REFUSES a second StartTurn while one is open", async () => {
     const h = await harness();
     await h.turns.startTurn(startTurn());
