@@ -1477,8 +1477,12 @@ so the arm is news rather than a failure and the walk runs again."
                                 (plist-get ref :id))
         (agent-repl-itest--await-call successor "AdoptHostWorkspace")
         (agent-repl-itest--await-log primary "elisp.host.not-yet-adopted" "info")
-        ;; The successor finishes taking the workspace over.
-        (agent-repl-itest--script successor "AdoptHostWorkspace" nil)
+        ;; The successor finishes taking the workspace over.  The success arm
+        ;; is scripted EXPLICITLY: an empty `{}' is a response with no oneof
+        ;; arm set, which the decoder refuses as a contract breach rather than
+        ;; reading as an acceptance.
+        (agent-repl-itest--script successor "AdoptHostWorkspace"
+                                  '((success . ())))
         ;; Assert: a SECOND adopt lands, and the stream ends up there.
         (agent-repl-itest--await-call successor "AdoptHostWorkspace" 2)
         (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))))))
@@ -1529,6 +1533,11 @@ was asked for."
                          (lambda () t))
                         ((symbol-function 'agent-repl--frontend-webview-live-widget)
                          (lambda (&rest _) 'fake-widget))
+                        ;; The mount arms the load watcher on whatever the live
+                        ;; widget accessor answers, and the stub widget above is
+                        ;; a symbol rather than an xwidget.  The watcher is the
+                        ;; open-progress ladder, not the redial under test.
+                        ((symbol-function 'agent-repl--frontend-watch-load) #'ignore)
                         ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
                          (lambda (_widget url) (push url navigated)))
                         ((symbol-function 'agent-repl--call-in-background-workspace)
