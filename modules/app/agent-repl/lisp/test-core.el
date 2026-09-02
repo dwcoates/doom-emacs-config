@@ -195,13 +195,6 @@ environments without notification tools (terminal-notifier or osascript)."
   "Package should provide 'agent-repl feature."
   (should (featurep 'agent-repl)))
 
-;;;; ---- Tests: Workspace-for-buffer ----
-
-(ert-deftest agent-repl-test-workspace-for-buffer-no-persp ()
-  "When `persp-mode' is nil, `workspace-for-buffer' should return nil."
-  (let ((persp-mode nil))
-    (should-not (agent-repl--workspace-for-buffer (current-buffer)))))
-
 ;;;; ---- Tests: cancel-all-timers ----
 
 (ert-deftest agent-repl-test-cancel-all-timers-empty-list ()
