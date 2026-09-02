@@ -57,6 +57,9 @@ func (s *fakeServer) AnswerColdGate(ctx context.Context, req *connect.Request[v1
 
 func (s *fakeServer) WatchWorkspaceRoster(ctx context.Context, req *connect.Request[v1.WatchWorkspaceRosterRequest], stream *connect.ServerStream[v1.WatchWorkspaceRosterResponse]) error {
 	s.record(ctx, "WatchWorkspaceRoster", req.Msg)
+	if err := awaitAcceptanceGate(ctx, s, "WatchWorkspaceRoster"); err != nil {
+		return err
+	}
 	return serveStream[v1.WatchWorkspaceRosterResponse](ctx, s, streamRoster, "", stream)
 }
 
@@ -181,12 +184,18 @@ func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Reques
 			map[string]any{"method": "WatchHostWorkspace", "error": err.Error()})
 		return connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	if err := awaitAcceptanceGate(ctx, s, "WatchHostWorkspace"); err != nil {
+		return err
+	}
 	ws := req.Msg.GetWorkspace()
 	return serveStream[v1.WatchHostWorkspaceResponse](ctx, s, streamHost, ws.GetId(), stream)
 }
 
 func (s *fakeServer) WatchDaemon(ctx context.Context, req *connect.Request[v1.WatchDaemonRequest], stream *connect.ServerStream[v1.WatchDaemonResponse]) error {
 	s.record(ctx, "WatchDaemon", req.Msg)
+	if err := awaitAcceptanceGate(ctx, s, "WatchDaemon"); err != nil {
+		return err
+	}
 	return serveStream[v1.WatchDaemonResponse](ctx, s, streamDaemon, "", stream)
 }
 
