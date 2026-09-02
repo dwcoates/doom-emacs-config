@@ -87,6 +87,23 @@
   (should-not (agent-repl--extract-panel-id "*Messages*"))
   (should-not (agent-repl--extract-panel-id "config.el")))
 
+(ert-deftest agent-repl-test-panels-extract-id-from-titled-input ()
+  "The identity segment ends at the space that introduces the display title."
+  (should (equal (agent-repl--extract-panel-id
+                  "*agent-panel-input-my-workspace Refactor the codec*")
+                 "my-workspace")))
+
+(ert-deftest agent-repl-test-panels-titled-input-buffer-is-an-agent-panel ()
+  "A titled composer is still an agent panel to the name predicates."
+  (should (agent-repl--agent-panel-buffer-p
+           (get-buffer-create "*agent-panel-input-my-workspace Refactor the codec*"))))
+
+(ert-deftest agent-repl-test-panels-partner-of-frontend-finds-the-titled-input ()
+  "The partner input buffer's name is READ off the live buffer, not rebuilt."
+  (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234 A title*"
+    (should (equal (agent-repl--partner-buffer-name "*agent-frontend-abcd1234*" "abcd1234")
+                   "*agent-panel-input-abcd1234 A title*"))))
+
 ;;;; ---- Tests: Partner buffer name ----
 
 (ert-deftest agent-repl-test-panels-partner-of-frontend-buffer ()
