@@ -195,13 +195,14 @@ proves*, honestly reported:
   `e2e/remainder_e2e_test.go:239`) and **`context-injected-skills`**
   (`TestContextInjectedSkills`, `:271`) — `AgentContextInjected` is a
   file-plane-only fact absent from the shim's live `WatchSession` stream per
-  `daemon.md`; no frontend `Watch*Agent*` rpc exists for it. Both tests fall
-  back to the footer's MOMENTARY `FooterStatusLoading` push as the nearest
-  dialable surface. The file's own header flags an OPEN QUESTION for the
-  project lead: whether that footer push is actually driven from the same
-  fact this golden names, or a separate signal — "if it turns out not to
-  fire for this scenario, that is a contract-vs-surface gap to report, not a
-  reason to fabricate a different assertion."
+  `daemon.md`; no frontend `Watch*Agent*` rpc exists for it. RULED and
+  RESOLVED (project lead, 2026-09-02): the footer's momentary
+  `FooterStatusLoading` push is NOT the surface — nothing in the contract
+  ties it to this fact. Both tests now assert through the READ-ONLY store
+  verb `OpenAgentSession`, checking the injected attachment landed as an
+  `AgentActivity.context_injected` page line in the main agent's book. No
+  frontend assertion. (This entry previously described the withdrawn footer
+  approach; the audit was taken before that update merged.)"
 - **`interrupt`** (`TestInterruptAfterTextDelta`,
   `e2e/interrupt_e2e_test.go:81`) — `SPEC.md`'s own entry describes this
   golden as "prose truncated exactly after the observed `text_delta`," but
@@ -283,9 +284,7 @@ the project lead runs it and dispatches remediation.
 
 **Open questions surfaced by area writers, not resolved here** (repeated
 from the cited headers so a reader does not have to reopen every file):
-whether `FooterStatusLoading` is driven from the same file-plane fact
-`daemon.md` calls FILE-PLANE-ONLY or a separate live-turn signal
-(`context-injected-memory`/`context-injected-skills`); whether the `interrupt`
+whether the `interrupt`
 golden's own description ("prose truncated after a `text_delta`") and its
 grounded fake-SDK scenario (which never streams one) are reconcilable, or the
 contract text needs revisiting; whether `HibernateError.kind.
