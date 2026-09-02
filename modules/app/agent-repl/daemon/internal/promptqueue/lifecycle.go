@@ -75,6 +75,22 @@ func (q *queue) runFinishHook(ctx context.Context, ws ids.WorkspaceID, turn ids.
 // interjection or a release installed, else the oldest standing hold no
 // daemon-side condition is holding.
 func (q *queue) popAndDeliver(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) error {
+	// A REFUSING LEASE OWNS THE SESSION, so nothing held is delivered into it.
+	// PolicyHold stamps every standing hold and nextDeliverable filters those,
+	// but the merge's PolicyRefuse stamps none — it refuses NEW submissions —
+	// so a turn ending underneath a merge would otherwise release a prompt
+	// straight into the session the merge is driving. The lease's release
+	// re-runs this through OnLeaseChanged, so nothing is lost.
+	lease, held, err := q.deps.DB.Lease(ctx, ws)
+	if err != nil {
+		log.Error(opTurnEnded, "could not read the occupancy lease before delivering", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("read the lease for %q: %w", ws, err)
+	}
+	if held && lease.Policy == wsm.PolicyRefuse {
+		log.Debug(opTurnEnded, "a refusing lease stands; the held prompts wait for its release",
+			dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
+		return nil
+	}
 	next, ok, err := q.nextDeliverable(ctx, ws)
 	if err != nil {
 		return err
