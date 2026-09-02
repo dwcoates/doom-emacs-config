@@ -611,10 +611,6 @@ export async function main(): Promise<void> {
   });
 
   const server = await serve(args.listen, shimRoutes(engine));
-  logMainLifecycle(
-    { listen_socket: args.listen, outcome: "serving" },
-    "shim.v1 is being served; the daemon may dial",
-  );
 
   // KillSession's own exit. The engine has already torn the session down and
   // built its response; the process may only end once that response — and every
@@ -646,6 +642,13 @@ export async function main(): Promise<void> {
     })();
   };
 
+  // THE SIGNAL HANDLERS GO ON BEFORE THE "SERVING" RECORD, NOT AFTER IT. The
+  // record is the shim's announcement that it is ready, and every supervisor
+  // waits on it before doing anything to the process — so a shim that
+  // announced readiness while node's DEFAULT signal dispositions were still in
+  // force could be killed by the very SIGINT it exists to refuse, in the gap
+  // between the two statements. Observed as a flake in the SIGINT integration
+  // test, which is the only place the gap is reachable at all.
   const handlers = shutdownSignalHandlers({
     engine,
     server,
@@ -653,6 +656,11 @@ export async function main(): Promise<void> {
   });
   process.on("SIGTERM", handlers.onSigterm);
   process.on("SIGINT", handlers.onSigint);
+
+  logMainLifecycle(
+    { listen_socket: args.listen, outcome: "serving" },
+    "shim.v1 is being served; the daemon may dial",
+  );
 
   // Nothing else to do: the listener holds the process open, and it is closed
   // only by the stand-down. A shim outlives its daemon by design, so there is

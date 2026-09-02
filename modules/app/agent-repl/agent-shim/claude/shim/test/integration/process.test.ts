@@ -320,6 +320,61 @@ describe("the workspace lock", () => {
   });
 });
 
+describe("--listen over an existing socket file", () => {
+  test("a STALE socket file is unlinked and bound", async () => {
+    // SIGKILL leaves the file behind and `listen` on it fails EADDRINUSE
+    // forever after, so a shim that refused every existing file could never be
+    // restarted after a hard kill. "Stale" is a VERDICT, not an assumption: the
+    // probe dials it and only unlinks what refuses the connection.
+    const first = await spawnShim();
+    first.signal("SIGKILL");
+    await first.exited;
+    expect(existsSync(first.dirs.listen)).toBe(true);
+
+    const second = await spawnShim({ reuse: first.dirs });
+
+    // Serving on the very path the corpse left: `spawnShim` resolved on this
+    // process's own serving record.
+    const started = sessionStarted(await second.clients.h1.startSession(freshSession()));
+    expect(started.vendorSessionId).not.toBe("");
+    const unlinked = second.log
+      .records()
+      .find((record) => record.context.why === "stale predecessor");
+    expect(unlinked?.context.socket_path).toBe(first.dirs.listen);
+  });
+
+  test("a LIVE socket file is REFUSED, and the incumbent is untouched", async () => {
+    // The opposite verdict, and the reason the probe exists at all: unlinking a
+    // socket somebody is listening on would leave the incumbent serving a path
+    // nothing can reach, and this shim bound over the top of it.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+
+    const second = await spawnShim({
+      reuse: first.dirs,
+      awaitServing: false,
+      argv: [
+        "--listen",
+        first.dirs.listen,
+        "--store-socket",
+        first.dirs.storeSocket,
+        "--log-fd",
+        "3",
+        "--fake",
+      ],
+    });
+    const exit = await second.exited;
+
+    expect(exit.code).not.toBe(0);
+    expect(second.stderr()).toContain("live listener");
+    // THE INCUMBENT IS UNHARMED: its socket still answers and still holds its
+    // session, which a shim that had unlinked and rebound would have destroyed.
+    const still = await first.clients.h1.startSession(freshSession());
+    expect(startSessionCause(still)).toBe("alreadyStarted");
+    expect(started.vendorSessionId).not.toBe("");
+  });
+});
+
 describe("signals", () => {
   test("SIGINT is refused, logged at error, and the shim keeps serving", async () => {
     // A shim may be spawned under an attached terminal, and a Ctrl-C there must
