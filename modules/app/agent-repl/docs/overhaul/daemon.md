@@ -1333,3 +1333,11 @@ its own file only when >1 endpoint needs it.
   then launch the new shim and StartSession(resume), then drain intake. The
   flip back to prelaunch-then-wait is one site in the relaunch engine plus
   the harness fake shim taking the lock at StartSession.
+- LANDED (shim, overhaul/shim be119abbf, 2026-09-02): the shim takes no
+  lock at startup; both locks are taken inside StartSession and released
+  together on kill/stand-down; a workspace conflict answers StartSession
+  `conversation_owned`. The interim sequential override above is RETIRED:
+  the relaunch engine runs the prescribed prelaunch-then-wait flow, and the
+  harness fake shim takes the workspace lock at StartSession. The shim's
+  signal handlers now precede its "serving" record, so a supervisor keying
+  off "serving" is safe.
