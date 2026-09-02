@@ -995,7 +995,6 @@ func TestSetModelWithATokenNotInTheCatalogIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetNotInCatalog() == nil {
 		t.Fatalf("SetModel(not-a-real-model) = %v, want error.not_in_catalog", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdatesOnlyOnThePush(t *testing.T) {
@@ -1068,7 +1067,6 @@ func TestSetPermissionModeWithAModeNotServedIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetModeNotServed() == nil {
 		t.Fatalf("SetPermissionMode(not-a-real-mode) = %v, want error.mode_not_served", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
@@ -1093,7 +1091,6 @@ func TestSetPermissionModeUngatedWithoutConsentIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetUngatedWithoutConsent() == nil {
 		t.Fatalf("SetPermissionMode(bypass) without creation consent = %v, want exactly error.ungated_without_consent", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,7 +1368,6 @@ func TestAllowStandingOnACardWithoutStandingOfferedIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetNoStandingOffer() == nil {
 		t.Fatalf("AnswerPermission{allow_standing} without standing_offered = %v, want error.no_standing_offer", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,7 +1450,6 @@ func TestAnswerQuestionWithAnUnservedLabelIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetUnservedValue() == nil {
 		t.Fatalf("AnswerQuestion with an unserved label = %v, want error.unserved_value", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
@@ -1479,7 +1474,6 @@ func TestMultiPickOnSingleSelectIsRefused(t *testing.T) {
 	if resp.Msg.GetError().GetMultiPickOnSingleSelect() == nil {
 		t.Fatalf("AnswerQuestion multi-pick on a single_select = %v, want error.multi_pick_on_single_select", resp.Msg)
 	}
-	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 }
 
 func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {

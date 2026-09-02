@@ -7,9 +7,14 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// opRefusal is the operation every unlanded-arm refusal is logged under, so the
-// ledger in daemon/ERROR-ARMS.md can be reconciled against the log.
-const opRefusal = "daemon.refusal.unlanded_arm"
+// opRefusal is the operation a verb's typed refusal is logged under. A refusal
+// raised here is an ORDINARY ANSWER — the contract carries an arm for it and
+// the client reads that arm — so it is recorded at INFO. Only a genuinely
+// unlanded arm warns, and it does so once, at the transport, through
+// server.UnlandedArm under "daemon.refusal.unlanded_arm"; that operation stays
+// usable for reconciling daemon/ERROR-ARMS.md precisely because this one does
+// not borrow it.
+const opRefusal = "daemon.refusal.typed"
 
 // The arm names this package refuses under. They exist as constants because
 // each one is a row in daemon/ERROR-ARMS.md and the two must not drift.
@@ -154,8 +159,8 @@ func AsRefusal(err error) (*Refusal, bool) {
 	return nil, false
 }
 
-// refuse records the intended arm at WARNING and returns it. Every refusal
-// site in this package goes through here, so the log and the ledger agree.
+// refuse records the refusal at INFO and returns it. Every refusal site in this
+// package goes through here, so every verb's refusal is recorded the same way.
 func refuse(log dlog.Logger, rpc, arm, reason string, notFound bool) *Refusal {
 	return refuseWith(log, rpc, arm, reason, notFound, nil)
 }
@@ -174,6 +179,6 @@ func refuseWith(log dlog.Logger, rpc, arm, reason string, notFound bool, fields 
 	for name, value := range r.Fields {
 		ctx["arm_"+name] = value
 	}
-	log.Warn(opRefusal, r.Error(), ctx)
+	log.Info(opRefusal, r.Error(), ctx)
 	return r
 }
