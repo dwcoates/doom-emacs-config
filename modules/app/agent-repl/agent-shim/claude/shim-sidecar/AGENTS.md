@@ -47,6 +47,19 @@ upgrade is involved.
   advance, holds NO retry buffer and spills NOTHING: its sources are durable
   files it re-reads from the last committed cursor.
 - Producer string: `shim-claude-sidecar` (`storeclient.Producer`).
+- THE AGENT REGISTER IS SOMETHING THE SIDECAR WRITES, NOT SOMETHING IT READS.
+  A book comes into existence when a page-line write (or a spawn frame) first
+  names its agent; until then the store has NEVER HEARD OF that agent and
+  `OpenAgentSession` REFUSES it as `unknown_agent`. HEARD-OF BUT UNWRITTEN IS
+  NOT THE SAME STATE: an agent already in the register serves an EMPTY page,
+  never a refusal. Production is unaffected — the sidecar never opens a book —
+  but the integration harness reads books back, and it must not confuse the two:
+  a POLLING read (`awaitBookLines`, `awaitBookUnits`, `awaitBookLine`, via
+  `bookLinesIfKnown`) treats `unknown_agent` as "the first batch has not
+  committed yet" and keeps waiting, while a ONE-SHOT read (`openBook`,
+  `bookLines`, `watchBook`) fails the subject on it, because naming an
+  unregistered agent there means asserting against a book nothing ever wrote.
+  NEVER seed a book by any path but a real write.
 - `AGENT_REPL_STORE_SOCKET`, when set, is the DEFAULT of `--store-socket`; an
   explicit flag beats it. Default when unset:
   `~/.cache/agent-repl/sock/store.sock` (`XDG_CACHE_HOME` honored).
