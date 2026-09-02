@@ -1,57 +1,48 @@
-# Stopping point — store + sidecar teamlead (wind-down, 2026-08-31)
+# Stopping point — store + sidecar teamlead (second pause, 2026-09-01)
 
 ## Branch and tip
-- Branch `overhaul/store`, worktree /Users/dodgecoates/.config/doom-overhaul/store, tip `3fea72b14`.
-- The branch deliberately carries a merge of `overhaul/shim` 731aa5f00 (the mock-generated fixture work needed the mocked vendor); the project lead expects that merge at integration time.
-- Agent worktrees under ~/.config/doom-overhaul/store-agents/: NONE (all merged and removed). No agents running.
+- Branch `overhaul/store`, worktree /Users/dodgecoates/.config/doom-overhaul/store, tip: the commit that carries this file (parent 6e2795771, verified green).
+- Carries merges of `overhaul/shim` 731aa5f00 and `overhaul/integration` (landing 6: protos d46e601e7, bindings 8a98e4fca).
+- Agent worktrees under ~/.config/doom-overhaul/store-agents/: NONE. No agents running. The lead is parked, resident.
 
-## Merged and green at the tip (verified 2026-08-31)
-- Store (agent-shim/shim-store): `go build && go vet && go test -race -count=1 ./...` — 6/6 packages ok, integration suite included.
-- Sidecar (agent-shim/claude/shim-sidecar): same gate — 9/9 packages ok, integration suite included (~112s; the 133 mock scenarios build the shim via npm and skip loudly without node).
-- Landings 1–5 merged (last: 081dbbba8, AgentBashOutput.not_observed). Landed work: ops (doctor Connect probes + harness + fake-store fixture, plists, wire/agent-shim AGENTS notes); store (Connect over UDS with h2c + header flush, four tables + write_ledger schema v3+, position/write_seq orderings, single-use watch tokens, WatchBashRun replay-follow-end, failure `kind` arms with `field` at every refusal site, socket exclusivity by dial-before-unlink, nuke rules incl. garbage-db, pprof-before-db with failed-boot hold); sidecar (Connect client, cursor-first cycle + store-unreachable invariant, boot rewind to the last real user prompt, bounded hold, multi-root discovery + spool prefixes, LOST policy with wire-carried DetachedLost arms + reason context key, per-row bash keys, residue keys residue:<uuid>|residue:file:<path>:<offset>, write_id digests file_id (R-S1), refusal-kind handling (invalid_request parks the file; storage_failure suspends), subagent AgentId = meta.toolUseId, sole-producer converters (context_injected, diagnostics adjacency, context_budget_warning), TaskStop cancel through the spool handler with real output, not_observed for never-read spools, stale/unowned-window flags); both integration suites; the mock-generated scenario subjects (131 pass / 2 skipped with stated reasons).
-- Audit state: store audit 1 fully remediated. Sidecar audit 1 remediated in part (see "Staged: sidecar remainder"). Store audit 2 delivered and STAGED below (not remediated — wind-down). Sidecar audit 2 never dispatched.
+## Verified green at 6e2795771 (both with -race, AGENT_REPL_FORBID_VENDOR_CALLS=1)
+- Store (agent-shim/shim-store): build, vet, gofmt, staticcheck U1000 zero, `go test -race -count=1 ./...` 6/6 ok.
+- Sidecar (agent-shim/claude/shim-sidecar): same gate, 9/9 ok (integration ~230s with node; mock scenarios included).
 
-## Staged: store audit 2 (17 critiques; remediation NOT dispatched) — teamlead rulings attached
-Critiques verbatim-condensed; C-n = auditor's rank. All are test-side; no production defect claimed.
-- C1 DetachedWorkId==AgentActivityId convergence subject (TestACoincidentHandleAndUnitIdIsOneObligation). RULING: add as specified; also align critique-17's fixture keys to `detached:<work id>`.
-- C2 WatchBashRun edges: terminal re-upsert against an ended stream and a fresh replay; a delta first-inserted after the terminal. RULING (staged): replay serves every stored row in first-insert order; the natural end fires after the last stored row once a terminal row has been sent; a terminal re-upsert to an ended stream is absorbed silently (no re-send to past watchers, exactly-once in a fresh replay). Pin both subjects to that.
-- C3 interleaved two-plane writers of one run (TestInterleavedPlanesReplayInFirstInsertOrder). RULING: add.
-- C4 announced-but-never-written run: WatchBashRun refused (CodeNotFound) while live_detached lists it. RULING: pin exactly that; relay to the shim lead that reconciliation must tolerate a refused open for an obligation with no rows yet (retry after the first row or synthesize from the announcement).
-- C5 cursor-only batch over the wire (TestACursorOnlyBatchIsDurablySuccessful). RULING: add.
-- C6 cursor latest-wins/multi-file/file_id filter over the wire (TestCursorsPerFileLatestWins). RULING: add.
-- C7 directory-at---db refusal (left intact) and stale -wal sibling removal as process subjects. RULING: add both.
-- C8 non-socket regular file at the listen path (refuse, untouched). RULING: add.
-- C9 bash-registry overflow black-box (TestASlowBashWatcherIsEndedWithResourceExhausted). RULING: add.
-- C10 live_detached across restart. RULING: add.
-- C11 producer_empty/batch_missing/cursor-advance field spellings on the wire. RULING: add to the malformed-batch table, each with assertNoDatabaseTouch.
-- C12 concurrent upserts of ONE key (TestConcurrentUpsertsOfOneKeyLeaveOneRow). RULING: add.
-- C13 pprof wildcard refusal + healthy-boot enabled record subjects. RULING: add.
-- C14 SIGTERM during a wedged boot: bounded subject. RULING: add, bounded, accept nondeterminism margins.
-- C15 empty catch-up page's boundary arm. RULING: floor (the caller is current; nothing older is owed below its mark) — extend the restart-reopen subject to assert floor.
-- C16 env-vs-flag precedence subject for --socket. RULING: add.
-- C17 announcement-key fixture drift. RULING: folded into C1.
-Rule-violating subjects to fix: workflow-warning subject (operation-scoped exactly-once record; assert GetNotImplemented() arm, never detail substring; prove durability by restart or write_id replay); unreadable-db nuke record (operation-scoped with error context); unknown-token refusal (assertExactlyOneNormalRecord + refusal_site + watch_token_hash; add exactly-once logging subjects for consumed-token, post-restart token, and both refused bash-run opens).
-Helper: wire assertNoDatabaseTouch's dead sawAnyStatement per-window guard or delete it with a comment pointing at the global positive control. Also queued earlier: normalize invalid_request.field to FULL envelope paths (db-owned vocabulary, documented in AGENTS.md, asserted per refusal); record in AGENTS.md the ruling that AgentFrame.detached_work is a page line for EVERY DetachableWork kind incl. workflow (live_detached still excludes workflow).
+## The recorded queue is COMPLETE
+1. Store audit 2 (C1–C17, rule-violating logging subjects, assertNoDatabaseTouch guard, invalid_request.field = full envelope paths rooted at WriteBatchRequest as db-owned vocabulary in shim-store/AGENTS.md, `refusal_kind` beside `refusal_site` on store refusal records, detached_work-is-a-page-line ruling recorded). Store `--socket` flag beats env (subject socketflag_test.go).
+2. Sidecar audit 1 remainder, all subjects (3–9, 11–18, 19–25, 7/24 integration subjects) + the warn/error census (every remaining record subject-provoked) + the outage ladder (first refusal error, later attempts warn with attempt/backoff_ms, exactly one info on recovery).
+3. Programmatic dead-code pass (staticcheck U1000 + coverprofile), see lists below.
+4. Sidecar adversarial loop: audits 2 and 3 dispatched and remediated; the lead closed the loop after audit 3 (each pass narrower; no further auditor queued).
 
-## Staged: sidecar audit 1 remainder (production halves landed; these SUBJECTS are unwritten)
-From SIDECAR-AUDIT-1.md (scratchpad copy now superseded by this file): critiques 3 (store bounce mid-ingest; integration/helpers' startRealStoreAt still has no caller), 4 (bash read-back through the REAL store's WatchBashRun, single stream, follow phase), 5 (transcript carry across three polls + seeded carry on boot), 6 (SIGTERM with an in-flight batch), 8 (never-SessionUpdate), 9 (split EXIT marker), 11 (invalid_request parking subject against the real store), 12 (multi-file interleaving), 13 (subagent join + meta edge cases; note: a meta parsing but naming no toolUseId logs at ERROR deliberately — the audit brief said WARNING and the code is right), 14 (usage on a tool_use first block), 15 (api_error table — GROUNDING LIMIT: the corpus holds exactly ONE api_error fixture, a connection/StreamSuspended record; rate_limit_error/overloaded_error/authentication_error/numeric-only/unknown-type have no fixture, so the table cannot be grounded past one row without a new capture), 16 (TaskStop agent-task + unlaunched), 17 (diagnostics adjacency across a poll + injected skills), 18 (hold-at-cursor restart + keep-alive across compaction), 19–21 (brittle subjects rewrites), 22 (logging field set + exactly-once + operation convergence), 23 (flags/env), 25 (residue key literals), plus critique 7's two rename INTEGRATION subjects and critique 24's a*/w* integration subjects. Spawn fixtures for 13/14 exist: tool-inputs/agent.jsonl, tool-results/agent_async_launch.jsonl, sidechain/agent-aef975b7bc3422d4b.jsonl (meta toolUseId toolu_019w534yMVsDAc3KqJYLGhP8). Also owed: the sidecar warn/error census on a green run at this tip (last census was pre-fix2: every record subject-provoked).
+## Production fixes landed this session (each with unit tests)
+- TaskStop result `task_type:"local_agent"` settles the agent task as cancelled (corpus fixture task_stop.jsonl states local_agent; previously fell through to the shell branch).
+- Recovered cursors indexed by file_id (rename-proof); watch() asks GetSidecarCursors{file_id} for a path with no cursor in the cycle snapshot before building a tailer; rewindOnce keyed per identity.
+- Backgrounded-spawn observation: the observer was never set, so a backgrounded subagent's spool frames named the main agent as top_level. Then ownerIndex.backgroundedCalls keyed by the spawning call's activity id + sidecar.refreshSpawnFacts() re-read every rescan (discovery order is not causal order), so spool and sidechain planes of one backgrounded agent agree on top_level.
+- AgentTranscriptHandler.LostTerminal: an a* spool concluded LOST upserts `activity:<toolUseId>` in the parent's book with AgentSubagentFailure.cause.lost{file_vanished|went_silent|swept_up}.
+- Workflow per-agent transcripts (wf_*/agent-*.jsonl) land as vendor_specific{kind:"workflow/agent_transcript"} residue, never `unknown` (workflow stays kicked: residue only, no meta hold).
+- Sidecar logs `refusal_site` beside `refusal_kind` on every refusal record.
 
-## Capture-run checklist items contributed by this team
-- The context-budget warning's REAL attachment spelling (corpus sample is SYNTHETIC; the mock writes attachment/context_tip, which is probably not the carrier — needs a ruling from a real capture).
-- A real compaction-summary line (the isCompactSummary shape is synthesized in one helper; every compaction subject proves a believed shape).
-- The api_error taxonomy fixtures (see grounding limit above).
+## Dead-code pass (ruling "Dead code is hunted programmatically")
+Deleted (no caller, confirmed by staticcheck U1000 and grep): shim-sidecar internal/discover/watcher.go (fsnotify Watcher, never wired) and Discoverer.SpoolRoot; convert.WorkflowSpool; convert.wholeStdout; ShellOutputHandler.Lost; AgentTranscriptHandler/SessionTranscriptHandler.SetObserver; storeclient Client.Socket; bootstrapError.Unwrap (sidecar and store); shim-store detached_work `cause*` constants; test-only helpers detachedSubagentFrame, toolUseIDOf, containsSubstring, phase, four requireNoneIn duplicates, harness.started field.
+Kept with reason and pinned by unit test: store db.queryError (error path the suites do not drive); sidecar convert dispatch-table success converters (12: write/grep/sendMessage/webFetch/webSearch/wakeup/artifact/planMode/findings/worktree/cron/push — table-referenced, no corpus fixture), imageBlock, settleUnmodeled, taskActSettled/taskState/taskIDs, settleQuestion/questionAnswers, seamObserver.TaskStopped, jitterBackoff/bootTimeMillis, oversizeCarryError.Error; main/run/runWithLogger/logProcessExit/cycle.Run reached only through the exec'd binaries (integration suites run the built binary; the coverprofile cannot see them) — covered by the integration suites; integration fake-store hook FailWritesWithoutAKind (caller landed in audit 2 remediation).
+Not deleted: agent-shim/wire — still imported by the daemon; its deletion belongs to the daemon rewrite (store.md ruling).
 
-## Cross-team facts recorded for integration
+## Open items for the next wave (implementation-detail, no ruling needed to resume)
+- discover.Target.TaskID is overloaded: for a sidechain transcript it carries the `agent-<id>` locator, not a harness task id (worked around in ownerIndex.backgroundedFor; a rename to VendorAgentID-only is the clean end state).
+- Bounded-hold subjects widen poll intervals by construction (audit 2 minor 12): load-sensitive but loud-fail, accepted.
+
+## Grounding gaps (project lead's capture checklist; subjects marked synthetic)
+- Real context-budget attachment spelling (`context_tip` is ruled NOT it); the fixture stays synthetic, the audit-2 proposal to force context_tip to convert was rejected.
+- Compaction-summary line (cheap-model captures never reached the threshold).
+- api_error taxonomy: table holds exactly one grounded row (connection/StreamSuspended).
+- Real /clear shape (from the identity-rotation-clear golden): old transcript stops with no closing record; new file under the second system:init's session_id; lineage is the shim's link file only. Sidecar subjects assume no closing record.
+
+## Cross-team relays outstanding
+- C4 to the shim lead: reconciliation must tolerate a refused WatchBashRun open (CodeNotFound) for an announced run with no rows yet (retry after the first row or synthesize from the announcement).
+
+## Cross-team facts recorded for integration (unchanged)
 - Pins: connectrpc.com/connect v1.17.0 + golang.org/x/net v0.43.0, go 1.23.x everywhere.
 - Private test socket: env AGENT_REPL_STORE_SOCKET; a flag beats it (store --socket, sidecar --store-socket).
-- Connect standing streams: consumers must CANCEL the stream context (Close alone drains a standing stream forever); acceptance is silent, refusal is CodeNotFound on first Receive; servers flush response headers on accepting a stream.
-- The mock's !cancel-all writes EXIT= into agent spools (shim-side bug, relayed); !compact-failed writes nothing to disk (ContextCut.compaction_failed has no file-plane producer); !subagent-failed's transcript holds only a user record, withheld by R15.
-- A db-refused batch yields two log records (db error-context at verbose + server warn with rpc) — accepted this wave; the single-record end state threads a request-scoped logger into db.
-
-## Correlation keys (logging contract vocabulary for these two services)
-producer, agent_id, vendor_session_id, book_agent_id, write_id, upsert_key, position, write_seq, watch_token_hash, rpc, refusal_site, statement, file_id, path, offset, task_id, activity_id, turn_id, reason, attempt, backoff_ms; top-level request_id via the X-Agent-Repl-Request-Id header.
-
-## Preserved grounding for the two lost sonnet offloads (settled pre-pause; re-dispatch can write immediately)
-- Critique 23 (flags/env): a malformed duration flag fails in durationSource.resolve() BEFORE run() opens the log file → contract is exit 1, a stderr-only bootstrap record, NO log file. Subjects must exec the sidecar binary directly (startSidecar cannot separate --store-socket from the env; mirror its flag construction with a small launchedSidecar type: exec.Command, stderr buffer, closed-channel exit, SIGTERM+wait). For "store B received nothing": wait on fake A's callC receive, then assert B.CallCount()==0 — no duration waits.
-- Critique 25 (residue keys): the uuid-form fixture is testdata/corpus/transcript-lines/system-local_command.jsonl (uuid 00b0f861-093e-4406-bda3-573801030d18), routed via VendorSpecificEntry("system/local_command") — a real withheld class with a real uuid; seed like seedApiError (retargetSession + the fixture line). VendorSpecificEntry, not only UnknownEntry, keys by ResidueKey when given no explicit key, so the uuid rule covers withheld classes too. The no-uuid case: a JSON parse failure lands via convert.UnparsedEntry on residue:file:<ctx.Path>:<offset> with ctx.Path discovery-normalized — compare against the symlink-resolved path.
-- Both offloads are cancelled for the pause (wind-down); this section is their re-dispatch brief.
+- Connect standing streams: consumers cancel the stream context; acceptance is silent, refusal is CodeNotFound on first Receive; servers flush headers on accepting a stream.
+- Correlation keys: producer, agent_id, vendor_session_id, book_agent_id, write_id, upsert_key, position, write_seq, watch_token_hash, rpc, refusal_site, refusal_kind, statement, file_id, path, offset, task_id, activity_id, turn_id, reason, attempt, backoff_ms; request_id via X-Agent-Repl-Request-Id (store only; the sidecar serves no inbound rpc).
