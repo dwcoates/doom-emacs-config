@@ -28,11 +28,9 @@ landed arm.
 | rpc | arm | condition | package |
 | --- | --- | --- | --- |
 
-One thing the batch did NOT land: `CloseWorkspaceError.blocked` exists but
-`CloseWorkspaceBlocked` is still an EMPTY message, so the composed reason the
-close refusal carries (turn_in_flight, live_work, held_prompts, merge_queued
-and its sentence) has no field to ride in. The arm is usable; the evidence is
-not yet expressible.
+`CloseWorkspaceBlocked` gained its five fields in landing 7 (turn_in_flight,
+live_work, held_prompts, merge_queued, summary), and `internal/workspace`'s
+quiet check fills all five. The evidence is expressible; nothing is owed here.
 | SubmitPrompt (the one-shot finish hook) | `brief_missing` | `prompts/oneshot-create-pr-then-close-followup.md` is absent or will not splice when the one-shot's turn concludes | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `not_deliverable` (landing 3, `UpdateAgentFailure.kind.not_deliverable`) | the SDK has no route to the addressed subagent; answered honestly, the control is not hidden this wave | workspace |
 | Interrupt / AnswerPermission / AnswerQuestion | `unknown_agent`, `no_open_ask`, `answer_mismatch`, `no_session` | the shim's own `UpdateAgentFailure` arm, propagated by NAME rather than collapsed into a sentence | workspace |

@@ -59,39 +59,48 @@ func (v *verbs) Open(ctx context.Context, ws ids.WorkspaceID) error {
 // closeBlocker names why a close is refused, or nil when the workspace is
 // quiet. The four blockers are the ruled ones; a standing cold gate and a
 // parked session are deliberately NOT among them.
+//
+// EVERY BLOCKER IS COMPUTED, not just the first one that fires: the refusal
+// carries all four counts as evidence (CloseWorkspaceBlocked, landing 7) and
+// the footer draws the same composed sentence, so the check answers the whole
+// picture and the ORDER below only decides which one the sentence leads with.
 func (v *verbs) closeBlocker(ctx context.Context, ws ids.WorkspaceID) (*footer.CloseBlocked, error) {
+	blocked := footer.CloseBlocked{}
+	var liveDetail string
 	if running, live := v.deps.Freeness(ws); live {
-		if running.Turn != nil {
-			return &footer.CloseBlocked{
-				Reason: "turn_in_flight",
-				Detail: "a turn is still running; interrupt it or wait for it to end",
-			}, nil
-		}
-		if !running.LiveWork.Empty() {
-			return &footer.CloseBlocked{
-				Reason: "live_work",
-				Detail: fmt.Sprintf("%d detached agents and %d detached shells are still live",
-					len(running.LiveWork.Agents), len(running.LiveWork.Shells)),
-			}, nil
-		}
+		blocked.TurnInFlight = running.Turn != nil
+		agents, shells := len(running.LiveWork.Agents), len(running.LiveWork.Shells)
+		blocked.LiveWork = uint32(agents + shells)
+		liveDetail = fmt.Sprintf("%d detached agents and %d detached shells are still live", agents, shells)
 	}
 	held, err := v.deps.DB.HeldPrompts(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("read the held prompts: %w", err)
 	}
-	if len(held) > 0 {
-		return &footer.CloseBlocked{
-			Reason: "held_prompts",
-			Detail: fmt.Sprintf("%d held prompts have not been delivered; release or drop them first", len(held)),
-		}, nil
-	}
+	blocked.HeldPrompts = uint32(len(held))
+	mergeState := ""
 	if facts, ok := v.deps.Merge.Facts(ws); ok && mergeIsPending(facts.State) {
-		return &footer.CloseBlocked{
-			Reason: "merge_queued",
-			Detail: fmt.Sprintf("a merge is %s; evict it from the queue first", facts.State),
-		}, nil
+		blocked.MergeQueued = true
+		mergeState = facts.State
 	}
-	return nil, nil
+
+	switch {
+	case blocked.TurnInFlight:
+		blocked.Reason = "turn_in_flight"
+		blocked.Detail = "a turn is still running; interrupt it or wait for it to end"
+	case blocked.LiveWork > 0:
+		blocked.Reason = "live_work"
+		blocked.Detail = liveDetail
+	case blocked.HeldPrompts > 0:
+		blocked.Reason = "held_prompts"
+		blocked.Detail = fmt.Sprintf("%d held prompts have not been delivered; release or drop them first", len(held))
+	case blocked.MergeQueued:
+		blocked.Reason = "merge_queued"
+		blocked.Detail = fmt.Sprintf("a merge is %s; evict it from the queue first", mergeState)
+	default:
+		return nil, nil
+	}
+	return &blocked, nil
 }
 
 // mergeIsPending reports whether a merge state still owes the workspace work.
