@@ -222,3 +222,22 @@ func TestCloseSucceedsWhenTheSinkEvictionFails(t *testing.T) {
 		t.Fatal("Close() did not record the workspace as closed")
 	}
 }
+
+func TestCloseRefusalIsNotLoggedAsAWarning(t *testing.T) {
+	// Arrange: `blocked` is a LANDED CloseWorkspaceError arm, so the refusal is
+	// an ordinary answer the client reads rather than a fault.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	turn := wsm.TurnID("t1")
+	f.running.Turn = &turn
+
+	// Act.
+	_ = f.verbs.Close(context.Background(), "w1")
+
+	// Assert.
+	for _, record := range f.log.logger.Records() {
+		if record.Operation == opClose && (record.Level == "warn" || record.Level == "error") {
+			t.Fatalf("record = %+v, want the landed refusal recorded below warning", record)
+		}
+	}
+}

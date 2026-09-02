@@ -607,12 +607,11 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	if resp.Msg.GetError().GetBlocked() == nil {
 		t.Fatalf("CloseWorkspace with a queued merge = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
-	// "daemon.merge.merge_tab" (the scripted conflict) and "daemon.merge.
-	// conflicts" (the resulting park) fire during Arrange; "daemon.workspace.
-	// close" fires on the Act's own blocked refusal. Needs a suite run to
-	// confirm no other operation is reached by the merge machinery this
-	// Arrange exercises.
-	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts", "daemon.workspace.close")
+	// The Arrange's scripted conflict is stated by the merge tab, the git
+	// client and the resulting park. The Act's own refusal names a LANDED arm,
+	// so it warns about nothing and is deliberately not declared here.
+	d.ExpectWarnings("daemon.merge.merge_tab", "daemon.merge.conflicts",
+		"daemon.gitclient.merge_no_ff")
 }
 
 func TestCloseWorkspaceWithAStandingColdGateSucceeds(t *testing.T) {
@@ -854,11 +853,15 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	if got := f.d.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != spawns {
 		t.Fatalf("shim spawns = %d after a second mount, want the %d already made: the stamp was already bounced for", got, spawns)
 	}
-	// A staleness bounce that runs to completion has no refusal on this path
-	// (internal/rollout/relaunch.go warns only on a stand-down-window
-	// timeout, which the fake's prompt KillSession acceptance never reaches);
-	// needs a suite run to confirm nothing else warns across two mounts.
-	f.d.ExpectWarnings()
+	// The bounce's stand-down is loud by design and the fake makes it louder:
+	// the fake shim EXITS on accepting KillSession, so the call it was
+	// answering fails, the client records the death, and each of the shim's two
+	// standing streams ends without the session ending. The relaunch then waits
+	// out its window before forcing. Every one of these is the same
+	// stand-down, honestly recorded once per observer.
+	f.d.ExpectWarnings("daemon.rollout.relaunch", "daemon.shimclient.exit",
+		"daemon.shimclient.kill_session", "daemon.sessionwatcher.watch_session",
+		"daemon.sessionwatcher.watch_agent")
 }
 
 func TestCrashBootAdoptsARunningShimWithoutASecondSpawn(t *testing.T) {
@@ -1150,7 +1153,10 @@ func TestSessionStartedDetachedOriginLiveWorkIsAnErrorAndSkipped(t *testing.T) {
 	// restored live-work set settles at zero rather than crashing bring-up.
 	f.d.AwaitWorkspaceLogOperation(f.repo.Dir, "daemon.sessionwatcher.detached_kind_unknown")
 	awaitLiveWork(t, f, 0)
-	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
+	// The feed resolver states the same unresolvable item a second time, from
+	// its own side, which is the second half of what the test asserts.
+	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown",
+		"daemon.feed.detached_unknown_unit")
 }
 
 // ---- critique 17 (this agent's share): AnswerColdGate{clear} ----

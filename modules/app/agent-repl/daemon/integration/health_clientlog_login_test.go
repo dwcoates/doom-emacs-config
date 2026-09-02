@@ -46,7 +46,10 @@ func TestDaemonHealthWithAnOpenFaultIsUnhealthy(t *testing.T) {
 	// is read (and the fault opened) inside RequestCommandSupport, which logs
 	// ERROR under daemon.workspace.request_command_support
 	// (internal/workspace/commandsupport.go).
-	d.ExpectWarnings("daemon.workspace.request_command_support")
+	// Opening the fault and the daemon reading unhealthy are the SUBJECT of
+	// this test, and each is recorded loudly by design.
+	d.ExpectWarnings("daemon.workspace.request_command_support",
+		"daemon.health.open_fault", "daemon.health.daemon")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	if err := os.RemoveAll(d.PromptsDir); err != nil {
@@ -96,11 +99,10 @@ func TestSessionHealthForALiveSessionIsHealthy(t *testing.T) {
 func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	// A shim-reported diagnostics fault is routed to the topbar at DEBUG
-	// (internal/sessionwatcher/route.go, internal/resolve/topbar/resolver.go
-	// applyDiagnostics) and SessionHealth's own read logs nothing above DEBUG
-	// either: nothing here reaches a WARN or ERROR site.
-	f.d.ExpectWarnings()
+	// A shim-reported fault IS a fault: the health reporter opens it and
+	// answers unhealthy, and each is recorded loudly by design. The routing to
+	// the topbar is the only DEBUG half of this.
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session")
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act: the shim reports itself unhealthy.
