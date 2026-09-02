@@ -164,6 +164,17 @@ describe("the when-column", () => {
     expect(drawn.querySelector(".when")?.textContent).toBe("3m");
   });
 
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the stamp does not share the shared ticker's phase.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", when: { case: "lastSelected", value: { atMs: BigInt(NOW - 4920) } } }),
+      sidebarContext(),
+      "R",
+    );
+    // Assert: five real seconds ago reads 5s, not the lagging 4s.
+    expect(drawn.querySelector(".when")?.textContent).toBe("5s");
+  });
+
   it("names a settled merge in its own words", () => {
     const drawn = drawRosterRow(
       row({ id: "ws-1", when: { case: "merged", value: { atMs: BigInt(NOW - 3_600_000) } } }),
