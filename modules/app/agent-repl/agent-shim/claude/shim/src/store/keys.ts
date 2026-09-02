@@ -245,23 +245,35 @@ export function streamResidueUpsertKey(sequence: number): string {
 // ---------------------------------------------------------------------------
 
 /**
- * WHERE a frame came from in the vendor's own record.
+ * WHERE a frame came from in the vendor's own record, plus WHICH ARM it is.
+ *
+ * THE ONE DECLARATION. `store/persistence.ts` re-exports this type rather than
+ * restating it: the same three fields were declared twice, once here for the
+ * hash and once there for the envelope, differing only in the uuid field's
+ * name — so `writer.ts` had to translate between two shapes of one fact, which
+ * is exactly the drift a shared declaration makes impossible.
  *
  * `blockIndex` is present exactly for a frame derived from one content block of
  * a message: without it, every block of one assistant message would share the
  * message's uuid and therefore mint one write id, and the store would absorb
  * all but the first as duplicates.
+ *
+ * `discriminator` is the frame's ARM PATH, and it is what keeps two frames
+ * derived from ONE vendor record (a tool call's start and the session fact the
+ * same record implied) from hashing identically.
  */
 export interface SourceCoordinates {
-  /** The SDK message's uuid — the vendor's own name for the record. */
-  readonly vendorRecordUuid: string;
+  /** The SDK message's `uuid` — the vendor's own name for the record. */
+  readonly vendorUuid: string;
   /** The 0-based content-block index, for a block-derived frame. */
   readonly blockIndex?: number;
+  /** The frame's arm path, e.g. `agent_frame.update.activity.read.start`. */
+  readonly discriminator: string;
 }
 
 /** The coordinates as they appear inside the hashed string. */
 export function formatSourceCoordinates(coordinates: SourceCoordinates): string {
-  const uuid = requireValue(coordinates.vendorRecordUuid, "the vendor record uuid");
+  const uuid = requireValue(coordinates.vendorUuid, "the vendor record uuid");
   if (coordinates.blockIndex === undefined) return uuid;
   if (!Number.isInteger(coordinates.blockIndex) || coordinates.blockIndex < 0) {
     throw new Error(
@@ -279,13 +291,9 @@ export function formatSourceCoordinates(coordinates: SourceCoordinates): string 
  * call's start arm and the session update that record also implied would
  * otherwise hash identically and one would be silently absorbed.
  */
-export function writeId(
-  producer: string,
-  coordinates: SourceCoordinates,
-  discriminator: string,
-): string {
+export function writeId(producer: string, coordinates: SourceCoordinates): string {
   const material = `${requireValue(producer, "the producer")}|${formatSourceCoordinates(
     coordinates,
-  )}|${requireValue(discriminator, "the frame's arm path")}`;
+  )}|${requireValue(coordinates.discriminator, "the frame's arm path")}`;
   return createHash("sha256").update(material, "utf8").digest("hex");
 }
