@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -158,7 +159,15 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 			if scope.Dir != "" && repo.Dir != scope.Dir {
 				continue
 			}
-			return []wsm.RepoKey{wsm.RepoKey(repo.Dir)}, nil
+			// THE QUEUE IS KEYED BY THE COMMON DIR (repoKeyFor), never by the
+			// registry's worktree dir: keying a scoped pause by repo.Dir wrote
+			// and read a key no queue is ever stored under, so a scoped pause
+			// never saw what an unscoped one had done.
+			common, err := o.deps.Git.CommonDir(ctx, repo.Dir)
+			if err != nil {
+				return nil, fmt.Errorf("merge: resolving the repository of %s: %w", repo.Dir, err)
+			}
+			return []wsm.RepoKey{wsm.RepoKey(common)}, nil
 		}
 		o.deps.Log.Global().Warn(op, "refused a pause change for a repository the registry does not hold", dlog.Context{"arm": ArmUnknownRepository, "repository": string(scope.ID), "dir": scope.Dir})
 		return nil, &RefusalError{Arm: ArmUnknownRepository, Reason: "no registered repository matches the request's repository ref"}
