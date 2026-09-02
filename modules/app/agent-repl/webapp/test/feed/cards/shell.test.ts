@@ -393,21 +393,21 @@ describe("the stop's typed refusals", () => {
       kind: { case: "confirmRequired", value: { liveAgentCount: 3n } },
       text: "stopping would also end 3 live agent(s)",
     },
-    { arm: "unknownWorkspace", kind: { case: "unknownWorkspace", value: {} }, text: "unknown workspace" },
+    { arm: "unknownWorkspace", kind: { case: "unknownWorkspace", value: {} }, text: "the daemon does not know this workspace" },
     {
       arm: "workspaceRefMismatch",
       kind: { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
-      text: "workspace ref mismatch — registry says /elsewhere",
+      text: "this workspace's directory disagrees with the registry's: /elsewhere",
     },
     {
       arm: "transferringAway",
       kind: { case: "transferringAway", value: { address: "127.0.0.1:9931" } },
-      text: "this workspace is transferring to 127.0.0.1:9931",
+      text: "this workspace moved to another daemon at 127.0.0.1:9931",
     },
     {
       arm: "notYetAdopted",
       kind: { case: "notYetAdopted", value: {} },
-      text: "the new daemon has not adopted this workspace yet",
+      text: "the daemon has not finished adopting this workspace yet",
     },
     {
       arm: "notDetachedWork",

@@ -55,7 +55,7 @@ import {
   refusal,
   whileInFlight,
 } from "../cards/controls.js";
-import { refusalOf, type SentenceTable } from "../refusal-text.js";
+import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";

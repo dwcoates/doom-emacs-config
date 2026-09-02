@@ -28,7 +28,7 @@ import {
   drawTypedRefusal,
   drawUnreadableRefusal,
   type SentenceTable,
-} from "./refuse.js";
+} from "../rpc/refuse.js";
 import { asAnchor } from "./strip.js";
 
 /** The causes only SetPermissionMode can answer with. */
