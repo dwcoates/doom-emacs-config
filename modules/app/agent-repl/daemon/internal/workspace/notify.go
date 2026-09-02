@@ -31,7 +31,7 @@ func (v *verbs) Notify(ctx context.Context, ws ids.WorkspaceID, note sessionwatc
 			"a notification must name its kind", false)
 	}
 
-	v.deps.Host.Notify(ws, note.Text, string(note.Kind), note.ToolName)
+	v.deps.Host.Notify(ws, note)
 
 	if err := v.deps.DB.SetAttention(ctx, ws, true); err != nil {
 		log.Error(opNotify, "could not set the attention marker", dlog.Context{"cause": err.Error()})
