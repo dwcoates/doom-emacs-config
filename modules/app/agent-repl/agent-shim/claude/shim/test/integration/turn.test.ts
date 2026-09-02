@@ -849,9 +849,13 @@ describe("keep-alives", () => {
     await shim.clients.h1.startSession(freshSession());
 
     await keepaliveSubmitted(shim);
+    // THE SUBMISSION AND THE ROW ARE TWO INSTANTS. The shim's own record says
+    // it submitted; the row reaches the store on the writer's next batch. Wait
+    // for the row itself, never for the log line that precedes it.
+    const arrived = await (shim.store?.unservedArrived("keepalive") ??
+      Promise.reject(new Error("this shim has no store")));
 
-    const unserved = shim.store?.unserved() ?? [];
-    expect(unserved.some((item) => item.unservedItem.case === "keepalive")).toBe(true);
+    expect(arrived.unservedItem.case).toBe("keepalive");
   });
 
   test("no keep-alive prompt appears in any page", async () => {

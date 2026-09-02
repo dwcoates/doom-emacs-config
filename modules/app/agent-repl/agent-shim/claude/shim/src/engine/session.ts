@@ -285,6 +285,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const watchers = new Set<OpenWatcher>();
   /** Every open `WatchBash` stream, so the teardown can wait for its terminal. */
   const bashWatchers = new Set<OpenBashWatcher>();
+  /**
+   * Subagent ids the RECORD named at reconciliation.
+   *
+   * Bounded by the session's open obligations, read once at start. A subagent
+   * this session spawns itself is in the live table instead, and one whose work
+   * is already written is known from its own book — this covers the third case:
+   * an agent the record knows about that this process never watched start.
+   */
+  const announcedAgents = new Set<string>();
 
   // THE RECORD PLANE'S FAULTS ARE THE SESSION'S. `Persistence` raises a
   // store_unreachable fault and opens a degraded window when the store stops
@@ -1808,6 +1817,10 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     }
     for (const agent of open.liveAgents) {
       if (agent.value === agentId.value) continue;
+      // NAMED BY THE RECORD, so a consumer may address it even though this
+      // process never watched it start -- that is what makes an empty book
+      // under this id "not written yet" rather than "no such agent".
+      announcedAgents.add(agent.value);
       closing.push(closingAgentTerminal(subagentId(agent.value)));
     }
     if (open.liveWorkflows.length > 0) {
@@ -1896,6 +1909,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         watchers.delete(entry);
         settle();
       };
+    },
+    knowsAgent: (agent) => {
+      const value = agent.value;
+      if (value === "") return false;
+      if (identity !== undefined && value === identity.agentId.value) return true;
+      if (live.byToolUseId(value) !== undefined) return true;
+      if (live.retired(value)) return true;
+      return announcedAgents.has(value);
     },
     concludeStoppedRuns: (entries) => {
       concludeStoppedRuns(entries);
