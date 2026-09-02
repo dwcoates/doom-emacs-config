@@ -484,22 +484,22 @@ func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
 	}
 }
 
-// TestBootSwallowsACorruptCreationJobOfAnAdmittedMerge pins the ACTUAL
-// behavior for a corrupt row of `creation_jobs`, which does NOT match
-// critique 9's "restart refuses loudly" claim for this table: the only boot
-// path that reads a workspace's creation job is the in-flight-merge recovery
+// TestBootRefusesACorruptCreationJobOfAnAdmittedMerge asserts critique 9's
+// contract for `creation_jobs`: a half-written row is a CORRUPTION, and the
+// boot refuses it loudly rather than coming up with the row dropped.
+//
+// IT IS EXPECTED TO BE RED, and the defect it exposes is stated here so the
+// failure is read as the finding it is. The only boot path that reads a
+// workspace's creation job is the in-flight-merge recovery
 // (internal/boot/sequence.go: recoverMerges -> internal/merge/recover.go:
 // Recover -> recoverAdmitted -> layoutFor -> DB.CreationJob), and
-// recoverAdmitted's own switch statement folds ANY layoutFor error --
-// including a genuine corrupt-row *wsm.DecodeError, not just a legitimately
-// absent job -- into "the workspace's merge geometry is gone", which fails
-// that ONE merge (loudly, at daemon.merge.recover) and lets the boot
-// continue and serve normally. This CONTRADICTS the "refuses loudly rather
-// than coming up with the row dropped" claim: the row IS dropped, silently
-// downgraded from a data-corruption refusal to an ordinary "unmergeable"
-// business outcome. See the report for this as a flagged production defect
-// (internal/merge/recover.go is out of this file's boundary to fix).
-func TestBootSwallowsACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
+// recoverAdmitted's switch folds ANY layoutFor error -- a genuine corrupt-row
+// *wsm.DecodeError included -- into "the workspace's merge geometry is gone".
+// A data-corruption refusal is thereby downgraded to an ordinary
+// "unmergeable" business outcome: the row IS dropped and the daemon serves on.
+// The remediation belongs in internal/merge/recover.go, which is outside this
+// file's boundary; the test states the contract, not the defect.
+func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	// Arrange: register a workspace, then seed its merge geometry and an
 	// ADMITTED queue entry directly (raw SQL, daemon stopped): the boot's
 	// merge recovery reads both without going through the ordinary merge rpc
@@ -523,24 +523,17 @@ func TestBootSwallowsACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
 	})
 	f.d.CorruptRow("creation_jobs", "actions_before", "workspace_id", f.ws.GetId(), "not valid json")
 
-	// Act: restart on the same state root. ExpectEarlyExit only tells the
-	// harness not to wait for daemon.addr up front (the whole point here is
-	// that boot does NOT exit early); the log record and the address file
-	// are awaited explicitly below instead.
+	// Act: restart on the same state root.
 	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
+	code := nd.AwaitExit()
 
-	// Assert: the corruption IS detected and logged loudly, as a failed
-	// merge -- never silently ignored.
+	// Assert: an undecodable row refuses the boot, non-zero and loud.
+	if code == 0 {
+		t.Fatalf("boot over a corrupt creation_jobs row exited 0, want a loud non-zero refusal\nstderr:\n%s", nd.Stderr())
+	}
 	rec := nd.AwaitRunLogOperation("daemon.merge.recover")
 	if lvl := strings.ToLower(rec.Level); lvl != "error" {
-		t.Fatalf("daemon.merge.recover record level = %q, want ERROR (a merge a restart left unfinished)", rec.Level)
-	}
-
-	// Assert: but the boot itself is NOT refused -- it completes and serves,
-	// with the corrupt row's merge simply dropped from the queue.
-	nd.AwaitFileExists(nd.AddrFile())
-	if nd.Exited() {
-		t.Fatalf("the daemon exited after the swallowed creation_jobs corruption, want it to have booted and be serving\nstderr:\n%s", nd.Stderr())
+		t.Fatalf("daemon.merge.recover record level = %q, want ERROR", rec.Level)
 	}
 }
 
