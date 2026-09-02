@@ -28,6 +28,11 @@ const (
 	// than swallowed — the control is not hidden this wave, so the caller is
 	// told the route does not exist.
 	ArmShimNotDeliverable = "not_deliverable"
+	// ArmShimAgentBusy is the shim's UpdateAgentFailure.agent_busy (landing 7):
+	// the addressed subagent's OWN turn is already open, so the prompt has no
+	// place to land. The daemon never judges a subagent's turn itself; it
+	// relays the shim's verdict.
+	ArmShimAgentBusy = "agent_busy"
 	// ArmShimUnknownWork is a detached shell the shim does not know.
 	ArmShimUnknownWork = "unknown_work"
 	// ArmShimAlreadyEnded is a detached shell that has already finished.
@@ -117,6 +122,8 @@ func updateAgentArm(failure *shimv1.UpdateAgentFailure) string {
 		return ArmShimNoSession
 	case *shimv1.UpdateAgentFailure_NotDeliverable:
 		return ArmShimNotDeliverable
+	case *shimv1.UpdateAgentFailure_AgentBusy:
+		return ArmShimAgentBusy
 	default:
 		return ArmShimUnspecified
 	}
