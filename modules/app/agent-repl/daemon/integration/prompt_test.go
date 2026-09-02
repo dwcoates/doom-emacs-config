@@ -846,7 +846,7 @@ func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCou
 	// then an interrupt raises the dequeue offer.
 	_, behind, _, d := mergeBlockedQueueFixture(t)
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
-	d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
+	d.ExpectWarnings("daemon.merge.conflicts", "daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued",
 		"daemon.merge.merge_tab")
 	holds := behind.d.WatchHolds(behind.ws)
 	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
