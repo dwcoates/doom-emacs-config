@@ -62,6 +62,9 @@ export const REVEAL_HIGHLIGHT_MS = 1500;
 /** The class a revealed row wears while the reader's eye lands on it. */
 export const REVEAL_CLASS = "row-revealed";
 
+/** The attribute a row wears while it is the one a jump landed on. */
+export const REVEAL_ATTRIBUTE = "data-revealed";
+
 export interface FeedDeps {
   renderers: RowRenderers;
   /** Mounts a composer inside each bubble. Absent in production (R7). */
@@ -323,11 +326,16 @@ export function mountFeed(host: HTMLElement, ctx: AppContext, deps: FeedDeps): F
   function land(element: HTMLElement): void {
     revealNode(element);
     element.classList.add(REVEAL_CLASS);
+    // STATED, not only styled: "this is the row you asked for" is a fact about
+    // the row while it stands, and a jump's caller has no other way to see that
+    // the landing happened.
+    element.setAttribute(REVEAL_ATTRIBUTE, "true");
     const deadline = ctx.ticker.now() + REVEAL_HIGHLIGHT_MS;
     tick(element, ctx.ticker, (nowMs) => {
       if (nowMs < deadline) return;
       stopTicking(element);
       element.classList.remove(REVEAL_CLASS);
+      element.removeAttribute(REVEAL_ATTRIBUTE);
     });
   }
 

@@ -70,10 +70,18 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
   const panel = document.createElement("div");
   panel.className = "merge-tab-panel";
 
-  mount.append(breadcrumbs, strip, summary, panel);
+  // ROWS THE STRIP CANNOT PLACE. A merge sub-feed is a feed like any other, and
+  // a row it carries that names no tab (or names one this bubble has not drawn)
+  // is still work that happened. It is drawn here, beneath the strip, and
+  // REPORTED — dropping it would hide real conversation, and pinning it under
+  // an arbitrary tab would state a grouping the daemon did not.
+  const loose = document.createElement("div");
+  loose.className = "merge-loose-rows";
+
+  mount.append(strip, summary, panel, loose);
 
   const draw = (): void => {
-    drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc);
+    drawBreadcrumbTrail(breadcrumbs, view.breadcrumbs(), rc, mount);
     const tabs = mergeTabsOf(view.rows());
     releasePickOnNewTab(tabs);
     const active = tabs.find((t) => t.id === picked) ?? autoSelectedTab(tabs);
@@ -93,6 +101,7 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
     );
     drawSummary(summary, active);
     drawTabBody(panel, active, view, rc);
+    drawLooseRows(loose, tabs, view);
   };
 
   /**
@@ -120,9 +129,35 @@ export const mergeBubbleBody: BubbleBodyRenderer = (mount, view, rc): Handle => 
       strip.remove();
       summary.remove();
       panel.remove();
+      loose.remove();
     },
   };
 };
+
+/**
+ * The sub-feed's rows that belong to no drawn tab, in feed order.
+ *
+ * They go through `view.drawRow` — the ordinary row path, chrome included — so
+ * a row nobody could place still reads exactly as it would anywhere else.
+ */
+export function drawLooseRows(
+  host: HTMLElement,
+  tabs: readonly MergeTab[],
+  view: SubfeedView,
+): void {
+  host.replaceChildren();
+  const placed = new Set(tabs.map((tab) => tab.id));
+  for (const row of view.rows()) {
+    if (row.row.case === "mergeTab") continue;
+    const parent = row.parent?.row?.value;
+    if (parent !== undefined && placed.has(parent)) continue;
+    log("warn", "a merge sub-feed row names no drawn tab; drawing it beneath the strip", {
+      operation: "merge.unplaced-row",
+      context: { row: row.id?.value ?? "unset", parent: parent ?? "none" },
+    });
+    host.append(view.drawRow(row));
+  }
+}
 
 /**
  * The line under the strip: a settled-failed tab's own account.

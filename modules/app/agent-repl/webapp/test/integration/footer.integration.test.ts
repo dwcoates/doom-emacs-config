@@ -361,7 +361,7 @@ describe("the clock", () => {
     expect(harness.text(".footer-clock")).not.toBe(before);
   });
 
-  it("draws nothing when no turn is live", async () => {
+  it("reads as not live when no turn is running", async () => {
     // Arrange / Act: turn_started_at_ms is `optional`.
     harness = await startHarness({
       arrange: (fake) =>
@@ -370,8 +370,22 @@ describe("the clock", () => {
           footerView({ status: "idle", substatus: "ready", turnStartedAtMs: undefined }),
         ),
     });
-    // Assert
-    expect(harness.text(".footer-clock") || "").toBe("");
+    // Assert: the cell keeps the baseline strip's idle dash (preamble §6 — the
+    // existing look does not change); what it must not do is claim a turn.
+    expect(harness.$(".footer-clock")?.dataset.live).toBe("false");
+  });
+
+  it("offers no stop control when no turn is running", async () => {
+    // Arrange / Act
+    harness = await startHarness({
+      arrange: (fake) =>
+        fake.setFooter(
+          WORKSPACE_ID,
+          footerView({ status: "idle", substatus: "ready", turnStartedAtMs: undefined }),
+        ),
+    });
+    // Assert: a control whose only answer is "nothing running" is chrome.
+    expect(harness.$(".footer-clock [data-interrupt]")).toBeNull();
   });
 });
 
