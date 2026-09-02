@@ -43,7 +43,7 @@ import {
   drawTypedRefusal,
   drawUnreadableRefusal,
   type SentenceTable,
-} from "./refuse.js";
+} from "../rpc/refuse.js";
 import { asAnchor } from "./strip.js";
 
 /** What the button says when the daemon reports no selection. */

@@ -53,7 +53,7 @@ import {
   refusal,
   whileInFlight,
 } from "../cards/controls.js";
-import { refusalOf, type SentenceTable } from "../refusal-text.js";
+import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { tick } from "../ticking.js";
@@ -356,7 +356,7 @@ async function answer(
 
 /**
  * The causes only THIS verb can answer with. The four cross-cutting ones are
- * worded once, in `refusal-text.ts`, so they read identically at every control.
+ * worded once, in `src/rpc/refuse.ts`, so they read identically everywhere.
  */
 const OWN_CAUSES = {
   askNotStanding: () => "this ask is no longer standing",

@@ -48,7 +48,7 @@ import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { buildInterruptDetachedRequest } from "../requests.js";
 import { stopTicking, tick } from "../ticking.js";
-import { refusalOf, type SentenceTable } from "../refusal-text.js";
+import { refusalOf, type SentenceTable } from "../../rpc/refuse.js";
 import {
   clearRefusals,
   drawMalformedRefusal,

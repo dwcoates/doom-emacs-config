@@ -291,21 +291,21 @@ describe("answering the gate", () => {
 
 describe("a refused gate answer", () => {
   const causes = [
-    { arm: "unknownWorkspace", cause: { case: "unknownWorkspace", value: {} }, text: "unknown workspace" },
+    { arm: "unknownWorkspace", cause: { case: "unknownWorkspace", value: {} }, text: "the daemon does not know this workspace" },
     {
       arm: "workspaceRefMismatch",
       cause: { case: "workspaceRefMismatch", value: { registryDir: "/elsewhere" } },
-      text: "workspace ref mismatch — registry says /elsewhere",
+      text: "this workspace's directory disagrees with the registry's: /elsewhere",
     },
     {
       arm: "transferringAway",
       cause: { case: "transferringAway", value: { address: "127.0.0.1:9931" } },
-      text: "this workspace is transferring to 127.0.0.1:9931",
+      text: "this workspace moved to another daemon at 127.0.0.1:9931",
     },
     {
       arm: "notYetAdopted",
       cause: { case: "notYetAdopted", value: {} },
-      text: "the new daemon has not adopted this workspace yet",
+      text: "the daemon has not finished adopting this workspace yet",
     },
     {
       arm: "noColdGate",
