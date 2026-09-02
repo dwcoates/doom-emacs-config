@@ -470,8 +470,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: build the prompt handler: %w", err)
 	}
 	ingress, err := commandfile.New(commandfile.Deps{
-		Dir:     p.Layout.OutputDir(),
-		Glob:    p.Layout.CommandFileGlob(),
+		Dir: p.Layout.OutputDir(),
+		// The ingress joins the pattern onto its own directory, so it takes
+		// the NAME pattern: the layout's CommandFileGlob is the whole path,
+		// and joining that onto the directory again yields a pattern that
+		// matches nothing at all.
+		Glob:    filepath.Base(p.Layout.CommandFileGlob()),
 		Verbs:   verbs,
 		DB:      p.DB,
 		Merge:   mergeOrchestrator,
