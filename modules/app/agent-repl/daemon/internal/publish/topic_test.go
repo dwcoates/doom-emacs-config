@@ -224,3 +224,42 @@ func TestEachSubscriberSeesEveryValue(t *testing.T) {
 		}
 	}
 }
+
+// TestRepublishDeliversTheLatestValueAgain covers the one caller that MEANS
+// the repetition: an adopted workspace's clients are repainted from what the
+// daemon holds, and Publish deliberately drops an identical re-render.
+func TestRepublishDeliversTheLatestValueAgain(t *testing.T) {
+	// Arrange.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var topic publish.Topic[int]
+	topic.Publish(7)
+	ch := topic.Subscribe(ctx)
+	<-ch
+
+	// Act.
+	republished := topic.Republish()
+
+	// Assert.
+	if !republished {
+		t.Fatal("Republish reported nothing to hand out, want the standing value")
+	}
+	if got := <-ch; got != 7 {
+		t.Fatalf("republished value = %d, want 7", got)
+	}
+}
+
+// TestRepublishReportsAnEmptyTopic covers the topic nothing has published: a
+// repaint with no value to draw is reported rather than sent empty.
+func TestRepublishReportsAnEmptyTopic(t *testing.T) {
+	// Arrange.
+	var topic publish.Topic[int]
+
+	// Act.
+	got := topic.Republish()
+
+	// Assert.
+	if got {
+		t.Fatal("Republish reported a value on a topic that never had one")
+	}
+}
