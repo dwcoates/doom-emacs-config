@@ -599,9 +599,12 @@ stream."
 
 (defun agent-repl-host--redial-successor (ws address)
   "Return the successor connection at ADDRESS for WS, dialing it if needed.
-The refusal's ADDRESS is authoritative: a successor already standing at a
-DIFFERENT address is a stale handover, so the dial is made either way and
-`agent-repl-link-dial-successor' is idempotent for the matching one.
+A successor already standing at ADDRESS is returned as is.  Otherwise the
+dial is made through `agent-repl-link-dial-successor', which is idempotent
+for the matching address; when a successor is standing at a DIFFERENT
+address DAEMON-LINK'S GUARD WINS (audit-3 #30 ruling) — it logs
+`elisp.link.successor-address-changed' at ERROR and dials nothing, so no
+adopt is sent to an address the link never attached.
 Answers nil while the dial has not been ACCEPTED yet — the caller must
 then wait for acceptance rather than adopt onto an unproven daemon."
   (let ((standing (agent-repl-link-successor)))

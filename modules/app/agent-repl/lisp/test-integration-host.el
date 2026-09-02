@@ -2475,12 +2475,9 @@ still pass every existing test."
   "A standing fault's KIND, not only its detail, must reach the health buffer.
 proto `HostFault': \"`detail' SUPPLEMENTS the typed kind, never replaces
 it.\"  `agent-repl-session-health''s own \"standing host faults\" rendering
-prints `detail' alone today.
-
-KNOWN PRODUCTION GAP -- this test currently FAILS BY DESIGN, in the same
-spirit as this file's `agent-repl-itest-host-unfocused-notification-click-selects-the-tab':
-the kind is decoded correctly (see the sibling test above) but nothing
-renders it, so a doctor reading only the health buffer cannot tell a
+prints the kind beside the detail (audit-3 #29 ruling), through the one
+shared `agent-repl-verbs--fault-line' formatter the daemon and session
+verdicts also use, so a doctor reading only the health buffer can tell a
 `shim_died' fault from a `bounce_unknown' one."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
@@ -2617,20 +2614,13 @@ touched."
 ;; audit-3 #30
 (ert-deftest agent-repl-itest-host-redial-to-a-different-address-hits-the-link-guard ()
   "A `transferring_away' naming an address OTHER than the standing successor.
-THIS TEST RECORDS A CONTRADICTION, deliberately.  host.el's
-`agent-repl-host--redial-successor' documents a stale-handover redial
-\(\"the dial is made either way\"), and it does call
-`agent-repl-link-dial-successor' -- but that lands in
-`agent-repl-link--attach-successor', which refuses a CHANGED address with
-`elisp.link.successor-address-changed' and keeps the successor it has.
-Audit-3 #8 pins that refusal as correct for the announced path, so the two
-rules cannot both hold for this one.
-
-Until the conflict is ruled, this pins the OBSERVED behavior: host.el asks
-to redial, the link guard refuses, and NO adopt reaches the third daemon.
-A ruling that host.el's stale-handover redial wins must rewrite this test
-\(and #8's sibling); a ruling the other way makes host.el's docstring the
-thing to fix."
+RULED (audit-3 #30): DAEMON-LINK'S GUARD WINS.  host.el asks
+`agent-repl-link-dial-successor' to redial, that lands in
+`agent-repl-link--attach-successor', and a `transferring_away' naming an
+address OTHER than the standing successor is logged ERROR
+\(`elisp.link.successor-address-changed\') and NOT dialed -- the same rule
+audit-3 #8 pins for the announced path, so one rule covers both.  The
+standing successor is kept and no adopt reaches the third daemon."
   ;; Arrange: successor A is announced and ACCEPTED on the real link.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-host--with-link-and-subscription primary ref
