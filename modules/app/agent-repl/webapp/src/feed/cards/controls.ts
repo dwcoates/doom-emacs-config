@@ -19,7 +19,6 @@
  * outlive the row it described.
  */
 import { log } from "../../log.js";
-import type { AppContext } from "../../rpc/context.js";
 import type { RowContext } from "../renderers.js";
 
 /** The attribute a fold's toggle carries its state on. */

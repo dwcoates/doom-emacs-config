@@ -24,8 +24,6 @@ import { InterruptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endp
 import { CloseWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_workspace_pb";
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
-import { OpenInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
-import { RequestCommandSupportResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_request_command_support_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
 import { startHarness, type Harness } from "./harness";

@@ -29,7 +29,6 @@ import {
   TURN_ERROR_ARMS,
   TURN_ERROR_HEADLINES,
   WORKSPACE_ID,
-  assertCoversOneof,
   clientFailure,
   feedPageError,
   turnEndedErroredRow,
