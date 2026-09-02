@@ -412,6 +412,17 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   (`opus-low`): R-SUITE-3 (elisp-agents/suite3; tests only) and
   R-AUDIT3-PROD (elisp-agents/audit3-prod; #33, #27, #51, verify #43-45).
   After merge: full run → final report → STOP-elisp.md → park.
+- R-AUDIT3-PROD MERGED (a208c6674): `agent-repl-host-rename OLD NEW`
+  (explicit seam, called by roster's rename; target occupied → ERROR, no
+  move); a rename refused by `--ws-rename-state` is refused WHOLE
+  (`elisp.roster.tab-rename-refused`); the input buffer applies host
+  naming at creation (#27); only a composer-sourced send erases the
+  composer (#51; explicit-text sends still push history). #43-45 verified
+  implemented, no change. SURFACED + RULED: panels.el's region-selection
+  send passed the string "PROMPT_ORIGIN_PANEL_SELECTION" (no such origin;
+  would have been fatal) → sends as `:user-sent` (user-composed text;
+  existing UX kept) — same agent, follow-up commit. Running: suite3,
+  audit3-prod (follow-up).
 
 ## 1. Module map (final tree of lisp/)
 
