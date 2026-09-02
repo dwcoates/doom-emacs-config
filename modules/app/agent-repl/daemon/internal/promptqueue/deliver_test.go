@@ -252,3 +252,22 @@ type failingPutTurn struct{ *fakeDB }
 func (f *failingPutTurn) PutTurn(context.Context, wsm.Turn) error {
 	return errors.New("the database is read-only")
 }
+
+// TestDeliveringAPromptStampsTheSessionsEngagement pins the engagement stamp:
+// the idle sweep measures hibernation eligibility from it, so a session nothing
+// stamps is hibernated out from under an active user — and a session revived by
+// a prompt is hibernated again before that prompt's turn has run.
+func TestDeliveringAPromptStampsTheSessionsEngagement(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	// Assert
+	if h.db.engagements != 1 {
+		t.Fatalf("engagement stamps = %d, want exactly one for the delivered prompt", h.db.engagements)
+	}
+}
