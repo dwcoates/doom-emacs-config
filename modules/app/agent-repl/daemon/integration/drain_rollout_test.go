@@ -730,8 +730,11 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 		t.Fatalf("AdoptWebWorkspace on a plain boot = %v, want error.no_transfer_announced", resp.Msg)
 	}
 
-	// Assert: logged at INFO, naming the arm, never WARN.
-	rec := f.d.AwaitRunLogOperation("AdoptWebWorkspace")
+	// Assert: logged at INFO, naming the arm, never WARN. AdoptWebWorkspace is
+	// a PER-WORKSPACE rpc, so its refusal record goes to that workspace's own
+	// sink — a record about one workspace in the global run log is the
+	// invariant violation the logging contract names.
+	rec := f.d.AwaitWorkspaceLogOperation(f.ws.GetDir(), "AdoptWebWorkspace")
 	if strings.ToLower(rec.Level) != "info" {
 		t.Fatalf("AdoptWebWorkspace's no_transfer_announced refusal logged at %q, want info", rec.Level)
 	}
