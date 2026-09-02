@@ -175,6 +175,13 @@ type Deps struct {
 	// admission, so it is resubmitted EXACTLY ONCE at lease release even across
 	// a daemon bounce. It reports false when nothing was in flight.
 	CaptureDisplaced DisplacedCapture
+	// PauseAfterCapture is a TEST-ONLY seam: when set, a run blocks in it
+	// immediately after the displaced turn was captured, which is the one
+	// window a test cannot otherwise reach (the merge's own next submission,
+	// or a clean run's finish, closes it instantly). PRODUCTION LEAVES IT NIL
+	// — nothing in the daemon's own graph builds one unless the test-only
+	// knob names a rendezvous file.
+	PauseAfterCapture AdmissionPause
 	// ParkedRoute delivers a parked submission to the resolution agent as
 	// guidance, landing it in the parked tab.
 	ParkedRoute ParkedRouter
@@ -235,6 +242,11 @@ type Displaced struct {
 	Turn ids.TurnID
 	Text string
 }
+
+// AdmissionPause blocks a merge run at admission. It exists for the test seam
+// PauseAfterCapture and has no production implementation; a nil pause is the
+// production value and is never called.
+type AdmissionPause func(ctx context.Context, ws ids.WorkspaceID)
 
 // DisplacedCapture durably records the turn a merge displaced. The bool is
 // false when no turn was in flight, which is not a failure.

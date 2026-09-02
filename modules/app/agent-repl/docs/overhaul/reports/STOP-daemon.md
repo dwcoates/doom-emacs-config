@@ -277,6 +277,18 @@ The dead-code pass's live-code/dead-code pairs, resolved:
   queue under the daemon-shutdown cause. `AbandonCause` declares all four
   causes beside the one sentence each draws, and `publishAbandoned` records
   the abandonment at INFO keyed by the cause. No proto changed.
+- RESOLVED (project lead's ruling, 2026-09-02).
+  `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` is
+  un-skipped, and a second test covers the double-boot edge. Both blockers were
+  built: `merge.recoverDisplaced`, a boot sweep that resubmits every turn still
+  marked displaced under `PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME`, and
+  `merge.Deps.PauseAfterCapture`, a test-only pause (nil in production, wired
+  only from `AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE`) that holds a run in the
+  window between the capture and everything that would close it. Exactly-once
+  is arbitrated by the database: `wsm.ClaimDisplacedTurn` clears the mark under
+  `WHERE displaced = 1` and reports whether THIS caller took the record, so the
+  merge's own release and the sweep can never both put one turn back. No proto
+  changed. The original reading, kept for the trace:
 - `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` stays
   skipped, and the earlier reading of WHY was wrong. The blocker is not the
   missing crash-window hook: THE BOUNCE-CROSSING RESUBMISSION HAS NO PRODUCER.

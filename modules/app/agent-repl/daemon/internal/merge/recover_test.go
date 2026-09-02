@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
+
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -374,5 +376,113 @@ func TestRecoverRefusesTheBootWhenAWaitingMergesJobRowWillNotDecode(t *testing.T
 	}
 	if got := h.feed.lastMergeErrorArm(); got != "" {
 		t.Fatalf("the corrupt row drew the %q terminal, want the boot refused instead", got)
+	}
+}
+
+// TestRecoverResubmitsATurnAMergeDisplacedAndNeverPutBack covers the boot
+// recovery's whole purpose: a merge that died holding the user's turn does not
+// keep it.
+func TestRecoverResubmitsATurnAMergeDisplacedAndNeverPutBack(t *testing.T) {
+	// Arrange: a turn left marked displaced by a merge that never released.
+	h := newHarness(t)
+	h.displaceTurn("carry on with the refactor")
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 1 {
+		t.Fatalf("the boot resubmitted the displaced turn %d times, want exactly once", n)
+	}
+}
+
+// TestRecoverResubmitsTheDisplacedTurnsOwnText covers what comes back: the
+// words the user typed, not an empty prompt.
+func TestRecoverResubmitsTheDisplacedTurnsOwnText(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	const text = "carry on with the refactor"
+	h.displaceTurn(text)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	h.queue.mu.Lock()
+	defer h.queue.mu.Unlock()
+	if len(h.queue.submissions) != 1 {
+		t.Fatalf("the boot made %d submissions, want exactly the one resubmission", len(h.queue.submissions))
+	}
+	got := h.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+	if got != text {
+		t.Fatalf("the resubmitted text = %q, want %q", got, text)
+	}
+}
+
+// TestASecondBootDoesNotResubmitADisplacedTurnAgain covers the exactly-once
+// edge the durable claim exists for: two boots, one resubmission.
+func TestASecondBootDoesNotResubmitADisplacedTurnAgain(t *testing.T) {
+	// Arrange: one displaced turn, already recovered by a first boot.
+	h := newHarness(t)
+	h.displaceTurn("carry on with the refactor")
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("the first Recover failed: %v", err)
+	}
+
+	// Act: a second boot over the same store.
+	second, err := newOrchestrator(h.deps())
+	if err != nil {
+		t.Fatalf("building the successor: %v", err)
+	}
+	if err := second.Recover(context.Background()); err != nil {
+		t.Fatalf("the second Recover failed: %v", err)
+	}
+
+	// Assert.
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 1 {
+		t.Fatalf("two boots resubmitted the displaced turn %d times, want exactly once", n)
+	}
+}
+
+// TestRecoverClaimsADisplacedTurnEvenWhenTheResubmissionFails covers the claim
+// ordering: a submission that fails must not leave the mark standing for the
+// next boot to fire again.
+func TestRecoverClaimsADisplacedTurnEvenWhenTheResubmissionFails(t *testing.T) {
+	// Arrange: a displaced turn and a queue that refuses.
+	h := newHarness(t)
+	h.displaceTurn("carry on with the refactor")
+	h.queue.err = errors.New("the session is gone")
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	if len(h.db.retired) != 1 {
+		t.Fatalf("the displaced turns claimed = %v, want the one record claimed", h.db.retired)
+	}
+}
+
+// TestRecoverWithNoDisplacedTurnsResubmitsNothing covers the ordinary boot,
+// where no merge ever took a turn.
+func TestRecoverWithNoDisplacedTurnsResubmitsNothing(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	if err := h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover failed: %v", err)
+	}
+
+	// Assert.
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 0 {
+		t.Fatalf("a boot with nothing displaced resubmitted %d turns, want none", n)
 	}
 }

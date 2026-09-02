@@ -270,3 +270,17 @@ func (r *Repo) SetPaths(sha string, paths ...string) {
 		c.Paths = paths
 	})
 }
+
+// SetDirty scripts a worktree's cleanliness, which is what `status --porcelain`
+// answers from. An unclean merge target is the state a restart refuses to
+// resume a merge into.
+func (r *Repo) SetDirty(worktreeDir string, dirty bool) {
+	r.t.Helper()
+	r.edit(func(s *fakegit.State) {
+		wt := r.state(s).Worktree(worktreeDir)
+		if wt == nil {
+			r.t.Fatalf("harness: %s is not a worktree of %s", worktreeDir, r.Dir)
+		}
+		wt.Dirty = dirty
+	})
+}
