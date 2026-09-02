@@ -247,6 +247,8 @@ type fakeGit struct {
 	defaultBranch string
 	defaultErr    error
 
+	resolveErr error
+
 	created   []createdWorktree
 	createErr error
 	nuked     []nukedWorktree
@@ -255,6 +257,13 @@ type fakeGit struct {
 
 type createdWorktree struct{ RepoDir, Branch, BaseRef, WorktreeDir string }
 type nukedWorktree struct{ RepoDir, WorktreeDir, Branch string }
+
+func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
+	if g.resolveErr != nil {
+		return "", g.resolveErr
+	}
+	return "sha-of-" + ref, nil
+}
 
 func (g *fakeGit) CommonDir(context.Context, string) (string, error) {
 	return g.commonDir, g.commonDirErr

@@ -28,6 +28,9 @@ const (
 	// ArmUngatedWithoutConsent is a model/mode combination that disables the
 	// permission gate with no consent recorded.
 	ArmUngatedWithoutConsent = "ungated_without_consent"
+	// ArmBaseRefUnresolved is a creation whose base ref does not resolve in
+	// the repository it is cut from.
+	ArmBaseRefUnresolved = "base_ref_unresolved"
 	// ArmNoSlug is a creation whose name and initial prompt yield no slug.
 	ArmNoSlug = "no_slug"
 	// ArmFinishRequired is a one-shot creation with no finish action.

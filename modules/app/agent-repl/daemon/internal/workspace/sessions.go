@@ -78,6 +78,9 @@ type FleetDeps struct {
 	NodeBin, MainJS string
 	// ShimBuildSHA is the build every spawn is stamped with.
 	ShimBuildSHA string
+	// DefaultModel is the model a fresh session starts on when the create
+	// asked for none; empty means FallbackModel.
+	DefaultModel string
 	// Fake forces the shim's offline scripted SDK.
 	Fake bool
 	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS on every spawn.
@@ -155,6 +158,9 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	now := deps.Now
 	if now == nil {
 		now = time.Now
+	}
+	if deps.DefaultModel == "" {
+		deps.DefaultModel = FallbackModel
 	}
 	return &Fleet{
 		deps:       deps,
@@ -393,6 +399,25 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 	}
 }
 
+// DefaultModelEnv names the model a session starts on when the create did not
+// ask for one. CreateWorkspace.model is optional and an unset one means "the
+// daemon's default", but StartSessionFresh.model is REQUIRED, so the daemon
+// has to have one to name.
+const DefaultModelEnv = "AGENT_REPL_DEFAULT_MODEL"
+
+// FallbackModel is the built-in default when DefaultModelEnv names none. It is
+// the vendor's own alias for its most capable model, not a minted id.
+const FallbackModel = "opus"
+
+// modelOrDefault answers the model a fresh session starts on: the one recorded
+// at creation, else the daemon's configured default.
+func (f *Fleet) modelOrDefault(recorded string) string {
+	if recorded != "" {
+		return recorded
+	}
+	return f.deps.DefaultModel
+}
+
 // startSession runs StartSession and answers a COLD refusal with the gate. A
 // nil SessionStarted with a nil error means the session is parked behind a
 // standing gate, which is an answer and not a failure.
@@ -400,7 +425,7 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	req := &shimv1.StartSessionRequest{}
 	if src.Fresh {
 		req.Source = &shimv1.StartSessionRequest_Fresh{Fresh: &shimv1.StartSessionFresh{
-			Model:          &conversationv1.AgentModel{Name: session.Model},
+			Model:          &conversationv1.AgentModel{Name: f.modelOrDefault(session.Model)},
 			PermissionMode: permissionMode(session.PermissionMode),
 		}}
 	} else {
