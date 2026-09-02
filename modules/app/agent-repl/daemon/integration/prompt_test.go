@@ -9,6 +9,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/integration/harness"
 
@@ -229,6 +230,138 @@ func TestHeldForTurnEndPromptsDeliverFifoAfterTheTurnEnds(t *testing.T) {
 	st3 := f.shim.ExpectStartTurn()
 	if st3.GetTurn().GetValue() != turn3.GetValue() {
 		t.Fatalf("second delivered turn = %q, want the FIFO tail %q", st3.GetTurn().GetValue(), turn3.GetValue())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A prompt held behind an uninterruptible context cut
+// ---------------------------------------------------------------------------
+
+// TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesRelease
+// covers audit-2 critique 2: a prompt arriving behind a running /clear or
+// /compact is classified before any model round trip
+// (internal/promptqueue/classify.go's judge checks state.uninterruptible
+// FIRST), so the tray's FIRST push for the entry already carries
+// uninterruptible_turn -- there is no transient classifying arm to observe,
+// unlike the ordinary-turn case TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic
+// covers. A force-through is refused (there is no interrupt this entry could
+// ride), and delivery still happens FIFO once the cut's own turn concludes.
+func TestAPromptHeldBehindAnUninterruptibleContextCutSkipsClassifyingAndRefusesRelease(t *testing.T) {
+	// Arrange: /clear runs as the turn in front, marking it uninterruptible
+	// (internal/promptqueue/acts.go's runContextCut).
+	f := newOpened(t, harness.Opts{})
+	cutResp := f.submit("/clear", "k-clear-running", origin)
+	if cutResp.GetError() != nil {
+		t.Fatalf("SubmitPrompt(/clear) = %v, want a success", cutResp)
+	}
+	f.shim.ExpectStartTurn()
+	holds := f.d.WatchHolds(f.ws)
+	awaitView(t, f, holds, "the initial empty tray", func(tray *frontendv1.DaemonHoldTray) bool {
+		return len(tray.GetItems()) == 0
+	})
+	f.d.ExpectWarnings("daemon.promptqueue.release")
+
+	// Act: a follow-up prompt arrives while the cut is running.
+	resp2 := f.submit("a follow-up behind the cut", "k-behind-cut", origin)
+	turn2 := resp2.GetSuccess().GetTurn().GetTurn()
+	if turn2.GetValue() == "" {
+		t.Fatalf("SubmitPrompt behind an uninterruptible turn = %v, want a minted TurnId (it is HELD, not refused)", resp2)
+	}
+
+	// Assert: the FIRST tray push for this entry already carries
+	// uninterruptible_turn -- no classifying arm is ever pushed for it.
+	tray := harness.AwaitNext(t, f.d.Ctx(), holds, "the uninterruptible_turn verdict")
+	p := promptHeldEntry(tray, turn2)
+	if p == nil || p.GetUninterruptibleTurn() == nil {
+		t.Fatalf("the first tray push for the held prompt = %v, want uninterruptible_turn with no classifying push ahead of it", p)
+	}
+	if got := p.GetUninterruptibleTurn().GetCommand(); got != conversationv1.SessionCommand_SESSION_COMMAND_CLEAR {
+		t.Fatalf("uninterruptible_turn.command = %v, want SESSION_COMMAND_CLEAR", got)
+	}
+
+	// Act: a force-through is attempted.
+	relResp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws,
+		Turn:      turn2,
+		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
+	}))
+
+	// Assert: `release_refused` is a LANDED arm, so the refusal is typed, and
+	// no KillTurn is ever sent for this entry (there is nothing to interject).
+	if err != nil {
+		t.Fatalf("UpdateHeldPrompt{release} on an uninterruptible_turn entry = error %v, want the typed release_refused answer", err)
+	}
+	if relResp.Msg.GetError().GetReleaseRefused() == nil {
+		t.Fatalf("UpdateHeldPrompt{release} on an uninterruptible_turn entry = %v, want error.release_refused", relResp.Msg)
+	}
+	expectNoRPC(t, f.shim, harness.RPCKillTurn, harness.ProbeWindow)
+
+	// Act: the cut's own turn ends naturally.
+	f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+
+	// Assert: delivery is FIFO, off the ordinary turn-end drain -- the same
+	// path a hold_for_turn_end verdict takes.
+	st2 := f.shim.ExpectStartTurn()
+	if st2.GetTurn().GetValue() != turn2.GetValue() {
+		t.Fatalf("StartTurn after the cut's turn ended = turn %q, want the entry held behind it %q", st2.GetTurn().GetValue(), turn2.GetValue())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A revival-time held prompt carries hold.session_starting
+// ---------------------------------------------------------------------------
+
+// TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease
+// covers audit-2 critique 3: the same revival state
+// TestCloseWorkspaceWithAHeldPromptRefuses (session_lifecycle_test.go) builds
+// to exercise CloseWorkspace's blocked answer is read here for the tray's own
+// hold arm and UpdateHeldPrompt's release refusal on it
+// (internal/promptqueue/submit.go's holdForLease projects HoldSessionStarting
+// for a hibernate-holder lease; internal/promptqueue/holdactions.go's Release
+// refuses a force-through on it -- there is nothing live to send an interrupt
+// to yet).
+func TestARevivalTimeHeldPromptCarriesTheSessionStartingHoldAndRefusesRelease(t *testing.T) {
+	// Arrange: hibernate an idle session, then submit a revival prompt while
+	// the revival's new shim withholds its diagnostics, so the lease is still
+	// held when the assertions run.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, &shimv1.KillSessionRequest{})
+	f.shim.AwaitGone()
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
+	holds := f.d.WatchHolds(f.ws)
+	f.d.ExpectWarnings("daemon.promptqueue.release")
+
+	held := f.submit("wake up", "k-session-starting-hold", origin)
+	turn := held.GetSuccess().GetTurn().GetTurn()
+	if turn.GetValue() == "" {
+		t.Fatalf("SubmitPrompt during revival = %v, want a minted TurnId even though delivery is held", held)
+	}
+
+	// Assert: the tray carries hold.session_starting, with no classification
+	// verdict at all -- the lease projects the hold before any turn exists.
+	tray := awaitView(t, f, holds, "the session_starting hold", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, turn).GetSessionStarting() != nil
+	})
+	p := promptHeldEntry(tray, turn)
+	if p.GetSessionStarting() == nil {
+		t.Fatalf("held entry during revival = %v, want hold.session_starting", p)
+	}
+
+	// Act: a force-through is attempted.
+	relResp, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws,
+		Turn:      turn,
+		Action:    &agentreplv1.UpdateHeldPromptRequest_Release{Release: &agentreplv1.UpdateHeldPromptRelease{}},
+	}))
+
+	// Assert: `release_refused` is a LANDED arm.
+	if err != nil {
+		t.Fatalf("UpdateHeldPrompt{release} on a session_starting hold = error %v, want the typed release_refused answer", err)
+	}
+	if relResp.Msg.GetError().GetReleaseRefused() == nil {
+		t.Fatalf("UpdateHeldPrompt{release} on a session_starting hold = %v, want error.release_refused", relResp.Msg)
 	}
 }
 
@@ -652,6 +785,77 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// HeldOffer (audit-2 critique 17)
+// ---------------------------------------------------------------------------
+
+func TestAnswerHeldOfferWithNoOfferStandingAnswersNoOfferStanding(t *testing.T) {
+	// Arrange: an ordinary workspace with nothing ever raised in its tray.
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().AnswerHeldOffer(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerHeldOfferRequest{
+		Workspace: f.ws,
+		Answer: &agentreplv1.AnswerHeldOfferRequest_MergeDequeue{MergeDequeue: &agentreplv1.AnswerHeldOfferMergeDequeue{
+			Decision: &agentreplv1.AnswerHeldOfferMergeDequeue_Keep{Keep: &agentreplv1.AnswerHeldOfferKeep{}},
+		}},
+	}))
+
+	// Assert: `no_offer_standing` is a LANDED arm, so the refusal is typed.
+	if err != nil {
+		t.Fatalf("AnswerHeldOffer with no offer standing = error %v, want the typed no_offer_standing answer", err)
+	}
+	if resp.Msg.GetError().GetNoOfferStanding() == nil {
+		t.Fatalf("AnswerHeldOffer with no offer standing = %v, want error.no_offer_standing", resp.Msg)
+	}
+}
+
+// TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCounts
+// covers the rest of audit-2 critique 17: while a merge-dequeue HeldOffer
+// stands (raised by an interrupt on a queued workspace), the OPERATOR path
+// (UpdateMergeQueue{evict}) -- not the offer's own answer -- also clears it,
+// and the tray's composed heading counts the standing offer like any other
+// item.
+func TestUpdateMergeQueueEvictWhileTheDequeueOfferStandsClearsItAndTheHeadingCounts(t *testing.T) {
+	// Arrange: a second workspace queued behind the first's blocked merge,
+	// then an interrupt raises the dequeue offer.
+	_, behind, _, d := mergeBlockedQueueFixture(t)
+	holds := behind.d.WatchHolds(behind.ws)
+	if _, err := behind.d.Client().Interrupt(behind.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: behind.ws, Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	})); err != nil {
+		t.Fatalf("Interrupt(turn) = error %v, want a success", err)
+	}
+	tray := awaitView(t, behind, holds, "the merge-dequeue held offer", func(tray *frontendv1.DaemonHoldTray) bool {
+		return mergeDequeueOffer(tray) != nil
+	})
+
+	// Assert: the heading reads the composed count for the one standing item.
+	if got := tray.GetHeading().GetText(); got != "held (1)" {
+		t.Fatalf("tray heading with one standing offer = %q, want %q", got, "held (1)")
+	}
+
+	// Act: the OPERATOR path evicts the queued merge directly, never through
+	// AnswerHeldOffer.
+	resp, err := d.Client().UpdateMergeQueue(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Action: &agentreplv1.UpdateMergeQueueRequest_Evict{Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: behind.ws}},
+	}))
+	if err != nil || resp.Msg.GetError() != nil {
+		t.Fatalf("UpdateMergeQueue{evict} while the offer stands = %v, %v, want a success", resp.Msg, err)
+	}
+
+	// Assert: the offer is cleared and the heading reflects the empty tray.
+	got := awaitView(t, behind, holds, "the offer cleared by the operator evict", func(tray *frontendv1.DaemonHoldTray) bool {
+		return mergeDequeueOffer(tray) == nil
+	})
+	if mergeDequeueOffer(got) != nil {
+		t.Fatalf("held tray after UpdateMergeQueue{evict} = %v, want the dequeue offer gone", got)
+	}
+	if gotText := got.GetHeading().GetText(); gotText != "held (0)" {
+		t.Fatalf("tray heading after the evict = %q, want %q", gotText, "held (0)")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // SubmitPrompt addressed to a subagent bubble
 // ---------------------------------------------------------------------------
 
@@ -897,20 +1101,32 @@ func TestModelWithAnArgumentSubmitsTheModelChange(t *testing.T) {
 }
 
 func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
-	// Arrange
+	// Arrange: audit-2 critique 22 -- internal/prompthandler/recognition.go's
+	// recognize takes the SAME RecognizedRefused path for a bare /model as it
+	// does for /agents and /help (the `matched.command ==
+	// SESSION_COMMAND_MODEL && rest == ""` branch), so the answer is EXACTLY
+	// success.command_refused{command:"/model"}, mirrored like any other
+	// recognized-but-unsupported command -- never command_acted, and there is
+	// no second, "absorbed" outcome this daemon actually produces.
 	f := newOpened(t, harness.Opts{})
+	feed := f.watchRootFeed()
 
 	// Act
 	resp := f.submit("/model", "k-bare-model", origin)
 
-	// Assert: whichever of refused/absorbed the daemon picks, the model never
-	// reaches the shim.
+	// Assert
 	if resp.GetError() != nil {
-		t.Fatalf("SubmitPrompt(/model) = %v, want a success (refused or absorbed, never a transport error)", resp)
+		t.Fatalf("SubmitPrompt(/model) = %v, want a success", resp)
+	}
+	if got := resp.GetSuccess().GetCommandRefused().GetCommand(); got != "/model" {
+		t.Fatalf("SubmitPrompt(/model) = %v, want EXACTLY success.command_refused{command: %q}", resp, "/model")
 	}
 	if got := f.shim.Count(harness.RPCSetSessionModel); got != 0 {
 		t.Fatalf("SetSessionModel count after bare /model = %d, want 0", got)
 	}
+	awaitRow(t, f, feed, "the mirrored command_refused row", func(r *frontendv1.FeedRow) bool {
+		return r.GetCommandRefused().GetCommand().GetText() == "/model"
+	})
 }
 
 func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing.T) {
@@ -1207,7 +1423,19 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 		t.Fatalf("Interrupt{turn} with only a detached shell = confirm_required(%d), want no challenge", challenge.GetLiveAgentCount())
 	}
 	f.shim.ExpectKillTurn()
-	f.d.ExpectWarnings(harness.AllowAllWarnings)
+	// Audit-2 critique 25: the exact operation set, not the AllowAllWarnings
+	// wildcard. A detached SHELL needs no confirmation (live_agent_count
+	// counts agents only), so interruptTurn takes its plain success path
+	// (internal/workspace/interrupt.go): the confirm-challenge Warn at line
+	// ~105 never fires because liveAgents is 0, stopDetachedForConfirm logs
+	// only at Debug, and the eventual "interrupted the running turn" record is
+	// Info. Merge.OnInterrupt (internal/merge/terminal.go) also logs nothing
+	// here: queueOf on a workspace with no queued merge returns an error the
+	// caller discards before any log call. The empty set is the exact set:
+	// this scenario produces no WARN or ERROR record at all, matching the
+	// sibling TestInterruptAllAgentsStopsEveryLiveDetachedAgent's own
+	// zero-argument ExpectWarnings for the same detached-stop shape.
+	f.d.ExpectWarnings()
 }
 
 func TestInterruptWithNothingRunningAnswersNothingRunning(t *testing.T) {
