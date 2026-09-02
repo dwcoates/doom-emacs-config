@@ -38,9 +38,6 @@ func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 	return &AgentTranscriptHandler{conv: conv, log: log, obs: obs}
 }
 
-// SetObserver installs the owner-resolution listener on this handler's converter.
-func (h *AgentTranscriptHandler) SetObserver(o convert.Observer) { h.conv.SetObserver(o) }
-
 // Handle implements tail.Handler.
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(handleCtx("agent-handle", ctx)).
