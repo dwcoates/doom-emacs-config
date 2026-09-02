@@ -395,6 +395,9 @@ func TestRosterResolvesEveryMergeArm(t *testing.T) {
 		{name: "queued", state: "queued", want: "merge_queued"},
 		{name: "merging", state: "merging", want: "merging"},
 		{name: "conflict", state: "conflict", want: "merge_conflict"},
+		// A parked merge holds its lease awaiting the user; the roster has no
+		// parked arm and spells it as the conflict awaiting resolution.
+		{name: "parked", state: "parked", want: "merge_conflict"},
 		{name: "failed", state: "failed", want: "merge_failed"},
 		{name: "merged", state: "merged", want: "merged"},
 	}
