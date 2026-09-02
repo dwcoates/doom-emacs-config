@@ -1695,6 +1695,55 @@ could only be invented, and the link already holds the accepted successor."
     ;; Assert
     (should (eq (agent-repl-host-composer-gate "ws-2") :merging))))
 
+(ert-deftest agent-repl-test-host-a-stream-callback-after-a-rename-resolves-the-new-name ()
+  "The STREAM'S OWN push, not a hand-named one, must reach the NEW name's gate.
+The stream outlives the rename, so a callback closed over the
+subscribe-time name would keep updating the old key and the renamed tab's
+gate would never advance again.  The ref id is the tab identity, so the
+name is resolved from it at call time."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-host-rename "ws-1" "ws-2")
+    (let ((agent-repl--workspaces (make-hash-table :test 'equal)))
+      (puthash "ws-2" (list :ref (agent-repl-test-host--ref)) agent-repl--workspaces)
+      ;; Act
+      (agent-repl-test-host--push
+       "ws-2" (list :arm :host :value (agent-repl-test-host--composer :merging)))
+      ;; Assert
+      (should (eq (agent-repl-host-composer-gate "ws-2") :merging)))))
+
+(ert-deftest agent-repl-test-host-a-stream-callback-after-a-rename-leaves-the-old-name ()
+  "The old name is left with nothing: the push landed on ONE gate, not two.
+`:unknown' is the answer for a name that holds no host state at all, so
+this is the assertion that the push did not resurrect the dead key."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-host-rename "ws-1" "ws-2")
+    (let ((agent-repl--workspaces (make-hash-table :test 'equal)))
+      (puthash "ws-2" (list :ref (agent-repl-test-host--ref)) agent-repl--workspaces)
+      ;; Act
+      (agent-repl-test-host--push
+       "ws-2" (list :arm :host :value (agent-repl-test-host--composer :merging)))
+      ;; Assert
+      (should (eq (agent-repl-host-composer-gate "ws-1") :unknown)))))
+
+(ert-deftest agent-repl-test-host-a-stream-callback-falls-back-when-the-id-is-gone ()
+  "A ref id that no longer resolves falls back to the subscribe-time name.
+A closed or tombstoned workspace has no live entry to find, and the name
+the subscription was opened under is then the best the record has -- the
+callback must still run rather than resolve to nil."
+  (agent-repl-test-host--with-harness
+    ;; Arrange: no live workspace carries this ref id.
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((agent-repl--workspaces (make-hash-table :test 'equal)))
+      ;; Act
+      (agent-repl-test-host--push
+       "ws-1" (list :arm :host :value (agent-repl-test-host--composer :merging)))
+      ;; Assert
+      (should (eq (agent-repl-host-composer-gate "ws-1") :merging)))))
+
 (ert-deftest agent-repl-test-host-rename-logs-the-move ()
   "Every branch records; the move is INFO with both names."
   (agent-repl-test-host--with-harness
