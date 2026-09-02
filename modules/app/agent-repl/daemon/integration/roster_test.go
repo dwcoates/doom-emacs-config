@@ -232,13 +232,21 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 // TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant covers the
 // roster's durable half moving on a LANDED merge.
 //
-// It is built on the merge tests' own fixture, and deliberately so: a merge
-// only lands for a workspace the daemon CREATED (its layout facts are what the
-// merge reads its target and brief from), and a bare `RegisterWorkspace` on a
-// hand-made worktree is refused for exactly that reason — which is what
-// TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused asserts. This test
-// previously registered such a worktree and then waited for a merge that could
-// never be enqueued.
+// It is built on the merge tests' own fixture (mergeCleanRepo), and
+// deliberately so: a merge only lands for a workspace the daemon CREATED
+// (its layout facts are what the merge reads its target and brief from), and
+// a bare `RegisterWorkspace` on a hand-made worktree is refused for exactly
+// that reason — which is what
+// TestMergeWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused asserts.
+//
+// mergeCleanRepo's workspace is NOT such a bare registration: mergeCreateChild
+// mints it through the real CreateWorkspace rpc, which writes the
+// wsm.CreationJob carrying Layout.SourceBranch / SourceDir / TargetDir —
+// internal/merge/orchestrator.go's layoutFor (queue.go's Enqueue calls it
+// first) reads exactly that job, finds it, and returns it with no refusal.
+// TestTheTestGatePassingSettlesTheTestsTab proves the same fixture's merge
+// lands cleanly end to end, so no daemon.merge.enqueue WARN is ever produced
+// on this path — that expectation was phantom and is dropped.
 func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	// Arrange
 	f, d, _, script := mergeCleanRepo(t)
@@ -269,19 +277,12 @@ func TestRecentlyMergedListsAMergedWorkspaceWithItsMergeInstant(t *testing.T) {
 	if row.GetWhen().GetMerged().GetAtMs() == 0 {
 		t.Fatalf("the recently merged row's when = %v, want when.merged stamped", row.GetWhen())
 	}
-	// UNCERTAIN — needs a suite run to confirm. `source` here is only
-	// harness.Register-ed, never materialized through CreateWorkspace, so it
-	// carries no wsm.CreationJob; internal/merge/orchestrator.go's layoutFor
-	// says geometry is "NEVER inferred later: a workspace materialized
-	// without it can never be merged", and Enqueue
-	// (internal/merge/queue.go:32-35) refuses immediately with WARN
-	// daemon.merge.enqueue when layoutFor finds none. If that reading is
-	// right this MergeWorkspace call is refused rather than landed, which
-	// would also mean the roster never reaches recently_merged and the test
-	// hangs on its own awaitRoster — a likely pre-existing defect in this
-	// test unrelated to critique 20, flagged to the teamlead. Naming the one
-	// operation the refusal path reaches as the best guess:
-	d.ExpectWarnings("daemon.merge.enqueue")
+	// internal/resolve/sidebar/rows.go's recedes() greys a row on ANY of three
+	// settled ends, one being rec.MergedAt != nil — a merged row's closed.closed
+	// is true for that reason, not because the workspace's editor was closed.
+	if !row.GetClosed().GetClosed() {
+		t.Fatalf("the recently merged row's closed.closed = false, want true (recedes() on rec.MergedAt != nil)")
+	}
 }
 
 func TestTaskViewGroupsAssignedWorkspaces(t *testing.T) {
@@ -388,5 +389,266 @@ func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 	}
 	if resp.Msg.GetError().GetBlankTitle() == nil {
 		t.Fatalf("CreateTask with a blank title = %v, want CreateTaskError.blank_title", resp.Msg)
+	}
+}
+
+// TestKilledWorkspaceRowCarriesClosedTrue covers the OTHER of the three
+// settled ends internal/resolve/sidebar/rows.go's recedes() greys a row for: a
+// KillWorkspace-terminated session (session.Terminal.Kind == "killed"), not an
+// editor-closed or merged workspace. TestKillWorkspaceForceKillsTheSessionAndReapsTheShim
+// (session_lifecycle_test.go) already asserts the row's status arm is `dead`;
+// this test is the roster suite's own coverage of the ORTHOGONAL closed.closed
+// receding flag on that same row.
+func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	roster := f.d.WatchRoster()
+
+	// Act
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "the killed workspace's row receded", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetClosed().GetClosed()
+	})
+	if row := rosterRow(got, f.ws.GetId()); !row.GetClosed().GetClosed() {
+		t.Fatalf("a killed workspace's row.closed.closed = false, want true")
+	}
+}
+
+// TestBringUpDeathLeavesTheRosterRowStartFailed is the roster suite's own
+// coverage of session_lifecycle_test.go's
+// TestFakeShimExitingDuringBringUpEndsBringUpImmediately fixture: that test
+// asserts the footer and SessionHealth arms; this one asserts the roster
+// row's own status arm, RosterRowStatus.start_failed
+// (frontend/v1/sidebar.proto's RosterRowStatusStartFailed), landed as arm 16.
+func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death"})
+	roster := f.d.WatchRoster()
+
+	// Act
+	resp, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+	if err != nil {
+		t.Fatalf("OpenWorkspace onto a dying shim = transport error %v, want the spawn_failed arm", err)
+	}
+	if resp.Msg.GetError().GetSpawnFailed() == nil {
+		t.Fatalf("OpenWorkspace onto a dying shim = %v, want OpenWorkspaceError.spawn_failed", resp.Msg)
+	}
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "the roster row start_failed after a bring-up death", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, f.ws.GetId())
+		return row != nil && row.GetStartFailed() != nil
+	})
+	if row := rosterRow(got, f.ws.GetId()); row.GetStartFailed() == nil {
+		t.Fatalf("the roster row's status = %T after a bring-up death, want start_failed", row.GetStatus())
+	}
+}
+
+// TestUpdateTaskSetTitleRelabelsTheTaskSectionHeader covers UpdateTaskSetTitle
+// against RosterTaskSectionHeader.label (frontend/v1/sidebar.proto), the
+// section header field the header's title text is drawn from.
+func TestUpdateTaskSetTitleRelabelsTheTaskSectionHeader(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "old title")
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the task section under its old title", func(r *frontendv1.WorkspaceRoster) bool {
+		return taskSection(r, task.GetId()).GetHeader().GetLabel().GetText() == "old title"
+	})
+
+	// Act
+	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetTitle{SetTitle: &agentreplv1.UpdateTaskSetTitle{Title: "new title"}},
+	})); err != nil {
+		t.Fatalf("UpdateTask{set_title} = error %v, want a success", err)
+	}
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "the task section relabeled", func(r *frontendv1.WorkspaceRoster) bool {
+		return taskSection(r, task.GetId()).GetHeader().GetLabel().GetText() == "new title"
+	})
+	if label := taskSection(got, task.GetId()).GetHeader().GetLabel().GetText(); label != "new title" {
+		t.Fatalf("task section label after set_title = %q, want %q", label, "new title")
+	}
+}
+
+// TestUpdateTaskSetOpenUnchecksADoneTask covers UpdateTaskSetOpen reversing a
+// prior UpdateTaskSetDone.
+func TestUpdateTaskSetOpenUnchecksADoneTask(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "flip me")
+	roster := f.d.WatchRoster()
+	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
+	})); err != nil {
+		t.Fatalf("UpdateTask{set_done} = error %v, want a success", err)
+	}
+	awaitRoster(t, f.d, roster, "the task section done", func(r *frontendv1.WorkspaceRoster) bool {
+		return taskSection(r, task.GetId()).GetHeader().GetDone().GetDone()
+	})
+
+	// Act
+	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetOpen{SetOpen: &agentreplv1.UpdateTaskSetOpen{}},
+	})); err != nil {
+		t.Fatalf("UpdateTask{set_open} = error %v, want a success", err)
+	}
+
+	// Assert
+	got := awaitRoster(t, f.d, roster, "the task section reopened", func(r *frontendv1.WorkspaceRoster) bool {
+		return !taskSection(r, task.GetId()).GetHeader().GetDone().GetDone()
+	})
+	if done := taskSection(got, task.GetId()).GetHeader().GetDone().GetDone(); done {
+		t.Fatalf("task section done after set_open = %v, want false", done)
+	}
+}
+
+// TestUpdateTaskSetDoneTwiceAnswersNoChange covers UpdateTaskError.no_change:
+// "the change asked for is what the task already holds".
+func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "done twice")
+	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
+	})); err != nil {
+		t.Fatalf("UpdateTask{set_done} (first) = error %v, want a success", err)
+	}
+
+	// Act
+	resp, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("UpdateTask{set_done} (second) = transport error %v, want the in-band no_change arm", err)
+	}
+	if resp.Msg.GetError().GetNoChange() == nil {
+		t.Fatalf("UpdateTask{set_done} on an already-done task = %v, want UpdateTaskError.no_change", resp.Msg)
+	}
+}
+
+// bogusTask is a TaskRef naming no task the daemon ever minted.
+func bogusTask() *agentreplv1.TaskRef { return &agentreplv1.TaskRef{Id: "no-such-task"} }
+
+// TestUpdateTaskWithABogusTaskRefAnswersUnknownTask covers
+// UpdateTaskError.unknown_task: "no task by that id".
+func TestUpdateTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+
+	// Act
+	resp, err := d.Client().UpdateTask(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   bogusTask(),
+		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("UpdateTask on a bogus TaskRef = transport error %v, want the in-band unknown_task arm", err)
+	}
+	if resp.Msg.GetError().GetUnknownTask() == nil {
+		t.Fatalf("UpdateTask on a bogus TaskRef = %v, want UpdateTaskError.unknown_task", resp.Msg)
+	}
+}
+
+// TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask covers
+// AssignWorkspaceTaskError.unknown_task: "no task by that id".
+func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().AssignWorkspaceTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.AssignWorkspaceTaskRequest{
+		Workspace: f.ws,
+		Task:      bogusTask(),
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AssignWorkspaceTask on a bogus TaskRef = transport error %v, want the in-band unknown_task arm", err)
+	}
+	if resp.Msg.GetError().GetUnknownTask() == nil {
+		t.Fatalf("AssignWorkspaceTask on a bogus TaskRef = %v, want AssignWorkspaceTaskError.unknown_task", resp.Msg)
+	}
+}
+
+// TestUpdateTaskWithABlankTitleAnswersBlankTitle covers UpdateTaskError.blank_title,
+// UpdateTask's own landed arm for "the new title is blank once trimmed" — the
+// same arm CreateTask carries, minted separately for UpdateTaskSetTitle.
+func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "has a title")
+
+	// Act
+	resp, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetTitle{SetTitle: &agentreplv1.UpdateTaskSetTitle{Title: "   "}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("UpdateTask{set_title} with a blank title = transport error %v, want the in-band blank_title arm", err)
+	}
+	if resp.Msg.GetError().GetBlankTitle() == nil {
+		t.Fatalf("UpdateTask{set_title} with a blank title = %v, want UpdateTaskError.blank_title", resp.Msg)
+	}
+}
+
+// TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart is the durability half
+// of the task view: tasks and AssignWorkspaceTask rows are WSM-owned per
+// SPEC.md's "Tasks are daemon-owned rows in WSM", so a restart on the same
+// state root must reload them rather than starting the task view over empty.
+func TestTasksAndWorkspaceAssignmentsSurviveADaemonRestart(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	task := createTask(t, f, "outlives the daemon")
+	assignTask(t, f, task)
+	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
+		Task:   task,
+		Change: &agentreplv1.UpdateTaskRequest_SetDone{SetDone: &agentreplv1.UpdateTaskSetDone{}},
+	})); err != nil {
+		t.Fatalf("UpdateTask{set_done} = error %v, want a success", err)
+	}
+	roster := f.d.WatchRoster()
+	awaitRoster(t, f.d, roster, "the workspace grouped under its done task, before the restart", func(r *frontendv1.WorkspaceRoster) bool {
+		s := taskSection(r, task.GetId())
+		return s != nil && s.GetHeader().GetDone().GetDone() && rosterTaskRow(r, task.GetId(), f.ws.GetId()) != nil
+	})
+
+	// Act: restart the daemon on the same state root, per prompt_test.go's
+	// promptRestartDaemon idiom — it updates f.d in place.
+	nd := promptRestartDaemon(t, f)
+
+	// Assert
+	after := nd.WatchRoster()
+	got := harness.AwaitNext(t, nd.Ctx(), after, "the roster after the restart")
+	section := taskSection(got, task.GetId())
+	if section == nil {
+		t.Fatalf("no task section for %s survived the restart", task.GetId())
+	}
+	if section.GetHeader().GetLabel().GetText() != "outlives the daemon" {
+		t.Fatalf("task section label after restart = %q, want %q", section.GetHeader().GetLabel().GetText(), "outlives the daemon")
+	}
+	if !section.GetHeader().GetDone().GetDone() {
+		t.Fatalf("task section done after restart = false, want true (the done mark must survive too)")
+	}
+	if rosterTaskRow(got, task.GetId(), f.ws.GetId()) == nil {
+		t.Fatalf("the workspace's assignment to %s did not survive the restart", task.GetId())
 	}
 }

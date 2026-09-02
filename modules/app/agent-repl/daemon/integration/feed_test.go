@@ -119,10 +119,12 @@ func TestGetFeedPageNextWithNoWalkStandingIsRefused(t *testing.T) {
 }
 
 func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
-	// Arrange: push enough rows that the newest page cannot hold them all.
+	// Arrange: push MORE than one page's worth of rows off harness.FeedPageSize
+	// — the daemon's own feed.DefaultPageSize, not a guessed number — so a
+	// second page provably exists regardless of what the page size is.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-walk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	const n = 150
+	const n = harness.FeedPageSize + walkPageMargin
 	for i := 0; i < n; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
@@ -139,7 +141,7 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 		t.Fatalf("GetFeedPage{first} = %v, want a clean page over %d rows", first.Msg, n)
 	}
 	if first.Msg.GetSuccess().GetSuccess().GetHasMore() == nil {
-		t.Skip("feedWalk: the fake session's history did not exceed one page at " + FeedPageSizeNote)
+		t.Fatalf("GetFeedPage{first} over %d rows (page size %d) = %v, want has_more set: a second page must exist", n, harness.FeedPageSize, first.Msg)
 	}
 	next, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
 		Workspace: f.ws,
@@ -164,12 +166,258 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 	}
 }
 
+func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *testing.T) {
+	// Arrange: spawn a subagent and push MORE than one page of its own work,
+	// plus a distinguishable row that lands only on the ROOT feed.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-subwalk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("spawn-walk"),
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Start{
+			Start: &conversationv1.AgentSubagentStart{CreatedAgentId: &conversationv1.AgentId{Value: "sub-walk"}, Prompt: &conversationv1.AgentSubagentPrompt{Text: "explore"}, StartedAt: startedAt(1)},
+		}}},
+	}))
+	bubble := awaitRow(t, f, tail, "the spawn's bubble head", func(r *frontendv1.FeedRow) bool { return r.GetActivity().GetSubagent() != nil })
+
+	const n = harness.FeedPageSize + walkPageMargin
+	for i := 0; i < n; i++ {
+		f.shim.PushAgentFrame("sub-walk", feedRowLabeledResponseFor("sub-walk", i))
+	}
+	// Sync: wait for the LAST sub-feed row to land before walking it, proving
+	// every row pushed to "sub-walk" is durable by the time the walk begins.
+	lastSubMd := "sub-walk row " + itoa(n-1)
+	f.awaitRowInFeed(bubble.GetId(), "the subagent's last pushed row", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == lastSubMd
+	})
+	// A row that must NEVER appear on the sub-feed's walk.
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("root-only", "root row")[0])
+	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("root-only", "root row")[1])
+	awaitRow(t, f, tail, "the root-only row landing on the root feed", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "root row"
+	})
+
+	// Act: walk the SUBAGENT BUBBLE's own FeedId, never the root.
+	isRootLeak := func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "root row"
+	}
+	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Feed: bubble.GetId(),
+		Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+	}))
+	if err != nil || first.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{first} on the subagent's FeedId = %v, %v, want the sub-feed's newest page", first.Msg, err)
+	}
+	if findRow(first.Msg.GetSuccess(), isRootLeak) != nil {
+		t.Fatalf("a walk on the subagent's FeedId served the ROOT feed's row: %v", first.Msg)
+	}
+	if first.Msg.GetSuccess().GetSuccess().GetHasMore() == nil {
+		t.Fatalf("GetFeedPage{first} on the subagent's FeedId over %d rows = %v, want has_more set", n, first.Msg)
+	}
+
+	// Assert: {next} on the SAME (sub-feed) walk, still never the root's row.
+	next, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Feed: bubble.GetId(),
+		Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+	}))
+	if err != nil || next.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{next} on the subagent's FeedId = %v, %v, want the sub-feed's older page", next.Msg, err)
+	}
+	if findRow(next.Msg.GetSuccess(), isRootLeak) != nil {
+		t.Fatalf("GetFeedPage{next} on the subagent's FeedId served the ROOT feed's row: %v", next.Msg)
+	}
+	for _, r := range next.Msg.GetSuccess().GetSuccess().GetRows() {
+		md := r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown()
+		if md == "" {
+			continue
+		}
+		if !strings.HasPrefix(md, "sub-walk row ") {
+			t.Fatalf("the sub-feed's older page carried a foreign row %v, want only sub-walk's own rows", r)
+		}
+	}
+}
+
+func TestGetFeedPageWithAnUndecodableFeedIdAnswersFeedUndecodable(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws,
+		Feed:      &frontendv1.FeedId{Value: "not-a-real-feed-id"},
+		Page:      &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GetFeedPage with a garbage feed id = error %v, want a typed feed_undecodable refusal", err)
+	}
+	if resp.Msg.GetError().GetFeedUndecodable() == nil {
+		t.Fatalf("GetFeedPage with a garbage feed id = %v, want error.feed_undecodable", resp.Msg)
+	}
+}
+
+func TestGetFeedPageWithAnotherWorkspacesBubbleFeedIdAnswersFeedNotInWorkspace(t *testing.T) {
+	// Arrange: a second, independent workspace on the same daemon, with its
+	// own subagent bubble.
+	f := newOpened(t, harness.Opts{})
+	other := secondWorkspaceOn(t, f.d)
+	other.submit("go", "k-otherwalk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	otherTail := other.watchRootFeed()
+	other.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID("other-spawn"),
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{Result: &conversationv1.AgentSubagent_Start{
+			Start: &conversationv1.AgentSubagentStart{CreatedAgentId: &conversationv1.AgentId{Value: "other-sub"}, Prompt: &conversationv1.AgentSubagentPrompt{Text: "x"}, StartedAt: startedAt(1)},
+		}}},
+	}))
+	otherBubble := awaitRow(t, other, otherTail, "the other workspace's bubble", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSubagent() != nil
+	})
+
+	// Act: address the FIRST workspace with the SECOND workspace's FeedId.
+	resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Feed: otherBubble.GetId(),
+		Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GetFeedPage across workspaces = error %v, want a typed feed_not_in_workspace refusal", err)
+	}
+	if resp.Msg.GetError().GetFeedNotInWorkspace() == nil {
+		t.Fatalf("GetFeedPage with another workspace's bubble FeedId = %v, want error.feed_not_in_workspace", resp.Msg)
+	}
+}
+
+func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
+	// Arrange: walk all the way to the feed's start.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-atstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	const n = harness.FeedPageSize + walkPageMargin
+	for i := 0; i < n; i++ {
+		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
+	}
+	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+	})
+
+	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+	}))
+	if err != nil || first.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{first} = %v, %v, want the newest page", first.Msg, err)
+	}
+	current := first.Msg
+	var oldest *agentreplv1.GetFeedPageResponse
+	for current.GetSuccess().GetSuccess().GetAtStart() == nil {
+		resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+			Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+		}))
+		if err != nil {
+			t.Fatalf("GetFeedPage{next} while walking to the start = error %v", err)
+		}
+		if resp.Msg.GetSuccess().GetError() != nil {
+			t.Fatalf("GetFeedPage{next} while walking to the start = %v, want a clean page", resp.Msg)
+		}
+		current = resp.Msg
+	}
+	oldest = current
+
+	// Act: a FURTHER {next} past the page that already set at_start.
+	further, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+	}))
+
+	// Assert: per pages.go's NextPage, a walk already at the start (with no
+	// history_replay_truncated record) is answered with success and
+	// composePage(durable, 0) — the WHOLE feed in one page, still at_start —
+	// never a refusal and never an empty page.
+	if err != nil {
+		t.Fatalf("GetFeedPage{next} past at_start = error %v, want the daemon's composePage(durable, 0) answer", err)
+	}
+	if further.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{next} past at_start = %v, want a success page", further.Msg)
+	}
+	if further.Msg.GetSuccess().GetSuccess().GetAtStart() == nil {
+		t.Fatalf("GetFeedPage{next} past at_start = %v, want at_start still set", further.Msg)
+	}
+	firstIDs := map[string]bool{}
+	for _, r := range first.Msg.GetSuccess().GetSuccess().GetRows() {
+		firstIDs[r.GetId().GetValue()] = true
+	}
+	oldestIDs := map[string]bool{}
+	for _, r := range oldest.GetSuccess().GetSuccess().GetRows() {
+		oldestIDs[r.GetId().GetValue()] = true
+	}
+	furtherIDs := map[string]bool{}
+	for _, r := range further.Msg.GetSuccess().GetSuccess().GetRows() {
+		furtherIDs[r.GetId().GetValue()] = true
+	}
+	wantTotal := len(firstIDs) + len(oldestIDs)
+	if len(furtherIDs) != wantTotal {
+		t.Fatalf("GetFeedPage{next} past at_start served %d rows, want %d (every row from both the newest page %d and the oldest page %d, re-served as one page)",
+			len(furtherIDs), wantTotal, len(firstIDs), len(oldestIDs))
+	}
+	for id := range firstIDs {
+		if !furtherIDs[id] {
+			t.Fatalf("GetFeedPage{next} past at_start dropped a row %q from the original newest page", id)
+		}
+	}
+	for id := range oldestIDs {
+		if !furtherIDs[id] {
+			t.Fatalf("GetFeedPage{next} past at_start dropped a row %q from the oldest page", id)
+		}
+	}
+}
+
+func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
+	// Arrange: walk one page older, so the reader's position is no longer the
+	// newest page.
+	f := newOpened(t, harness.Opts{})
+	f.submit("go", "k-firstafter", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	tail := f.watchRootFeed()
+	const n = harness.FeedPageSize + walkPageMargin
+	for i := 0; i < n; i++ {
+		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
+	}
+	awaitRow(t, f, tail, "the last padded row", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetResponse().GetSuccess().GetProse().GetMarkdown() == "row "+itoa(n-1)
+	})
+
+	first, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+	}))
+	if err != nil || first.Msg.GetSuccess().GetError() != nil {
+		t.Fatalf("GetFeedPage{first} = %v, %v, want the newest page", first.Msg, err)
+	}
+	if _, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_Next{Next: &agentreplv1.GetFeedPageNext{}},
+	})); err != nil {
+		t.Fatalf("GetFeedPage{next} = error %v", err)
+	}
+
+	// Act: {first} again, after the walk moved to an older page.
+	second, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
+		Workspace: f.ws, Page: &agentreplv1.GetFeedPageRequest_First{First: &agentreplv1.GetFeedPageFirst{}},
+	}))
+
+	// Assert: {first} re-serves the SAME newest page as the original {first},
+	// regardless of the intervening {next}.
+	if err != nil {
+		t.Fatalf("GetFeedPage{first} after a {next} = error %v, want the newest page again", err)
+	}
+	if !proto.Equal(second.Msg, first.Msg) {
+		t.Fatalf("GetFeedPage{first} after a {next} = %v, want the same newest page as the original {first} = %v", second.Msg, first.Msg)
+	}
+}
+
 func TestGetFeedPageWalkIsPerConnection(t *testing.T) {
 	// Arrange: enough rows for at least one older page, and a walk
 	// established on connection A.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-perconn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	for i := 0; i < 150; i++ {
+	for i := 0; i < harness.FeedPageSize+walkPageMargin; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
 	clientA := f.d.Client()
@@ -205,7 +453,7 @@ func TestGetFeedPageWalkIsNotPersistedAcrossAReconnect(t *testing.T) {
 	// Arrange: establish a walk on one connection, then abandon it.
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-noreplay", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
-	for i := 0; i < 150; i++ {
+	for i := 0; i < harness.FeedPageSize+walkPageMargin; i++ {
 		f.shim.PushAgentFrame(mainAgent, feedRowLabeledResponse(i))
 	}
 	if _, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
@@ -1749,11 +1997,10 @@ func TestASecondCallToTheSameUnmodeledToolAddsNoSecondWarning(t *testing.T) {
 // feed-suite-local helpers.
 // ==========================================================================
 
-// FeedPageSizeNote explains a skip when the fake session's pushed history did
-// not exceed one page under whatever page-size constant the daemon uses — a
-// value this suite deliberately does not hardcode (it is not stated in
-// SPEC.md, ARCHITECTURE.md or the protos).
-const FeedPageSizeNote = "an unknown page-size constant"
+// walkPageMargin is how far past harness.FeedPageSize a walk test pushes, so a
+// second (and, for the at-start tests, a distinct oldest) page provably
+// exists regardless of what the page size is.
+const walkPageMargin = 20
 
 // feedResponseFrames builds the start+success frame pair for one settled
 // response unit, so callers can push a whole row in two calls.
@@ -1782,6 +2029,34 @@ func feedRowLabeledResponse(i int) *conversationv1.AgentFrame {
 			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: "row " + itoa(i)}},
 		}}},
 	})
+}
+
+// feedRowLabeledResponseFor is feedRowLabeledResponse addressed to an
+// arbitrary agent, so a sub-feed can be padded past one page independently of
+// the root feed.
+func feedRowLabeledResponseFor(agent string, i int) *conversationv1.AgentFrame {
+	id := agent + "-wall-" + itoa(i)
+	return activityFrame(agent, &conversationv1.AgentActivity{
+		ActivityId: activityID(id),
+		Item: &conversationv1.AgentActivity_Response{Response: &conversationv1.AgentResponse{Result: &conversationv1.AgentResponse_Success{
+			Success: &conversationv1.AgentResponseSuccess{Prose: &conversationv1.AgentResponseProse{Markdown: agent + " row " + itoa(i)}},
+		}}},
+	})
+}
+
+// secondWorkspaceOn opens a SECOND, independent workspace on the SAME daemon
+// as an existing fixture — used only to prove a refusal is scoped to the
+// addressed workspace, never to the reader's own.
+func secondWorkspaceOn(t *testing.T, d *harness.Daemon) *fixture {
+	t.Helper()
+	repo := harness.NewRepo(t)
+	ws := harness.Register(t, d, repo.Dir)
+	d.WatchWorkspaceLogs(repo.Dir)
+	other := &fixture{d: d, repo: repo, ws: ws, t: t}
+	other.open()
+	other.host = d.WatchHost(ws)
+	other.web = d.WatchWeb(ws)
+	return other
 }
 
 // itoa avoids importing strconv solely for this suite's synthetic row labels.

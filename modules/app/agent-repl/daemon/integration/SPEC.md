@@ -74,6 +74,18 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
   control-socket script would be racing.
 - CODECS: `Opts.JSONCodec` dials the daemon with the JSON codec instead of
   the binary one, so one test proves both are served on the one origin.
+- PAGE SIZE: `harness.FeedPageSize` IS the daemon's own
+  `internal/resolve/feed.DefaultPageSize`, never a copy. A walk test pushes
+  `FeedPageSize + 1` rows and FAILS if `has_more` is unset; it never skips on
+  "the page size is unknown".
+- TRANSCRIPTS: `harness.TranscriptPath`, `d.WriteTranscript` and
+  `harness.HasTranscript` lay down and read back a `<vendor session id>.jsonl`
+  under either account root, which is how account-switch PORTING is watched
+  under a root no session has ever run in. `d.RemoveTranscripts` is the other
+  side (a resume whose transcript is gone).
+- LAUNCHER FAILURE: the fake browser and every other recorder executable take
+  `SetExitCode(n)`, so `OpenExternal`'s `launch_failed` arm is driven by a
+  launcher that really exits non-zero rather than by a stub.
 
 ## Suites and tests (one `_test.go` file per suite; one edge case per test)
 
@@ -397,6 +409,44 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - merge_actions recorded and read back by a later merge
 - ungated permission mode without allow_ungated refused
 
+### host_notifications_test.go
+- a `question_asked` host notification carries its `header` and sets the
+  workspace's attention marker; `agent_addressed` carries its text (skipped —
+  no production route, see the settled-behaviors section)
+
+### Coverage the second adversarial audit added
+
+Folded into the suites above rather than listed twice; recorded here so the
+audit's charge can be reconciled against the files.
+
+- COMMAND-FILE INGRESS beyond create/merge/prompt/task-create: one test per
+  verb (send, close, open, switch, task-toggle-done, task-add-workspace),
+  `dir` addressing proven equivalent to `workspace`, one-shot decoration,
+  `base_ref`, and a file with ONE invalid entry applying NOTHING.
+- HOLD ARMS: `uninterruptible_turn` (a /clear's turn open) reaches the tray
+  with NO classifying push and refuses release; a revival-time entry carries
+  `session_starting` and refuses release; `AnswerHeldOffer` with nothing
+  standing answers `no_offer_standing`; `UpdateMergeQueue{evict}` clears a
+  standing dequeue offer and the tray heading counts down.
+- ACCOUNT ROUTING: the topbar email and `HostVendorClaude.config_dir` are each
+  asserted for a workspace inside the multi-repo root and one outside it; a
+  fork created outside the root does not inherit its parent's account.
+- TASK ARMS: `set_title`, `set_open`, `set_done` twice → `no_change`, a bogus
+  ref → `unknown_task` on both UpdateTask and AssignWorkspaceTask, a blank
+  title → `blank_title`, and tasks plus assignments surviving a restart.
+- FAULT KINDS AND CLOSURE: `prompts_dir_missing.path`, its repair flipping
+  healthy, `shim_died{exit_code}`, `link_severed`, and a restart NOT reopening
+  a closed fault.
+- RELAY REFUSALS: `path_escapes_workspace`, a directory path relaying with
+  `line` unset, `invalid_url`, and `launch_failed` driven by a launcher that
+  really exits non-zero.
+- EXACT FIGURES rather than shapes: the context chip reads "142.3k", the
+  tokens cell "1k in", breakdown rows carry `share_permille`/`emphasized`, the
+  model selector's options are exactly the catalog in order, and the wakeup
+  cell carries the scheduled instant itself.
+- EITHER/OR REFUSALS SETTLED: the unknown-workspace and no-login-open refusals
+  and bare `/model` each assert one outcome, never "an error or an arm".
+
 ## Settled behaviors the daemon states differently from an earlier reading
 
 These are recorded here rather than argued in a test comment, per the audit's
@@ -414,6 +464,42 @@ a spec edit and never a rationalization in the suite.
   WARNING belongs to `server.UnlandedArm` alone, so that operation stays usable
   for reconciling ERROR-ARMS.md. A test therefore declares that operation only
   when the arm it exercises is genuinely unlanded per ERROR-ARMS.md.
+- CLOSEWORKSPACE DOES NOT REMOVE THE LOG SINK SYMLINK. The audit read it as
+  removing the workspace's sink on close; `internal/workspace/close.go` states
+  the opposite in as many words ("the canonical links and their targets stay on
+  disk"), and `internal/dlog/surfaces_test.go`'s
+  `TestEvictLeavesTheCanonicalLinkAndTargetOnDisk` pins it. The suite asserts
+  the link SURVIVES a close; the removal claim is retired, not tested.
+
+- A `workspace_commands_*.json` FILE IS QUARANTINED ONLY AT PARSE TIME. The
+  quarantine directory is reached from `Ingress.quarantine` alone, which runs
+  when `parse()` rejects the file. An entry that parses but is REFUSED at apply
+  time (a merge on a workspace with no layout facts) is joined into the run's
+  error and logged at ERROR under `daemon.commandfile.entry`/`.run`, and the
+  file stays in `ClaimedDir`. The suite tests the audit's stated contract (the
+  file lands in quarantine) so the divergence is a failing test the teamlead
+  dispositions, not a rationalized assertion.
+
+- THREE CONTRACT CLAIMS HAVE NO PRODUCTION HOOK and are `t.Skip`ped naming it,
+  never silently dropped. They are decisions owed, recorded here so the skips
+  are not read as suite defects:
+  - ACCOUNT-SWITCH TRANSCRIPT PORTING. `internal/account/transcript.go`'s
+    `MoveTranscript` has zero production callers, and
+    `internal/workspace/sessions.go`'s `Fleet.Start` reuses `session.ConfigDir`
+    verbatim rather than recomputing the routing for the current boot. Nothing
+    ports a `<vendor id>.jsonl` when a workspace crosses the MULTI_REPO_ROOT
+    boundary between boots. The hook owed: a reconciliation in `Fleet.Start`
+    that diffs the stored ConfigDir against `Accounts.ConfigDirFor(dir)` and
+    calls `MoveTranscript` before `StartSession(resume)`.
+  - `agent_addressed` HOST NOTIFICATIONS. `internal/sessionwatcher/route.go`
+    calls `sinks.Lifecycle.OnNotification` only for permissions and questions;
+    no path routes an `AgentPushNotification` start frame to one, and
+    `NotificationAgentAddressed` is built nowhere but the unknown-kind
+    fallback. The `question_asked` half of the same critique IS covered.
+  - `no_browser_configured`. `cmd/claude-repld/graph.go` always constructs an
+    external-browser launcher, so the daemon can never be in the configured-
+    with-no-browser state the arm exists for.
+
 - THE MERGE LEDGER HAS NO WIRE SURFACE. No rpc serves it: it exists only as
   the `merge_ledger` / `merge_tab_intervals` rows in `wsm.db`. The tab-interval
   test therefore stops the daemon and reads the database through `d.WithDB`,
