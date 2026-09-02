@@ -20,6 +20,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { workspaceLockKey } from "../../src/locks.js";
+import { BACKUP_KEEP, backupDir } from "../../src/engine/backup.js";
+import { agentIdPath, vendorLinkPath } from "../../src/engine/identity.js";
 import {
   freshSession,
   openStream,
@@ -41,13 +44,16 @@ import {
 } from "../integration-support/store.js";
 import {
   awaitFile,
+  readJsonl,
   readSpools,
   projectDir,
   readSubagentMeta,
   readTranscript,
   sessionTranscriptPath,
   subagentTranscriptPathFor,
+  workspaceRealPath,
 } from "../integration-support/vendor.js";
+import type { TranscriptRecord } from "../../src/fake/vendor-files.js";
 
 afterEach(cleanupShims);
 
@@ -111,6 +117,40 @@ function vendorAgentIdForCall(
   throw new Error(
     `no subagent sidecar under ${dir} names the spawning call ${toolUseId} (saw ${metas.join(", ")})`,
   );
+}
+
+/**
+ * Every content block of a transcript record's message, whatever its shape.
+ *
+ * THE FILE PLANE IS THE ORACLE. A key's suffix is only proved by the value the
+ * VENDOR wrote — comparing two shim-minted strings proves the shim agrees with
+ * itself and nothing more.
+ */
+function messageBlocks(record: TranscriptRecord): Array<Record<string, unknown>> {
+  const message = record.message as { content?: unknown } | undefined;
+  const content = message?.content;
+  return Array.isArray(content) ? (content as Array<Record<string, unknown>>) : [];
+}
+
+/** Every `tool_use` block id the vendor wrote into a transcript, in order. */
+function toolUseIds(records: readonly TranscriptRecord[]): string[] {
+  return records.flatMap((record) =>
+    messageBlocks(record)
+      .filter((block) => block.type === "tool_use" && typeof block.id === "string")
+      .map((block) => block.id as string),
+  );
+}
+
+/** Every chained record's own uuid, in file order. */
+function recordUuids(records: readonly TranscriptRecord[]): string[] {
+  return records
+    .map((record) => record.uuid)
+    .filter((uuid): uuid is string => typeof uuid === "string");
+}
+
+/** This spawn's workspace key — the directory both state trees are rooted at. */
+function keyOf(shim: Awaited<ReturnType<typeof spawnShim>>): string {
+  return workspaceLockKey(workspaceRealPath(shim.dirs));
 }
 
 /** The key prefixes the kickoff ruling allows, and nothing else. */
@@ -206,6 +246,38 @@ describe("every entry's envelope", () => {
     stream.close();
   });
 
+  test("the activity key's SUFFIX is the vendor's own tool_use_id from the transcript", async () => {
+    // The key is only right if it names the id the VENDOR minted. Asserting the
+    // `activity:` prefix alone would pass on a key whose suffix the shim
+    // invented, and the sidecar keying the same unit from the file would then
+    // write a second row for one call.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await runTurn(shim, stream, "t1", "!read");
+    await awaitFile(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+
+    const vendorIds = toolUseIds(readTranscript(shim.dirs, started.vendorSessionId));
+    const suffixes = new Set(
+      entriesKeyed(shim.store?.writes() ?? [], "activity:").map((entry) =>
+        entry.upsertKey.slice("activity:".length),
+      ),
+    );
+    expect(vendorIds.length).toBeGreaterThan(0);
+    // EVERY TOOL CALL THE VENDOR WROTE HAS ITS ROW UNDER THE VENDOR'S OWN ID.
+    for (const id of vendorIds) expect([...suffixes]).toContain(id);
+    // And the only OTHER activity keys are the prose/thinking units, whose
+    // suffix is the vendor's message id plus the block index (`<msg>:<n>`) —
+    // a block has no id of its own, so the message's is the only vendor value
+    // there is to key by.
+    const unaccounted = [...suffixes].filter(
+      (suffix) => !vendorIds.includes(suffix) && !/^msg_[^:]+:\d+$/.test(suffix),
+    );
+    expect(unaccounted).toEqual([]);
+    stream.close();
+  });
+
   test("a question's rows are keyed question:<the ask's tool_use_id>", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
@@ -222,6 +294,32 @@ describe("every entry's envelope", () => {
     expect(
       writtenKeys(shim.store?.writes() ?? []).some((key) => key.startsWith("question:")),
     ).toBe(true);
+    stream.close();
+  });
+
+  test("the question key's SUFFIX is the ASK's own tool_use_id from the transcript", async () => {
+    // An ask IS a tool call, so its id is the vendor's, and a question row
+    // keyed by anything else could never collide with the sidecar's row for the
+    // same line.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(shim);
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!ask-unanswered" }));
+    await stream.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const agentFrame = entryFrame(watchAgentEntry(frame));
+      if (agentFrame?.result.case !== "update") return false;
+      return agentFrame.result.value.update.case === "question";
+    });
+    await awaitFile(sessionTranscriptPath(shim.dirs, started.vendorSessionId));
+
+    const vendorIds = toolUseIds(readTranscript(shim.dirs, started.vendorSessionId));
+    const questionSuffixes = writtenKeys(shim.store?.writes() ?? [])
+      .filter((key) => key.startsWith("question:"))
+      .map((key) => key.slice("question:".length));
+    expect(questionSuffixes.length).toBeGreaterThan(0);
+    for (const suffix of questionSuffixes) expect(vendorIds).toContain(suffix);
     stream.close();
   });
 
@@ -269,6 +367,14 @@ describe("every entry's envelope", () => {
       key.startsWith(`terminal:${started.vendorSessionId}:`),
     );
     expect(new Set(terminals).size).toBe(2);
+    // AND THE SUFFIX IS THE VENDOR'S RECORD UUID, not a counter: two distinct
+    // suffixes could be minted by a shim that numbered its own terminals, and
+    // the sidecar reading the same two lines would key them differently.
+    const uuids = recordUuids(readTranscript(shim.dirs, started.vendorSessionId));
+    expect(uuids.length).toBeGreaterThan(0);
+    for (const key of new Set(terminals)) {
+      expect(uuids).toContain(key.slice(`terminal:${started.vendorSessionId}:`.length));
+    }
     stream.close();
   });
 

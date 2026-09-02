@@ -659,7 +659,13 @@ export function createFakeQuery(
 
   const result = (spec: ResultSpec): void => {
     resultEmitted = true;
-    emit({
+    // BOTH PLANES, ONE UUID, exactly as `attachment` does it. The turn's
+    // terminal row is keyed `terminal:<AgentId>:<vendor record uuid>`, and that
+    // key only collides with the sidecar's row for the SAME turn if the uuid on
+    // the stream's `result` and the uuid on the transcript's turn record are one
+    // value. Two uuids would put one turn's ending in the book twice.
+    const uuid = opts.newUuid();
+    emitWithUuid(uuid, {
       type: "result",
       subtype: spec.subtype,
       is_error: spec.subtype !== "success",
@@ -705,7 +711,7 @@ export function createFakeQuery(
       durationMs: 1_236,
       messageCount: messageCounter,
       isMeta: false,
-      uuid: opts.newUuid(),
+      uuid,
       timestamp: nowIso(),
     });
   };
