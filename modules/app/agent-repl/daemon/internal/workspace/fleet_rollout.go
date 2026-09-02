@@ -6,12 +6,14 @@ import (
 	"strconv"
 	"strings"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/drain"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/rollout"
+	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/wsm"
@@ -347,4 +349,74 @@ func (a *fleetFreeness) Free(ws ids.WorkspaceID) bool { return a.fleet.Free(ws) 
 
 func (a *fleetFreeness) AwaitFree(ctx context.Context, ws ids.WorkspaceID) error {
 	return a.fleet.AwaitFree(ctx, ws)
+}
+
+// RouteGuidance delivers one submission straight to the workspace's session as
+// a turn of its own, BYPASSING the prompt queue's lease policy.
+//
+// It is the merge orchestrator's guidance route. The queue cannot serve it: a
+// parked merge lease is precisely what sends a submission to the orchestrator,
+// so routing the orchestrator's own delivery back through the queue would loop
+// on the lease that produced it.
+//
+// The turn is minted here and handed to the watcher, so the orchestrator
+// resumes on that turn's REAL end rather than on a timer.
+func (f *Fleet) RouteGuidance(ctx context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, origin conversationv1.PromptOrigin) (ids.TurnID, error) {
+	if origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_UNSPECIFIED {
+		return "", fmt.Errorf("workspace: route guidance on %q: an unspecified prompt origin is never delivered", ws)
+	}
+	sender, ok := f.Sender(ws)
+	if !ok {
+		return "", fmt.Errorf("workspace: route guidance on %q: the workspace has no live session", ws)
+	}
+	turn := wsm.NewTurnID()
+	success, err := sender.StartTurn(ctx, turn, said, origin)
+	if err != nil {
+		return "", fmt.Errorf("workspace: route guidance on %q: %w", ws, err)
+	}
+	// The watcher is handed the accepted turn the same way the queue hands one
+	// over: it names the main agent and feeds the opening page through the
+	// history path, which is what makes the turn's end attributable.
+	if watcher, live := f.Watcher(ws); live {
+		watcher.SetMainAgent(success.GetPrompt().GetAgent())
+		watcher.OnTurnOpened(ws, success.GetPrompt(), success.GetPage())
+	}
+	f.deps.Log.Global().Debug(opFleetRollout, "routed guidance into the session as its own turn", dlog.Context{
+		"workspace": string(ws), "turn": string(turn), "origin": origin.String(),
+	})
+	return turn, nil
+}
+
+// RaiseColdGate draws the ordinary cold gate for a workspace whose resume
+// answered `cold`. It is rollout.ColdGateFunc: the relaunch engine learns the
+// cold facts and the fleet, which owns the gate's menu, is what serves them.
+func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conversationv1.SessionCold) error {
+	if cold == nil {
+		return fmt.Errorf("workspace: raise the cold gate on %q: no cold facts", ws)
+	}
+	session, _, err := f.deps.DB.Session(context.Background(), ws)
+	if err != nil {
+		return fmt.Errorf("workspace: raise the cold gate on %q: read the session record: %w", ws, err)
+	}
+	f.raiseColdGate(ws, session.VendorSessionID, cold)
+	return nil
+}
+
+// SessionBuildSHA reports the shim build a workspace's LIVE session says it is
+// running. It is a fact of the running process rather than of the session — a
+// shim that dies takes its build with it — so it lives in the fleet's memory
+// and not in a durable column.
+func (f *Fleet) SessionBuildSHA(ws ids.WorkspaceID) (string, bool) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	sha, ok := f.buildSHA[ws]
+	return sha, ok
+}
+
+// ProbeLock probes ONE workspace's shim-held kernel lock from its worktree. It
+// is rollout.LockProbeFunc and boot's probe in one behavior, so the two cannot
+// disagree about which lock a workspace's is or about what "could not tell"
+// means.
+func (f *Fleet) ProbeLock(workspaceDir string) (sessionlock.State, error) {
+	return f.probe(f.lockDir(), workspaceDir)
 }
