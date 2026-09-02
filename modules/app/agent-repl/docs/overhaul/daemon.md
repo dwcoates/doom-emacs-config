@@ -1297,3 +1297,11 @@ its own file only when >1 endpoint needs it.
 - FooterAllowance is sourced from SessionUpdate.rate_limit_status (typed status); the verbatim string is gone.
 - context_budget_warning arrives on the agent plane (AgentUpdate); the WatchSession routing goes.
 - Re-adopted live work is always `created`-origin (shim ruling); DetachedWorkId == the unit's AgentActivityId, so `created`-origin monitors are retired by their own terminal.
+
+## Landing 6 relay (2026-09-01, project lead)
+
+- SubmitPromptSuccess.command_acted lands: the act path answers it instead of the notimpl sentinel; retire that ERROR-ARMS row.
+- SubmitPromptError.duplicate_submission lands for the idempotency_key repeat; UpdateMergeQueueError.unknown_repository lands for pause/resume on an unknown RepositoryRef.
+- SubmitPromptError.turn_already_open is RETIRED (tag 8 reserved); delete promptqueue.ErrTurnAlreadyOpen and the server mapping.
+- /status uses the EXISTING SubmitPromptCommandPanel.status arm (tag 1); resolve the thin panel into StatusPanelView rows. AnswerQuestionError's ask_not_standing/unserved_value split already exists; drop the Refusal.NotFound workaround in favor of the two arms.
+- Watch* refusals stay transport-closed by ruling; record them as such, not as unlanded arms.
