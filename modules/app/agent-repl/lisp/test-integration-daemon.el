@@ -778,6 +778,386 @@ directly — so the registration itself is unpinned everywhere else.  Here
            5 "the no-daemon hook to reach cold start's build script")
           (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran")))))))
 
+;;;; ---- Audit-3 additions (R-SUITE-3) ----
+;;
+;; Findings 12-17 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+(defvar agent-repl-connect-unary-timeout-seconds)
+
+;; audit-3 #12
+(ert-deftest agent-repl-itest-daemon-restart-awaits-departure-before-ensuring ()
+  "The restart's departure wait is a GATE, not a race with the ack.
+R-RED-MISC: \"stop ack -> teardown -> await daemon.addr removal -> ensure\".
+The fake is kept alive well past the stop's ack, so a bounded window with
+it still answering must show no re-probe and no ensure at all -- only once
+it actually exits does the build-and-start half of the restart run."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       (format "touch %sbuild-ran" boot-dir)))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 5.0)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                        nil "the link to come up")
+          (let ((health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
+            ;; Act: restart, but the fake is left running past its ack.
+            (agent-repl-frontend-daemon-restart)
+            (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+            (agent-repl-itest--await-log daemon "elisp.daemon.departure-waiting")
+            ;; Assert: a bounded window with the fake still alive.  Not a
+            ;; wait-until (there is no positive condition to wait for) -- an
+            ;; explicit deadline loop through `accept-process-output', never
+            ;; a sleep, so the daemon's own I/O keeps being served while the
+            ;; negative is held open.
+            (let ((deadline (+ (float-time) 1.0)))
+              (while (< (float-time) deadline)
+                (accept-process-output nil 0.05)))
+            (should (= health-calls-before (length (agent-repl-itest--calls daemon "DaemonHealth"))))
+            (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+            (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+            ;; Act: only now does the fake actually leave.
+            (agent-repl-itest--exit daemon)
+            (agent-repl-itest--wait-until
+             (lambda () (null (agent-repl-itest--read-addr-file
+                               (agent-repl-itest-daemon-state-dir daemon))))
+             nil "the stopped daemon to remove daemon.addr")
+            ;; Assert: the ensure half proceeds once the address is gone.
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+             5 "the restart's own ensure to run the build script")
+            (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+             5 "the restart's own ensure to start a daemon")
+            (should (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))))))))
+
+;; audit-3 #12
+(ert-deftest agent-repl-itest-daemon-restart-departure-timeout-adopts-the-still-live-daemon ()
+  "A departure wait that times out still leaves the daemon ADOPTED.
+`agent-repl-daemon-boot-timeout-seconds' doubles as the departure-wait
+deadline (cross-suite note); a daemon that never removes `daemon.addr'
+inside it is not gone, and the ensure that follows finds it still
+answering -- so it is adopted again, never built or started a second
+time."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       (format "touch %sbuild-ran" boot-dir)))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 0.5)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                        nil "the link to come up")
+          ;; Act: restart, but the fake is NEVER asked to exit -- it answers
+          ;; the stop and simply keeps running, exactly like a departure
+          ;; that never actually completes.
+          (agent-repl-frontend-daemon-restart)
+          (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+          ;; Assert: the wait gives up ...
+          (agent-repl-itest--await-log daemon "elisp.daemon.departure-timeout" "warn")
+          ;; ... and the ensure that follows ADOPTS the still-live daemon:
+          ;; no build, no start, and the link stands again.
+          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                        nil "the link to come back up")
+          (should (agent-repl-link-up-p))
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran")))))))
+
+;; audit-3 #13
+(ert-deftest agent-repl-itest-daemon-restart-abandoned-on-stop-refusal ()
+  "A `nothingScheduled' refusal of the stop abandons the restart outright.
+daemon.el: \"the refusal stands and the link is left alone\" -- ensuring
+here would adopt the daemon it just asked to leave and report a restart
+that never happened."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "UpdateShutdownSchedule"
+                              '((error . ((nothingScheduled . ())))))
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       (format "touch %sbuild-ran" boot-dir)))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 2.0)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil)
+               (messages nil))
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                        nil "the link to come up")
+          (cl-letf (((symbol-function 'message)
+                     (lambda (fmt &rest args)
+                       (push (if args (apply #'format fmt args) fmt) messages)
+                       nil)))
+            ;; Act.
+            (agent-repl-frontend-daemon-restart)
+            (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+            ;; Assert: the refusal and the abandonment are both on the record.
+            (agent-repl-itest--await-log daemon "elisp.daemon.stop-refused" "error")
+            (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error")
+            (agent-repl-itest--wait-until
+             (lambda () (seq-some (lambda (m) (string-match-p "not restarting" m)) messages))
+             5 "the abandonment to be told to the user"))
+          ;; Assert: nothing was built or started, the link never came down,
+          ;; and the fake is still there to prove nothing killed it.
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+          (should (agent-repl-link-up-p))
+          (should (process-live-p (agent-repl-itest-daemon-process daemon))))))))
+
+;; audit-3 #13
+(ert-deftest agent-repl-itest-daemon-restart-abandoned-on-stop-transport-failure ()
+  "An UNREACHABLE stop (a transport failure, not a refused arm) also abandons.
+daemon.el treats a transport failure on the stop exactly like a refused
+arm: the link is left alone rather than risk re-adopting a daemon that
+never actually heard the ask."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--with-cold-start
+      (agent-repl-itest-daemon--with-stubs boot-dir
+        (let* ((build (agent-repl-itest-daemon--write-script
+                       (expand-file-name "build.sh" boot-dir)
+                       (format "touch %sbuild-ran" boot-dir)))
+               (start (agent-repl-itest-daemon--write-script
+                       (expand-file-name "start.sh" boot-dir)
+                       (format "touch %sstart-ran" boot-dir)))
+               (agent-repl-daemon-build-script build)
+               (agent-repl-daemon-command (list start))
+               (agent-repl-daemon-boot-timeout-seconds 2.0)
+               (agent-repl-link-up-functions nil)
+               (agent-repl-link-no-daemon-functions nil))
+          (agent-repl-daemon-ensure)
+          (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                        nil "the link to come up")
+          ;; Arrange: hold the stop's ANSWER open, and shrink the unary
+          ;; timeout so the client gives up on it -- a transport failure,
+          ;; never a daemon-authored arm.
+          (agent-repl-itest--gate daemon "UpdateShutdownSchedule")
+          (unwind-protect
+              (let ((agent-repl-connect-unary-timeout-seconds 0.3))
+                ;; Act.
+                (agent-repl-frontend-daemon-restart)
+                (agent-repl-itest--await-call daemon "UpdateShutdownSchedule")
+                ;; Assert: the transport failure, not a refusal, is what is
+                ;; logged, and the restart still abandons.
+                (agent-repl-itest--await-log daemon "elisp.daemon.stop-failed" "error")
+                (agent-repl-itest--await-log daemon "elisp.daemon.restart-abandoned" "error"))
+            (agent-repl-itest--release-gate daemon "UpdateShutdownSchedule"))
+          ;; Assert: nothing was built or started and the link is untouched.
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+          (should-not (agent-repl-itest-daemon--ran-p boot-dir "start-ran"))
+          (should (agent-repl-link-up-p)))))))
+
+;; audit-3 #14
+(ert-deftest agent-repl-itest-daemon-restart-with-no-link-is-just-the-ensure ()
+  "With no link standing, a restart is nothing but the ensure.
+fanout §11; daemon.el: \"nothing to stop\".  No `daemon.addr', no link ->
+the restart never sends `UpdateShutdownSchedule' at all, and its whole
+effect is cold start's own build-and-start-and-link sequence."
+  ;; Arrange: no daemon.addr and no link.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((binary (agent-repl-itest--ensure-binary))
+          (state-dir (agent-repl-itest-daemon-state-dir daemon)))
+      (agent-repl-itest--stop-daemon daemon t)
+      (agent-repl-itest--with-cold-start
+        (agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+                         (expand-file-name "build.sh" boot-dir)
+                         (format "touch %sbuild-ran" boot-dir)))
+                 (start (agent-repl-itest-daemon--write-script
+                         (expand-file-name "start.sh" boot-dir)
+                         (format "exec %s" (shell-quote-argument binary))))
+                 (agent-repl-daemon-build-script build)
+                 (agent-repl-daemon-command (list start))
+                 (agent-repl-daemon-boot-timeout-seconds 10)
+                 (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-up-functions nil)
+                 (agent-repl-link-no-daemon-functions nil))
+            (should-not (agent-repl-link-up-p))
+            ;; Act.
+            (agent-repl-frontend-daemon-restart)
+            ;; Assert.
+            (agent-repl-itest--await-log daemon "elisp.daemon.restart-nothing-to-stop" "info")
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+             nil "the ensure's build script to run")
+            (should (agent-repl-itest-daemon--ran-p boot-dir "build-ran"))
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            (should (agent-repl-link-up-p))
+            ;; Assert: `UpdateShutdownSchedule' was never sent to the new
+            ;; daemon -- there was never anything standing to stop.
+            (let* ((address (agent-repl-itest--read-addr-file state-dir))
+                   (live (agent-repl-itest--make-daemon :address address)))
+              (should (null (agent-repl-itest--calls live "UpdateShutdownSchedule"))))))))))
+
+;; audit-3 #14
+(ert-deftest agent-repl-itest-daemon-stop-with-no-link-is-skipped-not-signalled ()
+  "`agent-repl-frontend-daemon-stop' with no link stands never signals.
+daemon.el: with `agent-repl-link-primary' nil there is nothing to stop --
+a WARNING and a message are the whole reaction, and the callback still
+runs (with nil) so a caller is never left hanging on one that will not
+come."
+  ;; Arrange: a fake stands but nothing ever links to it.
+  (agent-repl-itest--with-fake-daemon daemon
+    (should (null (agent-repl-link-primary)))
+    (let (messages (outcome :unset))
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args)
+                   (push (if args (apply #'format fmt args) fmt) messages)
+                   nil)))
+        ;; Act.  A raw call, with no `condition-case': an unhandled signal
+        ;; here would fail this test on its own, which is the whole proof
+        ;; of "no signal".
+        (agent-repl-frontend-daemon-stop (lambda (accepted) (setq outcome accepted)))
+        ;; Assert: the callback ran, with nil -- refused, not abandoned.
+        (should (eq outcome nil)))
+      (should (seq-some (lambda (m) (string-match-p "no daemon link to stop" m)) messages)))
+    (should (agent-repl-itest--logged-p daemon "elisp.daemon.stop-skipped" "warn"))))
+
+;; audit-3 #15
+(ert-deftest agent-repl-itest-daemon-concurrent-ensure-is-single-flight ()
+  "A second `agent-repl-daemon-ensure' while one is in flight is a no-op.
+daemon.el `ensure-already-in-flight': a concurrent ensure is exactly how a
+second daemon gets spawned beside a live one, so the daemon command must
+run exactly once and only one `WatchDaemon' subscriber ever stands."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((binary (agent-repl-itest--ensure-binary))
+          (state-dir (agent-repl-itest-daemon-state-dir daemon)))
+      (agent-repl-itest--stop-daemon daemon t)
+      (agent-repl-itest--with-cold-start
+        (agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+                         (expand-file-name "build.sh" boot-dir) "exit 0"))
+                 (counter (expand-file-name "start-count" boot-dir))
+                 (start (agent-repl-itest-daemon--write-script
+                         (expand-file-name "start.sh" boot-dir)
+                         (format "echo run >> %s\nexec %s"
+                                 counter (shell-quote-argument binary))))
+                 (agent-repl-daemon-build-script build)
+                 (agent-repl-daemon-command (list start))
+                 (agent-repl-daemon-boot-timeout-seconds 10)
+                 (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-up-functions nil)
+                 (agent-repl-link-no-daemon-functions nil))
+            ;; Act: two back-to-back ensures, before the first has settled.
+            (agent-repl-daemon-ensure)
+            (agent-repl-daemon-ensure)
+            ;; Assert: the second was refused as already in flight.
+            (agent-repl-itest--await-log daemon "elisp.daemon.ensure-already-in-flight" "info")
+            ;; Assert: the daemon command ran exactly once, and exactly one
+            ;; `WatchDaemon' subscriber stands on the one daemon that came up.
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            (should (= 1 (agent-repl-itest-daemon--line-count counter)))
+            (let* ((address (agent-repl-itest--read-addr-file state-dir))
+                   (live (agent-repl-itest--make-daemon :address address)))
+              (agent-repl-itest--await-subscriber live "daemon")
+              (should (= 1 (length (agent-repl-itest--subscribers live "daemon")))))))))))
+
+;; audit-3 #16
+(ert-deftest agent-repl-itest-daemon-unhealthy-faults-all-kinds-reach-the-health-buffer ()
+  "Every `DaemonFault' KIND, not just `wsmReadOnly', reaches the health buffer.
+endpoint_daemon_health.proto declares six typed kinds; whichever one a
+daemon carries, adoption still happens (unhealthy is an answer) and the
+fault's dynamic detail still renders -- the kind classifies the fault, it
+does not gate whether the user gets to see it."
+  (dolist (case
+           (list (cons "adoption-window-expired"
+                       '(adoptionWindowExpired
+                         . ((workspace . ((id . "ws-1") (dir . "/tmp/ws-1"))))))
+                 (cons "log-sink-poisoned"
+                       '(logSinkPoisoned . ((sink . "emacs.jsonl"))))
+                 (cons "deploy-script-failed"
+                       '(deployScriptFailed . ((detail . "deploy script exited 1"))))
+                 (cons "successor-spawn-failed"
+                       '(successorSpawnFailed . ((detail . "spawn refused: address in use"))))
+                 (cons "prompts-dir-missing"
+                       '(promptsDirMissing . ((path . "/does/not/exist/prompts"))))
+                 (cons "wsm-read-only" '(wsmReadOnly . ()))))
+    (let* ((label (car case))
+           (kind-cell (cdr case))
+           (detail (format "audit-3-16 fault detail for %s" label))
+           (fault (list (cons 'detail detail) kind-cell))
+           (response `((success . ((unhealthy . ((faults . [,fault]))))))))
+      ;; Arrange: a fresh fake and cold start per kind.
+      (agent-repl-itest--with-fake-daemon daemon
+        (agent-repl-itest--script daemon "DaemonHealth" response)
+        (agent-repl-itest--with-cold-start
+          (let ((agent-repl-link-up-functions nil)
+                (agent-repl-link-no-daemon-functions nil))
+            ;; Act.
+            (agent-repl-daemon-ensure)
+            (agent-repl-itest--await-call daemon "DaemonHealth")
+            ;; Assert: adopted regardless of kind.
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-link-up-p))
+             nil (format "the link to come up for %s" label))
+            (should (agent-repl-link-up-p))
+            ;; Assert: this kind's own detail rendered.
+            (agent-repl-itest--wait-until
+             (lambda () (get-buffer "*agent-repl-health*"))
+             nil (format "the health buffer for %s" label))
+            (with-current-buffer "*agent-repl-health*"
+              (should (string-match-p (regexp-quote detail) (buffer-string))))))))))
+
+;; audit-3 #17
+(ert-deftest agent-repl-itest-daemon-own-adoption-is-logged-at-info ()
+  "The positive of `elisp.daemon.own-adopted': logged at INFO when THIS
+Emacs spawned the daemon it adopts.  Ledger: \"logs own-/foreign-adopted\";
+`agent-repl-itest-daemon-links-up-once-the-addr-appears' only pins the
+negative (never `foreign-adopted'), leaving the positive claim unpinned."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((binary (agent-repl-itest--ensure-binary)))
+      (agent-repl-itest--stop-daemon daemon t)
+      (agent-repl-itest--with-cold-start
+        (agent-repl-itest-daemon--with-stubs boot-dir
+          (let* ((build (agent-repl-itest-daemon--write-script
+                         (expand-file-name "build.sh" boot-dir) "exit 0"))
+                 (start (agent-repl-itest-daemon--write-script
+                         (expand-file-name "start.sh" boot-dir)
+                         (format "exec %s" (shell-quote-argument binary))))
+                 (agent-repl-daemon-build-script build)
+                 (agent-repl-daemon-command (list start))
+                 (agent-repl-daemon-boot-timeout-seconds 10)
+                 (agent-repl-link-reconnect-interval-seconds 0.05)
+                 (agent-repl-link-up-functions nil)
+                 (agent-repl-link-no-daemon-functions nil))
+            ;; Act.
+            (agent-repl-daemon-ensure)
+            ;; Assert.
+            (agent-repl-itest--wait-until (lambda () (agent-repl-link-up-p))
+                                          nil "the link to come up")
+            (agent-repl-itest--await-log daemon "elisp.daemon.own-adopted" "info")
+            (should (agent-repl-itest--logged-p daemon "elisp.daemon.own-adopted" "info"))))))))
+
 (provide 'test-integration-daemon)
 
 ;;; test-integration-daemon.el ends here

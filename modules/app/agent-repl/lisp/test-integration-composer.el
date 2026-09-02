@@ -1548,6 +1548,573 @@ for its own turn.  Only the outage half of that ruling was pinned."
                    "\\`[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-4[0-9a-f]\\{3\\}-[89ab][0-9a-f]\\{3\\}-[0-9a-f]\\{12\\}\\'"
                    drained-key)))))))
 
+;;;; ---- Audit-3 additions (R-SUITE-3) ----
+;;
+;; Findings 43-51 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+(declare-function agent-repl-link-successor "daemon-link" ())
+(declare-function agent-repl-update-pr "commands" ())
+(declare-function agent-repl-explain "commands" ())
+(declare-function agent-repl-rebase-onto-origin-master "commands" ())
+(declare-function agent-repl-create-or-update-pr "commands" (&optional excluded))
+(declare-function agent-repl--build-create-or-update-pr-prompt "commands" (excluded &optional ws))
+(declare-function agent-repl-send-and-hide "input" ())
+(declare-function agent-repl-send-with-metaprompt "input" ())
+(declare-function agent-repl--fire-metaprompt-read "input" (ws))
+(declare-function agent-repl--command-prefix-for "input" (ws))
+(declare-function agent-repl--on-close "panels" (&optional ws))
+(defvar agent-repl-link-promote-functions)
+(defvar agent-repl-update-pr-prompt)
+(defvar agent-repl-rebase-onto-origin-master-prompt)
+(defvar agent-repl-explain-prompt-template)
+(defvar agent-repl--input-history)
+
+;;;; ---- Findings 43-45: hold/replay under a REAL handover and link ----
+;;
+;; RULING (frozen, not re-litigated): #43-45 are believed already
+;; implemented in production.  They are pinned against the REAL path --
+;; `agent-repl-host-handle-refusal' is NEVER stubbed here, because stubbing
+;; it is exactly the audit-2 #32 hole this suite exists to close.
+
+(defun agent-repl-itest-composer--announce-shutdown (daemon address)
+  "Push `shutdown_announced' on DAEMON's daemon stream, naming ADDRESS.
+Mirrors `agent-repl-itest-link--announce' (test-integration-link.el), kept
+local here so this file's findings do not depend on another suite's
+helpers."
+  (agent-repl-itest--push
+   daemon "daemon"
+   `((shutdownAnnounced
+      . ((address . ,address)
+         (cause . ((selfMergeRollout . ())))
+         (expectedOutageMs . "1500")
+         (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time))))))))))
+
+;; audit-3 #43
+(ert-deftest agent-repl-itest-composer-transferring-away-holds-and-replays-under-the-same-key ()
+  "A `transferring_away' refusal HOLDS the prompt and replays it on PROMOTION,
+under the SAME idempotency key, with the queue left empty afterward.
+input.el `--input-on-handover-refusal' (\"outage queue under THIS
+attempt's KEY ... released on the promotion\"); prompt-queue.el
+`--prompt-queue-on-link-promote'.  The audit-2 #32 tests stubbed
+`agent-repl-host-handle-refusal', which is exactly the hole a production
+regression could hide in; nothing here is stubbed."
+  ;; Arrange: a real link to the primary; host.el's own register+subscribe.
+  (agent-repl-itest--with-fake-daemon primary
+    (let ((agent-repl-link-reconnect-interval-seconds 0.05)
+          (failed-key nil)
+          (buf nil))
+      (agent-repl--ws-put agent-repl-itest-composer--ws
+                          :project-dir agent-repl-itest-composer--dir)
+      (unwind-protect
+          (progn
+            (agent-repl-link-connect)
+            (agent-repl-itest--await-subscriber primary "daemon")
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-host-ref agent-repl-itest-composer--ws))
+             nil "host.el's own register+subscribe on the primary")
+            (agent-repl-itest--push
+             primary "host"
+             `((host . ,(agent-repl-itest-composer--live 'open)))
+             (plist-get (agent-repl-host-ref agent-repl-itest-composer--ws) :id))
+            (agent-repl-itest--wait-until
+             (lambda () (eq (agent-repl-host-composer-gate agent-repl-itest-composer--ws) :open))
+             nil "the primary's composer gate to open")
+            ;; Act: announce the successor and wait for the link to accept it.
+            (agent-repl-itest--with-second-daemon primary successor
+              (let ((successor-address (agent-repl-itest-daemon-address successor)))
+                (agent-repl-itest-composer--announce-shutdown primary successor-address)
+                (agent-repl-itest--await-subscriber successor "daemon")
+                (agent-repl-itest--wait-until
+                 #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+                ;; Script the primary's SubmitPrompt to refuse with the handover.
+                (agent-repl-itest--script
+                 primary "SubmitPrompt"
+                 `((error . ((transferringAway . ((address . ,successor-address)))))))
+                (setq buf (agent-repl-itest-composer--make-buffer
+                          agent-repl-itest-composer--ws "run the tests"))
+                ;; Act: send -- refused as a handover, not a user-facing failure.
+                (setq failed-key
+                      (agent-repl--send :user-sent nil agent-repl-itest-composer--ws))
+                (should failed-key)
+                ;; Assert: ONE outage entry, the text still in the buffer.
+                (agent-repl-itest--wait-until
+                 (lambda () (agent-repl-prompt-queue-pending
+                             agent-repl-itest-composer--ws :outage))
+                 nil "the prompt to reach the outage queue")
+                (should (equal (length (agent-repl-prompt-queue-pending
+                                       agent-repl-itest-composer--ws :outage))
+                               1))
+                (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
+                ;; Assert: the real handover walk adopted WS onto the
+                ;; successor -- `agent-repl-host-handle-refusal' ran for
+                ;; real and was never stubbed.
+                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                (agent-repl-itest--wait-until
+                 (lambda () (eq (agent-repl-host-conn agent-repl-itest-composer--ws)
+                                (agent-repl-link-successor)))
+                 nil "the workspace to be adopted onto the successor")
+                ;; Act: the old daemon's stream closes -- silent promotion.
+                (agent-repl-itest--end primary "daemon" nil nil t)
+                (agent-repl-itest--wait-until
+                 (lambda () (null (agent-repl-link-successor)))
+                 nil "the successor to be promoted to primary")
+                ;; Assert: exactly one SubmitPrompt reached the successor,
+                ;; under the SAME idempotency key as the failed attempt, and
+                ;; the outage queue is now empty.
+                (agent-repl-itest--await-call successor "SubmitPrompt")
+                (let ((calls (agent-repl-itest--calls successor "SubmitPrompt")))
+                  (should (equal (length calls) 1))
+                  (should (equal (agent-repl-itest--body-field
+                                  (alist-get 'body (car calls)) 'idempotencyKey)
+                                 failed-key)))
+                (should (null (agent-repl-prompt-queue-pending
+                               agent-repl-itest-composer--ws :outage))))))
+        (when buf (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))
+        (ignore-errors (agent-repl-host-forget agent-repl-itest-composer--ws))
+        (ignore-errors (agent-repl-link-teardown))
+        (ignore-errors (agent-repl-link--cancel-reconnect))))))
+
+;; audit-3 #43
+(ert-deftest agent-repl-itest-composer-default-promote-hooks-include-the-prompt-queue-drain ()
+  "The default `agent-repl-link-promote-functions' includes the queue's own hook.
+prompt-queue.el registers `agent-repl--prompt-queue-on-link-promote' at
+load time; a suite that only ever exercised a scratch-bound hook list would
+never notice a load-time `add-hook' that silently stopped firing."
+  (should (memq #'agent-repl--prompt-queue-on-link-promote
+                agent-repl-link-promote-functions)))
+
+;; audit-3 #44
+(ert-deftest agent-repl-itest-composer-outage-drain-skips-a-dead-connection ()
+  "A drain against a DEAD connection WARNs `dead-conn' and re-queues, sending nothing.
+R-STABILITY ruling: \"the outage drain skips a dead conn and re-queues\".
+The connection is REALLY closed by the test, not stubbed."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((conn (agent-repl-host-conn agent-repl-itest-composer--ws)))
+        (agent-repl--prompt-queue-enqueue
+         agent-repl-itest-composer--ws :outage
+         (agent-repl--input-said "run the tests" nil)
+         :user-sent "run the tests" "held-key-dead-conn")
+        (agent-repl-connect-close conn)
+        ;; Act: the link is up, but WS's own connection is dead.
+        (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+          (agent-repl-prompt-queue-drain agent-repl-itest-composer--ws :outage))
+        ;; Assert: nothing sent, the entry stays queued, the WARN is recorded.
+        (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
+        (should (agent-repl-prompt-queue-pending agent-repl-itest-composer--ws :outage))
+        (should (agent-repl-itest-composer--logged-p
+                 daemon "elisp.prompt-queue.dead-conn" "warn"))))))
+
+;; audit-3 #44
+(ert-deftest agent-repl-itest-composer-outage-drain-warns-with-no-connection-at-all ()
+  "A drain with NO connection at all (host conn and primary both nil) WARNs `no-conn'.
+The other half of the liveness gate: an unregistered or unlinked workspace
+has no connection to judge as dead, and its held entry must stay queued
+rather than being silently dropped."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((ws "itest-composer-no-conn-ws"))
+      (agent-repl--prompt-queue-enqueue
+       ws :outage (agent-repl--input-said "run the tests" nil)
+       :user-sent "run the tests" "held-key-no-conn")
+      ;; Act.
+      (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t))
+                ((symbol-function 'agent-repl-host-conn) (lambda (_ws) nil))
+                ((symbol-function 'agent-repl-link-primary) (lambda () nil)))
+        (agent-repl-prompt-queue-drain ws :outage))
+      ;; Assert.
+      (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
+      (should (agent-repl-prompt-queue-pending ws :outage))
+      (should (agent-repl-itest--logged-p daemon "elisp.prompt-queue.no-conn" "warn")))))
+
+;; audit-3 #45
+(ert-deftest agent-repl-itest-composer-outage-drain-replays-two-held-prompts-in-order ()
+  "Two held prompts drain OLDEST FIRST, each under its own original key.
+prompt-queue.el: \"oldest first\"; elisp.md: \"replay in order\" -- a drain
+that reordered or merged keys would deliver the user's words out of the
+order they wrote them."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (agent-repl--prompt-queue-enqueue
+       agent-repl-itest-composer--ws :outage
+       (agent-repl--input-said "first held prompt" nil)
+       :user-sent "first held prompt" "held-key-first")
+      (agent-repl--prompt-queue-enqueue
+       agent-repl-itest-composer--ws :outage
+       (agent-repl--input-said "second held prompt" nil)
+       :user-sent "second held prompt" "held-key-second")
+      ;; Act.
+      (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+        (agent-repl-prompt-queue-drain agent-repl-itest-composer--ws :outage))
+      (agent-repl-itest--await-call daemon "SubmitPrompt" 2)
+      ;; Assert.
+      (let ((bodies (agent-repl-itest--call-bodies daemon "SubmitPrompt")))
+        (should (equal (mapcar (lambda (b) (car (agent-repl-itest-composer--text-blocks b)))
+                               bodies)
+                       '("first held prompt" "second held prompt")))
+        (should (equal (mapcar (lambda (b) (agent-repl-itest--body-field b 'idempotencyKey))
+                               bodies)
+                       '("held-key-first" "held-key-second")))))))
+
+;; audit-3 #46
+(ert-deftest agent-repl-itest-composer-image-only-submission-carries-no-text-block ()
+  "An image attached to an EMPTY buffer submits as an image-only UserSaid.
+user.proto: UserSaid is \"NOT a bare TextBlock\"; input.el: \"Empty TEXT
+contributes no block\" -- an image-only send must not be treated as
+send-empty, and must carry no TextBlock at all."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+            (buf (agent-repl-itest-composer--make-buffer agent-repl-itest-composer--ws "")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert: one image block, no text block, not send-empty.
+              (let* ((body (agent-repl-itest-composer--submit-body daemon))
+                     (blocks (agent-repl-itest--body-field body 'said 'content 'blocks)))
+                (should (equal (mapcar #'caar blocks) '(image)))
+                (should (equal (agent-repl-itest-composer--image-paths body) (list image)))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+;; audit-3 #47
+(ert-deftest agent-repl-itest-composer-queue-deferred-prompt-clears-the-composer-and-holds-one-entry ()
+  "`agent-repl-queue-deferred-prompt', the REAL command, empties the composer
+and clears its attachments, pushes history, and holds exactly ONE
+`:deferred' entry; the finish edge then drains it with BOTH its text and
+its image.
+Neither suite before this one exercised `agent-repl-queue-deferred-prompt'
+itself -- both used `--prompt-queue-enqueue' directly."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((image (expand-file-name "pasted.png" agent-repl-itest-composer--dir))
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "queue this for later")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+              (with-current-buffer buf (agent-repl-input-attach-image image "image/png"))
+              ;; Act.
+              (agent-repl-queue-deferred-prompt)
+              ;; Assert: composer emptied, attachments cleared.
+              (should (equal (with-current-buffer buf (buffer-string)) ""))
+              (should (null (agent-repl-input-attachments agent-repl-itest-composer--ws)))
+              ;; Assert: history carries the raw text.
+              (should (equal (car (buffer-local-value 'agent-repl--input-history buf))
+                             "queue this for later"))
+              ;; Assert: exactly one deferred entry is pending.
+              (should (equal (length (agent-repl-prompt-queue-pending
+                                      agent-repl-itest-composer--ws :deferred))
+                             1))
+              ;; Act: the finish edge releases it.
+              (agent-repl--prompt-queue-on-finish agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert: the drained submission carries BOTH text and image.
+              (let ((body (agent-repl-itest-composer--submit-body daemon)))
+                (should (equal (car (agent-repl-itest-composer--text-blocks body))
+                               "queue this for later"))
+                (should (equal (agent-repl-itest-composer--image-paths body) (list image)))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+;; audit-3 #47
+(ert-deftest agent-repl-itest-composer-finish-edge-releases-only-one-deferred-prompt ()
+  "One finish edge releases exactly ONE deferred prompt, however many are held.
+prompt-queue.el: \"each deferred prompt is meant to be its own discrete
+turn\" -- firing the whole queue at one settle would put several prompts
+into a single turn's wake and lose exactly the guarantee deferral gives."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'agent-repl-link-up-p) (lambda () t)))
+        (agent-repl--prompt-queue-enqueue
+         agent-repl-itest-composer--ws :deferred
+         (agent-repl--input-said "first deferred" nil)
+         :deferred-prompt "first deferred")
+        (agent-repl--prompt-queue-enqueue
+         agent-repl-itest-composer--ws :deferred
+         (agent-repl--input-said "second deferred" nil)
+         :deferred-prompt "second deferred")
+        ;; Act: ONE finish edge.
+        (agent-repl--prompt-queue-on-finish agent-repl-itest-composer--ws)
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        ;; Assert: exactly one sent, one still pending.
+        (should (equal (length (agent-repl-itest--calls daemon "SubmitPrompt")) 1))
+        (should (equal (car (agent-repl-itest-composer--text-blocks
+                             (agent-repl-itest-composer--submit-body daemon)))
+                       "first deferred"))
+        (should (equal (length (agent-repl-prompt-queue-pending
+                                agent-repl-itest-composer--ws :deferred))
+                       1))))))
+
+;;;; ---- Finding 48: the REAL command sites, not `agent-repl--send' by keyword ----
+;;
+;; The twelve origin tests above call `agent-repl--send' with the keyword
+;; directly.  Each deftest below drives the actual production command
+;; function instead, so the assertion is that THAT site passes its own
+;; value -- every git/gh boundary and interactive reader it touches is
+;; stubbed with `cl-letf', and none of them runs real git.
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-update-pr-command-site-sends-its-own-text-and-origin ()
+  "`agent-repl-update-pr', the REAL command entry point, sends its own text."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () agent-repl-itest-composer--ws))
+                ((symbol-function 'agent-repl--ws-current-log-name)
+                 (lambda () agent-repl-itest-composer--ws)))
+        ;; Act.
+        (agent-repl-update-pr)
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        ;; Assert.
+        (let ((body (agent-repl-itest-composer--submit-body daemon)))
+          (should (equal (car (agent-repl-itest-composer--text-blocks body))
+                         agent-repl-update-pr-prompt))
+          (should (equal (agent-repl-itest--body-field body 'origin)
+                         "PROMPT_ORIGIN_COMMAND_UPDATE_PR")))))))
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-explain-command-site-sends-its-own-text-and-origin ()
+  "`agent-repl-explain', the REAL command entry point, sends its own text.
+Stubs the editor-context boundary (`agent-repl--context-reference') so the
+assertion is about the SEND SITE, not about magit/region detection."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () agent-repl-itest-composer--ws))
+                ((symbol-function 'agent-repl--ws-current-log-name)
+                 (lambda () agent-repl-itest-composer--ws))
+                ((symbol-function 'agent-repl--context-reference)
+                 (lambda () "some/file.el:42")))
+        ;; Act.
+        (agent-repl-explain)
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        ;; Assert.
+        (let ((body (agent-repl-itest-composer--submit-body daemon)))
+          (should (equal (car (agent-repl-itest-composer--text-blocks body))
+                         (format agent-repl-explain-prompt-template "some/file.el:42")))
+          (should (equal (agent-repl-itest--body-field body 'origin)
+                         "PROMPT_ORIGIN_COMMAND_EXPLAIN_CONTEXT")))))))
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-rebase-command-site-sends-its-own-text-and-origin-after-fetch ()
+  "`agent-repl-rebase-onto-origin-master' sends its own text ONLY after fetch.
+Stubs the `agent-repl--async-git' boundary -- NO REAL GIT -- to answer as
+though `git fetch origin' succeeded."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () agent-repl-itest-composer--ws))
+                ((symbol-function 'agent-repl--ws-current-log-name)
+                 (lambda () agent-repl-itest-composer--ws))
+                ((symbol-function 'agent-repl--async-git)
+                 (lambda (_label _root _args callback) (funcall callback t "stub fetch ok"))))
+        ;; Act.
+        (agent-repl-rebase-onto-origin-master)
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        ;; Assert.
+        (let ((body (agent-repl-itest-composer--submit-body daemon)))
+          (should (equal (car (agent-repl-itest-composer--text-blocks body))
+                         agent-repl-rebase-onto-origin-master-prompt))
+          (should (equal (agent-repl-itest--body-field body 'origin)
+                         "PROMPT_ORIGIN_COMMAND_REBASE")))))))
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-create-or-update-pr-command-site-sends-its-own-text-and-origin ()
+  "`agent-repl-create-or-update-pr', the REAL command entry point, sends its own text.
+With no composer draft to prefix, the sent text is exactly the built
+/create-or-update-pr prompt string."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () agent-repl-itest-composer--ws))
+                ((symbol-function 'agent-repl--ws-current-log-name)
+                 (lambda () agent-repl-itest-composer--ws)))
+        ;; Act.
+        (agent-repl-create-or-update-pr)
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        ;; Assert.
+        (let ((body (agent-repl-itest-composer--submit-body daemon)))
+          (should (equal (car (agent-repl-itest-composer--text-blocks body))
+                         (agent-repl--build-create-or-update-pr-prompt
+                          nil agent-repl-itest-composer--ws)))
+          (should (equal (agent-repl-itest--body-field body 'origin)
+                         "PROMPT_ORIGIN_COMMAND_CREATE_OR_UPDATE_PR")))))))
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-send-and-hide-command-site-sends-its-own-origin ()
+  "`agent-repl-send-and-hide', the REAL command entry point, sends its own origin.
+Stubs the panel-closing boundary (`agent-repl--on-close') -- window layout
+is not what this assertion is about."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl--ws-current-log-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl--on-close) (lambda (&optional _ws) nil)))
+              ;; Act.
+              (agent-repl-send-and-hide)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (let ((body (agent-repl-itest-composer--submit-body daemon)))
+                (should (equal (car (agent-repl-itest-composer--text-blocks body))
+                               "run the tests"))
+                (should (equal (agent-repl-itest--body-field body 'origin)
+                               "PROMPT_ORIGIN_USER_SENT_AND_HIDE"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-send-with-metaprompt-command-site-sends-its-own-origin-and-composed-text ()
+  "`agent-repl-send-with-metaprompt', the REAL command entry point, sends its own origin.
+The composed text carries the metaprompt read-directive prepended, exactly
+as `agent-repl--prepare-input' with FORCE-METAPROMPT builds it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl--ws-current-log-name)
+                       (lambda () agent-repl-itest-composer--ws)))
+              (let ((expected (agent-repl--prepare-input
+                               agent-repl-itest-composer--ws "run the tests" t)))
+                ;; Act.
+                (agent-repl-send-with-metaprompt)
+                (agent-repl-itest--await-call daemon "SubmitPrompt")
+                ;; Assert.
+                (let ((body (agent-repl-itest-composer--submit-body daemon)))
+                  (should (equal (car (agent-repl-itest-composer--text-blocks body)) expected))
+                  (should (equal (agent-repl-itest--body-field body 'origin)
+                                 "PROMPT_ORIGIN_USER_SENT_WITH_METAPROMPT")))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+;; audit-3 #48
+(ert-deftest agent-repl-itest-composer-fire-metaprompt-read-command-site-sends-its-own-origin ()
+  "`agent-repl--fire-metaprompt-read', the REAL command entry point, sends its own origin.
+The programmatic re-read carries the meta-wrapped read-directive as its
+whole text, with no user text riding along."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((expected (agent-repl--meta-wrap
+                       (agent-repl--command-prefix-for agent-repl-itest-composer--ws))))
+        ;; Act.
+        (agent-repl--fire-metaprompt-read agent-repl-itest-composer--ws)
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        ;; Assert.
+        (let ((body (agent-repl-itest-composer--submit-body daemon)))
+          (should (equal (car (agent-repl-itest-composer--text-blocks body)) expected))
+          (should (equal (agent-repl-itest--body-field body 'origin)
+                         "PROMPT_ORIGIN_METAPROMPT_READ")))))))
+
+;; audit-3 #49
+(ert-deftest agent-repl-itest-composer-merging-refusal-does-not-push-history ()
+  "A `merging' refusal must NOT push history: nothing was ever sent.
+fanout §10: only success `:turn' clears the input and pushes history; a
+refusal that pushed anyway would let the refused text pollute history
+recall as though it had been delivered."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((merging . ())))))
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (progn
+              (with-current-buffer buf
+                (setq agent-repl--input-history (list "sentinel-untouched")))
+              ;; Act.
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest-composer--await-log daemon "elisp.input.refused-merging" "warn")
+              ;; Assert: history's head is UNCHANGED.
+              (should (equal (buffer-local-value 'agent-repl--input-history buf)
+                             (list "sentinel-untouched"))))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+;; audit-3 #50
+(ert-deftest agent-repl-itest-composer-unknown-error-arm-message-names-the-arm ()
+  "The generic refusal `message' names the exact refusing ARM, not just \"refused\".
+input.el: `(message \"agent-repl: submission refused (%S)\" arm)' -- a
+message that dropped the arm would tell the user nothing about WHICH
+refusal happened."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "SubmitPrompt" '((error . ((noSession . ())))))
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((messages nil))
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args)
+                     (push (if args (apply #'format fmt args) fmt) messages)
+                     nil)))
+          ;; Act.
+          (agent-repl--send :user-sent "run the tests" agent-repl-itest-composer--ws)
+          (agent-repl-itest--await-call daemon "SubmitPrompt")
+          (agent-repl-itest--wait-until
+           (lambda () (member "agent-repl: submission refused (:no-session)" messages))
+           nil "the arm-naming refusal message")
+          ;; Assert: the EXACT message, naming the arm.
+          (should (member "agent-repl: submission refused (:no-session)" messages)))))))
+
+;; audit-3 #51 (RULED, fixed in parallel -- EXPECTED RED until that lands)
+(ert-deftest agent-repl-itest-composer-explicit-text-send-does-not-erase-the-unrelated-draft ()
+  "A command send with EXPLICIT text must NOT erase the composer's unrelated draft.
+Teamlead ruling (frozen, not re-litigated): only a send SOURCED FROM THE
+COMPOSER BUFFER clears it on acceptance; `agent-repl-update-pr' sends its
+own fixed text, so the user's unrelated \"my draft\" must survive the ack.
+`--input-accepted' currently erases unconditionally, so this is EXPECTED
+RED until the parallel fix lands."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "my draft")))
+        (unwind-protect
+            (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                       (lambda () agent-repl-itest-composer--ws))
+                      ((symbol-function 'agent-repl--ws-current-log-name)
+                       (lambda () agent-repl-itest-composer--ws)))
+              ;; Act: a command site with its OWN explicit text.
+              (agent-repl-update-pr)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              (agent-repl-itest-composer--await-log daemon "elisp.input.accepted" nil)
+              ;; Assert: the unrelated draft SURVIVES the accepted send.
+              (should (equal (with-current-buffer buf (buffer-string)) "my draft")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 (provide 'test-integration-composer)
 
 ;;; test-integration-composer.el ends here

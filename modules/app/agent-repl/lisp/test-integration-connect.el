@@ -604,6 +604,193 @@ the idempotency key that makes it safe."
                                       daemon "RegisterWorkspace")))))
         (agent-repl-connect-close conn)))))
 
+;;;; ---- Audit-3 additions (R-SUITE-3) ----
+;;
+;; Findings 1-3 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+
+;; audit-3 #1
+(ert-deftest agent-repl-itest-connect-unary-on-a-closed-connection-never-reaches-the-wire ()
+  "A unary call on a CLOSED connection fails loudly and sends nothing.
+elisp.md \"unary calls fail loudly\"; fanout §3: `agent-repl-connect-close'
+marks the connection dead (connect.el `--check-alive').  This fails if a
+call on a dead connection is quietly dropped, if it is misclassified as
+some kind other than `:transport', or -- the fact only the fake can see --
+if the request reaches the daemon anyway."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (agent-repl-connect-close conn)
+      ;; Act.
+      (let ((detail
+             (condition-case err
+                 (progn (agent-repl-connect-unary-sync
+                         conn "RegisterWorkspace"
+                         (json-serialize '((dir . "/tmp/itest-ws"))))
+                        nil)
+               (agent-repl-connect-error (cadr err)))))
+        ;; Assert.
+        (should detail)
+        (should (eq (plist-get detail :kind) :transport))
+        ;; The wire was never touched.
+        (should (null (agent-repl-itest--calls daemon "RegisterWorkspace")))
+        (should (agent-repl-itest--logged-p
+                 daemon "elisp.connect.call-on-closed-connection" "error"))))))
+
+;; audit-3 #1
+(ert-deftest agent-repl-itest-connect-stream-on-a-closed-connection-never-subscribes ()
+  "Opening a stream on a CLOSED connection fails loudly and subscribes nobody.
+The same `--check-alive' guard fronts `agent-repl-connect-stream', so a
+dead connection can never stand a subscription -- a stream that slipped
+past it would be a subscriber production believes it does not have."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (agent-repl-connect-close conn)
+      ;; Act.
+      (let ((detail
+             (condition-case err
+                 (progn (agent-repl-connect-stream
+                         conn "WatchDaemon" (json-serialize '())
+                         (lambda (_push) nil)
+                         (lambda (_outcome) nil))
+                        nil)
+               (agent-repl-connect-error (cadr err)))))
+        ;; Assert.
+        (should detail)
+        (should (eq (plist-get detail :kind) :transport))
+        (should (null (agent-repl-itest--calls daemon "WatchDaemon")))
+        (should (null (agent-repl-itest--subscribers daemon "daemon")))))))
+
+;; audit-3 #2
+(ert-deftest agent-repl-itest-connect-on-open-runs-once-before-the-first-push ()
+  "ON-OPEN fires exactly once, and BEFORE any frame, on an accepted stream.
+fanout §3 STANDING-STREAM ACCEPTANCE: the acceptance instant is the one
+the consumer re-subscribes on, so it must precede the first push.  R-ACCEPT
+pinned this in unit tests only; against a real accepted stream this fails
+if ON-OPEN runs late (after the snapshot frame the daemon replays), runs
+more than once, or never runs at all."
+  ;; Arrange: a standing snapshot, so a frame is waiting the moment the
+  ;; subscription is accepted.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--push
+     daemon "daemon"
+     '((drainScheduled . ((atMs . "1735689600000") (reason . ((deploy . ()))))))
+     nil t)
+    (let ((events nil)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act.
+            (agent-repl-connect-stream
+             conn "WatchDaemon" (json-serialize '())
+             (lambda (_push) (push :push events))
+             (lambda (_outcome) nil)
+             (lambda () (push :open events)))
+            (agent-repl-itest--wait-until
+             (lambda () (memq :push events)) nil
+             "the replayed drainScheduled snapshot to reach ON-PUSH")
+            ;; Assert: newest-first, so the tail is the acceptance instant.
+            (should (equal (reverse events) '(:open :push)))
+            (should (equal 1 (seq-count (lambda (e) (eq e :open)) events))))
+        (agent-repl-connect-close conn)))))
+
+;; audit-3 #2
+(ert-deftest agent-repl-itest-connect-on-open-never-runs-for-an-unset-ref-refusal ()
+  "A stream refused at validation never reaches its acceptance instant.
+fanout §3 STANDING-STREAM ACCEPTANCE: \"a non-200 ... never calls
+[ON-OPEN]\".  A refusal that ran ON-OPEN anyway would tell every consumer
+it had a standing subscription it never got."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((opened 0) (outcomes nil)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act: WatchHostWorkspaceRequest with its non-optional
+            ;; `workspace' field unset.
+            (agent-repl-connect-stream
+             conn "WatchHostWorkspace" (json-serialize '())
+             (lambda (_push) nil)
+             (lambda (outcome) (push outcome outcomes))
+             (lambda () (setq opened (1+ opened))))
+            (agent-repl-itest--wait-until
+             (lambda () outcomes) nil
+             "the refused WatchHostWorkspace stream's close outcome")
+            ;; Assert.
+            (should (eq (car (car outcomes)) :error))
+            (should (equal 0 opened)))
+        (agent-repl-connect-close conn)))))
+
+;; audit-3 #2
+(ert-deftest agent-repl-itest-connect-on-open-never-runs-for-an-unimplemented-stream ()
+  "A stream the daemon answers `unimplemented' never reaches ON-OPEN either.
+The sibling of the validation refusal: a DIFFERENT refusal reason, the
+same acceptance contract."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((opened 0) (outcomes nil)
+          (conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act: a webapp-only stream.
+            (agent-repl-connect-stream
+             conn "WatchFeed" (json-serialize '())
+             (lambda (_push) nil)
+             (lambda (outcome) (push outcome outcomes))
+             (lambda () (setq opened (1+ opened))))
+            (agent-repl-itest--wait-until
+             (lambda () outcomes) nil
+             "the unimplemented WatchFeed stream's close outcome")
+            ;; Assert.
+            (should (equal (plist-get (cadr (car outcomes)) :code) "unimplemented"))
+            (should (equal 0 opened)))
+        (agent-repl-connect-close conn)))))
+
+;; audit-3 #3
+(ert-deftest agent-repl-itest-connect-unary-request-negotiates-no-compression ()
+  "A unary request offers and carries NO content encoding.
+fanout §3: \"No compression negotiated.\"  An encoding the transport
+quietly started advertising would let the daemon answer a compressed body
+the reader does not decompress -- a failure that shows up as a parse error
+far from its cause.  Only the recorded HEADERS can see this; neither the
+parsed body nor the raw body can."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act.
+            (agent-repl-connect-unary-sync
+             conn "RegisterWorkspace" (json-serialize '((dir . "/tmp/itest-ws"))))
+            ;; Assert.
+            (dolist (header '("Connect-Accept-Encoding" "Connect-Content-Encoding"
+                              "Accept-Encoding" "Content-Encoding"))
+              (should (null (agent-repl-itest--call-header
+                             daemon "RegisterWorkspace" header)))))
+        (agent-repl-connect-close conn)))))
+
+;; audit-3 #3
+(ert-deftest agent-repl-itest-connect-stream-request-negotiates-no-compression ()
+  "A stream request offers and carries no content encoding either.
+The streaming half of fanout §3's \"No compression negotiated\": the
+framed envelope sequence has its OWN encoding headers, so the unary
+assertion does not cover it."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((conn (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+      (unwind-protect
+          (progn
+            ;; Act.
+            (agent-repl-itest-connect--watch-daemon conn (lambda (_outcome) nil))
+            (agent-repl-itest--await-call daemon "WatchDaemon")
+            ;; Assert.
+            (dolist (header '("Connect-Accept-Encoding" "Connect-Content-Encoding"
+                              "Accept-Encoding" "Content-Encoding"))
+              (should (null (agent-repl-itest--call-header
+                             daemon "WatchDaemon" header)))))
+        (agent-repl-connect-close conn)))))
+
 (provide 'test-integration-connect)
 
 ;;; test-integration-connect.el ends here

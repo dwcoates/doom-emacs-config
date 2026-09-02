@@ -32,6 +32,7 @@
 (declare-function agent-repl-link-up-p "daemon-link")
 (declare-function agent-repl-link-teardown "daemon-link")
 (declare-function agent-repl-connect-close "connect")
+(declare-function agent-repl-connect-connection-alive-p "connect")
 (declare-function agent-repl-host-register "host")
 (declare-function agent-repl-host-ref "host")
 (declare-function agent-repl-host-conn "host")
@@ -41,6 +42,7 @@
 (defvar agent-repl-link-down-functions)
 (defvar agent-repl-link-handover-functions)
 (defvar agent-repl-link-drain-functions)
+(defvar agent-repl-link-promote-functions)
 (defvar agent-repl-link-no-daemon-functions)
 (defvar agent-repl-link-drain)
 (defvar agent-repl-link-drain-segment)
@@ -115,6 +117,17 @@ a plain bounce: the same daemon is coming back, so nothing dual-attaches."
                  `((cause . ,(or cause '((selfMergeRollout . ()))))
                    (expectedOutageMs . "1500")
                    (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time)))))))))))
+
+(defun agent-repl-itest-link--boom-up-hook (&rest _)
+  "A link-up consumer that always signals, for pinning hook containment.
+Named (not a `lambda') so `agent-repl-link--run-hook''s ERROR record
+names it by symbol, and so it can be `remove-hook'd by name."
+  (error "agent-repl-itest: boom (up)"))
+
+(defun agent-repl-itest-link--boom-down-hook (&rest _)
+  "A link-down consumer that always signals, for pinning hook containment.
+Named for the same reason as `agent-repl-itest-link--boom-up-hook'."
+  (error "agent-repl-itest: boom (down)"))
 
 ;;;; ---- Scenario 2: reconnect after a daemon restart ----
 
@@ -891,6 +904,383 @@ has never decoded here."
        nil "the bounce indicator to name the maintenance drain")
       (should (equal agent-repl-link-drain-segment
                      "daemon restarting (scheduled drain: maintenance)")))))
+
+;;;; ---- Audit-3 additions (R-SUITE-3) ----
+;;
+;; Findings 4-11 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits to the
+;; sections above.
+
+;; audit-3 #4
+(ert-deftest agent-repl-itest-link-contained-hook-failure-does-not-block-host-or-roster-up ()
+  "A link-up consumer that signals is CONTAINED: the remaining consumers —
+host.el's register+subscribe, roster.el's re-subscribe — still run, and
+the failure is recorded naming the hook and the consumer.
+R-STABILITY ruling / fanout §6 `elisp.link.hook-consumer-failed'
+(`agent-repl-link--run-hook'): \"a consumer that signals must not silently
+take the consumers behind it down with it\".  Registered at DEPTH -100 so
+it runs ahead of host.el's and roster.el's own `add-hook' registrations
+regardless of load order — a regression that let one bad consumer cancel
+the rest would leave WS unregistered and the roster unsubscribed here."
+  (agent-repl-itest--with-fake-daemon daemon
+    (let ((ws "itest-link-hook-up-ws")
+          (dir "/tmp/itest-link-hook-up-ws"))
+      (agent-repl--ws-put ws :project-dir dir)
+      (add-hook 'agent-repl-link-up-functions
+                #'agent-repl-itest-link--boom-up-hook -100)
+      (unwind-protect
+          (agent-repl-itest-link--with-real-hooks daemon
+            ;; Assert: the failure is recorded, naming the hook and the
+            ;; consumer.
+            (agent-repl-itest--await-log
+             daemon "elisp.link.hook-consumer-failed" "error")
+            (let ((entry (car (agent-repl-itest--log-entries
+                                daemon "elisp.link.hook-consumer-failed" "error"))))
+              (should (string-match-p "hook=agent-repl-link-up-functions"
+                                      (alist-get 'message entry)))
+              (should (string-match-p "consumer=agent-repl-itest-link--boom-up-hook"
+                                      (alist-get 'message entry))))
+            ;; Assert: host.el still registered and subscribed WS, despite
+            ;; running behind the failing consumer.
+            (agent-repl-itest--wait-until
+             (lambda () (agent-repl-host-ref ws)) nil
+             "host.el's register+subscribe despite the failing up hook")
+            (should (agent-repl-host-ref ws))
+            ;; Assert: roster.el's subscriber stands too.
+            (agent-repl-itest--await-subscriber daemon "roster"))
+        (remove-hook 'agent-repl-link-up-functions
+                     #'agent-repl-itest-link--boom-up-hook)))))
+
+;; audit-3 #4
+(ert-deftest agent-repl-itest-link-contained-hook-failure-does-not-block-reconnect ()
+  "A link-DOWN consumer that signals is CONTAINED too: the schedule-
+reconnect call downstream of the hook loop still runs, and the link
+stands a fresh stream on the daemon that returns.
+`agent-repl-link--handle-close' runs the down hooks BEFORE
+`agent-repl-link--schedule-reconnect', so a signalling consumer must not
+swallow the poll behind it — a regression that let the failure propagate
+out of the dolist would leave the reconnect loop never armed."
+  (agent-repl-itest--with-fake-daemon primary
+    (add-hook 'agent-repl-link-down-functions
+              #'agent-repl-itest-link--boom-down-hook -100)
+    (unwind-protect
+        (agent-repl-itest-link--with-real-hooks primary
+          (let ((state-dir (agent-repl-itest-daemon-state-dir primary)))
+            ;; Act: an abrupt, non-handover death.
+            (agent-repl-itest--end primary "daemon" nil nil t)
+            ;; Assert: the failure is recorded, naming the hook and the
+            ;; consumer.
+            (agent-repl-itest--await-log
+             primary "elisp.link.hook-consumer-failed" "error")
+            (let ((entry (car (agent-repl-itest--log-entries
+                                primary "elisp.link.hook-consumer-failed" "error"))))
+              (should (string-match-p "hook=agent-repl-link-down-functions"
+                                      (alist-get 'message entry)))
+              (should (string-match-p "consumer=agent-repl-itest-link--boom-down-hook"
+                                      (alist-get 'message entry))))
+            ;; Assert: the reconnect still stands on the daemon that returns.
+            (let ((successor (agent-repl-itest--start-daemon state-dir)))
+              (unwind-protect
+                  (progn
+                    (agent-repl-itest--await-subscriber successor "daemon")
+                    (should (equal 1 (length (agent-repl-itest--subscribers
+                                              successor "daemon")))))
+                (agent-repl-itest--stop-daemon successor t)))))
+      (remove-hook 'agent-repl-link-down-functions
+                   #'agent-repl-itest-link--boom-down-hook))))
+
+;; audit-3 #5
+(ert-deftest agent-repl-itest-link-promote-hook-receives-old-new-and-old-still-alive ()
+  "The promote hook runs with (OLD NEW) and BEFORE OLD is closed: OLD is
+still ALIVE at call time, naming the former primary and NEW the former
+successor.
+fanout §6 \"the one hook that fires on promotion\"; daemon-link.el's
+`agent-repl-link--promote-successor' runs `agent-repl-link-promote-
+functions' immediately before `(agent-repl-connect-close old)'.  Every
+prior promotion test in this suite asserts only the consequence (roster's
+resubscribe); none captures the hook's own arguments or the close order."
+  (agent-repl-itest--with-fake-daemon primary
+    (let ((agent-repl-link-promote-functions agent-repl-link-promote-functions))
+      (agent-repl-itest-link--with-link primary
+        (agent-repl-itest--with-second-daemon primary successor
+          (let ((primary-conn (agent-repl-link-primary))
+                (calls nil))
+            (agent-repl-itest-link--announce
+             primary (agent-repl-itest-daemon-address successor))
+            (agent-repl-itest--await-subscriber successor "daemon")
+            (agent-repl-itest--wait-until
+             #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+            (let ((successor-conn (agent-repl-link-successor)))
+              (add-hook 'agent-repl-link-promote-functions
+                        (lambda (old new)
+                          (push (list old new (agent-repl-connect-connection-alive-p old))
+                                calls)))
+              ;; Act: the old daemon lets its stream go — promotion.
+              (agent-repl-itest--end primary "daemon" nil nil t)
+              (agent-repl-itest--wait-until
+               (lambda () (null (agent-repl-link-successor)))
+               nil "the successor to be promoted to primary")
+              ;; Assert: exactly one call, OLD the former primary, NEW the
+              ;; former successor, and OLD still ALIVE when the hook ran.
+              (should (equal (length calls) 1))
+              (should (eq (nth 0 (car calls)) primary-conn))
+              (should (eq (nth 1 (car calls)) successor-conn))
+              (should (nth 2 (car calls))))))))))
+
+;; audit-3 #5
+(ert-deftest agent-repl-itest-link-promote-hook-does-not-run-on-plain-link-down ()
+  "The promote hook fires ONLY on a handover promotion — an ordinary link
+death with no successor standing must never call it.
+fanout §6: promotion and a plain down are different facts (`elisp.link.
+down' vs `elisp.link.handover-complete'); a promote hook that also ran on
+a bare down would double-drive roster.el's and prompt-queue.el's
+promotion-only resubscribe."
+  (agent-repl-itest--with-fake-daemon primary
+    (let ((agent-repl-link-promote-functions agent-repl-link-promote-functions))
+      (agent-repl-itest-link--with-link primary
+        (let ((calls nil))
+          (add-hook 'agent-repl-link-promote-functions
+                    (lambda (&rest args) (push args calls)))
+          ;; Act: an ordinary, non-handover death.
+          (agent-repl-itest--end primary "daemon" nil nil t)
+          (agent-repl-itest--await-log primary "elisp.link.down" "warn")
+          ;; Assert.
+          (should (null calls)))))))
+
+;; audit-3 #6
+(ert-deftest agent-repl-itest-link-up-and-down-hooks-receive-the-connection ()
+  "The up hook's argument IS `(agent-repl-link-primary)' once it runs, and
+the down hook's argument is the EXACT connection that died — not merely
+called with SOME argument, which every `(lambda (&rest _) ...)' consumer
+elsewhere in this suite would pass regardless of what daemon-link.el
+actually handed it.
+fanout §6: \"run `agent-repl-link-up-functions' with CONN\"."
+  (agent-repl-itest--with-fake-daemon primary
+    (let ((up-args nil)
+          (down-args nil))
+      (agent-repl-itest-link--with-link primary
+        (add-hook 'agent-repl-link-up-functions
+                  (lambda (conn) (push conn up-args)))
+        (add-hook 'agent-repl-link-down-functions
+                  (lambda (conn) (push conn down-args)))
+        (let ((primary-conn (agent-repl-link-primary))
+              (state-dir (agent-repl-itest-daemon-state-dir primary)))
+          ;; Act: kill the link.
+          (agent-repl-itest--end primary "daemon" nil nil t)
+          (agent-repl-itest--wait-until (lambda () down-args) nil "the down hook")
+          ;; Assert: the down arg is the connection that died.
+          (should (eq (car down-args) primary-conn))
+          ;; Act: reconnect.
+          (let ((successor (agent-repl-itest--start-daemon state-dir)))
+            (unwind-protect
+                (progn
+                  (agent-repl-itest--await-subscriber successor "daemon")
+                  (agent-repl-itest--wait-until
+                   #'agent-repl-link-up-p nil "the reconnected link")
+                  (agent-repl-itest--wait-until (lambda () up-args) nil "the up hook")
+                  ;; Assert: the up arg IS the current primary.
+                  (should (eq (car up-args) (agent-repl-link-primary))))
+              (agent-repl-itest--stop-daemon successor t))))))))
+
+;; audit-3 #7
+(ert-deftest agent-repl-itest-link-clean-end-from-old-daemon-promotes-the-successor ()
+  "A CLEAN end frame (no error, no abort) from the OLD daemon after a
+handover promotes the successor exactly like the abort path does — no
+down/up hooks, `elisp.link.handover-complete'.
+fanout §6 + §3: \"`(:ended)' ... a failure\"; every existing promotion
+test in this suite drops the old daemon's TCP connection with `abort',
+never sends it a clean terminal envelope, so this path has never run."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((hooks nil))
+          (agent-repl-itest-link--announce
+           primary (agent-repl-itest-daemon-address successor))
+          (agent-repl-itest--await-subscriber successor "daemon")
+          (agent-repl-itest--wait-until
+           #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+          (add-hook 'agent-repl-link-down-functions (lambda (&rest _) (push 'down hooks)))
+          (add-hook 'agent-repl-link-up-functions (lambda (&rest _) (push 'up hooks)))
+          (let ((successor-conn (agent-repl-link-successor)))
+            ;; Act: a CLEAN end frame — no error, no abort.
+            (agent-repl-itest--end primary "daemon")
+            ;; Assert.
+            (agent-repl-itest--await-log primary "elisp.link.handover-complete" "info")
+            (agent-repl-itest--wait-until
+             (lambda () (null (agent-repl-link-successor)))
+             nil "the successor to be promoted to primary")
+            (should (null hooks))
+            (should (eq (agent-repl-link-primary) successor-conn))
+            (should (agent-repl-link-up-p))))))))
+
+;; audit-3 #8
+(ert-deftest agent-repl-itest-link-re-announcing-the-same-successor-address-is-idempotent ()
+  "A second `shutdown_announced{address}' naming the ALREADY-ATTACHED
+successor is a no-op: exactly one connection stands, the handover hooks
+fire only once, and the log names it `elisp.link.successor-already-
+attached' rather than opening a second connection.
+daemon-link.el: \"an already attached successor at the same address is a
+no-op, never a second connection\"; elisp.md dual attach opens \"a second
+connection\" (singular)."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((handovers nil)
+              (address (agent-repl-itest-daemon-address successor)))
+          (add-hook 'agent-repl-link-handover-functions
+                    (lambda (old new) (push (cons old new) handovers)))
+          ;; Act: announce, wait for acceptance, then announce AGAIN at the
+          ;; SAME address.
+          (agent-repl-itest-link--announce primary address)
+          (agent-repl-itest--await-subscriber successor "daemon")
+          (agent-repl-itest--wait-until
+           #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+          (agent-repl-itest-link--announce primary address)
+          ;; Assert.
+          (agent-repl-itest--await-log
+           primary "elisp.link.successor-already-attached" "debug")
+          (should (equal 1 (length (agent-repl-itest--subscribers successor "daemon"))))
+          (should (equal (length handovers) 1)))))))
+
+;; audit-3 #8
+(ert-deftest agent-repl-itest-link-re-announcing-a-different-successor-address-is-refused ()
+  "A second `shutdown_announced{address}' naming a DIFFERENT address while
+a successor already stands is refused loudly, and the standing successor
+is left UNCHANGED — no attempt to open a second connection nor to
+abandon the first."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (agent-repl-itest--with-second-daemon primary successor
+        (let ((address (agent-repl-itest-daemon-address successor)))
+          (agent-repl-itest-link--announce primary address)
+          (agent-repl-itest--await-subscriber successor "daemon")
+          (agent-repl-itest--wait-until
+           #'agent-repl-link-successor nil "the successor to be ACCEPTED")
+          (let ((successor-conn (agent-repl-link-successor)))
+            ;; Act: announce a DIFFERENT address while the successor stands.
+            (agent-repl-itest-link--announce primary "127.0.0.1:1")
+            ;; Assert.
+            (agent-repl-itest--await-log
+             primary "elisp.link.successor-address-changed" "error")
+            (should (eq (agent-repl-link-successor) successor-conn))))))))
+
+;; audit-3 #9
+(ert-deftest agent-repl-itest-link-successor-refused-before-acceptance ()
+  "An announced successor address that refuses the connection outright —
+nothing was ever listening — never becomes adoptable, never runs the
+handover or down hooks, and leaves the old link standing.
+daemon-link.el's pending-successor branch of `agent-repl-link--handle-
+close'; audit-2 #4 covers a successor dying AFTER acceptance only."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let ((handover-calls nil)
+            (down-calls nil))
+        (add-hook 'agent-repl-link-handover-functions
+                  (lambda (old new) (push (cons old new) handover-calls)))
+        (add-hook 'agent-repl-link-down-functions
+                  (lambda (&rest _) (push t down-calls)))
+        ;; Act: announce an address nothing is listening on.
+        (agent-repl-itest-link--announce primary "127.0.0.1:1")
+        ;; Assert.
+        (agent-repl-itest--await-log
+         primary "elisp.link.successor-open-refused" "error")
+        (should (null (agent-repl-link-successor)))
+        (should (agent-repl-link-up-p))
+        (should (null handover-calls))
+        (should (null down-calls))))))
+
+;; audit-3 #10
+(ert-deftest agent-repl-itest-link-bounce-indicator-clears-once-reconnected ()
+  "The bounce indicator, drawn while the outage is waited out, is taken
+DOWN once the reconnected link is accepted on the returning daemon.
+fanout §6 \"daemon restarting (<cause>)\"; the existing
+`agent-repl-itest-link-bounce-reconnects-once-the-addr-returns' asserts
+only `agent-repl-link-up-p' — a regression that left the segment drawn
+forever after a successful reconnect would still pass it."
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-link--with-link primary
+      (let ((state-dir (agent-repl-itest-daemon-state-dir primary)))
+        (agent-repl-itest-link--announce primary nil)
+        (agent-repl-itest--wait-until
+         (lambda () agent-repl-link-drain-segment) nil
+         "the bounce indicator to be drawn")
+        (should agent-repl-link-drain-segment)
+        ;; Act: the bounce actually happens.
+        (agent-repl-itest--stop-daemon primary t)
+        (let ((successor (agent-repl-itest--start-daemon state-dir)))
+          (unwind-protect
+              (progn
+                (agent-repl-itest--await-subscriber successor "daemon")
+                (agent-repl-itest--wait-until
+                 #'agent-repl-link-up-p nil
+                 "the reconnected link to be ACCEPTED on the successor")
+                ;; Assert: the indicator is taken down.
+                (should (null agent-repl-link-drain-segment)))
+            (agent-repl-itest--stop-daemon successor t)))))))
+
+;; audit-3 #11
+(ert-deftest agent-repl-itest-link-drain-scheduled-with-a-blank-operator-note-is-a-breach ()
+  "A `drain_scheduled' whose `DrainReason.operator.note' is the empty
+string is a breach: production logs `elisp.link.drain-operator-note-
+blank' ERROR, and the stream stands regardless — the breach is a logged
+fact, never a reason to tear the link down.
+drain_reason.proto: \"The note is REQUIRED non-blank\"; a plain proto3
+string field cannot enforce that at the wire, so this is elisp's own
+business-rule check inside `agent-repl-link--reason-text'."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act.
+      (agent-repl-itest--push
+       daemon "daemon"
+       '((drainScheduled . ((atMs . "1735689600000")
+                            (reason . ((operator . ((note . "")))))))))
+      ;; Assert.
+      (agent-repl-itest--await-log
+       daemon "elisp.link.drain-operator-note-blank" "error")
+      (should (agent-repl-itest--logged-p
+               daemon "elisp.link.drain-operator-note-blank" "error"))
+      (should (agent-repl-link-up-p)))))
+
+;; audit-3 #11
+(ert-deftest agent-repl-itest-link-shutdown-announced-immediate-with-a-blank-operator-note-is-a-breach ()
+  "The same breach rides `shutdown_announced{cause:{immediate:{reason:
+{operator:{}}}}}' — the operator arm present with `note' entirely absent,
+which decodes to the SAME blank string as an explicit empty one, since a
+plain proto3 string carries no presence bit.
+drain_reason.proto REQUIRED non-blank; production logs this from
+`agent-repl-link--cause-text''s call into `agent-repl-link--reason-text',
+reached only via the bounce indicator's own recompute."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act.
+      (agent-repl-itest-link--announce
+       daemon nil '((immediate . ((reason . ((operator . ())))))))
+      ;; Assert.
+      (agent-repl-itest--await-log
+       daemon "elisp.link.drain-operator-note-blank" "error")
+      (should (agent-repl-itest--logged-p
+               daemon "elisp.link.drain-operator-note-blank" "error"))
+      (should (agent-repl-link-up-p)))))
+
+;; audit-3 #11
+(ert-deftest agent-repl-itest-link-drain-scheduled-without-a-reason-is-dropped-not-fatal ()
+  "`drain_scheduled' missing `reason' (a non-optional message) is logged
+`elisp.rpc.push-invalid' and dropped; the standing drain schedule is
+UNCHANGED.
+`endpoint_watch_daemon.proto' `DaemonDrainScheduled.reason' is non-
+optional, mirroring the `shutdown_announced' / `cause' breach already
+pinned for this stream (`agent-repl-itest-link-invalid-shutdown-
+announced-is-dropped-not-fatal') — but nothing here pins the drain-
+scheduled push's own required field."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-link--with-link daemon
+      ;; Act: `reason' is entirely absent.
+      (agent-repl-itest--push
+       daemon "daemon" '((drainScheduled . ((atMs . "1735689600000")))))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (null agent-repl-link-drain)))))
 
 (provide 'test-integration-link)
 
