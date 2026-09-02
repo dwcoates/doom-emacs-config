@@ -482,7 +482,9 @@ purpose).
   SetSessionModel, SetSessionPermissionMode, Hibernate, KillSession,
   StartTurn, UpdateAgent, KillTurn, StopBash, DetachForeground, ReadHistory,
   plus SessionFault.kind; AgentUpdate gains `context_cut` and `api_error`
-  page-line arms (the shim may produce both). Workflow verbs answer Connect
+  page-line arms (corrected 2026-09-02 from the goldens: the shim produces
+  `context_cut`; `api_error`'s only observed producer is the transcript's
+  system:api_error record, so that page line is the SIDECAR's). Workflow verbs answer Connect
   Code.Unimplemented. A refused WatchBash/WatchAgent open closes at the
   transport.
 - UPSERT KEYS (cross-plane, adopted with the store lead): `activity:<
