@@ -315,7 +315,12 @@ func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
 	}
 }
 
-func TestAdoptionWarnsWhenNoShimHoldsTheWorkspaceLock(t *testing.T) {
+// TestAdoptionOfAFreeLockDialsNoShim pins the never-opened workspace: its lock
+// is free because no process was ever spawned for it, so it transfers on its
+// WSM facts alone. Dialing a shim that does not exist would fail the adoption
+// of a workspace in no trouble at all, and the incumbent would then wait out an
+// adoption window for it.
+func TestAdoptionOfAFreeLockDialsNoShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, dir := h.workspace(t)
@@ -327,9 +332,11 @@ func TestAdoptionWarnsWhenNoShimHoldsTheWorkspaceLock(t *testing.T) {
 	arm(t, h, ws, Participants{})
 
 	// Assert
-	warns := levelRecords(records(h.log, opAdopt), "warn")
-	if len(warns) != 1 {
-		t.Fatalf("adoption warnings = %d, want one naming the free lock", len(warns))
+	if got := h.fleet.Adoptions(); len(got) != 0 {
+		t.Fatalf("shim adoptions = %v, want none: no process holds the lock", got)
+	}
+	if warns := levelRecords(records(h.log, opAdopt), "warn"); len(warns) != 0 {
+		t.Fatalf("adoption warnings = %v, want none: a never-opened workspace is an ordinary transfer", warns)
 	}
 }
 
