@@ -47,7 +47,6 @@ import {
   bashUpsertKey,
   producerId,
   writeId,
-  type SourceCoordinates as KeySourceCoordinates,
 } from "./keys.js";
 import {
   DEFAULT_RETRY_POLICY,
@@ -73,11 +72,9 @@ export const WRITER_COMPONENT = "store-writer";
 
 /** The write's deterministic identity, from its provenance alone. */
 export function entryWriteId(producer: string, entry: PersistEntry): string {
-  const coordinates: KeySourceCoordinates = {
-    vendorRecordUuid: entry.source.vendorUuid,
-    ...(entry.source.blockIndex === undefined ? {} : { blockIndex: entry.source.blockIndex }),
-  };
-  return writeId(producer, coordinates, entry.source.discriminator);
+  // NO TRANSLATION: `PersistEntry.source` IS the hashing module's
+  // `SourceCoordinates` — one declaration, re-exported by persistence.ts.
+  return writeId(producer, entry.source);
 }
 
 /** A prompt or a frame, wrapped as the store's servable item. */

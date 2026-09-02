@@ -203,7 +203,7 @@ describe("sessionUpsertKey", () => {
 describe("formatSourceCoordinates", () => {
   it("is the vendor record uuid alone for a whole-message frame", () => {
     // Arrange, Act.
-    const formatted = keys.formatSourceCoordinates({ vendorRecordUuid: "uuid-1" });
+    const formatted = keys.formatSourceCoordinates({ vendorUuid: "uuid-1", discriminator: "d" });
 
     // Assert.
     expect(formatted).toBe("uuid-1");
@@ -211,7 +211,7 @@ describe("formatSourceCoordinates", () => {
 
   it("appends the block index for a block-derived frame", () => {
     // Arrange, Act.
-    const formatted = keys.formatSourceCoordinates({ vendorRecordUuid: "uuid-1", blockIndex: 2 });
+    const formatted = keys.formatSourceCoordinates({ vendorUuid: "uuid-1", blockIndex: 2, discriminator: "d" });
 
     // Assert.
     expect(formatted).toBe("uuid-1:2");
@@ -219,7 +219,7 @@ describe("formatSourceCoordinates", () => {
 
   it("keeps block 0 distinct from the whole message", () => {
     // Arrange, Act.
-    const block = keys.formatSourceCoordinates({ vendorRecordUuid: "uuid-1", blockIndex: 0 });
+    const block = keys.formatSourceCoordinates({ vendorUuid: "uuid-1", blockIndex: 0, discriminator: "d" });
 
     // Assert.
     expect(block).toBe("uuid-1:0");
@@ -228,7 +228,7 @@ describe("formatSourceCoordinates", () => {
   it("refuses a negative block index", () => {
     // Arrange, Act, Assert.
     expect(() =>
-      keys.formatSourceCoordinates({ vendorRecordUuid: "uuid-1", blockIndex: -1 }),
+      keys.formatSourceCoordinates({ vendorUuid: "uuid-1", blockIndex: -1, discriminator: "d" }),
     ).toThrow(/0-based integer/);
   });
 });
@@ -241,11 +241,11 @@ describe("writeId", () => {
       .digest("hex");
 
     // Act.
-    const id = keys.writeId(
-      "claude-shim:v1",
-      { vendorRecordUuid: "uuid-1", blockIndex: 0 },
-      "agent_frame.update.activity",
-    );
+    const id = keys.writeId("claude-shim:v1", {
+      vendorUuid: "uuid-1",
+      blockIndex: 0,
+      discriminator: "agent_frame.update.activity",
+    });
 
     // Assert.
     expect(id).toBe(expected);
@@ -254,7 +254,10 @@ describe("writeId", () => {
   it("mints the SAME id for a re-sent frame, so a retry is absorbed", () => {
     // Arrange.
     const mint = (): string =>
-      keys.writeId("claude-shim:v1", { vendorRecordUuid: "uuid-1" }, "agent_frame.success");
+      keys.writeId("claude-shim:v1", {
+        vendorUuid: "uuid-1",
+        discriminator: "agent_frame.success",
+      });
 
     // Act, Assert.
     expect(mint()).toBe(mint());
@@ -262,11 +265,17 @@ describe("writeId", () => {
 
   it("separates two frames the same vendor record produced", () => {
     // Arrange.
-    const coordinates = { vendorRecordUuid: "uuid-1" };
+    const coordinates = { vendorUuid: "uuid-1" };
 
     // Act.
-    const activity = keys.writeId("claude-shim:v1", coordinates, "agent_frame.update.activity");
-    const session = keys.writeId("claude-shim:v1", coordinates, "session_update.model_changed");
+    const activity = keys.writeId("claude-shim:v1", {
+      ...coordinates,
+      discriminator: "agent_frame.update.activity",
+    });
+    const session = keys.writeId("claude-shim:v1", {
+      ...coordinates,
+      discriminator: "session_update.model_changed",
+    });
 
     // Assert.
     expect(activity).not.toBe(session);
@@ -277,8 +286,8 @@ describe("writeId", () => {
     const discriminator = "agent_frame.update.activity";
 
     // Act.
-    const first = keys.writeId("claude-shim:v1", { vendorRecordUuid: "u", blockIndex: 0 }, discriminator);
-    const second = keys.writeId("claude-shim:v1", { vendorRecordUuid: "u", blockIndex: 1 }, discriminator);
+    const first = keys.writeId("claude-shim:v1", { vendorUuid: "u", blockIndex: 0, discriminator });
+    const second = keys.writeId("claude-shim:v1", { vendorUuid: "u", blockIndex: 1, discriminator });
 
     // Assert.
     expect(first).not.toBe(second);
@@ -286,11 +295,11 @@ describe("writeId", () => {
 
   it("separates two producers writing the same vendor record", () => {
     // Arrange.
-    const coordinates = { vendorRecordUuid: "uuid-1" };
+    const coordinates = { vendorUuid: "uuid-1", discriminator: "agent_frame.success" };
 
     // Act.
-    const mine = keys.writeId("claude-shim:v1", coordinates, "agent_frame.success");
-    const theirs = keys.writeId("claude-shim:v2", coordinates, "agent_frame.success");
+    const mine = keys.writeId("claude-shim:v1", coordinates);
+    const theirs = keys.writeId("claude-shim:v2", coordinates);
 
     // Assert.
     expect(mine).not.toBe(theirs);
@@ -298,7 +307,7 @@ describe("writeId", () => {
 
   it("refuses a write with no arm path to discriminate it", () => {
     // Arrange, Act, Assert.
-    expect(() => keys.writeId("claude-shim:v1", { vendorRecordUuid: "u" }, "")).toThrow(
+    expect(() => keys.writeId("claude-shim:v1", { vendorUuid: "u", discriminator: "" })).toThrow(
       /arm path is empty/,
     );
   });
