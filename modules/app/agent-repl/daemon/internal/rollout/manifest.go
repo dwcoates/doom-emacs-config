@@ -233,10 +233,45 @@ func disposition(intent Intent, state sessionlock.State) DispositionKind {
 	}
 }
 
+// pendingDisposition is one deferred accounting write.
+type pendingDisposition struct {
+	session ManifestSession
+	d       Disposition
+}
+
+// flushDispositions writes the dispositions reconciled while the handle was
+// read-only. The successor calls it the moment its handle is promoted, so the
+// bounce accounting is deferred by exactly the read-only window and by nothing
+// else.
+func (c *controller) flushDispositions(ctx context.Context) {
+	c.mu.Lock()
+	pending := c.pendingDispositions
+	c.pendingDispositions = nil
+	c.mu.Unlock()
+	for _, p := range pending {
+		c.recordDisposition(ctx, p.session, p.d)
+	}
+	if len(pending) > 0 {
+		c.log.Debug(opReconcile, "wrote the bounce dispositions deferred by the read-only window",
+			dlog.Context{"dispositions": len(pending)})
+	}
+}
+
 // recordDisposition writes one session's disposition as a WSM fault. It is
 // never collapsed into a count: one record per session, naming the workspace.
 func (c *controller) recordDisposition(ctx context.Context, session ManifestSession, d Disposition) {
 	ws := session.Workspace
+	// A READ-ONLY HANDLE IS NOT A FAILURE HERE, it is the joining successor's
+	// ordinary state: the incumbent is still the sole writer. The accounting
+	// is HELD, not dropped, and flushDispositions writes it at the promotion.
+	if c.deps.DB.ReadOnly() {
+		c.mu.Lock()
+		c.pendingDispositions = append(c.pendingDispositions, pendingDisposition{session: session, d: d})
+		c.mu.Unlock()
+		c.log.Debug(opReconcile, "deferred a bounce disposition until the state handle writes",
+			dlog.Context{"workspace": string(ws), "disposition": string(d.Kind)})
+		return
+	}
 	fields := dlog.Context{
 		"workspace":   string(ws),
 		"intent":      string(d.Intent),
