@@ -262,6 +262,16 @@ export function mountComposer(
             context: { command: outcome.value.command },
           });
           return;
+        case "commandActed":
+          // A RECOGNIZED ACT WITH NO TURN. The answer is empty on purpose: the
+          // visible effect (the model change, restated authoritatively) arrives
+          // on the topbar and footer streams, never here. So the box clears —
+          // the words are spent — and this component draws nothing at all.
+          accepted();
+          log("debug", "SubmitPrompt acted on a command without minting a turn", {
+            operation: "composer.command-acted",
+          });
+          return;
         default: {
           const other: { case: string } = outcome;
           unreachableArm("SubmitPromptSuccess.outcome", other.case);
