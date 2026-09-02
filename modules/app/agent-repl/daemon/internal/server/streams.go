@@ -96,11 +96,12 @@ func serveTopic[T comparable, R any](
 }
 
 // refuseStream answers a refused stream open. A Watch* rpc has NO `<Rpc>Error`
-// message — a refused open is a Connect error BEFORE any frame — so every
-// stream refusal goes through the unlanded-arm spelling and carries a row in
-// daemon/ERROR-ARMS.md.
+// message — a refused open is a Connect error BEFORE any frame — and by ruling
+// (landing 6) that is the SETTLED shape rather than an unlanded arm, so the
+// refusal is recorded at INFO under "daemon.refusal.transport_closed" and never
+// warned.
 func refuseStream(log dlog.Logger, rpc string, r refusal) *connect.Error {
-	return UnlandedArm(log, rpc, r.Arm, r.Reason, r.NotFound)
+	return TransportClosed(log, rpc, r.Arm, r.Reason, r.NotFound)
 }
 
 // WatchWorkspaceRoster serves the ONE editor-global stream: the roster, whole,
@@ -126,7 +127,7 @@ func (s *server) WatchFooter(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return fail(s.log, rpc, err)
 	}
@@ -149,7 +150,7 @@ func (s *server) WatchTopbar(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return fail(s.log, rpc, err)
 	}
@@ -172,7 +173,7 @@ func (s *server) WatchDaemonHolds(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return fail(s.log, rpc, err)
 	}
@@ -196,7 +197,7 @@ func (s *server) WatchHostWorkspace(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return fail(s.log, rpc, err)
 	}
@@ -223,7 +224,7 @@ func (s *server) WatchWebWorkspace(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return fail(s.log, rpc, err)
 	}

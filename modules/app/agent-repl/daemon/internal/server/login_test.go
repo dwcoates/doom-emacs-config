@@ -150,8 +150,8 @@ func TestWatchLoginTerminalRefusesWithNoLoginOpen(t *testing.T) {
 	}
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "WatchLoginTerminalError.no_login_open") {
-		t.Fatalf("error = %v, want the no_login_open sentinel", err)
+	if err == nil || !strings.Contains(err.Error(), "WatchLoginTerminal closed the stream: no_login_open") {
+		t.Fatalf("error = %v, want the transport-closed no_login_open cause", err)
 	}
 }
 

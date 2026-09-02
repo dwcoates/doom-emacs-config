@@ -57,7 +57,7 @@ func (s *server) WatchLoginTerminal(
 	if err := validateWorkspaceRef("workspace", req.Msg.GetWorkspace()); err != nil {
 		return err
 	}
-	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	subject, r, err := s.resolveStreamRef(ctx, rpc, req.Msg.GetWorkspace())
 	if err != nil {
 		return fail(s.log, rpc, err)
 	}
@@ -71,7 +71,7 @@ func (s *server) WatchLoginTerminal(
 	frames, err := s.deps.Login.Watch(streamCtx, subject.Record.ID)
 	if err != nil {
 		if errors.Is(err, login.ErrNoSession) {
-			return UnlandedArm(subject.Log, rpc, "no_login_open", err.Error(), false)
+			return TransportClosed(subject.Log, rpc, "no_login_open", err.Error(), false)
 		}
 		return fail(subject.Log, rpc, err)
 	}
