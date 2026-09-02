@@ -410,12 +410,11 @@ Captured AT LOAD TIME, the way daemon.el captures its own root: inside an
 ERT body `load-file-name' is already nil, so deriving it there would ask
 the test to know the path the module derives for itself.")
 
-(ert-deftest agent-repl-itest-daemon-command-default-and-no-argv ()
-  "`agent-repl-daemon-command' defaults to the module's own binary,
-with NO required argv: the state root travels in the environment only.
-A wrong default binary path would silently point cold start at nothing;
-an argv that grew a flag would give the spawned daemon input it is not
-supposed to need."
+(ert-deftest agent-repl-itest-daemon-command-default-and-account-argv ()
+  "`agent-repl-daemon-command' defaults to the module's own binary, and the
+spawn appends the two account-root flags the daemon REQUIRES.
+A wrong default binary path would silently point cold start at nothing; a
+spawn without the roots exits 2 before the daemon ever serves."
   ;; Arrange: the default value, independent of any override.  This suite
   ;; file lives in the same `lisp/' directory as daemon.el, so the module
   ;; root is derived the same way daemon.el derives it, without depending
@@ -433,7 +432,7 @@ supposed to need."
                        (expand-file-name "build.sh" boot-dir) "exit 0"))
                (start (agent-repl-itest-daemon--write-script
                        (expand-file-name "start.sh" boot-dir)
-                       (format "printf '%%s' \"$#\" > %sargc" boot-dir)))
+                       (format "printf '%%s\\n' \"$@\" > %sargv" boot-dir)))
                (agent-repl-daemon-build-script build)
                (agent-repl-daemon-command (list start))
                (agent-repl-daemon-boot-timeout-seconds 2)
@@ -441,13 +440,14 @@ supposed to need."
                (agent-repl-link-no-daemon-functions nil))
           ;; Act.
           (agent-repl-daemon-ensure)
-          ;; Assert: the spawn passes NO arguments.
+          ;; Assert: the spawn passes exactly the two account-root flags.
           (agent-repl-itest--wait-until
-           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "argc"))
-           nil "the daemon command to record its argument count")
+           (lambda () (agent-repl-itest-daemon--ran-p boot-dir "argv"))
+           nil "the daemon command to record its arguments")
           (with-temp-buffer
-            (insert-file-contents (expand-file-name "argc" boot-dir))
-            (should (equal (string-trim (buffer-string)) "0"))))))))
+            (insert-file-contents (expand-file-name "argv" boot-dir))
+            (should (equal (split-string (string-trim (buffer-string)) "\n" t)
+                           (cdr (agent-repl-daemon--argv))))))))))
 
 ;;;; ---- A build failure ----
 

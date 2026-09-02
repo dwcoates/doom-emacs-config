@@ -228,10 +228,10 @@
                    (list agent-repl-daemon-build-script)))))
 
 (ert-deftest agent-repl-test-daemon-command-defaults-to-the-module-binary ()
-  "The default argv is the module's own `daemon/bin/claude-repld', alone.
-fanout \u00a711: \"the default the module's `daemon/bin/claude-repld', no argv\"
-\u2014 a wrong default path would point cold start at nothing, and a default
-argument would hand the daemon input it is not supposed to need."
+  "The base argv defaults to the module's own `daemon/bin/claude-repld'.
+A wrong default path would point cold start at nothing.  The account-root
+flags are NOT part of it: `agent-repl-daemon--argv' appends them, so the
+binary stays overridable on its own."
   ;; Arrange / Act: the default, independent of any buffer-local override.
   (let ((default (default-value 'agent-repl-daemon-command)))
     ;; Assert
@@ -239,8 +239,192 @@ argument would hand the daemon input it is not supposed to need."
                    (list (expand-file-name "daemon/bin/claude-repld"
                                            agent-repl--frontend-root))))))
 
+(ert-deftest agent-repl-test-daemon-argv-carries-the-default-config-dir ()
+  "The argv states `--default-config-dir', expanded.
+The daemon's account resolver refuses to build without it and the process
+exits 2 before it serves, so an argv missing it never boots at all."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "~/.claude")
+        (agent-repl-daemon-multi-repo-config-dir "~/.claude-chesscom"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should (equal (cadr (member "--default-config-dir" argv))
+                     (expand-file-name "~/.claude"))))))
+
+(ert-deftest agent-repl-test-daemon-argv-carries-the-multi-repo-config-dir ()
+  "The argv states `--multi-repo-config-dir', expanded.
+The resolver requires BOTH roots: the account is determined by the
+workspace's path, so every path must have an answer."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "~/.claude")
+        (agent-repl-daemon-multi-repo-config-dir "~/.claude-chesscom"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should (equal (cadr (member "--multi-repo-config-dir" argv))
+                     (expand-file-name "~/.claude-chesscom"))))))
+
+(ert-deftest agent-repl-test-daemon-argv-keeps-the-binary-first ()
+  "The base argv leads: the flags are APPENDED, never interleaved."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/claude-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should (equal (car argv) "/bin/claude-repld")))))
+
+(ert-deftest agent-repl-test-daemon-default-config-dir-defaults-to-claude ()
+  "The default account root is the vendor's own `~/.claude'."
+  ;; Arrange / Act
+  (let ((default (default-value 'agent-repl-daemon-default-config-dir)))
+    ;; Assert
+    (should (equal default
+                   (expand-file-name (or (getenv "CLAUDE_CONFIG_DIR") "~/.claude"))))))
+
+(ert-deftest agent-repl-test-daemon-multi-repo-config-dir-defaults-to-chesscom ()
+  "The multi-repo account root is `~/.claude-chesscom' by default."
+  ;; Arrange / Act
+  (let ((default (default-value 'agent-repl-daemon-multi-repo-config-dir)))
+    ;; Assert
+    (should (equal default (expand-file-name "~/.claude-chesscom")))))
+
+(ert-deftest agent-repl-test-daemon-environment-states-the-multi-repo-root ()
+  "A configured multi-repo root is EXPORTED: the daemon reads it from env.
+There is no flag for it, so a root Emacs knows about and does not state is
+a root the daemon has never heard of."
+  ;; Arrange
+  (let ((agent-repl-daemon-multi-repo-root "~/workspace"))
+    ;; Act
+    (let ((env (agent-repl-daemon--environment)))
+      ;; Assert
+      (should (member (format "MULTI_REPO_ROOT=%s"
+                              (directory-file-name (expand-file-name "~/workspace")))
+                      env)))))
+
+(ert-deftest agent-repl-test-daemon-environment-states-one-multi-repo-root ()
+  "The stated root REPLACES an inherited one: two would be a split account rule."
+  ;; Arrange
+  (let* ((agent-repl-daemon-multi-repo-root "/roots/mine")
+         (process-environment (cons "MULTI_REPO_ROOT=/roots/stale"
+                                    process-environment)))
+    ;; Act
+    (let ((env (agent-repl-daemon--environment)))
+      ;; Assert
+      (should (equal (seq-filter (lambda (entry)
+                                   (string-prefix-p "MULTI_REPO_ROOT=" entry))
+                                 env)
+                     (list "MULTI_REPO_ROOT=/roots/mine"))))))
+
+(ert-deftest agent-repl-test-daemon-environment-leaves-an-unset-root-alone ()
+  "Nil is \"Emacs has no opinion\", never \"unset what the session carried\"."
+  ;; Arrange
+  (let* ((agent-repl-daemon-multi-repo-root nil)
+         (process-environment (cons "MULTI_REPO_ROOT=/roots/inherited"
+                                    process-environment)))
+    ;; Act
+    (let ((env (agent-repl-daemon--environment)))
+      ;; Assert
+      (should (member "MULTI_REPO_ROOT=/roots/inherited" env)))))
+
+(ert-deftest agent-repl-test-daemon-empty-default-config-dir-refuses-the-launch ()
+  "An empty required root REFUSES the spawn instead of buying a status-2 exit."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (let ((agent-repl-daemon-default-config-dir ""))
+      ;; Act
+      (agent-repl-daemon-ensure)
+      ;; Assert
+      (should (null agent-repl-test-daemon--spawns)))))
+
+(ert-deftest agent-repl-test-daemon-refused-launch-names-the-missing-flag ()
+  "The refusal SAYS which flag has no value, loudly."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (let ((agent-repl-daemon-multi-repo-config-dir "  "))
+      ;; Act
+      (agent-repl-daemon-ensure)
+      ;; Assert
+      (should (string-match-p "--multi-repo-config-dir"
+                              (or agent-repl-daemon-launch-failure ""))))))
+
+(ert-deftest agent-repl-test-daemon-refused-launch-raises-the-segment ()
+  "A refused launch is drawn in the mode line, not only logged."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil)
+    (let ((agent-repl-daemon-default-config-dir ""))
+      ;; Act
+      (agent-repl-daemon-ensure)
+      ;; Assert
+      (should (equal agent-repl-daemon-mode-line-segment "daemon: launch failed")))))
+
+(ert-deftest agent-repl-test-daemon-early-exit-ends-the-boot-wait ()
+  "A daemon that EXITED will never publish an address; the wait ends at once."
+  ;; Arrange
+  (let ((agent-repl-daemon--boot-timer nil)
+        (agent-repl-daemon--boot-deadline nil)
+        (agent-repl-daemon--boot-process nil)
+        (agent-repl-daemon--boot-continuation nil)
+        (outcomes nil))
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil))
+              ((symbol-function 'agent-repl-daemon--exited-p) (lambda (proc) (eq proc 'dead)))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 2))
+              ((symbol-function 'agent-repl--frontend-run-log-tail) (lambda () "boom")))
+      ;; Act
+      (agent-repl-daemon--await-address (lambda (address) (push address outcomes)) 'dead)
+      ;; Assert
+      (should (equal outcomes (list nil))))))
+
+(ert-deftest agent-repl-test-daemon-early-exit-surfaces-the-run-log-tail ()
+  "The failure carries the run log's last line: WHY it died is the diagnosis."
+  ;; Arrange
+  (let ((agent-repl-daemon--boot-timer nil)
+        (agent-repl-daemon--boot-deadline nil)
+        (agent-repl-daemon--boot-process nil)
+        (agent-repl-daemon--boot-continuation nil)
+        (agent-repl-daemon-launch-failure nil))
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil))
+              ((symbol-function 'agent-repl-daemon--exited-p) (lambda (proc) (eq proc 'dead)))
+              ((symbol-function 'process-exit-status) (lambda (_proc) 2))
+              ((symbol-function 'agent-repl--frontend-run-log-tail)
+               (lambda () "Roots.Default is required")))
+      ;; Act
+      (agent-repl-daemon--await-address #'ignore 'dead)
+      ;; Assert
+      (should (string-match-p "Roots.Default is required"
+                              (or agent-repl-daemon-launch-failure ""))))))
+
+(ert-deftest agent-repl-test-daemon-live-process-keeps-the-boot-wait-polling ()
+  "A LIVE daemon that has not published yet is still booting, not dead."
+  ;; Arrange
+  (let ((agent-repl-daemon--boot-timer nil)
+        (agent-repl-daemon--boot-deadline nil)
+        (agent-repl-daemon--boot-process nil)
+        (agent-repl-daemon--boot-continuation nil)
+        (agent-repl-daemon-launch-failure nil)
+        (settled 'none))
+    (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr) (lambda () nil))
+              ((symbol-function 'agent-repl-daemon--exited-p) (lambda (_proc) nil))
+              ((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create))))
+      ;; Act
+      (agent-repl-daemon--await-address (lambda (address) (setq settled address)) 'alive)
+      ;; Assert
+      (should (eq settled 'none)))))
+
+(ert-deftest agent-repl-test-daemon-exited-p-ignores-a-non-process ()
+  "A stubbed spawn is not an exit: only a real dead process ends the wait."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl-daemon--exited-p 'the-daemon-process)))
+
 (ert-deftest agent-repl-test-daemon-absent-address-starts-the-daemon ()
-  "After a clean build the daemon is started, with NO argv of its own."
+  "After a clean build the daemon is started with the account-root argv."
   (agent-repl-test-daemon--with-harness
     ;; Arrange
     (setq agent-repl-test-daemon--address nil)
@@ -248,7 +432,7 @@ argument would hand the daemon input it is not supposed to need."
     (agent-repl-daemon-ensure)
     ;; Assert
     (should (equal (car (car agent-repl-test-daemon--spawns))
-                   agent-repl-daemon-command))))
+                   (agent-repl-daemon--argv)))))
 
 (ert-deftest agent-repl-test-daemon-start-exports-the-state-root-explicitly ()
   "ONE state root is the cross-system contract, and it is STATED, not inherited."
