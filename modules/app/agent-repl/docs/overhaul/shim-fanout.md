@@ -751,3 +751,19 @@ every UX or contract gap you surfaced instead of improvising.
   encoding is reported at error). FINAL CODE TIP 3a60a11b5: typecheck,
   unit 3745, build, smoke, integration 302 / 0 / 3 todo (30 s). Dead-code
   pass (sonnet-medium, shim-agents/deadcode) next; then the final report.
+- LEDGER: dead-code pass (sonnet-medium) interim merged at 174a2e995:
+  knip unused exports in src 187 → 0, unused types 91 → 21 (sdk/types.ts
+  upgrade-canary aliases, kept), tsc unused 7 → 1 (kept), zero-hit src
+  functions 73 → 29; deleted src/subscription-usage.ts (+test),
+  crossCheckDenials, READER_COMPONENT, dead re-exports, unused imports,
+  ~245 needless `export`s; pinned: unavailablePersistence, the engine
+  dispatch arrows, FAILURE_ARMS, InvalidModeledUsageError, REAL_SCHEDULER,
+  noteVendorDenial/deniedCall, pushes return() path, reader
+  transportFailure/concludeThrough/awaitFirstRow, stoppedBashTerminal,
+  writer clearProducer/liveWork, main logCorrelation/queryFactory, server
+  listen bind-failure, AsyncQueue.return, vendor-files
+  vendorSessionId/survivingShellRuns, three scenarios. Agent resumed for the
+  29: lead rulings — delete the four unused ScenarioContext accessors; pin
+  the 21 engine facade functions through the engine harness (or name the
+  integration coverage that hits them); pin the three interrupt-driven
+  scenarios in-process; add knip.json naming scripts/dist-smoke.ts.
