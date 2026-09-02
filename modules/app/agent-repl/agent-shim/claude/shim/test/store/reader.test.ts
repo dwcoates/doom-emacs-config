@@ -12,7 +12,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import { createStoreClient, type StoreClient } from "../../src/store/client.js";
 import { PersistenceError } from "../../src/store/persistence.js";
-import { readFailure, toHistoryEntry, toStorePointer } from "../../src/store/reader.js";
+import { readFailure, toHistoryEntry, toStorePointer, transportFailure } from "../../src/store/reader.js";
 import { createPersistence } from "../../src/store/writer.js";
 import { producerId } from "../../src/store/keys.js";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
@@ -180,6 +180,21 @@ describe("the tail", () => {
     second.close();
 
     expect(second.page.entries).toHaveLength(1);
+  });
+
+  it("concludeThrough(undefined) ends the tail at once, with nothing left to wait for", async () => {
+    const { plane } = await seeded("tail-conclude-unbounded", 1);
+    const session = await plane.openAgentPage(BOOK, 10);
+    const iterator = session.tail[Symbol.asyncIterator]();
+
+    session.concludeThrough(undefined);
+
+    await expect(
+      Promise.race([
+        iterator.next().then(() => "settled"),
+        new Promise((resolve) => setTimeout(() => resolve("hung"), 2_000)),
+      ]),
+    ).resolves.toBe("settled");
   });
 });
 
@@ -356,6 +371,20 @@ describe("failure translation", () => {
 
     expect(() => toHistoryEntry(line)).toThrow(PersistenceError);
   });
+
+  it("transportFailure passes an existing PersistenceError through unchanged", () => {
+    const original = new PersistenceError("stale_pointer", "already classified");
+
+    expect(transportFailure(original)).toBe(original);
+  });
+
+  it("transportFailure wraps any other thrown value as store_unavailable", () => {
+    const wrapped = transportFailure(new Error("the socket reset"));
+
+    expect(wrapped).toBeInstanceOf(PersistenceError);
+    expect(wrapped.kind).toBe("store_unavailable");
+    expect(wrapped.message).toBe("the socket reset");
+  });
 });
 
 describe("openBashRun", () => {
@@ -411,6 +440,26 @@ describe("openBashRun", () => {
         for await (const frame of run) void frame;
       })(),
     ).rejects.toMatchObject({ kind: "unknown_work" });
+  });
+
+  it("waits out a refused open when the caller still believes the run is live, and is woken by its first row", async () => {
+    const { plane } = await seeded("bash-still-live", 0);
+
+    // Nothing has been written for run-1 yet, but the caller (the daemon's own
+    // live table) says the announcement already reached it, so the refusal is
+    // a race to wait out rather than a real "unknown_work".
+    const run = await plane.openBashRun(
+      create(conversationv1.DetachedWorkIdSchema, { value: "run-1" }),
+      () => true,
+    );
+    const iterator = run[Symbol.asyncIterator]();
+    const pending = iterator.next();
+
+    plane.write([bashStartEntry()]);
+    await plane.flush();
+
+    const first = await pending;
+    expect((first.value as conversationv1.AgentBash | undefined)?.result.case).toBe("start");
   });
 });
 
