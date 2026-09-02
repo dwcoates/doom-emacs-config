@@ -19,6 +19,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/integration/harness"
+	"claude-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
@@ -128,6 +129,7 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	stream := d.WatchDaemonStream()
 
 	// Act
+	before := time.Now()
 	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Now{Now: &agentreplv1.UpdateShutdownScheduleNow{Reason: drainReasonOperator("operator maintenance")}},
 	}))
@@ -139,14 +141,90 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	announced := harness.AwaitView(t, d.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced()
+	after := time.Now()
 	if announced.GetCause().GetImmediate() == nil {
 		t.Fatalf("shutdown_announced.cause = %v, want immediate", announced.GetCause())
+	}
+	if got := announced.GetCause().GetImmediate().GetReason().GetOperator().GetNote(); got != "operator maintenance" {
+		t.Fatalf("shutdown_announced.cause.immediate.reason.operator.note = %q, want the reason echoed verbatim", got)
 	}
 	if announced.Address != nil {
 		t.Fatalf("shutdown_announced.address = %q, want unset (a plain bounce, no successor)", announced.GetAddress())
 	}
+	// Enrichment (critique 15): minted_at_ms is this announcement's own mint
+	// instant (internal/drain/controller.go ShutdownNow: deps.Clock.Now()), so
+	// it falls inside the wall-clock window the rpc call bracketed.
+	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
+	if mintedAt.Before(before) || mintedAt.After(after) {
+		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between %d and %d", announced.GetMintedAtMs(), before.UnixMilli(), after.UnixMilli())
+	}
+	// An immediate operator shutdown states no bounded outage: unlike the
+	// self-merge rollout's handover.go (which states rollout.DefaultExpectedOutage),
+	// internal/drain/controller.go's ShutdownNow never sets ExpectedOutageMs.
+	if got := announced.GetExpectedOutageMs(); got != 0 {
+		t.Fatalf("shutdown_announced.expected_outage_ms for an immediate shutdown = %d, want 0 (the drain controller states no outage)", got)
+	}
 	// An immediate shutdown with a valid reason logs only at INFO
 	// (internal/drain/controller.go opNow): no WARN/ERROR is reached.
+	d.ExpectWarnings()
+}
+
+// TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause is
+// critique 15: strengthens the shutdown-announcement assertions onto the ONE
+// cause no other test in this file reaches — a schedule that actually fires
+// (every other shutdown_announced assertion here is either `now` or a
+// self-merge handover). A headless daemon has nothing to wait free, so the
+// drain loop (internal/drain/sweep.go Run, which caps its wait at the
+// schedule's own deadline regardless of the 5-minute sweep cadence) fires the
+// instant the deadline passes.
+func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	stream := d.WatchDaemonStream()
+	deadline := time.Now().Add(50 * time.Millisecond)
+	if _, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs: deadline.UnixMilli(), Reason: drainReasonDeploy(),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+	}
+	harness.AwaitView(t, d.Ctx(), stream, "drain_scheduled", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetDrainScheduled() != nil
+	})
+
+	// Act: wait out the deadline.
+	announced := harness.AwaitView(t, d.Ctx(), stream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetShutdownAnnounced() != nil
+	}).GetShutdownAnnounced()
+	after := time.Now()
+
+	// Assert: the cause is the scheduled drain, carrying the SAME reason that
+	// was scheduled (internal/drain/controller.go fire() decodes the persisted
+	// row rather than re-deriving it).
+	if announced.GetCause().GetScheduledDrain().GetReason().GetDeploy() == nil {
+		t.Fatalf("shutdown_announced.cause = %v, want scheduled_drain with the deploy reason echoed", announced.GetCause())
+	}
+	// Enrichment (critique 15): minted_at_ms is minted only once fire() runs,
+	// which cannot happen before the deadline it is waiting on, and this
+	// assertion's own wall clock bounds it from above.
+	mintedAt := time.UnixMilli(announced.GetMintedAtMs())
+	if mintedAt.Before(deadline) || mintedAt.After(after) {
+		t.Fatalf("shutdown_announced.minted_at_ms = %d, want between the deadline %d and now %d", announced.GetMintedAtMs(), deadline.UnixMilli(), after.UnixMilli())
+	}
+	// A scheduled drain states no bounded outage either (see the immediate-
+	// shutdown test above for the same gap against the self-merge rollout).
+	if got := announced.GetExpectedOutageMs(); got != 0 {
+		t.Fatalf("shutdown_announced.expected_outage_ms for a scheduled drain = %d, want 0 (the drain controller states no outage)", got)
+	}
+	if announced.Address != nil {
+		t.Fatalf("shutdown_announced.address = %q, want unset (a scheduled drain has no successor)", announced.GetAddress())
+	}
+
+	// Assert: the orderly exit that closes fire() actually ran.
+	if code := d.AwaitExit(); code != 0 {
+		t.Fatalf("the daemon's exit code after a fired scheduled drain = %d, want an orderly 0", code)
+	}
 	d.ExpectWarnings()
 }
 
@@ -351,6 +429,17 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	}).GetShutdownAnnounced()
 	if announced.GetCause().GetSelfMergeRollout() == nil {
 		t.Fatalf("shutdown_announced.cause = %v, want self_merge_rollout", announced.GetCause())
+	}
+	// Enrichment (critique 15): a handover states the ONE bounded outage the
+	// codebase knows exactly (internal/rollout/controller.go
+	// DefaultExpectedOutage, wired as rollout.Deps.ExpectedOutage in
+	// internal/rollout/handover.go) — unlike drain/controller.go's fire() and
+	// ShutdownNow(), which never set it.
+	if got, want := announced.GetExpectedOutageMs(), int64(rollout.DefaultExpectedOutage/time.Millisecond); got != want {
+		t.Fatalf("shutdown_announced.expected_outage_ms for a handover = %d, want the stated %d", got, want)
+	}
+	if announced.GetMintedAtMs() <= 0 {
+		t.Fatalf("shutdown_announced.minted_at_ms = %d, want a positive mint instant", announced.GetMintedAtMs())
 	}
 	addr := announced.GetAddress()
 	if addr == "" {
