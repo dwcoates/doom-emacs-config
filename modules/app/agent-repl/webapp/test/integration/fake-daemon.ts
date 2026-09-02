@@ -15,7 +15,9 @@
  * an accidentally-empty fake would fail tests for the wrong reason.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ScalarType,
   create,
@@ -173,12 +175,24 @@ export interface RecordedCall<Req = unknown> {
  * except `start`/`stop` and the awaitable `nextCall`/`awaitStream`.
  */
 export interface FakeDaemon {
-  /** Boot the listener; resolves with the base url the transport dials. */
-  start(): Promise<{ baseUrl: string }>;
+  /** Boot the listener; resolves with the base url and the socket it listens on. */
+  start(): Promise<{ baseUrl: string; socketPath: string }>;
   /** Shut the listener down and end every live stream. */
   stop(): Promise<void>;
-  /** The base url once started. Throws before `start` resolves. */
+  /**
+   * The daemon's IDENTITY, once started. Throws before `start` resolves.
+   *
+   * NOT a dialable address: this listener speaks over a unix socket (see
+   * `socketPath`), and every consumer reaches it by that path. The url exists
+   * because the wire carries a daemon address as a string — a transfer
+   * announces one, and the page draws it — and because a fetch still needs an
+   * origin to form a request line. It is unique per daemon and resolves
+   * nowhere, so a consumer that tried to dial it fails loudly rather than
+   * reaching some other daemon.
+   */
   readonly baseUrl: string;
+  /** The unix socket this listener accepts on. Throws before `start`. */
+  readonly socketPath: string;
 
   // --- scripted views: each setter also pushes to every live subscriber ----
   setFooter(workspace: string, view: FooterView): void;
@@ -525,6 +539,14 @@ function buildRefusal(rpc: RpcName, arm: string): unknown {
   } as MessageInitShape<DescMessage>);
 }
 
+/**
+ * Distinguishes one fake daemon's identity url from another's within a worker.
+ * A transfer test asserts the successor's address is DRAWN, so two daemons in
+ * one test must not share a url.
+ */
+let daemonOrdinal = 0;
+const nextDaemonOrdinal = (): number => (daemonOrdinal += 1);
+
 export function createFakeDaemon(): FakeDaemon {
   const registrations = new Set<Registration>();
   const recorded: RecordedCall[] = [];
@@ -554,6 +576,8 @@ export function createFakeDaemon(): FakeDaemon {
 
   let server: Server | undefined;
   let baseUrl = "";
+  let socketPath = "";
+  let socketDir = "";
   let mintCounter = 0;
 
   const countStreams = (rpc: RpcName, workspace?: string, feed?: FeedKey): number => {
@@ -1082,11 +1106,22 @@ export function createFakeDaemon(): FakeDaemon {
         flushHeadersOnAccept(req, res);
         handler(req, res);
       });
-      await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
-      const address = listener.address() as AddressInfo;
+      // A UNIX SOCKET, NOT A LOOPBACK PORT, and that is the whole point.
+      //
+      // Every daemon used to be a fresh 127.0.0.1 listener, so every request
+      // the app made burned an ephemeral port that then sat in TIME_WAIT for
+      // an MSL. A run is ~1600 tests, each booting a daemon and opening
+      // several standing streams; a few of those runs at once walked the
+      // 49152-65535 range dry and `connect` started answering EADDRNOTAVAIL,
+      // which reaches the page as a bare "fetch failed" and fails the boot
+      // adoption. A unix socket consumes no port at all, so that exhaustion
+      // is not merely unlikely here — it is unrepresentable.
+      socketDir = mkdtempSync(join(tmpdir(), "agent-repl-fake-"));
+      socketPath = join(socketDir, "d.sock");
+      await new Promise<void>((resolve) => listener.listen(socketPath, resolve));
       server = listener;
-      baseUrl = `http://127.0.0.1:${address.port}`;
-      return { baseUrl };
+      baseUrl = `http://fake-daemon-${nextDaemonOrdinal()}.invalid`;
+      return { baseUrl, socketPath };
     },
     async stop() {
       for (const reg of registrations) reg.channel.end();
@@ -1098,10 +1133,18 @@ export function createFakeDaemon(): FakeDaemon {
       await new Promise<void>((resolve, reject) =>
         listener.close((error) => (error ? reject(error) : resolve())),
       );
+      // The socket file outlives close(); a run leaks ~1600 of them otherwise.
+      if (socketDir) rmSync(socketDir, { recursive: true, force: true });
+      socketDir = "";
+      socketPath = "";
     },
     get baseUrl() {
       if (!baseUrl) throw new Error("fake daemon: start() has not resolved");
       return baseUrl;
+    },
+    get socketPath() {
+      if (!socketPath) throw new Error("fake daemon: start() has not resolved");
+      return socketPath;
     },
 
     setFooter(workspace, view) {
