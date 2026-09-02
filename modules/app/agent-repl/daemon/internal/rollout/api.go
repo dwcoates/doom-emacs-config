@@ -410,7 +410,12 @@ func New(deps Deps) (Controller, error) {
 		deps.StandDownWindow = DefaultStandDownWindow
 	}
 	deps.DeployScript = ResolveDeployScript(deps.DeployScript)
-	c := &controller{deps: deps, log: deps.Log.Global(), rendezvous: make(map[ids.WorkspaceID]*entry)}
+	c := &controller{
+		deps:         deps,
+		log:          deps.Log.Global(),
+		rendezvous:   make(map[ids.WorkspaceID]*entry),
+		bouncedStamp: make(map[ids.WorkspaceID]string),
+	}
 	c.log.Debug(opNew, "the rollout controller is up", dlog.Context{
 		"deploy_script":      deps.DeployScript,
 		"adoption_window":    deps.AdoptionWindow.String(),

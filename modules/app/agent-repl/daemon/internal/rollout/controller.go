@@ -91,6 +91,12 @@ type controller struct {
 	// successor is the address of the daemon taking over, empty while no
 	// handover is in flight.
 	successor string
+	// bouncedStamp is the reported shim build each workspace was LAST bounced
+	// for. It is what makes the build-staleness bounce fire ONCE per observed
+	// stamp: a relaunched shim that comes back reporting the same sha as the
+	// one just stood down is not stale again, and without this the bounce
+	// re-triggers on every mount forever, spawning a shim each round.
+	bouncedStamp map[ids.WorkspaceID]string
 }
 
 // entry is one workspace's rendezvous state.
