@@ -252,11 +252,17 @@ func (o *orchestrator) lastTab(ctx context.Context, ws wsm.WorkspaceID) string {
 // ended the turn), so without this sweep the turn the user typed stays marked
 // displaced forever and is never put back.
 //
-// ONE OWNER PER RECORD, DECIDED DURABLY. Both owners — the merge's own release
-// and this sweep — claim a record by RETIRING it, which clears the mark in one
-// durable statement. The claim goes down BEFORE the resubmission, so no second
-// boot and no concurrent release can ever submit the same displaced turn
-// twice.
+// ONE OWNER PER RECORD, AND THE DATABASE PICKS IT. Both owners — the merge's
+// own release and this sweep — take a record through ClaimDisplacedTurn, whose
+// `WHERE displaced = 1` lets exactly one of them win however the two are
+// scheduled; the loser is told false and puts nothing back. The claim is taken
+// BEFORE the resubmission, so no second boot can double it either.
+//
+// A merge the recovery RE-ENQUEUES is not an owner of the old record: its
+// second run captures nothing (the first run already ended the turn), which is
+// precisely the gap this sweep closes. Such a run may displace the resubmitted
+// turn all over again and put THAT one back at its own release — one
+// displacement, one resubmission, which is the contract.
 //
 // A submission that fails is recorded and the sweep goes on: one workspace
 // whose session refuses a turn is not a reason to leave every other user's
@@ -276,9 +282,14 @@ func (o *orchestrator) recoverDisplaced(ctx context.Context) error {
 		"turns": len(displaced)})
 	for _, t := range displaced {
 		fields := dlog.Context{"workspace": string(t.Workspace), "turn": string(t.ID)}
-		if err := o.deps.DB.RetireDisplacedTurn(ctx, t.ID, o.deps.Now()); err != nil {
+		claimed, err := o.deps.DB.ClaimDisplacedTurn(ctx, t.ID, o.deps.Now())
+		if err != nil {
 			o.deps.Log.Global().Error(op, "a displaced turn could not be claimed", withField(fields, "error", err.Error()))
 			return fmt.Errorf("merge: claim the displaced turn %q: %w", t.ID, err)
+		}
+		if !claimed {
+			o.deps.Log.Global().Debug(op, "a displaced turn was already put back by its merge", fields)
+			continue
 		}
 		if _, err := o.deps.Queue.Submit(ctx, promptqueue.Submission{
 			WS: t.Workspace, Turn: wsm.NewTurnID(), Said: saidText(t.Text),

@@ -638,3 +638,28 @@ func TestResubmittingTheDisplacedTurnClearsItsDurableMark(t *testing.T) {
 		t.Fatalf("turns still marked displaced after the release = %v, want none", left)
 	}
 }
+
+// TestAReleaseResubmitsNothingWhenTheDisplacedRecordIsAlreadyClaimed covers
+// the loser of the two owners: a boot recovery that already put the turn back
+// leaves no mark, and the release must not put it back a second time.
+func TestAReleaseResubmitsNothingWhenTheDisplacedRecordIsAlreadyClaimed(t *testing.T) {
+	// Arrange: a run holding the capture, with NO durable mark left — which is
+	// exactly what a sweep that already claimed the record leaves behind.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.displaced = &Displaced{Turn: wsm.NewTurnID(), Text: "carry on with the refactor"}
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if n := h.queue.countOrigin(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME); n != 0 {
+		t.Fatalf("the release resubmitted %d turns for a record it does not own, want none", n)
+	}
+}

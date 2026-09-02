@@ -172,15 +172,20 @@ func (r *run) resubmitDisplaced(ctx context.Context) {
 	displaced := *r.displaced
 	r.displaced = nil
 	fields := dlog.Context{"workspace": string(r.ws), "turn": string(displaced.Turn)}
-	// THE CLAIM GOES DOWN BEFORE THE SUBMISSION. Retiring clears the durable
-	// displaced mark, and the mark is what the boot recovery sweeps: a
-	// submission made first and a crash before the mark came down would have
-	// the next boot submit the same turn a second time. The claim is the one
-	// thing that makes "exactly once" hold across a bounce, so it is taken
-	// first, by this owner and by the sweep alike.
-	if err := r.o.deps.DB.RetireDisplacedTurn(ctx, displaced.Turn, r.o.deps.Now()); err != nil {
+	// THE CLAIM GOES DOWN BEFORE THE SUBMISSION, AND THE DATABASE ARBITRATES
+	// IT. Clearing the durable mark is what tells the boot recovery's sweep
+	// this record is spent; a submission made first, with a crash before the
+	// mark came down, would have the next boot put the same turn back a second
+	// time. A claim that answers false means the sweep already put it back,
+	// and this owner resubmits NOTHING.
+	claimed, err := r.o.deps.DB.ClaimDisplacedTurn(ctx, displaced.Turn, r.o.deps.Now())
+	if err != nil {
 		r.o.log(ctx, r.ws).Error("daemon.merge.resubmit", "could not claim the displaced turn",
 			withField(fields, "error", err.Error()))
+		return
+	}
+	if !claimed {
+		r.o.log(ctx, r.ws).Debug("daemon.merge.resubmit", "the displaced turn was already put back by a boot recovery", fields)
 		return
 	}
 	if _, err := r.o.deps.Queue.Submit(ctx, promptqueue.Submission{

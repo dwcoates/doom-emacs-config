@@ -253,26 +253,40 @@ func (s *store) AllDisplacedTurns(ctx context.Context) ([]Turn, error) {
 	return out, nil
 }
 
-// RetireDisplacedTurn clears the displaced mark and closes the turn if it is
-// still open, in ONE statement.
+// ClaimDisplacedTurn takes a displaced turn exclusively: it clears the mark
+// and closes the turn if it is still open, in ONE conditional statement, and
+// reports whether this caller is the one that took it.
 //
-// EXACTLY-ONCE LIVES HERE. Both owners of a displaced record — the merge's own
-// release and the boot recovery — retire it through this call, so a record can
-// be claimed once and only once: the mark going down is the claim, and it goes
-// down durably. An already-closed turn keeps the close it has; the retirement
-// is about the mark.
-func (s *store) RetireDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) error {
-	const op = "daemon.wsm.retire_displaced_turn"
+// EXACTLY-ONCE LIVES HERE, AND IT IS THE DATABASE THAT ARBITRATES. A displaced
+// record has two possible owners — the merge's own lease release and the boot
+// recovery's sweep — and `WHERE displaced = 1` is what lets only one of them
+// win, whatever the schedule: the loser is told false and puts nothing back. A
+// turn that does not exist, or was never marked, answers false the same way,
+// which is the same instruction: this caller does not own it.
+//
+// An already-closed turn keeps the close it has; the claim is about the mark.
+func (s *store) ClaimDisplacedTurn(ctx context.Context, turn TurnID, at time.Time) (bool, error) {
+	const op = "daemon.wsm.claim_displaced_turn"
 	fields := dlog.Context{"turn": string(turn), "at": at}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	claimed := false
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
 			`UPDATE turns SET displaced = 0,
 			   closed_at = COALESCE(closed_at, ?),
 			   close_kind = COALESCE(close_kind, ?)
-			 WHERE id = ?`, nanos(at), int(CloseCompleted), turn)
+			 WHERE id = ? AND displaced = 1`, nanos(at), int(CloseCompleted), turn)
 		if err != nil {
 			return err
 		}
-		return requireOneRow(res, fmt.Sprintf("wsm: turn %s", turn))
+		rows, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		claimed = rows == 1
+		return nil
 	})
+	if err != nil {
+		return false, err
+	}
+	return claimed, nil
 }

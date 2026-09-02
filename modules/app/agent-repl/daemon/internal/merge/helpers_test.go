@@ -208,22 +208,27 @@ func (f *fakeDB) AllDisplacedTurns(_ context.Context) ([]wsm.Turn, error) {
 	return out, nil
 }
 
-// RetireDisplacedTurn clears the mark and retires the record, exactly as the
-// store's one statement does.
-func (f *fakeDB) RetireDisplacedTurn(_ context.Context, turn wsm.TurnID, _ time.Time) error {
+// ClaimDisplacedTurn takes the record exclusively, exactly as the store's one
+// conditional statement does: only a turn still marked can be claimed.
+func (f *fakeDB) ClaimDisplacedTurn(_ context.Context, turn wsm.TurnID, _ time.Time) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	claimed := false
 	for id, list := range f.turns {
 		kept := list[:0]
 		for _, t := range list {
-			if t.ID != turn {
-				kept = append(kept, t)
+			if t.ID == turn && t.Displaced {
+				claimed = true
+				continue
 			}
+			kept = append(kept, t)
 		}
 		f.turns[id] = kept
 	}
-	f.retired = append(f.retired, turn)
-	return nil
+	if claimed {
+		f.retired = append(f.retired, turn)
+	}
+	return claimed, nil
 }
 
 func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease wsm.LeaseID) error {

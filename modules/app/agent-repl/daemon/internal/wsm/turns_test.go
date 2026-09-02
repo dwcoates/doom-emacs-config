@@ -479,7 +479,7 @@ func TestAllDisplacedTurnsSkipsAnUnmarkedTurn(t *testing.T) {
 	}
 }
 
-func TestRetireDisplacedTurnClearsTheMark(t *testing.T) {
+func TestClaimDisplacedTurnClearsTheMark(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
@@ -489,8 +489,8 @@ func TestRetireDisplacedTurnClearsTheMark(t *testing.T) {
 	}
 
 	// Act
-	if err := s.RetireDisplacedTurn(context.Background(), turn.ID, instant); err != nil {
-		t.Fatalf("RetireDisplacedTurn: %v", err)
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant); err != nil || !claimed {
+		t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 	}
 	got, err := s.AllDisplacedTurns(context.Background())
 
@@ -499,11 +499,11 @@ func TestRetireDisplacedTurnClearsTheMark(t *testing.T) {
 		t.Fatalf("AllDisplacedTurns: %v", err)
 	}
 	if len(got) != 0 {
-		t.Fatalf("displaced turns after the retirement = %+v, want none", got)
+		t.Fatalf("displaced turns after the claim = %+v, want none", got)
 	}
 }
 
-func TestRetireDisplacedTurnClosesAnOpenTurn(t *testing.T) {
+func TestClaimDisplacedTurnClosesAnOpenTurn(t *testing.T) {
 	// Arrange: the turn's kill never landed, so its record is still open.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
@@ -513,8 +513,8 @@ func TestRetireDisplacedTurnClosesAnOpenTurn(t *testing.T) {
 	}
 
 	// Act
-	if err := s.RetireDisplacedTurn(context.Background(), turn.ID, instant); err != nil {
-		t.Fatalf("RetireDisplacedTurn: %v", err)
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant); err != nil || !claimed {
+		t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 	}
 	open, err := s.OpenTurns(context.Background(), ws.ID)
 
@@ -523,11 +523,11 @@ func TestRetireDisplacedTurnClosesAnOpenTurn(t *testing.T) {
 		t.Fatalf("OpenTurns: %v", err)
 	}
 	if len(open) != 0 {
-		t.Fatalf("open turns after the retirement = %+v, want the record closed", open)
+		t.Fatalf("open turns after the claim = %+v, want the record closed", open)
 	}
 }
 
-func TestRetireDisplacedTurnKeepsAnExistingClose(t *testing.T) {
+func TestClaimDisplacedTurnKeepsAnExistingClose(t *testing.T) {
 	// Arrange: a turn already closed as KILLED by the capture.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
@@ -540,29 +540,50 @@ func TestRetireDisplacedTurnKeepsAnExistingClose(t *testing.T) {
 	}
 
 	// Act
-	if err := s.RetireDisplacedTurn(context.Background(), turn.ID, instant.Add(time.Minute)); err != nil {
-		t.Fatalf("RetireDisplacedTurn: %v", err)
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant.Add(time.Minute)); err != nil || !claimed {
+		t.Fatalf("ClaimDisplacedTurn = (%v, %v), want (true, nil)", claimed, err)
 	}
 	var kind int
 	if err := s.db().QueryRowContext(context.Background(), `SELECT close_kind FROM turns WHERE id = ?`, turn.ID).Scan(&kind); err != nil {
-		t.Fatalf("read the retired turn's close: %v", err)
+		t.Fatalf("read the claimed turn's close: %v", err)
 	}
 
 	// Assert
 	if TurnClose(kind) != CloseKilled {
-		t.Fatalf("the retired turn's close = %v, want the kill it already had", TurnClose(kind))
+		t.Fatalf("the claimed turn's close = %v, want the kill it already had", TurnClose(kind))
 	}
 }
 
-func TestRetireDisplacedTurnRefusesAnUnknownTurn(t *testing.T) {
+func TestClaimDisplacedTurnAnswersFalseForAnUnknownTurn(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 
 	// Act
-	err := s.RetireDisplacedTurn(context.Background(), NewTurnID(), instant)
+	claimed, err := s.ClaimDisplacedTurn(context.Background(), NewTurnID(), instant)
 
 	// Assert
-	if err == nil {
-		t.Fatal("RetireDisplacedTurn on an unknown turn = nil, want a refusal")
+	if err != nil || claimed {
+		t.Fatalf("ClaimDisplacedTurn on an unknown turn = (%v, %v), want (false, nil): nobody owns it", claimed, err)
+	}
+}
+
+func TestASecondClaimOfTheSameDisplacedTurnAnswersFalse(t *testing.T) {
+	// Arrange: a claimed record, as the second owner would find it.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	turn := Turn{ID: NewTurnID(), Workspace: ws.ID, Text: "carry on", Origin: "emacs", Displaced: true, StartedAt: instant}
+	if err := s.PutTurn(context.Background(), turn); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+	if claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant); err != nil || !claimed {
+		t.Fatalf("the first claim = (%v, %v), want (true, nil)", claimed, err)
+	}
+
+	// Act
+	claimed, err := s.ClaimDisplacedTurn(context.Background(), turn.ID, instant)
+
+	// Assert
+	if err != nil || claimed {
+		t.Fatalf("the second claim = (%v, %v), want (false, nil): one owner per record", claimed, err)
 	}
 }
