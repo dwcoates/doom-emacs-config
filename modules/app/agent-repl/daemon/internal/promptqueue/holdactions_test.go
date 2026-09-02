@@ -258,6 +258,11 @@ func TestReleasingAHibernationsHoldRevivesTheParkedSessionToDeliverIt(t *testing
 	// Act
 	h.watcher.idle()
 	h.q.OnLeaseChanged(theWorkspace)
+	// The lease change no longer revives in-line: a lease ending with no
+	// session up hands the surviving session_starting holds to the same
+	// background revival a fresh submission takes, so the join is the
+	// queue's own revival WaitGroup rather than a wait on the call's return.
+	h.waitRevivals()
 
 	// Assert
 	if h.revivals != 1 {
@@ -265,5 +270,41 @@ func TestReleasingAHibernationsHoldRevivesTheParkedSessionToDeliverIt(t *testing
 	}
 	if started := h.sender.started(); len(started) != 1 || started[0] != "t1" {
 		t.Fatalf("started = %v, want the held prompt delivered after the revival", started)
+	}
+}
+
+// TestReleasingDuringTheBringUpALeaseEndingStartedIsRefused pins the window
+// that produced the wrong arm: a hibernation's lease ends while the workspace
+// it parked still has no shim, and a release landing inside the bring-up that
+// follows must answer the domain-correct release_refused -- never the untyped
+// "no session" about a workspace that is in fact still coming up.
+func TestReleasingDuringTheBringUpALeaseEndingStartedIsRefused(t *testing.T) {
+	// Arrange: the prompt is held by the hibernation lease, the lease is
+	// cleared with the session still parked, and the revival is pinned open.
+	h := newHarness(t)
+	h.lease(wsm.HolderHibernate, wsm.PolicyHold)
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.noSession = true
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	h.reviveHook = func() {
+		close(entered)
+		<-proceed
+		h.noSession = false
+	}
+	h.clearLease()
+	h.watcher.idle()
+	go h.q.OnLeaseChanged(theWorkspace)
+	<-entered
+
+	// Act: a force-through lands while the bring-up is still running.
+	err := h.q.Release(context.Background(), theWorkspace, "t1")
+
+	// Assert
+	close(proceed)
+	h.waitRevivals()
+	if !errors.Is(err, ErrReleaseRefused) {
+		t.Fatalf("Release during the bring-up = %v, want ErrReleaseRefused", err)
 	}
 }

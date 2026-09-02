@@ -52,9 +52,15 @@ type wsState struct {
 	// queue's own mutex across it would wedge every other workspace.
 	drain sync.Mutex
 
-	// reviving reports that a bring-up for this workspace is already running,
+	// reviving reports that a BACKGROUND revival goroutine is already running,
 	// so a second submission joins it rather than spawning a second one.
 	reviving bool
+
+	// bringUps counts the revivals actually in flight for this workspace,
+	// from every caller -- the background one and the in-line one a hold's
+	// delivery takes. A release that lands while one is running is answered
+	// "the session is still coming up", never "there is no session".
+	bringUps int
 
 	head            *ids.TurnID
 	interrupting    bool
