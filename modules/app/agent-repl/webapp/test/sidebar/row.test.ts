@@ -117,7 +117,9 @@ describe("the attention marker", () => {
   it("starts the blink lit, on the cadence the message specifies", () => {
     const sc = sidebarContext();
     const drawn = drawRosterRow(row({ id: "ws-1", attention: true }), sc, "R");
-    expect(drawn.getAttribute("data-blink")).toBe("on");
+    // The MARKER blinks, not the row: `data-blink` is painted on the element
+    // the hook contract points at, `[data-roster-row] [data-attention]`.
+    expect(drawn.querySelector(".sb-attn")?.getAttribute("data-blink")).toBe("on");
   });
 });
 
@@ -374,15 +376,15 @@ describe("the row click", () => {
 });
 
 describe("the verb menu", () => {
-  it("is closed until it is asked for", () => {
+  it("is drawn with the row, hidden until it is asked for", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    expect(drawn.querySelector(".sb-menu")).toBeNull();
+    expect((drawn.querySelector(".sb-menu") as HTMLElement).hidden).toBe(true);
   });
 
   it("opens on the row's own control", async () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     await click(drawn.querySelector(".sb-more") as Element);
-    expect(drawn.querySelector(".sb-menu")).not.toBeNull();
+    expect((drawn.querySelector(".sb-menu") as HTMLElement).hidden).toBe(false);
   });
 
   it("opens DOWNWARD, under the row line, so it cannot clip off the top", async () => {
@@ -397,7 +399,8 @@ describe("the verb menu", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
     await click(drawn.querySelector(".sb-more") as Element);
     await click(drawn.querySelector(".sb-more") as Element);
-    expect(drawn.querySelector(".sb-menu")).toBeNull();
+    expect((drawn.querySelector(".sb-menu") as HTMLElement).hidden).toBe(true);
+    expect(drawn.querySelectorAll(".sb-menu")).toHaveLength(1);
   });
 
   it("opens on a right-click of the row", () => {
@@ -405,7 +408,7 @@ describe("the verb menu", () => {
     drawn
       .querySelector(".row")
       ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    expect(drawn.querySelector(".sb-menu")).not.toBeNull();
+    expect((drawn.querySelector(".sb-menu") as HTMLElement).hidden).toBe(false);
   });
 
   it("does not select the workspace when the control is clicked", async () => {
