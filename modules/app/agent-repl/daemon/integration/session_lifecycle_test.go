@@ -69,6 +69,17 @@ func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T)
 	if got := info.Env["AGENT_REPL_FORBID_VENDOR_CALLS"]; got != "1" {
 		t.Fatalf("shim AGENT_REPL_FORBID_VENDOR_CALLS = %q, want \"1\"", got)
 	}
+	// AGENT_REPL_SESSION_ID is the host session identity (shimclient.EnvSessionID,
+	// log correlation only): it must equal the very id the host stream serves
+	// for this session (agentrepl/v1's HostSessionExisting.id).
+	hostView := harness.AwaitView(t, f.d.Ctx(), f.host, "the host session identity",
+		func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+			return r.GetHost().GetExisting().GetId().GetValue() != ""
+		})
+	wantSessionID := hostView.GetHost().GetExisting().GetId().GetValue()
+	if got := info.Env["AGENT_REPL_SESSION_ID"]; got == "" || got != wantSessionID {
+		t.Fatalf("shim AGENT_REPL_SESSION_ID = %q, want the host session id %q", got, wantSessionID)
+	}
 
 	// Assert: cwd.
 	if info.Cwd != f.repo.Dir {
@@ -1483,5 +1494,381 @@ func assertShimRequestOrder(t *testing.T, f *fixture, first, second string) {
 	}
 	if firstAt > secondAt {
 		t.Fatalf("the shim received %s before %s, want %s first", second, first, first)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// audit-3 critique 4: a hibernate refusal or failure DEFERS the stand-down —
+// the sweep never forces a session down over a hibernate it could not get an
+// ack for. internal/drain/sweep.go's hibernate returns false (deferring)
+// before ever calling KillSession on both the transport-failure and the
+// typed-refusal branches.
+// ---------------------------------------------------------------------------
+
+// TestHibernateTransportFailureDefersTheStandDown covers the transport-level
+// failure: c.deps.Stand.Hibernate itself errors (shimclient's unary() passes
+// a raw connect error through), which internal/drain/sweep.go's hibernate()
+// logs at ERROR under daemon.drain.sweep ("the hibernate directive failed;
+// deferring the hibernation") — NOT WARN. The sweep's typed-refusal branch
+// (the other test below) is the one that logs WARN; a transport failure never
+// reaches that branch at all, so this test asserts the ERROR record the
+// source actually produces.
+func TestHibernateTransportFailureDefersTheStandDown(t *testing.T) {
+	// Arrange: a very short idle cutoff so the sweep fires promptly, and a
+	// generous run of scripted Hibernate transport failures so the assertion
+	// window below never lands on a sweep pass that got through to a real
+	// (successful) hibernate and forced a KillSession for real.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	f.d.ExpectWarnings("daemon.drain.sweep")
+	for i := 0; i < 20; i++ {
+		f.shim.AnswerFailure(harness.RPCHibernate, "transport blew up")
+	}
+
+	// Act: wait for the sweep to log the failed directive.
+	rec := f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"),
+		"an ERROR record for the failed hibernate directive",
+		func(r harness.LogRecord) bool {
+			return r.Operation == "daemon.drain.sweep" && strings.EqualFold(r.Level, "error")
+		})
+
+	// Assert: the record is the hibernate-directive failure, not some other
+	// daemon.drain.sweep error.
+	if !strings.Contains(rec.Message, "hibernate directive failed") {
+		t.Fatalf("daemon.drain.sweep ERROR record = %q, want it to name the failed hibernate directive", rec.Message)
+	}
+
+	// Assert: the daemon never forces the session down over the refused
+	// hibernate.
+	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
+}
+
+// TestHibernateTurnInFlightRefusalDefersTheStandDown covers the shim's own
+// typed refusal: HibernateError.turn_in_flight (shim.v1/endpoint_hibernate.proto).
+// The sweep logs this at DEBUG only ("a turn is in flight; deferring the
+// hibernation") — quieter than the OTHER typed refusals (compaction_failed,
+// no_session), which log WARN — so this test asserts no WARN fires at all.
+func TestHibernateTurnInFlightRefusalDefersTheStandDown(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	for i := 0; i < 20; i++ {
+		f.shim.Answer(harness.RPCHibernate, &shimv1.HibernateResponse{
+			Result: &shimv1.HibernateResponse_Error{Error: &shimv1.HibernateError{
+				Kind: &shimv1.HibernateError_TurnInFlight{TurnInFlight: &shimv1.HibernateTurnInFlight{}},
+			}},
+		})
+	}
+
+	// Act: wait for at least one refused Hibernate attempt.
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+
+	// Assert: the daemon never forces the session down over the deferred
+	// hibernate.
+	expectNoRPC(t, f.shim, harness.RPCKillSession, harness.ProbeWindow)
+}
+
+// ---------------------------------------------------------------------------
+// audit-3 critique 5: spawn-on-mount revival.
+// ---------------------------------------------------------------------------
+
+// TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume covers OpenWorkspace
+// re-mounting a hibernated session DIRECTLY (rather than through a revived
+// prompt, which TestHibernationParksAnIdleSessionAndRevivesOnPrompt already
+// covers): the row's session.Terminal.Kind is drain.TerminalHibernated
+// ("hibernated"), decideSource (internal/workspace/sessions.go) treats
+// anything but "deleted" as resumable, so the mount resumes the vendor
+// session exactly as a revival does.
+func TestOpenWorkspaceOnAHibernatedRowSendsStartSessionResume(t *testing.T) {
+	// Arrange: hibernate the session via the idle sweep.
+	f := newOpened(t, harness.Opts{IdleCutoffMS: 50})
+	f.shim.ExpectStartSession()
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCHibernate, &shimv1.HibernateRequest{})
+	killed := &shimv1.KillSessionRequest{}
+	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCKillSession, killed)
+	f.shim.AwaitGone()
+
+	// Act: OpenWorkspace re-mounts the parked session directly.
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace on a hibernated workspace = error %v, want a success", err)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+
+	// Assert
+	req := shim.ExpectStartSession()
+	if req.GetResume() == nil {
+		t.Fatalf("StartSession request = %v, want a resume source reviving the hibernated session", req)
+	}
+}
+
+// TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted covers
+// OpenWorkspaceError.session_deleted (endpoint_open_workspace.proto). NOTHING
+// in production ever writes the "deleted" session terminal today (grepped
+// every internal/**/*.go call to wsm.SetSessionTerminal: teardown.go writes
+// "killed", drain/sweep.go writes drain.TerminalHibernated) — so this test
+// produces the row the way harness.WithDB's own doc prescribes: corrupt one
+// column of a real (killed) session row, stop, and restart, watching the
+// successor refuse it. See internal/workspace/sessions.go's decideSource,
+// which refuses BEFORE any spawn.
+func TestOpenWorkspaceOnATerminallyDeletedSessionAnswersSessionDeleted(t *testing.T) {
+	// Arrange: kill to get a real, whole session-terminal row, then corrupt
+	// just its kind to "deleted" (wsm's terminalDeleted spelling).
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.Stop()
+	f.d.CorruptRow("sessions", "terminal_kind", "workspace_id", f.ws.GetId(), "deleted")
+
+	// Act: restart on the same state root and reopen.
+	successor := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}})
+	resp, err := successor.Client().OpenWorkspace(successor.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws}))
+
+	// Assert: the landed session_deleted arm, and nothing spawned to be
+	// refused BY (the guard reads the durable record before any process
+	// spawns, mirroring TestResumingAMissingVendorTranscriptIsRefusedBeforeSpawn).
+	if err != nil {
+		t.Fatalf("OpenWorkspace on a terminally deleted session = transport error %v, want the session_deleted arm", err)
+	}
+	if resp.Msg.GetError().GetSessionDeleted() == nil {
+		t.Fatalf("OpenWorkspace on a terminally deleted session = %v, want OpenWorkspaceError.session_deleted", resp.Msg)
+	}
+	if got := successor.WorkspaceLogOperationCount(f.repo.Dir, "daemon.shimclient.spawn"); got != 0 {
+		t.Fatalf("shim spawn records = %d after the refusal, want 0: the guard refuses BEFORE the spawn", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// audit-3 critique 20: cold-gate and interrupt arms.
+// ---------------------------------------------------------------------------
+
+// TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate covers
+// AnswerColdGateError.no_cold_gate (endpoint_answer_cold_gate.proto):
+// internal/workspace/sessions.go's Fleet.Stop and the successful-resolve path
+// both delete the served gate from Fleet.coldGates, so a SECOND answer
+// against the same (now resolved) gate id finds none standing.
+func TestAnswerColdGateOnAnAlreadyResolvedGateAnswersNoColdGate(t *testing.T) {
+	// Arrange: stand a cold gate and resolve it once.
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
+		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
+	}})
+	feed := f.watchRootFeed()
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
+		return r.GetColdGate().GetStanding() != nil
+	})
+	resolved, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+		Workspace: f.ws,
+		Gate:      gateRow.GetId(),
+		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
+	}))
+	if err != nil || resolved.Msg.GetSuccess() == nil {
+		t.Fatalf("the first AnswerColdGate{pay} = (%v, %v), want a success setting up the resolved gate", resolved.Msg, err)
+	}
+	shim.ExpectStartSession()
+
+	// Act: answer the SAME gate id again.
+	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+		Workspace: f.ws,
+		Gate:      gateRow.GetId(),
+		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AnswerColdGate on an already-resolved gate = transport error %v, want the no_cold_gate arm", err)
+	}
+	if resp.Msg.GetError().GetNoColdGate() == nil {
+		t.Fatalf("AnswerColdGate on an already-resolved gate = %v, want error.no_cold_gate", resp.Msg)
+	}
+}
+
+// TestAnswerColdGateWithNoLiveShimAnswersNoSession targets
+// AnswerColdGateError.no_session ("the workspace has no session to answer
+// to"). internal/workspace/answers.go's AnswerColdGate checks the served gate
+// (Cards.ColdGate) BEFORE liveness (Shim(ws)), so reaching no_session needs a
+// standing gate AND a dead session AT ONCE. KillWorkspace cannot produce that
+// combination: its teardown calls Sessions.Stop, which deletes
+// Fleet.coldGates and Fleet.sessions TOGETHER in the same critical section
+// (internal/workspace/sessions.go's Fleet.Stop) — so any daemon-driven
+// teardown clears the gate right along with the session, landing on
+// no_cold_gate instead (the test above). The only way left to split them is
+// to kill the shim's PROCESS out from under a standing gate without going
+// through any daemon verb: Fleet.Shim(ws) answers "live" purely from
+// Fleet.sessions map PRESENCE, never a real health check, so the map entry
+// (and the gate beside it) survives the process's death.
+//
+// EXPECTED RED: Fleet.Shim(ws) reports live=true regardless (map presence,
+// not health), so AnswerColdGate proceeds to shim.StartSession over the now-
+// dead control connection and fails with a raw transport error rather than
+// composing the typed no_session refusal. That is the production gap this
+// test exposes; see the report.
+func TestAnswerColdGateWithNoLiveShimAnswersNoSession(t *testing.T) {
+	// Arrange: stand a cold gate, then kill the shim PROCESS directly (never
+	// through KillWorkspace, which would also clear the coldGates record).
+	f := newOpened(t, harness.Opts{})
+	f.shim.ExpectStartSession()
+	if _, err := f.d.Client().KillWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("KillWorkspace = error %v, want a success", err)
+	}
+	f.shim.AwaitGone()
+	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ColdOnResume: &harness.ShimColdFacts{
+		ContextTokens: 1, LastRequestAtMS: 1, RequestedModel: "sonnet", CacheTTLMS: 1,
+	}})
+	feed := f.watchRootFeed()
+	if _, err := f.d.Client().OpenWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("OpenWorkspace (cold resume) = error %v, want a success", err)
+	}
+	shim := f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	shim.ExpectStartSession()
+	gateRow := awaitRow(t, f, feed, "the cold gate row", func(r *frontendv1.FeedRow) bool {
+		return r.GetColdGate().GetStanding() != nil
+	})
+	pid := shim.Info().PID
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill the fake shim process %d: %v", pid, err)
+	}
+	harness.AwaitProcessGone(t, f.d.Ctx(), pid)
+
+	// Act
+	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+		Workspace: f.ws,
+		Gate:      gateRow.GetId(),
+		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = transport error %v, want the no_session arm", err)
+	}
+	if resp.Msg.GetError().GetNoSession() == nil {
+		t.Fatalf("AnswerColdGate against a dead shim under a standing gate = %v, want error.no_session", resp.Msg)
+	}
+}
+
+// TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate documents
+// the OTHER "no session" shape, which is NOT the no_session arm: a workspace
+// that has never had any session, or whose cold gate has already been
+// cleared, hits the ColdGate check FIRST (internal/workspace/answers.go), so
+// it always answers no_cold_gate, never no_session — no_cold_gate is checked
+// before liveness. This locks that ordering down so a future reordering of
+// the two checks is caught here rather than only in the no_session test above.
+func TestAnswerColdGateOnAWorkspaceWithNoSessionAtAllAnswersNoColdGate(t *testing.T) {
+	// Arrange: a registered workspace that was never opened.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	resp, err := f.d.Client().AnswerColdGate(f.d.Ctx(), connect.NewRequest(&agentreplv1.AnswerColdGateRequest{
+		Workspace: f.ws,
+		Gate:      &frontendv1.FeedId{Value: "not-a-real-gate-id"},
+		Choice:    &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AnswerColdGate on a workspace with no session at all = transport error %v, want the no_cold_gate arm", err)
+	}
+	if resp.Msg.GetError().GetNoColdGate() == nil {
+		t.Fatalf("AnswerColdGate on a workspace with no session at all = %v, want error.no_cold_gate (checked before liveness)", resp.Msg)
+	}
+}
+
+// TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession targets
+// InterruptError.no_session (endpoint_interrupt.proto). A workspace with NO
+// live session at all answers `nothing_running` instead — a SUCCESS, not this
+// arm (TestInterruptWithNothingRunningAnswersNothingRunning; see
+// internal/workspace/interrupt.go's `if !live || !hasShim` branch, which
+// returns before ever reaching the shim). The only reachable route to the
+// TYPED no_session error is the shim's OWN KillTurnFailure.no_session cause,
+// propagated by name (internal/workspace/shimarms.go's killTurnArm ->
+// ArmShimNoSession = "no_session", which server/refuse.go's reflection-based
+// setArm matches directly against InterruptError's no_session field) while
+// Freeness still reports a turn open.
+func TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession(t *testing.T) {
+	// Arrange: a turn appears open, but the shim itself reports no session.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the long task", "k-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	f.shim.Answer(harness.RPCKillTurn, &shimv1.KillTurnResponse{
+		Result: &shimv1.KillTurnResponse_Failure{Failure: &shimv1.KillTurnFailure{
+			Cause:  &shimv1.KillTurnFailure_NoSession{NoSession: &shimv1.KillTurnNoSession{}},
+			Detail: "no session is open on this shim",
+		}},
+	})
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Interrupt{turn} against a shim reporting no_session = transport error %v, want the no_session arm", err)
+	}
+	if resp.Msg.GetError().GetNoSession() == nil {
+		t.Fatalf("Interrupt{turn} against a shim reporting no_session = %v, want error.no_session", resp.Msg)
+	}
+}
+
+// TestInterruptTurnWithATransportFailureAnswersShimRefused targets
+// InterruptError.shim_refused{detail} (endpoint_interrupt.proto's arm 8:
+// "A typed shim refusal relayed"). Per its doc comment this is meant for a
+// shim refusal the daemon does not otherwise have a specific arm for.
+//
+// EXPECTED RED, for two independent reasons found by grepping the whole
+// production tree:
+//  1. AnswerFailure is a TRANSPORT-level failure (fakeshim/server.go's
+//     `scripted` returns connect.NewError(CodeInternal, ...)), and
+//     internal/workspace/sender.go's KillTurn passes a transport error
+//     straight through UNWRAPPED — it is never a *workspace.ShimRefusal. So
+//     interrupt.go's `AsShimRefusal(err)` fails, the confirm/no_session
+//     branches are never reached, and the verb returns a plain wrapped error,
+//     which the server answers as a raw Connect error, not a typed arm at
+//     all.
+//  2. Even where a real *ShimRefusal DOES reach server/refuse.go, the arm
+//     name it carries is switched onto the CONCRETE named field the shim
+//     itself reported (e.g. "no_session", "live", "not_the_open_turn" —
+//     server.setArm matches the refusal's Arm string directly against
+//     InterruptError's oneof field names by reflection). No production code
+//     anywhere ever sets Arm to the literal string "shim_refused": grepping
+//     `"shim_refused"` and `ShimRefused` across internal/**/*.go (excluding
+//     _test.go) returns zero producers. The arm is UNREACHABLE as things
+//     stand.
+func TestInterruptTurnWithATransportFailureAnswersShimRefused(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the long task", "k-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
+	f.shim.ExpectStartTurn()
+	f.shim.AnswerFailure(harness.RPCKillTurn, "the vendor refused the kill")
+
+	// Act
+	resp, err := f.d.Client().Interrupt(f.d.Ctx(), connect.NewRequest(&agentreplv1.InterruptRequest{
+		Workspace: f.ws,
+		Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+	}))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Interrupt{turn} on a shim transport failure = transport error %v, want the shim_refused arm carrying its detail", err)
+	}
+	refused := resp.Msg.GetError().GetShimRefused()
+	if refused == nil {
+		t.Fatalf("Interrupt{turn} on a shim transport failure = %v, want error.shim_refused", resp.Msg)
+	}
+	if refused.GetDetail() != "the vendor refused the kill" {
+		t.Fatalf("shim_refused.detail = %q, want the shim's own detail %q", refused.GetDetail(), "the vendor refused the kill")
 	}
 }
