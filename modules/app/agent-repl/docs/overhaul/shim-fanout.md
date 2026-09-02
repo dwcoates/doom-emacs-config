@@ -616,3 +616,10 @@ every UX or contract gap you surfaced instead of improvising.
   unify the two `SourceCoordinates` types (store/keys.ts vs
   store/persistence.ts) into one shared declaration (rides the scenario
   rebuild brief).
+- LEDGER: landing 6 (overhaul/integration d46e601e7/8a98e4fca/bc0a07bae)
+  merged at c9280627f, no conflicts; no shim.v1/conversation.v1 change;
+  typecheck/unit(3682)/build green. Notes from the project lead: the
+  daemon's SubmitPromptError.turn_already_open is retired — the shim's
+  UpdateAgentFailure refusal of a busy subagent is the ONE producer and stays
+  typed and named; the compaction writer stays graded against the corpus
+  fixture and marked synthetic until a longer-history capture is approved.
