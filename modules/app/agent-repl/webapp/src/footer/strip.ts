@@ -81,7 +81,7 @@ import type {
   FooterTokensCellInput,
   FooterTokensCellVerdict,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { formatAge, formatCountdown, formatElapsed } from "../duration.js";
+import { formatAge, formatCountdown, formatTickedAge, formatTickedElapsed } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -645,7 +645,7 @@ export function drawFooterStatusActivityAt(
   age.setAttribute("data-age", "");
   const atMs = msOf(u.atMs, `${path}.at_ms`);
   tick(age, deps.ctx.ticker, (nowMs) => {
-    age.textContent = ` · ${formatAge(nowMs - atMs)} ago`;
+    age.textContent = ` · ${formatTickedAge(nowMs - atMs)} ago`;
   });
   return age;
 }
@@ -675,7 +675,7 @@ export function drawFooterClock(u: FooterClock, deps: StripDeps): HTMLElement {
   cell.setAttribute("data-live", "true");
   const startedAtMs = msOf(u.turnStartedAtMs, "FooterClock.turn_started_at_ms");
   tick(label, deps.ctx.ticker, (nowMs) => {
-    label.textContent = formatElapsed(nowMs - startedAtMs);
+    label.textContent = formatTickedElapsed(nowMs - startedAtMs);
   });
   cell.appendChild(drawTurnStopControl(deps.ctx));
   return cell;

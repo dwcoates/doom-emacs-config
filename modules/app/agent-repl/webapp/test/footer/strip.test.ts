@@ -500,6 +500,15 @@ describe("the ticking activity figures", () => {
     expect(row.querySelector("[data-age]")?.textContent).toBe(" · 2m ago");
   });
 
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the stamp does not share the shared ticker's phase.
+    const { row } = drawStrip({
+      status: withActivity("idle", null, "notification", { text: "done" }, BigInt(NOW - 4920)),
+    });
+    // Assert: five real seconds old reads 5s, not the lagging 4s.
+    expect(row.querySelector("[data-age]")?.textContent).toBe(" \u00b7 5s ago");
+  });
+
   it("re-reads the age on the shared tick", () => {
     const { row } = drawStrip({
       status: withActivity(
@@ -526,6 +535,13 @@ describe("drawFooterClock", () => {
   it("ticks the elapsed turn time from the shipped instant", () => {
     const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 42_000) });
     expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("42s");
+  });
+
+  it("reads the nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the turn's start does not share the shared ticker's phase.
+    const { row } = drawStrip({ turnStartedAtMs: BigInt(NOW - 4920) });
+    // Assert: five real seconds of turn reads 5s, not the lagging 4s.
+    expect(row.querySelector(".footer-clock .info-time")?.textContent).toBe("5s");
   });
 
   it("re-reads the clock on the shared tick", () => {

@@ -63,7 +63,7 @@ import {
   UpdateHeldPromptResponseSchema,
   type UpdateHeldPromptError,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
-import { formatAge } from "../duration.js";
+import { formatTickedAge } from "../duration.js";
 import { log } from "../log.js";
 import { renderMarkdown } from "../markdown.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -186,7 +186,7 @@ export function drawHeldPromptQueuedAt(
   age.className = "queued-age";
   age.setAttribute("data-queued", "");
   const paint = (nowMs: number): void => {
-    age.textContent = `queued ${formatAge(nowMs - atMs)} ago`;
+    age.textContent = `queued ${formatTickedAge(nowMs - atMs)} ago`;
   };
   paint(tc.ctx.ticker.now());
   tc.onDispose(tc.ctx.ticker.subscribe(paint));
