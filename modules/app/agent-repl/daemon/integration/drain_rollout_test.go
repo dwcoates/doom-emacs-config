@@ -743,7 +743,7 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 
 // ---- Drain schedule durability ----
 
-// TestDrainScheduleDoesNotSurviveRestartTheStandingBannerNeverReappears is
+// TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears is
 // critique 11: the CONTRACT is that the standing drain banner (drain_scheduled)
 // reappears on a fresh WatchDaemon subscription after a restart on the same
 // state root — a client that reconnects after the daemon bounces must not
@@ -765,7 +765,7 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 // call site is exactly there: after drain.New in graph.go, nothing reads the
 // persisted schedule and forwards it to the Announcer before the server starts
 // serving.
-func TestDrainScheduleDoesNotSurviveRestartTheStandingBannerNeverReappears(t *testing.T) {
+func TestDrainScheduleSurvivesARestartAndTheStandingBannerReappears(t *testing.T) {
 	// Arrange: schedule a drain far enough out that it never fires during this
 	// test, and confirm it is standing before the restart.
 	d1 := newDaemon(t, harness.Opts{})
