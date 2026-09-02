@@ -62,14 +62,10 @@ const FAILURE_SIDES: Readonly<Record<string, Color>> = renderColors.failure_side
 /** The glyph NAME the feed's merge bubble head takes. */
 export const FEED_MERGE_HEAD_GLYPH: string = renderColors.feed_merge_head_glyph;
 
-/** Every `roster_status` key, for a consumer asserting the table row for row. */
-export const ROSTER_STATUS_ARMS: readonly string[] = Object.keys(ROSTER_STATUS);
 /** Every `footer_status` key, for the same assertion on the footer. */
 export const FOOTER_STATUS_ARMS: readonly string[] = Object.keys(FOOTER_STATUS);
 /** Every `footer_allowance` key, for the same assertion on the allowance cell. */
 export const FOOTER_ALLOWANCE_ARMS: readonly string[] = Object.keys(FOOTER_ALLOWANCE);
-/** Every `topbar_connectivity` key. */
-export const TOPBAR_CONNECTIVITY_ARMS: readonly string[] = Object.keys(TOPBAR_CONNECTIVITY);
 /** The closed set of tones a received `TopbarConnectivity.tone` may name. */
 export const TOPBAR_TONES: readonly string[] = renderColors.topbar_tones;
 

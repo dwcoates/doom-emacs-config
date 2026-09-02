@@ -188,17 +188,6 @@ export function ownsSection<
 }
 
 /**
- * Lay out at full length every capped section CARD owns directly (input,
- * progress, output), leaving the sections nested in an open activity
- * panel alone. A section the user later clicks toggles back to its cap.
- */
-export function expandOwnSections(card: HTMLElement): void {
-  for (const section of sectionsIn(card)) {
-    if (ownsSection(section, card)) section.classList.add(EXPANDED_CLASS);
-  }
-}
-
-/**
  * Arm click-to-expand on `feed`: a click on a capped section lifts its
  * height cap, and the next click on it restores the capped preview.
  */
