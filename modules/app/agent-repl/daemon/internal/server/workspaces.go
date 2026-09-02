@@ -215,6 +215,9 @@ func (s *server) OpenWorkspace(
 	if err := s.deps.Verbs.Open(ctx, subject.Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// The verb moved the session's standing or the composer's gate; the host
+	// view is recomposed from what the change left behind.
+	s.PublishHostWorkspace(ctx, subject.Record.ID)
 	resp.Result = &agentreplv1.OpenWorkspaceResponse_Success{
 		Success: &agentreplv1.OpenWorkspaceSuccess{},
 	}
@@ -236,6 +239,9 @@ func (s *server) CloseWorkspace(
 	if err := s.deps.Verbs.Close(ctx, subject.Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// The verb moved the session's standing or the composer's gate; the host
+	// view is recomposed from what the change left behind.
+	s.PublishHostWorkspace(ctx, subject.Record.ID)
 	resp.Result = &agentreplv1.CloseWorkspaceResponse_Success{
 		Success: &agentreplv1.CloseWorkspaceSuccess{},
 	}
@@ -256,6 +262,9 @@ func (s *server) KillWorkspace(
 	if err := s.deps.Verbs.Kill(ctx, subject.Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// The verb moved the session's standing or the composer's gate; the host
+	// view is recomposed from what the change left behind.
+	s.PublishHostWorkspace(ctx, subject.Record.ID)
 	resp.Result = &agentreplv1.KillWorkspaceResponse_Success{
 		Success: &agentreplv1.KillWorkspaceSuccess{},
 	}
@@ -298,6 +307,9 @@ func (s *server) MergeWorkspace(
 	if err := s.deps.Merge.Enqueue(ctx, subject.Record.ID); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// The verb moved the session's standing or the composer's gate; the host
+	// view is recomposed from what the change left behind.
+	s.PublishHostWorkspace(ctx, subject.Record.ID)
 	resp.Result = &agentreplv1.MergeWorkspaceResponse_Success{
 		Success: &agentreplv1.MergeWorkspaceSuccess{},
 	}
@@ -318,6 +330,9 @@ func (s *server) RestartWorkspace(
 	if err := s.deps.Verbs.Restart(ctx, subject.Record.ID, req.Msg.GetForce()); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// The verb moved the session's standing or the composer's gate; the host
+	// view is recomposed from what the change left behind.
+	s.PublishHostWorkspace(ctx, subject.Record.ID)
 	resp.Result = &agentreplv1.RestartWorkspaceResponse_Success{
 		Success: &agentreplv1.RestartWorkspaceSuccess{},
 	}
