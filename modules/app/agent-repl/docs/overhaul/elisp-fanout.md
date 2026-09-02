@@ -446,6 +446,11 @@ STATE as of 2026-08-29 evening (tip after 6d97fe768):
   (elisp-agents/red3b: roster reopen / banner-activates / rename ×2,
   verbs merge-queue pause+resume resolve repository from the roster).
   Running: close, red3a, red3b (cap).
+- R-CLOSE MERGED (48c49e576): shared `agent-repl-verbs--fault-line` renders
+  kind + detail for daemon/session/standing host faults (a kindless fault
+  logs `elisp.verbs.fault-without-kind` and still prints the detail); #30
+  docstrings state the ruling. red3a/red3b re-cut at 48c49e576 and
+  dispatched (`opus-low`). Running: red3a, red3b.
 
 ## 1. Module map (final tree of lisp/)
 
