@@ -57,6 +57,23 @@ the vendor (`AGENT_REPL_FORBID_VENDOR_CALLS=1` in every process).
 - The harness exposes `d.Shim(ws)` (the fake's control client for that
   workspace's UDS) and helpers to read views: `d.WatchFooter(ws)` etc.
   returning channels; `AwaitView(t, ch, pred)` bounded by the test context.
+- STATE-DATABASE CORRUPTION: `d.WithDB(func(*sql.DB))`, `d.CorruptRow(table,
+  column, keyColumn, key, value)` and `d.CountRows(table)` open `wsm.db`
+  directly with the daemon's own sqlite driver. They exist for exactly one
+  thing — producing the half-written row no rpc can produce, so a restart can
+  be watched refusing it — and the daemon must be STOPPED while they run.
+- ORDERING PROOFS: the fake shim records every verb on one timeline in its
+  durable sink, and `harness.ShimVerbOrder(t, dir)` /
+  `d.AwaitShimVerbOrder(dir, verbs...)` / `harness.IndexOfVerb(order, verb)`
+  read it back. The in-memory recorder answers per verb and so cannot say
+  whether Hibernate preceded KillSession; this can.
+- ALREADY-RUNNING WORK: `ShimProfile.LiveWork` (built with
+  `harness.EncodeLiveWork(t, items...)`) is what the fake's `SessionStarted`
+  states as `live_work`. It is a startup PROFILE rather than a scripted
+  answer because the opening is the daemon's first request, which a
+  control-socket script would be racing.
+- CODECS: `Opts.JSONCodec` dials the daemon with the JSON codec instead of
+  the binary one, so one test proves both are served on the one origin.
 
 ## Suites and tests (one `_test.go` file per suite; one edge case per test)
 
