@@ -343,11 +343,27 @@ export function sessionUpdateArms(run: GoldenRun): string[] {
   return seen;
 }
 
-/** The turn terminal arm a run ended on, when it ended. */
-export function terminalArm(run: GoldenRun): string | undefined {
-  const [frame] = run.turnEnds;
-  if (frame === undefined) return undefined;
+/** One turn terminal frame, as its arm path. */
+function armOf(frame: conversationv1.AgentFrame): string {
   if (frame.result.case === "success") return `success.${frame.result.value.outcome.case ?? "unset"}`;
   if (frame.result.case === "failure") return `failure.${frame.result.value.failure.case ?? "unset"}`;
   return frame.result.case ?? "unset";
+}
+
+/**
+ * EVERY turn terminal the run ended on, in order.
+ *
+ * A capture may hold several turns (`identity-rotation-clear`,
+ * `compaction-directed`), and reading only the first left every later turn's
+ * ending unasserted — a capture whose second turn started failing would have
+ * gone on passing.
+ */
+export function terminalArms(run: GoldenRun): string[] {
+  return run.turnEnds.map(armOf);
+}
+
+/** The turn terminal arm a run's FIRST turn ended on, when it ended. */
+export function terminalArm(run: GoldenRun): string | undefined {
+  const [frame] = run.turnEnds;
+  return frame === undefined ? undefined : armOf(frame);
 }

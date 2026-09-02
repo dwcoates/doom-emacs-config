@@ -15,11 +15,13 @@ import {
 import { TOOL_CONVERTERS } from "../../../src/convert/tools/registry.js";
 import {
   activityOf,
+  arms,
   captureMeta,
   foldScenario,
   residueKeys,
   scenarioNames,
   sdkMessages,
+  sessionUpdateArms,
   subagentFiles,
   toolUses,
 } from "./harness.js";
@@ -48,45 +50,68 @@ describe("the fold never degrades on a real capture", () => {
   });
 });
 
+/**
+ * The captures that actually make an exempt call.
+ *
+ * NO VACUOUS ROWS. Running the assertion over every capture made most rows
+ * pass on an EMPTY filtered list — they asserted nothing at all, and the suite
+ * would have gone on green if the exempt set stopped being exercised anywhere.
+ * The captures that exercise it are named here, the assertion runs over those,
+ * and the partition itself is asserted below so a capture that stops making an
+ * exempt call fails rather than quietly dropping out of the run.
+ */
+const WITH_EXEMPT_CALLS = SCENARIOS.filter((scenario) =>
+  toolUses(scenario).some((call) => EXEMPT_TOOLS.has(call.name)),
+);
+
 describe("the exempt set is dropped silently", () => {
   it("the captures actually exercise it", () => {
     const exercised = SCENARIOS.flatMap((scenario) => toolUses(scenario))
       .map((call) => call.name)
       .filter((name) => EXEMPT_TOOLS.has(name));
     expect(exercised).toContain("ToolSearch");
+    // And the partition below is not empty, which is what makes its rows real.
+    expect(WITH_EXEMPT_CALLS.length).toBeGreaterThan(0);
   });
 
-  it.each(SCENARIOS)("%s produces no unit for an exempt call", (scenario) => {
+  it.each(WITH_EXEMPT_CALLS)("%s produces no unit for an exempt call", (scenario) => {
     const exempt = new Set(
       toolUses(scenario)
         .filter((call) => EXEMPT_TOOLS.has(call.name))
         .map((call) => call.id),
     );
+    // The row has something to say: it names at least one exempt call.
+    expect(exempt.size).toBeGreaterThan(0);
     const leaked = foldScenario(scenario)
       .entries.filter((entry) => exempt.has(entry.upsertKey.replace(/^activity:/, "")))
       .map((entry) => entry.source.discriminator);
     expect(leaked).toEqual([]);
   });
 
-  it.each(SCENARIOS)("%s produces no residue for an exempt call", (scenario) => {
-    const names = toolUses(scenario).map((call) => call.name);
-    if (!names.some((name) => EXEMPT_TOOLS.has(name))) return;
+  it.each(WITH_EXEMPT_CALLS)("%s produces no residue for an exempt call", (scenario) => {
     expect(residueKeys(foldScenario(scenario))).not.toContain("unknown/tool_use");
   });
 });
+
+/** The captures that actually make an engine-owned call. */
+const WITH_ENGINE_OWNED_CALLS = SCENARIOS.filter((scenario) =>
+  toolUses(scenario).some((call) => ENGINE_OWNED_TOOLS.has(call.name)),
+);
 
 describe("the engine's gate keeps its own units", () => {
   it("the captures actually exercise it", () => {
     const asked = SCENARIOS.flatMap((scenario) => toolUses(scenario)).map((call) => call.name);
     expect(asked).toContain("AskUserQuestion");
+    expect(WITH_ENGINE_OWNED_CALLS.length).toBeGreaterThan(0);
   });
 
-  it.each(SCENARIOS)("%s leaves an engine-owned call to the gate", (scenario) => {
+  it.each(WITH_ENGINE_OWNED_CALLS)("%s leaves an engine-owned call to the gate", (scenario) => {
     const owned = new Set(
       toolUses(scenario)
         .filter((call) => ENGINE_OWNED_TOOLS.has(call.name))
         .map((call) => call.id),
     );
+    expect(owned.size).toBeGreaterThan(0);
     const leaked = foldScenario(scenario)
       .entries.filter((entry) => owned.has(entry.upsertKey.replace(/^activity:/, "")))
       .map((entry) => entry.source.discriminator);
@@ -107,16 +132,24 @@ describe("AgentUnmodeled means a genuinely unknown tool", () => {
     return names;
   }
 
-  it.each(SCENARIOS)("%s never files a modelled built-in as unmodeled", (scenario) => {
-    for (const name of unmodeledNames(scenario)) {
-      expect(TOOL_CONVERTERS.has(name)).toBe(false);
-    }
+  // NO VACUOUS ROWS: a capture with no `unmodeled` unit has nothing to say
+  // here, and looping over its empty list asserted nothing while reading as a
+  // pass. The captures that reach the arm are named, and the partition is
+  // asserted non-empty so it cannot silently become one.
+  const WITH_UNMODELED = SCENARIOS.filter((scenario) => unmodeledNames(scenario).length > 0);
+
+  it("the captures actually reach the arm", () => {
+    expect(WITH_UNMODELED.length).toBeGreaterThan(0);
   });
 
-  it.each(SCENARIOS)("%s never files an exempt built-in as unmodeled", (scenario) => {
-    for (const name of unmodeledNames(scenario)) {
-      expect(EXEMPT_TOOLS.has(name)).toBe(false);
-    }
+  it.each(WITH_UNMODELED)("%s never files a modelled built-in as unmodeled", (scenario) => {
+    const names = unmodeledNames(scenario);
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.filter((name) => TOOL_CONVERTERS.has(name))).toEqual([]);
+  });
+
+  it.each(WITH_UNMODELED)("%s never files an exempt built-in as unmodeled", (scenario) => {
+    expect(unmodeledNames(scenario).filter((name) => EXEMPT_TOOLS.has(name))).toEqual([]);
   });
 
   it("the MCP tool the captures exercised lands there", () => {
@@ -144,7 +177,16 @@ describe("usage rides the first block's unit and no other", () => {
     return carriers;
   }
 
-  it.each(SCENARIOS)("%s stamps usage on a response's FIRST block", (scenario) => {
+  // Every capture carries usage, so this partition is the whole set — asserted
+  // rather than assumed, so a capture that stopped carrying usage is a failure
+  // instead of a row that quietly checks nothing.
+  const WITH_USAGE = SCENARIOS.filter((scenario) => usageCarriers(scenario).length > 0);
+
+  it("every capture carries usage on some unit", () => {
+    expect(WITH_USAGE).toEqual(SCENARIOS);
+  });
+
+  it.each(WITH_USAGE)("%s stamps usage on a response's FIRST block", (scenario) => {
     for (const carrier of usageCarriers(scenario)) {
       // A block unit spells its index; a first block that is a TOOL CALL is
       // named by the vendor's `tool_use_id` instead and carries no index at all,
@@ -256,5 +298,35 @@ describe("the residue the captures actually produce", () => {
     expect(residueKeys(foldScenario("worktree-enter-exit-kept-and-removed"))).toEqual([
       "vendor_specific/system/vcs_state_changed",
     ]);
+  });
+});
+
+describe("the shim never invents a context cut", () => {
+  // RULED: `compacting` is a STATUS beat, and the cut is the `compact_boundary`
+  // record. `compaction-directed` is the one capture whose session says it
+  // compacted — and it carries NO boundary (the run answered "Not enough
+  // messages to compact."), so the honest output has a `compacting` session arm
+  // and no `context_cut` anywhere. A shim that manufactured one from the status
+  // alone would draw a divider through a conversation nothing cut.
+  it("compaction-directed says `compacting` and cuts nothing", () => {
+    const run = foldScenario("compaction-directed");
+    expect(sessionUpdateArms(run)).toContain("compacting");
+    expect(arms(run).filter((arm) => arm.includes("context_cut"))).toEqual([]);
+  });
+
+  it("the ONLY capture that cuts is the /clear, and the compaction arms stay ungrounded", () => {
+    // A `/clear` IS a cut and the vendor records it, so exactly one capture
+    // produces one. The COMPACTION arms (`ContextCompacted`,
+    // `ContextCompactionFailed`) have no capture at all — the MANIFEST records
+    // that gap — so naming the whole set here keeps a manufactured cut from
+    // appearing anywhere without a human noticing.
+    const withCuts = SCENARIOS.filter((scenario) =>
+      arms(foldScenario(scenario)).some((arm) => arm.includes("context_cut")),
+    );
+    expect(withCuts).toEqual(["identity-rotation-clear"]);
+    const compacted = arms(foldScenario("identity-rotation-clear")).filter((arm) =>
+      arm.includes("context_cut"),
+    );
+    expect(compacted.some((arm) => arm.includes("compact"))).toBe(false);
   });
 });
