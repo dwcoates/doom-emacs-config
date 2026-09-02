@@ -993,12 +993,36 @@ SPEC APPROVED. Dispositions, binding on every writer:
    shape differs from what #77-80 need reports it; it is not a spec defect
    and is never fixed by changing production.
 
-3. **`vendor_start_failed` — NOT DROPPED.** Failure arms rank high in
-   coverage and a hole there is not worth a clean "0 new scenarios" line.
-   ONE narrow fake-SDK scenario that fails session START (not a turn) is
-   added on branch `overhaul/shim-e2e-startfail`, marked ungrounded with
-   its reason in the shim manifest, with a shim unit test. Test #54 drives
-   that scenario.
+3. **`vendor_start_failed` — NOT DROPPED, and NO new scenario needed.**
+   The project lead ruled the arm must be covered. Investigation then
+   established from the CONTRACT that a prompt-selected scenario for it is
+   structurally impossible, and that no new shim code is required either:
+
+   - `proto/src/shim/v1/endpoint_start_session.proto`
+     (`StartSessionRequest` / `StartSessionFresh` / `StartSessionResume`)
+     carries NO prompt text — only `model`+`permission_mode` (fresh) or
+     `vendor_session_id`+`cold_remediation` (resume). `StartSession`
+     resolves BEFORE any prompt exists, so there is no text off which a
+     scenario could ever be selected. A prompt-selected
+     `!vendor-start-failed` would require a new selector field on
+     `StartSessionFresh`/`StartSessionResume` — a proto/production change,
+     out of scope and unnecessary.
+   - The fake SDK ALREADY has the documented lever: the whole-process env
+     var `AGENT_REPL_FAKE_REFUSE=start` (`src/fake/index.ts` lines 124-142,
+     which state outright that these arms are "answers to CONTROL CALLS,
+     not to a turn", so no scenario prompt can reach them). A `start-once`
+     variant refuses only the FIRST StartSession, for retry recovery.
+     Existing shim coverage:
+     `agent-shim/claude/shim/test/integration/session.test.ts:1530-1536`.
+   - A whole-process lever is SAFE here because section B brings up one
+     daemon + store + sidecar PER TEST: the blast radius is one test's
+     world.
+
+   Therefore: test #54 sets `AGENT_REPL_FAKE_REFUSE=start` on its world's
+   shim environment via the harness's extra-shim-env option, and the
+   retry-recovery test uses `start-once`. Branch
+   `overhaul/shim-e2e-startfail` was opened for a scenario addition and
+   then abandoned unused; NO shim change was made.
 
 4. **Compaction-failure terminal shape — deferred to the area writer**, who
    reads `session.ts`'s `COMPACT_FAILED` scenario body rather than guessing.
