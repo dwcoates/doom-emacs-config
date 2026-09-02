@@ -397,6 +397,20 @@ export function createFakeQuery(
         break;
       }
     }
+  };
+
+  /**
+   * Close one block.
+   *
+   * SEPARATE FROM {@link emitBlockStream} because of the ORDER the real binary
+   * uses: with `includePartialMessages` the vendor emits the block's `assistant`
+   * line BEFORE that block's `content_block_stop` (observed in every streamed
+   * capture; `prose-streamed` is the smallest). The line RESTATES the block the
+   * stream is still streaming, and the fold reads it that way — so the mock
+   * cannot close the block first without making every streamed response's
+   * terminal land on a different unit than its start.
+   */
+  const emitBlockStop = (index: number): void => {
     emitStream({ type: "content_block_stop", index });
   };
 
@@ -409,7 +423,9 @@ export function createFakeQuery(
    * corpus shows one message's thinking block and tool_use block on two chained
    * transcript lines — and it is why `<message.id>:<block_index>` addresses a
    * BLOCK rather than a line. Every split carries the SAME usage, so the fold's
-   * "usage rides block 0" rule has a value to pick on the first one.
+   * "usage rides block 0" rule has a value to pick on the first one — and each
+   * line is emitted BEFORE its block's `content_block_stop`, which is the order
+   * the real binary uses and the order the fold's block identity depends on.
    */
   const assistant = (
     blocks: readonly FakeBlock[],
@@ -467,17 +483,20 @@ export function createFakeQuery(
               task_description: options.agent.taskDescription,
             }),
       });
-      if (options.skipTranscript === true) return;
-      const record = {
-        message,
-        requestId,
-        type: "assistant",
-        uuid,
-        timestamp,
-        ...(options.effort === undefined ? {} : { effort: options.effort }),
-      };
-      if (options.agent === undefined) files.transcript.append(record);
-      else files.subagent(options.agent.agentId).append(record);
+      if (options.skipTranscript !== true) {
+        const record = {
+          message,
+          requestId,
+          type: "assistant",
+          uuid,
+          timestamp,
+          ...(options.effort === undefined ? {} : { effort: options.effort }),
+        };
+        if (options.agent === undefined) files.transcript.append(record);
+        else files.subagent(options.agent.agentId).append(record);
+      }
+      // AFTER the line, never before: see emitBlockStop.
+      emitBlockStop(index);
     });
     emitStream({
       type: "message_delta",
