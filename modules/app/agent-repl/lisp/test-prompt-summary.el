@@ -239,6 +239,30 @@
         (agent-repl-prompt-summary-attach-all)
         (should-not attached)))))
 
+;;;; ---- The sentinel's own buffer teardown ----
+
+(ert-deftest agent-repl-test-ps-sentinel-tears-down-through-the-safe-kill ()
+  "OUT-BUF is the process's OWN buffer, so it goes through the detaching kill.
+A bare `kill-buffer' would delete the process from inside the kill and
+re-enter this sentinel forever."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((buf (generate-new-buffer " *agent-repl-test-ps-out*"))
+          (safe nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--kill-buffer-safely)
+                     (lambda (b) (setq safe b)))
+                    ((symbol-function 'process-exit-status) (lambda (_p) 0))
+                    ((symbol-function 'process-status) (lambda (_p) 'exit))
+                    ((symbol-function 'agent-repl--prompt-summary-apply) #'ignore))
+            (with-current-buffer buf (insert "a summary"))
+            ;; Act
+            (funcall (agent-repl--prompt-summary-make-sentinel "ws" "raw" buf)
+                     'fake-proc "finished\n")
+            ;; Assert
+            (should (eq safe buf)))
+        (kill-buffer buf)))))
+
 (provide 'test-prompt-summary)
 
 ;;; test-prompt-summary.el ends here
