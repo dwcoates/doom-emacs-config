@@ -1926,7 +1926,9 @@ type SessionFaultInit = MessageInitShape<typeof SessionFaultSchema>;
 
 /** An unhealthy answer is an ANSWER, not an error: it rides the success arm. */
 export function daemonFault(arm: DaemonFaultArm, detail?: string): DaemonFaultInit {
-  const kind = (() => {
+  // ANNOTATED, because an inferred IIFE union merges the six arms' value
+  // shapes into one optional-everything object that no single arm accepts.
+  const kind = ((): DaemonFaultInit["kind"] => {
     switch (arm) {
       case "adoptionWindowExpired":
         return { case: "adoptionWindowExpired" as const, value: { workspace: workspaceRef() } };
