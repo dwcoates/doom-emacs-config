@@ -49,6 +49,7 @@ import {
   sessionUpdate,
   setModelAccepted,
   setModelCause,
+  setModelCold,
   setPermissionModeAccepted,
   setPermissionModeCause,
   startSessionCause,
@@ -1507,5 +1508,135 @@ describe("the vendor refusing a CONTROL call", () => {
 
     expect(killSessionCause(response)).toBe("noSession");
     expect(shim.child.exitCode).toBeNull();
+  });
+});
+
+
+describe("SetSessionModel's cold gate", () => {
+  // A MODEL SWITCH IS A COLD CACHE, because the cache is per model. The refusal
+  // is immediate and states its cost, rather than a warning after the user has
+  // already paid for it.
+  test("a switch above the caller's threshold is REFUSED with its cost", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    // A turn so the transcript has context to lose.
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+
+    const response = await shim.clients.h1.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: modelNamed("fake-sonnet-5"),
+        coldThresholdTokens: 0n,
+      }),
+    );
+
+    expect(setModelCause(response)).toBe("cold");
+    const cold = setModelCold(response);
+    // THE COST, NAMED. The daemon cannot offer a remediation it cannot price.
+    expect(cold.reason.case).toBe("modelSwitch");
+    expect(cold.contextTokens).toBeGreaterThan(0n);
+    expect(cold.requestedModel?.name).toBe("fake-sonnet-5");
+  });
+
+  test("the same switch with a remediation SUCCEEDS", async () => {
+    // The refusal is not a veto: it exists so the caller decides knowingly.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    setModelCause(
+      await shim.clients.h1.setSessionModel(
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: modelNamed("fake-sonnet-5"),
+          coldThresholdTokens: 0n,
+        }),
+      ),
+    );
+
+    const retried = await shim.clients.h1.setSessionModel(
+      create(shimv1.SetSessionModelRequestSchema, {
+        model: modelNamed("fake-sonnet-5"),
+        coldThresholdTokens: 0n,
+        coldRemediation: remediationPay(),
+      }),
+    );
+
+    setModelAccepted(retried);
+  });
+
+  test("the NEXT turn-end's context_usage reports the switched model", async () => {
+    // The ack alone proves nothing about which model the session is on. The
+    // turn-end push is the session's own authoritative statement, and it is
+    // what a topbar renders.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = watchSession(shim);
+    await watch.until((frame) => sessionUpdate(frame).update.case === "contextUsage");
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    setModelAccepted(
+      await shim.clients.h1.setSessionModel(
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: modelNamed("fake-sonnet-5"),
+          coldThresholdTokens: 0n,
+          coldRemediation: remediationPay(),
+        }),
+      ),
+    );
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    const pushed = await watch.until((frame) => {
+      const update = sessionUpdate(frame);
+      return update.update.case === "contextUsage" && update.update.value.model === "fake-sonnet-5";
+    });
+
+    expect(sessionUpdate(pushed).update.case).toBe("contextUsage");
+    watch.close();
+  });
+});
+
+describe("a stand-down with an ask still open", () => {
+  test("SIGTERM settles the open ask DENIED and concludes the turn", async () => {
+    // A PENDING CALLBACK IS A LIVE PROMISE INSIDE THE VENDOR. A teardown that
+    // simply exited would leave the vendor's `canUseTool` awaiting an answer
+    // that can never come, and the shim's own exit code would say the session
+    // ended in good order. The gate stands down by DENYING every open ask,
+    // which is the only answer that is true once nobody is left to decide.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const agent = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await agent.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-allow-once" }));
+    // The ask is open once the permission unit has been announced.
+    await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const result = entryFrame(watchAgentEntry(frame))?.result;
+      if (result?.case !== "update") return false;
+      return result.value.update.case === "permission";
+    });
+    agent.close();
+
+    const exit = await shim.standDown();
+
+    expect(exit.code).toBe(0);
+    // THE ASK SETTLED DENIED, on the record. DENIED and not merely "settled":
+    // once nobody is left to decide, deny is the only answer that is true.
+    const decisions = writtenEntries(shim.store?.writes() ?? [])
+      .filter((entry) => entry.upsertKey.startsWith("permission:"))
+      .map((entry) => pageLineOf(entry)?.agentItem?.item)
+      .flatMap((item) => {
+        if (item?.case !== "agentFrame") return [];
+        const result = item.value.result;
+        if (result.case !== "update") return [];
+        const update = result.value.update;
+        if (update.case !== "permission") return [];
+        const outcome = update.value.result;
+        return outcome.case === "success" ? [outcome.value.decision.case ?? "unset"] : [];
+      });
+    expect(decisions).toContain("denied");
+    // ...AND THE TURN GOT ITS TERMINAL, rather than being left open forever.
+    const terminals = writtenEntries(shim.store?.writes() ?? []).filter((entry) =>
+      entry.upsertKey.startsWith(`terminal:${started.vendorSessionId}:`),
+    );
+    expect(terminals.length).toBeGreaterThan(0);
   });
 });
