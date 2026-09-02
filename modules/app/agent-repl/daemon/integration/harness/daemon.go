@@ -108,6 +108,13 @@ type Opts struct {
 	// ExtraArgs and ExtraEnv are appended verbatim.
 	ExtraArgs []string
 	ExtraEnv  []string
+	// OmitArgs names flags to REMOVE from the argv the harness would
+	// otherwise build, together with each one's value. It exists for the
+	// tests whose subject is a flag the daemon REQUIRES: the harness's own
+	// argv is the reference for a correct launch, so the only honest way to
+	// ask what happens without a flag is to take it back out of that argv
+	// rather than to hand-roll a second one that could drift from it.
+	OmitArgs []string
 	// Timeout overrides DefaultTimeout for this one Daemon's context. Zero
 	// means DefaultTimeout. Set it ONLY to a named, documented constant (for
 	// example HandoverChainTimeout) with a one-line reason at the call site —
@@ -197,6 +204,28 @@ func installFakeGit(t *testing.T, dir string) {
 var gitEnvKeys = []string{
 	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
 	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+}
+
+// omitFlags returns args without each named flag and the value following it.
+// A flag that is not present is not an error: a test names what must be
+// missing, not what the harness happened to add.
+func omitFlags(args, omit []string) []string {
+	if len(omit) == 0 {
+		return args
+	}
+	drop := make(map[string]bool, len(omit))
+	for _, flag := range omit {
+		drop[flag] = true
+	}
+	kept := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if drop[args[i]] {
+			i++ // the flag's value goes with it
+			continue
+		}
+		kept = append(kept, args[i])
+	}
+	return kept
 }
 
 func cleanGitEnv(env []string) []string {
@@ -326,6 +355,7 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		args = append(args, "--pprof", opts.Pprof)
 	}
 	args = append(args, opts.ExtraArgs...)
+	args = omitFlags(args, opts.OmitArgs)
 
 	env := append(os.Environ(),
 		"AGENT_REPL_STATE_DIR="+d.StateDir,
