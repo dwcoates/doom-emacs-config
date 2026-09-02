@@ -190,6 +190,103 @@ only because a caller bypasses it with a near-duplicate. No tool can tell
 "genuinely superseded" from "designed-to-be-shared-but-bypassed"; those were
 read by hand and routed to a deduplication remediation (see below).
 
+## Landing 7 (merged and adapted, 2026-09-02)
+
+Protos ab7e681f2, bindings c10714a41, relay in `docs/overhaul/daemon.md`
+"Landing 7 relay". All five adaptations landed:
+
+1. `SubmitPromptError.bubble_refused{detail, kind}` replaces `server.UnlandedArm`
+   for both bubble refusals. `workspace.ArmShimAgentBusy` names the shim's
+   `UpdateAgentFailure.agent_busy`; `server.bubbleRefused` maps
+   not_deliverable and agent_busy onto the landed arm through a new
+   `nestedArm` field value, and `setArm` gained nested-oneof selection that
+   REFUSES an arm the message does not carry (it degrades to `UnlandedArm`,
+   loudly, rather than arriving with an empty kind). The by-design red is
+   green.
+2. `StartSessionFresh.model` is optional. The `DefaultModel` fallback,
+   `AGENT_REPL_DEFAULT_MODEL` and the built-in `opus` are deleted, including
+   the AGENTS.md env row; `shimclient/validate.go` no longer requires the
+   field. The effective model is read from `SessionStarted.effective_model`.
+3. `WatchSessionResponse` is a `oneof frame`. `shimclient.WatchSession` yields
+   the response; an unset frame RAISES. `sessionwatcher` splits fact uptake
+   into `applySessionStartedLocked` + `adoptLiveWorkLocked`, ignores a repeat
+   at DEBUG (never a WARN) and records an armless frame at ERROR.
+   `Session.Started` is optional and `Fleet.watchInstalled` no longer
+   synthesizes a `SessionStarted` from the durable record: adoption is a PURE
+   ATTACH. The fake shim re-announces on every watch.
+4. `CloseWorkspaceBlocked` carries all five fields. `closeBlocker` computes
+   every blocker instead of returning at the first, so all four counts ride
+   the refusal and the leading reason only picks the sentence; `summary` IS
+   `footer.CloseBlocked.Detail`, so the footer's activity line and the
+   refusal share one composer.
+5. `FeedMergeAbandoned.summary` carries the abandon cause.
+
+ERROR-ARMS.md: the landing-6 bubble row, the "agent_busy has no producer" gap,
+the "CloseWorkspaceBlocked is an EMPTY message" note and both landing-7
+proposals are deleted. No remaining row lost its producer.
+
+## Duplication remediation (2026-09-02)
+
+The dead-code pass's live-code/dead-code pairs, resolved:
+
+- `internal/server/refuse.go` routes through `workspace.AsRefusal` and
+  `merge.Refused`. `merge.Refused` was RESHAPED from `(string, bool)` to
+  `(*RefusalError, bool)` to match `workspace.AsRefusal`: the arm-only shape
+  dropped `RefusalError.Reason`, which `refuse.go` needs for the arm's own
+  text and detail, and that is precisely why it had no production caller.
+  Behavior at every call site is unchanged.
+- `internal/workspace/oneshot.go` uses `prompts.Wrap`/`MetaOpen`/`MetaClose`;
+  the duplicate local sentinels are deleted. There is no import cycle
+  (`internal/prompts` has no internal dependencies). The emitted bytes are
+  pinned against the raw cross-system literal, not against the constant, so
+  the wrapper cannot drift from what the webapp and the elisp side strip.
+- Every workspace lock probe in `internal/boot` and `internal/workspace` goes
+  through `sessionlock.ProbeWithLog`: held/free at DEBUG, could-not-tell at
+  ERROR, an underivable lock path at ERROR (it previously returned silently).
+  No `ExpectWarnings` list changed.
+- `shimclient.WithLockProbe` is WIRED in `cmd/claude-repld/graph.go`. It was a
+  real defect: `witnessAdoptedDeath` returned early on a nil probe, so an
+  adopted shim whose socket was gone was redialed forever, no `ExitInfo` was
+  ever published and the workspace stayed wedged on a process that was not
+  there. The graph already owned the identical probe and handed it to rollout;
+  it simply never handed it to the supervisor. Only `StateFree` is death —
+  `StateUnknown` is not, and a probe error is surfaced and redialing
+  continues, so the AGENTS.md "a probe that could not tell is never read as
+  free" rule holds.
+- `RenderColors.AssertRosterStatusArms`/`AssertMergeGlyphArms` are called by
+  `sidebar.New` (the hand-rolled copy it replaced checked `merge_glyphs` in
+  one direction only, so this ADDS a failure path, pinned).
+  `AssertFooterStatusArms`/`AssertFooterAllowanceArms` are called by
+  `footer.New`, which now takes the vocabulary at all — the footer owns every
+  `FooterStatus.status` and `FooterAllowance.status` arm, and had no check
+  whatsoever. `vocab.OneofArmNames` stays test-only infrastructure, and now
+  also pins the hardcoded `statusArms`/`allowanceArms` lists against their
+  proto oneofs so an arm landing in the contract cannot escape the assertion.
+  No vocabulary drift was found.
+
+## Remaining items
+
+- `TestAnAbandonedQueuedMergeHasNoReachableCause` stays SKIPPED, and
+  `FeedMergeAbandoned.summary` did not unblock it: `dropQueued` has only two
+  call sites (operator evict, user dequeue) and no production site raises a
+  merge's own give-up, so the "workspace closed" and "daemon shutdown" causes
+  the relay names have no producer in `internal/merge` at all. The distinct
+  `FeedMergeError` evict/dequeue/abandon arms alone would NOT be enough; a
+  producer has to exist first. Route this to the project lead as a behavior
+  question, not a proto ask.
+- `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` stays
+  skipped: no crash-window hook.
+- The merge ENDS the displaced user turn (KillTurn) after capturing it, then
+  resubmits exactly once at lease release. daemon.md says only "captured
+  durably and resubmitted exactly once"; the rationale for ending it is that a
+  merge driving the session under a still-live user turn is incoherent. Owed
+  to the project lead as an FYI confirmation.
+- ShimBuildSHA resolution is flagged fragile: a built stamp file silently
+  outranks a test `SHIM_BUILD_SHA` env.
+- Coverage is not a dead-code oracle here until the daemon and the fakes are
+  built with `-cover` and `GOCOVERDIR` is collected (see the methodology
+  finding above).
+
 ## Tests over 1 s (re-profiled at 971145abf)
 
 Unit: none over 1 s.
