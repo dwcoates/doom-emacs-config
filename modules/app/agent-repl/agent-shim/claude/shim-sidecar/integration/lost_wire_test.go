@@ -168,14 +168,23 @@ func TestAClaimedPreBootSpoolSettlesSweptUpOnTheWire(t *testing.T) {
 }
 
 // TestASweptUpTerminalStatesNotObservedForItsOutput asserts what a swept-up
-// terminal may say about the run's output, which is nothing.
+// terminal may say about the run's output when the producer read nothing.
 //
-// THE PRODUCER READ NOTHING. A boot sweep concludes from a file's TIMESTAMP,
-// not from its bytes, so the terminal it mints holds none — and
 // `text{stdout: "", whole{}}` would be a positive claim that the command
 // printed nothing, which is a claim about the COMMAND that nobody here is
 // entitled to make. `not_observed` is the arm that says the producer does not
 // know.
+//
+// THE SPOOL IS EMPTY, AND THAT IS THE WHOLE FIXTURE. "The producer read
+// nothing" is a fact about the FILE, never about who won a race: a spool
+// carrying bytes is tailed like any other, and its terminal then honestly
+// carries what the tailer converted. Seeding bytes and asserting not_observed
+// made the subject a race between the tailer and the boot sweep — it passed
+// only when the sweep happened to conclude first, and the terminal it was
+// really asserting was the one production must NOT mint for a run whose output
+// it had already put on the wire. An empty pre-boot spool is the run that
+// genuinely printed nothing observable: the sweep still concludes from its
+// TIMESTAMP, and no batch ever reaches the handler.
 func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
 	// Arrange.
 	ctx, cancel := testContext(t)
@@ -185,7 +194,7 @@ func TestASweptUpTerminalStatesNotObservedForItsOutput(t *testing.T) {
 	session := "e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4"
 	fx := seedDetachedShell(t, tree, "/Users/dodgecoates/lost-swept-notobserved-probe", session)
 	mustMkdirAll(t, filepath.Dir(fx.SpoolPath))
-	if err := os.WriteFile(fx.SpoolPath, []byte("bytes nobody read\n"), 0o644); err != nil {
+	if err := os.WriteFile(fx.SpoolPath, nil, 0o644); err != nil {
 		t.Fatalf("write %s: %v", fx.SpoolPath, err)
 	}
 	if err := os.Chtimes(fx.SpoolPath, preBootStamp, preBootStamp); err != nil {
