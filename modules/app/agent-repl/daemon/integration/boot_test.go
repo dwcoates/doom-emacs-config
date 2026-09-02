@@ -199,5 +199,8 @@ func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
 			t.Fatalf("record %q has no context object, want structured context", r.Operation)
 		}
 	}
-	d.ExpectWarnings(harness.AllowAllWarnings)
+	// A fresh boot with pprof disabled and no workspace ever touched produces
+	// no WARN/ERROR record at all: pprof.disabled is logged at DEBUG
+	// (internal/pprofsurface/surface.go), and nothing else runs.
+	d.ExpectWarnings()
 }
