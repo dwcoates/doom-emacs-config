@@ -142,3 +142,23 @@ export function formatCountdown(ms: number): string {
   // Nothing reached a whole minute, and an empty string is not a duration.
   return parts.length === 0 ? "0m" : parts.join(" ");
 }
+
+/**
+ * A LIVE count-up that is repainted once per shared tick, as a relative age
+ * ROUNDED to the nearest second: `0s`, `5s`, `5m 30s`.
+ *
+ * WHY ROUNDING RATHER THAN `formatAge`'s TRUNCATION. A clock started by a draw
+ * has no reason to share the shared ticker's phase, so its repaints land at an
+ * arbitrary offset inside each second: a wait begun at t+140ms is repainted at
+ * t+1060, t+2060, … and a truncating reading is therefore up to a whole second
+ * BEHIND the wait the reader has actually been waiting — five real seconds in,
+ * the card still says `4s`. The repaint is a SAMPLE of a continuous quantity,
+ * and the nearest whole second is the reading closest to it, halving the worst
+ * error and removing the systematic lag.
+ *
+ * `formatAge` keeps its truncation: a STAMPED "N ago" is anchored to an instant
+ * on the wire and must never claim more time than has definitely passed.
+ */
+export function formatTickedAge(ms: number): string {
+  return formatAge(Math.max(0, Math.round(ms / 1000)) * 1000);
+}

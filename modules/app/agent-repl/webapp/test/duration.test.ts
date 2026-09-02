@@ -6,6 +6,7 @@ import {
   formatDuration,
   formatDurationCeil,
   formatElapsed,
+  formatTickedAge,
 } from "../src/duration.js";
 
 describe("formatDuration", () => {
@@ -274,5 +275,42 @@ describe("formatCountdown", () => {
   it("floors a deadline already past to zero minutes", () => {
     // Arrange + Act + Assert — a stale report counts from zero, not backwards.
     expect(formatCountdown(-90_000)).toBe("0m");
+  });
+});
+
+describe("formatTickedAge", () => {
+  it("reads zero on the tick that draws the clock", () => {
+    // Arrange + Act + Assert — the first paint samples the very instant it started.
+    expect(formatTickedAge(0)).toBe("0s");
+  });
+
+  it("rounds a sample that lands just short of a whole second up to it", () => {
+    // Arrange + Act + Assert — five real seconds in, sampled 80ms early, reads 5s.
+    expect(formatTickedAge(4920)).toBe("5s");
+  });
+
+  it("holds a sample that lands just past a whole second at that second", () => {
+    // Arrange + Act + Assert — 80ms after the fifth second still reads 5s.
+    expect(formatTickedAge(5080)).toBe("5s");
+  });
+
+  it("rounds the exact half second up", () => {
+    // Arrange + Act + Assert — the nearer whole second when the sample splits one.
+    expect(formatTickedAge(500)).toBe("1s");
+  });
+
+  it("keeps a sample below the half second at the second below it", () => {
+    // Arrange + Act + Assert
+    expect(formatTickedAge(499)).toBe("0s");
+  });
+
+  it("promotes a rounded-up minute into the coarser unit", () => {
+    // Arrange + Act + Assert — 59.7s is nearer the whole minute than 59s.
+    expect(formatTickedAge(59_700)).toBe("1m");
+  });
+
+  it("floors a negative span to zero rather than counting backward", () => {
+    // Arrange + Act + Assert
+    expect(formatTickedAge(-400)).toBe("0s");
   });
 });
