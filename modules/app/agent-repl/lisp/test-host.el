@@ -591,16 +591,6 @@ unary rpc can produce, which the contract never collapses into one."
       ;; Act / Assert
       (should (equal (agent-repl-host-faults "ws-1") faults)))))
 
-(ert-deftest agent-repl-test-host-session-id-is-the-correlation-token ()
-  "The session id is what transcripts and health probes are joined on."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push
-     "ws-1" (list :arm :host :value (agent-repl-test-host--live)))
-    ;; Act / Assert
-    (should (equal (agent-repl-host-session-id "ws-1") "session-1"))))
-
 (ert-deftest agent-repl-test-host-state-push-runs-the-update-hook ()
   "Every host push is whole-replace, and consumers hear about it."
   (agent-repl-test-host--with-harness

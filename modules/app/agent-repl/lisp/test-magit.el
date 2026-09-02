@@ -770,5 +770,63 @@ the first-restored-workspace splash-screen bug."
         (should (equal (car kill-ring)
                        "https://github.com/ChessCom/repo/commit/d00dfeed"))))))
 
+;;;; ---- Tests: SSH/HTTPS remote -> GitHub commit URL (table-driven) ----
+;;
+;; `agent-repl-magit-github-base-url' replaces
+;; `agent-repl-magit-github-ssh-prefix-regexp' ("^git@github.com:") in an
+;; SSH remote; a base URL with no trailing slash glued the owner/repo path
+;; straight onto "github.com" with no separator at all
+;; ("https://github.comChessCom/repo"), so it never matched
+;; `agent-repl-magit-github-org-regexp' and every SSH remote fell into the
+;; "does not match expected pattern" error — even a genuine ChessCom one.
+;; One case per test, all routed through the same production command so
+;; the fix is pinned exactly where the bug lived.
+
+(defun agent-repl-test--magit-commit-url-for-remote (remote-url)
+  "Return the GitHub commit URL `+dwc/magit-open-commit-in-github' browses
+for REMOTE-URL, or signal whatever error the command signals."
+  (let ((browsed nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--ws-dir) (lambda (_ws) default-directory))
+              ((symbol-function 'agent-repl--git-string)
+               (lambda (&rest args)
+                 (if (equal args '("rev-parse" "HEAD"))
+                     "cafebabe"
+                   remote-url)))
+              ((symbol-function 'browse-url) (lambda (url) (setq browsed url))))
+      (+dwc/magit-open-commit-in-github))
+    browsed))
+
+(ert-deftest agent-repl-test-magit-commit-url-ssh-remote ()
+  "An SSH remote (\"git@github.com:...\") builds a well-formed HTTPS URL.
+The regression case: the slash between \"github.com\" and the owner was
+being eaten by the prefix substitution."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--magit-commit-url-for-remote
+                   "git@github.com:ChessCom/repo")
+                 "https://github.com/ChessCom/repo/commit/cafebabe")))
+
+(ert-deftest agent-repl-test-magit-commit-url-https-remote ()
+  "An already-HTTPS remote is unaffected by the SSH-prefix substitution."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--magit-commit-url-for-remote
+                   "https://github.com/ChessCom/repo")
+                 "https://github.com/ChessCom/repo/commit/cafebabe")))
+
+(ert-deftest agent-repl-test-magit-commit-url-strips-trailing-dot-git ()
+  "A trailing `.git' on an SSH remote is stripped before the URL is built."
+  ;; Act / Assert
+  (should (equal (agent-repl-test--magit-commit-url-for-remote
+                   "git@github.com:ChessCom/repo.git")
+                 "https://github.com/ChessCom/repo/commit/cafebabe")))
+
+(ert-deftest agent-repl-test-magit-commit-url-non-github-remote-errors ()
+  "A remote outside the expected org is still an error, never a guessed URL.
+Pins that the fix did not weaken this refusal."
+  ;; Act / Assert
+  (should-error
+   (agent-repl-test--magit-commit-url-for-remote
+    "git@example.com:someone/repo.git")))
+
 (provide 'test-magit)
 ;;; test-magit.el ends here

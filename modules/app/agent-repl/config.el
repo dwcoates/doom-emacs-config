@@ -197,12 +197,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; xwidget buffer.  It needs only core.el's logging ladder, and it loads
 ;; this early so no later module can visit a URL before the handler is in
 ;; place.
-;; WHY: prompts.el is the loader for this module's file-backed automatic
-;; prompt texts (prompts/*.md).  It depends on nothing but subr-x, and
-;; every composer that calls it (worktree.el's workspace-generation
-;; prompt and one-shot suffixes) loads much later, so it sits here where
-;; its `load-file-name' capture of the prompts directory is unambiguous.
-(agent-repl--load-module "prompts")
 ;; WHY: workspace.el owns `agent-repl--workspaces' and the hash
 ;; accessors that nearly every other module uses.  Must load right
 ;; after core.el (which provides the logging primitives workspace.el
