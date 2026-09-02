@@ -24,13 +24,13 @@ everything needed, so re-derive nothing.
 
 | System | Branch @ tip | STOP file (on that branch) | Left in place |
 |---|---|---|---|
-| Daemon | overhaul/daemon @ e2694b20f | docs/overhaul/reports/STOP-daemon.md | worktrees daemon-agents/{hostside 87e3ca5f1, integration-tests 438c81e12} unmerged; stale paintvocab/promptflow to delete |
-| Shim | overhaul/shim @ f70941f0c (6669d9f37 + four capture-harness fixes, project lead, 2026-09-01) | docs/overhaul/reports/STOP-shim.md | none |
-| Webapp | overhaul/webapp @ b8aeaabaa | docs/overhaul/reports/STOP-webapp.md (+ reports/webapp-briefs/ incl. UX-LIST.md) | worktrees webapp-agents/{topbar-login, merge-bubble} |
-| Elisp | overhaul/elisp @ 3d3ea3a2c | docs/overhaul/reports/STOP-elisp.md | none |
-| Store+sidecar | overhaul/store @ 00edf4d4c | docs/overhaul/reports/STOP-store.md | none (carries a merge of overhaul/shim 731aa5f00 — expected) |
+| Daemon | overhaul/daemon @ (PENDING final report; last known 8c5b2fd23, itest 289/342, final pass + audit 1 running) | docs/overhaul/reports/STOP-daemon.md | see STOP |
+| Shim | overhaul/shim @ f9dcbaa80 (STOP-shim.md; code 032a9f0ab) — RESOLVED 2026-09-02: itest 302/0/3, unit 3806, landing 6 merged, dead-code lists STOP §7, capture-checklist answers in STOP | docs/overhaul/reports/STOP-shim.md | none |
+| Webapp | overhaul/webapp @ a2bc62c88 (STOP-webapp.md; code 3c2c632fb) — RESOLVED 2026-09-02: integration 13 files/1601/0, unit 3279, landing 6 merged, dead-code done | docs/overhaul/reports/STOP-webapp.md (+ webapp-briefs/UX-LIST.md for the user) | none |
+| Elisp | overhaul/elisp @ 53bc5b96e (STOP-elisp.md; code 05c49d574) — RESOLVED 2026-09-02: 3517/3518 (one order-dependent red documented), audits 2+3, dead-code lists elisp-fanout.md §17, user toss-ups STOP §Toss-ups | docs/overhaul/reports/STOP-elisp.md | none |
+| Store+sidecar | overhaul/store @ 00b8be0c1 (STOP-store.md; code 6e2795771) — RESOLVED 2026-09-01: gates green -race, staticcheck zero, landing 6 merged, dead-code lists in STOP | docs/overhaul/reports/STOP-store.md | none |
 | Cross-system e2e | overhaul/e2e @ 9dc3b148e | STOPPING-POINT section in the e2e README | suite has NEVER run |
-| Contract | overhaul/integration @ f13ca50ec | this file; PROTO-CHANGES.md (landings 1–5) | landing-6 material pending |
+| Contract | overhaul/integration @ dc65c084f (landing 6 landed: protos d46e601e7, bindings 8a98e4fca) | this file; PROTO-CHANGES.md (landings 1–6 + lock ruling) | landing-7 list below |
 
 Directives: ~/.config/doom-overhaul/directives/{COMMON,DAEMON,SHIM,WEBAPP,ELISP,STORE}.md.
 A recreated lead's mandatory reading order: TEAMLEAD.md → its system PLAN DOC
@@ -39,6 +39,25 @@ landing 5, incl. every "Landing N relay" section) → its STOP file → the
 directives. The plan docs are authoritative over memory of any prior session.
 The shim's 138-scenario mock table lives on overhaul/shim (AGENTS.md) and
 has NOT reached overhaul/integration yet.
+
+## Landing 7 (batched for the next resume, NOT landed)
+
+- agentrepl SubmitPromptError.bubble_refused{kind: not_deliverable|agent_busy}
+- shim.v1 StartSessionFresh.model optional (SDK default)
+- shim.v1 WatchSession push arm session_started (re-announce on every new watch; adoption = pure attach)
+- shim.v1 UpdateAgentFailure.agent_busy
+- agentrepl CloseWorkspaceBlocked composed-reason fields
+- store.v1 OpenAgentSessionFailure.unknown_agent (cross-plane; store lead must agree)
+- deferred: AgentToolFailure denied marker (only if the permission-id join is awkward); OpenWorkspaceTranscriptMissing composed text
+
+## Cross-system rulings 2026-09-01/02 (no proto; recorded in PROTO-CHANGES.md and the plan docs)
+
+- Workspace kernel lock taken in StartSession, not at shim startup (rollout prelaunch).
+- Denied tool: eager start kept; unit settles failure with content UNSET, drawn denied via the permission unit (id == activity id).
+- /clear rotation: new id = second system:init's session_id; conversation_reset.new_conversation_id never adopted.
+- Watch* refusals are transport-closed by design; logged INFO, never WARNING.
+- Webapp: no pull-driven health surface; session faults via pushed topbar warnings; UpdateMergeQueue has no webapp surface.
+- Compaction summary line still ungrounded (cheap-model capture never compacted); needs a user-approved longer-history capture.
 
 ## Project lead's own queue, in order
 
