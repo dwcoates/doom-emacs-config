@@ -120,8 +120,9 @@ func TestWriteBatchWithOneInvalidEntryCommitsNothing(t *testing.T) {
 	if cursors := sidecarCursors(after, t, cli, nil); len(cursors) != 0 {
 		t.Errorf("a refused batch advanced the cursor to %v; a failed transaction commits nothing", cursors)
 	}
-	page := openSession(after, t, cli, "main", 10, nil)
-	assertTexts(t, "the book after a refused batch", pageTexts(page.GetPage()), nil)
+	// Nothing committed at all — not even the agent row the good entry's first
+	// sight would have created, which is a stronger statement than an empty page.
+	openUnknownAgent(after, t, cli, "main")
 }
 
 // TestWriteBatchWithoutCursorAdvanceLeavesCursorsUntouched is the stream-plane

@@ -207,7 +207,7 @@ func (d *DB) refuse(fields logging.Fields, err error) error {
 	if fields.Operation == "" {
 		fields.Operation = "store.db"
 	}
-	if errors.Is(err, ErrInvalid) || errors.Is(err, ErrStalePointer) {
+	if errors.Is(err, ErrInvalid) || errors.Is(err, ErrStalePointer) || errors.Is(err, ErrUnknownAgent) {
 		fields.Level = "debug"
 		if site := RefusalSite(err); site != "" {
 			fields.RefusalSite = site

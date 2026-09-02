@@ -36,14 +36,17 @@ func TestOpenAnswersAPageAndAToken(t *testing.T) {
 	store.assertNoErrorRecords()
 }
 
-// TestEmptyBookIsALegalOpen: an agent with no rows is an empty book, not an
-// unknown agent — the page is empty, the boundary is floor, the token is real.
+// TestEmptyBookIsALegalOpen: an agent the store KNOWS but that has said
+// nothing is an empty book, not an unknown agent — the page is empty, the
+// boundary is floor, the token is real. A freshly spawned subagent is exactly
+// this, and refusing it would leave it unwatchable until it spoke.
 func TestEmptyBookIsALegalOpen(t *testing.T) {
 	// Arrange.
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
+	registerEmptyBook(ctx, t, streamProducer(cli), "main", "never-written-to", "empty")
 
 	// Act.
 	opened := openSession(ctx, t, cli, "never-written-to", 10, nil)
@@ -160,6 +163,7 @@ func TestWatchTokenIsSingleUse(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
+	seedBook(ctx, t, streamProducer(cli), "main", "single-use")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	first := watchStream(ctx, t, cli, opened.GetWatch())
 	defer first.Close()
@@ -170,6 +174,67 @@ func TestWatchTokenIsSingleUse(t *testing.T) {
 
 	// Assert.
 	assertWatchRefused(t, second)
+}
+
+// TestAnAgentIdNamingNoBookIsRefused: the other half of the empty-book rule.
+// An id the store holds no agent row for is refused rather than served an empty
+// page, so a consumer holding a stale or mistyped target learns it is wrong
+// instead of watching a book that will never fill.
+func TestAnAgentIdNamingNoBookIsRefused(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+
+	// Act & Assert.
+	openUnknownAgent(ctx, t, store.client(), "agent-never-existed")
+}
+
+// TestAnUnknownAgentIsRefusedInExactlyOneRecordNamingBothKeys: an operator
+// counts refusals by the site that fired AND by the arm the caller received,
+// and neither alone is enough — several sites map to one arm, and a site with
+// no arm cannot say whether a retry was ever possible.
+func TestAnUnknownAgentIsRefusedInExactlyOneRecordNamingBothKeys(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	mark := store.logMark()
+
+	// Act.
+	assertOpenUnknownAgent(t, openSessionExpectingFailure(ctx, t, store.client(), &storev1.OpenAgentSessionRequest{
+		Agent:    agentID("agent-never-existed"),
+		PageSize: 10,
+	}))
+
+	// Assert.
+	rec := assertExactlyOneNormalRecord(t, store.logRecordsAfter(mark), "an unknown agent")
+	assertRefusalKeys(t, rec, "unknown_agent", "unknown_agent")
+}
+
+// TestAnUnknownAgentIsRefusedBeforeThePointerIsJudged is the ordering: a
+// known_through against a book that does not exist is stale only as a
+// consequence, and answering stale_pointer would send the caller off to repaint
+// a book nobody ever kept.
+func TestAnUnknownAgentIsRefusedBeforeThePointerIsJudged(t *testing.T) {
+	// Arrange.
+	store := startStore(t, storeOptions{})
+	ctx, cancel := callContext(t)
+	defer cancel()
+	cli := store.client()
+	shim := streamProducer(cli)
+	seedBook(ctx, t, shim, "main", "pointer-order")
+	pointerInMain := openSession(ctx, t, cli, "main", 10, nil).GetPage().GetLines()[0].GetAt()
+
+	// Act.
+	failure := openSessionExpectingFailure(ctx, t, cli, &storev1.OpenAgentSessionRequest{
+		Agent:        agentID("agent-never-existed"),
+		PageSize:     10,
+		KnownThrough: pointerInMain,
+	})
+
+	// Assert.
+	assertOpenUnknownAgent(t, failure)
 }
 
 // TestUnknownWatchTokenIsRefused: a token the store never minted buys nothing.
@@ -205,6 +270,7 @@ func TestAConsumedWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
+	seedBook(ctx, t, streamProducer(cli), "main", "consumed")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	first := watchStream(ctx, t, cli, opened.GetWatch())
 	defer first.Close()
@@ -232,6 +298,7 @@ func TestAPostRestartWatchTokenIsRefusedInExactlyOneRecord(t *testing.T) {
 	store := startStore(t, storeOptions{})
 	ctx, cancel := callContext(t)
 	defer cancel()
+	seedBook(ctx, t, streamProducer(store.client()), "main", "post-restart")
 	opened := openSession(ctx, t, store.client(), "main", 10, nil)
 	staleToken := opened.GetWatch()
 	store.restart()

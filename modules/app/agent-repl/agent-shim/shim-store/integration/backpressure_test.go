@@ -26,6 +26,7 @@ func TestSlowWatcherExceedingTheBufferIsEndedWithAnError(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	shim := streamProducer(cli)
+	seedBook(ctx, t, shim, "main", "overrun")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer stream.Close()
@@ -81,6 +82,7 @@ func TestTheDefaultBufferAbsorbsALargeBurstWithoutEndingAWatcher(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	shim := streamProducer(cli)
+	seedBook(ctx, t, shim, "main", "default-buffer")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer stream.Close()
@@ -115,6 +117,7 @@ func TestOverrunWatcherRecoversByReopening(t *testing.T) {
 	defer cancel()
 	cli := store.client()
 	shim := streamProducer(cli)
+	seedBook(ctx, t, shim, "main", "reopen")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	overrun := smallWatchBuffer * 40

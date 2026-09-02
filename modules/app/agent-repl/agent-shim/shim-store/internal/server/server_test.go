@@ -539,8 +539,58 @@ func TestOpenAgentSessionMapsAStalePointerToTheFailureArm(t *testing.T) {
 	}
 }
 
+// TestOpenAgentSessionMapsAnUnknownAgentToItsOwnArm: the storage layer's
+// ErrUnknownAgent becomes unknown_agent on the wire and never invalid_request,
+// because the request was well formed and respelling it cannot help.
+func TestOpenAgentSessionMapsAnUnknownAgentToItsOwnArm(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: agent \"ghost\" names no book of this store", ErrUnknownAgent)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	res, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("ghost"), PageSize: 10,
+	}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+	if res.Msg.GetFailure().GetUnknownAgent() == nil {
+		t.Fatalf("failure kind = %v, want unknown_agent", res.Msg.GetFailure().GetKind())
+	}
+}
+
+// TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys: a refused
+// request belongs to the CALL, so this layer writes the one normal-level record
+// — at warn, never error, since a stale target is an ordinary consumer race.
+func TestOpenAgentSessionRecordsAnUnknownAgentAtWarnWithBothRefusalKeys(t *testing.T) {
+	// Arrange.
+	store := newFakeStore()
+	store.openErr = fmt.Errorf("%w: agent \"ghost\" names no book of this store", ErrUnknownAgent)
+	h := newHarness(t, store, 0)
+
+	// Act.
+	if _, err := h.client.OpenAgentSession(context.Background(), connect.NewRequest(&storev1.OpenAgentSessionRequest{
+		Agent: agentID("ghost"), PageSize: 10,
+	})); err != nil {
+		t.Fatalf("OpenAgentSession = %v, want nil", err)
+	}
+
+	// Assert.
+	rec, ok := findRecord(t, h.logs, "store.rpc.open-agent-session", "warn")
+	if !ok || rec.Context["refusal_site"] != SiteUnknownAgent || rec.Context["refusal_kind"] != "unknown_agent" {
+		t.Fatalf("records = %+v, want one warn record at site %q and kind %q", records(t, h.logs), SiteUnknownAgent, "unknown_agent")
+	}
+	if _, isError := findRecord(t, h.logs, "store.rpc.open-agent-session", "error"); isError {
+		t.Fatalf("an unknown agent produced an error record: %+v", records(t, h.logs))
+	}
+}
+
 func TestOpenAgentSessionServesAnEmptyBookAsALegalPage(t *testing.T) {
-	// Arrange. An agent with no rows is an empty book, not an unknown agent.
+	// Arrange. An agent the store knows but that has no rows is an empty book,
+	// not an unknown agent; the fake answers the empty page the db would.
 	store := newFakeStore()
 	h := newHarness(t, store, 0)
 

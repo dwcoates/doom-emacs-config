@@ -127,6 +127,7 @@ func TestAWatcherReceivesEveryConcurrentlyWrittenLine(t *testing.T) {
 	ctx, cancel := callContext(t)
 	defer cancel()
 	cli := store.client()
+	seedBook(ctx, t, streamProducer(cli), "main", "concurrent")
 	opened := openSession(ctx, t, cli, "main", 10, nil)
 	stream := watchStream(ctx, t, cli, opened.GetWatch())
 	defer stream.Close()
