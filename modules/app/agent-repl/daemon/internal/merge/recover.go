@@ -50,12 +50,13 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 	for _, repo := range repos {
 		for _, entry := range queues[repo] {
 			if entry.State != wsm.MergeAdmitted {
-				o.mu.Lock()
-				o.repoOf[entry.Workspace] = repo
-				o.mu.Unlock()
-				o.publish(entry.Workspace, MergeFacts{
-					State: StateQueued, QueuePosition: entry.Position, QueueDepth: len(queues[repo]),
-				})
+				requeued, err := o.recoverWaiting(ctx, repo, entry, len(queues[repo]))
+				if err != nil {
+					return err
+				}
+				if !requeued {
+					continue
+				}
 				o.deps.Log.Global().Debug(op, "re-enqueued a waiting merge", dlog.Context{
 					"workspace": string(entry.Workspace), "repo": string(repo), "position": entry.Position})
 				continue
@@ -69,6 +70,56 @@ func (o *orchestrator) Recover(ctx context.Context) error {
 		o.kick(repo)
 	}
 	return nil
+}
+
+// recoverWaiting puts one merely-WAITING merge back on its queue, or ABANDONS
+// it when it cannot go back.
+//
+// The queue is durable, so the daemon's own shutdown does not end a waiting
+// merge — the restart is where a merge that shut down queued either resumes its
+// wait or gives up, and the give-up is what the DAEMON SHUTDOWN cause names. A
+// merge whose workspace no longer records the geometry the merge would run
+// against cannot be re-queued: the workspace was nuked, or its creation job is
+// gone, and admitting it later would only fail at the front of the queue with
+// nothing said about why it was ever there.
+//
+// A ROW THAT WILL NOT DECODE STILL REFUSES THE BOOT, exactly as an admitted
+// merge's does: half-written state is evidence, not an outcome.
+func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, entry wsm.MergeQueueEntry, depth int) (bool, error) {
+	const op = "daemon.merge.recover"
+	ws := entry.Workspace
+	_, jobErr := o.layoutFor(ctx, ws)
+	var decodeErr *wsm.DecodeError
+	if errors.As(jobErr, &decodeErr) {
+		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
+		o.log(ctx, ws).Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
+		o.deps.Log.Global().Error(op, "refusing the boot: a queued merge's creation_jobs row will not decode", fields)
+		return false, fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
+	}
+	if jobErr != nil {
+		o.deps.Log.Global().Warn(op, "abandoning a merge the restart could not put back on its queue", dlog.Context{
+			"workspace": string(ws), "repo": string(repo), "error": jobErr.Error()})
+		// THE LEDGER IDENTITY IS MINTED HERE. A merely-queued merge's bubble
+		// is addressed by an identity minted in memory at enqueue and never
+		// written down, so the pre-restart bubble is unreachable; without a
+		// fresh one the abandoned terminal would have nowhere to land and the
+		// cause would reach nobody.
+		ledger := o.mintLedger(ws)
+		o.mu.Lock()
+		delete(o.repoOf, ws)
+		delete(o.ledgerOf, ws)
+		o.mu.Unlock()
+		if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(CauseDaemonShutdown)); err != nil {
+			return false, err
+		}
+		o.publishAbandoned(ctx, ws, ledger, CauseDaemonShutdown)
+		return false, nil
+	}
+	o.mu.Lock()
+	o.repoOf[ws] = repo
+	o.mu.Unlock()
+	o.publish(ws, MergeFacts{State: StateQueued, QueuePosition: entry.Position, QueueDepth: depth})
+	return true, nil
 }
 
 // recoverAdmitted decides one in-flight merge's fate. RESUMABLE means the

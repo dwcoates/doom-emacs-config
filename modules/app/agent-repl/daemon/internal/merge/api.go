@@ -74,6 +74,11 @@ type Orchestrator interface {
 	// OnInterrupt raises the dequeue offer when the user interrupts a
 	// workspace that is queued.
 	OnInterrupt(ctx context.Context, ws ids.WorkspaceID)
+	// OnWorkspaceClosed abandons a workspace's WAITING merge when the
+	// workspace itself is torn down (killed or nuked), recording the close as
+	// the abandon cause. It is a no-op for a workspace with no waiting merge,
+	// and never touches a merge already in flight.
+	OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID)
 	// RouteParked delivers a submission that arrived while this workspace's
 	// merge lease stands PARKED. It is the queue's one ingress into the
 	// orchestrator: the queue recognizes the parked lease policy, never merge

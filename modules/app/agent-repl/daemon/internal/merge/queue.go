@@ -191,25 +191,94 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 	return keys, nil
 }
 
-// Evict removes a queued workspace from the queue. It is one of the THREE
-// DISTINCT ENDS a merge can have before it runs — evict is the operator's,
-// dequeue is the user's answer to the interrupt offer, and abandon is the
-// merge's own give-up — and each records its own cause.
+// AbandonCause names WHY a queued merge left its queue before it ever ran.
+// `FeedMergeError` carries ONE `abandoned` arm for every one of them, so the
+// cause reaches a reader ONLY as `FeedMergeAbandoned.summary` — which is why
+// every cause is declared here, beside the one sentence it resolves to, rather
+// than spelled at each call site. The value is also the durable drop reason
+// `RemoveMergeQueueEntry` records, so the queue row and the bubble agree.
+type AbandonCause string
+
+const (
+	// CauseUserDrop is the user taking a queued merge off the queue through
+	// UpdateMergeQueue's evict.
+	CauseUserDrop AbandonCause = "evicted"
+	// CauseUserDequeue is the user releasing the slot in answer to the
+	// interrupt's dequeue offer.
+	CauseUserDequeue AbandonCause = "dequeued"
+	// CauseWorkspaceClosed is the workspace itself being torn down — killed or
+	// nuked — while its merge was still waiting.
+	CauseWorkspaceClosed AbandonCause = "workspace_closed"
+	// CauseDaemonShutdown is the daemon going away under a waiting merge: the
+	// queue is durable, so this is only reached at the RESTORE, for a merge the
+	// restart could not put back on its queue.
+	CauseDaemonShutdown AbandonCause = "daemon_shutdown"
+)
+
+// abandonSummaries is the resolved sentence each cause draws as the bubble's
+// collapsed line, exactly as `FeedMergeFailed.summary` is drawn.
+var abandonSummaries = map[AbandonCause]string{
+	CauseUserDrop:        "the operator evicted this merge from the queue",
+	CauseUserDequeue:     "the user released this merge's queue slot",
+	CauseWorkspaceClosed: "the workspace was closed while this merge was waiting in the queue",
+	CauseDaemonShutdown:  "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
+}
+
+// summary resolves one cause's sentence. The bool is false for a cause with no
+// declared sentence, which is a programming error rather than an outcome: the
+// caller reports it and still ends the bubble, because a reader losing the
+// terminal entirely is worse than reading an unpolished one.
+func (c AbandonCause) summary() (string, bool) {
+	sentence, declared := abandonSummaries[c]
+	return sentence, declared
+}
+
+// Evict removes a queued workspace from the queue. It is one of the FOUR
+// DISTINCT ENDS a merge can have before it runs — evict is the user's own
+// drop, dequeue is the user's answer to the interrupt offer, and the workspace
+// close and the daemon shutdown are the merge's give-up under something else
+// ending — and each records its own cause.
 func (o *orchestrator) Evict(ctx context.Context, ws ids.WorkspaceID) error {
-	return o.dropQueued(ctx, ws, "evicted", "the operator evicted this merge from the queue")
+	return o.dropQueued(ctx, ws, CauseUserDrop)
+}
+
+// OnWorkspaceClosed abandons a workspace's WAITING merge when the workspace
+// itself is torn down. A queued merge whose workspace is killed or nuked can
+// never run, and left on the queue it would block the repository's queue
+// forever on a workspace that is not there; abandoning it records WHY in the
+// bubble instead. Nothing is dropped when the merge has already been admitted:
+// a run in flight ends on its own terminal, not on this one.
+func (o *orchestrator) OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID) {
+	const op = "daemon.merge.workspace_closed"
+	if _, running := o.runFor(ws); running {
+		return
+	}
+	if _, err := o.queueOf(ctx, ws); err != nil {
+		// A REFUSAL IS THE ORDINARY ANSWER — this workspace simply had no
+		// queued merge. Anything else is a store failure and is surfaced.
+		if _, refused := Refused(err); !refused {
+			o.log(ctx, ws).Error(op, "could not tell whether a torn-down workspace had a queued merge",
+				dlog.Context{"workspace": string(ws), "error": err.Error()})
+		}
+		return
+	}
+	if err := o.dropQueued(ctx, ws, CauseWorkspaceClosed); err != nil {
+		o.log(ctx, ws).Error(op, "could not abandon the queued merge of a torn-down workspace",
+			dlog.Context{"workspace": string(ws), "error": err.Error()})
+	}
 }
 
 // dropQueued takes one workspace off its queue with the cause it was dropped
 // for, and publishes the abandoned terminal.
-func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause, summary string) error {
+func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause AbandonCause) error {
 	const op = "daemon.merge.drop_queued"
 	log := o.log(ctx, ws)
 	repo, err := o.queueOf(ctx, ws)
 	if err != nil {
 		return err
 	}
-	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, cause); err != nil {
-		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": cause, "error": err.Error()})
+	if err := o.deps.DB.RemoveMergeQueueEntry(ctx, repo, ws, string(cause)); err != nil {
+		log.Error(op, "could not drop a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause), "error": err.Error()})
 		return err
 	}
 	o.mu.Lock()
@@ -221,8 +290,8 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	ledger := o.ledgerOf[ws]
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
-	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": cause})
-	o.publishAbandoned(ctx, ws, ledger, summary)
+	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": string(cause)})
+	o.publishAbandoned(ctx, ws, ledger, cause)
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
