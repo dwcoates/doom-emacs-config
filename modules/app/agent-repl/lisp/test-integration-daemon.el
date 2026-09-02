@@ -502,9 +502,16 @@ the message is the whole recovery path."
           ;; Act.
           (agent-repl-daemon-ensure)
           ;; Assert.
+          ;; The capture buffer now exists from the moment the build process
+          ;; is spawned, so its EXISTENCE no longer means the output landed;
+          ;; the output itself is what this waits on.
           (agent-repl-itest--wait-until
-           (lambda () (get-buffer "*agent-repl-build-frontend*"))
-           nil "the build-output buffer")
+           (lambda ()
+             (let ((buffer (get-buffer "*agent-repl-build-frontend*")))
+               (and buffer
+                    (with-current-buffer buffer
+                      (string-match-p "compile error" (buffer-string))))))
+           nil "the build output to be captured")
           (with-current-buffer "*agent-repl-build-frontend*"
             (should (string-match-p "compile error" (buffer-string)))))))))
 
@@ -657,9 +664,13 @@ the BUILD state, and this build succeeded — a timeout that painted
             (agent-repl-itest--wait-until
              (lambda () (seq-some (lambda (m) (string-match-p "NOT ready" m)) messages))
              5 "the boot timeout to be surfaced to the user"))
-          ;; Assert: and the build state is untouched.
+          ;; Assert: and the build state is untouched.  The segment may be
+          ;; carrying the short-lived "stack built in N.Ns" note from the
+          ;; build that SUCCEEDED — what it must never say is that the build
+          ;; failed, which is the misdirection this scenario exists to catch.
           (should (null agent-repl-daemon-build-failure))
-          (should (null agent-repl-daemon-mode-line-segment)))))))
+          (should-not (equal agent-repl-daemon-mode-line-segment
+                             "daemon: build failed")))))))
 
 ;; audit-2 #41
 (ert-deftest agent-repl-itest-daemon-restart-asks-the-daemon-to-stop-itself ()
