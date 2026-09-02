@@ -3,7 +3,6 @@ package checkout_test
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"claude-repld/internal/checkout"
@@ -90,12 +89,12 @@ func TestRootRepositoryRootAncestor(t *testing.T) {
 	}
 }
 
-// TestRootNoMarkerReturnsError verifies that when no ancestor carries the
-// marker and no environment override is set, Root fails loudly and names the
-// executable path rather than guessing.
-func TestRootNoMarkerReturnsError(t *testing.T) {
-	// Arrange: a bare directory tree with no "modules/app/agent-repl"
-	// anywhere in it.
+// TestRootWithNoMarkerNearTheExecutableFallsBack covers the binary built
+// OUTSIDE the tree — `go build -o <tmp>`, which is what every test harness and
+// every scratch build does. The executable's own ancestors name no checkout,
+// so the path this package was compiled from answers instead of a refusal.
+func TestRootWithNoMarkerNearTheExecutableFallsBack(t *testing.T) {
+	// Arrange: a bare directory tree with no "modules/app/agent-repl" in it.
 	tmp := t.TempDir()
 	exePath := filepath.Join(tmp, "bin", "claude-repld")
 	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
@@ -106,14 +105,11 @@ func TestRootNoMarkerReturnsError(t *testing.T) {
 	got, err := checkout.Root(exePath)
 
 	// Assert.
-	if err == nil {
-		t.Fatalf("Root() = %q, want an error", got)
+	if err != nil {
+		t.Fatalf("Root() = %v, want the compiled-in checkout", err)
 	}
-	if !strings.Contains(err.Error(), exePath) {
-		t.Fatalf("Root() error %q does not name the executable path %q", err, exePath)
-	}
-	if !strings.Contains(err.Error(), checkout.Env) {
-		t.Fatalf("Root() error %q does not name %s", err, checkout.Env)
+	if filepath.Base(got) != "agent-repl" {
+		t.Fatalf("Root() = %q, want the agent-repl module root", got)
 	}
 }
 
@@ -137,5 +133,21 @@ func TestDerivedPaths(t *testing.T) {
 				t.Fatalf("got %q, want %q", tc.got, tc.want)
 			}
 		})
+	}
+}
+
+// TestVocabDirIsBeneathTheProtoTree covers the one path the daemon cannot be
+// given a flag for: the render vocabulary is shared with every other system
+// and lives with the protos.
+func TestVocabDirIsBeneathTheProtoTree(t *testing.T) {
+	// Arrange
+	root := filepath.Join("/checkout", "modules", "app", "agent-repl")
+
+	// Act
+	got := checkout.VocabDir(root)
+
+	// Assert
+	if want := filepath.Join(root, "proto", "vocab"); got != want {
+		t.Fatalf("VocabDir = %q, want %q", got, want)
 	}
 }
