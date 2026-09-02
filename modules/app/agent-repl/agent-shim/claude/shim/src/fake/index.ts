@@ -679,7 +679,15 @@ export function createFakeQuery(
       // prompt_too_long, hook_stopped, tool_deferred and the rest — is a
       // `TerminalReason`. A mock that only varied the subtype could reach four
       // of the sixteen conversation.v1 failure arms.
-      terminal_reason: spec.terminalReason ?? (spec.subtype === "success" ? "completed" : "api_error"),
+      // AN ERROR RESULT WITH NO REASON HAS NO REASON. Defaulting one to
+      // `api_error` made every unclassified stop claim the API had failed, and
+      // `execution_error` -- the arm that exists precisely for a stop the
+      // producer did not classify -- became unreachable.
+      ...(spec.terminalReason === undefined
+        ? spec.subtype === "success"
+          ? { terminal_reason: "completed" }
+          : {}
+        : { terminal_reason: spec.terminalReason }),
       // THE SESSION'S STATE IS THE DEFAULT, not a constant: fast mode is a
       // session fact the vendor restates on every result, so a turn that says
       // nothing about it reports what the session is actually in.
@@ -691,10 +699,14 @@ export function createFakeQuery(
             : spec.fastModeDisabledReason;
         return reason === undefined ? {} : { fast_mode_disabled_reason: reason };
       })(),
+      // `api_error_status` RIDES THE ERROR RESULT TOO. It is the only field
+      // that says WHICH api failure a `terminal_reason: "api_error"` was, and
+      // emitting it on success results alone left every `!api-*` row reaching
+      // the `unmodeled` kind -- the twelve statuses were indistinguishable.
+      api_error_status: spec.apiErrorStatus ?? null,
       ...(spec.subtype === "success"
         ? {
             result: spec.result ?? "",
-            api_error_status: spec.apiErrorStatus ?? null,
             ...(spec.structuredOutput === undefined ? {} : { structured_output: spec.structuredOutput }),
           }
         : { errors: spec.errors ?? [] }),

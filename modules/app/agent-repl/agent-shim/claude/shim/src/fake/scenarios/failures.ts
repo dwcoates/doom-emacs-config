@@ -62,7 +62,11 @@ function stopScenario(spec: {
     | "error_max_turns"
     | "error_max_budget_usd"
     | "error_max_structured_output_retries";
-  terminalReason: string;
+  /**
+   * The `TerminalReason` riding the result, or UNSET when the subtype alone is
+   * the whole of the vendor's account.
+   */
+  terminalReason?: string;
   error: string;
   arms: string;
   before?: (ctx: ScenarioContext) => void;
@@ -70,7 +74,11 @@ function stopScenario(spec: {
   return scenario({
     name: spec.name,
     prompt: `!${spec.name}`,
-    emits: `a reasoning block and a partial answer, then an error \`result\` with subtype \`${spec.subtype}\` and \`terminal_reason: "${spec.terminalReason}"\``,
+    emits:
+      `a reasoning block and a partial answer, then an error \`result\` with subtype \`${spec.subtype}\`` +
+      (spec.terminalReason === undefined
+        ? " and NO `terminal_reason` — the subtype alone is the vendor's whole account"
+        : ` and \`terminal_reason: "${spec.terminalReason}"\``),
     writes: "the assistant lines for the work it did reach, the prompt line and the turn record",
     arms: `AgentThinking + AgentResponse, then ${spec.arms}`,
     run(ctx) {
@@ -88,7 +96,11 @@ function stopScenario(spec: {
         stopReason: null,
       });
       spec.before?.(ctx);
-      ctx.result({ subtype: spec.subtype, terminalReason: spec.terminalReason, errors: [spec.error] });
+      ctx.result({
+        subtype: spec.subtype,
+        ...(spec.terminalReason === undefined ? {} : { terminalReason: spec.terminalReason }),
+        errors: [spec.error],
+      });
     },
   });
 }
@@ -96,7 +108,10 @@ function stopScenario(spec: {
 export const FAIL_EXECUTION = stopScenario({
   name: "fail-execution",
   subtype: "error_during_execution",
-  terminalReason: "api_error",
+  // NO terminal_reason: `execution_error` is the UNCLASSIFIED arm, so a row
+  // that named one would reach whatever that reason spells instead —
+  // `api_error` here reached `api_request_failed`, which grounded the wrong arm
+  // and left `execution_error` untested.
   error: "the turn raised during execution",
   arms:
     "AgentFailure.execution_error — DECLARED-ONLY: no capture grounds this terminal (`turn-stop-error-during-execution` ended `success.interrupted` after an `aborted_streaming`), so the mock keeps the declared arm and the evidence gap is listed in testdata/captures/MANIFEST.md",
@@ -252,8 +267,9 @@ export const FAIL_CONTINUATION_PREVENTED = scenario({
     "`preventedContinuation` is true, then a `stop_hook_prevented` terminal",
   writes: "the `system:stop_hook_summary` line, the prompt line and the turn record",
   arms:
-    "AgentFailure.continuation_prevented — UNSETTLED: no `TerminalReason` names it, so this pairs the two " +
-    "declared prevent-continuation signals with the nearest terminal",
+    "AgentFailure.stop_hook_prevented — the arm this pairing ACTUALLY reaches. AgentFailure.continuation_prevented " +
+    "is UNSETTLED and UNGROUNDED: no `TerminalReason` names it, so the two declared prevent-continuation signals " +
+    "ride the nearest terminal and nothing produces the continuation_prevented arm",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "fail-continuation-prevented" }, "fake continuation-prevented turn");
     ctx.systemMessage("informational", {
@@ -341,6 +357,9 @@ function apiErrorScenario(spec: {
       ctx.result({
         subtype: "error_during_execution",
         terminalReason: "api_error",
+        // THE STATUS IS THE WHOLE OF THE CLASSIFICATION: `api_error` names
+        // twelve different failures and only the status tells them apart.
+        ...(spec.status === null ? {} : { apiErrorStatus: spec.status }),
         errors: [spec.formatted],
       });
     },

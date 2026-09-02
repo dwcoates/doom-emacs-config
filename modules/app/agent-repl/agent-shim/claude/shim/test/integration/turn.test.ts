@@ -296,6 +296,203 @@ describe("StartTurn", () => {
   });
 });
 
+/**
+ * The turn-stop taxonomy, as ONE table.
+ *
+ * `sdk.d.ts` declares FOUR `result` error subtypes; every finer stop is a
+ * `TerminalReason` riding the result, and THE PAIRING IS THE CONTRACT — a
+ * converter keyed on `subtype` alone reaches four of the sixteen
+ * conversation.v1 arms. So the mock's published table is walked here row by
+ * row: each `!name` names one (subtype, terminal_reason) pair, and the row
+ * states the frame arm that pair must reach. One case per row, so a regression
+ * names the arm it broke rather than "the taxonomy".
+ *
+ * WHAT IS DELIBERATELY NOT ASSERTED HERE, and why:
+ *
+ * - `AgentUpdate.api_error` is a RECORD-PLANE fact. The vendor writes
+ *   `system:api_error` to the transcript, never onto the SDK stream, so the
+ *   sidecar is its only producer and no `!api-*` row can put one on this live
+ *   WatchAgent. The rows below assert the terminal, which is the whole of what
+ *   the stream plane owes.
+ * - `!refusal-fallback`, `!refusal-no-fallback` and `!context-window` publish
+ *   an `AgentResponseFailure` reason. The refusals arrive as a `fallback`
+ *   content block (no text, so no response unit is minted) and
+ *   `!context-window` emits no assistant message at all, so those three reasons
+ *   have NO producer on this plane today. Recorded as a gap rather than
+ *   asserted from an invented fixture.
+ */
+interface StopRow {
+  /** The mock lever. */
+  readonly prompt: string;
+  /** The turn terminal's frame arm. */
+  readonly terminal: "success" | "failure";
+  /** The oneof arm inside that terminal. */
+  readonly arm: string;
+  /**
+   * The `ApiRequestFailed` kind the arm must carry.
+   *
+   * Twelve rows reach `api_request_failed`, so the arm alone says almost
+   * nothing: what a consumer acts on is the KIND inside it — whether waiting
+   * helps (429/529), whether the user must act (401/402/403), or whether the
+   * request itself was wrong (400/413).
+   */
+  readonly apiKind?: string;
+  /** True when the row parks until a stop lands (its terminal IS the stop's). */
+  readonly needsStop?: boolean;
+}
+
+const STOP_TAXONOMY: readonly StopRow[] = [
+  // The producer's own turn-ending vocabulary: `error_during_execution` plus a
+  // TerminalReason, which is where most of these live.
+  { prompt: "!fail-execution", terminal: "failure", arm: "executionError" },
+  { prompt: "!fail-max-turns", terminal: "failure", arm: "maxTurns" },
+  { prompt: "!fail-budget", terminal: "failure", arm: "budgetExhausted" },
+  {
+    prompt: "!fail-structured-output",
+    terminal: "failure",
+    arm: "structuredOutputRetryExhausted",
+  },
+  { prompt: "!fail-blocking-limit", terminal: "failure", arm: "blockingLimit" },
+  { prompt: "!fail-rapid-refill", terminal: "failure", arm: "rapidRefillBreaker" },
+  { prompt: "!fail-prompt-too-long", terminal: "failure", arm: "promptTooLong" },
+  { prompt: "!fail-image", terminal: "failure", arm: "imageError" },
+  { prompt: "!fail-model", terminal: "failure", arm: "modelError" },
+  {
+    prompt: "!fail-malformed-tool-use",
+    terminal: "failure",
+    arm: "malformedToolUseExhausted",
+  },
+  { prompt: "!fail-tool-deferred", terminal: "failure", arm: "toolDeferred" },
+  {
+    prompt: "!fail-tool-deferred-unavailable",
+    terminal: "failure",
+    arm: "toolDeferredUnavailable",
+  },
+  { prompt: "!fail-turn-setup", terminal: "failure", arm: "turnSetupFailed" },
+  { prompt: "!fail-stop-hook", terminal: "failure", arm: "stopHookPrevented" },
+  { prompt: "!fail-hook-stopped", terminal: "failure", arm: "hookStopped" },
+  // UNGROUNDED ARM, ASSERTED AS IT ACTUALLY LANDS: no `TerminalReason` names
+  // continuation-prevention, so the two declared prevent-continuation signals
+  // ride a `stop_hook_prevented` terminal and
+  // `AgentFailure.continuation_prevented` has no producer at all.
+  { prompt: "!fail-continuation-prevented", terminal: "failure", arm: "stopHookPrevented" },
+  // `aborted_tools` is the ONE reason that is not a failure: the tools were
+  // aborted because a user stopped them, which is an interruption.
+  { prompt: "!fail-aborted-tools", terminal: "success", arm: "interrupted" },
+  // The API family: twelve reasons, ONE arm, distinguished by the taxonomy the
+  // arm carries (asserted per-kind in the test that follows).
+  { prompt: "!api-400", terminal: "failure", arm: "apiRequestFailed", apiKind: "invalidRequest" },
+  { prompt: "!api-401", terminal: "failure", arm: "apiRequestFailed", apiKind: "authenticationFailed" },
+  { prompt: "!api-403", terminal: "failure", arm: "apiRequestFailed", apiKind: "permissionDenied" },
+  { prompt: "!api-404", terminal: "failure", arm: "apiRequestFailed", apiKind: "notFound" },
+  { prompt: "!api-413", terminal: "failure", arm: "apiRequestFailed", apiKind: "requestTooLarge" },
+  { prompt: "!api-429", terminal: "failure", arm: "apiRequestFailed", apiKind: "rateLimited" },
+  { prompt: "!api-500", terminal: "failure", arm: "apiRequestFailed", apiKind: "internal" },
+  { prompt: "!api-529", terminal: "failure", arm: "apiRequestFailed", apiKind: "overloaded" },
+  // THREE KINDS THE RESULT RECORD CANNOT NAME. `billing_error`,
+  // `oauth_org_not_allowed` and `max_output_tokens` are separated from their
+  // neighbours only by the vendor's own error CLASS, and the result record
+  // carries the HTTP status alone — 402 and a null status fall through to
+  // `unmodeled`, and the org refusal is indistinguishable from an ordinary 403.
+  // Asserted as they actually land, with the gap named, rather than as an arm
+  // nothing on this plane produces.
+  { prompt: "!api-billing", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  {
+    prompt: "!api-oauth-org",
+    terminal: "failure",
+    arm: "apiRequestFailed",
+    apiKind: "permissionDenied",
+  },
+  { prompt: "!api-max-output", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  { prompt: "!api-unmodeled", terminal: "failure", arm: "apiRequestFailed", apiKind: "unmodeled" },
+  // The response-level stops. `!max-tokens` keeps the partial text and the turn
+  // itself completes; `!context-window` and the two refusals end the turn.
+  { prompt: "!max-tokens", terminal: "success", arm: "completed" },
+  { prompt: "!refusal-fallback", terminal: "success", arm: "completed" },
+  // `model_error`: the refusal with no fallback ends on the model's own
+  // failure, which is the reason the result carries.
+  { prompt: "!refusal-no-fallback", terminal: "failure", arm: "modelError" },
+  { prompt: "!context-window", terminal: "failure", arm: "promptTooLong" },
+  // The interrupt lands INSIDE a tool call, so the turn parks until the stop.
+  { prompt: "!interrupt", terminal: "success", arm: "interrupted", needsStop: true },
+];
+
+describe("the turn-stop taxonomy", () => {
+  test.each(STOP_TAXONOMY)("$prompt reaches its declared terminal", async (row) => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: row.prompt }));
+    if (row.needsStop === true) {
+      // The park is armed before the frame that announces it, so waiting for
+      // any entry is enough to know the interrupt has something to land on.
+      await watch.until((frame) => frame.frame.case === "entry");
+      updateAccepted(await shim.clients.h1.updateAgent(stopAgent()));
+    }
+    const terminal = await untilTerminal(watch);
+
+    const frame = entryFrame(terminal);
+    expect(frame?.result.case).toBe(row.terminal);
+    if (frame?.result.case === "failure") {
+      expect(frame.result.value.failure.case).toBe(row.arm);
+    } else if (frame?.result.case === "success") {
+      expect(frame.result.value.outcome.case).toBe(row.arm);
+    }
+    if (row.apiKind !== undefined) {
+      if (frame?.result.case !== "failure" || frame.result.value.failure.case !== "apiRequestFailed") {
+        throw new Error("the api row did not end AgentFailure.api_request_failed");
+      }
+      expect(frame.result.value.failure.value.kind.case).toBe(row.apiKind);
+    }
+    watch.close();
+  });
+
+  test("an api_error is MID-TURN EVIDENCE on the record plane, never a terminal", async () => {
+    // The two are distinct facts with distinct producers. The vendor writes
+    // `system:api_error` to the TRANSCRIPT and never onto the SDK stream, so
+    // the sidecar is the only producer of `AgentUpdate.api_error` and this live
+    // stream carries the terminal alone. A converter that raised the evidence
+    // into a terminal would end turns that recovered; one that read the
+    // terminal as evidence would draw a failed turn as still running.
+    const shim = await spawnShim();
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!api-429" }));
+    const terminal = await untilTerminal(watch);
+
+    // The EVIDENCE, on the plane that has it.
+    const records = readTranscript(shim.dirs, started.vendorSessionId);
+    expect(records.filter((record) => record.subtype === "api_error").length).toBe(1);
+    // The TERMINAL, on this one, carrying the same classification.
+    const frame = entryFrame(terminal);
+    if (frame?.result.case !== "failure" || frame.result.value.failure.case !== "apiRequestFailed") {
+      throw new Error("the turn did not end AgentFailure.api_request_failed");
+    }
+    expect(frame.result.value.failure.value.kind.case).toBe("rateLimited");
+    // And no api_error page line rode the live stream — that arm is the
+    // sidecar's, and a second producer would double every recorded failure.
+    expect(
+      watch.frames().some((served) => {
+        if (served.frame.case !== "entry") return false;
+        const agentFrame = entryFrame(watchAgentEntry(served));
+        return (
+          agentFrame?.result.case === "update" &&
+          agentFrame.result.value.update.case === "apiError"
+        );
+      }),
+    ).toBe(false);
+    watch.close();
+  });
+});
+
 describe("WatchAgent", () => {
   test("opened before any turn, it opens with an EMPTY page and a floor boundary", async () => {
     // The counterpart to R15's StartTurn page: nothing has been written yet, so
