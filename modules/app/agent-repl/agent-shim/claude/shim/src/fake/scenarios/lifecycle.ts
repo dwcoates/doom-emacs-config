@@ -15,7 +15,7 @@
  */
 import { askPermission, conclude, scenario } from "./support.js";
 
-export const HOLD = scenario({
+const HOLD = scenario({
   name: "hold",
   prompt: "!hold",
   emits:
@@ -36,7 +36,7 @@ export const HOLD = scenario({
   },
 });
 
-export const INTERRUPT_MID_TOOL = scenario({
+const INTERRUPT_MID_TOOL = scenario({
   name: "interrupt",
   prompt: "!interrupt",
   emits:
@@ -62,7 +62,7 @@ export const INTERRUPT_MID_TOOL = scenario({
   },
 });
 
-export const QUERY_EOF = scenario({
+const QUERY_EOF = scenario({
   name: "query-eof",
   prompt: "!query-eof",
   emits: "NOTHING, and then the iterable ENDS — the turn never terminates. The CLI going away cleanly mid-turn",
@@ -74,7 +74,7 @@ export const QUERY_EOF = scenario({
   },
 });
 
-export const QUERY_FAIL = scenario({
+const QUERY_FAIL = scenario({
   name: "query-fail",
   prompt: "!query-fail",
   emits: "NOTHING, and then the iterable REJECTS — the producer died rather than finished",
@@ -86,7 +86,7 @@ export const QUERY_FAIL = scenario({
   },
 });
 
-export const QUERY_EOF_MID_ASK = scenario({
+const QUERY_EOF_MID_ASK = scenario({
   name: "query-eof-mid-ask",
   prompt: "!query-eof-mid-ask",
   emits:
@@ -111,7 +111,7 @@ export const QUERY_EOF_MID_ASK = scenario({
   },
 });
 
-export const KEEPALIVE_ECHO = scenario({
+const KEEPALIVE_ECHO = scenario({
   name: "keepalive",
   prompt: "!keepalive",
   emits:

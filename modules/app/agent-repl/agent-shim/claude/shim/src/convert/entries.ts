@@ -88,7 +88,7 @@ export function toolFailure(
 // ---------------------------------------------------------------------------
 
 /** What rides an activity's envelope: the response's cost and effort. */
-export interface ActivityEnvelope {
+interface ActivityEnvelope {
   /** Set ONLY on the unit for the API response's FIRST content block. */
   readonly usage?: conversationv1.TokenUsage;
   /** Set on the same unit as `usage`, and no other. */
@@ -113,7 +113,7 @@ export function agentActivity(
 }
 
 /** An activity, as the read-only conversation content it is. */
-export function activityUpdate(activity: conversationv1.AgentActivity): conversationv1.AgentUpdate {
+function activityUpdate(activity: conversationv1.AgentActivity): conversationv1.AgentUpdate {
   return create(conversationv1.AgentUpdateSchema, {
     update: { case: "activity", value: activity },
   });

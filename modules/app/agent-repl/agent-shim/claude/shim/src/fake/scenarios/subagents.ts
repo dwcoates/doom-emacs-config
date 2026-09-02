@@ -67,7 +67,7 @@ function completedAgentOutput(fields: {
   };
 }
 
-export const SUBAGENT_SYNC = scenario({
+const SUBAGENT_SYNC = scenario({
   name: "subagent",
   prompt: "!subagent",
   emits:
@@ -132,7 +132,7 @@ export const SUBAGENT_SYNC = scenario({
   },
 });
 
-export const SUBAGENT_DETACHED = scenario({
+const SUBAGENT_DETACHED = scenario({
   name: "subagent-detached",
   prompt: "!subagent-detached",
   emits:
@@ -217,7 +217,7 @@ export const SUBAGENT_DETACHED = scenario({
   },
 });
 
-export const SUBAGENT_DETACHED_LIVE = scenario({
+const SUBAGENT_DETACHED_LIVE = scenario({
   name: "subagent-detached-live",
   prompt: "!subagent-detached-live",
   emits:
@@ -278,7 +278,7 @@ export const SUBAGENT_DETACHED_LIVE = scenario({
   },
 });
 
-export const SUBAGENT_FAILED = scenario({
+const SUBAGENT_FAILED = scenario({
   name: "subagent-failed",
   prompt: "!subagent-failed",
   emits: "a detached `Agent` that ends in failure: `task_updated{status:\"failed\"}` and a failed `task_notification`",
@@ -340,7 +340,7 @@ export const SUBAGENT_FAILED = scenario({
   },
 });
 
-export const CANCEL_ALL = scenario({
+const CANCEL_ALL = scenario({
   name: "cancel-all",
   prompt: "!cancel-all",
   emits:

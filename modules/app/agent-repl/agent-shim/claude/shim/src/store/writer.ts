@@ -44,7 +44,6 @@ import { bindLog } from "../log.js";
 import { conversationv1, storev1 } from "../proto.js";
 import type { StoreClient } from "./client.js";
 import {
-  bashUpsertKey,
   producerId,
   writeId,
 } from "./keys.js";
@@ -64,7 +63,7 @@ import { createReconciler } from "./reconcile.js";
 const LOGGER = bindLog({ component: "shim-store-writer", operation: "shim.store.writer" });
 
 /** The component name every fault and degraded window from this half carries. */
-export const WRITER_COMPONENT = "store-writer";
+const WRITER_COMPONENT = "store-writer";
 
 // ---------------------------------------------------------------------------
 // PersistEntry → StoreEntry: one function per arm (the proto→code mapping)
@@ -536,6 +535,3 @@ export function createPersistence(options: PersistenceOptions): Persistence {
     },
   };
 }
-
-/** The upsert key one detached shell run's lifecycle rows share. Re-exported for the fold. */
-export { bashUpsertKey };

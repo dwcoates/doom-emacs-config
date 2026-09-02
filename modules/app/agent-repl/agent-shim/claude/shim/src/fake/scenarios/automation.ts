@@ -16,7 +16,7 @@
  */
 import { conclude, scenario } from "./support.js";
 
-export const PLAN_MODE = scenario({
+const PLAN_MODE = scenario({
   name: "plan",
   prompt: "!plan",
   emits:
@@ -38,7 +38,7 @@ export const PLAN_MODE = scenario({
   },
 });
 
-export const REPORT_FINDINGS = scenario({
+const REPORT_FINDINGS = scenario({
   name: "findings",
   prompt: "!findings",
   emits:
@@ -82,7 +82,7 @@ export const REPORT_FINDINGS = scenario({
   },
 });
 
-export const WORKTREE_KEEP = scenario({
+const WORKTREE_KEEP = scenario({
   name: "worktree-keep",
   prompt: "!worktree-keep",
   emits: "an `EnterWorktree` then an `ExitWorktree` with `action: \"keep\"` — the worktree and branch stay on disk",
@@ -108,7 +108,7 @@ export const WORKTREE_KEEP = scenario({
   },
 });
 
-export const WORKTREE_REMOVE = scenario({
+const WORKTREE_REMOVE = scenario({
   name: "worktree-remove",
   prompt: "!worktree-remove",
   emits: "an `ExitWorktree` with `action: \"remove\"` reporting the discarded file and commit counts",
@@ -136,7 +136,7 @@ export const WORKTREE_REMOVE = scenario({
   },
 });
 
-export const CRON = scenario({
+const CRON = scenario({
   name: "cron",
   prompt: "!cron",
   emits: "a `CronCreate`, a `CronList` and a `CronDelete` — all three acts in one turn",
@@ -197,24 +197,24 @@ function pushScenario(
   });
 }
 
-export const PUSH_SENT = pushScenario("push-sent", { pushSent: true }, "AgentPushNotification.outcome=sent");
-export const PUSH_CONFIG_OFF = pushScenario(
+const PUSH_SENT = pushScenario("push-sent", { pushSent: true }, "AgentPushNotification.outcome=sent");
+const PUSH_CONFIG_OFF = pushScenario(
   "push-config-off",
   { pushSent: false, disabledReason: "config_off" },
   "AgentPushNotification.outcome=not_sent reason=config_off",
 );
-export const PUSH_USER_PRESENT = pushScenario(
+const PUSH_USER_PRESENT = pushScenario(
   "push-user-present",
   { pushSent: false, disabledReason: "user_present" },
   "AgentPushNotification.outcome=not_sent reason=user_present",
 );
-export const PUSH_NO_TRANSPORT = pushScenario(
+const PUSH_NO_TRANSPORT = pushScenario(
   "push-no-transport",
   { pushSent: false, disabledReason: "no_transport" },
   "AgentPushNotification.outcome=not_sent reason=no_transport",
 );
 
-export const MONITOR_DEADLINE = scenario({
+const MONITOR_DEADLINE = scenario({
   name: "monitor-deadline",
   prompt: "!monitor-deadline",
   emits: "a `Monitor` with a finite `timeoutMs` and `persistent: false` (corpus: tool-results/monitor.jsonl)",
@@ -231,7 +231,7 @@ export const MONITOR_DEADLINE = scenario({
   },
 });
 
-export const MONITOR_PERSISTENT = scenario({
+const MONITOR_PERSISTENT = scenario({
   name: "monitor-persistent",
   prompt: "!monitor-persistent",
   emits: "a `Monitor` with `timeoutMs: 0` and `persistent: true` — it runs until TaskStop or session end",
@@ -248,7 +248,7 @@ export const MONITOR_PERSISTENT = scenario({
   },
 });
 
-export const WAKEUP_SCHEDULE = scenario({
+const WAKEUP_SCHEDULE = scenario({
   name: "wakeup-schedule",
   prompt: "!wakeup-schedule",
   emits: "a `ScheduleWakeup` answered with the corpus shape — scheduledFor, clampedDelaySeconds, wasClamped",
@@ -266,7 +266,7 @@ export const WAKEUP_SCHEDULE = scenario({
   },
 });
 
-export const WAKEUP_STOP = scenario({
+const WAKEUP_STOP = scenario({
   name: "wakeup-stop",
   prompt: "!wakeup-stop",
   emits: "a `ScheduleWakeup` with `stop: true`, answered with `stopped: true` and the cancelled count",
@@ -286,7 +286,7 @@ export const WAKEUP_STOP = scenario({
   },
 });
 
-export const ARTIFACT_PUBLISH = scenario({
+const ARTIFACT_PUBLISH = scenario({
   name: "artifact-publish",
   prompt: "!artifact-publish",
   emits: "an `Artifact` publish answered with the url, the source path, a title and a contract version",
@@ -316,7 +316,7 @@ export const ARTIFACT_PUBLISH = scenario({
   },
 });
 
-export const ARTIFACT_LIST = scenario({
+const ARTIFACT_LIST = scenario({
   name: "artifact-list",
   prompt: "!artifact-list",
   emits: "an `Artifact` list answered with two rows, one owned and one shared, and `truncated: false`",
@@ -346,7 +346,7 @@ export const ARTIFACT_LIST = scenario({
   },
 });
 
-export const UNMODELED_MCP = scenario({
+const UNMODELED_MCP = scenario({
   name: "unmodeled",
   prompt: "!unmodeled",
   emits: "an `mcp__echo__echo` call — a tool NO converter owns — answered with an opaque payload",

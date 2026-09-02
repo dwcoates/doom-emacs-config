@@ -19,7 +19,7 @@
  */
 import { conclude, scenario } from "./support.js";
 
-export const SKILL = scenario({
+const SKILL = scenario({
   name: "skill",
   prompt: "!skill",
   emits:
@@ -62,7 +62,7 @@ export const SKILL = scenario({
   },
 });
 
-export const SKILL_FAILURE = scenario({
+const SKILL_FAILURE = scenario({
   name: "skill-fail",
   prompt: "!skill-fail",
   emits: "a `Skill` for a name that does not resolve, answered with an error result and no document",
@@ -78,7 +78,7 @@ export const SKILL_FAILURE = scenario({
   },
 });
 
-export const MEMORY_INJECTED = scenario({
+const MEMORY_INJECTED = scenario({
   name: "memory",
   prompt: "!memory",
   emits: "prose only; the injected memory is a FILE-PLANE fact the vendor never streams",
@@ -116,7 +116,7 @@ export const MEMORY_INJECTED = scenario({
   },
 });
 
-export const SKILLS_INJECTED = scenario({
+const SKILLS_INJECTED = scenario({
   name: "skills-injected",
   prompt: "!skills-injected",
   emits: "prose only; the injected skills are attachment records",

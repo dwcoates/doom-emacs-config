@@ -92,10 +92,10 @@ export interface StoreClient {
 }
 
 /** The generated Connect client, before it is narrowed to {@link StoreClient}. */
-export type GeneratedStoreClient = Client<typeof storev1.ShimStore>;
+type GeneratedStoreClient = Client<typeof storev1.ShimStore>;
 
 /** Build the generated Connect client for a store listening on `socketPath`. */
-export function createStoreTransportClient(socketPath: string): GeneratedStoreClient {
+function createStoreTransportClient(socketPath: string): GeneratedStoreClient {
   if (socketPath === "") {
     throw new Error("shim store client: a store socket path is required");
   }

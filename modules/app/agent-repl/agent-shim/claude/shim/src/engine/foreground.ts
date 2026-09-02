@@ -58,7 +58,7 @@ const DETACHABLE_KINDS = new Set(["subagent", "bash", "workflow", "monitor"]);
 const NEVER_A_CALL = new Set(["response", "thinking"]);
 
 /** What the table can say about one addressed unit. */
-export type ForegroundVerdict =
+type ForegroundVerdict =
   | { readonly kind: "unknown" }
   | { readonly kind: "settled" }
   | { readonly kind: "live_detachable" }

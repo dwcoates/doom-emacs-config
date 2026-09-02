@@ -104,7 +104,7 @@ export function settle(outcome: ToolOutcome): conversationv1.AgentActivitySettle
 // ---------------------------------------------------------------------------
 
 /** One hunk of the vendor's own structured patch. */
-export function hunkOf(entry: unknown): conversationv1.FilePatchHunk | undefined {
+function hunkOf(entry: unknown): conversationv1.FilePatchHunk | undefined {
   const record = asRecord(entry);
   if (record === undefined) return undefined;
   const lines = arr(record, "lines");
