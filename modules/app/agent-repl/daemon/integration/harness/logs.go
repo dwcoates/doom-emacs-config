@@ -135,19 +135,16 @@ func readLog(t *testing.T, path string) []LogRecord {
 var warningLevels = map[string]bool{"warn": true, "warning": true, "error": true, "fatal": true}
 
 // ExpectWarnings declares the operations whose WARN or ERROR records this test
-// intends to produce. Anything else at that level fails the test at cleanup,
-// which is what drives the daemon's warning count to zero.
+// intends to produce. It WIDENS the sweep StartDaemon already armed; it does
+// not arm it. Anything not declared fails the test at cleanup, which is what
+// drives the daemon's warning count to zero.
 func (d *Daemon) ExpectWarnings(operations ...string) {
 	d.t.Helper()
 	d.mu.Lock()
-	first := len(d.expected) == 0
 	for _, op := range operations {
 		d.expected[op] = true
 	}
 	d.mu.Unlock()
-	if first {
-		d.t.Cleanup(d.assertNoUnexpectedWarnings)
-	}
 }
 
 func (d *Daemon) assertNoUnexpectedWarnings() {

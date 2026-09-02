@@ -160,7 +160,6 @@ func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 	// above), answered in band at DEBUG through server.refuse — never the
 	// daemon.refusal.unlanded_arm WARN this path was originally written
 	// against.
-	d.ExpectWarnings()
 	unknown := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
 
 	// Act
@@ -185,7 +184,6 @@ func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 	// workspace_ref_mismatch is a LANDED CloseWorkspaceError arm too, answered
 	// in band at DEBUG — never the daemon.refusal.unlanded_arm WARN this path
 	// was originally written against.
-	f.d.ExpectWarnings()
 	mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: t.TempDir()}
 
 	// Act
@@ -224,7 +222,6 @@ func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 	}
 	// Validation refusals are plain connect.NewError(InvalidArgument, ...)
 	// (internal/server/validate.go's `invalid`), with no logging at all.
-	f.d.ExpectWarnings()
 }
 
 // TestSelectWorkspaceRefusesABogusWorkspaceRef pins the IN-BAND
@@ -236,7 +233,6 @@ func TestSelectWorkspaceRefusesABogusWorkspaceRef(t *testing.T) {
 	d := newDaemon(t, harness.Opts{})
 	// unknown_workspace is answered in band at DEBUG through server.refuse,
 	// never the daemon.refusal.unlanded_arm WARN.
-	d.ExpectWarnings()
 	bogus := &workspacev1.WorkspaceRef{Id: "no-such-workspace", Dir: t.TempDir()}
 
 	// Act

@@ -87,6 +87,8 @@ func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
 func TestUpdateShutdownScheduleCancelWithNothingScheduledIsRefused(t *testing.T) {
 	// Arrange
 	d := newDaemon(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	d.ExpectWarnings("daemon.drain.cancel")
 
 	// Act
 	resp, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
@@ -170,7 +172,6 @@ func TestUpdateShutdownScheduleNowAnnouncesImmediateShutdownWithNoAddress(t *tes
 	}
 	// An immediate shutdown with a valid reason logs only at INFO
 	// (internal/drain/controller.go opNow): no WARN/ERROR is reached.
-	d.ExpectWarnings()
 }
 
 // TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause is
@@ -229,7 +230,6 @@ func TestScheduledDrainFiresAndAnnouncesShutdownWithTheScheduledDrainCause(t *te
 	if code := d.AwaitExit(); code != 0 {
 		t.Fatalf("the daemon's exit code after a fired scheduled drain = %d, want an orderly 0", code)
 	}
-	d.ExpectWarnings()
 }
 
 // ---- Drain intake and exit ----
@@ -378,7 +378,6 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 	// No further submission is made once the drain fires (the turn's own
 	// terminal frame is pushed, never submitted), so NoteRefusal is never
 	// called and the orderly exit itself logs nothing above DEBUG.
-	f.d.ExpectWarnings()
 }
 
 // ---- Reload webapp (webapp-only rollout) ----
@@ -406,7 +405,6 @@ func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 	// A single-subsystem (webapp-only) landed range classifies cleanly and the
 	// harness's own fake deploy script succeeds, so rollout.Trigger
 	// (internal/rollout/trigger.go) never reaches its opClassify/opDeploy WARNs.
-	d.ExpectWarnings()
 }
 
 // ---- Handover ----
@@ -415,6 +413,8 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	// Arrange: an ordinary, idle workspace whose host+web streams are open at
 	// the moment the handover is announced, so it is an expected participant.
 	selfRepo, d := drainSelfRepoDaemon(t)
+	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
+	d.ExpectWarnings("daemon.refusal.unlanded_arm.standing")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -691,6 +691,8 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	// snapshot is taken at announcement) — no web participant was ever
 	// expected for this workspace.
 	selfRepo, d := drainSelfRepoDaemon(t)
+	// The sweep covers every test; the declared records are evidence of the adoption refusal the test provokes.
+	d.ExpectWarnings("daemon.rollout.adopt_web")
 	f := drainOpenWorkspace(t, d)
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
@@ -749,7 +751,6 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 	if got := rec.Context["arm"]; got != "no_transfer_announced" {
 		t.Fatalf("AdoptWebWorkspace refusal record's arm = %v, want no_transfer_announced", got)
 	}
-	f.d.ExpectWarnings()
 }
 
 // ---- Drain schedule durability ----

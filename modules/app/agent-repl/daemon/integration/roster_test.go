@@ -378,7 +378,6 @@ func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 	// it is answered in band at DEBUG through server.refuse — never the
 	// daemon.refusal.unlanded_arm WARN that path was originally written
 	// against.
-	d.ExpectWarnings()
 
 	// Act
 	resp, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "   "}))
@@ -402,6 +401,10 @@ func TestCreateTaskRefusesABlankTitle(t *testing.T) {
 func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
+	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
+		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session", "daemon.workspace.kill")
 	f.shim.ExpectStartSession()
 	roster := f.d.WatchRoster()
 
@@ -429,6 +432,9 @@ func TestKilledWorkspaceRowCarriesClosedTrue(t *testing.T) {
 func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, the shim death the test drives.
+	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.spawn",
+		"daemon.workspace.bring_up", "daemon.workspace.open")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{ExitOn: harness.ExitOnStartup, ExitCode: 7, Stderr: "boom: fake bring-up death"})
 	roster := f.d.WatchRoster()
 
@@ -713,6 +719,8 @@ func TestRosterRowIsDegradedWhileASessionDiagnosticsWindowIsOpen(t *testing.T) {
 func TestRosterRowIsVendorBlockedWhenTheQueryDies(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared records are evidence of the died query the test feeds.
+	f.d.ExpectWarnings("daemon.sessionwatcher.query_died")
 	roster := f.d.WatchRoster()
 	awaitRoster(t, f.d, roster, "ready before the query dies", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
