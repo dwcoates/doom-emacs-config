@@ -51,14 +51,6 @@ const (
 	detachedKindDetached = "detached"
 )
 
-// detached_work.cause values.
-const (
-	causeRequested = "requested"
-	causeByUser    = "by_user"
-	causeTimedOut  = "timed_out"
-	causeCreated   = "created"
-)
-
 // entryField spells one entry's field path exactly as the failure arm reports
 // it, so a producer reading `entries[1].upsert_key` off the wire is reading the
 // store's own name for what it sent wrong.

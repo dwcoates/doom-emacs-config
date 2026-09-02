@@ -228,11 +228,6 @@ func (c *Converter) taskStopTerminal(result map[string]any, at Attribution, env 
 	}
 }
 
-// wholeStdout wraps output the producer knows to be complete.
-func wholeStdout(output string) *conversationv1.AgentBashOutput {
-	return spoolOutput(output, 0)
-}
-
 // spoolOutput wraps a spool's accumulated bytes. ALWAYS SET, even for a command
 // that said nothing: an empty output still draws its header, so a reader can tell
 // "ran and was silent" from "has not run".

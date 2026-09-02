@@ -57,7 +57,7 @@ import (
 
 // Defaults for the two loop intervals. Polling is frequent because it is what
 // carries a user's prompt echo to the GUI; rescanning is not, because a new
-// file appearing is rare and fsnotify is the latency path.
+// file appearing is rare and there is no fsnotify path to catch it sooner.
 const (
 	DefaultPollInterval   = time.Second
 	DefaultRescanInterval = 30 * time.Second
@@ -305,7 +305,6 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 type bootstrapError struct{ err error }
 
 func (e bootstrapError) Error() string { return e.err.Error() }
-func (e bootstrapError) Unwrap() error { return e.err }
 
 func isBootstrapError(err error) bool {
 	var target bootstrapError

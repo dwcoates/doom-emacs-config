@@ -339,13 +339,3 @@ func contextStrings(v any) []string {
 	}
 	return out
 }
-
-// containsSubstring reports whether any of in contains want.
-func containsSubstring(in []string, want string) bool {
-	for _, s := range in {
-		if strings.Contains(s, want) {
-			return true
-		}
-	}
-	return false
-}

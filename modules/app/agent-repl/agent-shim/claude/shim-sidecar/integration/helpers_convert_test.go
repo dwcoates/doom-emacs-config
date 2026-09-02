@@ -52,16 +52,6 @@ func setToolUseInput(t *testing.T, obj map[string]any, input map[string]any) map
 	return withFields(t, obj, map[string]any{"message": newMsg})
 }
 
-// toolUseIDOf answers the id of a record's sole tool_use block.
-func toolUseIDOf(t *testing.T, obj map[string]any) string {
-	t.Helper()
-	id, _ := soleToolUseBlock(t, obj)["id"].(string)
-	if id == "" {
-		t.Fatalf("record's tool_use block carries no id: %v", obj)
-	}
-	return id
-}
-
 // corpusToolUseInput answers the `input` object of a tool-inputs fixture, so a
 // call built from a captured assistant line carries the REAL arguments the
 // vendor writes for that tool rather than the ones it was cloned from.
