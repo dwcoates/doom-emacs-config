@@ -20,6 +20,11 @@ type DB interface {
 	Close() error
 	// ReadOnly reports whether this handle was opened read-only.
 	ReadOnly() bool
+	// Promote turns a READ-ONLY handle into a writing one, in place. It exists
+	// for the handover's successor, which opens read-only because the
+	// incumbent is still the sole writer and becomes a writer at its first
+	// adoption. Promoting a handle that already writes is success.
+	Promote(ctx context.Context) error
 
 	// RegisterWorkspace records a workspace, idempotent by normalized dir,
 	// minting a WorkspaceID and a RepoID on first sight. The bool reports
@@ -71,6 +76,11 @@ type DB interface {
 	// AcquireLease takes the workspace's occupancy lease for holder under
 	// policy, refusing when it is already held.
 	AcquireLease(ctx context.Context, id WorkspaceID, holder LeaseHolder, policy LeasePolicy) (Lease, error)
+	// AcquireLeaseAs acquires it under an identity the CALLER minted. The
+	// merge's lease id is also its LEDGER identity -- the merge bubble is
+	// addressed by it and drawn from the moment the merge is QUEUED, before
+	// any occupancy is taken -- so it cannot be minted at acquisition.
+	AcquireLeaseAs(ctx context.Context, id WorkspaceID, lease LeaseID, holder LeaseHolder, policy LeasePolicy) (Lease, error)
 	// ReleaseLease releases one acquisition.
 	ReleaseLease(ctx context.Context, leaseID LeaseID) error
 	// Lease loads a workspace's current lease; the bool reports whether one is

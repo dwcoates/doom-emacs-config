@@ -52,7 +52,7 @@ func (s *store) DrainSchedule(ctx context.Context) (*DrainSchedule, error) {
 			deadline int64
 			setAt    int64
 		)
-		err := s.db.QueryRowContext(ctx, `SELECT reason, deadline, set_at FROM drain_schedule WHERE id = 1`).
+		err := s.db().QueryRowContext(ctx, `SELECT reason, deadline, set_at FROM drain_schedule WHERE id = 1`).
 			Scan(&schedule.Reason, &deadline, &setAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			out = nil

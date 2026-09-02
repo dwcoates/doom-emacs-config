@@ -27,6 +27,10 @@ const (
 	opEntry      = "daemon.commandfile.entry"
 )
 
+// ErrQuarantined marks the error a malformed file yields: the file was warned
+// about and moved aside, so the failure is already reported where it happened.
+var ErrQuarantined = errors.New("commandfile: the file was quarantined")
+
 // commandFileOrigin is the prompt origin every command-file prompt carries: the
 // channel is a host-written file, not a composer, and the origin says so on the
 // durable turn record.
@@ -86,7 +90,13 @@ func (i *ingress) sweep(ctx context.Context, log dlog.Logger) error {
 			log.Debug(opRun, "leaving a command file that is still being written", dlog.Context{"path": path})
 			continue
 		}
-		if err := i.ApplyFile(ctx, path); err != nil {
+		switch err := i.ApplyFile(ctx, path); {
+		case err == nil:
+		case errors.Is(err, ErrQuarantined):
+			log.Debug(opRun, "a malformed command file was quarantined", dlog.Context{
+				"path": path, "cause": err.Error(),
+			})
+		default:
 			log.Error(opRun, "a command file did not apply", dlog.Context{"path": path, "cause": err.Error()})
 		}
 	}
@@ -145,7 +155,11 @@ func (i *ingress) ApplyFile(ctx context.Context, path string) error {
 			log.Error(opQuarantine, "could not quarantine the command file", dlog.Context{"cause": qErr.Error()})
 			return errors.Join(err, qErr)
 		}
-		return fmt.Errorf("parse %q: %w", path, err)
+		// The file IS handled: it was warned about and retired to
+		// quarantine. The error still reaches a direct caller of ApplyFile,
+		// but the sweep recognizes the sentinel and does not report the same
+		// file a second time at ERROR on a path that has nothing left to do.
+		return fmt.Errorf("parse %q: %w: %w", path, ErrQuarantined, err)
 	}
 
 	base := filepath.Base(path)

@@ -285,9 +285,18 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		"HOME="+root,
 		"PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
-	if opts.SelfRepo != "" {
-		env = append(env, "AGENT_REPL_SELF_REPO_DIR="+opts.SelfRepo)
+	// The daemon's OWN checkout identity is always overridden, whether or not
+	// a test cares which repository it is. The merge orchestrator's two
+	// methods key on it, so it resolves that identity for EVERY merge -- and
+	// left at the real checkout the scripted `git` on PATH knows nothing about
+	// it, refuses, and the merge aborts before it starts. A test that does not
+	// name one gets a fake repository that is deliberately no test repository,
+	// so the comparison resolves and answers "not the self repo".
+	selfRepo := opts.SelfRepo
+	if selfRepo == "" {
+		selfRepo = NewRepoAt(t, filepath.Join(root, "self-repo")).Dir
 	}
+	env = append(env, "AGENT_REPL_SELF_REPO_DIR="+selfRepo)
 	if opts.IdleCutoffMS > 0 {
 		env = append(env, "AGENT_REPL_HIBERNATE_IDLE_CUTOFF_MS="+strconv.Itoa(opts.IdleCutoffMS))
 	}
@@ -410,6 +419,23 @@ func (d *Daemon) AwaitFileGone(path string) {
 		case <-ticker.C:
 		case <-d.ctx.Done():
 			d.t.Fatalf("waiting for %s to be removed: %v", path, d.ctx.Err())
+		}
+	}
+}
+
+// AwaitFileExists waits for a path to appear, bounded by the daemon's context.
+func (d *Daemon) AwaitFileExists(path string) {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %s to appear: %v", path, d.ctx.Err())
 		}
 	}
 }

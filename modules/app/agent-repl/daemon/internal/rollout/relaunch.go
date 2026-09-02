@@ -57,6 +57,10 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 
 	old, hasOld := c.deps.Shims.Client(ws)
 
+	// THE PRELAUNCH COEXISTS WITH THE LIVE SHIM. An inert shim holds NEITHER
+	// kernel lock -- by ruling the shim takes both inside StartSession, not at
+	// startup -- so a second process for one workspace comes up beside the
+	// first and waits there, costing nothing until the swap.
 	fresh, err := c.deps.Shims.Prelaunch(ctx, ws)
 	if err != nil {
 		c.log.Error(opRelaunch, "the inert prelaunch failed; the old shim is untouched", withCause(fields, err))
@@ -64,17 +68,23 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	}
 	c.log.Debug(opRelaunch, "prelaunched an inert shim beside the running one", fields)
 
-	if err := c.awaitFreeForever(ctx, ws, opRelaunch, fields); err != nil {
-		return err
-	}
-
+	// THE HOLD IS TAKEN BEFORE THE WAIT, not after it. The wait is the window
+	// the hold exists for: a graceful restart asked for while a turn runs
+	// waits out that turn, and every prompt arriving meanwhile would otherwise
+	// be delivered to the very shim about to be stood down.
 	lease, err := c.deps.DB.AcquireLease(ctx, ws, wsm.HolderRestart, wsm.PolicyHold)
 	if err != nil {
 		c.log.Error(opRelaunch, "could not take the restart-pending hold", withCause(fields, err))
 		return fmt.Errorf("rollout: relaunch %q: take the restart hold: %w", ws, err)
 	}
 	fields["lease"] = string(lease.ID)
+	c.publishHost(ws)
 	c.log.Debug(opRelaunch, "took the restart-pending hold; the tray draws it now", fields)
+
+	if err := c.awaitFreeForever(ctx, ws, opRelaunch, fields); err != nil {
+		c.release(ctx, ws, lease.ID, fields)
+		return err
+	}
 
 	if hasOld {
 		if err := c.standDown(ctx, old, ws, reason, fields); err != nil {
@@ -85,6 +95,8 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 		c.log.Debug(opRelaunch, "the workspace had no running shim to stand down", fields)
 	}
 
+	// THE REAP HAS PASSED, so both of the old shim's kernel locks are free and
+	// the prelaunched one takes them at its StartSession.
 	if err := c.deps.Shims.Install(ctx, ws, fresh); err != nil {
 		c.release(ctx, ws, lease.ID, fields)
 		c.log.Error(opRelaunch, "could not install the prelaunched shim", withCause(fields, err))
@@ -119,6 +131,15 @@ func (c *controller) RelaunchShim(ctx context.Context, ws ids.WorkspaceID, reaso
 	c.release(ctx, ws, lease.ID, fields)
 	c.log.Info(opRelaunch, "relaunched the workspace's shim", fields)
 	return nil
+}
+
+// publishHost republishes the workspace's host view when a surface is wired.
+// The restart-pending hold IS the composer's `restarting` arm.
+func (c *controller) publishHost(ws ids.WorkspaceID) {
+	if c.deps.PublishHost == nil {
+		return
+	}
+	c.deps.PublishHost(ws)
 }
 
 // standDown ends the old shim and PASSES THE REAP GATE. A stand-down window
@@ -195,6 +216,7 @@ func (c *controller) release(ctx context.Context, ws ids.WorkspaceID, lease ids.
 		return
 	}
 	c.deps.LeaseChanged(ws)
+	c.publishHost(ws)
 	c.log.Debug(opRelaunch, "released the restart-pending hold; the held intake drains", fields)
 }
 

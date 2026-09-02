@@ -89,6 +89,14 @@ func (r *resolver) SetWorkspaceDir(ws ids.WorkspaceID, dir string) error {
 	s.log = log.With(dlog.Context{"workspace_id": string(ws)})
 	s.log.Debug("daemon.holds.bind", "the hold tray bound a workspace to its log sink",
 		dlog.Context{"workspace_dir": dir})
+	view := r.render(s, s.log)
+	topic := r.topicLocked(ws)
+	r.mu.Unlock()
+	// THE EMPTY TRAY IS A COMPLETE ANSWER, and binding is when it can first be
+	// given: a subscriber that opens before any hold exists is otherwise
+	// handed nothing at all, because a Topic replays only what was published.
+	topic.Publish(view)
+	r.mu.Lock()
 	return nil
 }
 

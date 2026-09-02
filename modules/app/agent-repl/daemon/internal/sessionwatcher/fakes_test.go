@@ -284,6 +284,8 @@ type event struct {
 	live   *LiveWorkSet
 	note   *HostNotification
 	link   LinkState
+	// attached is the lifecycle sink's bare shim-attachment edge.
+	attached *bool
 }
 
 // name is the "sink.Method" spelling the assertions compare on.
@@ -504,6 +506,10 @@ func (s *lifecycleSink) OnTurnEnded(_ ids.WorkspaceID, turn ids.TurnID, how Turn
 func (s *lifecycleSink) OnLiveWorkChanged(_ ids.WorkspaceID, live LiveWorkSet) {
 	held := live
 	s.rec.emit(event{sink: "lifecycle", method: "OnLiveWorkChanged", live: &held})
+}
+
+func (s *lifecycleSink) OnLinkChanged(_ ids.WorkspaceID, attached bool) {
+	s.rec.emit(event{sink: "lifecycle", method: "OnLinkChanged", attached: &attached})
 }
 
 func (s *lifecycleSink) OnNotification(_ ids.WorkspaceID, note HostNotification) {
@@ -1085,6 +1091,9 @@ func (h *harness) routeNow(apply func(w *watcher)) []event {
 	h.w.mu.Lock()
 	apply(h.w)
 	h.w.mu.Unlock()
+	// The turn ends recorded under mu reach the lifecycle sink only once it is
+	// released, exactly as every stream goroutine does it.
+	h.w.flushTurnEnds()
 	return h.drainNow()
 }
 

@@ -42,6 +42,11 @@ const (
 	// ArmSessionDeleted is a bring-up of a session whose record is terminal by
 	// deletion: a deleted session refuses resurrection.
 	ArmSessionDeleted = "session_deleted"
+	// ArmConversationOwned is a StartSession the shim refused because ANOTHER
+	// shim holds this workspace's conversation: it took the workspace kernel
+	// lock first, and two vendor processes on one conversation is what that
+	// lock exists to prevent. OpenWorkspaceError has no arm for it.
+	ArmConversationOwned = "conversation_owned"
 	// ArmTranscriptMissing is a resume whose vendor transcript file is gone —
 	// refused BEFORE any process spawns.
 	ArmTranscriptMissing = "transcript_missing"
@@ -71,6 +76,8 @@ const (
 	// ArmModeNotServed is a permission mode outside what the topbar's picker
 	// served.
 	ArmModeNotServed = "mode_not_served"
+	// ArmNotInCatalog is a model outside what the topbar's selector served.
+	ArmNotInCatalog = "not_in_catalog"
 	// ArmPathEscapesWorkspace is an OpenInEditor path outside the workspace.
 	ArmPathEscapesWorkspace = "path_escapes_workspace"
 	// ArmBlankCommand is a RequestCommandSupport with no command named.

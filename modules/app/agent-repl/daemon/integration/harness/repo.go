@@ -41,7 +41,12 @@ func World(t *testing.T) *GitWorld {
 	if w, ok := worlds[t]; ok {
 		return w
 	}
-	root := t.TempDir()
+	// The root is CANONICAL: on macOS t.TempDir() hands back a path under the
+	// /tmp symlink, and a spawned child's own view of its cwd is the resolved
+	// /private/tmp one. A fixture path a test compares a process's answer
+	// against has to be the resolved form, or every such comparison fails on
+	// the symlink alone.
+	root := fakegit.Canon(t.TempDir())
 	w := &GitWorld{StateFile: filepath.Join(root, "fakegit.json"), root: filepath.Join(root, "repos"), t: t}
 	if err := os.MkdirAll(w.root, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", w.root, err)

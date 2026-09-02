@@ -469,7 +469,12 @@ func TestCreateForksTheParentTranscriptBeforeTheSessionStarts(t *testing.T) {
 	}
 }
 
-func TestCreateForkRecordsTheParentConversationForResume(t *testing.T) {
+// TestCreateForkRecordsAFreshConversationForResume covers the fork's identity
+// rule: a vendor session id is single-occupancy under the shim's session lock,
+// so the child is recorded against an id of its OWN -- never the parent's,
+// which its live shim still holds -- and the ported copy is filed under that
+// same id.
+func TestCreateForkRecordsAFreshConversationForResume(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)
 	parent := f.workspace("parent", t.TempDir())
@@ -485,9 +490,13 @@ func TestCreateForkRecordsTheParentConversationForResume(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Assert: a fork RESUMES; it never starts a fresh conversation.
-	if f.db.sessions[created.ID].VendorSessionID != "vendor-1" {
-		t.Fatalf("child session = %+v, want the parent conversation recorded", f.db.sessions[created.ID])
+	// Assert: a fork RESUMES a conversation, under a fresh id of its own.
+	recorded := f.db.sessions[created.ID].VendorSessionID
+	if recorded == "" || recorded == "vendor-1" {
+		t.Fatalf("child session = %+v, want a fresh vendor session id, never the parent's", f.db.sessions[created.ID])
+	}
+	if len(f.account.ported) != 1 || f.account.ported[0].VendorSessionID != recorded {
+		t.Fatalf("ported transcripts = %+v, want the copy filed under the child's own id %q", f.account.ported, recorded)
 	}
 }
 

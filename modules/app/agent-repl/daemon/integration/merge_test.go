@@ -71,7 +71,10 @@ func mergeBlockedQueueFixture(t *testing.T) (front, behind *fixture, repo *harne
 	behind = mergeCreateChild(t, d, repoRef, "behind", "behind work", nil)
 
 	frontBranch := mergeBranchOf(t, front.ws)
-	repo.ScriptConflict(front.ws.GetDir(), frontBranch, "conflict.txt")
+	// THE CONFLICT IS SCRIPTED WHERE THE MERGE RUNS: the merge is performed
+	// in the TARGET worktree, and a top-level child targets the repository's
+	// main worktree, never its own.
+	repo.ScriptConflict(repo.Dir, frontBranch, "conflict.txt")
 
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(front) = error %v, want the merge enqueued", err)
@@ -111,13 +114,10 @@ func TestASecondWorkspaceInTheSameRepoQueuesBehindTheFirstWithTheQueueTabFooterA
 	}
 
 	// Assert: the merge bubble's queue tab, on its own sub-feed.
-	root := behind.watchRootFeed()
-	mergeRow := awaitRow(t, behind, root, "the behind workspace's merge bubble", func(row *frontendv1.FeedRow) bool {
+	mergeRow := behind.awaitRowInFeed(nil, "the behind workspace's merge bubble", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge() != nil
 	})
-	_, token := behind.openFeed(mergeRow.GetId())
-	sub := behind.d.WatchFeed(token)
-	tabRow := awaitRow(t, behind, sub, "the queue tab", func(row *frontendv1.FeedRow) bool {
+	tabRow := behind.awaitRowInFeed(mergeRow.GetId(), "the queue tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetQueue() != nil
 	})
 	if tabRow.GetMergeTab().GetQueue().GetQueue().GetCurrent() == nil {
@@ -335,7 +335,7 @@ func TestAConflictingBranchOpensTheConflictsTabAndPromptsWithTheSplicedBrief(t *
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -392,7 +392,7 @@ func TestSubmitPromptWhileMergeParkedLandsInTheConflictsTabNotAsARefusal(t *test
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -458,9 +458,7 @@ func TestTheTestGatePassingSettlesTheTestsTab(t *testing.T) {
 	}
 
 	// Assert: the tests tab settled successfully at some point along the way.
-	_, token := f.openFeed(mergeRow.GetId())
-	sub := f.d.WatchFeed(token)
-	testsRow := awaitRow(t, f, sub, "the settled tests tab", func(row *frontendv1.FeedRow) bool {
+	testsRow := f.awaitRowInFeed(mergeRow.GetId(), "the settled tests tab", func(row *frontendv1.FeedRow) bool {
 		return row.GetMergeTab().GetTests().GetSettled() != nil
 	})
 	if testsRow.GetMergeTab().GetTests().GetSettled().GetSucceeded() == nil {
@@ -586,16 +584,19 @@ func TestALandedMergeProducesSuccessFooterRosterAndRemovesTheWorktreeAfterTheTer
 
 func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testing.T) {
 	// Arrange
-	f, d, _, script := mergeCleanRepo(t)
+	f, d, repo, script := mergeCleanRepo(t)
 	script.SetExitCode(0)
 	script.SetStdout("daemon: passed in 1s\n")
+	// THE BRANCH HAS TO CARRY A COMMIT. The self-reload fires off what the
+	// merge LANDED -- the classifier reads the changed paths -- so a merge
+	// that brought in nothing triggers nothing, correctly.
+	writeCommit(t, repo, f.ws.GetDir(), "modules/app/agent-repl/daemon/cmd/claude-repld/main.go", "landed\n")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
-	root := f.watchRootFeed()
-	awaitRow(t, f, root, "the merge's success", func(row *frontendv1.FeedRow) bool {
+	f.awaitRowInFeed(nil, "the merge's success", func(row *frontendv1.FeedRow) bool {
 		return row.GetActivity().GetMerge().GetSuccess() != nil
 	})
 
@@ -603,6 +604,9 @@ func TestLandingAMergeWhoseTargetIsTheSelfRepoTriggersTheRolloutDeploy(t *testin
 	// fires after the terminal push as part of teardown, so wait for its own
 	// log record rather than racing the push.
 	d.AwaitRunLogOperation("daemon.merge.self_reload")
+	// The deploy chain runs BEYOND the trigger call, so its own record is the
+	// synchronization point; the trigger's record only says it was asked for.
+	d.AwaitRunLogOperation("daemon.rollout.deploy")
 	if got := len(d.Deploy.Invocations()); got == 0 {
 		t.Fatalf("deploy script invocations = %d, want at least one from the self-repo landing's rollout trigger", got)
 	}
@@ -654,7 +658,7 @@ func TestAMergeInFlightAcrossADaemonRestartIsResumedOrLoudlyFailedNeverStuck(t *
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
 		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
 	}
@@ -700,7 +704,7 @@ func TestAMissingBriefFileFailsTheMergeStepLoudly(t *testing.T) {
 	repoRef := mergeRepositoryRef(t, d, repo)
 	f := mergeCreateChild(t, d, repoRef, "feature", "do the feature", nil)
 	branch := mergeBranchOf(t, f.ws)
-	repo.ScriptConflict(f.ws.GetDir(), branch, "conflict.txt")
+	repo.ScriptConflict(repo.Dir, branch, "conflict.txt")
 
 	// Act
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
@@ -755,9 +759,15 @@ func mergeRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *wo
 	return ref
 }
 
+// mergeFindRepoKey finds a repository section by its worktree.
+//
+// A repository is keyed by its COMMON DIR -- registration derives it from git
+// and it is `<worktree>/.git` for an ordinary checkout -- so a worktree's
+// section is found under either spelling rather than the worktree's alone.
 func mergeFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
 	for _, s := range r.GetRepository().GetSections() {
-		if s.GetKey().GetRepository().GetDir() == dir {
+		switch s.GetKey().GetRepository().GetDir() {
+		case dir, filepath.Join(dir, ".git"):
 			return s.GetKey().GetRepository()
 		}
 	}

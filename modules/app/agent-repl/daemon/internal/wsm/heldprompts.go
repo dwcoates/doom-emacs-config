@@ -359,7 +359,7 @@ func (s *store) AllHeldPrompts(ctx context.Context) ([]HeldPrompt, error) {
 func (s *store) loadHeldPrompts(ctx context.Context, op string, fields dlog.Context, query string, args ...any) ([]HeldPrompt, error) {
 	var out []HeldPrompt
 	err := s.read(ctx, op, fields, func(ctx context.Context) error {
-		rows, err := s.db.QueryContext(ctx, query, args...)
+		rows, err := s.db().QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}

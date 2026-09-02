@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
@@ -77,9 +78,21 @@ type watcher struct {
 	// sessionEnded records that the session itself is over (query_died), which
 	// is the one way a stream may legally end without a terminal.
 	sessionEnded bool
+	// degraded records that a standing stream is actually DOWN -- a stream
+	// that ended while the session was live, or a watch that could not be
+	// opened. It, and not the link state, is what a re-open answers: the
+	// client's connectivity feed replays the bring-up transitions (dialing,
+	// then connected) to a watcher that was handed a connected link, and a
+	// re-open on that history would tear down the very streams bring-up had
+	// just established. A link that comes back with every stream still
+	// standing has nothing to re-open.
+	degraded bool
 
 	link LinkState
-	addr OutputAddress
+	// linkNow mirrors link for the lock-free readers; every write to link
+	// writes it under mu, so the mirror can never lead the truth.
+	linkNow atomic.Int32
+	addr    OutputAddress
 
 	turn      *ids.TurnID
 	mainAgent *conversationv1.AgentId
@@ -89,6 +102,9 @@ type watcher struct {
 	freeWaiters []chan error
 	// turnWaiters are the standing AwaitTurnEnd calls, keyed by the turn.
 	turnWaiters map[ids.TurnID][]chan turnEnd
+	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
+	// to the lifecycle sink, which is told only once mu is released.
+	pendingTurnEnds []endedTurn
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -211,6 +227,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 		closedTurns: map[ids.TurnID]TurnClose{},
 		facts:       map[string]*activityFact{},
 	}
+	w.linkNow.Store(int32(shimclient.LinkConnected))
 	if session.MainKnownThrough != nil {
 		w.known[mainWatchKey] = session.MainKnownThrough
 	}
@@ -260,11 +277,13 @@ func rootAddress() OutputAddress {
 func (w *watcher) Connected() bool { return w.Link() == shimclient.LinkConnected }
 
 // Link is the current link state.
-func (w *watcher) Link() LinkState {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.link
-}
+//
+// It is read WITHOUT the watcher's lock, from an atomic mirror of w.link. The
+// link is asked for from every direction -- freeness, health, and the host
+// view's shim_attached, which is recomposed from inside a sink call the
+// watcher makes while holding mu -- and a lock-taking reader there is a
+// self-deadlock, not a race.
+func (w *watcher) Link() LinkState { return LinkState(w.linkNow.Load()) }
 
 // LiveWork is the current live-work set.
 func (w *watcher) LiveWork() LiveWorkSet {
@@ -482,8 +501,9 @@ func (w *watcher) runLink() {
 			return
 		}
 		previous := w.link
+		degraded := w.degraded
 		w.setLinkLocked(state)
-		if state == shimclient.LinkConnected && previous != shimclient.LinkConnected {
+		if state == shimclient.LinkConnected && previous != shimclient.LinkConnected && degraded {
 			w.reopenLocked("the link came back")
 		}
 		w.mu.Unlock()
@@ -501,14 +521,18 @@ func (w *watcher) setLinkLocked(state LinkState) {
 		"previous": int(w.link), "link": int(state),
 	})
 	w.link = state
+	w.linkNow.Store(int32(state))
 	w.publishLinkLocked()
 }
 
-// publishLinkLocked hands the link to the three views that draw it.
+// publishLinkLocked hands the link to the three views that draw it, and the
+// bare attachment to the daemon's own machinery (the host view's
+// `shim_attached`, which no view sink carries).
 func (w *watcher) publishLinkLocked() {
 	w.sinks.Footer.OnLink(w.ws, w.link)
 	w.sinks.Topbar.OnLink(w.ws, w.link)
 	w.sinks.Sidebar.OnLink(w.ws, w.link)
+	w.sinks.Lifecycle.OnLinkChanged(w.ws, w.link == shimclient.LinkConnected)
 }
 
 // severedLocked records a transport failure on a stream that should still have
@@ -520,6 +544,7 @@ func (w *watcher) severedLocked(operation, detail string, err error) {
 		ctx["error"] = err.Error()
 	}
 	w.log.Error("daemon.sessionwatcher."+operation, "a standing stream ended without the session ending", ctx)
+	w.degraded = true
 	w.setLinkLocked(shimclient.LinkRedialing)
 }
 
@@ -528,6 +553,9 @@ func (w *watcher) severedLocked(operation, detail string, err error) {
 // old goroutines' errors stale rather than a second severing.
 func (w *watcher) reopenLocked(reason string) {
 	w.gen++
+	// The fleet is whole again from here: any open below that fails calls
+	// severedLocked, which sets the flag afresh.
+	w.degraded = false
 	// The closers run OFF the lock, for the reason takeStreamsLocked states:
 	// a stream's Close drains its response body and does not return until the
 	// SERVER ends the stream, and a standing watch is never ended by the
@@ -634,6 +662,7 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*conversationv
 		}
 		w.routeSessionUpdateLocked(update)
 		w.mu.Unlock()
+		w.flushTurnEnds()
 	}
 }
 
@@ -652,6 +681,7 @@ func (w *watcher) runAgent(gen uint64, a *agentWatch, stream shimclient.Stream[*
 		}
 		w.routeAgentResponseLocked(a, resp)
 		w.mu.Unlock()
+		w.flushTurnEnds()
 	}
 }
 
@@ -670,6 +700,25 @@ func (w *watcher) runShell(gen uint64, s *shellWatch, stream shimclient.Stream[*
 		}
 		w.routeBashLocked(s, bash)
 		w.mu.Unlock()
+		w.flushTurnEnds()
+	}
+}
+
+// endedTurn is one turn end waiting to be handed to the lifecycle sink.
+type endedTurn struct {
+	turn ids.TurnID
+	how  TurnClose
+}
+
+// flushTurnEnds hands every recorded turn end to the lifecycle sink WITHOUT
+// the lock. Every site that routes under mu calls it right after unlocking.
+func (w *watcher) flushTurnEnds() {
+	w.mu.Lock()
+	pending := w.pendingTurnEnds
+	w.pendingTurnEnds = nil
+	w.mu.Unlock()
+	for _, ended := range pending {
+		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 	}
 }
 

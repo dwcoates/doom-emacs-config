@@ -18,6 +18,15 @@ import (
 // participants means there is nothing to wait for, and Emacs may not even be
 // running.
 func (c *controller) Join(ctx context.Context) error {
+	// JOINING MODE IS THE FACT, not the manifest. A successor owns NOTHING
+	// until it adopts, and the manifest may not exist yet when it boots: the
+	// incumbent writes it only after the successor has reported its address.
+	// Until then every per-workspace rpc must answer not_yet_adopted rather
+	// than fall through to a read-only state handle.
+	c.mu.Lock()
+	c.joiningMode = true
+	c.mu.Unlock()
+
 	m, found, err := ReadManifest(c.deps.IntentManifest)
 	if err != nil {
 		c.log.Error(opJoin, "could not read the intent manifest",
@@ -43,7 +52,7 @@ func (c *controller) Join(ctx context.Context) error {
 	}
 	for _, session := range m.Sessions {
 		expected := Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb}
-		c.rendezvous[session.Workspace] = &entry{expected: expected}
+		c.rendezvous[session.Workspace] = &entry{expected: expected, done: make(chan struct{})}
 		c.joining[session.Workspace] = true
 		if expected.Count() == 0 {
 			headless = append(headless, session.Workspace)
@@ -64,6 +73,38 @@ func (c *controller) Join(ctx context.Context) error {
 			c.log.Error(opJoin, "a headless workspace could not be adopted",
 				withCause(dlog.Context{"workspace": string(ws)}, err))
 		}
+	}
+	return nil
+}
+
+// armFromManifest arms the rendezvous from the intent manifest as it stands
+// NOW, adding what is not already armed and touching nothing that is: an entry
+// a participant has already called on keeps its ledger.
+func (c *controller) armFromManifest() error {
+	m, found, err := ReadManifest(c.deps.IntentManifest)
+	if err != nil || !found {
+		return err
+	}
+	added := 0
+	c.mu.Lock()
+	for _, session := range m.Sessions {
+		if _, already := c.rendezvous[session.Workspace]; already {
+			continue
+		}
+		c.rendezvous[session.Workspace] = &entry{
+			expected: Participants{Host: session.ExpectedHost, Web: session.ExpectedWeb},
+			done:     make(chan struct{}),
+		}
+		if c.joining == nil {
+			c.joining = map[ids.WorkspaceID]bool{}
+		}
+		c.joining[session.Workspace] = true
+		added++
+	}
+	c.mu.Unlock()
+	if added > 0 {
+		c.log.Info(opJoin, "armed the adopt rendezvous from a manifest that arrived after boot",
+			dlog.Context{"workspaces": added})
 	}
 	return nil
 }
@@ -98,6 +139,19 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 
 	c.mu.Lock()
 	e, armed := c.rendezvous[ws]
+	if !armed && c.joiningMode {
+		// THE MANIFEST MAY HAVE ARRIVED SINCE BOOT. The incumbent writes it
+		// only after the successor has reported its address, so a successor
+		// that armed nothing at boot is the ordinary case, not a refusal: it
+		// re-reads once, here, when a participant actually calls.
+		c.mu.Unlock()
+		if err := c.armFromManifest(); err != nil {
+			c.log.Error(operation, "could not re-read the intent manifest", withCause(fields, err))
+			return err
+		}
+		c.mu.Lock()
+		e, armed = c.rendezvous[ws]
+	}
 	if !armed {
 		c.mu.Unlock()
 		// INFO, not WARN: on the web side this is what a page boot looks like
@@ -121,13 +175,37 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 			"expected_host": e.expected.Host, "expected_web": e.expected.Web,
 			"host_called": e.hostCalled, "web_called": e.webCalled,
 		}
+		done := e.done
 		c.mu.Unlock()
-		c.log.Debug(operation, "an expected participant has not called yet", merge(fields, outstanding))
-		return ErrNotYetAdopted
+		c.log.Debug(operation, "an expected participant has not called yet; waiting for the rendezvous",
+			merge(fields, outstanding))
+		// EVERY EXPECTED PARTICIPANT SUCCEEDS TOGETHER. The callers arrive
+		// concurrently and the one that arrives first has not failed: it
+		// waits for the one that completes the rendezvous. `not_yet_adopted`
+		// on an ADOPT call means only that this caller's own context expired
+		// first, which is the retry-with-backoff case.
+		select {
+		case <-done:
+			c.mu.Lock()
+			failed := e.failed
+			c.mu.Unlock()
+			if failed != nil {
+				return failed
+			}
+			c.log.Debug(operation, "the rendezvous completed while this caller waited", fields)
+			return nil
+		case <-ctx.Done():
+			c.log.Debug(operation, "the caller gave up before the rendezvous completed", fields)
+			return ErrNotYetAdopted
+		}
 	}
 	c.mu.Unlock()
 
-	if err := c.adopt(ctx, ws, operation); err != nil {
+	err := c.adopt(ctx, ws, operation)
+	c.mu.Lock()
+	e.settle(err)
+	c.mu.Unlock()
+	if err != nil {
 		return err
 	}
 	c.log.Info(operation, "every expected participant called; the workspace is adopted", fields)
@@ -145,6 +223,14 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source string) error {
 	fields := dlog.Context{"workspace": string(ws), "source": source}
 
+	// THE HANDLE BECOMES A WRITING ONE HERE. A successor opens read-only
+	// because the incumbent is still the sole writer; adopting a workspace is
+	// the moment it starts writing that workspace's rows, and the incumbent
+	// stopped writing them at its transfer notice.
+	if err := c.deps.DB.Promote(ctx); err != nil {
+		c.log.Error(opAdopt, "the state handle could not be promoted to writing", withCause(fields, err))
+		return fmt.Errorf("rollout: adopt %q: promote the state handle: %w", ws, err)
+	}
 	record, err := c.deps.DB.Workspace(ctx, ws)
 	if err != nil {
 		c.log.Error(opAdopt, "could not read the workspace being adopted", withCause(fields, err))

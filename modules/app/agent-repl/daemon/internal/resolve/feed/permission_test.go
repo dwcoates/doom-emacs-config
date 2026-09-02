@@ -392,6 +392,48 @@ func TestADeniedGateMarksTheGatedCallAsNeverHavingRun(t *testing.T) {
 	}
 }
 
+// TestADeniedCallsOwnFailureTerminalStaysDeniedNeverAGenericFailure covers the
+// ruled sequence: a denied call still reaches its `failure` terminal, with no
+// content, because nothing ran. Drawing that as a returned failure would tell
+// the reader the tool tried and broke.
+func TestADeniedCallsOwnFailureTerminalStaysDeniedNeverAGenericFailure(t *testing.T) {
+	// Arrange: a gated call the gate refused.
+	h := newHarness(t)
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Start{Start: &conversationv1.AgentBashStart{
+			Command:   &conversationv1.AgentBashCommand{Line: "rm -rf /"},
+			StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+		}},
+	}))
+	h.ask("unit-1", "unit-1", &conversationv1.AgentPermissionStart{
+		Prompt:    &conversationv1.AgentPermissionPrompt{Title: "Claude wants to run a command"},
+		StartedAt: &conversationv1.AgentActivityStartedAt{AtMs: 1_000},
+	})
+	h.ask("unit-1", "unit-1", &conversationv1.AgentPermissionSuccess{
+		Decision: &conversationv1.AgentPermissionSuccess_Denied{Denied: &conversationv1.AgentPermissionDenied{
+			By: &conversationv1.AgentPermissionDenied_User{User: &conversationv1.AgentPermissionDeniedByUser{}},
+		}},
+	})
+
+	// Act: the unit's own contentless terminal.
+	h.send(activityOf("unit-1", &conversationv1.AgentBash{
+		Result: &conversationv1.AgentBash_Failure{Failure: &conversationv1.AgentBashFailure{
+			Error: &conversationv1.AgentToolFailure{SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 2_000}},
+		}},
+	}))
+
+	// Assert.
+	for _, row := range h.rows(rootFeed()) {
+		card := row.GetActivity().GetSimpleToolCall()
+		if card == nil {
+			continue
+		}
+		if card.GetReturned() != nil {
+			t.Fatalf("the denied call's card = %v, want denied and never a returned failure", card.GetOutcome())
+		}
+	}
+}
+
 func TestAnAskThatCouldNotBePutToTheUserIsAbandoned(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

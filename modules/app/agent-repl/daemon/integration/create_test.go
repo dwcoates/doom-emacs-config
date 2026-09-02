@@ -158,8 +158,20 @@ func TestCreateWorkspaceWithASuppliedNameWinsOverTheDerivedSlug(t *testing.T) {
 
 func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMerge(t *testing.T) {
 	// Arrange: a parent, top-level workspace.
-	d := newDaemon(t, harness.Opts{})
+	//
+	// The daemon's own checkout IS this repository and a test-all script
+	// stands in for the gate, because the emacs-repo method is the one that
+	// runs `git merge` at all: in every other repository the landing belongs
+	// to the merge prompts, and no git merge is issued for this assertion to
+	// find.
 	repo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	d := newDaemon(t, harness.Opts{
+		SelfRepo: repo.Dir,
+		ExtraEnv: []string{"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path},
+	})
 	repository := createRepositoryRef(t, d, repo)
 	parentResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
 		Repository: repository,
@@ -200,13 +212,19 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: child})); err != nil {
 		t.Fatalf("MergeWorkspace(child) = error %v, want the merge enqueued", err)
 	}
-	awaitRoster(t, d, roster, "the child's merge settled", func(r *frontendv1.WorkspaceRoster) bool {
+	// The merge has to have REACHED ITS TERMINAL before the git calls say
+	// anything: `merge_queued` is published before the run starts, so waiting
+	// on it would read the trace of a merge that has not run yet.
+	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, child.GetId())
-		return row != nil && (row.GetMergeQueued() != nil || row.GetMerging() != nil || row.GetMerged() != nil)
+		return row != nil && row.GetMerged() != nil
 	})
+	// The git client selects its directory with `-C <dir>` and never with the
+	// child process's cwd, so "inside the parent's worktree" is read off the
+	// selection argument.
 	targetedParent := false
 	for _, c := range d.Git.Calls() {
-		if createArgsContain(c.Args, "merge") && c.Cwd == parent.GetDir() {
+		if createArgsContain(c.Args, "merge") && createGitDir(c.Args) == parent.GetDir() {
 			targetedParent = true
 		}
 	}
@@ -249,22 +267,33 @@ func TestCreateWorkspaceForkPortsTheParentsTranscriptAndResumesIt(t *testing.T) 
 		},
 	}))
 
-	// Assert: the transcript is ported under the child's own project dir.
+	// Assert: the child resumes a conversation of its OWN. A vendor session id
+	// is single-occupancy -- the shim takes session-<id>.lock inside
+	// StartSession -- so a child resuming the live parent's id could never come
+	// up; the daemon mints a fresh id and files the copy under it.
 	if err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(fork) = (%v, %v), want a success", resp, err)
 	}
 	child := resp.Msg.GetSuccess().GetWorkspace()
-	childProject := createProjectDir(f.d.DefaultConfigDir, child.GetDir())
-	ported := filepath.Join(childProject, vendorID+".jsonl")
-	if _, err := os.Stat(ported); err != nil {
-		t.Fatalf("stat the ported transcript %s: %v, want the parent's transcript copied under the child's project dir", ported, err)
-	}
-
-	// Assert: the child resumes the ported vendor session.
 	childShim := f.d.Shim(child)
 	resume := childShim.ExpectStartSession().GetResume()
-	if resume == nil || resume.GetVendorSessionId() != vendorID {
-		t.Fatalf("the forked child's StartSession = %v, want resume of the parent's vendor session %q", resume, vendorID)
+	if resume == nil {
+		t.Fatalf("the forked child's StartSession = %v, want a resume", resume)
+	}
+	forked := resume.GetVendorSessionId()
+	if forked == "" || forked == vendorID {
+		t.Fatalf("the forked child resumes %q, want a fresh vendor session id and never the parent's %q", forked, vendorID)
+	}
+
+	// Assert: the parent's conversation is copied under the child's project
+	// dir, filed under the child's own id, and the parent keeps its own.
+	childProject := createProjectDir(f.d.DefaultConfigDir, child.GetDir())
+	ported := filepath.Join(childProject, forked+".jsonl")
+	if _, err := os.Stat(ported); err != nil {
+		t.Fatalf("stat the ported transcript %s: %v, want the parent's conversation copied under the child's own id", ported, err)
+	}
+	if _, err := os.Stat(transcript); err != nil {
+		t.Fatalf("stat the parent's transcript %s: %v, want it left in place", transcript, err)
 	}
 }
 
@@ -432,6 +461,16 @@ func createProjectDir(configDir, workspaceDir string) string {
 }
 
 // createArgsContain reports whether a git call's args contain an exact token.
+// createGitDir answers the directory a recorded git call selected with -C.
+func createGitDir(args []string) string {
+	for i, a := range args {
+		if a == "-C" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
 func createArgsContain(args []string, want string) bool {
 	for _, a := range args {
 		if a == want {
