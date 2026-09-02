@@ -1,10 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	conversationv1 "agentrepl/proto/conversation/v1"
+
+	"google.golang.org/protobuf/proto"
 )
 
 func TestLoadProfileWithoutADirectoryIsTheZeroProfile(t *testing.T) {
@@ -15,7 +22,7 @@ func TestLoadProfileWithoutADirectoryIsTheZeroProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProfile = error %v, want the zero profile", err)
 	}
-	if got != (Profile{}) {
+	if !reflect.DeepEqual(got, Profile{}) {
 		t.Fatalf("LoadProfile = %+v, want the zero profile", got)
 	}
 }
@@ -84,5 +91,30 @@ func write(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func TestLoadProfileCarriesTheLiveWorkTheOpeningStates(t *testing.T) {
+	// Arrange: one binary-encoded AgentDetachedWork, base64 as JSON renders
+	// []byte.
+	dir := t.TempDir()
+	raw, err := proto.Marshal(&conversationv1.AgentDetachedWork{
+		Work: &conversationv1.DetachedWorkId{Value: "work-1"},
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	write(t, filepath.Join(dir, "default.json"),
+		`{"live_work":["`+base64.StdEncoding.EncodeToString(raw)+`"]}`)
+
+	// Act
+	got, err := LoadProfile(dir, "/w/one")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("LoadProfile = error %v, want the profile", err)
+	}
+	if len(got.LiveWork) != 1 || !bytes.Equal(got.LiveWork[0], raw) {
+		t.Fatalf("LoadProfile.LiveWork = %v, want the one encoded item", got.LiveWork)
 	}
 }
