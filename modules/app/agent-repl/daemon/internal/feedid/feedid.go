@@ -104,34 +104,6 @@ type RowKey struct {
 	Sub string
 }
 
-// SubagentRowKey is the row key of the subagent bubble one spawn unit created:
-// the row whose sub-feed is the created agent's.
-func SubagentRowKey(spawnUnit string, created *conversationv1.AgentId) RowKey {
-	sub := ""
-	if created != nil {
-		sub = created.GetValue()
-	}
-	return RowKey{Kind: KindActivity, ID: spawnUnit, Sub: sub}
-}
-
-// PlanRowKey is the row key of one agent's plan bubble for one episode. The
-// plan bubble keys on `plan:<agent>:<episode>` in the activity space, which is
-// the one spelling of it in the daemon.
-func PlanRowKey(agent, episode string) RowKey {
-	return RowKey{Kind: KindActivity, ID: PlanBubbleKey(agent, episode)}
-}
-
-// PlanBubbleKey is the plan bubble's activity id: `plan:<agent>:<episode>`.
-func PlanBubbleKey(agent, episode string) string {
-	return "plan:" + agent + ":" + episode
-}
-
-// MergeHeadRowKey is the row key of a merge bubble's head row, whose sub-feed
-// is the merge's.
-func MergeHeadRowKey(lease LeaseID) RowKey {
-	return RowKey{Kind: KindMergeHead, ID: string(lease)}
-}
-
 // version is the scheme version every encoded id carries. Decode refuses any
 // other version rather than reinterpreting an id it does not own.
 const version = "1"

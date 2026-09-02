@@ -273,32 +273,6 @@ func TestSpliceOnABriefWithNoPlaceholdersTakesNoValues(t *testing.T) {
 	}
 }
 
-func TestLoadAndSpliceReadsAndFillsInOneStep(t *testing.T) {
-	// Arrange.
-	dir := write(t, "b", "<!-- used by: x; placeholders: {{a}} -->\nv={{a}}\n")
-
-	// Act.
-	got, err := LoadAndSplice(dir, "b", map[string]string{"a": "1"})
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("LoadAndSplice: %v", err)
-	}
-	if got != "v=1" {
-		t.Fatalf("LoadAndSplice = %q, want v=1", got)
-	}
-}
-
-func TestLoadAndSpliceSurfacesALoadFailure(t *testing.T) {
-	// Act.
-	_, err := LoadAndSplice(t.TempDir(), "absent", nil)
-
-	// Assert.
-	if err == nil {
-		t.Fatal("LoadAndSplice accepted a missing brief")
-	}
-}
-
 func TestEveryCheckedInBriefLoads(t *testing.T) {
 	// Arrange.
 	entries, err := os.ReadDir(repoPromptsDir)

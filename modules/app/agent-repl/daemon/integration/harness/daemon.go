@@ -1,11 +1,9 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -150,7 +148,6 @@ type Daemon struct {
 	t          *testing.T
 	ctx        context.Context
 	cmd        *exec.Cmd
-	stderr     *syncBuffer
 	stderrPath string
 	client     agentreplv1connect.AgentReplClient
 	http       *http.Client
@@ -206,24 +203,6 @@ func cleanGitEnv(env []string) []string {
 	return out
 }
 
-// syncBuffer collects a process's stderr without racing the reader.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
 // StartDaemon lays out a hermetic environment, starts the daemon, waits for
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.
 func StartDaemon(t *testing.T, opts Opts) *Daemon {
@@ -248,7 +227,6 @@ func StartDaemon(t *testing.T, opts Opts) *Daemon {
 		Browser:            NewFakeBrowser(t, filepath.Join(root, "bin")),
 		Deploy:             NewFakeDeployScript(t, filepath.Join(root, "bin")),
 		t:                  t,
-		stderr:             &syncBuffer{},
 		expected:           map[string]bool{},
 		shims:              map[string]*ShimControl{},
 	}
@@ -687,9 +665,6 @@ func (d *Daemon) AwaitExit() int {
 
 // Stderr is everything the daemon wrote to its terminal mirror.
 func (d *Daemon) Stderr() string {
-	if d.stderrPath == "" {
-		return d.stderr.String()
-	}
 	raw, err := os.ReadFile(d.stderrPath)
 	if err != nil {
 		return ""
@@ -722,14 +697,6 @@ func (d *Daemon) WriteShimProfile(dir string, profile any) {
 	d.t.Helper()
 	writeJSON(d.t, filepath.Join(d.ProfileDir, profileFileName(dir)), profile)
 }
-
-// WriteDefaultShimProfile files the profile every unprofiled workspace uses.
-func (d *Daemon) WriteDefaultShimProfile(profile any) {
-	d.t.Helper()
-	writeJSON(d.t, filepath.Join(d.ProfileDir, "default.json"), profile)
-}
-
-func (d *Daemon) String() string { return fmt.Sprintf("daemon(%s)", d.Addr) }
 
 // ExpectFileUnchanged asserts a file still holds exactly `want` after the
 // probe window. It is a negative assertion, so it necessarily waits out a
@@ -836,22 +803,6 @@ const FeedPageSize = feed.DefaultPageSize
 // transcript under an account root: `<ProjectDir>/<vendor session id>.jsonl`.
 func TranscriptPath(configDir, workspaceDir, vendorSessionID string) string {
 	return filepath.Join(ProjectDir(configDir, workspaceDir), vendorSessionID+".jsonl")
-}
-
-// WriteTranscript lays a vendor transcript down under an account root, which
-// is what an account switch must PORT to the other root. The fake shim writes
-// one at every StartSession; this exists for the tests that need a transcript
-// under a root no session has ever run in.
-func (d *Daemon) WriteTranscript(configDir, workspaceDir, vendorSessionID, body string) string {
-	d.t.Helper()
-	path := TranscriptPath(configDir, workspaceDir, vendorSessionID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		d.t.Fatalf("harness: mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		d.t.Fatalf("harness: write %s: %v", path, err)
-	}
-	return path
 }
 
 // HasTranscript reports whether a workspace's transcript exists under a root.
