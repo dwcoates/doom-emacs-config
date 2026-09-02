@@ -140,11 +140,10 @@ func TestAMalformedCommandFileIsQuarantinedAndLoggedNeverIngested(t *testing.T) 
 	d.AwaitFileGone(path)
 
 	// ...and lands in quarantine rather than being silently dropped or
-	// ingested.
+	// ingested. The wait is for the file to ARRIVE there: leaving its own
+	// place is the CLAIM's rename, and the quarantine is a second one.
 	quarantined := filepath.Join(d.StateDir, "output", "quarantine", "workspace_commands_bad.json")
-	if _, err := os.Stat(quarantined); err != nil {
-		t.Fatalf("stat %s = %v, want the malformed file quarantined there", quarantined, err)
-	}
+	d.AwaitFileExists(quarantined)
 
 	// Assert: logged.
 	d.AwaitRunLogOperation("daemon.commandfile.quarantine")

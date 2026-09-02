@@ -423,6 +423,23 @@ func (d *Daemon) AwaitFileGone(path string) {
 	}
 }
 
+// AwaitFileExists waits for a path to appear, bounded by the daemon's context.
+func (d *Daemon) AwaitFileExists(path string) {
+	d.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-d.ctx.Done():
+			d.t.Fatalf("waiting for %s to appear: %v", path, d.ctx.Err())
+		}
+	}
+}
+
 func (d *Daemon) expectedExit() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()

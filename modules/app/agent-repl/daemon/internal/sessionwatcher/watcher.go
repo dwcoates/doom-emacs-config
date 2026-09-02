@@ -102,6 +102,9 @@ type watcher struct {
 	freeWaiters []chan error
 	// turnWaiters are the standing AwaitTurnEnd calls, keyed by the turn.
 	turnWaiters map[ids.TurnID][]chan turnEnd
+	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
+	// to the lifecycle sink, which is told only once mu is released.
+	pendingTurnEnds []endedTurn
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -659,6 +662,7 @@ func (w *watcher) runSession(gen uint64, stream shimclient.Stream[*conversationv
 		}
 		w.routeSessionUpdateLocked(update)
 		w.mu.Unlock()
+		w.flushTurnEnds()
 	}
 }
 
@@ -677,6 +681,7 @@ func (w *watcher) runAgent(gen uint64, a *agentWatch, stream shimclient.Stream[*
 		}
 		w.routeAgentResponseLocked(a, resp)
 		w.mu.Unlock()
+		w.flushTurnEnds()
 	}
 }
 
@@ -695,6 +700,25 @@ func (w *watcher) runShell(gen uint64, s *shellWatch, stream shimclient.Stream[*
 		}
 		w.routeBashLocked(s, bash)
 		w.mu.Unlock()
+		w.flushTurnEnds()
+	}
+}
+
+// endedTurn is one turn end waiting to be handed to the lifecycle sink.
+type endedTurn struct {
+	turn ids.TurnID
+	how  TurnClose
+}
+
+// flushTurnEnds hands every recorded turn end to the lifecycle sink WITHOUT
+// the lock. Every site that routes under mu calls it right after unlocking.
+func (w *watcher) flushTurnEnds() {
+	w.mu.Lock()
+	pending := w.pendingTurnEnds
+	w.pendingTurnEnds = nil
+	w.mu.Unlock()
+	for _, ended := range pending {
+		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)
 	}
 }
 
