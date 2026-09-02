@@ -74,6 +74,44 @@ type fakeDB struct {
 	taskChanges  map[ids.TaskID]wsm.TaskChange
 	assignments  map[ids.WorkspaceID]*ids.TaskID
 	taskErr      error
+
+	// dbFaults is the fault table the fleet opens and closes lost-link rows
+	// in; dbClosed records the ids CloseFault was called with.
+	dbFaults []wsm.Fault
+	dbClosed []ids.FaultID
+}
+
+func (d *fakeDB) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
+	id := ids.FaultID(fmt.Sprintf("db-fault-%d", len(d.dbFaults)+1))
+	f.ID = id
+	d.dbFaults = append(d.dbFaults, f)
+	return id, nil
+}
+
+func (d *fakeDB) CloseFault(_ context.Context, id ids.FaultID, _ time.Time) error {
+	d.dbClosed = append(d.dbClosed, id)
+	kept := d.dbFaults[:0]
+	for _, f := range d.dbFaults {
+		if f.ID != id {
+			kept = append(kept, f)
+		}
+	}
+	d.dbFaults = kept
+	return nil
+}
+
+func (d *fakeDB) OpenFaults(_ context.Context, scope wsm.FaultScope) ([]wsm.Fault, error) {
+	var out []wsm.Fault
+	for _, f := range d.dbFaults {
+		if scope.Kind != "" && f.Kind != scope.Kind {
+			continue
+		}
+		if scope.Workspace != nil && (f.Workspace == nil || *f.Workspace != *scope.Workspace) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 func newFakeDB() *fakeDB {

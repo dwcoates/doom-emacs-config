@@ -289,8 +289,11 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	footer := f.d.WatchFooter(f.ws)
+	// A lost link is EVIDENCE, recorded loudly: the watcher says so, the
+	// health reporter opens the fault, and SessionHealth answers unhealthy.
 	f.d.ExpectWarnings("daemon.shimclient.exit",
-		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
+		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault", "daemon.health.session")
 
 	// Act: the fake shim process exits outright, mid-session.
 	f.shim.Exit(1, "simulated crash")
