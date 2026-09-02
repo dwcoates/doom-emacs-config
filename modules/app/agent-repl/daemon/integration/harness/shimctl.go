@@ -275,13 +275,44 @@ func (s *ShimControl) Info() ShimInfo {
 // PushSessionUpdate delivers a session-level fact on every open WatchSession.
 func (s *ShimControl) PushSessionUpdate(u *conversationv1.SessionUpdate) {
 	s.t.Helper()
-	s.send(controlCommand{Op: "push_session_update", Payload: encode(s.t, u)})
+	s.pushSessionUpdate(u)
 }
 
-// PushHealthy delivers the healthy diagnostics push that gates readiness.
-func (s *ShimControl) PushHealthy() {
+// pushSessionUpdate delivers one update and answers how many session streams
+// received it.
+func (s *ShimControl) pushSessionUpdate(u *conversationv1.SessionUpdate) int {
 	s.t.Helper()
-	s.PushSessionUpdate(&conversationv1.SessionUpdate{
+	return s.send(controlCommand{Op: "push_session_update", Payload: encode(s.t, u)}).Count
+}
+
+// PushHealthyWhenSubscribed delivers the readiness diagnostics, retrying until
+// at least one session stream is subscribed to receive it.
+//
+// A push to a hub nobody has subscribed to is DROPPED, and the daemon
+// subscribes when its bring-up opens WatchSession — which a test cannot observe
+// from the wire. Retrying on the subscriber count is what makes "the shim came
+// up healthy" an event the daemon is guaranteed to see.
+func (s *ShimControl) PushHealthyWhenSubscribed() {
+	s.t.Helper()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		if s.PushHealthy() > 0 {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-s.d.Ctx().Done():
+			s.t.Fatalf("fake shim control %s: no session stream ever subscribed to receive the readiness push", s.Socket)
+		}
+	}
+}
+
+// PushHealthy delivers the healthy diagnostics push that gates readiness and
+// answers how many session streams received it.
+func (s *ShimControl) PushHealthy() int {
+	s.t.Helper()
+	return s.pushSessionUpdate(&conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_Diagnostics{Diagnostics: &conversationv1.SessionDiagnostics{
 			Health: &conversationv1.SessionDiagnostics_Healthy{Healthy: &conversationv1.SessionHealthy{}},
 		}},

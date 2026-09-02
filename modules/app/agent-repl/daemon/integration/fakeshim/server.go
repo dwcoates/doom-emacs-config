@@ -87,8 +87,9 @@ type server struct {
 	profile Profile
 	log     *logSink
 
-	sessions        *hub[*conversationv1.SessionUpdate]
-	announcedBashes map[string]*conversationv1.AgentBash
+	sessions            *hub[*conversationv1.SessionUpdate]
+	announcedBashes     map[string]*conversationv1.AgentBash
+	sessionStreamOpened bool
 
 	agents *hub[agentFrame]
 	bashes *hub[bashFrame]
@@ -285,6 +286,18 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	return connect.NewResponse(resp), nil
 }
 
+// claimFirstSessionStream reports whether this open is the FIRST session
+// stream, which is the one DelayDiagnostics withholds its opening frames from.
+func (s *server) claimFirstSessionStream() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessionStreamOpened {
+		return false
+	}
+	s.sessionStreamOpened = true
+	return true
+}
+
 // noteAnnouncedBash remembers the `start` a detached shell was ANNOUNCED with,
 // so its WatchBash can open with it.
 func (s *server) noteAnnouncedBash(frame *conversationv1.AgentFrame) {
@@ -377,7 +390,7 @@ func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.W
 	id, ch := s.sessions.subscribe()
 	defer s.sessions.unsubscribe(id)
 
-	if !s.profile.DelayDiagnostics {
+	if !s.profile.DelayDiagnostics || !s.claimFirstSessionStream() {
 		if err := stream.Send(&shimv1.WatchSessionResponse{Update: HealthyDiagnostics()}); err != nil {
 			return err
 		}
