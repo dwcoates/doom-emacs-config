@@ -1487,7 +1487,13 @@ and logs the same fields in the context, so both are asserted."
 `endpoint_create_workspace.proto': \"a fork without a parent is
 unrepresentable\" — the fact lives INSIDE the parent by construction.
 Silently dropping the fork would create an ordinary workspace where the
-caller asked for a forked conversation, which is worse than a refusal."
+caller asked for a forked conversation, which is worse than a refusal.
+
+The signal is `user-error', the kind fanout §9 gives every verbs-layer
+pre-send guard (\"nil -> `user-error'\" for a missing ref, and see
+`agent-repl-itest-verbs-unregistered-workspace-refuses-before-send').  The
+neighbouring `agent-repl-wire-error' refusals are raised one layer down, by
+the codec, on a request the verb did build; this one never reaches it."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-verbs--with-primary daemon conn
@@ -1495,7 +1501,7 @@ caller asked for a forked conversation, which is worse than a refusal."
       ;; Act / Assert.
       (should-error
        (agent-repl-verb-create agent-repl-itest-verbs--repo :standard :fork t)
-       :type 'agent-repl-wire-error)
+       :type 'user-error)
       (should (null (agent-repl-itest--calls daemon "CreateWorkspace"))))))
 
 ;; audit-2 #27
