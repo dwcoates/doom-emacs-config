@@ -598,20 +598,29 @@ func TestAFailedToolCallDrawsReturnedFailed(t *testing.T) {
 }
 
 func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
-	// Arrange: a denied tool never starts and has no activity frames at all
-	// (permission.proto) — the card is drawn from the permission gate alone.
+	// Arrange: the ruled sequence. A gated call arrives as a START, the
+	// permission unit settles DENIED, and the tool unit then reaches its
+	// `failure` terminal with NO content, because nothing ran. The permission
+	// id IS the gated unit's AgentActivityId, which is what joins the two.
+	const unit = "gated-bash"
 	f := newOpened(t, harness.Opts{})
 	f.submit("go", "k-denied", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID(unit),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Start{
+			Start: &conversationv1.AgentBashStart{Command: &conversationv1.AgentBashCommand{Line: "rm -rf /"}, StartedAt: startedAt(1)},
+		}}},
+	}))
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
-		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-denied", "gated-bash")},
+		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission(unit, unit)},
 	}))
 
-	// Act
+	// Act: the denial, then the tool unit's contentless terminal.
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Permission{Permission: &conversationv1.AgentPermission{
-			Id:        &conversationv1.AgentPermissionId{Value: "perm-denied"},
-			GatedCall: activityID("gated-bash"),
+			Id:        &conversationv1.AgentPermissionId{Value: unit},
+			GatedCall: activityID(unit),
 			Result: &conversationv1.AgentPermission_Success{Success: &conversationv1.AgentPermissionSuccess{
 				Decision: &conversationv1.AgentPermissionSuccess_Denied{Denied: &conversationv1.AgentPermissionDenied{
 					By: &conversationv1.AgentPermissionDenied_User{User: &conversationv1.AgentPermissionDeniedByUser{Message: "no"}},
@@ -619,23 +628,19 @@ func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
 			}},
 		}},
 	}))
+	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
+		ActivityId: activityID(unit),
+		Item: &conversationv1.AgentActivity_Bash{Bash: &conversationv1.AgentBash{Result: &conversationv1.AgentBash_Failure{
+			Failure: &conversationv1.AgentBashFailure{Error: &conversationv1.AgentToolFailure{SettledAt: settledAt(2)}},
+		}}},
+	}))
 
-	// Assert: SOMEWHERE in the feed, the gated call's own card draws denied.
-	found := false
-	for {
-		row := awaitRow(t, f, tail, "a row following the denial", func(*frontendv1.FeedRow) bool { return true })
-		if row.GetActivity().GetSimpleToolCall().GetDenied() != nil {
-			found = true
-			break
-		}
-		if row.GetPermission().GetState() != nil {
-			// The permission card itself re-pushed as answered; keep looking
-			// for the gated call's own card among the same batch of pushes.
-			continue
-		}
-	}
-	if !found {
-		t.Skip("feedDenied: the harness observed the permission's own answered re-push but no distinct gated-call tool card; report as unexpressible if this recurs")
+	// Assert: the gated call's own card says DENIED, never a generic failure.
+	row := awaitRow(t, f, tail, "the gated call's denied card", func(r *frontendv1.FeedRow) bool {
+		return r.GetActivity().GetSimpleToolCall().GetDenied() != nil
+	})
+	if got := row.GetActivity().GetSimpleToolCall().GetReturned(); got != nil {
+		t.Fatalf("the gated call's outcome = %v, want denied and never a returned failure", got)
 	}
 }
 
