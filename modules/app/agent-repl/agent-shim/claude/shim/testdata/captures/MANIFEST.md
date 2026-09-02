@@ -179,3 +179,17 @@ each is graded against the grounding named below, or marked ungrounded.
   rest = args; the document body is templated on the name), so a caller can
   name e.g. `create-or-update-workspace` with args `merge`. Retires
   `mergewindow_e2e_test.go`'s `mergeSkillCallLine` fabrication.
+
+- **`!bash-detach-poll`** (`src/fake/scenarios/shell.ts`). UNGROUNDED,
+  INVENTED: `TaskOutput` is a declared vendor tool (every capture's
+  `init.tools` lists it), but NO capture ever calls it — every recorded
+  backgrounded run was checked by re-reading its spool path, never by an
+  explicit retrieval call. The poll's `toolUseResult` shape
+  (`retrievalStatus`/`task{taskId,taskType,status,description,output,
+  exitCode,exitCodeSet}`) mirrors the daemon/e2e Go harness's own invented
+  `bashTaskOutcome`, since no vendor recording exists to spell it from. Note:
+  `TaskOutput` is not in `src/convert/tools/registry.ts`, so these tool_use/
+  tool_result pairs fold to `AgentUnmodeled` in the current converter — this
+  addition is test-tooling only and does not add a converter arm. Retires
+  `detachedworksettle_e2e_test.go`'s and `detachedspooloffset_e2e_test.go`'s
+  explicit-poll fabrication.
