@@ -8,6 +8,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
 
@@ -66,7 +67,7 @@ func TestOnOneShotTurnConcludedMetaWrapsTheFollowup(t *testing.T) {
 
 	// Assert.
 	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
-	if !strings.HasPrefix(sent, MetaOpen) || !strings.HasSuffix(sent, MetaClose) {
+	if !strings.HasPrefix(sent, prompts.MetaOpen) || !strings.HasSuffix(sent, prompts.MetaClose) {
 		t.Fatalf("follow-up = %q, want it meta-wrapped whole", sent)
 	}
 }

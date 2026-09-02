@@ -1,12 +1,15 @@
 package footer
 
 import (
+	"slices"
+	"sort"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/vocab"
 )
 
 // connected puts a serving link under the workspace so the disconnected arm —
@@ -781,5 +784,45 @@ func TestAPeerHopDownBeforeAnyLinkIsObservedIsNotDisconnected(t *testing.T) {
 	// Assert
 	if got := h.status(t); got == "disconnected" {
 		t.Fatal("status = disconnected with no link ever observed, want the no-session statuses")
+	}
+}
+
+// TestStatusArmsCoverTheProtoOneof pins the hardcoded arm list against the
+// FooterStatus.status oneof itself, so an arm landing in the proto cannot be
+// left out of the list and silently escape the render-colors assertion.
+func TestStatusArmsCoverTheProtoOneof(t *testing.T) {
+	// Arrange.
+	arms, err := vocab.OneofArmNames((&frontendv1.FooterStatus{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		t.Fatalf("OneofArmNames: %v", err)
+	}
+
+	// Act.
+	got := append([]string(nil), statusArms...)
+	sort.Strings(got)
+	sort.Strings(arms)
+
+	// Assert.
+	if !slices.Equal(got, arms) {
+		t.Fatalf("statusArms = %v, want the FooterStatus.status arms %v", got, arms)
+	}
+}
+
+// TestAllowanceArmsCoverTheProtoOneof pins the same for the allowance list.
+func TestAllowanceArmsCoverTheProtoOneof(t *testing.T) {
+	// Arrange.
+	arms, err := vocab.OneofArmNames((&frontendv1.FooterAllowance{}).ProtoReflect().Descriptor(), "status")
+	if err != nil {
+		t.Fatalf("OneofArmNames: %v", err)
+	}
+
+	// Act.
+	got := append([]string(nil), allowanceArms...)
+	sort.Strings(got)
+	sort.Strings(arms)
+
+	// Assert.
+	if !slices.Equal(got, arms) {
+		t.Fatalf("allowanceArms = %v, want the FooterAllowance.status arms %v", got, arms)
 	}
 }

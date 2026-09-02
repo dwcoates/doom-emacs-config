@@ -23,8 +23,8 @@ func TestEnqueueRefusesAWorkspaceWithNoLayoutFacts(t *testing.T) {
 	err := h.o.Enqueue(context.Background(), theWorkspace)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmNoLayoutFacts {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmNoLayoutFacts {
 		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmNoLayoutFacts)
 	}
 }
@@ -44,8 +44,8 @@ func TestEnqueueRefusesAnIncompleteLayout(t *testing.T) {
 	err := h.o.Enqueue(context.Background(), theWorkspace)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmNoLayoutFacts {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmNoLayoutFacts {
 		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmNoLayoutFacts)
 	}
 }
@@ -66,8 +66,8 @@ func TestEnqueueRefusesADeletedSession(t *testing.T) {
 	err := h.o.Enqueue(context.Background(), theWorkspace)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmSessionDeleted {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmSessionDeleted {
 		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmSessionDeleted)
 	}
 }
@@ -84,8 +84,8 @@ func TestEnqueueRefusesASecondEnqueue(t *testing.T) {
 	err := h.o.Enqueue(context.Background(), theWorkspace)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmAlreadyQueued {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmAlreadyQueued {
 		t.Fatalf("the second Enqueue answered %v, want the %s refusal", err, ArmAlreadyQueued)
 	}
 }
@@ -106,8 +106,8 @@ func TestEnqueueRefusesAWorkspaceAlreadyMerging(t *testing.T) {
 	err := h.o.Enqueue(context.Background(), theWorkspace)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmAlreadyMerging {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmAlreadyMerging {
 		t.Fatalf("Enqueue answered %v, want the %s refusal", err, ArmAlreadyMerging)
 	}
 }
@@ -230,8 +230,8 @@ func TestPauseRefusesAnAlreadyPausedQueue(t *testing.T) {
 	err := h.o.Pause(context.Background(), nil)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmAlreadyPaused {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmAlreadyPaused {
 		t.Fatalf("the second pause answered %v, want the %s refusal", err, ArmAlreadyPaused)
 	}
 }
@@ -248,8 +248,8 @@ func TestUnpauseRefusesAQueueThatIsNotPaused(t *testing.T) {
 	err := h.o.Unpause(context.Background(), nil)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmNotPaused {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmNotPaused {
 		t.Fatalf("Unpause answered %v, want the %s refusal", err, ArmNotPaused)
 	}
 }
@@ -311,8 +311,8 @@ func TestEvictRefusesAWorkspaceWithNothingQueued(t *testing.T) {
 	err := h.o.Evict(context.Background(), theWorkspace)
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmNoSuchQueuedMerge {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmNoSuchQueuedMerge {
 		t.Fatalf("Evict answered %v, want the %s refusal", err, ArmNoSuchQueuedMerge)
 	}
 }
@@ -573,8 +573,8 @@ func TestPauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 	err := h.o.Pause(context.Background(), &RepositoryScope{ID: "repo-nope"})
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmUnknownRepository {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmUnknownRepository {
 		t.Fatalf("the pause answered %v, want the %s refusal", err, ArmUnknownRepository)
 	}
 }
@@ -598,8 +598,8 @@ func TestUnpauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 	err := h.o.Unpause(context.Background(), &RepositoryScope{Dir: "/not/registered/.git"})
 
 	// Assert.
-	arm, refused := Refused(err)
-	if !refused || arm != ArmUnknownRepository {
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmUnknownRepository {
 		t.Fatalf("the resume answered %v, want the %s refusal", err, ArmUnknownRepository)
 	}
 }

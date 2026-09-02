@@ -1081,3 +1081,43 @@ func TestShimAnswersTheSurfaceForALiveSession(t *testing.T) {
 		t.Fatal("Shim() refused a live session")
 	}
 }
+
+// TestFleetProbeWorkspaceLockRecordsAnOrdinaryProbe pins that the fleet's
+// production probe lands a debug record for a lock it could read, so a
+// spawn-versus-adopt decision is reconstructable from the log.
+func TestFleetProbeWorkspaceLockRecordsAnOrdinaryProbe(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	if _, err := probeWorkspaceLock(log)(t.TempDir(), t.TempDir()); err != nil {
+		t.Fatalf("probe() error = %v", err)
+	}
+
+	// Assert.
+	records := log.Records()
+	if len(records) != 1 || records[0].Level != "debug" ||
+		records[0].Operation != "daemon.sessionlock.probe" {
+		t.Fatalf("records = %+v, want one debug daemon.sessionlock.probe record", records)
+	}
+}
+
+// TestFleetProbeWorkspaceLockRecordsAnUnderivablePath pins that a lock path the
+// fleet cannot derive is recorded rather than returned silently.
+func TestFleetProbeWorkspaceLockRecordsAnUnderivablePath(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+
+	// Act.
+	state, err := probeWorkspaceLock(log)("", "")
+
+	// Assert.
+	if err == nil || state != sessionlock.StateUnknown {
+		t.Fatalf("probe() = %v, %v, want StateUnknown and an error", state, err)
+	}
+	records := log.Records()
+	if len(records) != 1 || records[0].Level != "error" ||
+		records[0].Operation != "daemon.workspace.probe_workspace_lock" {
+		t.Fatalf("records = %+v, want one error daemon.workspace.probe_workspace_lock record", records)
+	}
+}

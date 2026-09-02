@@ -3,6 +3,8 @@ package workspace
 import (
 	"fmt"
 	"strings"
+
+	"claude-repld/internal/prompts"
 )
 
 // The brief names the one-shot decoration reads from the prompts directory AT
@@ -22,17 +24,6 @@ const (
 	BriefAddSupport = "add-support-slash-command"
 )
 
-// The harness-injection markers. Text the USER never typed is bracketed with
-// them at the point it is composed; they are the ONE source of truth for "this
-// span was injected", and the feed resolver strips them from the drawn row
-// while the full text stays on the record.
-const (
-	// MetaOpen opens a harness-injected span.
-	MetaOpen = "<!--agent-repl:meta-->"
-	// MetaClose closes one.
-	MetaClose = "<!--/agent-repl:meta-->"
-)
-
 // The wrap-up spellings the one-shot finishes name. They are constants because
 // the agent must invoke EXACTLY these commands; a drifted spelling leaves the
 // agent invoking something the flow does not expect.
@@ -47,9 +38,6 @@ const (
 	// accomplishes.
 	openPrActionPhrase = "push and queue this branch for merge"
 )
-
-// metaWrap brackets a harness-injected span.
-func metaWrap(text string) string { return MetaOpen + text + MetaClose }
 
 // createPrCommand renders the pr invocation for an open-pr finish. The base
 // flags are the flow's own (a patch PR rebased onto the refreshed base); the
@@ -90,7 +78,7 @@ func (v *verbs) decorateOneShot(raw string, finish *OneShotFinish) (string, erro
 	if err != nil {
 		return "", err
 	}
-	return metaWrap(preambleText) + raw + metaWrap(suffix), nil
+	return prompts.Wrap(preambleText) + raw + prompts.Wrap(suffix), nil
 }
 
 // oneShotSuffix renders the finish action's success-gated wrap-up. The
