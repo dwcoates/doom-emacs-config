@@ -8,8 +8,13 @@
  * drawn not composed, the chip counts are the served numbers, and opening a
  * panel costs no round trip because the panels already arrived.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
 
+import {
+  InterruptResponseSchema,
+  InterruptSuccessSchema,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
 import {
   FooterAllowanceSchema,
   FooterStatusSchema,
@@ -17,6 +22,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 
 import { startHarness, type Harness } from "./harness";
+import { panelStorageKey } from "../../src/footer/footer";
 import {
   assertVocabCoversArms,
   RENDER_COLORS,
@@ -697,5 +703,250 @@ describe("whole-view replacement", () => {
     await harness.settle();
     // Assert
     expect(harness.$$(".footer-status")).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE FOOTER'S TWO STOPS (audit 1, item 1)
+//
+// Stopping is ALWAYS an Interrupt rpc and THE ARM IS THE TARGET: the strip's
+// stop beside the clock is the running TURN, the agents panel's header stop is
+// EVERY live agent. The response's arm is the OUTCOME, and two of the three
+// outcomes are answers rather than failures — a stop that found nothing running
+// says so calmly, and a fan-wide stop reports the count the daemon reached.
+// ---------------------------------------------------------------------------
+
+describe("the turn stop", () => {
+  it("sends the turn target", async () => {
+    // Arrange
+    await withFooter({ status: "thinking" });
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    const [request] = harness.fake.calls<{ target: { case?: string } }>("interrupt");
+    expect(request.target.case).toBe("turn");
+  });
+
+  it("echoes the page's own workspace", async () => {
+    // Arrange
+    await withFooter({ status: "thinking" });
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("interrupt");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
+  });
+
+  it("draws the interrupted-turn outcome as a note, not a refusal", async () => {
+    // Arrange
+    await withFooter({ status: "thinking" });
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.$('.footer-stop-turn [data-stop-outcome="interruptedTurn"]')).not.toBeNull();
+  });
+
+  it("draws no refusal for an interrupted turn", async () => {
+    // Arrange
+    await withFooter({ status: "thinking" });
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
+  it("draws the nothing-running outcome as a note", async () => {
+    // Arrange: a domain outcome, not an error — the stop found the session
+    // already quiet, which is a legitimate reply to a legitimate ask.
+    await withFooter({ status: "thinking" });
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "nothingRunning", value: {} } } },
+      }),
+    );
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.$('.footer-stop-turn [data-stop-outcome="nothingRunning"]')).not.toBeNull();
+  });
+
+  it("draws no refusal for a nothing-running answer", async () => {
+    // Arrange
+    await withFooter({ status: "thinking" });
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: { case: "success", value: { outcome: { case: "nothingRunning", value: {} } } },
+      }),
+    );
+    // Act
+    await harness.click(".footer-clock [data-interrupt]");
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
+  it("covers every Interrupt success outcome", () => {
+    assertCoversOneof(InterruptSuccessSchema, "outcome", [
+      "interruptedTurn",
+      "interruptedDetached",
+      "nothingRunning",
+    ]);
+  });
+});
+
+describe("the agents panel's stop-all", () => {
+  /** Open the agents panel, where the fan-wide stop lives. */
+  const openAgents = async (): Promise<void> => {
+    await withFooter({ status: "thinking" });
+    await harness.click('.footer-chip[data-chip="agents"]');
+  };
+
+  it("sends the all-agents target", async () => {
+    // Arrange
+    await openAgents();
+    // Act
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Assert
+    const [request] = harness.fake.calls<{ target: { case?: string } }>("interrupt");
+    expect(request.target.case).toBe("allAgents");
+  });
+
+  it("draws the count the daemon reported", async () => {
+    // Arrange
+    await openAgents();
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "interruptedDetached", value: { count: 4n } } },
+        },
+      }),
+    );
+    // Act
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Assert: the figure is the daemon's; counting the panel's rows would say 2.
+    expect(harness.text('[data-stop-outcome="interruptedDetached"]')).toContain("4");
+  });
+
+  it("draws no refusal for an interrupted-detached answer", async () => {
+    // Arrange
+    await openAgents();
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "interruptedDetached", value: { count: 4n } } },
+        },
+      }),
+    );
+    // Act
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
+  it("offers no confirm step on the fan-wide target", async () => {
+    // Arrange: `confirm_agents` is meaningless on all_agents, so the challenge
+    // arm arriving there is a dead end rather than a second button.
+    await openAgents();
+    harness.fake.refuse("interrupt", "confirmRequired");
+    // Act
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Assert
+    expect(harness.$("[data-interrupt-confirm]")).toBeNull();
+  });
+
+  it("draws the challenge arm as an ordinary refusal on the fan-wide target", async () => {
+    // Arrange
+    await openAgents();
+    harness.fake.refuse("interrupt", "confirmRequired");
+    // Act
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Assert
+    expect(harness.$('.footer-stop-all .refusal[data-arm="confirmRequired"]')).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R14: THE OPEN PANEL IS A WEBVIEW-LOCAL PREFERENCE (audit 1, item 16)
+//
+// Nothing is persisted client-side except the webview's own preferences, in
+// `localStorage`, behind try/catch. So the selection survives a reload, and a
+// storage that throws costs the memory and nothing else.
+// ---------------------------------------------------------------------------
+
+describe("the remembered panel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("stores the panel a chip opened", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    // Act
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Assert
+    expect(window.localStorage.getItem(panelStorageKey(WORKSPACE_ID))).toBe("shells");
+  });
+
+  it("forgets the panel when it is closed again", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Act
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Assert
+    expect(window.localStorage.getItem(panelStorageKey(WORKSPACE_ID))).toBeNull();
+  });
+
+  it("re-opens the stored panel on a fresh mount", async () => {
+    // Arrange: what a reload looks like — the preference is all that survives.
+    window.localStorage.setItem(panelStorageKey(WORKSPACE_ID), "crons");
+    // Act
+    await withFooter({ status: "idle" });
+    // Assert
+    expect(harness.$('.footer-expanded[data-panel="crons"]')).not.toBeNull();
+  });
+
+  it("opens no panel on a fresh mount with nothing stored", async () => {
+    // Arrange / Act
+    await withFooter({ status: "idle" });
+    // Assert
+    expect(harness.$(".footer-expanded[data-panel]")).toBeNull();
+  });
+
+  it("discards a stored value that is not a panel name", async () => {
+    // Arrange: an older bundle's spelling, or a hand-edited entry.
+    window.localStorage.setItem(panelStorageKey(WORKSPACE_ID), "not-a-panel");
+    // Act
+    await withFooter({ status: "idle" });
+    // Assert
+    expect(harness.$(".footer-expanded[data-panel]")).toBeNull();
+  });
+
+  it("still draws the strip when reading storage throws", async () => {
+    // Arrange: a webview with site data disabled throws on the accessor.
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("site data is disabled");
+    });
+    // Act
+    await withFooter({ status: "idle" });
+    // Assert
+    expect(harness.$(".footer-status")).not.toBeNull();
+  });
+
+  it("still opens a panel when writing storage throws", async () => {
+    // Arrange
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("site data is disabled");
+    });
+    await withFooter({ status: "idle" });
+    // Act
+    await harness.click('.footer-chip[data-chip="tasks"]');
+    // Assert: the preference is lost, the footer is not.
+    expect(harness.$('.footer-expanded[data-panel="tasks"]')).not.toBeNull();
   });
 });
