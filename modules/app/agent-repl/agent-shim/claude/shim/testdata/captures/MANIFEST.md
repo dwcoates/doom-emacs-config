@@ -170,3 +170,12 @@ each is graded against the grounding named below, or marked ungrounded.
   ALREADY-BUILT `context_budget_warning` arm
   (`test/convert/attachments.test.ts`) has a fake-SDK path to drive it from,
   pending a real grounding capture.
+
+- **`!skill [skill-name] [args]` parameterization** (`src/fake/scenarios/skills.ts`).
+  GROUNDED: `skill-invocation` (this manifest, above) remains the golden for
+  the SHAPE (tool_use → `{success, commandName, allowedTools}` ack → isMeta
+  document) — unchanged. Only the fixed `"fake-skill"` name/args/document body
+  are now derived from the prompt's own argument (first token = skill name,
+  rest = args; the document body is templated on the name), so a caller can
+  name e.g. `create-or-update-workspace` with args `merge`. Retires
+  `mergewindow_e2e_test.go`'s `mergeSkillCallLine` fabrication.
