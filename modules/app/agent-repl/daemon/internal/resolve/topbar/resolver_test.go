@@ -77,7 +77,6 @@ func (h *harness) ready(t *testing.T) {
 	})
 	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
 	h.r.SetAccount(testWS, "dev@example.com")
-	h.r.SetPermissionModePicker(testWS, picker("default", "default", "accept_edits", "plan"))
 	h.r.OnSessionUpdate(testWS, contextUsage(142_300, 200_000, 71, "claude-opus-5"))
 	// The two client hops of connectivity truth are up too: a serving shim
 	// link alone is not a connected workspace (daemon.md invariant 11), so a
@@ -118,6 +117,17 @@ func picker(current string, modes ...string) *frontendv1.TopbarPermissionModePic
 			&frontendv1.TopbarPermissionModeOption{Mode: mode, DisplayName: mode})
 	}
 	return out
+}
+
+// setPicker installs a picker directly on the workspace's accumulated state,
+// bypassing the ordinary sink path. Production never narrows the served set
+// below the fixed switchable set (OnSessionStarted is the ONLY producer), so
+// this white-box seam exists only to pin permissionModePicker's defensive
+// fallback for a mode in force that a served set does not carry — a shape no
+// real vendor input can produce once the served set is always the fixed one.
+func (h *harness) setPicker(p *frontendv1.TopbarPermissionModePicker) {
+	h.r.mutate(testWS, "test.set_picker", "test installed a picker", nil,
+		func(s *wsState) { s.picker = p })
 }
 
 // contextUsage is the vendor's own get_context_usage answer.
@@ -187,7 +197,6 @@ func TestNothingIsPublishedBeforeEveryRequiredFact(t *testing.T) {
 	h.r.SetNaming(testWS, Naming{Title: "w", ConfigDir: "/root"})
 	h.r.OnSessionStarted(testWS, sessionStarted("vend-1", "claude-opus-5"))
 	h.r.SetAccount(testWS, "dev@example.com")
-	h.r.SetPermissionModePicker(testWS, picker("default", "default"))
 
 	// Assert
 	if _, ok := h.r.Topic(testWS).Latest(); ok {
@@ -397,7 +406,7 @@ func TestTheSelectorRendersExactlyTheServedCatalog(t *testing.T) {
 	}
 }
 
-func TestThePickerServesExactlyTheGivenOptions(t *testing.T) {
+func TestThePickerServesExactlyTheFixedSwitchableSet(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 
@@ -406,8 +415,8 @@ func TestThePickerServesExactlyTheGivenOptions(t *testing.T) {
 
 	// Assert
 	got := h.view(t).GetPermissionModePicker()
-	if len(got.GetOptions()) != 3 {
-		t.Fatalf("options = %+v, want exactly the served set", got.GetOptions())
+	if len(got.GetOptions()) != len(SwitchableModes) {
+		t.Fatalf("options = %+v, want exactly the fixed switchable set", got.GetOptions())
 	}
 	if got.GetCurrent().GetMode() != "default" {
 		t.Fatalf("current = %+v, want the mode the session facts stated", got.GetCurrent())
@@ -439,9 +448,12 @@ func TestAPermissionModeChangeMovesTheCurrentOption(t *testing.T) {
 }
 
 func TestAModeInForceOutsideTheServedSetIsCurrentButNotOffered(t *testing.T) {
-	// Arrange
+	// Arrange. The fixed switchable set always carries every vendor arm, so
+	// no real session input can name a mode outside it; the served set is
+	// narrowed directly to pin permissionModePicker's fallback.
 	h := newHarness(t)
 	h.ready(t)
+	h.setPicker(picker("default", "default", "accept_edits", "plan"))
 
 	// Act
 	h.r.OnSessionUpdate(testWS, &conversationv1.SessionUpdate{
