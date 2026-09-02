@@ -460,3 +460,15 @@ One file per drawn component; each file's header comment is its spec.
   merge-queue control exists in the webapp, and its refusal arms (incl. landing
   6's `unknown_repository`) render nowhere here. The integration suite's seven
   UpdateMergeQueue refusal cases are deleted.
+
+## Landing 7 relay (2026-09-02, project lead)
+
+Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
+- SubmitPromptError.bubble_refused{detail, kind}: the bubble's refusal
+  rendering keys on kind (not_deliverable | agent_busy); `detail` is the
+  human line. Replaces any interim rendering of the transport fault.
+- CloseWorkspaceBlocked now carries fields; the webapp still draws the
+  footer's close-blocked state (pushed), NOT this response — no new surface,
+  only the decoder/type update.
+- FeedMergeAbandoned.summary: draw it on the collapsed merge line exactly as
+  FeedMergeFailed.summary is drawn.

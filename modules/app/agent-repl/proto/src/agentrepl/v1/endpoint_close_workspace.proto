@@ -55,7 +55,22 @@ message CloseWorkspaceError {
     CloseWorkspaceNotYetAdopted not_yet_adopted = 5;
   }
 }
-message CloseWorkspaceBlocked {}
+// WHY the close is blocked — the same evidence the footer's close-blocked
+// state draws, so a caller with no footer (a test, a log line, the host's
+// own message) can still say why. (Landing 7, 2026-09-02.)
+message CloseWorkspaceBlocked {
+  // The main thread has a turn in flight.
+  bool turn_in_flight = 1;
+  // Detached items live now (subagents, runs, tasks).
+  uint32 live_work = 2;
+  // Held prompts in the tray — undelivered user intent.
+  uint32 held_prompts = 3;
+  // The workspace is queued for, or inside, a merge.
+  bool merge_queued = 4;
+  // The daemon's composed sentence over the fields above — the footer's
+  // activity line, verbatim.
+  string summary = 5;
+}
 message CloseWorkspaceUnknownWorkspace {}
 message CloseWorkspaceWorkspaceRefMismatch {
   // The dir the registry holds for this id.
