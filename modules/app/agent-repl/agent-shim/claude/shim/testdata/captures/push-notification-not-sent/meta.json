@@ -1,0 +1,27 @@
+{
+  "scenario": "push-notification-not-sent",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Send me a push notification that says 'capture harness probe: not sent'.",
+  "prompts": [
+    {
+      "text": "Send me a push notification that says 'capture harness probe: not sent'.",
+      "resume": false
+    }
+  ],
+  "world": "push-notification-not-sent",
+  "cwd_init": null,
+  "vendor_session_id": "33c88e66-d4f2-4142-b671-2391e423cc2f",
+  "manual": "Run this scenario on an account with NO push device registered, or with notifications disabled, so the vendor reports the not-sent arm and its reason. The sent/not-sent split is an account-state property, not a prompt property.",
+  "expect": [
+    "tool:PushNotification",
+    "tool_result:push_notification(not sent, with reason)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-push-notification-not-sent-rUFrIm-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:24:43.551Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
