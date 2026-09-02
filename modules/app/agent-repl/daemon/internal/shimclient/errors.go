@@ -3,6 +3,8 @@ package shimclient
 import (
 	"errors"
 	"fmt"
+
+	"connectrpc.com/connect"
 )
 
 // ErrNoProcess is returned by Kill on a client that supervises no child
@@ -92,3 +94,18 @@ func (e *SpecError) Error() string {
 // errProcessDead ends a wait because the supervised process is gone. It is
 // internal: callers learn of death through Exited and Connectivity.
 var errProcessDead = errors.New("shimclient: process is dead")
+
+// Detail renders a shim call failure's own words, without the transport's
+// framing. A Connect error's Error() prefixes its code ("internal: ..."), and
+// the code is the transport's business: a refusal relayed to a client carries
+// what the SHIM said, so the caller reads the shim's account and not ours.
+func Detail(err error) string {
+	if err == nil {
+		return ""
+	}
+	var cerr *connect.Error
+	if errors.As(err, &cerr) {
+		return cerr.Message()
+	}
+	return err.Error()
+}

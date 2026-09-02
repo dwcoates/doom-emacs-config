@@ -214,11 +214,15 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	}
 	o.mu.Lock()
 	delete(o.repoOf, ws)
-	// The bubble goes with the merge: a dropped merge has no ledger.
+	// THE LEDGER IDENTITY IS KEPT LONG ENOUGH TO END THE BUBBLE. It addresses
+	// the queued merge's own bubble, and a bubble that simply stopped
+	// mid-queue-tab would leave a reader with no terminal at all — so the
+	// terminal is drawn against it before the identity is dropped.
+	ledger := o.ledgerOf[ws]
 	delete(o.ledgerOf, ws)
 	o.mu.Unlock()
 	log.Warn(op, "dropped a queued merge", dlog.Context{"workspace": string(ws), "repo": string(repo), "cause": cause})
-	o.publishAbandoned(ctx, ws, summary)
+	o.publishAbandoned(ctx, ws, ledger, summary)
 	o.clearOffer(ws)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
@@ -395,9 +399,39 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 		return false, err
 	}
 	if err := o.start(ctx, repo, front.Workspace, lock); err != nil {
-		return true, err
+		// ONE MERGE'S FAILURE IS NOT THE QUEUE'S. A run that reached its own
+		// terminal has already recorded the failure at ERROR, published the
+		// bubble's terminal and left the queue — so the pump goes on to the
+		// next entry rather than stranding every merge behind this one.
+		//
+		// The test is whether the entry is STILL THERE: a failure early enough
+		// to leave it admitted has no terminal and no teardown, and continuing
+		// would re-admit the same entry forever. That one stops the pump, as
+		// the caller's ERROR record says.
+		if still, checkErr := o.stillQueued(ctx, repo, front.Workspace); checkErr != nil || still {
+			return true, err
+		}
+		o.deps.Log.Global().Debug("daemon.merge.pump", "a merge ended on its own terminal; the queue continues",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "error": err.Error()})
+		return true, nil
 	}
 	return true, nil
+}
+
+// stillQueued reports whether a workspace's entry is still on its repository's
+// queue, which is how the pump tells a merge that ended from one that never
+// started.
+func (o *orchestrator) stillQueued(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) (bool, error) {
+	entries, err := o.deps.DB.MergeQueue(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.Workspace == ws {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // queueTab builds the queue tab: LIVE while this workspace waits, SETTLED the

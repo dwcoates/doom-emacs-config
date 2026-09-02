@@ -19,15 +19,16 @@ import (
 // The controller's operation names. Every logical branch records under one of
 // them, per the logging contract.
 const (
-	opNew      = "daemon.drain.new"
-	opSchedule = "daemon.drain.schedule"
-	opCancel   = "daemon.drain.cancel"
-	opCurrent  = "daemon.drain.current"
-	opNow      = "daemon.drain.shutdown_now"
-	opFire     = "daemon.drain.fire"
-	opRefusal  = "daemon.drain.refusal"
-	opSweep    = "daemon.drain.sweep"
-	opRun      = "daemon.drain.run"
+	opNew       = "daemon.drain.new"
+	opSchedule  = "daemon.drain.schedule"
+	opCancel    = "daemon.drain.cancel"
+	opCurrent   = "daemon.drain.current"
+	opRepublish = "daemon.drain.republish"
+	opNow       = "daemon.drain.shutdown_now"
+	opFire      = "daemon.drain.fire"
+	opRefusal   = "daemon.drain.refusal"
+	opSweep     = "daemon.drain.sweep"
+	opRun       = "daemon.drain.run"
 )
 
 // IdleCutoffEnv compresses the idle cutoff for tests, in milliseconds. It BEATS
@@ -359,4 +360,44 @@ func workspaceIDs(in []ids.WorkspaceID) []string {
 		out = append(out, string(ws))
 	}
 	return out
+}
+
+// Republish re-arms the schedule a previous process left in force: the row is
+// durable, but the daemon topic replays only what THIS process announced, so a
+// reconnecting client would otherwise never learn a shutdown is still standing.
+//
+// It announces exactly what Schedule announced — the banner rendered from the
+// persisted row — and takes the same intake holds, because the hold begins with
+// the schedule and a restart does not end it.
+func (c *controller) Republish(ctx context.Context) error {
+	current, err := c.deps.DB.DrainSchedule(ctx)
+	if err != nil {
+		c.log.Error(opRepublish, "could not read the standing drain schedule at boot", withCause(nil, err))
+		return fmt.Errorf("drain: republish: %w", err)
+	}
+	if current == nil {
+		c.log.Debug(opRepublish, "no drain schedule survived the restart", nil)
+		return nil
+	}
+	reason, err := DecodeReason(current.Reason)
+	if err != nil {
+		// A row that will not decode is corruption, not an absent schedule:
+		// the boot refuses rather than serving as though nothing were standing.
+		c.log.Error(opRepublish, "the persisted schedule's reason will not decode",
+			withCause(dlog.Context{"deadline": current.Deadline}, err))
+		return fmt.Errorf("drain: republish: %w", err)
+	}
+	fields := dlog.Context{
+		"schedule": ScheduleID(*current),
+		"deadline": current.Deadline,
+		"set_at":   current.SetAt,
+	}
+	c.deps.Announcer.DrainScheduled(&agentreplv1.DaemonDrainScheduled{
+		AtMs:   milliseconds(current.Deadline),
+		Reason: reason,
+	})
+	c.holdForSchedule(ctx, fields)
+	c.wake()
+	c.log.Info(opRepublish, "a drain schedule survived the restart and was announced again", fields)
+	return nil
 }

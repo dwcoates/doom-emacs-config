@@ -95,10 +95,16 @@ func (v *verbs) Nuke(ctx context.Context, ws ids.WorkspaceID) error {
 		return fmt.Errorf("nuke %q: %w", ws, err)
 	}
 	if err := v.deps.Git.Nuke(ctx, repo, record.Dir, record.Branch); err != nil {
-		log.Error(opNuke, "could not destroy the worktree and branch", dlog.Context{
+		// A GIT FAILURE HERE IS AN ANSWER, not an internal error: the contract
+		// spells NukeWorkspaceError.git_failed for exactly this, and it carries
+		// git's own account so the caller learns WHAT would not be destroyed
+		// rather than only that something did not work. The record has not been
+		// forgotten, so nothing is half-nuked.
+		log.Debug(opNuke, "git refused to destroy the worktree and branch", dlog.Context{
 			"repo": repo, "dir": record.Dir, "branch": record.Branch, "cause": err.Error(),
 		})
-		return fmt.Errorf("nuke %q: destroy %q: %w", ws, record.Dir, err)
+		return refuse(log, "NukeWorkspace", ArmGitFailed,
+			fmt.Sprintf("destroying %q: %v", record.Dir, err), false)
 	}
 
 	if err := v.deps.DB.Forget(ctx, ws); err != nil {

@@ -813,8 +813,14 @@ func TestASiblingWorktreeOfTheSelfRepoRunsTheEmacsMethodButNeverTriggersTheDeplo
 
 	childResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
 		Repository: repoRef,
-		Form:       &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{Name: strPtr("sibling7a-child")}},
-		Parent:     &agentreplv1.CreateWorkspaceParent{Workspace: parent.ws},
+		// The child carries an initial prompt: the arrangement below waits for
+		// its StartTurn and terminates it, and a promptless create opens no
+		// turn to wait for at all.
+		Form: &agentreplv1.CreateWorkspaceRequest_Standard{Standard: &agentreplv1.CreateWorkspaceStandard{
+			InitialPrompt: said("the child work"),
+			Name:          strPtr("sibling7a-child"),
+		}},
+		Parent: &agentreplv1.CreateWorkspaceParent{Workspace: parent.ws},
 	}))
 	if err != nil || childResp.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateWorkspace(child) = (%v, %v), want a success", childResp, err)
