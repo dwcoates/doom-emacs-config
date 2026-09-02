@@ -424,6 +424,47 @@ that follows must not care which of the two got there first."
     ;; Assert
     (should (equal (agent-repl-test-roster--tabs) '("stays")))))
 
+(ert-deftest agent-repl-test-roster-a-reopened-row-gets-a-live-tab-again ()
+  "A row that closed and came back is LIVE again, not left tombstoned.
+`--ws-del' tombstones, so the reopen must clear the stamp through
+`agent-repl--ws-revive' or `closed = false' never ensures a tab."
+  ;; Arrange -- open the row, then close it so its name is tombstoned.
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "back" :ready))))))
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section "repo" nil))))
+    (should (agent-repl--ws-tombstoned-p "back"))
+    ;; Act -- the SAME id reopens.
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "back" :ready))))))
+    ;; Assert.
+    (should (equal (agent-repl--ws-by-ref-id "a") "back"))))
+
+(ert-deftest agent-repl-test-roster-a-reopened-row-keeps-its-previous-close-on-record ()
+  "The reopen revives the name without erasing `:last-killed-at'."
+  ;; Arrange.
+  (agent-repl-test-roster--with-editor
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "back" :ready))))))
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section "repo" nil))))
+    ;; Act.
+    (agent-repl-roster-apply
+     (agent-repl-test-roster--roster
+      :sections (list (agent-repl-test-roster--section
+                       "repo" (list (agent-repl-test-roster--row "a" "back" :ready))))))
+    ;; Assert.
+    (should (agent-repl--ws-get "back" :last-killed-at))))
+
 (ert-deftest agent-repl-test-roster-a-refused-rename-does-not-abort-the-walk ()
   "The `user-error' must not escape the push handler mid-reconcile."
   ;; Arrange

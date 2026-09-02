@@ -109,6 +109,38 @@ a workspace name used as a bare prefix reads as a different notification."
         ;; Assert
         (should (equal body "Agent ready: ws1"))))))
 
+(ert-deftest agent-repl-test-session-notify-passes-no-explicit-activation ()
+  "The finish-edge banner leaves the click to the backend's workspace default.
+`agent-repl--notify' treats a nil ACTIVATE as \"activate WS yourself\", and
+`--notify-backend-alerter' answers it by running
+`agent-repl--notification-activate' on WS -- raising the frame and
+selecting WS's tab, which is precisely what this banner's click means.
+An explicit function here would REPLACE that default with a hand-rolled
+copy, so the absence is the contract."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((args 'unset))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat _fn &rest a) (setq args a))))
+        ;; Act
+        (agent-repl--maybe-notify-finished "ws1")
+        ;; Assert -- (WS TITLE MESSAGE) and nothing in the ACTIVATE slot.
+        (should (equal (length args) 3))))))
+
+(ert-deftest agent-repl-test-session-notify-targets-the-finished-workspace ()
+  "The banner is posted FOR the workspace whose turn finished."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let ((ws nil))
+      (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) nil))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat _fn &rest a) (setq ws (nth 0 a)))))
+        ;; Act
+        (agent-repl--maybe-notify-finished "ws-finished")
+        ;; Assert
+        (should (equal ws "ws-finished"))))))
+
 ;;;; ---- Reaction (3): the magit refresh ----
 
 (defmacro agent-repl-test-session--with-magit (var &rest body)
