@@ -22,7 +22,6 @@
  * transport is hand-rolled, never the message.
  */
 import { toBinary, type DescMessage, type MessageShape } from "@bufbuild/protobuf";
-import http from "node:http";
 import http2 from "node:http2";
 import { connect as netConnect } from "node:net";
 
@@ -60,10 +59,23 @@ export interface RawStreamOpen {
 /**
  * Open a server stream over HTTP/1.1 and report the head/body ordering.
  *
+ * DIALED AT THE SOCKET, not through `http.request`. Node's client parses the
+ * response and hands back a stream whose `data` events are already past the
+ * head, so from up there "the head arrived alone" and "the head arrived glued
+ * to a frame" are indistinguishable — which is why an earlier version of this
+ * helper simply reported `bodyBeforeHeaders: false` and asserted nothing.
+ *
+ * On HTTP/1.1 the head and the body share one byte stream, so the observable
+ * is WHICH CHUNK completes the head: a server that flushed on accept writes the
+ * head by itself and the chunk carrying `\r\n\r\n` ends there, while a server
+ * that withheld its head until it had something to say writes the head and the
+ * first frame together. That is the same question `rawStreamOpenH2` answers by
+ * comparing two events, asked in the shape HTTP/1.1 makes it available.
+ *
  * Resolves once the first body byte has arrived (or the response ended), which
- * is the point at which both stamps exist. The request socket is destroyed
- * before resolving: a standing stream never ends, and leaving it open would
- * hold the shim's listener past the test.
+ * is the point at which both stamps exist. The socket is destroyed before
+ * resolving: a standing stream never ends, and leaving it open would hold the
+ * shim's listener past the test.
  */
 export function rawStreamOpenH1(
   socketPath: string,
@@ -71,40 +83,70 @@ export function rawStreamOpenH1(
   body: Buffer,
 ): Promise<RawStreamOpen> {
   return new Promise<RawStreamOpen>((resolve, reject) => {
-    const request = http.request(
-      {
-        socketPath,
-        path: procedure,
-        method: "POST",
-        headers: {
-          "content-type": CONNECT_STREAM_CONTENT_TYPE,
-          "connect-protocol-version": "1",
-          "content-length": String(body.length),
-        },
-      },
-      (response) => {
-        const headersAt = process.hrtime.bigint();
-        let firstByteAt: bigint | null = null;
-        const settle = (): void => {
-          response.destroy();
-          request.destroy();
-          resolve({
-            status: response.statusCode ?? 0,
-            contentType: String(response.headers["content-type"] ?? ""),
-            headersAt,
-            firstByteAt,
-            bodyBeforeHeaders: false,
-          });
-        };
-        response.once("data", () => {
-          firstByteAt = process.hrtime.bigint();
+    const socket = netConnect(socketPath);
+    socket.once("error", reject);
+
+    let buffered = Buffer.alloc(0);
+    let headersAt: bigint | null = null;
+    let firstByteAt: bigint | null = null;
+    let status = 0;
+    let contentType = "";
+    let bodyBeforeHeaders = false;
+    let settled = false;
+
+    const settle = (): void => {
+      if (settled || headersAt === null) return;
+      settled = true;
+      socket.destroy();
+      resolve({ status, contentType, headersAt, firstByteAt, bodyBeforeHeaders });
+    };
+
+    socket.on("data", (chunk: Buffer) => {
+      const at = process.hrtime.bigint();
+      if (headersAt === null) {
+        buffered = Buffer.concat([buffered, chunk]);
+        const boundary = buffered.indexOf("\r\n\r\n");
+        if (boundary < 0) return;
+        headersAt = at;
+        const head = buffered.subarray(0, boundary).toString("latin1").split("\r\n");
+        status = Number(head[0]?.split(" ")[1] ?? 0);
+        for (const line of head.slice(1)) {
+          const colon = line.indexOf(":");
+          if (colon < 0) continue;
+          if (line.slice(0, colon).toLowerCase() === "content-type") {
+            contentType = line.slice(colon + 1).trim();
+          }
+        }
+        // THE ASSERTION THIS HELPER EXISTS FOR: body bytes riding in the very
+        // chunk that completed the head mean the server had already produced a
+        // frame when it finally flushed.
+        const trailing = buffered.length - (boundary + 4);
+        if (trailing > 0) {
+          bodyBeforeHeaders = true;
+          firstByteAt = at;
           settle();
-        });
-        response.once("end", settle);
-      },
+          return;
+        }
+        return;
+      }
+      if (firstByteAt === null) firstByteAt = at;
+      settle();
+    });
+    socket.once("end", settle);
+    socket.once("close", settle);
+
+    socket.write(
+      [
+        `POST ${procedure} HTTP/1.1`,
+        "host: shim",
+        `content-type: ${CONNECT_STREAM_CONTENT_TYPE}`,
+        "connect-protocol-version: 1",
+        `content-length: ${String(body.length)}`,
+        "",
+        "",
+      ].join("\r\n"),
     );
-    request.once("error", reject);
-    request.end(body);
+    socket.write(body);
   });
 }
 

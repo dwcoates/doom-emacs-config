@@ -28,7 +28,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog, onLogSinkPoisoned, setClaudeSessionId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
-import { acquireSessionLock } from "../locks.js";
+import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
@@ -135,6 +135,19 @@ export interface EngineDeps {
   readonly identityStore?: AgentIdentityStore;
   /** Injected so a suite can take no kernel lock. */
   readonly acquireLock?: (sessionId: string) => () => void;
+  /**
+   * Injected so a suite can take no kernel workspace lock.
+   *
+   * THE WORKSPACE LOCK IS A SESSION CLAIM, NOT A PROCESS ONE (rollout ruling,
+   * 2026-09-02). A shim that has been spawned but has no session is INERT: it
+   * serves shim.v1 and holds NEITHER lock, so a prelaunched inert shim can sit
+   * beside the live one it is about to replace instead of blocking forever on
+   * a lock the live shim holds for its lifetime. The claim is still made
+   * before the SDK is ever touched, and still held for the process lifetime
+   * once a session exists, so the daemon's probe semantics are unchanged: a
+   * HELD workspace lock still means a live shim owns the conversation.
+   */
+  readonly acquireWorkspaceLock?: (cwd: string) => () => void;
   /** How long StartSession waits for the vendor's own `system:init`. */
   readonly initTimeoutMs?: number;
   /**
@@ -252,6 +265,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const identityStore =
     deps.identityStore ?? createAgentIdentityStore(deps.env.stateDir, workspaceKey, deps.nowMs);
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
+  const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
   const pushes = new SessionPushes(deps.nowMs);
   const live = new LiveWorkTable();
   const foreground = new ForegroundUnitTable();
@@ -259,6 +273,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   let identity: SessionIdentity | undefined;
   let releaseLock: (() => void) | undefined;
+  let releaseWorkspaceLock: (() => void) | undefined;
   let query: QueryLike | undefined;
   let abort: AbortController | undefined;
   let prompts: PromptQueue | undefined;
@@ -1415,6 +1430,30 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         `another process already owns vendor session ${JSON.stringify(inForce)}`,
       );
     }
+    // THE WORKSPACE CLAIM, taken with the session claim and in the same fixed
+    // order the lock module documents (session first, then workspace), so two
+    // shims racing for the pair cannot take them in opposite orders. It lands
+    // HERE rather than at process start because an inert shim owns no
+    // conversation and must not exclude the live one it will replace.
+    try {
+      releaseWorkspaceLock = acquireWorkspace(deps.env.cwd);
+    } catch (err) {
+      releaseLock?.();
+      releaseLock = undefined;
+      LOGGER.log(
+        {
+          level: "warn",
+          workspace_dir: deps.env.cwd,
+          lock_path: workspaceLockPath(deps.env.cwd),
+          cause: err instanceof Error ? err.message : String(err),
+        },
+        "REFUSED StartSession: another shim holds this workspace's lock",
+      );
+      return startSessionRefused(
+        { kind: "conversationOwned" },
+        `another process already owns this workspace (${workspaceLockPath(deps.env.cwd)})`,
+      );
+    }
     const brandNew = source.case === "fresh" || facts === undefined;
     identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
@@ -1449,6 +1488,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       releaseLock?.();
       releaseLock = undefined;
+      releaseWorkspaceLock?.();
+      releaseWorkspaceLock = undefined;
       identity = undefined;
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.log({ level: "error", cause: detail }, "the vendor query could not be started");
@@ -1682,6 +1723,64 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     LOGGER.log(
       { level: "warn", turn_id: ended.id.value, cause: detail },
       "concluded the open turn with a failure terminal: the vendor query died under it",
+    );
+  }
+
+  /**
+   * Conclude the open turn as INTERRUPTED BY HOST SHUTDOWN, because the session
+   * is being torn down under it.
+   *
+   * EVERY STARTED THING EVENTUALLY GETS A TERMINAL ROW, and a turn is a started
+   * thing. Without this a shim that was SIGTERMed or force-killed mid-turn left
+   * the turn open in the record forever: nothing else ever writes it, because
+   * the vendor's own interrupt terminal arrives after the stream this teardown
+   * is closing.
+   *
+   * `host_shutdown` AND NOT `by_user`: nobody chose this. The distinction is
+   * load-bearing for recovery — a user stop is a decision and the conversation
+   * waits, while a host shutdown is an accident and the work is expected to be
+   * driven again when the host returns — so reporting the accident as a
+   * decision tells the user they stopped something they never touched.
+   */
+  function writeHostShutdownTerminal(reason: string): void {
+    const ended = open;
+    if (ended === undefined || identity === undefined) return;
+    const agentId = identity.agentId;
+    const coordinate = `host-shutdown-${ended.id.value}`;
+    deps.persistence.write([
+      {
+        agentId,
+        upsertKey: terminalUpsertKey(agentId, coordinate),
+        source: {
+          vendorUuid: `${coordinate}-${identity.vendorSessionId}`,
+          discriminator: "agent_frame.success.interrupted.host_shutdown",
+        },
+        keepalive: ended.keepalive,
+        item: {
+          kind: "frame",
+          frame: create(conversationv1.AgentFrameSchema, {
+            agentId,
+            result: {
+              case: "success",
+              value: create(conversationv1.AgentSuccessSchema, {
+                outcome: {
+                  case: "interrupted",
+                  value: create(conversationv1.AgentInterruptedSchema, {
+                    cause: {
+                      case: "hostShutdown",
+                      value: create(conversationv1.AgentInterruptedByHostShutdownSchema, {}),
+                    },
+                  }),
+                },
+              }),
+            },
+          }),
+        },
+      },
+    ]);
+    LOGGER.log(
+      { level: "warn", turn_id: ended.id.value, reason },
+      "concluded the open turn as interrupted by host shutdown: the session is being torn down under it",
     );
   }
 
@@ -2235,6 +2334,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       }
       concludeStoppedRuns(stopping);
     }
+    // BEFORE `open` IS CLEARED: the terminal names the turn, and a teardown
+    // that forgot the turn first would have nothing to write it for.
+    writeHostShutdownTerminal(reason);
     open = undefined;
     prompts?.close();
     abort?.abort();
@@ -2258,6 +2360,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushes.standDown();
     releaseLock?.();
     releaseLock = undefined;
+    releaseWorkspaceLock?.();
+    releaseWorkspaceLock = undefined;
   }
 
   /**

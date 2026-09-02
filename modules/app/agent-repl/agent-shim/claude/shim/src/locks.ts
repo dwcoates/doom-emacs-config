@@ -15,8 +15,16 @@
  * for this session?" answers NO when the truth is NOT YET, and the daemon would
  * spawn a duplicate of a shim that is alive and mid-turn.
  *
- * So the shim takes a kernel-enforced lock at startup and holds it for its
- * lifetime. Held is what the daemon probes before spawning.
+ * So the shim takes a kernel-enforced lock and holds it for its lifetime. Held
+ * is what the daemon probes before spawning.
+ *
+ * BOTH LOCKS ARE TAKEN INSIDE `StartSession`, not at process start. A shim that
+ * has bound its socket but has no session is INERT: it owns no conversation, so
+ * it must exclude nobody. That is what lets the daemon prelaunch a replacement
+ * shim beside the live one it is about to retire — a startup-time workspace
+ * claim would wedge the newcomer behind a lock the live shim only drops when it
+ * dies. The probe's meaning is unchanged: a held lock still means a LIVE shim
+ * owns the conversation, because only a shim with a session holds one.
  *
  * # Two keys, both required
  *
@@ -33,7 +41,8 @@
  *
  * Both locks are taken, in a fixed order — session lock first, then workspace
  * lock — so no two shims can ever take them in opposite orders. Failing to take
- * either is a refusal to start.
+ * either is a refusal to START THE SESSION: `StartSession` answers
+ * `conversation_owned` and the process stays inert and serving.
  *
  * # Mechanism
  *
@@ -160,7 +169,8 @@ export function acquireSessionLock(sessionId: string): () => void {
  * order is what keeps two shims racing for the same pair from deadlocking each
  * other. Throws when another shim already owns the workspace or when the
  * platform cannot take the lock; a shim that cannot prove it is the workspace's
- * only one must not start.
+ * only one must not start A SESSION — the caller turns the throw into
+ * `StartSession{conversation_owned}` and keeps serving, inert.
  */
 export function acquireWorkspaceLock(cwd: string): () => void {
   return acquireExclusiveLock({
