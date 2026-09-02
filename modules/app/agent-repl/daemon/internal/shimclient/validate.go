@@ -35,8 +35,13 @@ func validateStartSessionFresh(field string, fresh *shimv1.StartSessionFresh) er
 	if fresh == nil {
 		return invalid(m, field, "arm is nil")
 	}
-	if err := validateAgentModel(field+".model", fresh.GetModel()); err != nil {
-		return err
+	// LANDING 7: model is OPTIONAL — unset means the SDK's own default. A
+	// model that IS named still has to be well formed, so presence selects
+	// whether the base function runs, never a sentinel value.
+	if fresh.Model != nil {
+		if err := validateAgentModel(field+".model", fresh.GetModel()); err != nil {
+			return err
+		}
 	}
 	return validateAgentPermissionMode(field+".permission_mode", fresh.GetPermissionMode())
 }
