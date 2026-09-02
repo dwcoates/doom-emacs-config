@@ -103,6 +103,9 @@ func (r *run) teardown(ctx context.Context, out outcome) {
 	delete(r.o.running, r.repo)
 	delete(r.o.runsByWorkspace, r.ws)
 	delete(r.o.repoOf, r.ws)
+	// The bubble's ledger identity retires with the merge it addressed; a
+	// later merge of the same workspace gets a bubble of its own.
+	delete(r.o.ledgerOf, r.ws)
 	r.o.mu.Unlock()
 	r.o.clearOffer(r.ws)
 
