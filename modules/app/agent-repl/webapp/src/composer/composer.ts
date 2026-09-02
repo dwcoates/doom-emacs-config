@@ -400,7 +400,10 @@ type SubmitPromptReason = NonNullable<SubmitPromptError["reason"]> & { case: str
  */
 export function drawSubmitRefusal(root: HTMLElement, arm: string, text: string): void {
   const refusal = document.createElement("div");
-  refusal.className = "composer-refusal";
+  // BOTH HOOKS: `.refusal` is the vocabulary every refusal surface shares
+  // (preamble §5 — a refusal drawn at the control that made the call), and
+  // `.composer-refusal` is this surface's own.
+  refusal.className = "refusal composer-refusal";
   refusal.setAttribute("data-arm", arm);
   refusal.textContent = text;
   root.appendChild(refusal);
