@@ -241,6 +241,42 @@ come."
      (agent-repl--error nil "elisp.host.register-failed dir=%S detail=%S" dir detail)
      (funcall on-done nil))))
 
+(defconst agent-repl-host--handover-arms '(:transferring-away :not-yet-adopted)
+  "Refusal arms that are HANDOVER NEWS rather than user-facing failures.
+Both are declared on every per-workspace rpc's error type, so one list
+serves them all; they are handed to `agent-repl-host-handle-refusal' and
+nothing is drawn for either.")
+
+(defcustom agent-repl-host-handover-retry-delay 0.2
+  "Seconds before a `not_yet_adopted' refusal re-walks the adopt.
+The refusing daemon is the very one still finishing its takeover, so the
+retry is SCHEDULED rather than issued from inside the answer: a straight
+re-adopt from the response handler would retry as fast as the round trip
+allows for as long as the takeover lasts."
+  :type 'number
+  :group 'agent-repl)
+
+(defun agent-repl-host--on-refused (ws op value)
+  "Report a daemon-authored refusal VALUE of OP for WS, or route the handover.
+THE SLUG NAMES THE RPC (`elisp.host.<op>-refused'), so a reader can ask
+for every refusal of one verb.  The two handover arms are not refusals of
+the verb at all — they are the daemon telling Emacs where the workspace
+went — so they are INFO and go to `agent-repl-host-handle-refusal', the
+one place the handover walk lives."
+  (let* ((arm (plist-get value :cause))
+         (keyword (plist-get arm :arm)))
+    (cond
+     ((memq keyword agent-repl-host--handover-arms)
+      (agent-repl--info ws (format "elisp.host.%s-handover-refusal ws=%%s arm=%%S fields=%%S" op)
+                        ws keyword (plist-get arm :value))
+      (if (eq keyword :not-yet-adopted)
+          (run-at-time agent-repl-host-handover-retry-delay nil
+                       #'agent-repl-host-handle-refusal ws arm)
+        (agent-repl-host-handle-refusal ws arm)))
+     (t
+      (agent-repl--error ws (format "elisp.host.%s-refused ws=%%s error=%%S" op)
+                         ws value)))))
+
 ;;;; ---- Select ----
 
 (defun agent-repl-host-select (ws)
@@ -260,16 +296,22 @@ workspace has no identity to select."
       (agent-repl--warn ws "elisp.host.select-skipped ws=%s reason=no-connection" ws)
       nil)
      (t
-      (setq agent-repl-host-last-selected-id (plist-get ref :id))
       (agent-repl--info ws "elisp.host.select ws=%s id=%S" ws (plist-get ref :id))
       (agent-repl-rpc-select-workspace
        conn (list :workspace ref)
        :on-response
        (lambda (response)
          (pcase (plist-get response :arm)
-           (:success (agent-repl--log ws "elisp.host.selected ws=%s" ws))
-           (:error (agent-repl--error ws "elisp.host.select-refused ws=%s error=%S"
-                                      ws (plist-get response :value)))
+           (:success
+            ;; RECORDED ONLY ON THE ACK.  `agent-repl-host-last-selected-id' is
+            ;; what Emacs believes the daemon stamped as `current'; a refusal is
+            ;; the daemon saying it stamped nothing, and recording the id anyway
+            ;; would leave Emacs disagreeing with the daemon about which
+            ;; workspace is current.
+            (setq agent-repl-host-last-selected-id (plist-get ref :id))
+            (agent-repl--log ws "elisp.host.selected ws=%s id=%S"
+                             ws (plist-get ref :id)))
+           (:error (agent-repl-host--on-refused ws "select" (plist-get response :value)))
            (arm (agent-repl--error ws "elisp.host.select-unknown-arm ws=%s arm=%S" ws arm))))
        :on-failure
        (lambda (detail)
@@ -459,8 +501,7 @@ be served by nobody."
             (agent-repl-host-unsubscribe ws)
             (agent-repl-host-subscribe new ws ref))
            (:error
-            (agent-repl--error ws "elisp.host.adopt-refused ws=%s error=%S"
-                               ws (plist-get response :value)))
+            (agent-repl-host--on-refused ws "adopt" (plist-get response :value)))
            (arm
             (agent-repl--error ws "elisp.host.adopt-unknown-arm ws=%s arm=%S" ws arm))))
        :on-failure
@@ -542,8 +583,12 @@ through here, so a repeated refusal cannot recurse into a loop."
     (pcase arm
       (:transferring-away
        (let ((address (plist-get value :address)))
-         (if (null address)
-             (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s" ws)
+         ;; `address' is a PLAIN string on the wire, so the daemon's zero value
+         ;; decodes to the empty string rather than to an absence: both mean
+         ;; "no address rode the arm" and both are the same breach.
+         (if (or (null address) (string-empty-p address))
+             (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s address=%S"
+                                ws address)
            (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
            (let ((new (agent-repl-host--redial-successor ws address)))
              (if new
