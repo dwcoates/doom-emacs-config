@@ -183,6 +183,56 @@ describe("a detached subagent", () => {
   });
 });
 
+describe("a detached subagent's mid-flight utterance", () => {
+  it("emits exactly ONE sidechain assistant text line after the turn ends", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-utterance"]);
+    const sidechain = (driven.messages as unknown as Record<string, unknown>[]).filter(
+      (m) => m.type === "assistant" && m.agent_id !== undefined,
+    );
+
+    // Assert
+    expect(sidechain).toHaveLength(1);
+  });
+
+  it("stamps the utterance with IsSidechain, AgentId and SourceToolUseId on its own transcript", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-utterance"]);
+    const agentId = agentIdOf(driven);
+    const utterance = driven
+      .subagent(agentId)
+      .find((l) => l.type === "assistant") as Record<string, unknown> | undefined;
+
+    // Assert
+    expect({
+      isSidechain: utterance?.isSidechain,
+      agentId: utterance?.agentId,
+    }).toEqual({ isSidechain: true, agentId });
+  });
+
+  it("writes NO completion — the agent stays live", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-utterance"]);
+
+    // Assert. Nothing here ever finishes the agent; only a stop does.
+    expect(ofType(driven, "system", "task_notification")).toHaveLength(0);
+    expect(ofType(driven, "system", "task_updated")).toHaveLength(0);
+  });
+
+  it("delivers the utterance AFTER the turn ended, same as any detached work", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!subagent-detached-utterance"]);
+    const types = (driven.messages as unknown as Record<string, unknown>[]).map((m) => m.type);
+    const resultIndex = types.indexOf("result");
+    const lateAttribution = (driven.messages as unknown as Record<string, unknown>[]).findIndex(
+      (m, i) => i > resultIndex && m.agent_id !== undefined,
+    );
+
+    // Assert
+    expect(lateAttribution).toBeGreaterThan(resultIndex);
+  });
+});
+
 describe("the fan-wide cancel setup", () => {
   it("leaves THREE live items — two agents and a shell", async () => {
     // Arrange + Act
@@ -299,5 +349,82 @@ describe("the fan-wide cancel setup", () => {
     expect(ofType(driven, "result")).toHaveLength(1);
     const started = ofType(driven, "system", "task_started")[0];
     expect(seen).toEqual([started?.task_id]);
+  });
+});
+
+describe("historical usage attributed to a nested subagent", () => {
+  // UNGROUNDED, INVENTED (see MANIFEST.md): no capture carries a file-plane
+  // -only historical usage record with nested-subagent attribution.
+  const nestedAgentIdOf = (result: string): string => {
+    const match = /nested subagent (\S+)\./.exec(result);
+    if (match?.[1] === undefined) throw new Error("no nested agent id in the conclusion");
+    return match[1];
+  };
+
+  it("writes NO paired stream-plane message for the historical record", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!usage-historical"]);
+    const attributed = (driven.messages as unknown as Record<string, unknown>[]).filter(
+      (m) => m.agent_id !== undefined,
+    );
+
+    // Assert. Only the ordinary turn's own conclude() messages reach the
+    // stream; the nested agent's usage record is FILE-plane only.
+    expect(attributed).toHaveLength(0);
+  });
+
+  it("marks the nested agent with spawnDepth 2", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!usage-historical"]);
+    const agentId = nestedAgentIdOf((ofType(driven, "result")[0]?.result as string) ?? "");
+
+    // Assert
+    expect(driven.subagentMeta(agentId).spawnDepth).toBe(2);
+  });
+
+  it("carries the ephemeral 5m/1h cache-creation split", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!usage-historical"]);
+    const agentId = nestedAgentIdOf((ofType(driven, "result")[0]?.result as string) ?? "");
+    const record = driven.subagent(agentId).find((l) => l.type === "assistant") as
+      | { message: { usage: { cache_creation: Record<string, number> } } }
+      | undefined;
+
+    // Assert
+    expect(record?.message.usage.cache_creation).toEqual({
+      ephemeral_5m_input_tokens: 25,
+      ephemeral_1h_input_tokens: 50,
+    });
+  });
+
+  it("carries server_tool_use, service_tier, speed and inference_geo", async () => {
+    // Arrange + Act
+    const driven = await driveScenario(["!usage-historical"]);
+    const agentId = nestedAgentIdOf((ofType(driven, "result")[0]?.result as string) ?? "");
+    const record = driven.subagent(agentId).find((l) => l.type === "assistant") as
+      | {
+          message: {
+            usage: {
+              server_tool_use: Record<string, number>;
+              service_tier: string;
+              speed: string;
+              inference_geo: string;
+            };
+          };
+        }
+      | undefined;
+
+    // Assert
+    expect({
+      serverToolUse: record?.message.usage.server_tool_use,
+      serviceTier: record?.message.usage.service_tier,
+      speed: record?.message.usage.speed,
+      inferenceGeo: record?.message.usage.inference_geo,
+    }).toEqual({
+      serverToolUse: { web_search_requests: 2, web_fetch_requests: 3 },
+      serviceTier: "priority",
+      speed: "fast",
+      inferenceGeo: "us-east-1",
+    });
   });
 });
