@@ -206,10 +206,68 @@ func (s *server) WatchHostWorkspace(
 	}
 	s.holdParticipant(subject.Record.ID, true, +1)
 	defer s.holdParticipant(subject.Record.ID, true, -1)
-	return serveTopic(s, ctx, rpc, subject.Log, s.hostTopic(subject.Record.ID), out,
-		func(push *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
-			return push
-		})
+
+	// COMPOSE BEFORE SUBSCRIBING. The state topic replays its latest value to
+	// a new subscriber, so publishing here is what gives every fresh
+	// subscription its opening `host` push — including the first one, before
+	// any session edge has ever fired.
+	s.PublishHostWorkspace(ctx, subject.Record.ID)
+	return s.serveHost(ctx, rpc, subject.Log, subject.Record.ID, out)
+}
+
+// serveHost serves the host stream's TWO topics onto one wire: the `host`
+// state and the four event arms. They are separate topics (see host.go) and
+// this is the one place they are merged, in publication order per topic.
+func (s *server) serveHost(
+	ctx context.Context,
+	rpc string,
+	log dlog.Logger,
+	ws ids.WorkspaceID,
+	out *connect.ServerStream[agentreplv1.WatchHostWorkspaceResponse],
+) error {
+	streamCtx, cancel := s.streamContext(ctx)
+	defer cancel()
+
+	states := s.hostStateTopic(ws).Subscribe(streamCtx)
+	events := s.hostTopic(ws).Subscribe(streamCtx)
+	s.acceptStream(ctx, rpc)
+	log.Debug(rpc, "accepted a standing stream", nil)
+
+	for {
+		var push *agentreplv1.WatchHostWorkspaceResponse
+		select {
+		case <-streamCtx.Done():
+			log.Debug(rpc, "the standing stream ended on cancellation", nil)
+			return nil
+		case view, ok := <-states:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if view == nil {
+				log.Error(rpc, "the host composer raised an empty view; it was not sent", nil)
+				continue
+			}
+			push = &agentreplv1.WatchHostWorkspaceResponse{
+				Push: &agentreplv1.WatchHostWorkspaceResponse_Host{Host: view},
+			}
+		case event, ok := <-events:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			if event == nil {
+				log.Error(rpc, "a publisher raised an empty push; it was not sent", nil)
+				continue
+			}
+			push = event
+		}
+		if err := out.Send(push); err != nil {
+			log.Debug(rpc, "the standing stream's client went away",
+				dlog.Context{"cause": err.Error()})
+			return nil
+		}
+	}
 }
 
 // WatchWebWorkspace serves one workspace's WEB link stream. The web side never
