@@ -6,6 +6,20 @@ import (
 	"claude-repld/internal/shimclient"
 )
 
+// The FooterStatus.status arms this resolver emits, in the precedence order
+// documented below. render-colors.json's footer_status table is asserted
+// against them at construction: an arm landing without a color would draw
+// unpainted, and a table row no arm claims is a state the vocabulary paints and
+// the resolver can never reach.
+var statusArms = []string{
+	"disconnected", "closing", "interrupted", "loading", "blocked", "merging",
+	"waiting", "thinking", "background", "idle",
+}
+
+// The FooterAllowance.status arms this resolver emits, asserted the same way
+// against the footer_allowance table.
+var allowanceArms = []string{"allowed", "allowed_warning", "rejected"}
+
 // status resolves the whole status family — the coarse status, its step and
 // its activity line — as ONE tree, so an illegal pairing is unrepresentable
 // rather than forbidden by comment.

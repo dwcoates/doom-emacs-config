@@ -194,8 +194,9 @@ type viewFixture struct {
 	sidebarRows <-chan *frontendv1.WorkspaceRoster
 }
 
-// testColors is a fully painted render-colors table: both resolvers refuse to
-// serve an unpainted state, which is the guarantee they exist to keep.
+// testColors is a fully painted render-colors table: every resolver here
+// refuses to serve an unpainted state, which is the guarantee they exist to
+// keep.
 func testColors() vocab.RenderColors {
 	status := map[string]string{}
 	for _, arm := range []string{
@@ -222,6 +223,15 @@ func testColors() vocab.RenderColors {
 			"dead": "blue", "no_session": "none",
 		},
 		TopbarTones: []string{"none", "blue", "purple", "red", "yellow", "green"},
+		FooterStatus: map[string]string{
+			"disconnected": "grey", "closing": "grey", "interrupted": "grey",
+			"loading": "grey", "blocked": "grey", "merging": "grey",
+			"waiting": "grey", "thinking": "grey", "background": "grey",
+			"idle": "grey",
+		},
+		FooterAllowance: map[string]string{
+			"allowed": "grey", "allowed_warning": "grey", "rejected": "grey",
+		},
 	}
 }
 
@@ -241,7 +251,7 @@ func newViewFixture(t *testing.T, ws ids.WorkspaceID) *viewFixture {
 	if err != nil {
 		t.Fatalf("topbar.New: %v", err)
 	}
-	foot, err := footer.New(log)
+	foot, err := footer.New(testColors(), log)
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}
@@ -356,7 +366,7 @@ func TestPublishViewsSkipsAViewNothingHasPublished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("topbar.New: %v", err)
 	}
-	foot, err := footer.New(surfaces)
+	foot, err := footer.New(testColors(), surfaces)
 	if err != nil {
 		t.Fatalf("footer.New: %v", err)
 	}

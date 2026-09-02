@@ -24,6 +24,7 @@ import (
 	"claude-repld/internal/ids"
 	"claude-repld/internal/publish"
 	"claude-repld/internal/sessionwatcher"
+	"claude-repld/internal/vocab"
 )
 
 // MergeFacts is what the merge orchestrator tells the footer and the sidebar
@@ -187,7 +188,9 @@ const (
 	DefaultWarningRowWidth = 120
 )
 
-// New builds the footer resolver.
-func New(log dlog.Surfaces, opts ...Option) (Resolver, error) {
-	return newResolver(log, opts...)
+// New builds the footer resolver. It takes the render-colors vocabulary so the
+// footer_status and footer_allowance tables are asserted against the arms this
+// resolver emits, at boot, rather than drawing an unpainted state later.
+func New(colors vocab.RenderColors, log dlog.Surfaces, opts ...Option) (Resolver, error) {
+	return newResolver(colors, log, opts...)
 }
