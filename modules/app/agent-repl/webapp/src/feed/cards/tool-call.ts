@@ -51,7 +51,7 @@ import {
   type FeedToolCallRuntime,
   type FeedToolCallTextOutput,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { formatAge } from "../../duration.js";
+import { formatTickedAge } from "../../duration.js";
 import { renderExternalLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -355,7 +355,7 @@ export function drawFeedToolCallLastProgress(
   quiet.className = "tool-quiet";
   quiet.setAttribute("data-since-ms", String(since));
   const paint = (nowMs: number): void => {
-    quiet.textContent = `quiet for ${formatAge(nowMs - since)}`;
+    quiet.textContent = `quiet for ${formatTickedAge(nowMs - since)}`;
   };
   paint(rc.ctx.ticker.now());
   const stop = rc.ctx.ticker.subscribe((nowMs) => {
