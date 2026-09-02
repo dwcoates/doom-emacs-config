@@ -747,6 +747,75 @@ clears the input; the webapp draws panels from its own dev composer."
                        daemon "elisp.input.command-answered" ":command-panel")))
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
+(ert-deftest agent-repl-itest-composer-command-acted-is-answered-not-awaited ()
+  "`command_acted' is the third \"answered, nothing to await\" arm.
+The daemon recognized a session-acting command and queued the act; the
+visible effect arrives on the component streams, so Emacs's whole reaction
+is to clear the input and log which arm answered."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script
+     daemon "SubmitPrompt"
+     '((success . ((commandActed . ())))))
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "/model opus")))
+        (unwind-protect
+            (progn
+              ;; Act.
+              (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+              (agent-repl-itest--await-call daemon "SubmitPrompt")
+              ;; Assert.
+              (agent-repl-itest-composer--await-log daemon "elisp.input.command-answered" "info")
+              (should (agent-repl-itest-composer--logged-p daemon "elisp.input.command-answered" "info"))
+              ;; Assert: the input is cleared.
+              (agent-repl-itest--wait-until
+               (lambda () (equal (with-current-buffer buf (buffer-string)) ""))
+               nil "the composer to clear")
+              (should (equal (with-current-buffer buf (buffer-string)) ""))
+              ;; Assert: the log context names the answered ARM.
+              (should (agent-repl-itest-composer--log-names-arm-p
+                       daemon "elisp.input.command-answered" ":command-acted")))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
+(ert-deftest agent-repl-itest-composer-duplicate-submission-keeps-the-text ()
+  "`duplicate_submission' says the key was already accepted: nothing landed
+twice and nothing is owed a resend, so the text stays and the queue is
+untouched."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest--script daemon "SubmitPrompt"
+                              '((error . ((duplicateSubmission . ())))))
+    (agent-repl-itest-composer--with-composer daemon 'open ref
+      (ignore ref)
+      (let ((messages nil)
+            (buf (agent-repl-itest-composer--make-buffer
+                  agent-repl-itest-composer--ws "run the tests")))
+        (unwind-protect
+            (progn
+              (cl-letf (((symbol-function 'message)
+                         (lambda (fmt &rest args)
+                           (push (if args (apply #'format fmt args) fmt) messages)
+                           nil)))
+                ;; Act.
+                (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
+                (agent-repl-itest--await-call daemon "SubmitPrompt")
+                (agent-repl-itest--wait-until
+                 (lambda ()
+                   (seq-some (lambda (text) (string-match-p "already accepted" text))
+                             messages))
+                 nil "the duplicate-key message")
+                ;; Assert: the user is told plainly.
+                (should (seq-some (lambda (text) (string-match-p "already accepted" text))
+                                  messages)))
+              ;; Assert: the composer keeps every word.
+              (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
+              ;; Assert: a refusal is an ANSWER, so nothing is held for resend.
+              (should-not (agent-repl-prompt-queue-pending
+                           agent-repl-itest-composer--ws :outage)))
+          (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
+
 (ert-deftest agent-repl-itest-composer-merging-refusal-preserves-the-text ()
   "A `merging' refusal keeps the user's text: undelivered intent survives.
 SubmitPromptError.merging is the daemon's own refusal arm; the composer
@@ -1192,15 +1261,15 @@ so the refusal must leave the composer exactly as the user left it."
           (agent-repl-itest-composer--kill-buffer agent-repl-itest-composer--ws buf))))))
 
 ;; audit-2 #32
-(ert-deftest agent-repl-itest-composer-turn-already-open-refusal-names-its-arm ()
-  "A `turn_already_open' refusal is REPORTED with its own arm keyword.
-The generic branch is the whole treatment for eight of the nine arms, so
-the arm has to reach the record: \"submission refused (:turn-already-open)\"
+(ert-deftest agent-repl-itest-composer-feed-undecodable-refusal-names-its-arm ()
+  "A `feed_undecodable' refusal is REPORTED with its own arm keyword.
+The generic branch is the whole treatment for most declared arms, so the
+arm has to reach the record: \"submission refused (:feed-undecodable)\"
 is the only thing that tells a reader which refusal happened."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest--script daemon "SubmitPrompt"
-                              '((error . ((turnAlreadyOpen . ())))))
+                              '((error . ((feedUndecodable . ())))))
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       ;; Act.
@@ -1211,7 +1280,7 @@ is the only thing that tells a reader which refusal happened."
       ;; Assert.
       (should (seq-some
                (lambda (entry)
-                 (seq-some (lambda (arg) (string-match-p ":turn-already-open" arg))
+                 (seq-some (lambda (arg) (string-match-p ":feed-undecodable" arg))
                            (agent-repl-itest--body-field entry 'context 'arguments)))
                (agent-repl-itest-composer--log-entries
                 daemon "elisp.input.unknown-error-arm" "error"))))))
