@@ -222,11 +222,12 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // ledger is the bubble's ledger identity, captured before the caller dropped
 // it: an empty one means no bubble was ever drawn and there is nothing to end.
 //
-// THE ABANDONED ARM IS THE ONLY EXPRESSIBLE CAUSE. `FeedMergeError` carries
-// `failed` and `abandoned` and nothing else, so an evict, a dequeue release and
-// a run's own give-up all end here with the same arm; distinguishing them is a
-// landing-7 shape, and the daemon states what it CAN state rather than
-// inventing an arm or leaving the bubble unterminated.
+// THE ABANDONED ARM IS STILL THE ONLY ARM. `FeedMergeError` carries `failed`
+// and `abandoned` and nothing else, so an evict, a dequeue release and a run's
+// own give-up all end here under the same arm. What landing 7 added is
+// `FeedMergeAbandoned.summary`: the resolved sentence for the collapsed line,
+// composed from the abandon CAUSE by the caller that dropped the merge, so the
+// cause reaches a reader in prose even though the arm does not distinguish it.
 func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, summary string) {
 	o.deps.Log.Global().Debug("daemon.merge.abandoned", "a merge left the queue without running",
 		dlog.Context{"workspace": string(ws), "summary": summary})
@@ -235,10 +236,9 @@ func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID,
 		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
 			&frontendv1.FeedMergeError{
 				EndedAtMs: o.nowMS(),
-				// FeedMergeAbandoned is an EMPTY message: the cause has
-				// nowhere to ride on the wire, so the summary stays in the
-				// log record above and the arm carries only itself.
-				Reason: &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{}},
+				Reason: &frontendv1.FeedMergeError_Abandoned{
+					Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary},
+				},
 			}))
 	}
 	// The surfaces come AFTER the terminal, in the teardown's own order: the
