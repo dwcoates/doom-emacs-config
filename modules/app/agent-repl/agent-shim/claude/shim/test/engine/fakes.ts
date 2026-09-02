@@ -257,7 +257,13 @@ export class RecordingPersistence implements Persistence {
     if (this.liveWorkError !== undefined) return Promise.reject(this.liveWorkError);
     return Promise.resolve(this.live);
   }
-  openBashRun(): Promise<AsyncIterable<conversationv1.AgentBash>> {
+  /** The `stillLive` predicate the caller passed on its last openBashRun, if any. */
+  lastStillLive: (() => boolean) | undefined;
+  openBashRun(
+    _work?: conversationv1.DetachedWorkId,
+    stillLive?: () => boolean,
+  ): Promise<AsyncIterable<conversationv1.AgentBash>> {
+    this.lastStillLive = stillLive;
     const frames = this.bashFrames;
     return Promise.resolve({
       async *[Symbol.asyncIterator](): AsyncIterator<conversationv1.AgentBash> {

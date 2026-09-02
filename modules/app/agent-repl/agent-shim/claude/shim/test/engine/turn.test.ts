@@ -912,3 +912,54 @@ describe("DetachForeground on a live foreground unit", () => {
     expect(response.result.case).toBe("success");
   });
 });
+
+/**
+ * watchBash's own `stillLive` predicate -- the shim's answer to "does this run
+ * still exist", used to turn a store refusal into a race worth waiting out
+ * (store/reader.ts's awaitFirstRow). RecordingPersistence.openBashRun ignored
+ * both its arguments before this suite, so the predicate turn.ts builds and
+ * passes in was created but never CALLED by any test; it now records the
+ * predicate it was handed so it can be invoked directly.
+ */
+describe("WatchBash's stillLive predicate", () => {
+  it("is true while the live table still holds the work", async () => {
+    const h = await harness();
+    h.live.onTaskStarted({
+      type: "system",
+      subtype: "task_started",
+      task_id: "b01",
+      tool_use_id: "t",
+      description: "",
+      uuid: "00000000-0000-4000-8000-000000000000",
+      session_id: "s",
+    } as SdkTaskStartedMessage);
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    for await (const response of h.turns.watchBash(
+      create(shimv1.WatchBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "t" }),
+      }),
+    )) {
+      void response;
+      break;
+    }
+
+    expect(h.persistence.lastStillLive?.()).toBe(true);
+  });
+
+  it("is false for a handle the live table never held", async () => {
+    const h = await harness();
+    h.persistence.bashFrames = [create(conversationv1.AgentBashSchema, {})];
+
+    for await (const response of h.turns.watchBash(
+      create(shimv1.WatchBashRequestSchema, {
+        work: create(conversationv1.DetachedWorkIdSchema, { value: "nope" }),
+      }),
+    )) {
+      void response;
+      break;
+    }
+
+    expect(h.persistence.lastStillLive?.()).toBe(false);
+  });
+});
