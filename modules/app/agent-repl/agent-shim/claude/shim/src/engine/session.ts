@@ -260,7 +260,13 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   let modelCatalog: conversationv1.ModelOption[] = [];
   let started = false;
   let standingDown = false;
-  let pendingModel: conversationv1.AgentModel | undefined;
+  /** A model change accepted mid-turn, and the call still waiting on it. */
+  let pendingModel:
+    | {
+        readonly model: conversationv1.AgentModel;
+        readonly resolve: (response: shimv1.SetSessionModelResponse) => void;
+      }
+    | undefined;
   let accountUsageHandle: unknown;
   let cadence: KeepaliveCadence | undefined;
   let initResolve: ((message: SdkMessage) => void) | undefined;
@@ -1070,9 +1076,33 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (ended.keepalive) rewind.noteKeepaliveTurn();
     cadence?.resume();
     if (pendingModel !== undefined) {
-      const model = pendingModel;
+      const waiting = pendingModel;
       pendingModel = undefined;
-      await applyModel(model);
+      try {
+        await applyModel(waiting.model);
+        waiting.resolve(
+          create(shimv1.SetSessionModelResponseSchema, {
+            result: {
+              case: "success",
+              value: create(shimv1.SetSessionModelSuccessSchema, {
+                modelChanged: create(conversationv1.SessionModelChangedSchema, {
+                  effectiveModel: waiting.model,
+                }),
+              }),
+            },
+          }),
+        );
+      } catch (err) {
+        // The caller has been waiting for this exact moment, so the vendor's
+        // refusal is ITS answer; swallowing it would leave the daemon believing
+        // a model change landed that never did.
+        waiting.resolve(
+          setSessionModelRefused(
+            { kind: "vendorRefused" },
+            err instanceof Error ? err.message : String(err),
+          ),
+        );
+      }
     }
     await pushContextUsage();
     if (identity !== undefined) {
@@ -1804,17 +1834,24 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // ONE MODEL PER TURN, a deliberate departure from the SDK's mid-turn
       // setModel: a turn that changed model halfway would have two models'
       // pricing and two models' behavior in one answer.
-      pendingModel = model;
+      //
+      // AND THE CALL DOES NOT RESOLVE UNTIL IT HAS. Answering now would tell
+      // the caller the model is in effect while the running turn is still
+      // answering on the old one -- so the next turn-end's own
+      // `context_usage.model` would contradict the ack it already had. The
+      // response waits for the boundary that makes it true.
       LOGGER.log({ model: model.name, turn_id: open.id.value }, "model change accepted; it resolves at the turn boundary");
-      return create(shimv1.SetSessionModelResponseSchema, {
-        result: {
-          case: "success",
-          value: create(shimv1.SetSessionModelSuccessSchema, {
-            modelChanged: create(conversationv1.SessionModelChangedSchema, {
-              effectiveModel: model,
-            }),
-          }),
-        },
+      return new Promise<shimv1.SetSessionModelResponse>((resolve) => {
+        // A second SetSessionModel during one turn REPLACES the first, and the
+        // first caller is told so rather than left holding a promise nothing
+        // will ever settle.
+        pendingModel?.resolve(
+          setSessionModelRefused(
+            { kind: "vendorRefused" },
+            "a later SetSessionModel replaced this one before the turn ended",
+          ),
+        );
+        pendingModel = { model, resolve };
       });
     }
     try {
@@ -1969,6 +2006,19 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     if (standingDown) return;
     standingDown = true;
     gate.standDown(reason);
+    // A CALL WAITING ON A TURN BOUNDARY THAT WILL NEVER COME still gets an
+    // answer: leaving the daemon holding a promise nothing can settle is worse
+    // than telling it the change did not land.
+    if (pendingModel !== undefined) {
+      const waiting = pendingModel;
+      pendingModel = undefined;
+      waiting.resolve(
+        setSessionModelRefused(
+          { kind: "vendorRefused" },
+          `the session stood down before the turn ended (${reason}); the model change did not land`,
+        ),
+      );
+    }
     cadence?.stop();
     if (accountUsageHandle !== undefined) {
       (deps.scheduler ?? REAL_SCHEDULER).clearInterval(accountUsageHandle);

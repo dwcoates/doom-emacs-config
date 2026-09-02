@@ -264,7 +264,14 @@ describe("SetSessionModel", () => {
     let settled = false;
     const pending = shim.clients.h1
       .setSessionModel(
-        create(shimv1.SetSessionModelRequestSchema, { model: modelNamed("fake-sonnet-5") }),
+        // The threshold is stated so the COLD GATE is not the subject here: a
+        // turn has run, so the transcript now has context, and an unset
+        // threshold (0) makes every switch a refused cold-cache switch before
+        // the turn boundary is ever reached.
+        create(shimv1.SetSessionModelRequestSchema, {
+          model: modelNamed("fake-sonnet-5"),
+          coldThresholdTokens: 1_000_000n,
+        }),
       )
       .then((response) => {
         settled = true;
