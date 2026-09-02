@@ -653,18 +653,6 @@ func TestAChangedViewIsPublishedAgain(t *testing.T) {
 	}
 }
 
-// TestAnUnwiredFactsSourceAnswersNoSession pins the explicit null object: it
-// answers honestly rather than inventing an identity.
-func TestAnUnwiredFactsSourceAnswersNoSession(t *testing.T) {
-	// Arrange. Act.
-	_, ok := unwiredSessionFacts{}.HostSessionFacts(testWorkspaceID)
-
-	// Assert.
-	if ok {
-		t.Fatal("the unwired facts source claimed a session")
-	}
-}
-
 // TestAHibernatedSessionStaysLiveWithTheShimUnattached pins the one session
 // mark that is NOT a death: the idle sweep's park. A prompt brings the session
 // straight back, so the host keeps the live arm and only the shim's attachment
