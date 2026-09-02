@@ -177,6 +177,13 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
           ...(options.extraArgv ?? []),
         ];
 
+  // THE CLIENTS DIAL THE SOCKET THIS SPAWN ACTUALLY BOUND, not the directory
+  // set's default. A second shim over reused directories listens on its own
+  // path, and clients built from `dirs.listen` would silently reach the FIRST
+  // shim — every assertion about the second one would then be about the wrong
+  // process.
+  const listenAt = argv[argv.indexOf("--listen") + 1] ?? dirs.listen;
+
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     CLAUDE_CONFIG_DIR: dirs.configDir,
@@ -226,7 +233,7 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     store,
     log,
     logPipe: pipeEnd,
-    clients: createShimClients(dirs.listen),
+    clients: createShimClients(listenAt),
     stderr: () => stderrText,
     exited,
     signal: (signal) => {

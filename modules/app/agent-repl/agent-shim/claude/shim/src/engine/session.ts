@@ -28,7 +28,7 @@
 import { create } from "@bufbuild/protobuf";
 import { bindLog, onLogSinkPoisoned, setClaudeSessionId } from "../log.js";
 import { conversationv1, shimv1 } from "../proto.js";
-import { acquireSessionLock } from "../locks.js";
+import { acquireSessionLock, acquireWorkspaceLock, workspaceLockPath } from "../locks.js";
 import { workspaceLockKey } from "../locks.js";
 import { recordAgentBinaryVersion, requireSessionRuntime } from "../build-identity.js";
 import { subagentId, toolCallActivityId } from "../convert/ids.js";
@@ -135,6 +135,19 @@ export interface EngineDeps {
   readonly identityStore?: AgentIdentityStore;
   /** Injected so a suite can take no kernel lock. */
   readonly acquireLock?: (sessionId: string) => () => void;
+  /**
+   * Injected so a suite can take no kernel workspace lock.
+   *
+   * THE WORKSPACE LOCK IS A SESSION CLAIM, NOT A PROCESS ONE (rollout ruling,
+   * 2026-09-02). A shim that has been spawned but has no session is INERT: it
+   * serves shim.v1 and holds NEITHER lock, so a prelaunched inert shim can sit
+   * beside the live one it is about to replace instead of blocking forever on
+   * a lock the live shim holds for its lifetime. The claim is still made
+   * before the SDK is ever touched, and still held for the process lifetime
+   * once a session exists, so the daemon's probe semantics are unchanged: a
+   * HELD workspace lock still means a live shim owns the conversation.
+   */
+  readonly acquireWorkspaceLock?: (cwd: string) => () => void;
   /** How long StartSession waits for the vendor's own `system:init`. */
   readonly initTimeoutMs?: number;
   /**
@@ -252,6 +265,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
   const identityStore =
     deps.identityStore ?? createAgentIdentityStore(deps.env.stateDir, workspaceKey, deps.nowMs);
   const acquireLock = deps.acquireLock ?? acquireSessionLock;
+  const acquireWorkspace = deps.acquireWorkspaceLock ?? acquireWorkspaceLock;
   const pushes = new SessionPushes(deps.nowMs);
   const live = new LiveWorkTable();
   const foreground = new ForegroundUnitTable();
@@ -259,6 +273,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   let identity: SessionIdentity | undefined;
   let releaseLock: (() => void) | undefined;
+  let releaseWorkspaceLock: (() => void) | undefined;
   let query: QueryLike | undefined;
   let abort: AbortController | undefined;
   let prompts: PromptQueue | undefined;
@@ -1415,6 +1430,30 @@ export function createEngine(deps: EngineDeps): SessionEngine {
         `another process already owns vendor session ${JSON.stringify(inForce)}`,
       );
     }
+    // THE WORKSPACE CLAIM, taken with the session claim and in the same fixed
+    // order the lock module documents (session first, then workspace), so two
+    // shims racing for the pair cannot take them in opposite orders. It lands
+    // HERE rather than at process start because an inert shim owns no
+    // conversation and must not exclude the live one it will replace.
+    try {
+      releaseWorkspaceLock = acquireWorkspace(deps.env.cwd);
+    } catch (err) {
+      releaseLock?.();
+      releaseLock = undefined;
+      LOGGER.log(
+        {
+          level: "warn",
+          workspace_dir: deps.env.cwd,
+          lock_path: workspaceLockPath(deps.env.cwd),
+          cause: err instanceof Error ? err.message : String(err),
+        },
+        "REFUSED StartSession: another shim holds this workspace's lock",
+      );
+      return startSessionRefused(
+        { kind: "conversationOwned" },
+        `another process already owns this workspace (${workspaceLockPath(deps.env.cwd)})`,
+      );
+    }
     const brandNew = source.case === "fresh" || facts === undefined;
     identity = brandNew
       ? await SessionIdentity.fresh(identityStore, () => vendorSessionId)
@@ -1449,6 +1488,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     } catch (err) {
       releaseLock?.();
       releaseLock = undefined;
+      releaseWorkspaceLock?.();
+      releaseWorkspaceLock = undefined;
       identity = undefined;
       const detail = err instanceof Error ? err.message : String(err);
       LOGGER.log({ level: "error", cause: detail }, "the vendor query could not be started");
@@ -2258,6 +2299,8 @@ export function createEngine(deps: EngineDeps): SessionEngine {
     pushes.standDown();
     releaseLock?.();
     releaseLock = undefined;
+    releaseWorkspaceLock?.();
+    releaseWorkspaceLock = undefined;
   }
 
   /**
