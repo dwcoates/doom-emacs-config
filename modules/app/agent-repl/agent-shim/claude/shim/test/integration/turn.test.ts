@@ -9,6 +9,7 @@
  * restarted daemon able to reattach and miss nothing.
  */
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
@@ -106,7 +107,7 @@ describe("StartTurn", () => {
     // paint was missing the turn it had just started. `floor` still says there
     // is no older history, which is a different statement from "no page".
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
 
     const response = await shim.clients.h1.startTurn(
       startTurnRequest({ turn: "t1", text: "!md" }),
@@ -115,8 +116,22 @@ describe("StartTurn", () => {
     if (response.result.case !== "success") throw new Error("StartTurn refused");
     const page = response.result.value.page;
     expect(page?.entries.length).toBe(1);
-    expect(page?.entries[0]?.entry?.entry.case).toBe("userPrompt");
     expect(page?.boundary.case).toBe("floor");
+    // THE ENTRY IS THAT PROMPT, not merely a prompt: its TurnId and its text
+    // are the ones this call carried. "A user_prompt is on the page" would pass
+    // on a shim that served some other turn's question.
+    const served = entryPrompt(page?.entries[0] ?? create(conversationv1.HistoryEntryAtSchema, {}));
+    expect(served?.id?.value).toBe("t1");
+    const blocks = served?.said?.content?.blocks ?? [];
+    expect(blocks.map((block) => (block.block.case === "text" ? block.block.value.text : ""))).toEqual([
+      "!md",
+    ]);
+    // AND THE FILE PLANE AGREES. Both values above are the shim's own; the
+    // vendor's transcript is the independent witness that the prompt it served
+    // is the prompt it actually delivered.
+    expect(userPrompts(readTranscript(shim.dirs, started.vendorSessionId)).map(promptText)).toEqual([
+      "!md",
+    ]);
   });
 
   test("a later turn's page carries the previous turn's settled entries, newest first", async () => {
@@ -137,9 +152,22 @@ describe("StartTurn", () => {
     if (response.result.case !== "success") throw new Error("StartTurn refused");
     const entries = response.result.value.page?.entries ?? [];
     expect(entries.length).toBeGreaterThan(0);
-    // Newest first: the pointers descend.
-    const pointers = entries.map((entry) => Number(entry.at?.value ?? 0));
-    expect([...pointers].sort((a, b) => b - a)).toEqual(pointers);
+    // NEWEST FIRST, ASSERTED WITHOUT READING THE POINTER. Pointers are OPAQUE:
+    // the store mints them and only it may interpret them, so parsing one as an
+    // integer here would build the suite against a store that happens to mint
+    // numbers. What "newest first" means on the wire is the SERVED SEQUENCE —
+    // the page's own order — against a ground truth this test already knows:
+    // the order the two turns were started in. t1's prompt must come AFTER t2's
+    // in the served list.
+    const promptOrder = entries
+      .map(entryPrompt)
+      .filter((prompt): prompt is conversationv1.AgentPrompt => prompt !== null)
+      .map((prompt) => prompt.id?.value ?? "");
+    expect(promptOrder).toEqual(["t2", "t1"]);
+    // Every pointer is distinct, which is the only other property a consumer
+    // may rely on.
+    const served = entries.map((entry) => entry.at?.value ?? "");
+    expect(new Set(served).size).toBe(served.length);
   });
 
   test("the page carries terminal frames AS ENTRIES", async () => {
@@ -361,8 +389,22 @@ describe("WatchAgent", () => {
       if (item.case !== "response" || item.value.result.case !== "success") return [];
       return [item.value.result.value];
     });
-    expect(settled.length).toBeGreaterThan(0);
-    expect(settled[0]?.prose?.markdown).not.toBe("");
+    // THE TERMINAL SELF-CORRECTS: a consumer that dropped every delta still
+    // ends up with the right text, which is only true if the whole IS the
+    // concatenation. "Not empty" would pass on a terminal carrying one word.
+    const deltas = watch.frames().flatMap((frame) => {
+      if (frame.frame.case !== "entry") return [];
+      const agentFrame = entryFrame(frame.frame.value);
+      if (agentFrame?.result.case !== "update") return [];
+      const update = agentFrame.result.value.update;
+      if (update.case !== "activity") return [];
+      const item = update.value.item;
+      if (item.case !== "response" || item.value.result.case !== "update") return [];
+      return [item.value.result.value.newMarkdown];
+    });
+    expect(settled.length).toBe(1);
+    expect(deltas.length).toBeGreaterThan(1);
+    expect(settled[0]?.prose?.markdown).toBe(deltas.join(""));
     expect(settled[0]?.authorship.case).toBe("fromModel");
     watch.close();
   });
@@ -398,6 +440,26 @@ describe("WatchAgent", () => {
       }),
     );
     expect(carryingIds.size).toBe(1);
+    // THE CARRIER IS THE MESSAGE'S FIRST BLOCK. Unit keys are
+    // `activity:<message>:<n>` 0-based, so the carrier's id ends in `:0` — and
+    // it is the EARLIEST-POINTERED unit of that message, which is the property
+    // a consumer relies on when it draws the cost beside the answer's opening.
+    const carrier = [...carryingIds][0] ?? "";
+    expect(carrier.endsWith(":0")).toBe(true);
+    const message = carrier.slice(0, carrier.lastIndexOf(":"));
+    // Served order IS pointer order on one tail, so "earliest-pointered" is the
+    // first frame of that message the stream served — no pointer is parsed.
+    const ofMessage = watch
+      .frames()
+      .filter((frame) => frame.frame.case === "entry")
+      .map((frame) => {
+        const agentFrame = entryFrame(watchAgentEntry(frame));
+        if (agentFrame?.result.case !== "update") return "";
+        const update = agentFrame.result.value.update;
+        return update.case === "activity" ? (update.value.activityId?.value ?? "") : "";
+      })
+      .filter((id) => id.startsWith(`${message}:`));
+    expect(ofMessage[0]).toBe(carrier);
     watch.close();
   });
 
@@ -423,9 +485,20 @@ describe("WatchAgent", () => {
     );
     const page = watchAgentPage(await second.next());
 
+    // POINTERS ARE OPAQUE: only the store may interpret one, so "newer" is
+    // asserted as the two facts a consumer actually has — the mark itself is
+    // not replayed, and every entry the FIRST watch already served (the whole
+    // turn, through its terminal) is absent from the catch-up page.
+    const alreadySeen = new Set(
+      first
+        .frames()
+        .filter((frame) => frame.frame.case === "entry")
+        .map((frame) => watchAgentEntry(frame).at?.value ?? ""),
+    );
+    expect(alreadySeen.has(highWater)).toBe(true);
     expect(
-      page.entries.every((entry) => Number(entry.at?.value ?? 0) > Number(highWater)),
-    ).toBe(true);
+      page.entries.map((entry) => entry.at?.value ?? "").filter((at) => alreadySeen.has(at)),
+    ).toEqual([]);
     second.close();
   });
 
@@ -466,7 +539,12 @@ describe("WatchAgent", () => {
     after.close();
   });
 
-  test("an unknown watch target closes the stream at the transport", async () => {
+  test("an unknown watch target is refused NOT_FOUND, naming the agent", async () => {
+    // INTERIM RULING (ledger, rebuild merge): `WatchAgent` has no refusal arm
+    // of its own, so an unknown target is a TRANSPORT refusal — and it is
+    // pinned rather than left as "some throw", because a store outage, a
+    // cancelled call and an id nobody minted all reach a caller as an
+    // exception and only the code tells them apart.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
@@ -476,8 +554,14 @@ describe("WatchAgent", () => {
         options,
       ),
     );
+    const failure = await stream.nextOrEnd().then(
+      () => undefined,
+      (err: unknown) => ConnectError.from(err),
+    );
 
-    await expect(stream.next()).rejects.toThrow();
+    if (failure === undefined) throw new Error("the unknown target was not refused");
+    expect(failure.code).toBe(Code.NotFound);
+    expect(failure.message).toContain("no-such-agent");
   });
 });
 
@@ -522,8 +606,52 @@ describe("ReadHistory", () => {
     );
 
     expect(older.boundary.case).toBe("floor");
-    const newest = Number(firstPage.entries[firstPage.entries.length - 1]?.at?.value ?? 0);
-    expect(older.entries.every((entry) => Number(entry.at?.value ?? 0) < newest)).toBe(true);
+    // "OLDER" WITHOUT READING A POINTER: the walk is disjoint from the page it
+    // continued, and it stopped at the floor. Parsing the marks as integers
+    // would assert against a store that happens to mint numbers.
+    const firstMarks = new Set(firstPage.entries.map((entry) => entry.at?.value ?? ""));
+    expect(older.entries.map((entry) => entry.at?.value ?? "").filter((at) => firstMarks.has(at))).toEqual(
+      [],
+    );
+    expect(older.entries.length).toBeGreaterThan(0);
+  });
+
+  test("after(last_entry) with a page_size larger than the remainder ends at the FLOOR", async () => {
+    // A budget bigger than what is left is not an error and not a `more`: the
+    // page is however many entries remain, and the boundary says there are no
+    // older ones. A shim that reported `more` here would have a consumer paging
+    // forever against an empty tail.
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await untilTerminal(watch);
+    watch.close();
+    const whole = historyPage(
+      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 200 })),
+    );
+    if (whole.boundary.case !== "floor") {
+      throw new Error("the fixture did not fit in one page, so there is no remainder to floor");
+    }
+    const firstPage = historyPage(
+      await shim.clients.h1.readHistory(readHistoryFirst({ pageSize: 2 })),
+    );
+    if (firstPage.boundary.case !== "more") {
+      throw new Error("the fixture produced too few entries to page over");
+    }
+
+    const rest = historyPage(
+      await shim.clients.h1.readHistory(
+        readHistoryAfter(firstPage.boundary.value.lastEntry ?? pointer("0"), { pageSize: 200 }),
+      ),
+    );
+
+    expect(rest.boundary.case).toBe("floor");
+    // EXACTLY the remainder: the whole book, less the page already served.
+    expect(rest.entries.length).toBe(whole.entries.length - firstPage.entries.length);
   });
 
   test("an unknown agent is refused unknown_agent", async () => {
@@ -766,25 +894,46 @@ describe("KillTurn", () => {
     );
     await watch.next();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await watch.until((frame) => {
+    const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
     });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") {
+      throw new Error("expected the run's announcement");
+    }
+    const run = detached.result.value.work?.value ?? "";
 
     const response = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
     );
 
     expect(killTurnCause(response)).toBe("live");
-    expect(killTurnLive(response).liveWork.length).toBeGreaterThan(0);
+    // NAMING IT is the whole point of the refusal: a count says only that
+    // SOMETHING is live, and the refusal exists so a consumer can tell the user
+    // exactly what forcing would destroy.
+    expect(killTurnLive(response).liveWork.map((work) => work.value)).toEqual([run]);
     watch.close();
   });
 
   test("force ends it, naming the stopped work", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
+    const watch = openStream((options) =>
+      shim.clients.h1.watchAgent(watchAgentRequest(), options),
+    );
+    await watch.next();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await shim.clients.h1.killTurn(
+    const announced = await watch.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
+    });
+    const detached = entryFrame(watchAgentEntry(announced));
+    if (detached?.result.case !== "detachedWork") {
+      throw new Error("expected the run's announcement");
+    }
+    const run = detached.result.value.work?.value ?? "";
+    const refused = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
     );
 
@@ -794,9 +943,13 @@ describe("KillTurn", () => {
 
     const killed = turnKilled(response);
     expect(killed.how.case).toBe("forced");
-    if (killed.how.case === "forced") {
-      expect(killed.how.value.stoppedWork.length).toBeGreaterThan(0);
-    }
+    if (killed.how.case !== "forced") throw new Error("the forced kill did not report forced");
+    // THE SAME ITEM THE REFUSAL NAMED, now named as stopped: the two lists are
+    // the consumer's before-and-after of one act, and a count would not say
+    // they are about the same work.
+    expect(killed.how.value.stoppedWork.map((work) => work.value)).toEqual([run]);
+    expect(killTurnLive(refused).liveWork.map((work) => work.value)).toEqual([run]);
+    watch.close();
   });
 
   test("a TurnId that is not the open turn is refused not_the_open_turn", async () => {
@@ -913,9 +1066,7 @@ describe("keep-alives", () => {
 
     const prompts = userPrompts(readTranscript(shim.dirs, started.vendorSessionId));
     expect(prompts.length).toBeGreaterThan(0);
-    expect(prompts.every((record) => !promptText(record).startsWith("<!--agent-repl:keepalive-->"))).toBe(
-      true,
-    );
+    expect(prompts.every((record) => !promptText(record).startsWith(KEEPALIVE_MARKER))).toBe(true);
     watch.close();
   });
 });
