@@ -1148,10 +1148,16 @@ gate\" -- both facts, not just link-up, must hold before a drain sends."
   "Return WS's composer notice as its mode line actually renders it.
 The notice is a BUFFER-LOCAL fact drawn through
 `agent-repl--input-mode-line-spec', so the rendered segment is what the
-user sees and is what an assertion about a badge must read."
+user sees and is what an assertion about a badge must read.
+
+The segment is produced by calling `agent-repl--input-notice-segment' --
+the `:eval' body of that very spec -- rather than by `format-mode-line'.
+A batch Emacs has no displayed frame, so `format-mode-line' renders the
+empty string for EVERY construct, literal strings included; reading it
+here would report \"no badge\" no matter what the composer set, which is
+the one answer this assertion must never be able to fabricate."
   (let ((buf (agent-repl--input-buffer ws)))
-    (and buf (with-current-buffer buf
-               (format-mode-line agent-repl--input-mode-line-spec)))))
+    (and buf (with-current-buffer buf (agent-repl--input-notice-segment)))))
 
 ;; audit-2 #32
 (ert-deftest agent-repl-itest-composer-no-session-refusal-keeps-everything ()
