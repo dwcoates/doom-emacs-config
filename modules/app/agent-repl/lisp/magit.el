@@ -20,8 +20,12 @@
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-magit-github-base-url "https://github.com"
-  "Base URL for GitHub, used when converting SSH remote URLs to HTTPS."
+(defcustom agent-repl-magit-github-base-url "https://github.com/"
+  "Base URL for GitHub, used when converting SSH remote URLs to HTTPS.
+Carries the trailing slash `agent-repl-magit-github-ssh-prefix-regexp'
+consumes along with the SSH prefix's colon — without it, substituting
+this in place of \"git@github.com:\" would glue the owner/repo path
+directly onto \"github.com\" with no separator at all."
   :type 'string
   :group 'agent-repl)
 

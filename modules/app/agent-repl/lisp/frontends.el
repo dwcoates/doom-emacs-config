@@ -45,8 +45,16 @@
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
-(declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
-(declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
+(defun agent-repl--ws-backend-name (_ws)
+  "Return the backend WS runs under: `claude', always.
+
+backend.el and codex.el are DEAD — a second vendor is a future shim, not
+a second Emacs backend — so this axis has exactly one value.  It survives
+as a function rather than being deleted because the frontend registry's
+capability check is genuinely two-axis and the vendor oneof stays
+extensible in the contract; the day a second vendor lands, the daemon
+tells us which one a workspace runs and this reads it from there."
+  'claude)
 
 ;;;; ---- Struct ---------------------------------------------------------------
 
@@ -68,18 +76,6 @@ paths know the worktree path and environment before any state file
 exists).  The view follows later, when the user actually switches to
 WS (`:pending-show-panels').
 KILL-FN (WS): destroy WS's session AND its view.
-SEND-FN (WS INPUT RAW PROMPT-ORIGIN ON-SETTLE): deliver one prepared user turn.
-INPUT is the decorated text actually sent; RAW the undecorated
-original (history/posthooks currency).  ON-SETTLE, when non-nil, runs
-once the send is committed.
-INTERRUPT-FN (WS KIND): interrupt the in-flight turn.  KIND names the
-gesture: `ctrl-c' (clear the prompt line) vs `escape' (stop
-generation).  Both began as the vterm TUI's two keystrokes; they now
-differ by INTENT, since `escape' before the agent has answered is an
-undo and may additionally retract the sent turn.  Returns `retracted'
-when the frontend withdrew the turn's prompt (the caller then owns that
-text and is expected to restore it), or any other non-nil value when
-the interrupt merely landed.  Nil means not delivered.
 CANCEL-DETACHED-FN (WS): stop WS's DETACHED background agents — the
 subagents and shells still working after the turn that launched them
 ended.  Distinct from INTERRUPT-FN and never a variant of it: an
@@ -122,8 +118,6 @@ gui."
   open-fn
   boot-fn
   kill-fn
-  send-fn
-  interrupt-fn
   cancel-detached-fn
   running-p-fn
   show-fn
@@ -147,7 +141,7 @@ a configuration to cope with."
   (unless (agent-repl-frontend-p frontend)
     (agent-repl--log nil "frontend-register: rejected non-frontend value=%S" frontend)
     (error "agent-repl-register-frontend: not a frontend struct: %S" frontend))
-  (dolist (slot '(name open-fn boot-fn kill-fn send-fn interrupt-fn running-p-fn
+  (dolist (slot '(name open-fn boot-fn kill-fn running-p-fn
                   supported-backends supported-envs))
     (unless (funcall (intern (format "agent-repl-frontend-%s" slot)) frontend)
       (agent-repl--log nil "frontend-register: rejected frontend=%S missing-slot=%s"
@@ -263,7 +257,7 @@ capability-constrained default (`agent-repl--frontend-default-for-ws')."
 Two writes, and the second is the point: `:frontend' is the resolution
 key, while `:frontend-explicit' marks the value as CHOSEN rather than
 merely resolved-to.  Only a chosen frontend is restored across an
-Emacs restart (`agent-repl--apply-display-state'); a workspace with no
+Emacs restart (the daemon's pushed views); a workspace with no
 `:frontend' of its own re-resolves from the default every time
 \(`agent-repl--frontend-default-for-ws'), which is what lets a
 workspace that only ever rode the default follow the default forward
@@ -326,26 +320,6 @@ both capability axes (WS's backend and its `:active-env')."
 
 ;;;; ---- Dispatch helpers ----------------------------------------------------------
 
-(defun agent-repl--frontend-dispatch-send (ws input raw prompt-origin &optional on-settle)
-  "Send one prepared turn through WS's frontend."
-  (let* ((fe (agent-repl--ws-frontend ws))
-         (frontend (agent-repl-frontend-name fe))
-         (result (funcall (agent-repl-frontend-send-fn fe) ws input raw prompt-origin on-settle)))
-    (agent-repl--log ws "frontend-dispatch-send: frontend=%s input-length=%d raw-length=%d input-equals-raw=%s prompt-origin=%s on-settle-p=%s result=%S"
-                     frontend (length input) (length raw) (equal input raw)
-                     prompt-origin (not (null on-settle)) result)
-    result))
-
-(defun agent-repl--frontend-dispatch-interrupt (ws kind)
-  "Interrupt WS's in-flight turn through its frontend.
-KIND is `ctrl-c' or `escape' (see the struct docstring)."
-  (let* ((fe (agent-repl--ws-frontend ws))
-         (frontend (agent-repl-frontend-name fe))
-         (result (funcall (agent-repl-frontend-interrupt-fn fe) ws kind)))
-    (agent-repl--log ws "frontend-dispatch-interrupt: frontend=%s kind=%s result=%S"
-                     frontend kind result)
-    result))
-
 (defun agent-repl--frontend-dispatch-cancel-detached (ws)
   "Cancel WS\='s detached background agents through its frontend.
 Returns the capability\='s own value: non-nil when the cancel was
@@ -394,45 +368,13 @@ ever marking itself `:inactive', which in turn left the sidebar showing a
 torn-down workspace as live."
   (agent-repl--frontend-dispatch-view ws 'hide #'agent-repl-frontend-hide-fn))
 
-(defun agent-repl--frontend-boot-session (ws &optional project-dir-hint active-env-hint)
-  "Start WS's agent session under WS's own frontend, WITHOUT showing it.
-
-The single boot door for every path that brings a workspace into
-existence or back from disk — snapshot / project restore and reopen
-\(`agent-repl--establish-workspace') — so all of them agree on which
-frontend a workspace is born under, instead of each hard-wiring its
-own boot path and stranding the gui default.
-
-Order matters: the environment is hydrated (PROJECT-DIR-HINT and
-ACTIVE-ENV-HINT are `agent-repl--initialize-ws-env' hints) BEFORE the
-booting frontend is picked, because `:active-env' is one of the two
-axes the frontend resolves against, so a workspace must have declared
-its environment before a frontend is chosen for it.
-
-No-op when WS's frontend already has a live session — the restore path
-re-establishes workspaces that may already be running.  The
-already-running check runs BEFORE the hydration, because
-`agent-repl--initialize-ws-env' must never run against a live session
-\(it would clobber the instantiation structs' session ids).  A running
-workspace always carries the `:active-env' its own boot hydrated, so
-the pre-hydration resolution below sees the same frontend the running
-session is on."
-  (let ((running (agent-repl--ws-frontend ws)))
-    (if (funcall (agent-repl-frontend-running-p-fn running) ws)
-        (agent-repl--log ws "boot-session: ws=%s frontend=%s running=t project-dir-hint=%S active-env-hint=%S -> skipping"
-                         ws (agent-repl-frontend-name running) project-dir-hint active-env-hint)
-      (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
-      (let ((fe (agent-repl--ws-frontend ws)))
-        (agent-repl--log ws "boot-session: ws=%s frontend=%s running=nil project-dir-hint=%S active-env-hint=%S hydrated-env=%S merged=%s merge-completed-at=%s -> booting"
-                         ws (agent-repl-frontend-name fe) project-dir-hint active-env-hint
-                         (agent-repl--ws-get ws :active-env)
-                         (or (eq (agent-repl--ws-get ws :repl-state) :merged)
-                             (eq (agent-repl--ws-get ws :merge-completed) t))
-                         (agent-repl--ws-get ws :merge-completed-at))
-        (let ((result (funcall (agent-repl-frontend-boot-fn fe) ws project-dir-hint active-env-hint)))
-          (agent-repl--log ws "boot-session: ws=%s frontend=%s -> booted result=%S"
-                           ws (agent-repl-frontend-name fe) result)
-          result)))))
+;; `agent-repl--frontend-boot-session' is DELETED.  It was the single boot
+;; door for the paths that brought a workspace into existence from disk --
+;; the snapshot restore and `agent-repl--establish-workspace' -- and both
+;; are gone: THE DAEMON owns session lifecycle, CreateWorkspace creates and
+;; registers, and Emacs opens tabs from the roster stream on connect.  There
+;; is nothing left for Emacs to boot, so the door is removed rather than
+;; kept as an unreachable entry point.
 
 (provide 'frontends)
 
