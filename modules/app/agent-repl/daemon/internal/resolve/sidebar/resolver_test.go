@@ -261,3 +261,21 @@ func TestANilSessionUpdateChangesNothing(t *testing.T) {
 		t.Fatalf("status = %q, want the row unchanged", got)
 	}
 }
+
+// TestNewRefusesASurplusMergeGlyphRow pins the direction the resolver's own
+// copy of the assertion never checked: a merge_glyphs row naming no merge arm
+// is a state the vocabulary paints and the resolver can never emit, so the
+// vocabulary's assertion refuses it.
+func TestNewRefusesASurplusMergeGlyphRow(t *testing.T) {
+	// Arrange.
+	colors := testColors()
+	colors.MergeGlyphs["merge_teleported"] = "recycle"
+
+	// Act.
+	_, err := sidebar.New(colors, dlog.NewTestSurfaces())
+
+	// Assert.
+	if err == nil {
+		t.Fatal("New accepted a merge_glyphs row naming no merge arm")
+	}
+}
