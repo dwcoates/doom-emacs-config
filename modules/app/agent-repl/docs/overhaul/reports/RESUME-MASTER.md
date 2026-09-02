@@ -24,7 +24,7 @@ everything needed, so re-derive nothing.
 
 | System | Branch @ tip | STOP file (on that branch) | Left in place |
 |---|---|---|---|
-| Daemon | overhaul/daemon @ (PENDING final report; last known 8c5b2fd23, itest 289/342, final pass + audit 1 running) | docs/overhaul/reports/STOP-daemon.md | see STOP |
+| Daemon | overhaul/daemon @ 892fab33e (FINAL 2026-09-02; opus-medium finisher; itest 539/0/4 skip) | docs/overhaul/reports/STOP-daemon.md | see STOP |
 | Shim | overhaul/shim @ f9dcbaa80 (STOP-shim.md; code 032a9f0ab) — RESOLVED 2026-09-02: itest 302/0/3, unit 3806, landing 6 merged, dead-code lists STOP §7, capture-checklist answers in STOP | docs/overhaul/reports/STOP-shim.md | none |
 | Webapp | overhaul/webapp @ a2bc62c88 (STOP-webapp.md; code 3c2c632fb) — RESOLVED 2026-09-02: integration 13 files/1601/0, unit 3279, landing 6 merged, dead-code done | docs/overhaul/reports/STOP-webapp.md (+ webapp-briefs/UX-LIST.md for the user) | none |
 | Elisp | overhaul/elisp @ 53bc5b96e (STOP-elisp.md; code 05c49d574) — RESOLVED 2026-09-02: 3517/3518 (one order-dependent red documented), audits 2+3, dead-code lists elisp-fanout.md §17, user toss-ups STOP §Toss-ups | docs/overhaul/reports/STOP-elisp.md | none |
