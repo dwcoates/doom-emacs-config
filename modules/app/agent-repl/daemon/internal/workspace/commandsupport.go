@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/health"
 	"claude-repld/internal/ids"
 	"claude-repld/internal/wsm"
 )
@@ -39,6 +40,7 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 		log.Error(opCommandSupport, "could not read the add-support brief", dlog.Context{
 			"brief": BriefAddSupport, "cause": err.Error(),
 		})
+		v.raisePromptsFault(ctx, log, fmt.Sprintf("the %s brief is unreadable: %v", BriefAddSupport, err))
 		return wsm.Workspace{}, refuse(log, "RequestCommandSupport", ArmBriefMissing,
 			fmt.Sprintf("the %s brief is unreadable: %v", BriefAddSupport, err), false)
 	}
@@ -50,6 +52,7 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 		log.Error(opCommandSupport, "could not splice the add-support brief", dlog.Context{
 			"brief": BriefAddSupport, "cause": err.Error(),
 		})
+		v.raisePromptsFault(ctx, log, fmt.Sprintf("the %s brief will not splice: %v", BriefAddSupport, err))
 		return wsm.Workspace{}, refuse(log, "RequestCommandSupport", ArmBriefMissing,
 			fmt.Sprintf("the %s brief will not splice: %v", BriefAddSupport, err), false)
 	}
@@ -74,4 +77,41 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 		return wsm.Workspace{}, fmt.Errorf("request command support for %q: %w", command, err)
 	}
 	return created, nil
+}
+
+// raisePromptsFault records a prompts directory that cannot furnish a brief as
+// a DAEMON-SCOPED FAULT, so DaemonHealth answers unhealthy rather than healthy.
+//
+// A brief_missing refusal is not one caller's bad luck: every composed brief
+// this daemon owes — the merge briefs, the one-shot finish hook, this one —
+// reads from the same directory, so the refusal is EVIDENCE ABOUT THE DAEMON.
+// The refusal still travels to the caller; the fault is what makes the
+// operator's health check see it.
+//
+// At most ONE such fault stands at a time: a second identical row would tell
+// the operator nothing the first did not, and faults stay open until closed.
+func (v *verbs) raisePromptsFault(ctx context.Context, log dlog.Logger, detail string) {
+	standing, err := v.deps.Health.OpenFaults(ctx, wsm.FaultScope{Kind: health.KindPromptsDirMissing})
+	if err != nil {
+		// The read failing does not excuse leaving the fault unrecorded: it is
+		// surfaced, and the fault is opened anyway.
+		log.Error(opCommandSupport, "could not check for a standing prompts-directory fault",
+			dlog.Context{"cause": err.Error()})
+	}
+	for _, f := range standing {
+		if f.Workspace == nil {
+			log.Debug(opCommandSupport, "a prompts-directory fault already stands",
+				dlog.Context{"fault": string(f.ID)})
+			return
+		}
+	}
+	if _, err := v.deps.Health.OpenFault(ctx, wsm.Fault{
+		Kind:     health.KindPromptsDirMissing,
+		Detail:   detail,
+		Evidence: map[string]string{"path": v.deps.PromptsDir},
+		OpenedAt: v.now(),
+	}); err != nil {
+		log.Error(opCommandSupport, "could not record the prompts-directory fault",
+			dlog.Context{"cause": err.Error()})
+	}
 }

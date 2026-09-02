@@ -2,9 +2,11 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"claude-repld/internal/health"
 	"claude-repld/internal/prompts"
 	"claude-repld/internal/wsm"
 )
@@ -149,4 +151,102 @@ func TestRequestCommandSupportRefusesAnUnknownWorkspace(t *testing.T) {
 
 	// Assert.
 	asRefusal(t, err, ArmUnknownWorkspace)
+}
+
+// TestRequestCommandSupportOpensADaemonFaultWhenTheBriefIsMissing pins that a
+// brief_missing refusal is EVIDENCE ABOUT THE DAEMON, not one caller's bad
+// luck: every composed brief reads the same directory, so DaemonHealth must
+// answer unhealthy rather than healthy while it cannot furnish one.
+func TestRequestCommandSupportOpensADaemonFaultWhenTheBriefIsMissing(t *testing.T) {
+	// Arrange.
+	f, _ := supportFixture(t)
+	delete(f.briefs, BriefAddSupport)
+
+	// Act.
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err == nil {
+		t.Fatal("RequestCommandSupport with no brief = success, want the brief_missing refusal")
+	}
+
+	// Assert.
+	if len(f.health.opened) != 1 {
+		t.Fatalf("opened faults = %+v, want exactly one", f.health.opened)
+	}
+	if got := f.health.opened[0].Kind; got != health.KindPromptsDirMissing {
+		t.Fatalf("fault kind = %q, want %q", got, health.KindPromptsDirMissing)
+	}
+}
+
+// TestTheDaemonFaultNamesThePromptsDirectory pins the arm's own field: the
+// operator reading DaemonFault.prompts_dir_missing gets the path.
+func TestTheDaemonFaultNamesThePromptsDirectory(t *testing.T) {
+	// Arrange.
+	f, _ := supportFixture(t)
+	delete(f.briefs, BriefAddSupport)
+
+	// Act.
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err == nil {
+		t.Fatal("RequestCommandSupport with no brief = success, want a refusal")
+	}
+
+	// Assert.
+	if got := f.health.opened[0].Evidence["path"]; got != "/prompts" {
+		t.Fatalf("fault evidence path = %q, want the prompts directory", got)
+	}
+}
+
+// TestASecondBriefFailureDoesNotOpenASecondFault pins that at most one such
+// fault stands: a duplicate row tells the operator nothing the first did not,
+// and faults stay open until they are closed.
+func TestASecondBriefFailureDoesNotOpenASecondFault(t *testing.T) {
+	// Arrange.
+	f, _ := supportFixture(t)
+	delete(f.briefs, BriefAddSupport)
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err == nil {
+		t.Fatal("the first RequestCommandSupport = success, want a refusal")
+	}
+
+	// Act.
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/mcp"); err == nil {
+		t.Fatal("the second RequestCommandSupport = success, want a refusal")
+	}
+
+	// Assert.
+	if len(f.health.opened) != 1 {
+		t.Fatalf("opened faults = %d, want the standing one to be reused", len(f.health.opened))
+	}
+}
+
+// TestABriefFailureStillOpensTheFaultWhenTheStandingReadFails pins that a
+// failing fault read does not excuse leaving the fault unrecorded.
+func TestABriefFailureStillOpensTheFaultWhenTheStandingReadFails(t *testing.T) {
+	// Arrange.
+	f, _ := supportFixture(t)
+	delete(f.briefs, BriefAddSupport)
+	f.health.listErr = errors.New("the state client will not read")
+
+	// Act.
+	if _, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status"); err == nil {
+		t.Fatal("RequestCommandSupport with no brief = success, want a refusal")
+	}
+
+	// Assert.
+	if len(f.health.opened) != 1 {
+		t.Fatalf("opened faults = %+v, want the fault recorded anyway", f.health.opened)
+	}
+}
+
+// TestTheBriefRefusalSurvivesAFailingFaultWrite pins that the caller's refusal
+// is never replaced by the bookkeeping's failure: the fault is the operator's
+// signal, the refusal is the caller's answer, and losing either would be worse.
+func TestTheBriefRefusalSurvivesAFailingFaultWrite(t *testing.T) {
+	// Arrange.
+	f, _ := supportFixture(t)
+	delete(f.briefs, BriefAddSupport)
+	f.health.openErr = errors.New("the state client will not write")
+
+	// Act.
+	_, err := f.verbs.RequestCommandSupport(context.Background(), "w1", "/status")
+
+	// Assert.
+	asRefusal(t, err, ArmBriefMissing)
 }
