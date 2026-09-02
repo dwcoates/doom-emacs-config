@@ -428,10 +428,26 @@ describe("the refusals", () => {
     h.handle.dispose();
   });
 
-  it("tells a turn-already-open submitter what to wait for", async () => {
-    const h = mount(refusalError("turnAlreadyOpen"));
+  it("tells a duplicate submitter the earlier submission already stands", async () => {
+    const h = mount(refusalError("duplicateSubmission"));
     await sendText(h, "hello");
-    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain("already open");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain("already submitted");
+    h.handle.dispose();
+  });
+
+  it("labels the duplicate-submission refusal with its own arm", async () => {
+    const h = mount(refusalError("duplicateSubmission"));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.getAttribute("data-arm")).toBe(
+      "duplicateSubmission",
+    );
+    h.handle.dispose();
+  });
+
+  it("keeps the words in the box through a duplicate-submission refusal", async () => {
+    const h = mount(refusalError("duplicateSubmission"));
+    await sendText(h, "hello");
+    expect(h.input.value).toBe("hello");
     h.handle.dispose();
   });
 

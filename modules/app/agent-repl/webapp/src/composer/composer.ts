@@ -411,8 +411,8 @@ export function submitPromptRefusal(reason: SubmitPromptReason): string {
       return "that feed does not belong to this workspace — your text is kept";
     case "feedUndecodable":
       return "the daemon could not read that feed's id — your text is kept";
-    case "turnAlreadyOpen":
-      return "a turn is already open — resubmit once it ends";
+    case "duplicateSubmission":
+      return "this prompt was already submitted — the earlier one stands";
     case "noSession":
       return "this workspace has no session to prompt — your text is kept";
     default: {
