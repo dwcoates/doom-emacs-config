@@ -319,6 +319,23 @@ describe("StopBash", () => {
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
+    // EVERY BYTE OF A DETACHED SHELL COMES FROM THE SIDECAR, which no
+    // integration harness runs — so the run's rows are seeded here exactly as
+    // the WatchBash tests above seed theirs. `exitCode: null` leaves the run
+    // UNTERMINATED, which is what gives the stop something live to conclude.
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "sleep 600",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["running\n"],
+        exitCode: null,
+        topLevel: started.vendorSessionId,
+      },
+    );
     const bash = openStream((options) =>
       shim.clients.h1.watchBash(
         create(shimv1.WatchBashRequestSchema, { work: workId(run) }),
@@ -355,11 +372,26 @@ describe("StopBash", () => {
 
   test("a run that already ended is refused already_ended", async () => {
     const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     const stream = await openAgentStream(shim);
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
+    // The sidecar's rows, seeded as everywhere else in this file — and this
+    // seed CARRIES A TERMINAL, so the drain below reaches the run's own end.
+    await seedBashLifecycle(
+      createStoreClient(shim.dirs.storeSocket),
+      sidecarProducer(started.vendorSessionId),
+      {
+        run,
+        work: run,
+        command: "echo done",
+        startedAtMs: 1_700_000_000_000,
+        chunks: ["done\n"],
+        exitCode: 0,
+        topLevel: started.vendorSessionId,
+      },
+    );
     // Drive the run to its own terminal before asking to stop it.
     const bash = openStream((options) =>
       shim.clients.h1.watchBash(
