@@ -574,7 +574,7 @@ func TestAVanishedFileKeepsItsTailerSoItsTerminalCanBeSpelled(t *testing.T) {
 	// Arrange: a claimed spool being tailed.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -596,7 +596,7 @@ func TestAVanishedFileIsStatedOnce(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "b1", "hello\n")
-	h.sc.TaskSpawned("b1", "call-1", "", "")
+	h.sc.TaskSpawned("b1", "call-1", "", "", false)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestASpoolThatReadItsOwnExitMarkerIsNoLongerTracked(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1settled", "work\nEXIT=0\n")
-	h.sc.TaskSpawned("b1settled", "toolu_settled_run", "", spool)
+	h.sc.TaskSpawned("b1settled", "toolu_settled_run", "", spool, false)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -708,7 +708,7 @@ func TestARunIsSettledOnlyOnceItsTerminalIsDurable(t *testing.T) {
 	store := &fakeStore{writeFail: "the store is refusing everything"}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1refused", "work\nEXIT=0\n")
-	h.sc.TaskSpawned("b1refused", "toolu_refused_run", "", spool)
+	h.sc.TaskSpawned("b1refused", "toolu_refused_run", "", spool, false)
 
 	// Act.
 	if err := h.sc.beginCycle(); err != nil {
@@ -728,7 +728,7 @@ func TestASettledRunIsNeverConcludedLost(t *testing.T) {
 	store := &fakeStore{}
 	h := newHarness(t, store)
 	spool := h.spoolFile(t, "b1swept", "work\nEXIT=0\n")
-	h.sc.TaskSpawned("b1swept", "toolu_swept_run", "", spool)
+	h.sc.TaskSpawned("b1swept", "toolu_swept_run", "", spool, false)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
@@ -934,7 +934,7 @@ func TestAnAgentSpoolsBookIsItsSpawningCall(t *testing.T) {
 	// tool_use_id.
 	h := newHarness(t, &fakeStore{})
 	spool := h.spoolFile(t, "a1", promptLine+"\n")
-	h.sc.TaskSpawned("a1", "toolu_spawn_0001", "owner-agent", spool)
+	h.sc.TaskSpawned("a1", "toolu_spawn_0001", "owner-agent", spool, true)
 	if err := h.sc.beginCycle(); err != nil {
 		t.Fatalf("beginCycle: %v", err)
 	}
