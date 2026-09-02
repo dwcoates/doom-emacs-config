@@ -60,7 +60,8 @@
 (defconst agent-repl-itest-composer--ws "itest-composer-ws"
   "The Doom workspace name this suite composes into.")
 
-(defconst agent-repl-itest-composer--dir "/tmp/itest-composer-ws"
+(defconst agent-repl-itest-composer--dir
+  (agent-repl-itest--fixture-dir "composer-ws")
   "The workspace directory registered for the composer's workspace.")
 
 (defun agent-repl-itest-composer--live (composer)
@@ -590,6 +591,18 @@ submit that still carried the first image would resend it twice."
               (should (equal (agent-repl-itest-composer--image-paths
                               (agent-repl-itest-composer--submit-body daemon 0))
                              (list image)))
+              ;; THE CLEARING IS A CONSEQUENCE OF THE ANSWER, NOT OF THE
+              ;; REQUEST LANDING.  `--await-call' proves only that the
+              ;; daemon recorded the submit; input.el empties the
+              ;; attachment list in the success callback, which runs when
+              ;; the answer arrives.  A second send issued on the strength
+              ;; of the recorded call alone races that callback and
+              ;; sometimes re-sends the very image this test exists to
+              ;; prove is gone -- so the wait is for the observable
+              ;; consequence, not for the request.
+              (agent-repl-itest--wait-until
+               (lambda () (null (buffer-local-value 'agent-repl-input-attachments buf)))
+               nil "the first send's attachments to clear")
               ;; Act: second send, nothing newly attached.
               (with-current-buffer buf (insert "and this"))
               (agent-repl--send :user-sent nil agent-repl-itest-composer--ws)
@@ -1212,6 +1225,7 @@ gate\" -- both facts, not just link-up, must hold before a drain sends."
 (defvar agent-repl-input-notice)
 (defvar agent-repl--input-merge-parked-badge)
 (defvar agent-repl-link-reconnect-interval-seconds)
+(defvar agent-repl-link-reconnect-max-interval-seconds)
 
 (defun agent-repl-itest-composer--notice (ws)
   "Return WS's composer notice as its mode line actually renders it.
@@ -1349,6 +1363,7 @@ successor is the only trigger."
   ;; host.el re-registers and prompt-queue.el drains for real.
   (agent-repl-itest--with-fake-daemon primary
     (let ((agent-repl-link-reconnect-interval-seconds 0.05)
+          (agent-repl-link-reconnect-max-interval-seconds 0.2)
           (successor nil))
       (agent-repl--ws-put agent-repl-itest-composer--ws
                           :project-dir agent-repl-itest-composer--dir)
@@ -1478,7 +1493,7 @@ path — so an unregistered workspace has no submission to make."
     (agent-repl-itest-composer--with-composer daemon 'open ref
       (ignore ref)
       (agent-repl--ws-put "itest-composer-never-registered"
-                          :project-dir "/tmp/itest-composer-never-registered")
+                          :project-dir (agent-repl-itest--fixture-dir "composer-never-registered"))
       ;; Act / Assert.
       (should-error
        (agent-repl--send :user-sent "x" "itest-composer-never-registered"))
@@ -1602,6 +1617,7 @@ regression could hide in; nothing here is stubbed."
   ;; Arrange: a real link to the primary; host.el's own register+subscribe.
   (agent-repl-itest--with-fake-daemon primary
     (let ((agent-repl-link-reconnect-interval-seconds 0.05)
+          (agent-repl-link-reconnect-max-interval-seconds 0.2)
           (failed-key nil)
           (buf nil))
       (agent-repl--ws-put agent-repl-itest-composer--ws

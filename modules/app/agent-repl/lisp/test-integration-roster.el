@@ -60,7 +60,8 @@
 
 ;;;; ---- Fixtures ----
 
-(defconst agent-repl-itest-roster--repo-dir "/tmp/itest-roster-repo"
+(defconst agent-repl-itest-roster--repo-dir
+  (agent-repl-itest--fixture-dir "roster-repo")
   "The repository directory every fixture row lives under.")
 
 (defun agent-repl-itest-roster--row (id name status &rest overrides)
@@ -74,7 +75,7 @@ Every non-optional field is populated.  `when' carries an unset oneof and
 — presence itself is the fact for RosterRowDetail's three lines."
   (append overrides
           `((workspace . ((workspace . ((id . ,id)
-                                        (dir . ,(concat "/tmp/itest-roster-" id))))))
+                                        (dir . ,(agent-repl-itest--fixture-dir (concat "roster-" id)))))))
             (name . ((text . ,name)))
             (,status . ())
             (current . ((current . :false)))
@@ -128,10 +129,10 @@ a second one, with its own distinct repo key and label, to tell walk
 order apart from declaration order."
   `((repository
      . ((sections
-         . [((key . ((repository . ((id . "repo-a") (dir . "/tmp/itest-repo-a")))))
+         . [((key . ((repository . ((id . "repo-a") (dir . ,(agent-repl-itest--fixture-dir "itest-repo-a"))))))
              (header . ((label . ((text . "repo-a")))))
              (rows . ((rows . ,(vconcat rows-a)))))
-            ((key . ((repository . ((id . "repo-b") (dir . "/tmp/itest-repo-b")))))
+            ((key . ((repository . ((id . "repo-b") (dir . ,(agent-repl-itest--fixture-dir "itest-repo-b"))))))
              (header . ((label . ((text . "repo-b")))))
              (rows . ((rows . ,(vconcat rows-b)))))])))
     (task . ((sections . [])))
@@ -248,7 +249,7 @@ there is no HostWorkspace lifecycle axis to fall back on."
         (let* ((arm (car case))
                (expected (cdr case))
                (ws-name (format "itest-roster-%s" arm)))
-          (agent-repl--ws-put ws-name :project-dir (format "/tmp/%s" ws-name))
+          (agent-repl--ws-put ws-name :project-dir (agent-repl-itest--fixture-dir ws-name))
           ;; Act.
           (agent-repl-itest-roster--push
            daemon (agent-repl-itest-roster--roster
@@ -269,7 +270,7 @@ fall back to, and inventing one would paint a wrong tab silently."
       ;; Act: every other field present, no status arm.
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
-               (list `((workspace . ((workspace . ((id . "ws-x") (dir . "/tmp/ws-x")))))
+               (list `((workspace . ((workspace . ((id . "ws-x") (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                        (name . ((text . "ws-x")))
                        (current . ((current . :false)))
                        (when . ())
@@ -287,7 +288,7 @@ Losing the roster would lose the ONLY source of which workspaces exist."
     (agent-repl-itest-roster--with-subscription daemon
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
-               (list `((workspace . ((workspace . ((id . "ws-x") (dir . "/tmp/ws-x")))))
+               (list `((workspace . ((workspace . ((id . "ws-x") (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                        (name . ((text . "ws-x")))
                        (current . ((current . :false)))
                        (when . ())
@@ -336,7 +337,7 @@ sidebar and the Emacs tab-bar both implement exactly it."
       (let ((blinked nil)
             (agent-repl-roster-update-functions
              (list #'agent-repl-status-sync-attention)))
-        (agent-repl--ws-put "itest-attn" :project-dir "/tmp/itest-attn")
+        (agent-repl--ws-put "itest-attn" :project-dir (agent-repl-itest--fixture-dir "itest-attn"))
         (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
                    (lambda (ws) (push ws blinked))))
           ;; Act.
@@ -362,7 +363,7 @@ notification would be a spurious re-alert."
       (let ((blinked nil)
             (agent-repl-roster-update-functions
              (list #'agent-repl-status-sync-attention)))
-        (agent-repl--ws-put "itest-attn2" :project-dir "/tmp/itest-attn2")
+        (agent-repl--ws-put "itest-attn2" :project-dir (agent-repl-itest--fixture-dir "itest-attn2"))
         (cl-letf (((symbol-function 'agent-repl-status-blink-tab)
                    (lambda (ws) (push ws blinked))))
           (agent-repl-itest-roster--push
@@ -392,7 +393,7 @@ that never clears would flag a workspace with nothing left unread."
       ;; consumer's work, so it is put back for this scenario.
       (let ((agent-repl-roster-update-functions
              (list #'agent-repl-status-sync-attention)))
-      (agent-repl--ws-put "itest-attn3" :project-dir "/tmp/itest-attn3")
+      (agent-repl--ws-put "itest-attn3" :project-dir (agent-repl-itest--fixture-dir "itest-attn3"))
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
@@ -529,7 +530,7 @@ so no loop forms."
     (agent-repl-itest-roster--with-subscription daemon
       (let ((switched nil)
             (agent-repl-host-last-selected-id nil))
-        (agent-repl--ws-put "itest-cur" :project-dir "/tmp/itest-cur")
+        (agent-repl--ws-put "itest-cur" :project-dir (agent-repl-itest--fixture-dir "itest-cur"))
         (cl-letf (((symbol-function 'agent-repl--ws-switch)
                    (lambda (ws &rest _) (push ws switched))))
           ;; Act.
@@ -538,8 +539,8 @@ so no loop forms."
                    (list (agent-repl-itest-roster--row
                           "itest-cur" "itest-cur" 'ready
                           '(current . ((current . t)))))
-                   '(current . ((workspace . ((id . "itest-cur")
-                                              (dir . "/tmp/itest-cur")))))))
+                   `(current . ((workspace . ((id . "itest-cur")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-cur"))))))))
           ;; Assert.
           (agent-repl-itest--wait-until (lambda () switched) nil
                                         "the daemon-originated tab switch")
@@ -554,7 +555,7 @@ its own act is not mistaken for a request."
     (agent-repl-itest-roster--with-subscription daemon
       (let ((switched nil)
             (agent-repl-host-last-selected-id "itest-own"))
-        (agent-repl--ws-put "itest-own" :project-dir "/tmp/itest-own")
+        (agent-repl--ws-put "itest-own" :project-dir (agent-repl-itest--fixture-dir "itest-own"))
         (cl-letf (((symbol-function 'agent-repl--ws-switch)
                    (lambda (ws &rest _) (push ws switched))))
           ;; Act: the roster echoes back the selection Emacs made.
@@ -563,8 +564,8 @@ its own act is not mistaken for a request."
                    (list (agent-repl-itest-roster--row
                           "itest-own" "itest-own" 'ready
                           '(current . ((current . t)))))
-                   '(current . ((workspace . ((id . "itest-own")
-                                              (dir . "/tmp/itest-own")))))))
+                   `(current . ((workspace . ((id . "itest-own")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-own"))))))))
           (agent-repl-itest-roster--await-view daemon)
           ;; Assert: no switch, and no SelectWorkspace of our own.
           (should (null switched))
@@ -716,7 +717,7 @@ is enough to skip."
     (agent-repl-itest-roster--with-subscription daemon
       (let ((switched nil)
             (agent-repl-host-last-selected-id "some-other-id"))
-        (agent-repl--ws-put "itest-cur-eq" :project-dir "/tmp/itest-cur-eq")
+        (agent-repl--ws-put "itest-cur-eq" :project-dir (agent-repl-itest--fixture-dir "itest-cur-eq"))
         (cl-letf (((symbol-function 'agent-repl--ws-switch)
                    (lambda (ws &rest _) (push ws switched)))
                   ((symbol-function '+workspace-current-name)
@@ -727,8 +728,8 @@ is enough to skip."
                    (list (agent-repl-itest-roster--row
                           "itest-cur-eq" "itest-cur-eq" 'ready
                           '(current . ((current . t)))))
-                   '(current . ((workspace . ((id . "itest-cur-eq")
-                                              (dir . "/tmp/itest-cur-eq")))))))
+                   `(current . ((workspace . ((id . "itest-cur-eq")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-cur-eq"))))))))
           (agent-repl-itest-roster--await-view daemon)
           ;; Assert.
           (should (null switched)))))))
@@ -741,7 +742,7 @@ legal, never a contract breach."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((switched nil))
-        (agent-repl--ws-put "itest-nocur" :project-dir "/tmp/itest-nocur")
+        (agent-repl--ws-put "itest-nocur" :project-dir (agent-repl-itest--fixture-dir "itest-nocur"))
         (cl-letf (((symbol-function 'agent-repl--ws-switch)
                    (lambda (ws &rest _) (push ws switched))))
           ;; Act: `--roster' emits no `current' key at all unless overridden.
@@ -779,8 +780,8 @@ of that very selection must not fire a second one."
                    (list (agent-repl-itest-roster--row
                           "itest-ownswitch" "itest-ownswitch" 'ready
                           '(current . ((current . t)))))
-                   '(current . ((workspace . ((id . "itest-ownswitch")
-                                              (dir . "/tmp/itest-roster-itest-ownswitch")))))))
+                   `(current . ((workspace . ((id . "itest-ownswitch")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-ownswitch"))))))))
           (agent-repl-itest-roster--await-view daemon)
           ;; Assert.
           (should (equal (length (agent-repl-itest--calls daemon "SelectWorkspace")) 1)))))))
@@ -809,8 +810,8 @@ into a second one."
                    (list (agent-repl-itest-roster--row
                           "itest-r8loop" "itest-r8loop" 'ready
                           '(current . ((current . t)))))
-                   '(current . ((workspace . ((id . "itest-r8loop")
-                                              (dir . "/tmp/itest-roster-itest-r8loop")))))))
+                   `(current . ((workspace . ((id . "itest-r8loop")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-r8loop"))))))))
           (agent-repl-itest--await-call daemon "SelectWorkspace")
           ;; The daemon echoes Emacs's own resulting selection back.
           (agent-repl-itest-roster--push
@@ -818,8 +819,8 @@ into a second one."
                    (list (agent-repl-itest-roster--row
                           "itest-r8loop" "itest-r8loop" 'ready
                           '(current . ((current . t)))))
-                   '(current . ((workspace . ((id . "itest-r8loop")
-                                              (dir . "/tmp/itest-roster-itest-r8loop")))))))
+                   `(current . ((workspace . ((id . "itest-r8loop")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-r8loop"))))))))
           (agent-repl-itest-roster--await-view daemon)
           ;; Assert.
           (should (equal (length (agent-repl-itest--calls daemon "SelectWorkspace")) 1)))))))
@@ -943,7 +944,7 @@ drain."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((finished nil))
-        (agent-repl--ws-put "itest-fin" :project-dir "/tmp/itest-fin")
+        (agent-repl--ws-put "itest-fin" :project-dir (agent-repl-itest--fixture-dir "itest-fin"))
         (add-hook 'agent-repl-roster-finish-functions
                   (lambda (ws) (push ws finished)))
         (agent-repl-itest-roster--push
@@ -968,7 +969,7 @@ a no-change push and must produce no reaction."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((count 0))
-        (agent-repl--ws-put "itest-fin1" :project-dir "/tmp/itest-fin1")
+        (agent-repl--ws-put "itest-fin1" :project-dir (agent-repl-itest--fixture-dir "itest-fin1"))
         (add-hook 'agent-repl-roster-finish-functions
                   (lambda (_ws) (setq count (1+ count))))
         (agent-repl-itest-roster--push
@@ -997,7 +998,7 @@ inside that set is not a finish."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((count 0))
-        (agent-repl--ws-put "itest-fin2" :project-dir "/tmp/itest-fin2")
+        (agent-repl--ws-put "itest-fin2" :project-dir (agent-repl-itest--fixture-dir "itest-fin2"))
         (add-hook 'agent-repl-roster-finish-functions
                   (lambda (_ws) (setq count (1+ count))))
         (agent-repl-itest-roster--push
@@ -1026,7 +1027,7 @@ not the turn running."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((finished nil))
-        (agent-repl--ws-put "itest-fin3" :project-dir "/tmp/itest-fin3")
+        (agent-repl--ws-put "itest-fin3" :project-dir (agent-repl-itest--fixture-dir "itest-fin3"))
         (add-hook 'agent-repl-roster-finish-functions
                   (lambda (ws) (push ws finished)))
         (agent-repl-itest-roster--push
@@ -1060,7 +1061,7 @@ target."
                (target (cdr case))
                (ws (format "itest-fe-%s-%s" source target))
                (finished nil))
-          (agent-repl--ws-put ws :project-dir (format "/tmp/%s" ws))
+          (agent-repl--ws-put ws :project-dir (agent-repl-itest--fixture-dir ws))
           (add-hook 'agent-repl-roster-finish-functions
                     (let ((ws ws)) (lambda (w) (when (equal w ws) (push w finished)))))
           (agent-repl-itest-roster--push
@@ -1086,7 +1087,7 @@ a move within SETTLED never is."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((count 0))
-        (agent-repl--ws-put "itest-settled-settled" :project-dir "/tmp/itest-settled-settled")
+        (agent-repl--ws-put "itest-settled-settled" :project-dir (agent-repl-itest--fixture-dir "itest-settled-settled"))
         (add-hook 'agent-repl-roster-finish-functions
                   (lambda (_ws) (setq count (1+ count))))
         (agent-repl-itest-roster--push
@@ -1115,7 +1116,7 @@ not a transition, whatever the arriving state is."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
       (let ((finished nil))
-        (agent-repl--ws-put "itest-first-settled" :project-dir "/tmp/itest-first-settled")
+        (agent-repl--ws-put "itest-first-settled" :project-dir (agent-repl-itest--fixture-dir "itest-first-settled"))
         (add-hook 'agent-repl-roster-finish-functions
                   (lambda (ws) (push ws finished)))
         ;; Act: the very first push already carries a SETTLED status.
@@ -1144,7 +1145,7 @@ user would never be told their turn finished while looking away."
       ;; puts the production consumer back and nothing else.
       (let ((agent-repl-roster-finish-functions
              (list #'agent-repl-roster-notify-finished)))
-      (agent-repl--ws-put "itest-fin-banner" :project-dir "/tmp/itest-fin-banner")
+      (agent-repl--ws-put "itest-fin-banner" :project-dir (agent-repl-itest--fixture-dir "itest-fin-banner"))
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
@@ -1176,7 +1177,7 @@ silently."
       ;; production consumer's reaction, so it puts that one consumer back.
       (let ((agent-repl-roster-finish-functions
              (list #'agent-repl-roster-echo-finished)))
-      (agent-repl--ws-put "itest-fin-echo" :project-dir "/tmp/itest-fin-echo")
+      (agent-repl--ws-put "itest-fin-echo" :project-dir (agent-repl-itest--fixture-dir "itest-fin-echo"))
       (agent-repl-itest-roster--push
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row "itest-fin-echo" "itest-fin-echo" 'thinking))))
@@ -1233,7 +1234,7 @@ stale or global one."
                           "itest-fin-magit" "itest-fin-magit" 'done))))
           ;; Assert.
           (agent-repl-itest--wait-until (lambda () refreshed) nil "the magit refresh")
-          (should (member "/tmp/itest-roster-itest-fin-magit" refreshed)))))))
+          (should (member (agent-repl-itest--fixture-dir "roster-itest-fin-magit") refreshed)))))))
 
 (ert-deftest agent-repl-itest-roster-finish-edge-drains-a-deferred-prompt ()
   "Reaction (4): a held deferred prompt drains as a SubmitPrompt on the finish edge.
@@ -1411,11 +1412,11 @@ skips, and host.el is handed no ref to hold."
        (lambda () (agent-repl--ws-by-ref-id "itest-ref"))
        nil "the row's tab to be opened")
       (let ((ws (agent-repl--ws-by-ref-id "itest-ref")))
-        (should (equal (agent-repl--ws-get ws :project-dir) "/tmp/itest-roster-itest-ref"))
-        (should (equal (agent-repl--ws-get ws :dir) "/tmp/itest-roster-itest-ref"))
+        (should (equal (agent-repl--ws-get ws :project-dir) (agent-repl-itest--fixture-dir "roster-itest-ref")))
+        (should (equal (agent-repl--ws-get ws :dir) (agent-repl-itest--fixture-dir "roster-itest-ref")))
         (should (equal (plist-get (agent-repl--ws-get ws :ref) :id) "itest-ref"))
         (should (equal (plist-get (agent-repl--ws-get ws :ref) :dir)
-                       "/tmp/itest-roster-itest-ref"))))))
+                       (agent-repl-itest--fixture-dir "roster-itest-ref")))))))
 
 ;; audit-2 #19
 (ert-deftest agent-repl-itest-roster-finish-reactions-are-globally-registered ()
@@ -1504,8 +1505,8 @@ nothing is dropped as invalid."
                           '(current . ((current . t))))
                          (agent-repl-itest-roster--row
                           "itest-live" "itest-live" 'ready))
-                   '(current . ((workspace . ((id . "itest-lag")
-                                              (dir . "/tmp/itest-roster-itest-lag")))))))
+                   `(current . ((workspace . ((id . "itest-lag")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-lag"))))))))
           (agent-repl-itest--wait-until
            (lambda () (agent-repl--ws-by-ref-id "itest-live"))
            nil "the push to be applied")
@@ -1531,8 +1532,8 @@ still names it; the same lag, reached by the other way a row disappears."
            daemon (agent-repl-itest-roster--roster
                    (list (agent-repl-itest-roster--row
                           "itest-present" "itest-present" 'ready))
-                   '(current . ((workspace . ((id . "itest-vanished")
-                                              (dir . "/tmp/itest-roster-itest-vanished")))))))
+                   `(current . ((workspace . ((id . "itest-vanished")
+                                              (dir . ,(agent-repl-itest--fixture-dir "itest-roster-itest-vanished"))))))))
           (agent-repl-itest--wait-until
            (lambda () (agent-repl--ws-by-ref-id "itest-present"))
            nil "the push to be applied")
@@ -1560,7 +1561,7 @@ pinned directly."
                    (rows
                     . ((rows
                         . [((workspace . ((workspace . ((id . "ws-x")
-                                                        (dir . "/tmp/ws-x")))))
+                                                        (dir . ,(agent-repl-itest--fixture-dir "ws-x"))))))
                             (name . ((text . "ws-x")))
                             (ready . nil)
                             (thinking . nil)
@@ -1586,7 +1587,7 @@ into the user's face."
       (let ((agent-repl-roster-finish-functions
              (list #'agent-repl-roster-notify-finished)))
         (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&rest _) t)))
-          (agent-repl--ws-put "itest-fin-focused" :project-dir "/tmp/itest-fin-focused")
+          (agent-repl--ws-put "itest-fin-focused" :project-dir (agent-repl-itest--fixture-dir "itest-fin-focused"))
           (agent-repl-itest-roster--push
            daemon (agent-repl-itest-roster--roster
                    (list (agent-repl-itest-roster--row
@@ -2054,7 +2055,7 @@ side in test-session.el."
     (agent-repl-itest-roster--with-subscription daemon
       (let ((agent-repl-roster-finish-functions
              (list #'agent-repl-roster-notify-finished)))
-        (agent-repl--ws-put "itest-fin-banner-shape" :project-dir "/tmp/itest-fin-banner-shape")
+        (agent-repl--ws-put "itest-fin-banner-shape" :project-dir (agent-repl-itest--fixture-dir "itest-fin-banner-shape"))
         (agent-repl-itest-roster--push
          daemon (agent-repl-itest-roster--roster
                  (list (agent-repl-itest-roster--row

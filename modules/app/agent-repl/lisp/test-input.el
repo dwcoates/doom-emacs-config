@@ -1052,6 +1052,75 @@ input clears."
   "A lone `/name' is a slash command."
   (should (agent-repl--slash-command-p "/clear")))
 
+
+;;;; ---- The flash dwell -------------------------------------------------
+;;
+;; `agent-repl--input-flash' arms a timer that clears the notice after a
+;; dwell.  The timer fires seconds later, long after the flash's own
+;; scenario, so what it is allowed to clear is the whole contract:
+;; `agent-repl--input-expire-flash' is called directly here rather than
+;; through a real timer, which is what makes these tests deterministic.
+
+(ert-deftest agent-repl-input-expire-flash-clears-its-own-text ()
+  "The dwell clears the notice it flashed."
+  ;; Arrange.
+  (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local agent-repl-input-notice "refused: merge in flight"))
+          ;; Act.
+          (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight")
+          ;; Assert.
+          (should (null (buffer-local-value 'agent-repl-input-notice buffer))))
+      (kill-buffer buffer))))
+
+(ert-deftest agent-repl-input-expire-flash-leaves-a-different-notice-standing ()
+  "The dwell NEVER clears a notice it did not set.
+A refusal flashed within the dwell of a parked send would otherwise erase
+the merge-parked badge -- the one line telling the user their prompts go
+to the resolution agent."
+  ;; Arrange.
+  (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local agent-repl-input-notice agent-repl--input-merge-parked-badge))
+          ;; Act.
+          (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight")
+          ;; Assert.
+          (should (equal (buffer-local-value 'agent-repl-input-notice buffer)
+                         agent-repl--input-merge-parked-badge)))
+      (kill-buffer buffer))))
+
+(ert-deftest agent-repl-input-expire-flash-tolerates-a-dead-buffer ()
+  "A composer killed before the dwell elapses is not an error."
+  ;; Arrange.
+  (let ((buffer (generate-new-buffer " *agent-repl-test-input-flash*")))
+    (kill-buffer buffer)
+    ;; Act / Assert.
+    (should-not (agent-repl--input-expire-flash "ws" buffer "refused: merge in flight"))))
+
+(ert-deftest agent-repl-input-flash-arms-the-dwell-on-the-buffer-it-wrote ()
+  "The dwell is armed with the buffer and text of THIS flash.
+Resolving the composer by NAME when the timer fires is what let one
+workspace's dwell clear another composer's badge."
+  ;; Arrange.
+  (agent-repl-test-input--with
+    (let ((armed nil))
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_secs _repeat fn &rest args)
+                   (setq armed (cons fn args))
+                   nil)))
+        ;; Act.
+        (agent-repl--input-flash "ws-one" "refused: merge in flight"))
+      ;; Assert.
+      (should (eq (car armed) #'agent-repl--input-expire-flash))
+      (should (equal (cdr armed)
+                     (list "ws-one"
+                           agent-repl-test-input--buffer
+                           "refused: merge in flight"))))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here
