@@ -1,0 +1,594 @@
+//go:build integration
+
+// Package integration: the audit-3 SUBSCRIPTION INVARIANT and FLUSH-ON-ACCEPT
+// family tests, table-driven across harness.WatchKinds(), plus the
+// push-cadence no-change probes and the per-workspace transport-closed
+// refusal family. See daemon/ARCHITECTURE.md "Standing-stream mechanics" and
+// docs/overhaul/daemon.md invariant 13.
+package integration
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"claude-repld/internal/workspace"
+
+	"claude-repld/integration/harness"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+)
+
+// ---------------------------------------------------------------------------
+// Critique 1: the SUBSCRIPTION INVARIANT, table-driven across
+// harness.WatchKinds() — a late subscriber's first push is the
+// last-published view, and everything after arrives in order.
+// ---------------------------------------------------------------------------
+
+// subscriptionScenario drives one WatchKind through two distinguishable
+// states so the invariant can be checked against a witness stream opened
+// BEFORE either change.
+type subscriptionScenario struct {
+	// drive1 performs the action whose resulting view a LATE subscriber must
+	// receive as its first push.
+	drive1 func(t *testing.T, f *fixture)
+	// isFirst identifies drive1's resulting view on the wire.
+	isFirst func(msg proto.Message) bool
+	// drive2 performs a FURTHER action after the late subscriber is already
+	// attached.
+	drive2 func(t *testing.T, f *fixture)
+	// isSecond identifies drive2's resulting view on the wire.
+	isSecond func(msg proto.Message) bool
+}
+
+// subscriptionScenarioFor answers the lightweight two-step driver for one
+// WatchKind, or false when none exists in this suite.
+//
+// WatchWebWorkspace has none: its only push arm is `transferred`, fired
+// exactly once per handover, and by the time it fires the workspace's
+// standing on THIS daemon has already become transferring_away —
+// resolveStreamRef (internal/server/refuse.go) refuses every FURTHER
+// per-workspace open on this daemon before it ever reaches the topic. There
+// is no window in which "subscribe late on the daemon holding the published
+// transferred view" is even reachable, so the late-subscribe half of the
+// invariant cannot be demonstrated for it without contradicting that refusal
+// contract. See the report for this note restated.
+func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
+	switch name {
+	case "WatchFooter":
+		return subscriptionScenario{
+			drive1: func(t *testing.T, f *fixture) {
+				f.submit("start the work", "k-sub-inv-footer-1", origin)
+				f.shim.ExpectStartTurn()
+			},
+			isFirst: func(msg proto.Message) bool {
+				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetThinking() != nil
+			},
+			drive2: func(t *testing.T, f *fixture) {
+				f.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, nil))
+			},
+			isSecond: func(msg proto.Message) bool {
+				return msg.(*frontendv1.FooterView).GetStrip().GetStatus().GetIdle() != nil
+			},
+		}, true
+
+	case "WatchTopbar":
+		return subscriptionScenario{
+			drive1: func(t *testing.T, f *fixture) {
+				f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+					Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+						TotalTokens: 10_000, MaxTokens: 200_000, Percentage: 5, Model: "claude-opus-5",
+						Categories: []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 1_000, Color: "blue"}},
+					}},
+				})
+			},
+			// figures.Tokens(10_000) == "10k" (internal/figures/tokens.go).
+			isFirst: func(msg proto.Message) bool {
+				return msg.(*frontendv1.TopbarView).GetContext().GetText() == "10k"
+			},
+			drive2: func(t *testing.T, f *fixture) {
+				f.shim.PushSessionUpdate(&conversationv1.SessionUpdate{
+					Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+						TotalTokens: 20_000, MaxTokens: 200_000, Percentage: 10, Model: "claude-opus-5",
+						Categories: []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 1_000, Color: "blue"}},
+					}},
+				})
+			},
+			isSecond: func(msg proto.Message) bool {
+				return msg.(*frontendv1.TopbarView).GetContext().GetText() == "20k"
+			},
+		}, true
+
+	case "WatchWorkspaceRoster":
+		var ws2, ws3 *workspacev1.WorkspaceRef
+		return subscriptionScenario{
+			drive1: func(t *testing.T, f *fixture) {
+				repo2 := harness.NewRepo(t)
+				ws2 = harness.Register(t, f.d, repo2.Dir)
+			},
+			isFirst: func(msg proto.Message) bool {
+				return ws2 != nil && rosterRow(msg.(*frontendv1.WorkspaceRoster), ws2.GetId()) != nil
+			},
+			drive2: func(t *testing.T, f *fixture) {
+				repo3 := harness.NewRepo(t)
+				ws3 = harness.Register(t, f.d, repo3.Dir)
+			},
+			isSecond: func(msg proto.Message) bool {
+				return ws3 != nil && rosterRow(msg.(*frontendv1.WorkspaceRoster), ws3.GetId()) != nil
+			},
+		}, true
+
+	case "WatchDaemon":
+		return subscriptionScenario{
+			drive1: func(t *testing.T, f *fixture) {
+				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+					Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+						AtMs:   time.Now().Add(time.Hour).UnixMilli(),
+						Reason: drainReasonDeploy(),
+					}},
+				}))
+				if err != nil {
+					t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+				}
+			},
+			isFirst: func(msg proto.Message) bool {
+				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainScheduled() != nil
+			},
+			drive2: func(t *testing.T, f *fixture) {
+				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+					Action: &agentreplv1.UpdateShutdownScheduleRequest_Cancel{Cancel: &agentreplv1.UpdateShutdownScheduleCancel{}},
+				}))
+				if err != nil {
+					t.Fatalf("UpdateShutdownSchedule{cancel} = error %v, want a success", err)
+				}
+			},
+			isSecond: func(msg proto.Message) bool {
+				return msg.(*agentreplv1.WatchDaemonResponse).GetDrainCancelled() != nil
+			},
+		}, true
+
+	case "WatchDaemonHolds":
+		var turn2, turn3 *conversationv1.TurnId
+		return subscriptionScenario{
+			drive1: func(t *testing.T, f *fixture) {
+				f.submit("start the work", "k-sub-inv-holds-run", origin)
+				f.shim.ExpectStartTurn()
+				resp := f.submit("a follow-up while it runs", "k-sub-inv-holds-1", origin)
+				turn2 = resp.GetSuccess().GetTurn().GetTurn()
+				if turn2.GetValue() == "" {
+					t.Fatalf("SubmitPrompt while a turn runs = %v, want a minted TurnId (it is HELD)", resp)
+				}
+			},
+			isFirst: func(msg proto.Message) bool {
+				e := promptHeldEntry(msg.(*frontendv1.DaemonHoldTray), turn2)
+				return e != nil && e.GetHoldForTurnEnd() != nil
+			},
+			drive2: func(t *testing.T, f *fixture) {
+				resp := f.submit("a second follow-up while it still runs", "k-sub-inv-holds-2", origin)
+				turn3 = resp.GetSuccess().GetTurn().GetTurn()
+				if turn3.GetValue() == "" {
+					t.Fatalf("SubmitPrompt while a turn runs = %v, want a minted TurnId (it is HELD)", resp)
+				}
+			},
+			isSecond: func(msg proto.Message) bool {
+				tray := msg.(*frontendv1.DaemonHoldTray)
+				e2 := promptHeldEntry(tray, turn2)
+				e3 := promptHeldEntry(tray, turn3)
+				return e2 != nil && e2.GetHoldForTurnEnd() != nil && e3 != nil && e3.GetHoldForTurnEnd() != nil
+			},
+		}, true
+
+	case "WatchHostWorkspace":
+		return subscriptionScenario{
+			drive1: func(t *testing.T, f *fixture) {
+				line := uint32(1)
+				if _, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
+					Workspace: f.ws, Path: "README.md", Line: &line,
+				})); err != nil {
+					t.Fatalf("OpenInEditor = error %v, want a success", err)
+				}
+			},
+			isFirst: func(msg proto.Message) bool {
+				oe := msg.(*agentreplv1.WatchHostWorkspaceResponse).GetOpenInEditor()
+				return oe.GetPath() == "README.md" && oe.GetLine() == 1
+			},
+			drive2: func(t *testing.T, f *fixture) {
+				line := uint32(2)
+				if _, err := f.d.Client().OpenInEditor(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{
+					Workspace: f.ws, Path: "README.md", Line: &line,
+				})); err != nil {
+					t.Fatalf("OpenInEditor = error %v, want a success", err)
+				}
+			},
+			isSecond: func(msg proto.Message) bool {
+				oe := msg.(*agentreplv1.WatchHostWorkspaceResponse).GetOpenInEditor()
+				return oe.GetPath() == "README.md" && oe.GetLine() == 2
+			},
+		}, true
+
+	default:
+		return subscriptionScenario{}, false
+	}
+}
+
+func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
+	for _, k := range harness.WatchKinds() {
+		k := k
+		t.Run(k.Name, func(t *testing.T) {
+			scenario, ok := subscriptionScenarioFor(k.Name)
+			if !ok {
+				t.Skipf("%s has no lightweight two-step driver in this suite (see subscriptionScenarioFor's doc comment)", k.Name)
+				return
+			}
+
+			// Arrange: a workspace already opened, a witness attached before
+			// anything is driven.
+			f := newOpened(t, harness.Opts{})
+			var ws *workspacev1.WorkspaceRef
+			if k.PerWorkspace {
+				ws = f.ws
+			}
+			witness := k.Open(f.d, ws)
+
+			// Act: drive the first change, and confirm it landed on the
+			// witness before subscribing late — "a workspace already opened
+			// and its view already published".
+			scenario.drive1(t, f)
+			first := harness.AwaitView(t, f.d.Ctx(), witness, k.Name+": the driven first view", scenario.isFirst)
+
+			// Act: subscribe LATE.
+			late := k.Open(f.d, ws)
+
+			// Assert (a): the first push a late subscriber receives is the
+			// last-published view.
+			gotFirst := harness.AwaitNext(t, f.d.Ctx(), late, k.Name+": the late subscriber's first push")
+			if !proto.Equal(gotFirst, first) {
+				t.Fatalf("%s: late subscriber's first push = %v, want the last-published view %v", k.Name, gotFirst, first)
+			}
+
+			// Act: drive a further change.
+			scenario.drive2(t, f)
+			second := harness.AwaitView(t, f.d.Ctx(), witness, k.Name+": the driven second view", scenario.isSecond)
+
+			// Assert (b): the further change arrives next, in order.
+			gotSecond := harness.AwaitNext(t, f.d.Ctx(), late, k.Name+": the late subscriber's next push")
+			if !proto.Equal(gotSecond, second) {
+				t.Fatalf("%s: late subscriber's next push = %v, want the further-published view %v", k.Name, gotSecond, second)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Critique 2: FLUSH-ON-ACCEPT, table-driven across harness.WatchKinds().
+// ---------------------------------------------------------------------------
+
+// TestFlushOnAcceptAcrossWatchKinds asserts that every Watch* stream's
+// response headers reach the client at accept time, before any push. Two
+// kinds — WatchDaemonHolds and WatchHostWorkspace — turn out to ALWAYS have a
+// view to send even on a workspace that was only just registered (holds
+// publishes the empty tray at SetWorkspaceDir/registration time;
+// WatchHostWorkspace composes and publishes its host view synchronously
+// before every subscribe — "COMPOSE BEFORE SUBSCRIBING",
+// internal/server/streams.go). For those two the no-view flush path this
+// test exercises for every other kind never actually fires, so the
+// assertion here is deliberately per-kind rather than one blanket
+// ExpectNoPush, per the sub-brief's own instruction.
+func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
+	for _, k := range harness.WatchKinds() {
+		k := k
+		t.Run(k.Name, func(t *testing.T) {
+			var d *harness.Daemon
+			var ws *workspacev1.WorkspaceRef
+			if k.PerWorkspace {
+				f := newRegistered(t, harness.Opts{})
+				d, ws = f.d, f.ws
+			} else {
+				d = newDaemon(t, harness.Opts{})
+			}
+
+			s := k.Open(d, ws)
+			hdrs := s.AwaitHeaders(t, d.Ctx(), k.Name)
+			if hdrs == nil {
+				t.Fatalf("%s: AwaitHeaders returned no header set", k.Name)
+			}
+
+			switch k.Name {
+			case "WatchDaemonHolds":
+				tray := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the tray a fresh registration opens with")
+				if got := len(tray.(*frontendv1.DaemonHoldTray).GetItems()); got != 0 {
+					t.Fatalf("%s on a fresh registration = %d items, want the empty tray (it is a complete answer, published at registration)", k.Name, got)
+				}
+			case "WatchHostWorkspace":
+				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the host push a registered-but-unopened workspace opens with")
+				if push.(*agentreplv1.WatchHostWorkspaceResponse).GetHost().GetNone() == nil {
+					t.Fatalf("%s on a registered-but-unopened workspace = %v, want host.none (composed before every subscribe)", k.Name, push)
+				}
+			default:
+				harness.ExpectNoPush(t, s, harness.ProbeWindow, k.Name+" carries no frame before anything is ever published")
+			}
+		})
+	}
+}
+
+// TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled is
+// the sub-brief's specific "WatchDaemon with no view yet" case: the
+// daemon-wide announcement topic is published only by a drain schedule or
+// cancellation, never at boot, so a fresh daemon's WatchDaemon has genuinely
+// nothing to send.
+func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+
+	// Act
+	s := d.WatchDaemonStream()
+
+	// Assert: headers arrive even though nothing was ever published, and no
+	// frame follows.
+	s.AwaitHeaders(t, d.Ctx(), "WatchDaemon")
+	harness.ExpectNoPush(t, s, harness.ProbeWindow, "WatchDaemon with no drain ever scheduled carries no frame")
+}
+
+// TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray is the
+// sub-brief's specific "WatchDaemonHolds with an empty tray" case. Per
+// internal/resolve/holds/resolver.go ("THE EMPTY TRAY IS A COMPLETE ANSWER,
+// and binding is when it can first be given"), SetWorkspaceDir — called at
+// REGISTRATION — already publishes the empty tray, so a subscriber opening
+// on a merely-registered workspace does NOT find "no view due": it gets the
+// empty tray as an ordinary first push. Asserting a blanket ExpectNoPush here
+// would be asserting a claim the source contradicts.
+func TestWatchDaemonHoldsFlushesHeadersThenPushesTheAlreadyEmptyTray(t *testing.T) {
+	// Arrange: registered, never opened.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	holds := f.d.WatchHolds(f.ws)
+
+	// Assert: headers arrive, and the already-published empty tray follows.
+	holds.AwaitHeaders(t, f.d.Ctx(), "WatchDaemonHolds")
+	tray := harness.AwaitNext(t, f.d.Ctx(), holds, "the empty tray a fresh registration already published")
+	if got := len(tray.GetItems()); got != 0 {
+		t.Fatalf("WatchDaemonHolds on a fresh registration = %d items, want the empty tray", got)
+	}
+}
+
+// TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotOpened
+// is the sub-brief's specific "WatchHostWorkspace on a workspace that is
+// registered but not opened" case. Per internal/server/streams.go's
+// WatchHostWorkspace handler ("COMPOSE BEFORE SUBSCRIBING... publishing here
+// is what gives every fresh subscription its opening host push -- including
+// the first one, before any session edge has ever fired") and
+// composeHostWorkspace's `!hasSession` arm ("Registered, and no session was
+// ever created for it. This is the one session arm that needs no live facts
+// at all."), this open ALWAYS has a view to send: host.none. As with holds
+// above, a blanket "no push is due" assertion would not match the source.
+func TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotOpened(t *testing.T) {
+	// Arrange: registered, never opened -- no session exists for it at all.
+	f := newRegistered(t, harness.Opts{})
+
+	// Act
+	host := f.d.WatchHost(f.ws)
+
+	// Assert: headers arrive, and the composed host.none push follows.
+	host.AwaitHeaders(t, f.d.Ctx(), "WatchHostWorkspace")
+	push := harness.AwaitNext(t, f.d.Ctx(), host, "the host.none push a registered-but-unopened workspace already has")
+	if push.GetHost().GetNone() == nil {
+		t.Fatalf("WatchHostWorkspace on a registered-but-unopened workspace = %v, want host.none", push)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Critique 3: push-cadence no-change probes.
+// ---------------------------------------------------------------------------
+
+// TestTopbarIdenticalContextUsagePushProducesNoSecondPush re-pushes the exact
+// same context_usage session update and asserts no second topbar push
+// follows — the topbar resolver's whole-view dedup (internal/publish's
+// Topic.Publish, proto.Equal) applies here exactly as it does to the footer
+// (TestFooterPushesAreWholeViewsDeduplicated).
+func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	usage := &conversationv1.SessionUpdate{
+		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
+			TotalTokens: 10_000, MaxTokens: 200_000, Percentage: 5, Model: "claude-opus-5",
+			Categories: []*conversationv1.SessionContextCategory{{Label: "system prompt", Tokens: 1_000, Color: "blue"}},
+		}},
+	}
+	f.shim.PushSessionUpdate(usage)
+	awaitTopbar(t, f, topbar, "the context chip after the first context_usage push", func(v *frontendv1.TopbarView) bool {
+		return v.GetContext().GetText() == "10k"
+	})
+
+	// Act: push the IDENTICAL context_usage fact again.
+	f.shim.PushSessionUpdate(usage)
+
+	// Assert
+	harness.ExpectNoPush(t, topbar, harness.ProbeWindow, "an identical consecutive context_usage push is not sent")
+}
+
+// TestHoldsIdenticalSecondAcceptProducesNoSecondPush accepts the same
+// hold_for_turn_end verdict twice. internal/promptqueue/holdactions.go's
+// Accept only checks that the classification is STILL hold_for_turn_end, not
+// whether it was already accepted, so the second call succeeds as a no-op —
+// and the tray's whole-view dedup means it produces no second push.
+func TestHoldsIdenticalSecondAcceptProducesNoSecondPush(t *testing.T) {
+	// Arrange: a turn running, and a follow-up held with the hold_for_turn_end
+	// verdict.
+	f := newOpened(t, harness.Opts{})
+	f.submit("start the work", "k-accept-run", origin)
+	f.shim.ExpectStartTurn()
+	resp := f.submit("a follow-up while it runs", "k-accept-held", origin)
+	turn := resp.GetSuccess().GetTurn().GetTurn()
+	holds := f.d.WatchHolds(f.ws)
+	awaitView(t, f, holds, "the hold_for_turn_end verdict", func(tray *frontendv1.DaemonHoldTray) bool {
+		e := promptHeldEntry(tray, turn)
+		return e != nil && e.GetHoldForTurnEnd() != nil
+	})
+
+	// Act: accept once.
+	accept1, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws, Turn: turn,
+		Action: &agentreplv1.UpdateHeldPromptRequest_Accept{Accept: &agentreplv1.UpdateHeldPromptAccept{}},
+	}))
+	if err != nil || accept1.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateHeldPrompt{accept} = (%v, %v), want a success", accept1, err)
+	}
+	awaitView(t, f, holds, "the tray after the first accept", func(tray *frontendv1.DaemonHoldTray) bool {
+		return promptHeldEntry(tray, turn).GetHoldForTurnEnd().GetAccepted().GetAccepted()
+	})
+
+	// Act: the SAME accept again — a no-op.
+	accept2, err := f.d.Client().UpdateHeldPrompt(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+		Workspace: f.ws, Turn: turn,
+		Action: &agentreplv1.UpdateHeldPromptRequest_Accept{Accept: &agentreplv1.UpdateHeldPromptAccept{}},
+	}))
+	if err != nil || accept2.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateHeldPrompt{accept} (second, no-op) = (%v, %v), want a success", accept2, err)
+	}
+
+	// Assert: the unchanged tray is never re-pushed.
+	harness.ExpectNoPush(t, holds, harness.ProbeWindow, "an already-accepted hold_for_turn_end re-accepted produces no second tray push")
+}
+
+// TestHostStreamIdenticalRepublishedViewProducesNoSecondPush opens a SECOND
+// WatchHostWorkspace on the same, unchanged workspace: the handler composes
+// and publishes the host view again on every open ("COMPOSE BEFORE
+// SUBSCRIBING", internal/server/streams.go), and since nothing about the
+// workspace changed the republished view is identical, so an already-caught-up
+// witness receives no further push.
+func TestHostStreamIdenticalRepublishedViewProducesNoSecondPush(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	witness := f.d.WatchHost(f.ws)
+	harness.AwaitNext(t, f.d.Ctx(), witness, "the witness's initial host push")
+
+	// Act: a second subscription re-triggers PublishHostWorkspace with an
+	// unchanged, hence identical, composed view.
+	second := f.d.WatchHost(f.ws)
+	harness.AwaitNext(t, f.d.Ctx(), second, "the second subscriber's own initial push")
+
+	// Assert: the witness, already caught up, gets nothing further.
+	harness.ExpectNoPush(t, witness, harness.ProbeWindow, "a re-published identical host view produces no second push")
+}
+
+// ---------------------------------------------------------------------------
+// Critique 12: per-workspace Watch* transport-closed refusals.
+// ---------------------------------------------------------------------------
+
+// firstReceiveErr answers a streaming rpc's refusal, whether it surfaced at
+// the open call itself or (per connect-go's stream semantics) only at the
+// first Receive.
+func firstReceiveErr[T any](stream *connect.ServerStreamForClient[T], err error) error {
+	if err != nil {
+		return err
+	}
+	if stream.Receive() {
+		return fmt.Errorf("delivered a frame %v, want a transport refusal", stream.Msg())
+	}
+	return stream.Err()
+}
+
+// transportClosedRPC is one per-workspace Watch* rpc, opened DIRECTLY via
+// d.Client() (never harness.Stream, which fatals on an open error).
+type transportClosedRPC struct {
+	name string
+	open func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error
+}
+
+func transportClosedRPCs() []transportClosedRPC {
+	return []transportClosedRPC{
+		{"WatchFooter", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
+			s, err := d.Client().WatchFooter(d.Ctx(), connect.NewRequest(&agentreplv1.WatchFooterRequest{Workspace: ws}))
+			return firstReceiveErr(s, err)
+		}},
+		{"WatchTopbar", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
+			s, err := d.Client().WatchTopbar(d.Ctx(), connect.NewRequest(&agentreplv1.WatchTopbarRequest{Workspace: ws}))
+			return firstReceiveErr(s, err)
+		}},
+		{"WatchDaemonHolds", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
+			s, err := d.Client().WatchDaemonHolds(d.Ctx(), connect.NewRequest(&agentreplv1.WatchDaemonHoldsRequest{Workspace: ws}))
+			return firstReceiveErr(s, err)
+		}},
+		{"WatchHostWorkspace", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
+			s, err := d.Client().WatchHostWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ws}))
+			return firstReceiveErr(s, err)
+		}},
+		{"WatchWebWorkspace", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
+			s, err := d.Client().WatchWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ws}))
+			return firstReceiveErr(s, err)
+		}},
+		{"WatchLoginTerminal", func(d *harness.Daemon, ws *workspacev1.WorkspaceRef) error {
+			s, err := d.Client().WatchLoginTerminal(d.Ctx(), connect.NewRequest(&agentreplv1.WatchLoginTerminalRequest{Workspace: ws}))
+			return firstReceiveErr(s, err)
+		}},
+	}
+}
+
+// assertTransportClosed checks the shared shape of every case below: a
+// refusal at connect time, recorded once at INFO under
+// daemon.refusal.transport_closed, and never warned.
+func assertTransportClosed(t *testing.T, d *harness.Daemon, rpcName, wantCause string) {
+	t.Helper()
+	rec := d.AwaitRunLogOperation("daemon.refusal.transport_closed")
+	if !strings.EqualFold(rec.Level, "info") {
+		t.Fatalf("the transport-closed record = level %q, want INFO", rec.Level)
+	}
+	if rec.Context["rpc"] != rpcName || rec.Context["cause"] != wantCause {
+		t.Fatalf("the transport-closed record's context = %v, want rpc %q and cause %q", rec.Context, rpcName, wantCause)
+	}
+	d.ExpectWarnings()
+}
+
+// TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed covers an
+// id the registry does not hold, for every per-workspace Watch* rpc.
+func TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed(t *testing.T) {
+	for _, rpc := range transportClosedRPCs() {
+		rpc := rpc
+		t.Run(rpc.name, func(t *testing.T) {
+			// Arrange
+			d := newDaemon(t, harness.Opts{})
+			bogus := &workspacev1.WorkspaceRef{Id: "bogus-unregistered-workspace-id"}
+
+			// Act
+			err := rpc.open(d, bogus)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("%s(unknown workspace) = success, want a transport-level refusal", rpc.name)
+			}
+			assertTransportClosed(t, d, rpc.name, workspace.ArmUnknownWorkspace)
+		})
+	}
+}
+
+// TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed covers a ref
+// whose `dir` disagrees with the registry, for every per-workspace Watch*
+// rpc.
+func TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed(t *testing.T) {
+	for _, rpc := range transportClosedRPCs() {
+		rpc := rpc
+		t.Run(rpc.name, func(t *testing.T) {
+			// Arrange
+			f := newRegistered(t, harness.Opts{})
+			mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: f.ws.GetDir() + "-mismatched"}
+
+			// Act
+			err := rpc.open(f.d, mismatched)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("%s(mismatched dir) = success, want a transport-level refusal", rpc.name)
+			}
+			assertTransportClosed(t, f.d, rpc.name, workspace.ArmWorkspaceRefMismatch)
+		})
+	}
+}

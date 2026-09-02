@@ -3,15 +3,20 @@
 package integration
 
 import (
+	"context"
+	"database/sql"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"claude-repld/integration/harness"
+	"claude-repld/internal/rollout"
 
 	"connectrpc.com/connect"
 )
@@ -86,6 +91,19 @@ func TestJoiningDaemonDoesNotClaimTheAddressFile(t *testing.T) {
 	}
 	if joining.Exited() {
 		t.Fatalf("the joining daemon exited instead of binding its own port\nstderr:\n%s", joining.Stderr())
+	}
+
+	// Assert: the joining daemon really serves, off the port it reported in
+	// joining.addr (internal/rollout/spawn.go: ReportJoiningAddr) rather than
+	// daemon.addr, which it deliberately left untouched above.
+	joining.AwaitFileExists(rollout.JoiningAddrPath(joining.StateDir))
+	raw, err := os.ReadFile(rollout.JoiningAddrPath(joining.StateDir))
+	if err != nil {
+		t.Fatalf("read the joining daemon's own reported address: %v", err)
+	}
+	addr := strings.TrimSuffix(string(raw), "\n")
+	if _, err := harness.DialAt(t, addr).DaemonHealth(joining.Ctx(), healthRequest()); err != nil {
+		t.Fatalf("DaemonHealth against the joining daemon's OWN reported address %q = error %v, want a success: a joining daemon owns no workspace yet but must already be serving", addr, err)
 	}
 }
 
@@ -225,6 +243,15 @@ func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
 	if _, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {
 		t.Fatalf("SelectWorkspace over the JSON codec = error %v, want a success", err)
 	}
+
+	// Assert: the SERVER-STREAM path over the JSON codec too — a late
+	// subscriber's roster stream delivers the latest view first, exactly as
+	// the binary codec does (TestRosterDeliversTheLatestViewToALateSubscriber).
+	roster := d.WatchRosterOn(d.Client())
+	first := harness.AwaitNext(t, d.Ctx(), roster, "the roster a JSON-codec subscriber opens with")
+	if rosterRow(first, ws.GetId()) == nil {
+		t.Fatalf("the first roster push over the JSON codec has no row for %s, want the latest-first roster", ws.GetId())
+	}
 }
 
 // TestWorkspaceBoundWarnStaysOffTheRunLog pins the log-discipline split:
@@ -342,4 +369,277 @@ func TestDaemonRestartRotatesTheRunLogKeepingThePriorBootsRecords(t *testing.T) 
 		}
 	}
 	d2.ExpectWarnings()
+}
+
+// ---- audit-3 critique 9: layout-version and corrupt-row boot refusals ----
+
+// TestBootRefusesAForeignLayoutVersion pins internal/wsm/open.go's
+// checkLayout: a state database stamped with any version but this build's
+// wsm.LayoutVersion is refused rather than migrated, at operation
+// daemon.wsm.open.
+func TestBootRefusesAForeignLayoutVersion(t *testing.T) {
+	// Arrange: a fresh boot stamps the layout row, then is stopped so the
+	// row can be corrupted (the daemon holds the sole writing handle while
+	// it runs).
+	d := newDaemon(t, harness.Opts{})
+	d.Stop()
+	d.WithDB(func(db *sql.DB) {
+		if _, err := db.Exec(`UPDATE layout SET version = version + 1`); err != nil {
+			t.Fatalf("bump the layout version: %v", err)
+		}
+	})
+
+	// Act: restart on the same state root.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, ExpectEarlyExit: true})
+	code := nd.AwaitExit()
+
+	// Assert
+	if code == 0 {
+		t.Fatalf("boot with a foreign layout version exited 0, want a loud non-zero refusal")
+	}
+	stderr := nd.Stderr()
+	if got := strings.Count(stderr, "daemon.wsm.open"); got != 1 {
+		t.Fatalf("daemon.wsm.open records in stderr = %d, want exactly 1\nstderr:\n%s", got, stderr)
+	}
+	if !strings.Contains(stderr, `"level":"error"`) {
+		t.Fatalf("stderr = %q, want an ERROR-level record for the refused layout version", stderr)
+	}
+}
+
+// TestBootRefusesACorruptTaskRow pins that a corrupt row of `tasks` fails the
+// boot, not just an rpc: cmd/claude-repld/run.go's Prime step runs
+// verbs.PublishRegistry BEFORE the server ever serves (internal/workspace/
+// register.go: "a daemon that has just booted... would leave
+// WatchWorkspaceRoster with no value to deliver"), and PublishRegistry reads
+// DB.Tasks whole-or-nothing. A task row whose `done` column cannot scan as a
+// bool therefore refuses the WHOLE boot, at wsm's own daemon.wsm.tasks
+// operation as well as the top-level daemon.cmd.serve wrapper.
+func TestBootRefusesACorruptTaskRow(t *testing.T) {
+	// Arrange
+	d := newDaemon(t, harness.Opts{})
+	created, err := d.Client().CreateTask(d.Ctx(), connect.NewRequest(&agentreplv1.CreateTaskRequest{Title: "land the rebuild"}))
+	if err != nil {
+		t.Fatalf("CreateTask = error %v, want a task ref", err)
+	}
+	taskID := created.Msg.GetSuccess().GetTask().GetId()
+	if taskID == "" {
+		t.Fatalf("CreateTask = %v, want a minted task id", created.Msg)
+	}
+	d.Stop()
+	d.CorruptRow("tasks", "done", "id", taskID, "not-a-bool")
+
+	// Act: restart on the same state root.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, ExpectEarlyExit: true})
+	code := nd.AwaitExit()
+
+	// Assert
+	if code == 0 {
+		t.Fatalf("boot with a corrupted tasks row exited 0, want a loud non-zero refusal")
+	}
+	stderr := nd.Stderr()
+	if got := strings.Count(stderr, "daemon.wsm.tasks"); got != 1 {
+		t.Fatalf("daemon.wsm.tasks records in stderr = %d, want exactly 1\nstderr:\n%s", got, stderr)
+	}
+	if !strings.Contains(stderr, "publish the opening views") {
+		t.Fatalf("stderr = %q, want the Prime/PublishRegistry wrapper naming the failed boot step", stderr)
+	}
+	if !strings.Contains(stderr, `"level":"error"`) {
+		t.Fatalf("stderr = %q, want an ERROR-level record for the failed task read", stderr)
+	}
+}
+
+// TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace pins that a corrupt
+// row of `sessions` fails the boot of a crash-restart that must ADOPT a
+// surviving shim: boot/sequence.go's adopt() calls the Adopted callback
+// (internal/workspace/fleet_rollout.go: Fleet.Install), which opens the
+// adopted shim's watches from the session's durable record
+// (watchInstalled -> DB.Session). A session row whose recorded shim_pid is
+// not positive is refused as a *wsm.DecodeError (internal/wsm/sessions.go:
+// scanSession), which propagates all the way to boot.Sequence.Run and fails
+// the whole boot rather than adopting the shim with the row silently
+// dropped.
+func TestBootRefusesACorruptSessionRowOfAnAdoptedWorkspace(t *testing.T) {
+	// Arrange: an opened workspace has a `sessions` row (PutSession on the
+	// shim's successful bring-up). Killing only the daemon (never the shim,
+	// which SysProcAttr.Setpgid puts in its own process group) leaves the
+	// shim holding its kernel lock, which is what selects the ADOPT path on
+	// restart rather than a fresh spawn.
+	f := newOpened(t, harness.Opts{})
+	f.d.Kill()
+	f.d.CorruptRow("sessions", "shim_pid", "workspace_id", f.ws.GetId(), -1)
+
+	// Act: restart on the same state root, with the same redirected lock
+	// directory so the probe finds the surviving shim's lock still held.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + f.d.LockDir}, ExpectEarlyExit: true})
+	code := nd.AwaitExit()
+
+	// Assert
+	if code == 0 {
+		t.Fatalf("boot adopting a shim whose session row is corrupt exited 0, want a loud non-zero refusal")
+	}
+	stderr := nd.Stderr()
+	if got := strings.Count(stderr, "daemon.boot.adopt"); got != 1 {
+		t.Fatalf("daemon.boot.adopt records in stderr = %d, want exactly 1\nstderr:\n%s", got, stderr)
+	}
+	if !strings.Contains(stderr, "shim_pid") {
+		t.Fatalf("stderr = %q, want it to name the corrupt shim_pid field (*wsm.DecodeError)", stderr)
+	}
+	if !strings.Contains(stderr, `"level":"error"`) {
+		t.Fatalf("stderr = %q, want an ERROR-level record for the failed adoption", stderr)
+	}
+}
+
+// TestBootRefusesACorruptCreationJobOfAnAdmittedMerge asserts critique 9's
+// contract for `creation_jobs`: a half-written row is a CORRUPTION, and the
+// boot refuses it loudly rather than coming up with the row dropped.
+//
+// IT IS EXPECTED TO BE RED, and the defect it exposes is stated here so the
+// failure is read as the finding it is. The only boot path that reads a
+// workspace's creation job is the in-flight-merge recovery
+// (internal/boot/sequence.go: recoverMerges -> internal/merge/recover.go:
+// Recover -> recoverAdmitted -> layoutFor -> DB.CreationJob), and
+// recoverAdmitted's switch folds ANY layoutFor error -- a genuine corrupt-row
+// *wsm.DecodeError included -- into "the workspace's merge geometry is gone".
+// A data-corruption refusal is thereby downgraded to an ordinary
+// "unmergeable" business outcome: the row IS dropped and the daemon serves on.
+// The remediation belongs in internal/merge/recover.go, which is outside this
+// file's boundary; the test states the contract, not the defect.
+func TestBootRefusesACorruptCreationJobOfAnAdmittedMerge(t *testing.T) {
+	// Arrange: register a workspace, then seed its merge geometry and an
+	// ADMITTED queue entry directly (raw SQL, daemon stopped): the boot's
+	// merge recovery reads both without going through the ordinary merge rpc
+	// flow, and CreationJob's own scan validates actions_before/actions_after
+	// as JSON regardless of how the row was written.
+	f := newRegistered(t, harness.Opts{})
+	f.d.Stop()
+	f.d.WithDB(func(db *sql.DB) {
+		now := time.Now().UnixNano()
+		if _, err := db.Exec(
+			`INSERT INTO creation_jobs (workspace_id, source_branch, source_dir, target_dir, layout_origin, actions_before, actions_after, base_ref, materialized, one_shot, one_shot_finish, initial_prompt, consented_ungated_mode, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			f.ws.GetId(), "feature/x", f.repo.Dir, f.repo.Dir, "create", "[]", "[]", "main", 1, 0, "", "", "", now); err != nil {
+			t.Fatalf("seed a creation_jobs row: %v", err)
+		}
+		if _, err := db.Exec(
+			`INSERT INTO merge_queue (repo_key, workspace_id, seq, state, enqueued_at) VALUES (?, ?, ?, ?, ?)`,
+			"repo1", f.ws.GetId(), 1, 1 /* wsm.MergeAdmitted */, now); err != nil {
+			t.Fatalf("seed an admitted merge_queue row: %v", err)
+		}
+	})
+	f.d.CorruptRow("creation_jobs", "actions_before", "workspace_id", f.ws.GetId(), "not valid json")
+
+	// Act: restart on the same state root.
+	nd := harness.StartDaemon(t, harness.Opts{StateDir: f.d.StateDir, ExpectEarlyExit: true})
+	code := nd.AwaitExit()
+
+	// Assert: an undecodable row refuses the boot, non-zero and loud.
+	if code == 0 {
+		t.Fatalf("boot over a corrupt creation_jobs row exited 0, want a loud non-zero refusal\nstderr:\n%s", nd.Stderr())
+	}
+	rec := nd.AwaitRunLogOperation("daemon.merge.recover")
+	if lvl := strings.ToLower(rec.Level); lvl != "error" {
+		t.Fatalf("daemon.merge.recover record level = %q, want ERROR", rec.Level)
+	}
+}
+
+// ---- audit-3 critique 10: socket-path budget boot refusal ----
+
+// TestBootRefusesAStateRootTooLongForShimSockets pins
+// internal/stateroot/stateroot.go's CheckSocketPathBudget, invoked at boot
+// (cmd/claude-repld/run.go) before any dependency is built. The harness's
+// own requireSocketPathBudget would fatal the TEST (not just the daemon)
+// before ever spawning it if the state root named by Opts.StateDir were the
+// long one, so the long path is smuggled in as a SECOND --state-dir via
+// ExtraArgs: Go's flag package takes the last occurrence of a flag, so the
+// daemon actually boots against the long root while the harness's own
+// pre-flight check saw only the short default.
+func TestBootRefusesAStateRootTooLongForShimSockets(t *testing.T) {
+	// Arrange: a root comfortably past the 103-byte unix-socket path limit
+	// once "/sock/<21-char-name>" is appended.
+	long, err := os.MkdirTemp("/tmp", "ar-long-")
+	if err != nil {
+		t.Fatalf("mkdir a long state root: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(long) })
+	long = filepath.Join(long, strings.Repeat("x", 100))
+
+	// Act
+	d := harness.StartDaemon(t, harness.Opts{ExtraArgs: []string{"--state-dir", long}, ExpectEarlyExit: true})
+	code := d.AwaitExit()
+
+	// Assert
+	if code == 0 {
+		t.Fatalf("boot with a %d-byte state root exited 0, want a loud non-zero refusal", len(long))
+	}
+	if !strings.Contains(d.Stderr(), "sock/") {
+		t.Fatalf("boot stderr = %q, want it to name the socket directory that cannot fit", d.Stderr())
+	}
+}
+
+// ---- audit-3 critique 25: address-file temp sibling, pprof unix socket ----
+
+// TestBootLeavesNoDaemonAddrTempSibling pins that daemon.addr's atomic
+// write (internal/daemonaddr/claim.go: os.CreateTemp(dir, "."+base+".*"))
+// leaves no ".daemon.addr.<random>" sibling behind once the rename lands.
+func TestBootLeavesNoDaemonAddrTempSibling(t *testing.T) {
+	// Arrange / Act
+	d := newDaemon(t, harness.Opts{})
+
+	// Assert
+	matches, err := filepath.Glob(filepath.Join(d.StateDir, ".daemon.addr.*"))
+	if err != nil {
+		t.Fatalf("glob for a daemon.addr temp sibling: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("daemon.addr temp siblings after boot = %v, want none", matches)
+	}
+}
+
+// TestPprofServesOverAUnixSocket pins the OTHER accepted --pprof shape
+// (internal/pprofsurface/surface.go: isSocketPath recognizes a path
+// separator or a .sock suffix): a unix-socket path serves /debug/pprof/
+// exactly as the loopback host:port form does
+// (TestPprofServesOnAnExplicitLoopbackAddress).
+func TestPprofServesOverAUnixSocket(t *testing.T) {
+	// Arrange: a short root, independent of the state root's own socket
+	// budget, so the profiling socket's own path stays under the unix-socket
+	// limit.
+	sockDir, err := os.MkdirTemp("/tmp", "pprof")
+	if err != nil {
+		t.Fatalf("mkdir a short pprof socket root: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sockPath := filepath.Join(sockDir, "p.sock")
+
+	d := newDaemon(t, harness.Opts{Pprof: sockPath})
+	record := d.AwaitRunLogOperation("daemon.pprof.enabled")
+	network, _ := record.Context["network"].(string)
+	if network != "unix" {
+		t.Fatalf("daemon.pprof.enabled context = %v, want network \"unix\"", record.Context)
+	}
+	address, _ := record.Context["address"].(string)
+	if address == "" {
+		t.Fatalf("daemon.pprof.enabled context = %v, want the resolved socket path", record.Context)
+	}
+
+	// Act: GET /debug/pprof/ dialed over the unix socket itself.
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var dialer net.Dialer
+				return dialer.DialContext(ctx, "unix", address)
+			},
+		},
+	}
+	resp, err := client.Get("http://unix/debug/pprof/")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("GET /debug/pprof/ over the pprof unix socket = error %v, want the profiling surface", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /debug/pprof/ over the pprof unix socket = %d, want 200", resp.StatusCode)
+	}
+	d.ExpectWarnings("daemon.pprof.enabled")
 }
