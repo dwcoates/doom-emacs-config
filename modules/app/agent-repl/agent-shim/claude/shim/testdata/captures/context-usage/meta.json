@@ -1,0 +1,36 @@
+{
+  "scenario": "context-usage",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Read notes.txt and summarize it in one sentence.",
+  "prompts": [
+    {
+      "text": "Read notes.txt and summarize it in one sentence.",
+      "resume": false
+    }
+  ],
+  "world": "context-usage",
+  "cwd_init": null,
+  "vendor_session_id": "37b95916-cd2b-45e2-b9ec-6278015baea3",
+  "manual": null,
+  "expect": [
+    "SDKControlGetContextUsageResponse with categories, memoryFiles, mcpTools, agents, skills, messageBreakdown, apiUsage",
+    "the totals differing between the two calls"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-context-usage-YEyVtk-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:34:06.178Z",
+  "controls": [
+    {
+      "verb": "getContextUsage",
+      "ok": true
+    },
+    {
+      "verb": "getContextUsage",
+      "ok": true
+    }
+  ],
+  "unparsed_lines": [],
+  "errors": []
+}

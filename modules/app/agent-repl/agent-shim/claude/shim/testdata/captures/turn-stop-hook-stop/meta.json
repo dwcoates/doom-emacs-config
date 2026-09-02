@@ -1,0 +1,27 @@
+{
+  "scenario": "turn-stop-hook-stop",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Say hello and stop.",
+  "prompts": [
+    {
+      "text": "Say hello and stop.",
+      "resume": false
+    }
+  ],
+  "world": "turn-stop-hook-stop",
+  "cwd_init": null,
+  "vendor_session_id": "70358515-a1e9-4489-9935-fc07227c5ae0",
+  "manual": null,
+  "expect": [
+    "system:stop_hook_summary",
+    "the two hook-stop result terminals"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-turn-stop-hook-stop-ciTAh2-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T21:43:20.255Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

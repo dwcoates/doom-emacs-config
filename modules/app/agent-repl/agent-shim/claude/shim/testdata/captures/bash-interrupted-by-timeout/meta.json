@@ -1,0 +1,28 @@
+{
+  "scenario": "bash-interrupted-by-timeout",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": "Run `sleep 600` with a Bash timeout of 5000 milliseconds. Report exactly what the tool told you when it stopped.",
+  "prompts": [
+    {
+      "text": "Run `sleep 600` with a Bash timeout of 5000 milliseconds. Report exactly what the tool told you when it stopped.",
+      "resume": false
+    }
+  ],
+  "world": "bash-interrupted-by-timeout",
+  "cwd_init": null,
+  "vendor_session_id": "37f26525-9a7d-4f3e-ac3c-a349994bcaf6",
+  "manual": null,
+  "expect": [
+    "tool:Bash(timeout=5000)",
+    "tool_result:bash.timedOutAfterMs",
+    "detached_work:bash"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-bash-interrupted-by-timeout-RGiSbM-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-01T20:20:11.161Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}

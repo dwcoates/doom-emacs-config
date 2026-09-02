@@ -1,0 +1,36 @@
+{
+  "scenario": "compaction-directed",
+  "ok": true,
+  "failure_reasons": [],
+  "prompt": null,
+  "prompts": [
+    {
+      "text": "Recap, at length, every topic covered in this conversation so far.",
+      "resume": false
+    },
+    {
+      "text": "/compact",
+      "resume": false
+    },
+    {
+      "text": "What is the first thing I asked you in this conversation?",
+      "resume": false
+    }
+  ],
+  "world": "conversation-history",
+  "cwd_init": null,
+  "vendor_session_id": "82344fd4-8020-46ac-bf04-26541cef6fea",
+  "manual": null,
+  "expect": [
+    "system:compact_boundary with DiskCompactMetadata",
+    "system:local_command_output",
+    "the rewritten transcript's per-line field union (the undocumented shape the compaction experiment must observe)"
+  ],
+  "cwd_slug": "-private-var-folders--m-7ff9yqwn6y91dgtws1zpsb680000gn-T-agent-repl-capture-conversation-history-ybyfcK-cwd",
+  "api_key_source": "none",
+  "auth_mode": "config_root",
+  "captured_at": "2026-09-02T00:32:32.952Z",
+  "controls": [],
+  "unparsed_lines": [],
+  "errors": []
+}
