@@ -139,8 +139,13 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 	// Arrange: open then close the prompts-dir fault, on a state root a
 	// restart will reuse.
 	d := newDaemon(t, harness.Opts{})
+	// The restarted daemon appends to the SAME run log, so its boot
+	// reconciliation is read by this daemon's log assertion too: the support
+	// workspaces created above have in-flight turns and no session, and
+	// closing them at boot is a warning by design.
 	d.ExpectWarnings("daemon.workspace.request_command_support",
-		"daemon.health.open_fault", "daemon.health.daemon")
+		"daemon.health.open_fault", "daemon.health.daemon",
+		"daemon.promptqueue.restore_holds")
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	if err := os.RemoveAll(d.PromptsDir); err != nil {

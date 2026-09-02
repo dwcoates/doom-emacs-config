@@ -57,6 +57,12 @@ func (v *verbs) RequestCommandSupport(ctx context.Context, ws ids.WorkspaceID, c
 			fmt.Sprintf("the %s brief will not splice: %v", BriefAddSupport, err), false)
 	}
 
+	// THE FAULT CLOSES HERE. The brief just read and spliced, so the
+	// condition prompts_dir_missing records — this daemon's prompts directory
+	// cannot furnish a brief — no longer holds. A fault that only ever opens
+	// is not a record of a condition; it is a one-way trip.
+	v.clearPromptsFault(ctx, log)
+
 	repoDir, err := v.repoDirOf(ctx, record)
 	if err != nil {
 		log.Error(opCommandSupport, "could not resolve the repository to create in", dlog.Context{"cause": err.Error()})
@@ -113,5 +119,30 @@ func (v *verbs) raisePromptsFault(ctx context.Context, log dlog.Logger, detail s
 	}); err != nil {
 		log.Error(opCommandSupport, "could not record the prompts-directory fault",
 			dlog.Context{"cause": err.Error()})
+	}
+}
+
+// clearPromptsFault closes every standing DAEMON-SCOPED prompts-directory
+// fault. It is the symmetric half of raisePromptsFault, called on the
+// successful read+splice of a brief: that read IS the health probe, so the
+// repair is observed by the same path the breakage was.
+func (v *verbs) clearPromptsFault(ctx context.Context, log dlog.Logger) {
+	standing, err := v.deps.Health.OpenFaults(ctx, wsm.FaultScope{Kind: health.KindPromptsDirMissing})
+	if err != nil {
+		log.Error(opCommandSupport, "could not check for a standing prompts-directory fault",
+			dlog.Context{"cause": err.Error()})
+		return
+	}
+	for _, f := range standing {
+		if f.Workspace != nil {
+			continue
+		}
+		if err := v.deps.Health.CloseFault(ctx, f.ID); err != nil {
+			log.Error(opCommandSupport, "could not close the prompts-directory fault",
+				dlog.Context{"fault": string(f.ID), "cause": err.Error()})
+			continue
+		}
+		log.Info(opCommandSupport, "the prompts directory furnishes briefs again; fault closed",
+			dlog.Context{"fault": string(f.ID), "path": v.deps.PromptsDir})
 	}
 }
