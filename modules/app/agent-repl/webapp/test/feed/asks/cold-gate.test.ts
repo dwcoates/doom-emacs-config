@@ -15,6 +15,7 @@ import {
   COLD_GATE_COPY,
   drawFeedColdGate,
   scopeLabel,
+  scopeName,
 } from "../../../src/feed/asks/cold-gate.js";
 import { armsOf } from "../arms.js";
 import { askHarness, ROW_ID, settle as drain } from "./harness.js";
@@ -76,6 +77,24 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("scopeName", () => {
+  const cases = [
+    SessionCompactScope.ALL,
+    SessionCompactScope.PROMPTS,
+    SessionCompactScope.RESPONSES,
+  ] as const;
+
+  for (const scope of cases) {
+    it(`names ${SessionCompactScope[scope]} by its enum name`, () => {
+      expect(scopeName(scope, "path")).toBe(SessionCompactScope[scope]);
+    });
+  }
+
+  it("refuses UNSPECIFIED, which has no name this build can draw", () => {
+    expect(() => scopeName(SessionCompactScope.UNSPECIFIED, "path")).toThrow(MalformedView);
+  });
 });
 
 describe("scopeLabel", () => {
@@ -406,6 +425,30 @@ describe("the resolved trace", () => {
       );
     });
   }
+
+  it("carries the scope's enum name on the trace, not its number", () => {
+    // Arrange / Act
+    const el = drawFeedColdGate(
+      gate({
+        case: "resolved",
+        value: {
+          atMs: 0n,
+          choice: {
+            case: "compact",
+            value: {
+              model: { model: { name: SUMMARIZER } },
+              scope: SessionCompactScope.RESPONSES,
+            },
+          },
+        },
+      }),
+      askHarness().rc,
+    );
+    // Assert
+    expect(
+      el.querySelector("[data-compact-scope]")?.getAttribute("data-compact-scope"),
+    ).toBe("RESPONSES");
+  });
 
   it("refuses a compact trace whose scope is UNSPECIFIED", () => {
     expect(() =>
