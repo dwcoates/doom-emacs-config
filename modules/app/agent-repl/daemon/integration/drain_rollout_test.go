@@ -741,6 +741,62 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 	f.d.ExpectWarnings()
 }
 
+// ---- Drain schedule durability ----
+
+// TestDrainScheduleDoesNotSurviveRestartTheStandingBannerNeverReappears is
+// critique 11: the CONTRACT is that the standing drain banner (drain_scheduled)
+// reappears on a fresh WatchDaemon subscription after a restart on the same
+// state root — a client that reconnects after the daemon bounces must not
+// silently lose a schedule that is still in force.
+//
+// THIS TEST IS EXPECTED TO BE RED. wsm.DB persists the schedule
+// (PutDrainSchedule/DrainSchedule, internal/drain/api.go), and
+// internal/drain/sweep.go's Run DOES read DB.DrainSchedule(ctx) on every loop
+// iteration including the very first one after boot — but it only ACTS on a
+// schedule whose deadline has already passed (calling fire, which announces).
+// A schedule still in the future is silently absorbed into Run's wait
+// calculation and never handed to Announcer.DrainScheduled. The daemon-level
+// push topic (internal/server/api.go daemonTopic, a publish.Topic that replays
+// only its own process's latest value to new subscribers) is therefore EMPTY
+// on a fresh process until something re-announces — and nothing does: there is
+// no boot caller of DrainSchedule()/Current() anywhere in
+// cmd/claude-repld/graph.go (where drainController is built, ~line 385) or
+// internal/boot/sequence.go (which never mentions drain at all). The missing
+// call site is exactly there: after drain.New in graph.go, nothing reads the
+// persisted schedule and forwards it to the Announcer before the server starts
+// serving.
+func TestDrainScheduleDoesNotSurviveRestartTheStandingBannerNeverReappears(t *testing.T) {
+	// Arrange: schedule a drain far enough out that it never fires during this
+	// test, and confirm it is standing before the restart.
+	d1 := newDaemon(t, harness.Opts{})
+	stream1 := d1.WatchDaemonStream()
+	if _, err := d1.Client().UpdateShutdownSchedule(d1.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
+		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
+			AtMs: time.Now().Add(time.Hour).UnixMilli(), Reason: drainReasonDeploy(),
+		}},
+	})); err != nil {
+		t.Fatalf("UpdateShutdownSchedule{schedule} = error %v, want a success", err)
+	}
+	harness.AwaitView(t, d1.Ctx(), stream1, "drain_scheduled", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetDrainScheduled() != nil
+	})
+	d1.Stop()
+
+	// Act: restart on the same state root, then open a BRAND NEW subscription
+	// (standing in for a reconnecting Emacs or webview after the bounce).
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d1.StateDir})
+	stream2 := d2.WatchDaemonStream()
+
+	// Assert: the contract — the standing banner reappears. Bounded to a short
+	// probe rather than the harness's full 30s timeout, since this is expected
+	// to time out rather than succeed.
+	probeCtx, cancel := context.WithTimeout(d2.Ctx(), 2*time.Second)
+	defer cancel()
+	harness.AwaitView(t, probeCtx, stream2, "drain_scheduled reappearing after a restart", func(r *agentreplv1.WatchDaemonResponse) bool {
+		return r.GetDrainScheduled() != nil
+	})
+}
+
 // ---- Asset origin ----
 
 func TestAssetOriginServesIndexWithNoStoreCacheControl(t *testing.T) {
