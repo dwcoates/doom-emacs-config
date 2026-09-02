@@ -1064,6 +1064,70 @@ wait on a curl exit for that fact is what left a real stream hanging."
       ;; Assert
       (should (agent-repl-connect-stream-opened-p stream)))))
 
+;;;; ---- Terminal sentinels cannot re-enter themselves ----
+
+(ert-deftest agent-repl-test-connect-detach-sentinel-installs-ignore ()
+  "A terminal branch detaches its process, so nothing can be delivered again."
+  ;; Arrange
+  (let ((installed 'unset))
+    (cl-letf (((symbol-function 'processp) (lambda (_p) t))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (_p s) (setq installed s))))
+      ;; Act
+      (agent-repl-connect--detach-sentinel 'fake-proc)
+      ;; Assert
+      (should (eq installed #'ignore)))))
+
+(ert-deftest agent-repl-test-connect-detach-sentinel-tolerates-a-non-process ()
+  "A nil or non-process argument is not an error."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl-connect--detach-sentinel nil)))
+
+(ert-deftest agent-repl-test-connect-cleanup-detaches-the-stderr-pipe-process ()
+  "The stderr buffer's pipe process is detached BEFORE its buffer is killed.
+Killing the buffer deletes that process, and a live sentinel on it would
+be run from inside the kill."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *agent-repl-test-connect-stderr*"))
+        (order nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'get-buffer-process) (lambda (_b) 'pipe-proc))
+                  ((symbol-function 'set-process-query-on-exit-flag) #'ignore)
+                  ((symbol-function 'set-process-filter) #'ignore)
+                  ((symbol-function 'set-process-sentinel)
+                   (lambda (_p s) (push (cons 'sentinel s) order)))
+                  ((symbol-function 'kill-buffer)
+                   (lambda (b) (when (eq b buf) (push 'kill order)))))
+          ;; Act
+          (agent-repl-connect--cleanup nil buf)
+          ;; Assert
+          (should (equal (nreverse order) '((sentinel . ignore) kill))))
+      (kill-buffer buf))))
+
+(ert-deftest agent-repl-test-connect-terminal-sentinel-runs-once-under-re-delivery ()
+  "A terminal branch that tears down runs ONCE even when the teardown
+re-delivers its process's status.  This is the sampled hang, driven
+directly: the teardown kills a buffer, the kill deletes a process, and the
+deletion re-runs whatever sentinel is installed at that moment."
+  ;; Arrange
+  (let* ((installed nil)
+         (runs 0)
+         (branch nil))
+    (setq branch (lambda (proc)
+                   (cl-incf runs)
+                   (agent-repl-connect--detach-sentinel proc)
+                   (when (< runs 100)      ; a runaway is bounded, not hung
+                     ;; The teardown's kill re-delivers the terminal status.
+                     (funcall installed proc))))
+    (setq installed branch)
+    (cl-letf (((symbol-function 'processp) (lambda (_p) t))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (_p s) (setq installed s))))
+      ;; Act
+      (funcall branch 'fake-proc)
+      ;; Assert
+      (should (= runs 1)))))
+
 (provide 'test-connect)
 
 ;;; test-connect.el ends here
