@@ -858,6 +858,8 @@ func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing
 func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
+	// The sweep covers every test; the declared record is evidence of the session faults the test pushes.
+	f.d.ExpectWarnings("daemon.health.open_fault")
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act: one unhealthy pull naming two distinct faults, in this order.
