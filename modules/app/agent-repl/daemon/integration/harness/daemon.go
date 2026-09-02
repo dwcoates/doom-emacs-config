@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -723,14 +722,6 @@ func (d *Daemon) WriteShimProfile(dir string, profile any) {
 	writeJSON(d.t, filepath.Join(d.ProfileDir, profileFileName(dir)), profile)
 }
 
-// WriteDefaultShimProfile files the profile every unprofiled workspace uses.
-func (d *Daemon) WriteDefaultShimProfile(profile any) {
-	d.t.Helper()
-	writeJSON(d.t, filepath.Join(d.ProfileDir, "default.json"), profile)
-}
-
-func (d *Daemon) String() string { return fmt.Sprintf("daemon(%s)", d.Addr) }
-
 // ExpectFileUnchanged asserts a file still holds exactly `want` after the
 // probe window. It is a negative assertion, so it necessarily waits out a
 // bound rather than synchronizing on an event.
@@ -836,22 +827,6 @@ const FeedPageSize = feed.DefaultPageSize
 // transcript under an account root: `<ProjectDir>/<vendor session id>.jsonl`.
 func TranscriptPath(configDir, workspaceDir, vendorSessionID string) string {
 	return filepath.Join(ProjectDir(configDir, workspaceDir), vendorSessionID+".jsonl")
-}
-
-// WriteTranscript lays a vendor transcript down under an account root, which
-// is what an account switch must PORT to the other root. The fake shim writes
-// one at every StartSession; this exists for the tests that need a transcript
-// under a root no session has ever run in.
-func (d *Daemon) WriteTranscript(configDir, workspaceDir, vendorSessionID, body string) string {
-	d.t.Helper()
-	path := TranscriptPath(configDir, workspaceDir, vendorSessionID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		d.t.Fatalf("harness: mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		d.t.Fatalf("harness: write %s: %v", path, err)
-	}
-	return path
 }
 
 // HasTranscript reports whether a workspace's transcript exists under a root.
