@@ -13,6 +13,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	shimv1 "agentrepl/proto/shim/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"claude-repld/integration/harness"
@@ -1277,13 +1278,118 @@ func TestAFailingPostPromptNeverFailsTheRunAndRidesTheTerminalSuccess(t *testing
 // PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME, and clears the mark in the same
 // step so a second boot cannot double it. That is a behavior question for the
 // project lead, not something a test hook can paper over.
+//
+// BOTH BLOCKERS ARE GONE (2026-09-02). The behavior exists:
+// internal/merge/recover.go's recoverDisplaced sweeps every turn still marked
+// displaced at boot and puts it back exactly once, claiming each record
+// through wsm's conditional ClaimDisplacedTurn so the merge's own release and
+// the sweep can never both submit one turn. The hook exists too:
+// merge.Deps.PauseAfterCapture, nil in production, wired only from
+// AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE, holds a run in exactly the window a
+// crash has to land in.
 func TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce(t *testing.T) {
-	t.Skip("behavior not implemented: nothing reads wsm.Turn.Displaced back, so a merge " +
-		"that crashes after CaptureDisplaced never resubmits the turn it took -- there is " +
-		"no boot recovery for displaced turns in internal/merge/recover.go or anywhere " +
-		"else. The missing harness hook (no knob freezes a merge run between " +
-		"CaptureDisplaced and its own next Queue.Submit) is the SECOND blocker, not the " +
-		"first: see this test's own doc comment for both traces")
+	// Arrange / Act: displace a turn, crash inside the capture window, and
+	// bring a fresh daemon up on the same state root.
+	f, _, resubmit := displacedTurnAcrossABounce(t)
+
+	// Assert: the turn came back with the user's own words, under the resume
+	// origin, on a turn id of its own.
+	if got := text(resubmit.GetSaid()); got != displacedBounceText {
+		t.Fatalf("the resubmitted turn's StartTurn.said = %q, want the displaced turn's own text %q", got, displacedBounceText)
+	}
+	if resubmit.GetOrigin() != mergeDisplacedResumeOrigin {
+		t.Fatalf("the resubmitted turn's StartTurn.origin = %v, want PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME (%d)", resubmit.GetOrigin(), mergeDisplacedResumeOrigin)
+	}
+	// Assert: the mark is DOWN. A record still marked is one the next boot
+	// would put back a second time.
+	if n := f.d.DisplacedTurnCount(); n != 0 {
+		t.Fatalf("turns still marked displaced after the recovery = %d, want none", n)
+	}
+}
+
+// TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain covers the
+// exactly-once edge across TWO bounces: the claim that put the turn back is
+// durable, so the boot after it finds nothing owed and submits nothing.
+func TestASecondDaemonBounceDoesNotResubmitTheDisplacedTurnAgain(t *testing.T) {
+	// Arrange: the turn already recovered by the first bounce.
+	f, d2, _ := displacedTurnAcrossABounce(t)
+	afterFirstBounce := f.shim.Count(harness.RPCStartTurn)
+	d2.Kill()
+
+	// Act: a second fresh daemon on the same state root.
+	d3 := harness.StartDaemon(t, harness.Opts{StateDir: d2.StateDir,
+		ExtraEnv: []string{"AGENT_REPL_LOCK_DIR=" + d2.LockDir}})
+	displacedBounceWarnings(d3)
+	// The recovery's own record is the rendezvous: it is logged AFTER the
+	// displaced sweep ran, so the count below is settled rather than probed.
+	d3.AwaitRunLogOperation("daemon.merge.recover")
+
+	// Assert.
+	if got := f.shim.Count(harness.RPCStartTurn); got != afterFirstBounce {
+		t.Fatalf("StartTurns after a second boot = %d, want %d (the displaced turn is put back once, ever)", got, afterFirstBounce)
+	}
+}
+
+// displacedBounceWarnings declares the records every daemon in this scenario
+// legitimately writes: see the call site in displacedTurnAcrossABounce.
+func displacedBounceWarnings(d *harness.Daemon) {
+	d.ExpectWarnings("daemon.rollout.reconcile", "daemon.merge.recover", "daemon.promptqueue.restore_holds")
+}
+
+// displacedBounceText is the user's own words, asserted end to end.
+const displacedBounceText = "keep going"
+
+// displacedTurnAcrossABounce stages the whole scenario: a user turn in flight
+// when a merge admits, a daemon killed inside the window between the capture
+// and everything that would close it, and a fresh daemon on the same state
+// root. It answers the fixture (rebound to the new daemon), that daemon, and
+// the resubmission's own StartTurn.
+//
+// THE MERGE MUST NOT COME BACK. An unclean merge target is not resumable, so
+// the restart FAILS the interrupted merge instead of running it again — which
+// is what leaves the displaced record to the boot sweep and keeps this test's
+// StartTurn trace free of a second run's traffic.
+func displacedTurnAcrossABounce(t *testing.T) (*fixture, *harness.Daemon, *shimv1.StartTurnRequest) {
+	t.Helper()
+	repo := harness.NewRepo(t)
+	script := harness.NewTestAllScript(t, repo.Dir)
+	script.SetExitCode(0)
+	script.SetStdout("daemon: passed in 1s\n")
+	rendezvous := filepath.Join(t.TempDir(), "capture.rendezvous")
+	d := harness.StartDaemon(t, harness.Opts{SelfRepo: repo.Dir, ExtraEnv: []string{
+		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+		"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + rendezvous,
+	}})
+	// The sweep covers every test; these declared records are evidence of the
+	// crash this test stages. A daemon killed mid-merge writes no stand-down
+	// manifest (daemon.rollout.reconcile), the restart refuses to resume the
+	// merge into an unclean target (daemon.merge.recover), and a turn left in
+	// flight by a killed daemon is closed by the next boot
+	// (daemon.promptqueue.restore_holds) -- which is what the RESUBMITTED turn
+	// becomes when this test kills the daemon that received it.
+	displacedBounceWarnings(d)
+	repoRef := mergeRepositoryRef(t, d, repo)
+	f := mergeCreateChild(t, d, repoRef, "displaced", "do the clean thing", nil)
+	f.submit(displacedBounceText, "k-displace-bounce", origin)
+	// No terminal frame is ever pushed for it: it is the workspace's in-flight
+	// turn when the merge admits, which is what CaptureDisplaced reads.
+	f.shim.ExpectStartTurn()
+	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: f.ws})); err != nil {
+		t.Fatalf("MergeWorkspace = error %v, want the merge enqueued", err)
+	}
+	d.AwaitFileExists(rendezvous)
+	repo.SetDirty(repo.Dir, true)
+	d.Kill()
+
+	d2 := harness.StartDaemon(t, harness.Opts{StateDir: d.StateDir, SelfRepo: repo.Dir, ExtraEnv: []string{
+		"AGENT_REPL_TEST_ALL_SCRIPT=" + script.Path,
+		"AGENT_REPL_LOCK_DIR=" + d.LockDir,
+	}})
+	displacedBounceWarnings(d2)
+	f.d = d2
+	// ExpectStartTurn BLOCKS for the next request, so this is the
+	// resubmission's own arrival rather than a race against the boot.
+	return f, d2, f.shim.ExpectStartTurn()
 }
 
 // ---------------------------------------------------------------------------
