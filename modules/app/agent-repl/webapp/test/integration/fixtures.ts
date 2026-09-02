@@ -768,8 +768,17 @@ export function questionRow(state: QuestionState, overrides?: Partial<RowInit>):
 
 // ---- FeedSessionSeparation ------------------------------------------------
 
-export const SEPARATION_ARMS = ["cleared", "compacted", "worktreeEntered", "worktreeLeft"] as const;
+export const SEPARATION_ARMS = [
+  "cleared",
+  "compacted",
+  "worktreeEntered",
+  "worktreeLeft",
+  "compactionFailed",
+] as const;
 export type SeparationArm = (typeof SEPARATION_ARMS)[number];
+
+/** The producer's account of a compaction that did not happen, echoed verbatim. */
+export const COMPACTION_FAILED_ERROR = "the summarizing request was refused";
 
 /** The path the worktree divider's link opens; the suites echo it verbatim. */
 export const WORKTREE_PATH = "/repo/wt";
@@ -800,6 +809,8 @@ const separationKind = (arm: SeparationArm): SeparationKind => {
         case: "worktreeLeft",
         value: { outcome: { case: "kept", value: { path: { text: WORKTREE_PATH } } } },
       };
+    case "compactionFailed":
+      return { case: "compactionFailed", value: { error: COMPACTION_FAILED_ERROR } };
   }
 };
 
@@ -810,7 +821,9 @@ export const separationRow = (arm: SeparationArm, overrides?: Partial<RowInit>):
       value: {
         label: { text: `separation: ${arm}` },
         kind: separationKind(arm),
-        tokens: { beforeText: "180k", afterText: "12k" },
+        // A compaction that did not happen cut nothing: `tokens` is UNSET on
+        // that arm, as the schema states.
+        tokens: arm === "compactionFailed" ? undefined : { beforeText: "180k", afterText: "12k" },
       },
     },
     overrides,
