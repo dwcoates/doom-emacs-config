@@ -23,6 +23,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_permission_mode_pb";
 
 import { startHarness, type Harness } from "./harness";
+import { MODEL_PLACEHOLDER } from "../../src/topbar/model";
 import { isKnownTone, RENDER_COLORS } from "./vocab";
 import {
   PERMISSION_MODES,
@@ -875,5 +876,79 @@ describe("the login terminal's transport death", () => {
     await harness.tick(1_000);
     // Assert
     expect(harness.failureArms()).toEqual([]);
+  });
+});
+
+/**
+ * PRESENCE, NEVER A SENTINEL. `TopbarModelSelector.selected` is `optional`, so
+ * an unset selection is a state the daemon can legitimately serve — the chip
+ * says so with its placeholder rather than naming the first option as though
+ * it had been picked.
+ */
+describe("the model selector with nothing selected", () => {
+  it("draws the placeholder", async () => {
+    // Arrange / Act
+    await withTopbar({ unselected: true });
+    // Assert
+    expect(harness.text(".topbar-model")).toBe(MODEL_PLACEHOLDER);
+  });
+
+  it("marks the chip as unselected", async () => {
+    // Arrange / Act
+    await withTopbar({ unselected: true });
+    // Assert
+    expect(harness.$(".topbar-model-button")?.hasAttribute("data-unselected")).toBe(true);
+  });
+
+  it("still lists every option the view carries", async () => {
+    // Arrange
+    await withTopbar({ unselected: true });
+    // Act
+    await harness.click(".topbar-model");
+    // Assert
+    expect(harness.$$("[data-model-option]").map((el) => el.dataset.modelOption)).toEqual([
+      "opus",
+      "sonnet",
+    ]);
+  });
+
+  it("does not mark a selected chip as unselected", async () => {
+    // Arrange / Act
+    await withTopbar({});
+    // Assert
+    expect(harness.$(".topbar-model-button")?.hasAttribute("data-unselected")).toBe(false);
+  });
+});
+
+describe("the detached-unmodeled detail", () => {
+  const openDetail = async (): Promise<void> => {
+    await withTopbar({ warnings: [topbarWarning("detachedUnmodeled")] });
+    await harness.click(".topbar-warnings");
+    await harness.click('.topbar-warning-row[data-arm="detachedUnmodeled"]');
+  };
+
+  it("names the tool that is still running", async () => {
+    // Arrange / Act
+    await openDetail();
+    // Assert
+    expect(harness.text('[data-reveal="warning-detail"] .topbar-warning-body')).toContain(
+      "mcp__weather__watch",
+    );
+  });
+
+  it("reads its age from the served start instant", async () => {
+    // Arrange / Act: started 1 s, the page's clock starts at the epoch (10 s).
+    await openDetail();
+    // Assert
+    expect(harness.text(".topbar-warning-clock")).toBe("running 9s");
+  });
+
+  it("ticks the age while the detail stands open", async () => {
+    // Arrange
+    await openDetail();
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.text(".topbar-warning-clock")).toBe("running 14s");
   });
 });

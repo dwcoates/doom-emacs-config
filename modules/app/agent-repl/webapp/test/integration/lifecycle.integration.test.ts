@@ -24,9 +24,13 @@ import {
   SHUTDOWN_CAUSE_ARMS,
   WATCH_DAEMON_PUSHES,
   WORKSPACE_ID,
+  activityRow,
   assertCoversOneof,
   drainReason,
   feedId,
+  feedPageSuccess,
+  responseRow,
+  subagentUnit,
   footerView,
   heldPromptItem,
   holdTray,
@@ -511,5 +515,64 @@ describe.each(MOVE_SITES)("$name refused as transferring_away", (site) => {
     await harness.tick(30_000);
     // Assert: the webapp never redials a successor.
     expect(harness.fake.calls("watchFooter").length).toBe(attempts);
+  });
+});
+
+/**
+ * AN EXPANDED BUBBLE'S TAIL IS A STREAM LIKE ANY OTHER.
+ *
+ * `quiesce()` cancels EVERY registered handle, and a sub-feed's tail is
+ * registered by the same `watchStream` the views use. A bubble left tailing
+ * after the workspace moved would keep drawing rows from a daemon this page has
+ * been told it no longer belongs to.
+ */
+describe("the transfer with a bubble expanded", () => {
+  const transferWithBubble = async (): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([activityRow(subagentUnit("live"), { id: feedId("bubble") })]),
+        );
+        fake.setPage(WORKSPACE_ID, "bubble", feedPageSuccess([]));
+      },
+    });
+    await harness.click('[data-feed-row="bubble"] [data-expand]');
+    await harness.fake.awaitStream("watchFeed", 2);
+    const second = await harness.startSecondDaemon();
+    harness.fake.transfer(WORKSPACE_ID, second.baseUrl);
+    await harness.settle();
+  };
+
+  it("cancels the sub-feed's tail too", async () => {
+    // Arrange / Act
+    await transferWithBubble();
+    // Assert
+    expect(harness.fake.liveStreams("watchFeed", WORKSPACE_ID, "bubble")).toBe(0);
+  });
+
+  it("draws nothing more in the bubble afterwards", async () => {
+    // Arrange
+    await transferWithBubble();
+    // Act: the daemon still has the feed; nothing is listening for it.
+    harness.fake.pushRow(
+      WORKSPACE_ID,
+      "bubble",
+      responseRow("success", "after the move", { id: feedId("inner-after") }),
+    );
+    await harness.settle();
+    // Assert
+    expect(harness.row("inner-after")).toBeNull();
+  });
+
+  it("does not reopen the sub-feed after the move", async () => {
+    // Arrange
+    await transferWithBubble();
+    const opens = harness.fake.calls("openFeed").length;
+    // Act
+    await harness.tick(30_000);
+    // Assert: a quiesced page never redials, the bubble included.
+    expect(harness.fake.calls("openFeed").length).toBe(opens);
   });
 });

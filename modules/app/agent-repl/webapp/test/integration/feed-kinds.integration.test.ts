@@ -1848,3 +1848,258 @@ describe("an agentic merge tab", () => {
     expect(harness.$$("[data-merge-tab]").map((el) => el.dataset.mergeTab)).toEqual(["prePrompt"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The head clocks: instants on the wire, the count-up on the client
+// ---------------------------------------------------------------------------
+
+/**
+ * CLOCKS TICK CLIENT-SIDE. Every fixture stamps its start at 1 s absolute and
+ * the page's clock starts at the harness epoch (10 s), so a live head reads 9s
+ * on its first paint — a figure the daemon never sent and the client derived
+ * from an instant it did.
+ */
+describe("a live subagent's head clock", () => {
+  it("counts up from the served start instant", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentUnit("live")));
+    // Assert
+    expect(row.querySelector(".subagent-clock")?.textContent).toBe("9s");
+  });
+
+  it("grows as time passes", async () => {
+    // Arrange
+    await drawRow(activityRow(subagentUnit("live")));
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".subagent-clock")?.textContent).toBe("14s");
+  });
+
+  it("reads the quiet-for figure from the live arm's last progress", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(subagentUnit("live")));
+    // Assert: last_progress is stamped at 2 s, eight seconds before the epoch.
+    expect(row.querySelector(".subagent-quiet")?.textContent).toBe("quiet for 8s");
+  });
+
+  it("stops the clock where a settled arm says it stopped", async () => {
+    // Arrange / Act: started 1 s, ended 9 s — a span, not a count-up.
+    const row = await drawRow(activityRow(subagentUnit("succeeded")));
+    // Assert
+    expect(row.querySelector(".subagent-clock")?.textContent).toBe("8s");
+  });
+});
+
+describe("a detached subagent's head clock", () => {
+  it("counts up from the served start instant", async () => {
+    // Arrange / Act
+    const row = await drawRow(detachedSubagentRow("live"));
+    // Assert
+    expect(row.querySelector(".subagent-clock")?.textContent).toBe("9s");
+  });
+
+  it("keeps the original start instant across a re-push", async () => {
+    // Arrange
+    await drawRow(detachedSubagentRow("live"));
+    await harness.tick(5_000);
+    // Act: the daemon re-pushes the SAME row, start instant unchanged.
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedSubagentRow("live"));
+    await harness.settle();
+    // Assert: the count-up continues rather than restarting at the re-push.
+    expect(harness.row("row-1")?.querySelector(".subagent-clock")?.textContent).toBe("14s");
+  });
+});
+
+describe("a live detached shell's head clock", () => {
+  it("counts up from the served start instant", async () => {
+    // Arrange / Act
+    const row = await drawRow(detachedShellRow("live"));
+    // Assert
+    expect(row.querySelector(".shell-clock")?.textContent).toBe("9s");
+  });
+
+  it("grows as time passes", async () => {
+    // Arrange
+    await drawRow(detachedShellRow("live"));
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".shell-clock")?.textContent).toBe("14s");
+  });
+
+  it("reads the quiet-for figure from the live arm's last progress", async () => {
+    // Arrange / Act
+    const row = await drawRow(detachedShellRow("live"));
+    // Assert
+    expect(row.querySelector(".shell-quiet")?.textContent).toBe("quiet for 8s");
+  });
+
+  it("keeps the original start instant across a re-push", async () => {
+    // Arrange
+    await drawRow(detachedShellRow("live"));
+    await harness.tick(5_000);
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, detachedShellRow("live"));
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".shell-clock")?.textContent).toBe("14s");
+  });
+});
+
+describe("a live merge head's clock", () => {
+  it("counts up from the served enqueue instant", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(mergeUnit("update")));
+    // Assert
+    expect(row.querySelector(".merge-clock")?.textContent).toBe("9s");
+  });
+
+  it("grows as time passes", async () => {
+    // Arrange
+    await drawRow(activityRow(mergeUnit("update")));
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".merge-clock")?.textContent).toBe("14s");
+  });
+
+  it("stops where the settled arm says it stopped", async () => {
+    // Arrange
+    await drawRow(activityRow(mergeUnit("success")));
+    // Act
+    await harness.tick(5_000);
+    // Assert: started 1 s, ended 9 s, and time passing changes nothing.
+    expect(harness.row("row-1")?.querySelector(".merge-clock")?.textContent).toBe("8s");
+  });
+});
+
+describe("an open permission's waiting clock", () => {
+  it("starts at zero when the card arrives", async () => {
+    // Arrange / Act: the wait is stamped at the FIRST DRAW, not on the wire.
+    const row = await drawRow(permissionRow("open"));
+    // Assert
+    expect(row.querySelector(".perm-waiting")?.textContent).toBe("waiting 0s");
+  });
+
+  it("ticks up while the card stands", async () => {
+    // Arrange
+    await drawRow(permissionRow("open"));
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".perm-waiting")?.textContent).toBe("waiting 5s");
+  });
+
+  it("keeps counting the real wait across a re-push of the open card", async () => {
+    // Arrange
+    await drawRow(permissionRow("open"));
+    await harness.tick(5_000);
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("open"));
+    await harness.settle();
+    // Assert: a push while the reader is deciding does not reset their wait.
+    expect(harness.row("row-1")?.querySelector(".perm-waiting")?.textContent).toBe("waiting 5s");
+  });
+
+  it("stops on the answered push", async () => {
+    // Arrange
+    await drawRow(permissionRow("open"));
+    await harness.tick(5_000);
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("allowedOnce"));
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".perm-waiting")).toBeNull();
+  });
+
+  it("stops on the abandoned push", async () => {
+    // Arrange
+    await drawRow(permissionRow("open"));
+    await harness.tick(5_000);
+    // Act
+    harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, permissionRow("abandoned"));
+    await harness.settle();
+    // Assert
+    expect(harness.row("row-1")?.querySelector(".perm-waiting")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The external link's call site
+// ---------------------------------------------------------------------------
+
+/**
+ * A LINK IS AN RPC, NOT A NAVIGATION. This page IS the app inside an xwidget,
+ * so an http(s) link cancels its own click and asks the daemon to launch the
+ * pinned browser profile. Nothing is drawn on success: the result happens in a
+ * browser window the reader is about to be looking at.
+ */
+describe("an http(s) link in a tool call's output", () => {
+  const drawLink = async (): Promise<HTMLElement> => {
+    const row = await drawRow(activityRow(toolCallReturnedUnit("links")));
+    // The INPUT line carries a link of its own in this fixture, so the one
+    // under test is picked by the output link's own text.
+    const anchor = [...row.querySelectorAll<HTMLElement>("[data-external-link]")].find(
+      (el) => el.textContent === "the docs",
+    );
+    if (!anchor) throw new Error("the links output drew no external link");
+    return anchor;
+  };
+
+  it("calls OpenExternal when clicked", async () => {
+    // Arrange
+    const anchor = await drawLink();
+    // Act
+    await harness.clickElement(anchor);
+    // Assert
+    expect(harness.fake.calls("openExternal")).toHaveLength(1);
+  });
+
+  it("sends the url the view carried, verbatim", async () => {
+    // Arrange
+    const anchor = await drawLink();
+    // Act
+    await harness.clickElement(anchor);
+    // Assert
+    const [request] = harness.fake.calls<{ url: string }>("openExternal");
+    expect(request.url).toBe("https://example.test/docs");
+  });
+
+  it("echoes the page's own workspace", async () => {
+    // Arrange
+    const anchor = await drawLink();
+    // Act
+    await harness.clickElement(anchor);
+    // Assert
+    const [request] = harness.fake.calls<{ workspace?: { id: string } }>("openExternal");
+    expect(request.workspace?.id).toBe(WORKSPACE_ID);
+  });
+
+  it("cancels the click rather than navigating the webview", async () => {
+    // Arrange
+    const anchor = await drawLink();
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    // Act
+    anchor.dispatchEvent(event);
+    await harness.settle();
+    // Assert
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("draws nothing at the link on success", async () => {
+    // Arrange
+    const anchor = await drawLink();
+    // Act
+    await harness.clickElement(anchor);
+    // Assert
+    expect(harness.refusalArms()).toEqual([]);
+  });
+
+  it("draws the link's own text rather than the url", async () => {
+    // Arrange / Act
+    const anchor = await drawLink();
+    // Assert
+    expect(anchor.textContent).toBe("the docs");
+  });
+});

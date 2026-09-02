@@ -1531,6 +1531,12 @@ type TopbarInit = {
   connectivityTitle?: string;
   models?: { name: string; displayName: string; description: string }[];
   selected?: string;
+  /**
+   * UNSET `TopbarModelSelector.selected`. The field is `optional` and absence
+   * is the legitimate "no model is selected" state, which the chip draws as
+   * its placeholder rather than guessing an option.
+   */
+  unselected?: boolean;
   contextText?: string;
   breakdown?: boolean;
   /** Omit the per-row share, which is `optional` and drawn only when set. */
@@ -1548,7 +1554,14 @@ export function topbarView(init?: TopbarInit): TopbarView {
     title: { text: init?.title ?? "port the webapp" },
     sessionLine: { text: init?.sessionLine ?? "session 3 of the overhaul" },
     modelSelector: {
-      selected: modelOption(init?.selected ?? models[0].name, models[0].displayName, models[0].description),
+      selected:
+        init?.unselected === true
+          ? undefined
+          : modelOption(
+              init?.selected ?? models[0].name,
+              models[0].displayName,
+              models[0].description,
+            ),
       options: models.map((m) => modelOption(m.name, m.displayName, m.description)),
     },
     connectivity: {
@@ -1675,11 +1688,25 @@ export function roster(init?: {
   taskRows?: RosterRow[];
   merged?: RosterRow[];
   current?: string;
+  /**
+   * UNSET `WorkspaceRoster.current`. The field is `optional`, and absence is
+   * the legitimate "no workspace is current" state — never a MalformedView,
+   * and never a reason to highlight a row (the row's own flag decides that).
+   */
+  currentUnset?: boolean;
+  /** The task section header's done check, as the daemon resolved it. */
+  taskDone?: boolean;
+  /** Replace the repository grouping's sections, IN WIRE ORDER. */
+  repositorySections?: { repositoryId: string; label: string; rows: RosterRow[] }[];
 }): WorkspaceRoster {
   const rows = init?.rows ?? [rosterRow()];
   return create(WorkspaceRosterSchema, {
     repository: {
-      sections: [
+      sections: init?.repositorySections?.map((section) => ({
+        key: { repository: repositoryRef(section.repositoryId) },
+        header: { label: { text: section.label } },
+        rows: { rows: section.rows },
+      })) ?? [
         { key: { repository: repositoryRef() }, header: { label: { text: "doom" } }, rows: { rows } },
       ],
     },
@@ -1687,7 +1714,7 @@ export function roster(init?: {
       sections: [
         {
           key: { taskId: "task-1" },
-          header: { label: { text: "the overhaul" }, done: { done: false } },
+          header: { label: { text: "the overhaul" }, done: { done: init?.taskDone ?? false } },
           rows: { rows: init?.taskRows ?? rows },
         },
       ],
@@ -1696,7 +1723,10 @@ export function roster(init?: {
       header: { label: { text: "recently merged" } },
       rows: { rows: init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })] },
     },
-    current: { workspace: workspaceRef(init?.current ?? WORKSPACE_ID) },
+    current:
+      init?.currentUnset === true
+        ? undefined
+        : { workspace: workspaceRef(init?.current ?? WORKSPACE_ID) },
   });
 }
 

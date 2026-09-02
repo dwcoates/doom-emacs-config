@@ -43,6 +43,7 @@ import {
   FOOTER_TOKENS_VERDICTS,
   WORKSPACE_ID,
   activityRow,
+  detachedShellRow,
   feedId,
   feedPageSuccess,
   footerView,
@@ -948,5 +949,132 @@ describe("the remembered panel", () => {
     await harness.click('.footer-chip[data-chip="tasks"]');
     // Assert: the preference is lost, the footer is not.
     expect(harness.$('.footer-expanded[data-panel="tasks"]')).not.toBeNull();
+  });
+});
+
+/**
+ * THE PANELS' OWN CLOCKS. `FooterAgentRowRuntime` and `FooterShellRowRuntime`
+ * ship a start instant and nothing else; the count-up is the client's, through
+ * the one shared ticker. Every fixture stamps 1 s absolute and the page's clock
+ * starts at the harness epoch (10 s), so a first paint reads 9s.
+ */
+describe("the agents panel's runtime clock", () => {
+  it("counts up from the served start instant", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    // Act
+    await harness.click('.footer-chip[data-chip="agents"]');
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="agents"] .footer-row-clock')).toBe("9s");
+  });
+
+  it("grows as time passes", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    await harness.click('.footer-chip[data-chip="agents"]');
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="agents"] .footer-row-clock')).toBe("14s");
+  });
+});
+
+describe("the shells panel's runtime clock", () => {
+  it("counts up from the served start instant", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    // Act
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="shells"] .footer-row-clock')).toBe("9s");
+  });
+
+  it("grows as time passes", async () => {
+    // Arrange
+    await withFooter({ status: "idle" });
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Act
+    await harness.tick(5_000);
+    // Assert
+    expect(harness.text('.footer-expanded[data-panel="shells"] .footer-row-clock')).toBe("14s");
+  });
+});
+
+describe("the activity line's relative age", () => {
+  it("reads the age since the served instant", async () => {
+    // Arrange / Act: stamped AT the epoch, so the age is what the clock has run.
+    await withFooter({ status: "thinking", activity: "hook", activityAtMs: 10_000n });
+    // Assert
+    expect(harness.text(".footer-activity-age")).toBe("· 0s ago");
+  });
+
+  it("grows into minutes as time passes", async () => {
+    // Arrange
+    await withFooter({ status: "thinking", activity: "hook", activityAtMs: 10_000n });
+    // Act
+    await harness.tick(120_000);
+    // Assert
+    expect(harness.text(".footer-activity-age")).toBe("· 2m ago");
+  });
+
+  it("truncates rather than rounding the second level", async () => {
+    // Arrange
+    await withFooter({ status: "thinking", activity: "hook", activityAtMs: 10_000n });
+    // Act
+    await harness.tick(130_000);
+    // Assert
+    expect(harness.text(".footer-activity-age")).toBe("· 2m 10s ago");
+  });
+});
+
+/**
+ * A JUMP INTO A SHELL ROW. A detached shell is a CARD, not a sub-feed, so the
+ * jump degrades to scroll-if-rendered: the row is found on the root feed and
+ * landed on, and no `OpenFeed` is issued for it.
+ */
+describe("a jump into a rendered shell row", () => {
+  const withShellRow = async (): Promise<void> => {
+    harness = await startHarness({
+      arrange: (fake) => {
+        fake.setFooter(WORKSPACE_ID, footerView({ status: "idle" }));
+        fake.setPage(
+          WORKSPACE_ID,
+          ROOT_FEED,
+          feedPageSuccess([detachedShellRow("live", { id: feedId(FOOTER_SHELL_TARGET) })]),
+        );
+      },
+    });
+    await harness.click('.footer-chip[data-chip="shells"]');
+  };
+
+  it("lands on the row that is already drawn", async () => {
+    // Arrange
+    await withShellRow();
+    // Act
+    await harness.click(`[data-jump="${FOOTER_SHELL_TARGET}"]`);
+    // Assert
+    expect(harness.row(FOOTER_SHELL_TARGET)?.dataset.revealed).toBe("true");
+  });
+
+  it("asks the daemon nothing to get there", async () => {
+    // Arrange
+    await withShellRow();
+    harness.fake.clearCalls();
+    // Act
+    await harness.click(`[data-jump="${FOOTER_SHELL_TARGET}"]`);
+    // Assert: a drawn row is scrolled to, never re-opened.
+    expect(harness.fake.calls("openFeed")).toHaveLength(0);
+  });
+});
+
+describe("a jump whose target is not drawn", () => {
+  it("leaves the feed as it was", async () => {
+    // Arrange: the shells panel names a FeedId the root page never carried.
+    await withFooter({ status: "idle" });
+    await harness.click('.footer-chip[data-chip="shells"]');
+    // Act
+    await harness.click(`[data-jump="${FOOTER_SHELL_TARGET}"]`);
+    // Assert: the walk finds nothing, and the reader is left where they were.
+    expect(harness.row(FOOTER_SHELL_TARGET)).toBeNull();
   });
 });
