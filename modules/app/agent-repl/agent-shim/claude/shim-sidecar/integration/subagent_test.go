@@ -9,10 +9,13 @@ import (
 // SUBJECT 2 — a subagent transcript and its meta.json.
 //
 // A sidechain file is NOT ingestible without its meta: the meta is the only
-// source for the agent's type, description, spawn depth and model. A transcript
-// whose meta has not appeared yet is HELD (not tailed) with a warning and never
-// dropped. Once the meta lands, the sidechain's frames form the subagent's OWN
-// book, keyed by the vendor agentId — which is also the agent-<id> file name.
+// source for the agent's type, description, spawn depth and model — and, under
+// the Landing 3 rule, for the agent's very IDENTITY. A transcript whose meta has
+// not appeared yet is HELD (not tailed) with a warning and never dropped. Once
+// the meta lands, the sidechain's frames form the subagent's OWN book, keyed by
+// the meta's `toolUseId` — the tool_use_id of the spawning call. The vendor's
+// own `agentId`, which is also the `agent-<id>` file name, is a LOCATOR for the
+// files on disk and never an identity.
 
 // corpusSubagentID is the agent id of the checked-in sidechain fixture; its
 // file name and its records' `agentId` field agree on it.
@@ -68,14 +71,18 @@ func TestASidechainWithoutItsMetaIsHeldRatherThanIngested(t *testing.T) {
 		return r.Level == "warn" && samePathAny(r.Context["path"], g.Path())
 	})
 
-	// Assert: nothing from that file was written.
-	for _, cs := range []string{g.Path()} {
-		if latestCursorFor(fake.Batches(), cs) != nil {
-			t.Errorf("a sidechain with no meta advanced a cursor; it must not be tailed at all")
-		}
+	// Assert: nothing from that file was written. BOTH candidate books are
+	// checked — the file's `agent-<id>` LOCATOR and the identity the meta would
+	// have named — because checking only the locator proves nothing: the reader
+	// never keys a book by the locator anyway, so that assertion held even for a
+	// sidechain that had been ingested wholesale into its real book.
+	if latestCursorFor(fake.Batches(), g.Path()) != nil {
+		t.Errorf("a sidechain with no meta advanced a cursor; it must not be tailed at all")
 	}
-	if len(linesForBook(fake.Entries(), corpusSubagentID)) != 0 {
-		t.Errorf("a sidechain with no meta produced page lines")
+	for _, book := range []string{corpusSubagentID, corpusSubagentAgentID} {
+		if len(linesForBook(fake.Entries(), book)) != 0 {
+			t.Errorf("a sidechain with no meta produced page lines in book %q", book)
+		}
 	}
 }
 
