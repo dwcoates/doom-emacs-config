@@ -632,3 +632,20 @@ func TestCreateWithNeitherANameNorAPromptNamesTheBranchAfterTheWorkspaceID(t *te
 		t.Fatalf("branch = %q, want it named after the minted workspace id", branch)
 	}
 }
+
+func TestCreateWithAnUnresolvableBaseRefIsRefused(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.git.resolveErr = errors.New("fatal: invalid reference: does-not-exist")
+	spec := standardSpec(t)
+	spec.BaseRef = "does-not-exist"
+
+	// Act.
+	_, err := f.verbs.Create(context.Background(), spec)
+
+	// Assert.
+	asRefusal(t, err, ArmBaseRefUnresolved)
+	if len(f.git.created) != 0 {
+		t.Fatalf("created worktrees = %+v, want none for an unresolvable base ref", f.git.created)
+	}
+}
