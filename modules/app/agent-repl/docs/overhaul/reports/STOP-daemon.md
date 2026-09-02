@@ -267,14 +267,16 @@ The dead-code pass's live-code/dead-code pairs, resolved:
 
 ## Remaining items
 
-- `TestAnAbandonedQueuedMergeHasNoReachableCause` stays SKIPPED, and
-  `FeedMergeAbandoned.summary` did not unblock it: `dropQueued` has only two
-  call sites (operator evict, user dequeue) and no production site raises a
-  merge's own give-up, so the "workspace closed" and "daemon shutdown" causes
-  the relay names have no producer in `internal/merge` at all. The distinct
-  `FeedMergeError` evict/dequeue/abandon arms alone would NOT be enough; a
-  producer has to exist first. Route this to the project lead as a behavior
-  question, not a proto ask.
+- RESOLVED (project lead's ruling, 2026-09-02).
+  `TestAnAbandonedQueuedMergeHasNoReachableCause` is un-skipped, renamed
+  `TestKillingAWorkspaceAbandonsItsQueuedMergeWithTheCloseAsTheCause`. The two
+  missing producers were built: `merge.OnWorkspaceClosed`, called by both
+  teardown verbs (`CloseWorkspace` still refuses outright while a merge is
+  queued, so Kill/Nuke are the one door such a workspace leaves through), and
+  `recoverWaiting`, which abandons a merge the restart cannot put back on its
+  queue under the daemon-shutdown cause. `AbandonCause` declares all four
+  causes beside the one sentence each draws, and `publishAbandoned` records
+  the abandonment at INFO keyed by the cause. No proto changed.
 - `TestADisplacedUserTurnIsResubmittedExactlyOnceAcrossADaemonBounce` stays
   skipped: no crash-window hook.
 - The merge ENDS the displaced user turn (KillTurn) after capturing it, then

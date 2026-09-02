@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -223,14 +224,27 @@ func (r *run) selfReload(ctx context.Context, out outcome) {
 // it: an empty one means no bubble was ever drawn and there is nothing to end.
 //
 // THE ABANDONED ARM IS STILL THE ONLY ARM. `FeedMergeError` carries `failed`
-// and `abandoned` and nothing else, so an evict, a dequeue release and a run's
-// own give-up all end here under the same arm. What landing 7 added is
-// `FeedMergeAbandoned.summary`: the resolved sentence for the collapsed line,
-// composed from the abandon CAUSE by the caller that dropped the merge, so the
-// cause reaches a reader in prose even though the arm does not distinguish it.
-func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, summary string) {
-	o.deps.Log.Global().Debug("daemon.merge.abandoned", "a merge left the queue without running",
-		dlog.Context{"workspace": string(ws), "summary": summary})
+// and `abandoned` and nothing else, so a user drop, a dequeue release, a
+// workspace close and a daemon shutdown all end here under the same arm. What
+// landing 7 added is `FeedMergeAbandoned.summary`: the resolved sentence for
+// the collapsed line, composed from the abandon CAUSE, so the cause reaches a
+// reader in prose even though the arm does not distinguish it.
+func (o *orchestrator) publishAbandoned(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID, cause AbandonCause) {
+	const op = "daemon.merge.abandoned"
+	summary, declared := cause.summary()
+	if !declared {
+		// AN UNDECLARED CAUSE IS A DEFECT, never a silent empty line: the
+		// bubble still ends, and the raw cause rides the sentence so the
+		// reader is not left with nothing while the ERROR names the gap.
+		summary = fmt.Sprintf("this merge left the queue before it ran (%s)", cause)
+		o.deps.Log.Global().Error(op, "a merge was abandoned under a cause with no declared summary",
+			dlog.Context{"workspace": string(ws), "cause": string(cause)})
+	}
+	// THE ABANDONMENT IS AN INFO RECORD, keyed by the cause: which of the four
+	// ends a merge had is exactly what a reader of the run log comes for, and
+	// the cause key is what makes them countable.
+	o.deps.Log.Global().Info(op, "a merge left the queue without running",
+		dlog.Context{"workspace": string(ws), "cause": string(cause), "summary": summary})
 	if ledger != "" {
 		label := o.abandonedLabel(ctx, ws)
 		o.deps.Feed.UpsertSynthesized(ws, feedid.Feed{Root: true}, headRow(ws, ledger, label, o.nowMS(),
@@ -300,7 +314,7 @@ func (o *orchestrator) AnswerDequeue(ctx context.Context, ws ids.WorkspaceID, ke
 	// DEBUG and the release arm is no more of a warning than it is. The work
 	// actually abandoned is recorded by dropQueued's own WARN below.
 	o.log(ctx, ws).Debug(op, "releasing a queued merge's slot on the user's answer", dlog.Context{"workspace": string(ws)})
-	return o.dropQueued(ctx, ws, "dequeued", "the user released this merge's queue slot")
+	return o.dropQueued(ctx, ws, CauseUserDequeue)
 }
 
 // clearOffer retires the dequeue offer, whether it was answered, superseded by
