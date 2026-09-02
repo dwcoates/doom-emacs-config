@@ -1058,9 +1058,12 @@ func TestBuildStalenessBounceRelaunchesAStaleShimAtFreeness(t *testing.T) {
 	// answering fails, the client records the death, and each of the shim's two
 	// standing streams ends without the session ending. The relaunch then waits
 	// out its window before forcing. Every one of these is the same
-	// stand-down, honestly recorded once per observer.
+	// stand-down, honestly recorded once per observer -- including the client's
+	// own redial, which notices the broken link and stops once the death is
+	// registered, and which only wins the race to record it under load.
 	f.d.ExpectWarnings("daemon.rollout.relaunch", "daemon.shimclient.exit",
-		"daemon.shimclient.kill_session", "daemon.sessionwatcher.watch_session",
+		"daemon.shimclient.kill_session", "daemon.shimclient.redial",
+		"daemon.sessionwatcher.watch_session",
 		"daemon.sessionwatcher.watch_agent")
 }
 
@@ -1140,6 +1143,18 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 		t.Fatalf("CloseWorkspace with a held prompt = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
 
+	// The footer's status precedence puts `disconnected` above `closing`
+	// (internal/resolve/footer/status.go), and the revival's shim is still
+	// withholding its diagnostics, so the link does not serve yet and nothing
+	// the footer could say about the close is drawn. Letting that shim answer
+	// is what brings the link up; the close refusal is LATCHED (SetClosing is
+	// cleared only by a successful close or a re-open), so it is drawn as soon
+	// as the link serves.
+	// ShimAt, not Shim: Shim caches its control connection per socket path and
+	// would answer with the hibernated shim's dead one.
+	f.shim = f.d.ShimAt(f.d.SocketPath(f.ws) + ".ctl")
+	f.shim.PushHealthyWhenSubscribed()
+
 	// Assert: the footer names the held-prompt cause specifically (not
 	// turn_in_flight or live_work).
 	view := awaitFooter(t, f, footer, "footer closing.blocked naming the held prompt", func(v *frontendv1.FooterView) bool {
@@ -1149,7 +1164,16 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 	if !strings.Contains(text, "held prompt") {
 		t.Fatalf("closing.blocked activity text = %q, want it to name the held-prompt cause", text)
 	}
-	f.d.ExpectWarnings("daemon.workspace.close")
+	// The hibernation's own stand-down is loud by design, and the fake makes it
+	// louder: the fake shim EXITS on accepting KillSession, so the call it was
+	// answering fails, the client records the death, and each of the shim's two
+	// standing streams ends without the session ending. Every one of these is
+	// that one stand-down, honestly recorded once per observer -- the same set
+	// TestABuildStampBounceFiresOnceAndStandsTheOldShimDown declares.
+	f.d.ExpectWarnings("daemon.workspace.close",
+		"daemon.shimclient.exit", "daemon.shimclient.kill_session",
+		"daemon.shimclient.redial", "daemon.workspace.bring_up",
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
 }
 
 // ---- critique 12: relaunch mechanics ----

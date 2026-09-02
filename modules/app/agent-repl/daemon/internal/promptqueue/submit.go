@@ -40,15 +40,11 @@ func (q *queue) Submit(ctx context.Context, sub Submission) (Disposition, error)
 		// A HIBERNATED SESSION IS IDLE, NOT DEAD. The prompt is its revival,
 		// exactly as mounting the frontend is; only a workspace that will not
 		// come back refuses.
-		if revived, err := q.revive(ctx, sub.WS, log); err != nil {
-			return Disposition{}, err
-		} else if revived {
-			sender, ok = q.deps.Client(sub.WS)
+		if q.deps.Revive == nil {
+			log.Warn(opSubmit, "the workspace has no session to submit to", nil)
+			return Disposition{}, ErrNoSession
 		}
-	}
-	if !ok {
-		log.Warn(opSubmit, "the workspace has no session to submit to", nil)
-		return Disposition{}, ErrNoSession
+		return q.holdForRevival(ctx, sub, log)
 	}
 
 	// A BUBBLE-ADDRESSED prompt goes to THAT agent through UpdateAgent.prompt.
@@ -112,6 +108,11 @@ func (q *queue) applyLeasePolicy(ctx context.Context, sub Submission, log dlog.L
 				merged(fields, dlog.Context{"cause": err.Error()}))
 			return Disposition{}, true, fmt.Errorf("route the parked submission on %q: %w", sub.WS, err)
 		}
+		// THE GUIDANCE IS STILL SOMETHING THE USER TYPED, so it is drawn like
+		// every other accepted prompt -- at the session's standing output
+		// address, which the parked lease holder has pointed at its own tab, so
+		// the guidance lands there and never on the root feed.
+		q.mirrorAccepted(sub.WS, sub.Turn, sub.Said, sub.Origin)
 		log.Info(opSubmit, "routed the submission to the resolution agent as guidance",
 			merged(fields, dlog.Context{"guidance_turn": string(turn)}))
 		return Disposition{Delivered: true}, true, nil
@@ -218,6 +219,106 @@ func holderName(h wsm.LeaseHolder) string {
 		return "hibernate"
 	default:
 		return fmt.Sprintf("holder(%d)", h)
+	}
+}
+
+// holdForRevival parks a submission whose workspace has no live session and
+// brings that session up OUT OF BAND.
+//
+// THE REVIVAL IS NEVER AWAITED INSIDE THE SUBMISSION. Bring-up gates on the
+// shim's first healthy diagnostics (internal/workspace/sessions.go's settled
+// readiness ruling), so a shim that is slow to answer them would hold the rpc
+// open for exactly as long as it takes -- and the caller would be left with no
+// minted TurnId, no hold in the tray, and nothing to act on. The prompt is
+// held under the revival-pending hold instead, the rpc answers at once with
+// the turn it minted, and the revival releases the hold when the session is
+// up, delivering it down the ordinary path.
+func (q *queue) holdForRevival(ctx context.Context, sub Submission, log dlog.Logger) (Disposition, error) {
+	disposition, err := q.hold(ctx, sub, "", &leaseHold{kind: wsm.HoldSessionStarting}, log)
+	if err != nil {
+		return Disposition{}, err
+	}
+	q.reviveInBackground(context.WithoutCancel(ctx), sub.WS, log)
+	return disposition, nil
+}
+
+// reviveInBackground brings one workspace's session up off the request path and
+// releases every revival-pending hold once it is up.
+//
+// EXACTLY ONE REVIVAL RUNS PER WORKSPACE: a second submission arriving while
+// the first one's bring-up is still running joins its outcome rather than
+// spawning a second bring-up, and its own hold is released by the same sweep.
+func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+	s := q.state(ws)
+	q.mu.Lock()
+	if s.reviving {
+		q.mu.Unlock()
+		log.Debug(opSubmit, "a revival is already in flight; the hold waits on it", nil)
+		return
+	}
+	s.reviving = true
+	q.mu.Unlock()
+
+	q.reviving.Add(1)
+	go func() {
+		defer q.reviving.Done()
+		defer func() {
+			q.mu.Lock()
+			s.reviving = false
+			q.mu.Unlock()
+		}()
+		revived, err := q.revive(ctx, ws, log)
+		if err != nil || !revived {
+			// revive() recorded the failure loudly. THE PROMPT STAYS HELD:
+			// the tray keeps showing it, so nothing the user typed is lost to
+			// a revival that did not happen.
+			return
+		}
+		if _, ok := q.deps.Client(ws); !ok {
+			log.Error(opSubmit, "the revival reported success but the workspace still has no session; the prompt stays held", nil)
+			return
+		}
+		q.releaseRevivalHolds(ctx, ws, log)
+	}()
+}
+
+// releaseRevivalHolds un-stamps every revival-pending hold on a workspace whose
+// session is now up and delivers the next one down the ordinary path.
+func (q *queue) releaseRevivalHolds(ctx context.Context, ws ids.WorkspaceID, log dlog.Logger) {
+	// SERIALIZED AGAINST A TURN END AND A LEASE CHANGE, for the reason
+	// OnTurnEnded states: all three deliver from the same standing holds.
+	drain := &q.state(ws).drain
+	drain.Lock()
+	defer drain.Unlock()
+
+	standing, err := q.deps.DB.HeldPrompts(ctx, ws)
+	if err != nil {
+		log.Error(opSubmit, "could not read the holds the revival should release",
+			dlog.Context{"cause": err.Error()})
+		return
+	}
+	released := 0
+	for _, h := range standing {
+		if h.Tombstone != nil || h.Hold == nil || *h.Hold != wsm.HoldSessionStarting {
+			continue
+		}
+		if err := q.deps.DB.UpdateHeldPromptHold(ctx, h.Turn, nil, ""); err != nil {
+			log.Error(opSubmit, "could not release a revival-pending hold",
+				dlog.Context{"turn": string(h.Turn), "cause": err.Error()})
+			continue
+		}
+		released++
+	}
+	if released == 0 {
+		log.Debug(opSubmit, "the revival released no hold", dlog.Context{"holds": len(standing)})
+		return
+	}
+	log.Debug(opSubmit, "the revival released its pending holds", dlog.Context{"released": released})
+	if err := q.pushTray(ctx, ws, log); err != nil {
+		return
+	}
+	if err := q.popAndDeliver(ctx, ws, log); err != nil {
+		log.Error(opSubmit, "the revived hold was not delivered", dlog.Context{"cause": err.Error()})
 	}
 }
 

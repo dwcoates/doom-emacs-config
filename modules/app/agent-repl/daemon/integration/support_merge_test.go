@@ -18,27 +18,32 @@ import (
 // merge-prefixed helpers at that file's bottom.
 
 // mergeBlockedRepoOn builds one MORE blocked-queue repository under an
-// EXISTING daemon: a front child whose branch is scripted to conflict (so its
-// merge parks forever, pinning the queue) and a second child queued behind it.
-// It mirrors merge_test.go's own mergeBlockedQueueFixture, parameterized on a
-// daemon the caller already started, so a test can hold several repositories'
-// queues open at once under one daemon.
+// EXISTING daemon: a front child whose merge stops on a configured
+// before-merge prompt nobody answers (so its run holds the repository lock
+// indefinitely, pinning the queue) and a second child queued behind it.
+//
+// The pre-prompt is what blocks it, NOT a scripted conflict: a conflict only
+// arises under the no-ff merge of the daemon's OWN checkout (internal/merge's
+// emacsMethod), and at most one repository under one daemon can be that
+// checkout — so a scripted conflict on a second repository lands a clean,
+// instantly finished merge instead of a park. The before-merge prompt runs
+// under BOTH methods, which is what lets several repositories hold their
+// queues open at once.
 func mergeBlockedRepoOn(t *testing.T, d *harness.Daemon, namePrefix string) (front, behind *fixture, repo *harness.Repo, repoRef *workspacev1.RepositoryRef) {
 	t.Helper()
 	repo = harness.NewRepo(t)
 	repoRef = mergeRepositoryRef(t, d, repo)
 
-	front = mergeCreateChild(t, d, repoRef, namePrefix+"-front", namePrefix+" front work", nil)
+	front = mergeCreateChild(t, d, repoRef, namePrefix+"-front", namePrefix+" front work",
+		&agentreplv1.CreateWorkspaceMergeActions{BeforeWsMerge: said("hold " + namePrefix + "'s queue open")})
 	behind = mergeCreateChild(t, d, repoRef, namePrefix+"-behind", namePrefix+" behind work", nil)
-
-	frontBranch := mergeBranchOf(t, front.ws)
-	repo.ScriptConflict(repo.Dir, frontBranch, "conflict.txt")
 
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: front.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(%s front) = error %v, want the merge enqueued", namePrefix, err)
 	}
+	// The pre-prompt's turn is started and NEVER answered: the run sits in it
+	// holding the repository lock.
 	front.shim.ExpectStartTurn()
-	front.shim.PushAgentFrame(mainAgent, successFrame(mainAgent, activityID(namePrefix+"-front-conflict-brief")))
 
 	if _, err := d.Client().MergeWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.MergeWorkspaceRequest{Workspace: behind.ws})); err != nil {
 		t.Fatalf("MergeWorkspace(%s behind) = error %v, want the merge enqueued", namePrefix, err)

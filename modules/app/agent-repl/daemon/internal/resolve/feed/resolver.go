@@ -322,11 +322,7 @@ type placement struct {
 // never dropped: a row nobody can place is still a row the user must see.
 func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) placement {
 	if s.address != nil {
-		p := placement{feed: s.address.Feed}
-		if s.address.Parent != nil {
-			p.parent = &frontendv1.FeedRowParent{Row: r.deps.Encode(*s.address.Parent)}
-		}
-		return p
+		return r.outputPlacement(s)
 	}
 	id := agent.GetValue()
 	if id == "" || id == s.mainAgent {
@@ -346,6 +342,19 @@ func (r *resolver) place(s *wsState, agent *conversationv1.AgentId) placement {
 		"a frame arrived for an agent whose creation was never seen; the row lands on the root feed",
 		dlog.Context{"agent": id, "main_agent": s.mainAgent})
 	return placement{feed: feedid.Feed{Root: true}}
+}
+
+// outputPlacement is where a row the LEASE HOLDER draws for this session
+// belongs: the standing output address, or the root feed when none stands.
+func (r *resolver) outputPlacement(s *wsState) placement {
+	if s.address == nil {
+		return placement{feed: feedid.Feed{Root: true}}
+	}
+	p := placement{feed: s.address.Feed}
+	if s.address.Parent != nil {
+		p.parent = &frontendv1.FeedRowParent{Row: r.deps.Encode(*s.address.Parent)}
+	}
+	return p
 }
 
 // upsert replaces one row whole and publishes it on its feed's tail. It is the
@@ -446,6 +455,23 @@ func (r *resolver) SetOutputAddress(ws ids.WorkspaceID, addr *sessionwatcher.Out
 	}
 	r.logger(ws).Debug("daemon.feed.output_address",
 		"the feed's output address changed", dlog.Context{"feed": target, "cleared": addr == nil})
+}
+
+// UpsertAtOutputAddress upserts a daemon-synthesized row AT THE SESSION'S
+// STANDING OUTPUT ADDRESS: the row's identity is composed from the addressed
+// feed and it is parented exactly as the resolver's own draw of the same row
+// key will be, so the two are ONE row rather than a root copy the addressed
+// draw can never replace.
+func (r *resolver) UpsertAtOutputAddress(ws ids.WorkspaceID, key feedid.RowKey, row *frontendv1.FeedRow) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.state(ws)
+	at := r.outputPlacement(s)
+	row.Id = r.rowID(ws, at.feed, key)
+	r.logger(ws).Debug("daemon.feed.synthesized_at_output",
+		"a daemon-synthesized row was upserted at the session's output address",
+		dlog.Context{"feed": r.feedKey(ws, at.feed), "row": row.GetId().GetValue()})
+	r.upsert(s, at, row, true)
 }
 
 // UpsertSynthesized upserts a daemon-synthesized row on the named feed.

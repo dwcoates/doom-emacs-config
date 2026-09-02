@@ -105,6 +105,10 @@ type watcher struct {
 	// pendingTurnEnds are the turn ends recorded under mu and not yet handed
 	// to the lifecycle sink, which is told only once mu is released.
 	pendingTurnEnds []endedTurn
+
+	// dispatching tracks the OFF-LOCK sink dispatch (flushTurnEnds), so Close
+	// can join it. It is a WaitGroup rather than a sleep.
+	dispatching sync.WaitGroup
 	// closedTurns remembers how the last few turns ended, so a wait that
 	// arrives after the terminal is still answered; closedTurnOrder is its
 	// eviction order.
@@ -380,6 +384,10 @@ func (w *watcher) OnTurnOpened(ws ids.WorkspaceID, prompt *conversationv1.AgentP
 		// The TURN-OPEN EDGE reaches the footer here and nowhere else: no
 		// stream frame states that a turn was accepted.
 		w.sinks.Footer.OnTurnOpened(ws, turn)
+		// AND THE FEED, for the same reason: the turn's own terminal row for a
+		// query that died out from under it is drawn against the turn the feed
+		// believes is running, and nothing on the streams states it either.
+		w.sinks.Feed.OnTurnOpened(ws, turn)
 	} else {
 		w.log.Error("daemon.sessionwatcher.turn_opened_unidentified", "an opened turn named no id", dlog.Context{
 			"agent_id": prompt.GetAgent().GetValue(),
@@ -414,6 +422,10 @@ func (w *watcher) Close() error {
 
 	w.cancel()
 	closeStreams(closing)
+	// The off-lock sink dispatch is JOINED here: a turn end still being handled
+	// reads the state client, and the daemon closes that client once every
+	// watcher is closed.
+	w.dispatching.Wait()
 	return nil
 }
 
@@ -741,6 +753,15 @@ func (w *watcher) flushTurnEnds() {
 	w.mu.Lock()
 	pending := w.pendingTurnEnds
 	w.pendingTurnEnds = nil
+	if len(pending) > 0 {
+		// THE DISPATCH IS JOINABLE. It is the one sink call this watcher makes
+		// off its own mutex, and the sinks it drives read the state client --
+		// so Close, which the daemon runs BEFORE closing that client, waits on
+		// exactly this rather than tearing the store out from under a turn end
+		// that is still being handled.
+		w.dispatching.Add(1)
+		defer w.dispatching.Done()
+	}
 	w.mu.Unlock()
 	for _, ended := range pending {
 		w.sinks.Lifecycle.OnTurnEnded(w.ws, ended.turn, ended.how)

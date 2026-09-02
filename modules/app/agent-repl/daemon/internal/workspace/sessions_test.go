@@ -919,3 +919,36 @@ func TestStopTellsTheViewsTheLinkIsDead(t *testing.T) {
 		}
 	}
 }
+
+// TestCloseWatchersEndsEveryLiveSessionsWatcher covers the daemon's teardown
+// order: the watchers are closed (and their in-flight sink work joined) before
+// the state client their sinks read is closed.
+func TestCloseWatchersEndsEveryLiveSessionsWatcher(t *testing.T) {
+	// Arrange: a live session with a watcher.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	f.fleet.CloseWatchers()
+
+	// Assert.
+	if !f.watcher.closed {
+		t.Fatal("the live session's watcher was not closed by the fleet's teardown")
+	}
+}
+
+// TestCloseWatchersOnAFleetWithNoSessionsDoesNothing is the other edge: a
+// daemon that never brought a session up tears down cleanly.
+func TestCloseWatchersOnAFleetWithNoSessionsDoesNothing(t *testing.T) {
+	// Arrange, Act.
+	f := newFleetFixture(t)
+	f.fleet.CloseWatchers()
+
+	// Assert.
+	if f.watcher.closed {
+		t.Fatal("a watcher was closed on a fleet that has no live session")
+	}
+}

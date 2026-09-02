@@ -3,11 +3,13 @@ package promptqueue
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -122,6 +124,28 @@ func TestSubmitRoutesAParkedLeaseToTheResolutionAgent(t *testing.T) {
 	}
 }
 
+func TestSubmitMirrorsAParkedLeasesGuidanceAsAUserPromptRow(t *testing.T) {
+	// Arrange: a parked merge lease has addressed the session at its own tab.
+	h := newHarness(t)
+	h.lease(wsm.HolderMerge, wsm.PolicyParked)
+	lease := ids.LeaseID("lease-1")
+	h.feed.SetOutputAddress("ws-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "fix the conflict this way")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert: the guidance is drawn at the ADDRESSED feed, never on the root.
+	rows := h.feed.mirrored()
+	if len(rows) != 1 {
+		t.Fatalf("mirrored rows = %d, want the guidance drawn once", len(rows))
+	}
+	want := feedid.Encode(feedid.Ref{WS: "ws-1", Feed: feedid.Feed{Merge: &lease},
+		Row: feedid.RowKey{Kind: feedid.KindPrompt, ID: "t1"}})
+	if got := rows[0].GetId().GetValue(); got != want.GetValue() {
+		t.Fatalf("guidance mirror id = %q, want the addressed feed's %q", got, want.GetValue())
+	}
+}
+
 func TestSubmitSurfacesAParkedRouteFailure(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -135,9 +159,9 @@ func TestSubmitSurfacesAParkedRouteFailure(t *testing.T) {
 	}
 }
 
-func TestSubmitRefusesAWorkspaceWithNoSession(t *testing.T) {
+func TestSubmitRefusesAWorkspaceWithNoSessionAndNoRevivalWired(t *testing.T) {
 	// Arrange
-	h := newHarness(t)
+	h := newHarnessWithoutRevival(t)
 	h.noSession = true
 	// Act
 	_, err := h.q.Submit(context.Background(), submission("t1", "hello"))
@@ -241,15 +265,44 @@ func TestSubmitRevivesAParkedWorkspaceRatherThanRefusingIt(t *testing.T) {
 	// Act
 	got, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
 
-	// Assert
+	// Assert: the rpc answers AT ONCE under the revival-pending hold -- the
+	// bring-up gates on the shim's diagnostics and is never awaited inside the
+	// request -- and the revival then delivers the prompt.
 	if err != nil {
-		t.Fatalf("Submit onto a parked workspace = %v, want the revival to deliver it", err)
+		t.Fatalf("Submit onto a parked workspace = %v, want it held pending the revival", err)
 	}
-	if !got.Delivered {
-		t.Fatalf("disposition = %+v, want the prompt delivered after the revival", got)
+	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
+		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
 	}
+	h.waitRevivals()
 	if h.revivals != 1 {
 		t.Fatalf("revivals = %d, want exactly one", h.revivals)
+	}
+	if len(h.sender.started()) != 1 {
+		t.Fatalf("started turns = %d, want the revived prompt delivered", len(h.sender.started()))
+	}
+}
+
+// TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp is the rpc-shape
+// half: the minted turn comes back before the revival has run at all.
+func TestSubmitAnswersARevivalAtOnceRatherThanAwaitingTheBringUp(t *testing.T) {
+	// Arrange: a bring-up that never finishes while the test looks at the
+	// answer, exactly as a shim withholding its diagnostics does.
+	h := newHarness(t)
+	h.noSession = true
+	release := make(chan struct{})
+	h.reviveHook = func() { <-release }
+	t.Cleanup(func() { close(release); h.waitRevivals() })
+
+	// Act
+	got, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Submit during a bring-up = %v, want an answer", err)
+	}
+	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
+		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
 	}
 }
 
@@ -263,10 +316,23 @@ func TestSubmitSurfacesAFailedRevival(t *testing.T) {
 	h.reviveErr = errors.New("the shim would not spawn")
 
 	// Act
-	_, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
+	got, err := h.q.Submit(context.Background(), submission("t1", "wake up"))
+	h.waitRevivals()
 
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "the shim would not spawn") {
-		t.Fatalf("Submit = %v, want the revival's own failure surfaced", err)
+	// Assert: the failure happens off the request path, so the prompt STAYS
+	// HELD and visible in the tray rather than being lost -- the revival's own
+	// error record is where the failure is surfaced.
+	if err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	if got.Held == nil || *got.Held != wsm.HoldSessionStarting {
+		t.Fatalf("disposition = %+v, want the revival-pending hold", got)
+	}
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("reading the standing holds: %v", err)
+	}
+	if len(standing) != 1 || standing[0].Tombstone != nil {
+		t.Fatalf("standing holds = %+v, want the prompt still held after the failed revival", standing)
 	}
 }

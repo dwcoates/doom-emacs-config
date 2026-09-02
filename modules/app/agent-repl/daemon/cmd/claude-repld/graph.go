@@ -102,6 +102,11 @@ type graph struct {
 	// Background are the long-running loops the daemon owns. They start after
 	// the bindings, because each of them can push.
 	Background []backgroundLoop
+	// CloseWatchers ends every session watcher and joins its in-flight sink
+	// work. `run` calls it BEFORE closing the state client: a watcher's sinks
+	// read that client, and a turn end still being handled when the store
+	// closes under it is a refused read on a path that owes no error.
+	CloseWatchers func()
 }
 
 // backgroundLoop is one long-running loop the daemon runs for its whole
@@ -565,6 +570,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			{Name: "drain", Run: drainController.Run},
 			{Name: "command_file_ingress", Run: ingress.Run},
 		},
+		CloseWatchers: fleet.CloseWatchers,
 	}, nil
 }
 

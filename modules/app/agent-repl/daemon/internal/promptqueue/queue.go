@@ -52,6 +52,10 @@ type wsState struct {
 	// queue's own mutex across it would wedge every other workspace.
 	drain sync.Mutex
 
+	// reviving reports that a bring-up for this workspace is already running,
+	// so a second submission joins it rather than spawning a second one.
+	reviving bool
+
 	head            *ids.TurnID
 	interrupting    bool
 	uninterruptible conversationv1.SessionCommand
@@ -68,6 +72,10 @@ type queue struct {
 	// classifying tracks the in-flight classification goroutines. It is a
 	// WaitGroup rather than a sleep so a test can join them.
 	classifying sync.WaitGroup
+
+	// reviving tracks the in-flight background revivals. It is a WaitGroup
+	// rather than a sleep so a test can join them.
+	reviving sync.WaitGroup
 }
 
 // newQueue validates the dependencies and builds the queue. Every collaborator
