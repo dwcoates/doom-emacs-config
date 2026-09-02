@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sync"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -84,9 +87,11 @@ type server struct {
 	profile Profile
 	log     *logSink
 
-	sessions *hub[*conversationv1.SessionUpdate]
-	agents   *hub[agentFrame]
-	bashes   *hub[bashFrame]
+	sessions        *hub[*conversationv1.SessionUpdate]
+	announcedBashes map[string]*conversationv1.AgentBash
+
+	agents *hub[agentFrame]
+	bashes *hub[bashFrame]
 
 	mu      sync.Mutex
 	answers map[string][]scriptedAnswer
@@ -280,6 +285,33 @@ func (s *server) StartSession(ctx context.Context, req *connect.Request[shimv1.S
 	return connect.NewResponse(resp), nil
 }
 
+// noteAnnouncedBash remembers the `start` a detached shell was ANNOUNCED with,
+// so its WatchBash can open with it.
+func (s *server) noteAnnouncedBash(frame *conversationv1.AgentFrame) {
+	announcement := frame.GetDetachedWork()
+	if announcement == nil {
+		return
+	}
+	bash := announcement.GetCreated().GetWorkCreated().GetBash()
+	if bash == nil || announcement.GetWork().GetValue() == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.announcedBashes == nil {
+		s.announcedBashes = map[string]*conversationv1.AgentBash{}
+	}
+	s.announcedBashes[announcement.GetWork().GetValue()] = bash
+	s.mu.Unlock()
+}
+
+// announcedBash answers the opening frame one detached shell was announced
+// with, nil when the shell was never announced.
+func (s *server) announcedBash(work string) *conversationv1.AgentBash {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.announcedBashes[work]
+}
+
 // noteVendorSession takes the session kernel lock the moment a vendor session
 // id is assigned, exactly as the real shim does inside StartSession.
 func (s *server) noteVendorSession(resp *shimv1.StartSessionResponse) {
@@ -292,9 +324,40 @@ func (s *server) noteVendorSession(resp *shimv1.StartSessionResponse) {
 	s.vendorID = id
 	hook := s.onSessionStarted
 	s.mu.Unlock()
+	s.writeTranscript(id)
 	if first && hook != nil {
 		hook(id)
 	}
+}
+
+// nonAlphanumeric spells the vendor CLI's projects/<name> encoding rule.
+var nonAlphanumeric = regexp.MustCompile(`[^A-Za-z0-9]`)
+
+// writeTranscript creates the conversation's transcript file exactly where the
+// vendor CLI files it — $CLAUDE_CONFIG_DIR/projects/<encoded cwd>/<vendor
+// session id>.jsonl. THE FILE IS THE RESUME'S DEATH EVIDENCE: the daemon's
+// resume guard refuses a resume whose transcript is gone, so a fake that starts
+// sessions without laying one down makes every re-open unresumable.
+func (s *server) writeTranscript(vendorSessionID string) {
+	configDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if configDir == "" {
+		return
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	dir := filepath.Join(configDir, "projects", nonAlphanumeric.ReplaceAllString(cwd, "-"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	path := filepath.Join(dir, vendorSessionID+".jsonl")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(`{"type":"session_started","sessionId":"` + vendorSessionID + `"}` + "\n")
 }
 
 func (s *server) buildSHA() string {
@@ -386,6 +449,15 @@ func (s *server) WatchBash(ctx context.Context, req *connect.Request[shimv1.Watc
 	work := req.Msg.GetWork().GetValue()
 	id, ch := s.bashes.subscribe()
 	defer s.bashes.unsubscribe(id)
+	// THE STREAM OPENS WITH `start` (WatchBashResponse's own contract). The
+	// daemon's stream open consumes the first frame as the open's answer, so a
+	// watch that sends nothing until the shell speaks again blocks the caller
+	// — under the session watcher's lock — for as long as the shell is quiet.
+	if opening := s.announcedBash(work); opening != nil {
+		if err := stream.Send(&shimv1.WatchBashResponse{Bash: opening}); err != nil {
+			return err
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
