@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -84,6 +85,20 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 		return err
 	}
 	job, jobErr := o.layoutFor(ctx, ws)
+	// CORRUPTION REFUSES THE LOAD, it is never an unmergeable outcome. A
+	// creation_jobs row that will not decode is a half-written record, not a
+	// workspace whose geometry was legitimately removed: dropping the merge and
+	// serving on would turn state corruption into an ordinary business answer
+	// and lose the evidence. The boot fails instead, loudly, naming the row.
+	var decodeErr *wsm.DecodeError
+	if errors.As(jobErr, &decodeErr) {
+		fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "error": decodeErr.Error()}
+		log.Error(op, "refusing the boot: a merge's creation_jobs row will not decode", fields)
+		// AND IN THE RUN LOG: a boot that refuses is a fact about the restart,
+		// and the restart-scoped log is where the boot sequence is read.
+		o.deps.Log.Global().Error(op, "refusing the boot: a merge's creation_jobs row will not decode", fields)
+		return fmt.Errorf("merge: recover %q: %w", ws, decodeErr)
+	}
 	resumable := false
 	var why string
 	switch {
