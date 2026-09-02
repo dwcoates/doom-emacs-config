@@ -144,6 +144,10 @@ type Deps struct {
 	Announcer Announcer
 	// Pusher relays the per-workspace handover and webapp pushes.
 	Pusher WorkspacePusher
+	// PublishHost recomposes and republishes one workspace's HOST view. The
+	// restart-pending hold is the composer's `restarting` arm, and the server
+	// cannot see a lease taken or released. Nil means no host surface.
+	PublishHost func(ids.WorkspaceID)
 	// Participants is the expected-participant snapshot: who holds a
 	// workspace's two per-workspace streams at announcement.
 	Participants ParticipantSource

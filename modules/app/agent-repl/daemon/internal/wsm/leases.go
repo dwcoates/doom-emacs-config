@@ -106,7 +106,7 @@ func (s *store) Lease(ctx context.Context, id WorkspaceID) (Lease, bool, error) 
 		held bool
 	)
 	err := s.read(ctx, "daemon.wsm.lease", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		l, err := scanLease(s.db.QueryRowContext(ctx, `SELECT `+leaseColumns+` FROM leases WHERE workspace_id = ?`, id))
+		l, err := scanLease(s.db().QueryRowContext(ctx, `SELECT `+leaseColumns+` FROM leases WHERE workspace_id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			out, held = Lease{}, false
 			return nil

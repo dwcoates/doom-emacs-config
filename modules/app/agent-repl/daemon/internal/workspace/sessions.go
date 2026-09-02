@@ -517,6 +517,14 @@ func (f *Fleet) startSession(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			})
 			return nil, nil
 		}
+		if failure.GetConversationOwned() != nil {
+			// ANOTHER SHIM HOLDS THIS CONVERSATION. It took the workspace
+			// kernel lock first, which is exactly what that lock is for: two
+			// vendor processes on one conversation is the state it prevents.
+			// The refusal is the shim's own verdict, relayed.
+			return nil, refuse(log, "OpenWorkspace", ArmConversationOwned,
+				fmt.Sprintf("another shim holds workspace %q's conversation: %s", ws, failure.GetDetail()), false)
+		}
 		log.Error(opBringUp, "StartSession refused", dlog.Context{"detail": failure.GetDetail()})
 		return nil, fmt.Errorf("start session for %q: %s", ws, failure.GetDetail())
 	}

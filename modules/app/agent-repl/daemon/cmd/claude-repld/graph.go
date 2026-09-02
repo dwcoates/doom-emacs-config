@@ -336,6 +336,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("claude-repld: resolve this daemon's own binary: %w", err)
 	}
 	rolloutController, err := rollout.New(rollout.Deps{
+		PublishHost:     relay.PublishHostWorkspace,
 		Deploy:          scripts,
 		SelfExe:         selfExe,
 		SelfRepoDir:     paths.SelfRepo,
