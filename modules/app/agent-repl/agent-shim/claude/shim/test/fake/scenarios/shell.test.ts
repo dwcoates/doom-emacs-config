@@ -273,4 +273,26 @@ describe("Ctrl-B", () => {
       { is_backgrounded: true },
     );
   });
+
+
+  it("parks a foreground Bash until an interrupt lands, with no terminal on its own", async () => {
+    // !bash-hold's run() calls ctx.awaitInterrupt() and never returns on its
+    // own -- a bare driveScenario() would hang the suite forever, which is why
+    // this scenario had never been driven at the fake level (lifecycle.test.ts
+    // documents the same shape for !hold/!interrupt as the ENGINE suite's job).
+    // Driving the interrupt through `during` releases it in-process instead.
+    const driven = await driveScenario(["!bash-hold"], {
+      during: async (query, _prompts, messages) => {
+        for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r));
+        expect(messages.some((m) => (m as { type: string }).type === "assistant")).toBe(true);
+        await query.interrupt();
+      },
+    });
+
+    // The vendor's own generic interrupt terminal, not something bash-hold's
+    // run() produced -- it never calls conclude().
+    const results = ofType(driven, "result");
+    expect(results).toHaveLength(1);
+    expect(results[0]?.terminal_reason).toBe("aborted_streaming");
+  });
 });
