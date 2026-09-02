@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-store/internal/logging"
 )
 
 func TestInvalidfIsErrInvalid(t *testing.T) {
@@ -181,6 +182,43 @@ func TestEntryFieldSpellsThePathTheFailureArmReports(t *testing.T) {
 				t.Fatalf("entryField = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestQueryErrorLogsAndReturnsTheDriverFailure(t *testing.T) {
+	// Arrange: every lifecycle write funnels a driver failure through
+	// queryError, but the happy-path suites never provoke a real driver
+	// error, so this pins the method directly.
+	d, s := newStore(t)
+	cause := errors.New("disk I/O error")
+
+	// Act
+	got := d.queryError("store.db.write-batch", "agent", logging.Fields{AgentID: "agent-1"}, cause)
+
+	// Assert: the caller gets back exactly the error it handed in.
+	if !errors.Is(got, cause) {
+		t.Fatalf("queryError returned %v, want it to wrap %v", got, cause)
+	}
+	records := s.records(t)
+	if len(records) == 0 {
+		t.Fatal("no records logged")
+	}
+	record := records[len(records)-1]
+	if record["operation"] != "store.db.write-batch" {
+		t.Fatalf("operation = %v, want store.db.write-batch", record["operation"])
+	}
+	if record["level"] != "error" {
+		t.Fatalf("level = %v, want error", record["level"])
+	}
+	context, ok := record["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("context = %v, want a map", record["context"])
+	}
+	if context["table"] != "agent" {
+		t.Fatalf("context.table = %v, want agent", context["table"])
+	}
+	if context["error"] != cause.Error() {
+		t.Fatalf("context.error = %v, want %v", context["error"], cause.Error())
 	}
 }
 
