@@ -75,7 +75,33 @@ const unsetError = (): SubmitPromptResponse =>
 const REASON_FILL: Readonly<Record<string, Record<string, unknown>>> = {
   workspaceRefMismatch: { registryDir: "/w/registry" },
   transferringAway: { address: "127.0.0.1:7777" },
+  bubbleRefused: { detail: "", kind: { case: "agentBusy", value: {} } },
 };
+
+/** A bubble refusal carrying KIND and the shim's DETAIL. */
+const bubbleRefusal =
+  (kind: string, detail: string) =>
+  (): SubmitPromptResponse =>
+    create(SubmitPromptResponseSchema, {
+      result: {
+        case: "error",
+        value: {
+          reason: {
+            case: "bubbleRefused",
+            value: { detail, kind: { case: kind, value: {} } },
+          },
+        },
+      },
+    } as never);
+
+/** A bubble refusal whose `kind` oneof sets no arm. */
+const bubbleRefusalUnsetKind = (): SubmitPromptResponse =>
+  create(SubmitPromptResponseSchema, {
+    result: {
+      case: "error",
+      value: { reason: { case: "bubbleRefused", value: { detail: "d" } } },
+    },
+  } as never);
 
 /** A refusal carrying ARM, with the payload that arm's sentence needs. */
 const refusalError = (arm: string) => (): SubmitPromptResponse =>
@@ -461,6 +487,73 @@ describe("the refusals", () => {
 
   it("keeps the words in the box through a duplicate-submission refusal", async () => {
     const h = mount(refusalError("duplicateSubmission"));
+    await sendText(h, "hello");
+    expect(h.input.value).toBe("hello");
+    h.handle.dispose();
+  });
+
+  it("tells a not-deliverable bubble prompt that this agent has no route", async () => {
+    const h = mount(bubbleRefusal("notDeliverable", ""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain(
+      "cannot be prompted directly",
+    );
+    h.handle.dispose();
+  });
+
+  it("tells an agent-busy bubble prompt to resubmit once that turn settles", async () => {
+    const h = mount(bubbleRefusal("agentBusy", ""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain(
+      "resubmit once it settles",
+    );
+    h.handle.dispose();
+  });
+
+  it("draws the shim's own account after the stem when the refusal carries one", async () => {
+    const h = mount(bubbleRefusal("agentBusy", "agent 'reviewer' is mid-turn"));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).toContain(
+      "(agent 'reviewer' is mid-turn)",
+    );
+    h.handle.dispose();
+  });
+
+  it("draws no empty parenthetical when the bubble refusal carries no detail", async () => {
+    const h = mount(bubbleRefusal("agentBusy", ""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.textContent).not.toContain("(");
+    h.handle.dispose();
+  });
+
+  it("labels a bubble refusal with the SubmitPromptError arm it arrived on", async () => {
+    const h = mount(bubbleRefusal("notDeliverable", ""));
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")?.getAttribute("data-arm")).toBe(
+      "bubbleRefused",
+    );
+    h.handle.dispose();
+  });
+
+  it("refuses a bubble refusal whose kind sets no arm rather than inventing words", async () => {
+    const h = mount(bubbleRefusalUnsetKind);
+    await sendText(h, "hello");
+    expect(h.host.querySelector(".composer-refusal")).toBeNull();
+    h.handle.dispose();
+  });
+
+  it("names the kind oneof in the card it files for an unset bubble kind", async () => {
+    const h = mount(bubbleRefusalUnsetKind);
+    await sendText(h, "hello");
+    const kind = h.reports[0]?.kind;
+    expect(kind?.case === "frameUndecodable" ? kind.value.frameHead : undefined).toBe(
+      "SubmitPromptBubbleRefused.kind",
+    );
+    h.handle.dispose();
+  });
+
+  it("keeps the words in the box when a bubble refusal's kind is unset", async () => {
+    const h = mount(bubbleRefusalUnsetKind);
     await sendText(h, "hello");
     expect(h.input.value).toBe("hello");
     h.handle.dispose();
