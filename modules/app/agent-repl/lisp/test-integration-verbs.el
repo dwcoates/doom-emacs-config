@@ -780,8 +780,16 @@ this test loudly rather than hanging a batch run."
           (agent-repl-itest--await-call daemon "CloseWorkspace")
           ;; Assert: the exact footer-pointer text, and no dialog function ran
           ;; (a run would have signalled out of the `cl-letf' stubs above).
-          (agent-repl-itest--wait-until (lambda () messages) nil
-                                        "the close-blocked message")
+          ;; WAIT FOR THE MESSAGE THIS TEST IS ABOUT, not for "some message":
+          ;; every ladder rung below `agent-repl--error' emits through
+          ;; `message' (quietly, via `agent-repl--emit-message'), so the
+          ;; `elisp.verbs.send' info record close itself writes is already in
+          ;; this list before the daemon has even been asked -- waiting on a
+          ;; non-empty list is therefore satisfied by the send log and races
+          ;; the refusal reply that produces the footer pointer.
+          (agent-repl-itest--wait-until
+           (lambda () (member "close blocked -- see the workspace footer" messages))
+           nil "the close-blocked message")
           (should (member "close blocked -- see the workspace footer" messages)))))))
 
 ;;;; ---- Raw-wire explicit-false assertions (audit findings 72, 73) ----
