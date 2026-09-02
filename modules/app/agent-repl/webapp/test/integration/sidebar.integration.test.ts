@@ -688,3 +688,134 @@ describe("the remembered preferences", () => {
     expect(harness.$("[data-section-fold]")?.dataset.folded).toBe("true");
   });
 });
+
+/**
+ * THE WIRE'S ORDER IS THE ORDER. The daemon resolved the roster's ordering —
+ * priority, recency, whatever it weighed — so the client sorts nothing. A
+ * client that re-sorted alphabetically would look tidy and be wrong.
+ */
+describe("roster ordering", () => {
+  it("draws the rows in the order the wire carried them", async () => {
+    // Arrange / Act: deliberately neither alphabetical nor priority order.
+    await withRoster({
+      rows: [
+        rosterRow({ id: "ws-zeta", name: "zeta" }),
+        rosterRow({ id: "ws-alpha", name: "alpha", priority: "p1" }),
+        rosterRow({ id: "ws-mid", name: "mid" }),
+      ],
+    });
+    // Assert
+    expect(
+      harness
+        .$$('[data-grouping="repository"] [data-roster-row]')
+        .map((el) => el.dataset.rosterRow),
+    ).toEqual(["ws-zeta", "ws-alpha", "ws-mid", "ws-merged"]);
+  });
+
+  it("draws the sections in the order the wire carried them", async () => {
+    // Arrange / Act
+    await withRoster({
+      repositorySections: [
+        { repositoryId: "repo-z", label: "zulu", rows: [rosterRow({ id: "ws-z" })] },
+        { repositoryId: "repo-a", label: "alpha", rows: [rosterRow({ id: "ws-a" })] },
+      ],
+    });
+    // Assert
+    // The recently-merged section is the grouping's last, by construction.
+    expect(harness.texts('[data-grouping="repository"] .repo-head .sb-label')).toEqual([
+      "zulu",
+      "alpha",
+      "recently merged",
+    ]);
+  });
+
+  it("keeps a later section's rows after an earlier section's", async () => {
+    // Arrange / Act
+    await withRoster({
+      repositorySections: [
+        { repositoryId: "repo-z", label: "zulu", rows: [rosterRow({ id: "ws-z" })] },
+        { repositoryId: "repo-a", label: "alpha", rows: [rosterRow({ id: "ws-a" })] },
+      ],
+    });
+    // Assert
+    expect(
+      harness
+        .$$('[data-grouping="repository"] [data-roster-row]')
+        .map((el) => el.dataset.rosterRow),
+    ).toEqual(["ws-z", "ws-a", "ws-merged"]);
+  });
+});
+
+/**
+ * `WorkspaceRoster.current` IS NOT A JOIN KEY. The highlight is drawn from the
+ * ROW's own `RosterRowCurrent.current`, so an unset roster-level pointer is a
+ * legitimate state (nothing is current) rather than a malformed view or a
+ * reason to compare ids client-side.
+ */
+describe("a roster with no current workspace", () => {
+  it("highlights no row", async () => {
+    // Arrange / Act
+    await withRoster({ currentUnset: true, rows: [rosterRow({ id: "ws-1", current: false })] });
+    // Assert
+    expect(harness.$$('[data-roster-row][data-current="true"]')).toEqual([]);
+  });
+
+  it("draws the roster rather than refusing it", async () => {
+    // Arrange / Act
+    await withRoster({ currentUnset: true, rows: [rosterRow({ id: "ws-1", current: false })] });
+    // Assert
+    expect(harness.$('[data-roster-row="ws-1"]')).not.toBeNull();
+  });
+
+  it("reports no malformed view", async () => {
+    // Arrange / Act
+    await withRoster({ currentUnset: true, rows: [rosterRow({ id: "ws-1", current: false })] });
+    // Assert
+    expect(harness.failureArms()).toEqual([]);
+  });
+
+  it("still highlights the row whose own flag says it is current", async () => {
+    // Arrange / Act: the row's flag is the fact, with no pointer above it.
+    await withRoster({ currentUnset: true, rows: [rosterRow({ id: "ws-1", current: true })] });
+    // Assert
+    expect(harness.$('[data-roster-row="ws-1"]')?.dataset.current).toBe("true");
+  });
+});
+
+describe("a task section's done check", () => {
+  it("draws the open state the header carries", async () => {
+    // Arrange
+    await withRoster({ taskDone: false });
+    // Act
+    await harness.click('[data-grouping-pick="task"]');
+    // Assert
+    expect(harness.$('.task-head [data-task-status]')?.dataset.taskStatus).toBe("open");
+  });
+
+  it("draws the done state the header carries", async () => {
+    // Arrange
+    await withRoster({ taskDone: true });
+    // Act
+    await harness.click('[data-grouping-pick="task"]');
+    // Assert
+    expect(harness.$('.task-head [data-task-status]')?.dataset.taskStatus).toBe("done");
+  });
+
+  it("offers the reopen change on a done task", async () => {
+    // Arrange
+    await withRoster({ taskDone: true });
+    // Act
+    await harness.click('[data-grouping-pick="task"]');
+    // Assert: the control flips what the check currently says.
+    expect(harness.$('.task-head [data-task-status]')?.dataset.taskChange).toBe("setOpen");
+  });
+
+  it("offers the complete change on an open task", async () => {
+    // Arrange
+    await withRoster({ taskDone: false });
+    // Act
+    await harness.click('[data-grouping-pick="task"]');
+    // Assert
+    expect(harness.$('.task-head [data-task-status]')?.dataset.taskChange).toBe("setDone");
+  });
+});
