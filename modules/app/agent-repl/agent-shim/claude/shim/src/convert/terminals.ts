@@ -22,7 +22,6 @@ import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
-import type { PersistEntry } from "../store/persistence.js";
 import { terminalEntry } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import type { FoldOutput } from "./fold.js";
