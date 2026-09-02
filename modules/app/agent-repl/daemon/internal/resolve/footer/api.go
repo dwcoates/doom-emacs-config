@@ -64,8 +64,21 @@ type CloseBlocked struct {
 	// Reason names what is not quiet: "turn_in_flight", "live_work",
 	// "held_prompts", "merge_queued".
 	Reason string
-	// Detail is the human-readable sentence the footer draws.
+	// Detail is the human-readable sentence the footer draws. It is also the
+	// `summary` CloseWorkspaceBlocked carries: ONE composed sentence, so a
+	// caller with no footer reads exactly what the footer's activity line
+	// shows (landing 7).
 	Detail string
+	// The evidence the quiet check computed, whole, so the refusal states it
+	// rather than only naming the first blocker it hit. Every field is filled
+	// on every blocker.
+	TurnInFlight bool
+	// LiveWork counts the detached agents and shells still live.
+	LiveWork uint32
+	// HeldPrompts counts the undelivered held prompts.
+	HeldPrompts uint32
+	// MergeQueued reports a merge that still owes this workspace work.
+	MergeQueued bool
 }
 
 // ColdGate is the standing cold-context gate, which owns the composer while it
