@@ -17,7 +17,7 @@ import (
 // version it opens. The file carries its own version in the layout table; a
 // file stamped with anything else is refused rather than migrated, because the
 // rebuild's store is recreated from scratch, never upgraded in place.
-const LayoutVersion = 2
+const LayoutVersion = 3
 
 // Option configures an open. Options exist so the logger can be supplied
 // without changing the two open functions' shape for callers that do not care.
