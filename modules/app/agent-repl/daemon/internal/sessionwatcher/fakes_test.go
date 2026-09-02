@@ -361,17 +361,6 @@ func find(events []event, name string) (event, bool) {
 	return event{}, false
 }
 
-// count reports how many events carry the given name.
-func count(events []event, name string) int {
-	n := 0
-	for _, e := range events {
-		if e.name() == name {
-			n++
-		}
-	}
-	return n
-}
-
 type feedSink struct{ rec *recorder }
 
 func (s *feedSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
@@ -642,17 +631,6 @@ func (h *harness) route(stream *fakeStream[*shimv1.WatchAgentResponse], frame *s
 	return h.sentinel(stream)
 }
 
-// warnings returns every WARN and ERROR record the watcher logged.
-func (h *harness) warnings() []dlog.Record {
-	var out []dlog.Record
-	for _, r := range h.log.Records() {
-		if r.Level == "warn" || r.Level == "error" {
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
 // hasRecord reports whether the watcher logged a record with this operation at
 // this level.
 func (h *harness) hasRecord(level, operation string) bool {
@@ -705,16 +683,6 @@ func interrupted() *conversationv1.AgentSuccess {
 
 func backgrounded() *conversationv1.AgentSuccess {
 	return &conversationv1.AgentSuccess{Outcome: &conversationv1.AgentSuccess_Backgrounded{Backgrounded: &conversationv1.AgentBackgrounded{}}}
-}
-
-// frameFailure is an agent's stream ending because something broke.
-func frameFailure(agent string) *conversationv1.AgentFrame {
-	return &conversationv1.AgentFrame{
-		AgentId: agentID(agent),
-		Result: &conversationv1.AgentFrame_Failure{Failure: &conversationv1.AgentFailure{
-			Failure: &conversationv1.AgentFailure_ExecutionError{ExecutionError: &conversationv1.AgentExecutionError{}},
-		}},
-	}
 }
 
 // frameDetached is a detached-work announcement riding an agent's stream.

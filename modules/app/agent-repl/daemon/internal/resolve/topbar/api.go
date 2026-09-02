@@ -124,9 +124,8 @@ type Option func(*options)
 
 // options are the resolver's knobs.
 type options struct {
-	clock       Clock
-	warningCap  int
-	tokenColumn int
+	clock      Clock
+	warningCap int
 }
 
 // WithClock injects the clock every warning's ordering instant is taken from.
