@@ -423,3 +423,40 @@ func TestAnObservedButGenuinelySilentRunStatesEmptyTextNotNotObserved(t *testing
 		t.Fatalf("output = %v, want text with the whole extent", output)
 	}
 }
+
+func TestALostSubagentSettleAssertsNoError(t *testing.T) {
+	// Arrange. We observed SILENCE, never an error. Filling in an AgentToolFailure
+	// would have this producer assert the run died, which is exactly the claim
+	// `lost` exists to avoid making.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "a15b5267244c1360e"
+
+	// Act.
+	entry := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostWentSilent)
+
+	// Assert.
+	failure := entry.GetAgentUpdate().GetServeableFrame().GetAgentItem().GetAgentFrame().
+		GetUpdate().GetActivity().GetSubagent().GetFailure()
+	if failure.GetError() != nil {
+		t.Fatalf("a LOST subagent's settle carries an error %v; we observed only silence", failure.GetError())
+	}
+}
+
+func TestALostSubagentVerdictIsStableSoAReEmissionIsANoOp(t *testing.T) {
+	// Arrange. A subagent is lost ONCE however many sweeps observe it, so the
+	// write identity must be stable and a re-emission absorbed rather than
+	// appending a second settle.
+	c := newTestConverter(t)
+	at := testAttribution(0)
+	at.TaskID = "a15b5267244c1360e"
+
+	// Act.
+	first := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp)
+	second := c.SubagentLost(at, "toolu_spawn", "owner-agent", LostSweptUp)
+
+	// Assert.
+	if first.GetWriteId() != second.GetWriteId() {
+		t.Fatalf("write ids differ: %q vs %q", first.GetWriteId(), second.GetWriteId())
+	}
+}
