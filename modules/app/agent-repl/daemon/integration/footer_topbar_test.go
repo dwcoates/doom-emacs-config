@@ -614,7 +614,11 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// publishExit's ELSE branch fires: daemon.shimclient.exit at ERROR
 	// ("shim died"). Nothing else observes this exit (no query_died update
 	// was pushed -- the process simply exited).
-	f.d.ExpectWarnings("daemon.shimclient.exit")
+	// The shim's own standing streams end WITH IT, and the session never
+	// ended, which is exactly what the session watcher records at ERROR for
+	// each of the two. They are the same crash the exit record names.
+	f.d.ExpectWarnings("daemon.shimclient.exit",
+		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent")
 }
 
 // ---------------------------------------------------------------------------
@@ -1020,4 +1024,113 @@ func ftAwaitTrue(t *testing.T, ctx interface{ Done() <-chan struct{} }, pred fun
 			t.Fatalf("waiting for %s: context done", what)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Connectivity truth per hop (daemon.md invariant 11): a workspace is
+// CONNECTED only while its shim.v1 WatchSession, its WatchHostWorkspace and its
+// WatchWebWorkspace are all live. Any one down is not connected.
+// ---------------------------------------------------------------------------
+
+func TestFooterIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
+	// Arrange: a workspace opened with only the HOST hop held, so the shim
+	// link serves but the web hop does not.
+	f := newRegistered(t, harness.Opts{})
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	footer := f.d.WatchFooter(f.ws)
+
+	// Act, Assert: the footer draws disconnected.
+	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetDisconnected() != nil
+	})
+}
+
+func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "disconnected while the web hop is down", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetDisconnected() != nil
+	})
+
+	// Act: the page opens its stream, putting the last hop up.
+	f.web = f.d.WatchWeb(f.ws)
+
+	// Assert
+	awaitFooter(t, f, footer, "idle once every hop is live", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+}
+
+func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
+	// Arrange: every hop up.
+	f := newOpened(t, harness.Opts{})
+	footer := f.d.WatchFooter(f.ws)
+	awaitFooter(t, f, footer, "idle with every hop live", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetIdle() != nil
+	})
+
+	// Act: the page goes away.
+	f.web.Close()
+
+	// Assert
+	awaitFooter(t, f, footer, "disconnected once the web hop is cancelled", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetDisconnected() != nil
+	})
+}
+
+func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	topbar := f.d.WatchTopbar(f.ws)
+
+	// Act, Assert: the connectivity indicator never reads the serving glyph
+	// while a client hop is down.
+	got := awaitTopbar(t, f, topbar, "a resolved topbar", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity() != nil
+	})
+	if got.GetConnectivity().GetTitle() == "connected to the session" {
+		t.Fatalf("topbar connectivity = %+v, want not-connected while the web hop is down", got.GetConnectivity())
+	}
+}
+
+func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
+	// Arrange
+	f := newRegistered(t, harness.Opts{})
+	f.open()
+	f.host = f.d.WatchHost(f.ws)
+	topbar := f.d.WatchTopbar(f.ws)
+	awaitTopbar(t, f, topbar, "a resolved topbar", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity() != nil
+	})
+
+	// Act
+	f.web = f.d.WatchWeb(f.ws)
+
+	// Assert
+	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "connected to the session"
+	})
+}
+
+func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
+	// Arrange
+	f := newOpened(t, harness.Opts{})
+	topbar := f.d.WatchTopbar(f.ws)
+	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() == "connected to the session"
+	})
+
+	// Act
+	f.web.Close()
+
+	// Assert
+	awaitTopbar(t, f, topbar, "the not-connected indicator", func(v *frontendv1.TopbarView) bool {
+		return v.GetConnectivity().GetTitle() != "connected to the session"
+	})
 }
