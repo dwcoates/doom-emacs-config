@@ -54,7 +54,7 @@
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl--prepare-input "agent-repl-input" (ws raw &optional force))
 (declare-function agent-repl--input-said "agent-repl-input" (text attachments))
-(declare-function agent-repl--input-submit "agent-repl-input" (ws said origin raw &optional key))
+(declare-function agent-repl--input-submit "agent-repl-input" (ws said origin raw &optional key from-buffer))
 (declare-function agent-repl-input-attachments "agent-repl-input" (ws))
 (declare-function agent-repl-input-clear-attachments "agent-repl-input" (ws))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))

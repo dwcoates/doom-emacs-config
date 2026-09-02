@@ -1639,6 +1639,102 @@ could only be invented, and the link already holds the accepted successor."
       ;; Assert
       (should (agent-repl-test-host--logged-p :info "method=\"WatchHostWorkspace\"")))))
 
+;;;; ---- Rename ----
+
+(ert-deftest agent-repl-test-host-rename-re-keys-the-entry ()
+  "A renamed workspace answers under the NEW name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-rename "ws-1" "ws-2")
+    ;; Assert
+    (should (equal (agent-repl-host-ref "ws-2") (agent-repl-test-host--ref)))))
+
+(ert-deftest agent-repl-test-host-rename-drops-the-old-name ()
+  "The old key is gone, so nothing keeps answering for a name that ended."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-rename "ws-1" "ws-2")
+    ;; Assert
+    (should (null (agent-repl-host-ref "ws-1")))))
+
+(ert-deftest agent-repl-test-host-rename-carries-the-stream ()
+  "The standing stream moves with the name; a teardown by NEW cancels it."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-rename "ws-1" "ws-2")
+    (agent-repl-host-unsubscribe "ws-2")
+    ;; Assert
+    (should (equal (length agent-repl-test-host--cancelled) 1))))
+
+(ert-deftest agent-repl-test-host-rename-carries-the-conn ()
+  "The owning connection moves with the name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-connect-open "127.0.0.1:9001")))
+      (agent-repl-test-host--subscribe "ws-1" conn)
+      ;; Act
+      (agent-repl-host-rename "ws-1" "ws-2")
+      ;; Assert
+      (should (eq (agent-repl-host-conn "ws-2") conn)))))
+
+(ert-deftest agent-repl-test-host-a-push-after-a-rename-updates-the-new-name ()
+  "The stream's own pushes reach the NEW name's gate, not a dead key's."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-host-rename "ws-1" "ws-2")
+    ;; Act
+    (agent-repl-host--handle-push
+     "ws-2" (list :arm :host :value (agent-repl-test-host--composer :merging)))
+    ;; Assert
+    (should (eq (agent-repl-host-composer-gate "ws-2") :merging))))
+
+(ert-deftest agent-repl-test-host-rename-logs-the-move ()
+  "Every branch records; the move is INFO with both names."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-host-rename "ws-1" "ws-2")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.renamed"))))
+
+(ert-deftest agent-repl-test-host-rename-of-an-unknown-workspace-is-a-noop ()
+  "A rename before the first subscribe has nothing to move and is not a failure."
+  (agent-repl-test-host--with-harness
+    ;; Arrange / Act
+    (let ((moved (agent-repl-host-rename "ws-1" "ws-2")))
+      ;; Assert
+      (should (null moved)))))
+
+(ert-deftest agent-repl-test-host-rename-onto-an-occupied-name-is-refused ()
+  "Two workspaces must never share one entry: the target is refused loudly."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--subscribe "ws-2" nil (agent-repl-test-host--ref "ws-id-2"))
+    ;; Act
+    (agent-repl-host-rename "ws-1" "ws-2")
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.rename-target-occupied"))))
+
+(ert-deftest agent-repl-test-host-a-refused-rename-leaves-both-entries ()
+  "A refused rename moves nothing: the old name still answers."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--subscribe "ws-2" nil (agent-repl-test-host--ref "ws-id-2"))
+    ;; Act
+    (agent-repl-host-rename "ws-1" "ws-2")
+    ;; Assert
+    (should (equal (plist-get (agent-repl-host-ref "ws-1") :id) "ws-id-1"))))
+
 (provide 'test-host)
 
 ;;; test-host.el ends here
