@@ -19,7 +19,7 @@
  * of sleeping.
  */
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { vi } from "vitest";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
@@ -100,7 +100,11 @@ export interface Harness {
 
 /** The body of the real index.html, so the shell under test is the shipped one. */
 function installShell(doc: Document): void {
-  const html = readFileSync(fileURLToPath(new URL("../../index.html", import.meta.url)), "utf8");
+  // RESOLVED OFF THE PROJECT ROOT, not off `import.meta.url`. Under the jsdom
+  // environment the module's own url is an http one (jsdom's document base),
+  // and `fileURLToPath` refuses it — vitest runs from `webapp/`, so the shell
+  // is found the same way `npm run build` finds it.
+  const html = readFileSync(resolve(process.cwd(), "index.html"), "utf8");
   const body = /<body[^>]*>([\s\S]*)<\/body>/i.exec(html);
   if (!body) throw new Error("index.html has no <body>: the harness cannot boot the real shell");
   // Drop the module script tag: the harness mounts components itself rather

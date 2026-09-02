@@ -17,6 +17,11 @@ export default defineConfig({
   resolve: { alias: protobufRuntimeAliases },
   test: {
     environment: "jsdom",
+    // The same logger bootstrap the unit run uses: production installs the
+    // ClientLog-forwarding logger before any component draws, and `log()`
+    // refuses a record with no bound identity — so a suite without it fails
+    // inside the logger rather than inside the code under test.
+    setupFiles: ["./test/setup.ts"],
     include: ["test/integration/**/*.test.ts"],
     env: { AGENT_REPL_FORBID_VENDOR_CALLS: "1" },
     css: true,

@@ -59,6 +59,7 @@ import {
   nukeWorkspaceRefusal,
   openWorkspaceRefusal,
   restartWorkspaceRefusal,
+  fireVerb,
   runVerb,
 } from "../../src/sidebar/verbs.js";
 import { oneofArms } from "../arms.js";
@@ -429,6 +430,19 @@ describe("the per-rpc causes, worded at their own site", () => {
     expect(refusal?.textContent).toContain("vs-1");
   });
 
+  it("lists the paths a missing transcript was searched for in", async () => {
+    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    expect([...(refusal?.querySelectorAll("[data-searched-paths] li") ?? [])].map((li) => li.textContent)).toEqual([
+      "/a",
+      "/b",
+    ]);
+  });
+
+  it("counts no paths in the sentence, because a count is not actionable", async () => {
+    const refusal = await refuseWith(VERBS[0], "transcriptMissing");
+    expect(refusal?.textContent).not.toContain("2 searched");
+  });
+
   it("carries the spawn failure's own detail", async () => {
     const refusal = await refuseWith(VERBS[0], "spawnFailed");
     expect(refusal?.textContent).toContain("exec format error");
@@ -533,6 +547,40 @@ describe("an error with no cause", () => {
         refusalText: () => undefined as unknown as string,
       }),
     ).rejects.toThrow(MalformedView);
+  });
+});
+
+describe("fireVerb", () => {
+  it("answers true when the verb succeeded", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } }),
+    });
+    const button = document.createElement("button");
+    await expect(
+      fireVerb(button, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("absorbs a malformed answer rather than letting a click's rejection escape", async () => {
+    const t = target({
+      openWorkspace: () =>
+        create(OpenWorkspaceResponseSchema, { result: { case: "error", value: {} } }),
+    });
+    const button = document.createElement("button");
+    await expect(
+      fireVerb(button, {
+        sc: t.sc,
+        rpc: "OpenWorkspace",
+        call: (client) => client.openWorkspace(buildOpenWorkspaceRequest(TARGET_WS)),
+        schema: OpenWorkspaceResponseSchema,
+      }),
+    ).resolves.toBe(false);
   });
 });
 

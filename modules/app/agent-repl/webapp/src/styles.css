@@ -736,13 +736,6 @@ body::after {
    recede. */
 #ws-sidebar .ws.gone > .row { opacity: 0.55; }
 
-/* Keyboard cursor: where C-S-n / C-S-p (relayed from the Emacs input
-   window) currently point; C-S-RET selects it. */
-#ws-sidebar .ws.navsel > .row {
-  outline: 1px dashed var(--accent);
-  outline-offset: -1px;
-}
-
 /* The current row's merge (sidebar.ts `mergeRowHtml`). The rail LEADS on
    merges, and the recycle glyph beside the name says only that one is
    happening — identically for a run on its last commit and a run parked on a
@@ -959,99 +952,14 @@ body::after {
   text-align: center;
 }
 
-/* THE RESERVED WARNING SLOT. The warning indicator is the one element that
-   appears and vanishes with ordinary state, and un-reserved it would re-measure
-   the strip — shoving the title — every time a warning was raised or cleared.
-   The slot holds its width whether or not the chip is inside it. Reserving
-   geometry is NOT rendering an idle control: the chip itself is still absent
-   (see topbarWarningsHtml), so there is nothing to click and no count to read;
-   only the space stays put. */
-.topbar-warning-slot {
-  display: inline-flex;
-  justify-content: flex-end;
-  flex: 0 0 auto;
-  /* min-, not a hard width: a chip that outgrew its slot must overflow the
-     reservation rather than be clipped, because a half-drawn warning control is
-     worse than a shifted one. Sized past the widest ordinary chip so the
-     reservation is what actually governs. */
-  min-width: 3.2rem;
-}
-
-/* The strip's own row. The parts are emitted with no whitespace between them
-   (the renderer joins them with ""), so the spacing is the layout's to give. */
-.topbar-view {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* The datapoint strip's value colors, shared by BOTH renderings of the
-   strip: the header's #session-info and each subagent bubble's
-   .agent-topbar (see topbar.ts). Style a new datapoint against
-   .topbar-info and every surface picks it up. The tokens color covers
-   both of that datapoint's shapes: the agent strip's plain span here,
-   and the session strip's chip button via its own rule below. */
-.topbar-info { color: var(--muted); }
-.topbar-info .info-ws { color: var(--info-ws); }
-.topbar-info .info-model { color: var(--info-model); }
-.topbar-info .info-tokens:not(.token-heat) { color: var(--info-tokens); }
-
 /* The running task's timer: the one datapoint that rewrites itself once a
    second, so fixed-width digits keep everything to its right from twitching
    on every tick. */
-.topbar-info .info-time {
+.info-time {
   color: var(--info-time);
   font-variant-numeric: tabular-nums;
 }
-/* Topbar dropdowns (subagent roster, task roster, tokens breakdown): a chip
-   in the session-datapoint run that drops an overlay. The two counters share
-   the counter-menu facade's parallel class stems; the tokens menu emits the
-   same stems from its own module. The menu anchors the overlay, which hangs
-   below the topbar without displacing the row it hangs from. */
-.agents-menu, .tasks-menu, .tokens-menu, .warnings-menu, .session-menu { position: relative; display: inline-block; }
-
-.info-agents, .info-tasks, .info-tokens, .info-warnings, .info-session {
-  font: inherit;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-/* Only the color tells one chip from another: each keeps its own
-   datapoint token from the session-info palette. */
-.info-agents { color: var(--info-agents); }
-.info-tasks { color: var(--info-tasks); }
 .info-tokens:not(.token-heat) { color: var(--info-tokens); }
-.info-agents:hover, .info-tasks:hover, .info-tokens:hover { text-decoration: underline; }
-.agents-caret, .tasks-caret, .tokens-caret, .warnings-caret, .session-caret { font-size: 0.7rem; }
-
-/* THE IDS CHIP: the session and conversation correlation ids, which the strip
-   used to print inline. Quiet — muted like the rest of the datapoint run,
-   because it is debugging material rather than anything to read on a normal
-   turn. Its label is the fixed word "ids", so the chip's width never moves. */
-.info-session { color: var(--muted); }
-.info-session:hover { text-decoration: underline; }
-/* The ids exist to be COPIED into an issue or a log query, so the row is
-   monospaced (the two ids are hex and a uuid, which proportional type
-   mis-renders at a glance), selectable, and wraps rather than clipping — a
-   half-copied identifier is worse than none. */
-.session-overlay .session-row {
-  padding: 0.3rem 0.35rem;
-  color: var(--fg);
-  font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
-  user-select: text;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-/* THE WARNING INDICATOR: the topbar's one red affordance. It replaces the
-   retired accounting line, which printed a settled turn's whole sentence
-   across the header — the sentences now live in the dropdown, and the strip
-   carries only the mark that there is one to read. It exists ONLY while the
-   daemon has raised a warning, so it never sits idle in the run. */
-.info-warnings { color: var(--err); }
-.info-warnings:hover { text-decoration: underline; }
 /* Tabular figures and a reserved digit box, so a second warning arriving widens
    nothing: the count is the strip's only number that changes on its own. */
 .topbar-warning-count {
@@ -1061,52 +969,6 @@ body::after {
   font-variant-numeric: tabular-nums;
   margin-left: 0.15rem;
 }
-/* The rows are daemon-composed prose, so they wrap rather than ellipsis-clip:
-   clipping a warning is hiding the half that says what went wrong. */
-.warnings-overlay .warning-row {
-  padding: 0.3rem 0.35rem;
-  color: var(--err);
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.agents-overlay, .tasks-overlay, .tokens-overlay, .warnings-overlay, .session-overlay {
-  position: absolute;
-  top: calc(100% + 0.4rem);
-  right: 0;
-  z-index: 10;
-  margin: 0;
-  padding: 0.35rem;
-  list-style: none;
-  min-width: 22rem;
-  max-width: 34rem;
-  max-height: 60vh;
-  overflow-y: auto;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
-}
-
-/* The agent-scoped topbar a subagent's bubble carries (see topbar.ts): the
-   header strip's own markup on its own line under the card head, sized
-   down to card scale. Its datapoint colors come from .topbar-info. */
-.agent-topbar {
-  font-size: 0.75rem;
-  margin: 0.15rem 0 0.35rem;
-}
-/* Counter overlays hang right-aligned off their chip, which suits the
-   header's far-right chips; a bubble's chips sit at the LEFT of the card,
-   so its overlays flip to extend rightward instead of off the card edge. */
-.agent-topbar .agents-overlay, .agent-topbar .tasks-overlay {
-  right: auto;
-  left: 0;
-}
-
-/* The tokens breakdown is stat rows under section headers, not a roster:
-   a label on the left, a right-aligned tabular figure, and a total's
-   constituents indented beneath it the way nested roster entries are. */
-.tokens-overlay { min-width: 16rem; }
 .tokens-section {
   color: var(--tool-title);
   font-family: ui-monospace, monospace;
@@ -1636,8 +1498,7 @@ pre {
    shared `Fold` skeleton): the activity panel on a spawning card and the
    async fold every stream body wears. They were near-identical rule sets —
    the tickers were byte-for-byte identical — so they are one selector list
-   here; only .gns-fold's slightly roomier rule below still differs, and
-   only because it sets off answer prose rather than card chrome. */
+   here. */
 .agent-activity,
 .async-fold {
   border-top: 1px dashed var(--border);
@@ -1664,8 +1525,7 @@ pre {
    fold's top, never in the tab bar). max-width keeps a long "N steps · …"
    line from spilling past the card. */
 .agent-ticker,
-.async-ticker,
-.gns-ticker {
+.async-ticker {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
@@ -1738,19 +1598,6 @@ pre {
 .fold-fixed > .agent-panel {
   --cap-lines: var(--feed-cap-lines);
 }
-/* The gns-sockets fold inside a final-response bubble (see gns.ts): the
-   bridge upkeep that followed the answer, wearing the shared fold dress —
-   dashed rule, pill ticker, .agent-panel body — with slightly roomier
-   spacing because it sets off answer prose rather than card chrome. Its
-   body is a child feed (folded cards and bubbles through renderItem). */
-.gns-fold {
-  border-top: 1px dashed var(--border);
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  cursor: zoom-in;
-}
-.gns-fold.open { cursor: default; }
-.gns-fold.open > .gns-ticker { cursor: zoom-out; }
 /* A row-format stream's entries (§2.6 jsonl-journal / events). Rows, not
    bubbles: a workflow journal is a record log and a task's stream is state
    transitions, so neither has a speaker to attribute a bubble to. */
@@ -2417,39 +2264,6 @@ pre {
   cursor: not-allowed;
   opacity: 0.5;
 }
-
-/* --- Feed search marks (search.ts) --------------------------------------
-   One <mark> per match, wrapped around the matched TEXT only (never around
-   an element), which is what lets these rules win over the syntax palette:
-   a mark inside an .hljs-* span sets its own color directly, where the
-   span's color merely inherits. */
-.search-match {
-  background: var(--search-match);
-  color: var(--search-fg);
-  border-radius: 2px;
-}
-/* The current match outranks its neighbours: the louder wash plus a ring,
-   because on a screen full of hits the wash alone is not findable. Declared
-   after .search-match so source order decides at equal specificity — the
-   same discipline .expanded uses over the cap rules, and no !important. */
-.search-current {
-  background: var(--search-current);
-  box-shadow: 0 0 0 2px var(--search-current);
-}
-
-/* --- Search reveal (search.ts) ------------------------------------------
-   What .expanded does for a click, .search-revealed does for a search that
-   landed inside a fold — same effect, different owner. Two classes rather
-   than one because the renderer PERSISTS .expanded across a re-render
-   (expandedKeys/applyExpanded) as the user's own state: a search borrowing
-   it would have its reveal laundered into a click it never made, and could
-   no longer tell what it was entitled to close when the user aborts.
-   Declared after every cap rule, so source order lifts the cap at equal
-   specificity and no !important is needed. */
-.search-revealed {
-  max-height: none;
-  overflow-y: visible;
-}
 /* The display folds, whose bodies are hidden outright rather than capped —
    a subagent's whole prompt, a tool's raw input JSON. Mirrors the .expanded
    pair above them; a match in one is why the search opened it. */
@@ -2569,7 +2383,6 @@ pre {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.unsupported-err { color: var(--err); font-style: normal; font-weight: normal; }
 
 /* The /status panel: the rich graphical replacement for the CLI's interactive
    status command, rendered in place of the generic unsupported card. A
@@ -2659,8 +2472,7 @@ pre {
 /* The dead-air progress indicators (working / retrying / interrupting) and the
    live turn-stats row that used to live here are GONE: the consolidated
    progress footer (`.pfooter`) is the one home for every in-flight signal now.
-   `.thinking-pending` survives only as the chess widget's own "processing…"
-   row (see chess-game.ts), which is where its remaining rules below belong.
+   `.thinking-pending` survives as the composer's own "processing…" row.
 
    The monitoring indicator was never a feed-tail row: it breathes as the
    sidebar's amber dot on the session's own row (`.st-monitoring`), and still
@@ -2801,25 +2613,6 @@ pre {
   contain-intrinsic-size: auto var(--lazy-h, 320px);
 }
 
-/* `content-visibility: auto` also applies PAINT containment, which clips a
-   descendant to its item's box — and a bubble's counter overlay (the agent and
-   task rosters an agent-topbar chip drops, `.agents-overlay` and friends) is
-   absolutely positioned to hang BELOW the strip it opens from, well past the
-   card's own bottom edge. An overlay only exists in the DOM while it is open,
-   so exempting the item that holds one costs nothing feed-wide and keeps the
-   dropdown from being sliced off at the card boundary. */
-.feed-item:has(.agents-overlay, .tasks-overlay, .tokens-overlay, .warnings-overlay) {
-  content-visibility: visible;
-}
-
-/* A running search measures item positions to seat itself and scrolls matches
-   into view, and both are quoted against boxes the skipping has not laid out.
-   For as long as one runs, nothing in the feed is skipped (see
-   `SEARCHING_CLASS`, search.ts). */
-#feed.searching .feed-item {
-  content-visibility: visible;
-}
-
 /* The stand-in for an item whose real render has not been paid for yet
    (lazy-item.ts): the item's own text, wrapped and monospaced-free, at the
    line height the height estimate assumes. Deliberately unstyled beyond
@@ -2830,19 +2623,6 @@ pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--muted);
-}
-
-/* The bubble the keyboard cycle (nav.ts) currently sits on.
-
-   Focus never leaves the input box while cycling, so the feed has no
-   caret and this bar is the ONLY thing saying where the cycle is: without
-   it, two adjacent bubbles both on screen are indistinguishable and the
-   scroll position is left to imply the answer. An inset shadow draws it
-   without shifting layout the way a real border would, and it rides the
-   wrapper (not the bubble) so it lands the same on every bubble kind. */
-.feed-item.nav-current {
-  box-shadow: inset 3px 0 0 var(--accent);
-  border-radius: 4px;
 }
 
 /* ---- The login terminal ----------------------------------------------------
@@ -2906,28 +2686,6 @@ pre {
   flex: 1;
   min-height: 0;
   padding: 0.4rem;
-}
-
-/* Chess-game widget containers (marker channel, chess-game.ts): the
-   embeddable board reads its theme through --chess-widget-* custom
-   properties, mapped here onto the webapp palette so boards follow the
-   GUI in both schemes. */
-.chess-game {
-  margin: 0.5em 0;
-  --chess-widget-bg: var(--card);
-  --chess-widget-fg: var(--fg);
-  --chess-widget-border: var(--border);
-  --chess-widget-accent: var(--accent);
-  --chess-widget-btn-bg: var(--card);
-  --chess-widget-max-width: 420px;
-}
-.chess-game-error {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 0.85rem;
-  color: #b91c1c;
-  background: color-mix(in srgb, #b91c1c 8%, var(--bg));
 }
 
 /* ---- The consolidated progress footer (progress-footer.ts) ---------------
@@ -3285,11 +3043,6 @@ pre {
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
-/* A keep-alive that came back cold is the LOUDER of the two readings: the
-   ping existed solely to keep the cache warm, so it bought nothing at all.
-   Bolded rather than given a hue of its own — it is the same alarm, one step
-   worse, and a sixth color would say it is a different kind of thing. */
-.pfooter-expensive-turn.cold-keep-alive { font-weight: 700; }
 
 .pfooter-error.failure-internal { color: var(--init); }
 .pfooter-error.failure-api { color: var(--blocked); }
@@ -3383,18 +3136,6 @@ pre {
   font-variant-numeric: tabular-nums;
 }
 
-/* The relocated counter chips sit in the last cell, where the topbar's
-   overlays would drop DOWNWARD off the bottom of the window. Flipping them
-   upward is the whole adaptation the relocation needs — the chips, rows, and
-   colors are the shared counter-menu facade's, untouched. */
-.pfooter-counters .agents-menu,
-.pfooter-counters .tasks-menu { position: relative; }
-.pfooter-counters .agents-overlay,
-.pfooter-counters .tasks-overlay {
-  top: auto;
-  bottom: calc(100% + 6px);
-}
-
 /* --- the scheduled-shutdown drain banner (drain.ts) -----------------------
    A daemon bounce is scheduled and the drain lease is held: no NEW turn may
    start in ANY workspace until every hold clears. That is a daemon-global
@@ -3402,7 +3143,7 @@ pre {
    per-workspace chip — a reader whose own session is idle is still affected,
    because the prompt they are about to type will be parked.
 
-   It is deliberately NOT dressed like #ungated-banner: an open permission
+   It is deliberately NOT dressed like an alarm: an open permission
    gate is an alarm, a pending bounce is an announcement, and painting the
    two the same would spend the alarm's red on a routine restart. It takes
    the merge/bounce amber the rest of the app already uses for coordinated
@@ -3629,75 +3370,6 @@ pre {
    own hint below. */
 body.draining #composer-input::placeholder {
   color: var(--merge-border);
-}
-
-/* --- the ungated-session surface (ungated.ts) -----------------------------
-   A session under `bypassPermissions` has NO permission gate: the SDK
-   auto-approves every tool before `canUseTool` — the shim's only approval
-   hook — is consulted, so no permission card ever appears and none ever
-   could. Without this treatment such a session is pixel-identical to a fully
-   gated one, which is the whole problem these rules exist to end.
-
-   Two cues, both permanent while the mode is in force and neither
-   dismissible:
-     1. #ungated-banner, a FILLED high-contrast bar under the topbar. Filled,
-        not outlined like .failure-card — those are
-        "something went wrong" notices sharing the feed's ground, and an open
-        door must not read as one more of them.
-     2. body.ungated, an inset frame around the whole viewport, so the warning
-        survives scrolling the banner off screen. */
-#ungated-banner {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: var(--err);
-  color: #ffffff;
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  margin: 0.25rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-/* An empty slot collapses completely: a gated session pays no layout for a
-   warning it does not carry. */
-#ungated-banner:empty { display: none; }
-/* The leading glyph: a filled disc carrying "!" rather than an emoji, so the
-   mark renders identically on every platform and takes the bar's own colors. */
-.ungated-mark {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.15rem;
-  height: 1.15rem;
-  border-radius: 50%;
-  background: #ffffff;
-  color: var(--err);
-  font-weight: 900;
-  line-height: 1;
-}
-.ungated-text { flex: 1 1 auto; }
-
-/* The viewport frame. `position: fixed` plus `pointer-events: none` floats it
-   over every layer (feed, rail, login overlay) without intercepting a single
-   click, and drawing it on ::after leaves every existing box untouched. */
-body.ungated::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  border: 3px solid var(--err);
-  pointer-events: none;
-  z-index: 9999;
-}
-/* The picker's disabled live-mode option (unswitchableModeOptionHtml): the
-   mode is SHOWN because a blank picker would hide it, but it is not a choice,
-   and on an ungated session the select wears the alarm color so the topbar
-   agrees with the banner. */
-body.ungated #mode-select {
-  color: var(--err);
-  border-color: var(--err);
-  font-weight: 700;
 }
 
 /* The heat ramp's dark-theme half: the same hues, lifted and slightly desaturated
@@ -5882,3 +5554,16 @@ body.ungated #mode-select {
 
 /* The merge commit's narration lines. */
 .merge-line { padding: 0.1rem 0; color: var(--muted); }
+
+/* ---- searched paths under a sidebar refusal (src/sidebar/verbs.ts) ---- */
+/* `transcript_missing` names the places the daemon looked. They are paths, so
+   they are monospace, and they are supporting detail, so they are muted. */
+#ws-sidebar .sb-refusal-paths {
+  list-style: none;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  color: var(--muted);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.65rem;
+}
+#ws-sidebar .sb-refusal-paths > li { overflow-wrap: anywhere; }

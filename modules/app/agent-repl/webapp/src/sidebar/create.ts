@@ -34,7 +34,7 @@ import { buildUserSaid } from "../composer/composer.js";
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
-import { runVerb, type PriorityChoice } from "./verbs.js";
+import { fireVerb, type PriorityChoice } from "./verbs.js";
 
 /** The finish action a one-shot takes when its work concludes. */
 export type OneShotFinish =
@@ -275,7 +275,7 @@ export function drawCreateWorkspaceForm(
       submit.after(missingPromptNote());
       return;
     }
-    void runVerb(submit, {
+    fireVerb(submit, {
       sc,
       rpc: "CreateWorkspace",
       call: (client) => client.createWorkspace(buildCreateWorkspaceRequest(spec)),

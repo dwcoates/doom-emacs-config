@@ -44,7 +44,7 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { refusalSentence } from "../rpc/refusal.js";
+import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../tray/held-prompt.js";
@@ -402,7 +402,7 @@ export function drawSubmitRefusal(root: HTMLElement, arm: string, text: string):
  * so the user knows what to wait for before resubmitting.
  */
 export function submitPromptRefusal(reason: SubmitPromptReason): string {
-  const shared = refusalSentence("SubmitPrompt", reason);
+  const shared = crossCuttingSentence("SubmitPrompt", reason);
   if (shared !== undefined) return `${shared} — your text is kept`;
   switch (reason.case) {
     case "merging":

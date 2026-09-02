@@ -32,7 +32,8 @@ import {
 import { log } from "../log.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { refusalSentence } from "../rpc/refusal.js";
+import { guardMalformed } from "../rpc/guard.js";
+import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TrayContext } from "./context.js";
 
@@ -115,7 +116,7 @@ function decisionButton(
   button.textContent = label;
   button.addEventListener("click", (event: MouseEvent) => {
     event.preventDefault();
-    void answer(decision, tc, button);
+    void guardMalformed(tc.ctx, "tray.held-offer.answer", answer(decision, tc, button));
   });
   return button;
 }
@@ -155,7 +156,7 @@ async function answer(
       (result.value as AnswerHeldOfferError).cause,
       "AnswerHeldOfferError.cause",
     );
-    const say = refusalSentence("AnswerHeldOffer", cause) ?? answerHeldOfferRefusal(cause);
+    const say = crossCuttingSentence("AnswerHeldOffer", cause) ?? answerHeldOfferRefusal(cause);
     drawRefusal(actions, cause.case, say);
     log("warn", `AnswerHeldOffer refused a ${decision}`, {
       operation: "tray.held-offer.refused",

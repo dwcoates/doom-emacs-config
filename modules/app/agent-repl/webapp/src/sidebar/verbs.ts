@@ -74,8 +74,10 @@ import {
 import { WorkspacePrioritySchema } from "../../../proto/gen/ts/agentrepl/v1/workspace_priority_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { log } from "../log.js";
+import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
-import { refusalSentence, type RefusalCause } from "../rpc/refusal.js";
+import { crossCuttingSentence } from "../rpc/refuse.js";
+import type { RefusalCause } from "../rpc/refusal.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
@@ -161,7 +163,11 @@ function simpleVerbItem(
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void runSimpleVerb(verb, target, button);
+    void guardMalformed(
+      target.sc.ctx,
+      `sidebar.verbs.${verb}`,
+      runSimpleVerb(verb, target, button),
+    );
   });
   row.appendChild(button);
   return row;
@@ -246,7 +252,7 @@ export function drawKillConfirm(target: VerbTarget): HTMLElement {
   go.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void runVerb(go, {
+    void fireVerb(go, {
       sc: target.sc,
       rpc: "KillWorkspace",
       call: (client) => client.killWorkspace(buildKillWorkspaceRequest(target.workspace)),
@@ -304,7 +310,7 @@ export function drawNukeConfirm(target: VerbTarget): HTMLElement {
   go.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    void runVerb(go, {
+    void fireVerb(go, {
       sc: target.sc,
       rpc: "NukeWorkspace",
       call: (client) => client.nukeWorkspace(buildNukeWorkspaceRequest(target.workspace)),
@@ -332,7 +338,7 @@ function drawPriorityItem(target: VerbTarget): HTMLElement {
     entry.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void runVerb(entry, {
+      void fireVerb(entry, {
         sc: target.sc,
         rpc: "SetWorkspacePriority",
         call: (client) =>
@@ -398,7 +404,7 @@ export function fillAssignSubmenu(submenu: HTMLElement, target: VerbTarget): voi
     entry.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void runVerb(entry, {
+      void fireVerb(entry, {
         sc: target.sc,
         rpc: "AssignWorkspaceTask",
         call: (client) =>
@@ -480,14 +486,14 @@ export async function runVerb<Res extends VerbResponse>(
     if (result.case === "success") return true;
     const cause = refusalCause(spec.rpc, result.value);
     const say =
-      refusalSentence(spec.rpc, cause) ??
+      crossCuttingSentence(spec.rpc, cause) ??
       spec.refusalText?.(cause) ??
       unreachableArm(`${spec.rpc}Error.cause`, cause.case);
     log("warn", `${spec.rpc} was refused`, {
       operation: "sidebar.verbs.refused",
       context: { rpc: spec.rpc, arm: cause.case, sentence: say },
     });
-    drawRefusal(control, cause.case, say);
+    drawRefusal(control, cause.case, say, refusalDetail(cause));
     setDisabled(control, false);
     return false;
   } catch (err) {
@@ -504,6 +510,31 @@ export async function runVerb<Res extends VerbResponse>(
     setDisabled(control, false);
     return false;
   }
+}
+
+/**
+ * FIRE a verb from a click handler.
+ *
+ * A click listener cannot be awaited, so every verb below runs as a detached
+ * promise — and `runVerb` deliberately rethrows a `MalformedView` rather than
+ * dressing it as a transport failure. Detached, that rethrow would land as an
+ * unhandled rejection nobody sees. `guardMalformed` (src/rpc/guard.ts) is the
+ * ONE place a fire-and-forget click's malformed answer stops: it logs it once
+ * and files the `frame_undecodable` card. Every void-ed verb goes through here.
+ */
+export async function fireVerb<Res extends VerbResponse>(
+  control: HTMLElement,
+  spec: VerbCall<Res>,
+): Promise<boolean> {
+  let took = false;
+  const malformed = await guardMalformed(
+    spec.sc.ctx,
+    `sidebar.verbs.${spec.rpc}`,
+    runVerb(control, spec).then((ok) => {
+      took = ok;
+    }),
+  );
+  return !malformed && took;
 }
 
 /**
@@ -549,7 +580,10 @@ export function openWorkspaceRefusal(cause: CauseOf<OpenWorkspaceError>): string
     case "sessionDeleted":
       return "this workspace's session has been deleted";
     case "transcriptMissing":
-      return `the transcript for session ${cause.value.vendorSessionId} was not found in ${cause.value.searchedPaths.length} searched path(s)`;
+      // THE PATHS THEMSELVES, not a count of them: the reader's next act is to
+      // go look in one, and "3 searched path(s)" tells them nothing they can
+      // act on. The list is drawn under the sentence by `refusalDetail`.
+      return `the transcript for session ${cause.value.vendorSessionId} was not found`;
     case "spawnFailed":
       return `the session could not be started: ${cause.value.detail}`;
     default:
@@ -619,12 +653,42 @@ export function assignWorkspaceTaskRefusal(cause: CauseOf<AssignWorkspaceTaskErr
 }
 
 /** The refusal, drawn as the NEXT SIBLING of the control that made the call. */
-export function drawRefusal(control: HTMLElement, arm: string, text: string): void {
+export function drawRefusal(
+  control: HTMLElement,
+  arm: string,
+  text: string,
+  detail: HTMLElement | null = null,
+): void {
   const refusal = document.createElement("div");
   refusal.className = "refusal sb-refusal";
   refusal.setAttribute("data-arm", arm);
-  refusal.textContent = text;
+  const sentence = document.createElement("div");
+  sentence.textContent = text;
+  refusal.append(sentence);
+  if (detail !== null) refusal.append(detail);
   control.after(refusal);
+}
+
+/**
+ * The FACTS an arm carries that do not fit in a sentence.
+ *
+ * `transcript_missing` carries the paths the daemon looked in, and those are
+ * the reader's next act — so they are listed verbatim rather than counted. Every
+ * other arm's facts fit its sentence, so this answers `null` for them.
+ */
+export function refusalDetail(cause: RefusalCause & { case: string }): HTMLElement | null {
+  if (cause.case !== "transcriptMissing") return null;
+  const paths = (cause.value as { searchedPaths?: readonly string[] }).searchedPaths ?? [];
+  if (paths.length === 0) return null;
+  const list = document.createElement("ul");
+  list.className = "sb-refusal-paths";
+  list.setAttribute("data-searched-paths", "");
+  for (const path of paths) {
+    const item = document.createElement("li");
+    item.textContent = path;
+    list.append(item);
+  }
+  return list;
 }
 
 /** Drop whatever a previous attempt at this control left behind. */
