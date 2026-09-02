@@ -29,10 +29,25 @@ describe("the cadence frontend.v1.RosterRowAttention specifies", () => {
     [1, "off"],
     [2, "on"],
     [3, "off"],
-    [4, "steady"],
-    [9, "steady"],
+    // The settled marker STANDS LIT: steady is not a third visual state.
+    [4, "on"],
+    [9, "on"],
   ] as const)("draws phase %i as %s", (phase, state) => {
     expect(blinkState(phase)).toBe(state);
+  });
+
+  it.each([
+    [3, "false"],
+    [4, "true"],
+  ] as const)("reports phase %i as settled=%s", (phase, settled) => {
+    const timers = fakeTimers();
+    const registry = new AttentionRegistry(timers);
+    const el = element();
+    registry.beginPass();
+    registry.mark("ws-1", el);
+    registry.endPass();
+    for (let i = 0; i < phase; i++) timers.run();
+    expect(el.getAttribute("data-settled")).toBe(settled);
   });
 });
 
@@ -50,7 +65,7 @@ describe("a marker's first appearance", () => {
     [1, "off"],
     [2, "on"],
     [3, "off"],
-    [4, "steady"],
+    [4, "on"],
   ] as const)("is %s after %i phases", (phases, state) => {
     const timers = fakeTimers();
     const registry = new AttentionRegistry(timers);
@@ -104,7 +119,8 @@ describe("a re-push that keeps the marker", () => {
     registry.endPass();
     timers.run();
     timers.run();
-    expect(redrawn.getAttribute("data-blink")).toBe("steady");
+    expect(redrawn.getAttribute("data-blink")).toBe("on");
+    expect(redrawn.getAttribute("data-settled")).toBe("true");
   });
 
   it("drives every element the pass drew for one workspace", () => {

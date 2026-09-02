@@ -282,15 +282,14 @@ describe("the task section's header", () => {
     ).toBe("task-1");
   });
 
-  it("opens an inline editor holding the current title", async () => {
+  it("holds the current title in the rename field", () => {
     const drawn = drawWorkspaceRoster(
       roster({ tasks: [taskSection({ id: "task-1", label: "ship" })] }),
       sidebarContext(appContext(), memoryPrefs({ grouping: "task" })),
     );
-    await click(taskHead(drawn).querySelector("[data-task-rename]") as Element);
-    expect((taskHead(drawn).querySelector("[data-task-title]") as HTMLInputElement).value).toBe(
-      "ship",
-    );
+    expect(
+      (taskHead(drawn).querySelector("[data-task-rename]") as HTMLInputElement).value,
+    ).toBe("ship");
   });
 
   it("retitles through the set_title arm", async () => {
@@ -305,8 +304,7 @@ describe("the task section's header", () => {
       memoryPrefs({ grouping: "task" }),
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
-    await click(taskHead(drawn).querySelector("[data-task-rename]") as Element);
-    (taskHead(drawn).querySelector("[data-task-title]") as HTMLInputElement).value = "renamed";
+    (taskHead(drawn).querySelector("[data-task-rename]") as HTMLInputElement).value = "renamed";
     await click(taskHead(drawn).querySelector("[data-task-change='setTitle']") as Element);
     expect(title).toBe("renamed");
   });
@@ -323,8 +321,7 @@ describe("the task section's header", () => {
       memoryPrefs({ grouping: "task" }),
     );
     const drawn = drawWorkspaceRoster(roster({ tasks: [taskSection({ id: "task-1" })] }), sc);
-    await click(taskHead(drawn).querySelector("[data-task-rename]") as Element);
-    (taskHead(drawn).querySelector("[data-task-title]") as HTMLInputElement).value = "   ";
+    (taskHead(drawn).querySelector("[data-task-rename]") as HTMLInputElement).value = "   ";
     await click(taskHead(drawn).querySelector("[data-task-change='setTitle']") as Element);
     expect(calls).toBe(0);
   });

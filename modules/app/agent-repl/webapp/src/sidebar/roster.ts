@@ -46,7 +46,12 @@ import {
 } from "./context.js";
 import { drawCreateWorkspaceControl } from "./create.js";
 import { drawRosterRow } from "./row.js";
-import { buildUpdateTaskRequest, drawCreateTaskControl, updateTaskRefusal } from "./tasks.js";
+import {
+  buildUpdateTaskRequest,
+  drawCreateTaskControl,
+  updateTaskRefusal,
+  type TaskChange,
+} from "./tasks.js";
 import { fireVerb } from "./verbs.js";
 
 /**
@@ -280,14 +285,25 @@ export function drawRosterTaskSectionHeader(
 
   const label = document.createElement("span");
   label.className = "task-label";
-  label.setAttribute("data-task-rename", taskId);
   label.textContent = title;
-  label.title = "rename";
-  label.addEventListener("click", (event) => {
-    event.stopPropagation();
-    openRename(label, taskId, title, sc);
-  });
   header.appendChild(label);
+
+  // THE TASK'S OWN VERBS, drawn with the header and revealed by the "⋯"
+  // control beside it — the same shape the roster row's menu has, for the same
+  // reason: what a task IS and what can be DONE to one are two surfaces.
+  const menu = drawTaskMenu(taskId, title, sc);
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "sb-more";
+  more.textContent = "⋯";
+  more.title = "task actions";
+  more.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+  header.appendChild(more);
+  header.appendChild(menu);
   header.addEventListener("click", () => toggleFold(section, sc, taskFoldKey(taskId)));
   return header;
 }
@@ -336,18 +352,38 @@ function drawFoldToggle(
   const triangle = document.createElement("span");
   triangle.className = "tri";
   triangle.setAttribute("data-section-fold", "");
-  triangle.textContent = "▾";
   triangle.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleFold(section, sc, foldKey);
   });
+  paintTriangle(triangle, section.classList.contains("folded"));
   return triangle;
 }
 
 function toggleFold(section: HTMLElement, sc: SidebarContext, foldKey: string): void {
   const folded = !section.classList.contains("folded");
   section.classList.toggle("folded", folded);
+  paintFold(section, folded);
   sc.prefs.setFolded(foldKey, folded);
+}
+
+/**
+ * Say on the toggle itself which way the section stands.
+ *
+ * The fold is webview-local, so the element that carries the gesture is also
+ * the element that reports it — `[data-section-fold][data-folded]` — and the
+ * triangle's direction follows from the same one fact.
+ */
+function paintFold(section: HTMLElement, folded: boolean): void {
+  for (const triangle of section.querySelectorAll<HTMLElement>("[data-section-fold]")) {
+    paintTriangle(triangle, folded);
+  }
+}
+
+/** One triangle, told which way its section stands. */
+function paintTriangle(triangle: HTMLElement, folded: boolean): void {
+  triangle.setAttribute("data-folded", folded ? "true" : "false");
+  triangle.textContent = folded ? "▸" : "▾";
 }
 
 /** The done check: a fact from the wire and the control that flips it. */
@@ -376,45 +412,78 @@ function drawTaskDoneCheck(taskId: string, done: boolean, sc: SidebarContext): H
   return check;
 }
 
-/** Rename in place: the label becomes an input, and Enter is the request. */
-function openRename(
-  label: HTMLElement,
-  taskId: string,
-  title: string,
-  sc: SidebarContext,
-): void {
-  if (label.hidden) return;
+/**
+ * A task's menu: rename, complete, reopen.
+ *
+ * BOTH done arms are offered, always. `UpdateTask` has three changes and the
+ * daemon answers `no_change` when one is a no-op, so the rail draws all three
+ * controls and lets the refusal say so at the control — rather than hiding an
+ * arm and deciding on the daemon's behalf what a task's state permits.
+ */
+function drawTaskMenu(taskId: string, title: string, sc: SidebarContext): HTMLElement {
+  const menu = document.createElement("div");
+  menu.className = "sb-menu list-rows";
+  menu.hidden = true;
+  menu.addEventListener("click", (event) => event.stopPropagation());
+
   const input = document.createElement("input");
   input.type = "text";
   input.className = "task-rename";
-  input.setAttribute("data-task-title", "");
+  input.setAttribute("data-task-rename", taskId);
   input.value = title;
-  const submit = document.createElement("button");
-  submit.type = "button";
-  submit.className = "task-rename-go";
-  submit.setAttribute("data-task-change", "setTitle");
-  submit.textContent = "Rename";
-  const send = (): void => {
-    const next = input.value.trim();
-    if (next === "") return;
-    void fireVerb(submit, {
+  menu.appendChild(input);
+
+  const rename = taskChangeButton(
+    "setTitle",
+    "Rename",
+    () => {
+      const next = input.value.trim();
+      return next === "" ? null : { case: "setTitle", title: next };
+    },
+    taskId,
+    sc,
+  );
+  menu.appendChild(rename);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") rename.click();
+  });
+
+  menu.appendChild(
+    taskChangeButton("setDone", "Mark done", () => ({ case: "setDone" }), taskId, sc),
+  );
+  menu.appendChild(
+    taskChangeButton("setOpen", "Reopen", () => ({ case: "setOpen" }), taskId, sc),
+  );
+  return menu;
+}
+
+/** One `UpdateTask` control, with the change it composes when clicked. */
+function taskChangeButton(
+  arm: TaskChange["case"],
+  label: string,
+  compose: () => TaskChange | null,
+  taskId: string,
+  sc: SidebarContext,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "sb-menu-item";
+  button.setAttribute("data-task-change", arm);
+  button.textContent = label;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const change = compose();
+    // A blank title is not SENT: the contract says the title is non-blank, so
+    // the refusal is avoided rather than provoked.
+    if (change === null) return;
+    void fireVerb(button, {
       sc,
       rpc: "UpdateTask",
-      call: (client) =>
-        client.updateTask(buildUpdateTaskRequest(taskId, { case: "setTitle", title: next })),
+      call: (client) => client.updateTask(buildUpdateTaskRequest(taskId, change)),
       schema: UpdateTaskResponseSchema,
       refusalText: (cause) => updateTaskRefusal(cause as never),
     });
-  };
-  submit.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    send();
   });
-  input.addEventListener("click", (event) => event.stopPropagation());
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") send();
-  });
-  label.hidden = true;
-  label.after(input, submit);
+  return button;
 }
