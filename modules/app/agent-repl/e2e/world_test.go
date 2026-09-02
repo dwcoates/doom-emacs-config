@@ -133,6 +133,14 @@ type WorldOpts struct {
 // cleanup, in reverse start order (shim [daemon-owned] -> daemon -> sidecar
 // -> store), so tearing the store down never races a live writer.
 //
+// GUARANTEE: a store or sidecar process that exits before the test's own
+// cleanup runs — for any reason OTHER than a deliberate Store.Stop /
+// Store.StartSameDB cycle — fails the test. This is automatic and requires
+// no action from the test; there is no opt-out. It mirrors
+// harness.Daemon's own unconditional warning sweep for the same reason: a
+// check a test must remember to ask for is a check the tests that need it
+// most (a store or sidecar that silently died) will forget to ask for.
+//
 // Loud skips (never a fail): no `node` on PATH, the shim's deps not
 // installed (names the exact `npm ci` command — never runs it), no `go` on
 // PATH. A store or sidecar build FAILURE (not a missing precondition) fails
@@ -166,7 +174,39 @@ func NewWorld(t *testing.T, opts WorldOpts) *World {
 		LogPath:     filepath.Join(t.TempDir(), "sidecar.log"),
 	})
 
-	return &World{Daemon: d, Store: store, Sidecar: sidecar}
+	w := &World{Daemon: d, Store: store, Sidecar: sidecar}
+
+	// Registered LAST, so t.Cleanup's LIFO unwind runs this FIRST — before
+	// the store/sidecar/daemon Stop cleanups above ever touch the
+	// processes. It therefore observes exactly the state ruling this
+	// GUARANTEE cares about: what died on its OWN, before the test ended,
+	// as opposed to what this world's own teardown is about to kill on
+	// purpose. Store.Stop (and the deliberate restart in
+	// Store.StartSameDB) records the exit as INTENTIONAL by setting
+	// Store.stopped; this assertion is the only reader of that bit that
+	// treats it as authoritative.
+	t.Cleanup(func() {
+		if store.Exited() && !store.stopped {
+			t.Errorf("e2e: the store exited before test cleanup, and was never stopped by the test:\n%s", tailStoreLog(t, store))
+		}
+		if sidecar.Exited() && !sidecar.stopped {
+			t.Errorf("e2e: the sidecar exited before test cleanup, and was never stopped by the test")
+		}
+	})
+
+	return w
+}
+
+// tailStoreLog reads back the store's own log file for the failure message
+// above, so a test that trips this assertion does not have to go find the
+// log file itself to learn why the store died.
+func tailStoreLog(t *testing.T, s *Store) string {
+	t.Helper()
+	body, err := os.ReadFile(s.LogPath)
+	if err != nil {
+		return "(no store log: " + err.Error() + ")"
+	}
+	return string(body)
 }
 
 // shortSocketPath mints a short-enough UDS path directly under the OS temp
@@ -436,26 +476,44 @@ func (s *Sidecar) Log(t *testing.T) []harness.LogRecord {
 	return harness.ReadLog(t, s.LogPath)
 }
 
+// Exited reports whether the sidecar process has already left, without
+// disturbing it.
+func (s *Sidecar) Exited() bool {
+	select {
+	case <-s.done:
+		return true
+	default:
+		return false
+	}
+}
+
 // ===========================================================================
 // A process that exits before test cleanup fails the test loudly (SPEC.md
 // section B, "Lifecycle"). harness.Daemon already tracks this for the
-// daemon; these two calls extend the same discipline to Store and Sidecar.
-// An area writer calls this once, right after NewWorld, if the test does not
-// itself intend to stop either process.
+// daemon; NewWorld registers the same check for Store and Sidecar
+// AUTOMATICALLY, with no action required from a test — see NewWorld's own
+// doc comment for the exact guarantee and how a deliberate Store.Stop is
+// told apart from an unexpected exit (the Store.stopped / Sidecar.stopped
+// bit each Stop method sets before it signals the process).
 // ===========================================================================
 
-// RequireNoUnexpectedExit registers a cleanup that fails the test if the
-// store or the sidecar has already exited by the time the test ends, unless
-// the test itself stopped it (Store.Stop / a Sidecar the test killed
-// directly). It is opt-in, not automatic, because ruling-2 degraded-state
-// tests deliberately stop the store mid-test.
+// RequireNoUnexpectedExit asserts, RIGHT NOW rather than at test cleanup,
+// that the store and the sidecar are both still running. It exists for a
+// test that wants to pin "still alive" at some specific mid-test point
+// (for example: immediately before provoking the very outage the
+// degraded-state family's test IS about, to prove the outage is what
+// causes the failure ordering, not something that already happened). It is
+// a convenience on top of the automatic end-of-test guarantee NewWorld
+// always registers, never a substitute for it — that one requires no call
+// and has no opt-out.
 func (w *World) RequireNoUnexpectedExit(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() {
-		if w.Store.Exited() && !w.Store.stopped {
-			t.Errorf("e2e: the store exited before test cleanup")
-		}
-	})
+	if w.Store.Exited() && !w.Store.stopped {
+		t.Errorf("e2e: the store has already exited, and was never stopped by the test")
+	}
+	if w.Sidecar.Exited() && !w.Sidecar.stopped {
+		t.Errorf("e2e: the sidecar has already exited, and was never stopped by the test")
+	}
 }
 
 // ===========================================================================
