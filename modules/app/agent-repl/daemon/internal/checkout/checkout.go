@@ -136,3 +136,10 @@ func WebappDist(root string) string {
 func PromptsDir(root string) string {
 	return filepath.Join(root, "prompts")
 }
+
+// ShimBuildStamp is the shim bundle's build stamp beneath root: the file the
+// shim's build chain writes next to its compiled entry point. It is the
+// production source of SHIM_BUILD_SHA.
+func ShimBuildStamp(root string) string {
+	return filepath.Join(root, "agent-shim", "claude", "shim", "dist", ".built-sha")
+}
