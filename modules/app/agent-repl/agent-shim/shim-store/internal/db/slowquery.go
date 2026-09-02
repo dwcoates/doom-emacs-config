@@ -1,7 +1,7 @@
 package db
 
 import (
-	"fmt"
+	"context"
 	"os"
 	"strconv"
 	"time"
@@ -16,9 +16,9 @@ const EnvSlowQueryMs = "AGENT_REPL_STORE_SLOW_QUERY_MS"
 // DefaultSlowQuery is the duration past which a statement is reported.
 //
 // A quarter second is far longer than any indexed lookup this schema performs
-// and far shorter than the multi-second replays a multi-gigabyte events.db
-// produces, so it separates "this database is big" from "this query is the
-// problem" without reporting healthy traffic.
+// and far shorter than the multi-second replays a large store produces, so it
+// separates "this database is big" from "this query is the problem" without
+// reporting healthy traffic.
 const DefaultSlowQuery = 250 * time.Millisecond
 
 // SlowQueryOperation is the stable operation name every slow-query record
@@ -26,21 +26,20 @@ const DefaultSlowQuery = 250 * time.Millisecond
 const SlowQueryOperation = "store.db.slow-query"
 
 // Statement families. They name WHAT ran, never the SQL and never its bound
-// values: the store's payloads are opaque to it, and a record quoting a
-// parameterized statement would leak session content into the global log.
+// values: the store's frames are opaque to it, and a record quoting a
+// parameterized statement would leak conversation content into the global log.
 //
-// `events_by_task` and `open_tasks` are gone with the statements they timed:
-// both selected on a `task_id` column extracted from the retired TaskStarted /
-// TaskProgress / TaskEnded payloads, and detached work is modelled as messages
-// now, with no task-scoped envelope column for the store to index. See the gap
-// note on OpenTaskState.
+// The families are the four-table schema's own statements. The retired ones
+// (`replay`, `max_seq`, `ingest`, `message_page`) named the (session_id, seq)
+// addressing and died with it.
 const (
-	StatementReplay      = "replay"
-	StatementMaxSeq      = "max_seq"
+	StatementWriteBatch  = "write_batch"
+	StatementOpenPage    = "open_page"
+	StatementReadPage    = "read_page"
+	StatementLinesSince  = "lines_since"
+	StatementLiveWork    = "live_work"
 	StatementListCursors = "list_cursors"
-	StatementCursor      = "cursor"
-	StatementIngest      = "ingest"
-	StatementMessagePage = "message_page"
+	StatementBashRun     = "bash_run"
 )
 
 // SlowQueryFromEnv resolves the slow-query threshold from the environment.
@@ -56,27 +55,48 @@ func SlowQueryFromEnv() (time.Duration, error) {
 	}
 	ms, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("shim-store db: %s=%q is not an integer number of milliseconds: %w", EnvSlowQueryMs, raw, err)
+		return 0, invalidf("%s=%q is not an integer number of milliseconds: %v", EnvSlowQueryMs, raw, err)
 	}
 	if ms <= 0 {
-		return 0, fmt.Errorf("shim-store db: %s=%q must be a positive number of milliseconds", EnvSlowQueryMs, raw)
+		return 0, invalidf("%s=%q must be a positive number of milliseconds", EnvSlowQueryMs, raw)
 	}
 	return time.Duration(ms) * time.Millisecond, nil
+}
+
+// traceStatement records that one statement family RAN, for this request.
+//
+// IT IS THE EVIDENCE THAT A REQUEST REACHED STORAGE, and it exists because the
+// negative is what the suite needs to assert: "a refused request never opened a
+// transaction" is only checkable if a request that DID reach storage leaves a
+// mark tied to it. The slow-query record could not serve — it fires only past a
+// threshold, so its absence means "fast", not "never ran".
+//
+// Verbose, because it is per-operation narration on the hot path; the request id
+// comes off the context, which is the one parameter that already crosses every
+// storage signature and already means "this call".
+func (d *DB) traceStatement(ctx context.Context, statement, table string, fields logging.Fields, rows int64) {
+	fields.Operation = "store.db.statement"
+	fields.Level = "debug"
+	fields.Table = table
+	fields.Statement = statement
+	fields.Rows = rows
+	fields.RequestID = logging.RequestIDFrom(ctx)
+	d.log.LogVerbose(fields, "statement ran statement=%s rows=%d", statement, rows)
 }
 
 // observeQuery reports one completed statement that took longer than the
 // threshold, and says nothing at all about one that did not.
 //
-// THE RECORD IS NORMAL-VERBOSITY WARN, deliberately. Successful query timing
-// is exactly the high-volume per-operation narration the store's verbose gate
+// THE RECORD IS NORMAL-VERBOSITY WARN, deliberately. Successful query timing is
+// exactly the high-volume per-operation narration the store's verbose gate
 // exists to keep out of a singleton global log; a query that blew the threshold
 // is the opposite — the operator must see it without having enabled anything in
-// advance, because by the time they know to look the subscription replay or
-// backfill that stalled is already over.
+// advance, because by the time they know to look, the replay or page walk that
+// stalled is already over.
 //
 // rows is what the statement actually produced or touched, which is the term
 // that distinguishes a slow query from a large answer.
-func (d *DB) observeQuery(statement, table, session string, started time.Time, rows int64) {
+func (d *DB) observeQuery(statement, table string, fields logging.Fields, started time.Time, rows int64) {
 	if d.slowQuery <= 0 {
 		return
 	}
@@ -84,9 +104,13 @@ func (d *DB) observeQuery(statement, table, session string, started time.Time, r
 	if elapsed < d.slowQuery {
 		return
 	}
-	d.log.Log(logging.Fields{
-		Operation: SlowQueryOperation, Level: "warn", Table: table, Session: session,
-		Statement: statement, Duration: elapsed, Rows: rows, Threshold: d.slowQuery,
-	}, "SQLite statement exceeded the slow-query threshold statement=%s duration_ms=%d rows=%d threshold_ms=%d",
+	fields.Operation = SlowQueryOperation
+	fields.Level = "warn"
+	fields.Table = table
+	fields.Statement = statement
+	fields.Duration = elapsed
+	fields.Rows = rows
+	fields.Threshold = d.slowQuery
+	d.log.Log(fields, "SQLite statement exceeded the slow-query threshold statement=%s duration_ms=%d rows=%d threshold_ms=%d",
 		statement, elapsed.Milliseconds(), rows, d.slowQuery.Milliseconds())
 }
