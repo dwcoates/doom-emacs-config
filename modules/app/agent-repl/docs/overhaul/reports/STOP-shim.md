@@ -1,127 +1,118 @@
-# STOPPING POINT — shim (wind-down 2026-08-31, shim teamlead)
+# STOPPING POINT — shim (pause 2026-09-02, recreated fable-low shim lead)
+
+Supersedes the 2026-08-31 STOP file. Everything below is the state at the
+final tip named in "Where things stand"; the LIVE LEDGER in
+docs/overhaul/shim-fanout.md carries the per-dispatch history.
 
 ## Where things stand
 
-- Branch `overhaul/shim`, worktree `~/.config/doom-overhaul/shim`. Last code
-  commit: `ba1281377` (merge of remediation #1); this file's commit is the tip.
-- No shim agent worktrees or branches remain; no agents are running.
-  INCIDENT, recorded for the resumption: remediation #1 was still ALIVE at
-  the first "no agents running" report — the lead had judged it dead after
-  two silent days and force-removed its worktree mid-run (it re-anchored the
-  identical branch and later stopped cleanly on order). Lesson: verify a
-  silent agent with a message round-trip before reaping its worktree. One
-  uncommitted scratch file (`test/integration/zz-fm.test.ts`) was discarded
-  with the first removal.
-- Verified AT THE TIP: `npm run typecheck` clean; `npm test` 89 files /
-  2270 tests green; `npm run build` green; `npm run smoke` green (real --fake
-  StartSession). Every test environment exports
-  `AGENT_REPL_FORBID_VENDOR_CALLS=1`; the vendor was never called.
-- Landings 1–5 merged; every proto ask answered (failure arms, StartTurn
-  page, not_deliverable/unsupported, StoreLineAt, WatchBashRun, lost arms,
-  rate_limit_status, context_budget_warning page line, not_observed).
+- Branch `overhaul/shim`, worktree `~/.config/doom-overhaul/shim`. FINAL
+  CODE TIP: see the last ledger entry (the dead-code merge); the code tip
+  before the dead-code pass was `3a60a11b5`.
+- Verified at the tip: `npm run typecheck` clean; `npm test` 96 files
+  green; `npm run build` green; `npm run smoke` green (fake store + a
+  no-store exit-1 step); `npm run test:integration` GREEN — 302 passed /
+  0 failed / 3 todo in ~30 s (was 99 failed / 90 passed / 4 todo in ~30 min
+  at the 2026-08-31 pause). Every test environment exports
+  `AGENT_REPL_FORBID_VENDOR_CALLS=1`; the vendor was never called by any
+  test; no real git in any test.
+- No shim agent worktrees or branches remain (shim-agents/ empty).
+- Landing 6 merged (c9280627f); no shim.v1 / conversation.v1 change.
 
-## What is DONE (merged and green)
+## What landed since the 2026-08-31 pause (merge order)
 
-- Process shell + Connect service (17 rpcs; workflow trio Unimplemented;
-  preface-sniffed h1+h2c on one UDS; streaming header flush; validation).
-- Engine: StartSession fresh/resume, cold gate, keep-alive (4 min; fake-only
-  env override) + resumeSessionAt rewind, compaction, backups, R9 identity
-  (+ rotation link files), one-turn-in-flight, permission gate, detached
-  work (DetachedWorkId == tool_use_id), KillTurn/KillSession scoping,
-  Hibernate, WatchSession fan-out (immediate diagnostics; context_usage;
-  rate_limit_status; fast_mode; unsolicited model_changed; converter-defect
-  faults + degraded windows), SIGTERM stand-down, SIGINT refusal.
-- Record plane: the full SDK→conversation.v1 fold (21 tool kinds, terminals,
-  session updates, residue with ruled keys), store client (WriteBatch retry
-  buffer, WatchBashRun, per-delta bash keys, typed-arm-aware reads,
-  reconciliation with created-origin live_work and lost.swept_up).
-- Mocked vendor: 140+ `!scenario` roster (table in agent-shim/claude/shim/
-  AGENTS.md, asserted both ways); vendor-shaped files on disk (layout in
-  shim.md's mock section); capture harness ready (scripts/capture; the Q5
-  capture run itself is still pending on the operator).
-- Integration suite: seven suites (~193 tests incl. 2 remaining todos) +
-  harness under test/integration[-support]; `npm run test:integration`.
+1. Capture-harness fixes (48ed642eb and below): `on_control` trigger kind;
+   sweep-end late reclaim; multi-turn drain held across turns
+   (`drainToResult`); transport-closed control_failed quarantines;
+   `permission-undecidable-parked` expects_error_subtypes; denied-by-user
+   prompt rewrite. The project lead re-captured 13 scenarios; 69 goldens.
+2. Goldens (eb7930399): the 69 real captures under
+   agent-shim/claude/shim/testdata/captures/ (+MANIFEST with an
+   evidence-gaps section) and the converter golden suites
+   test/convert/goldens/*; two converter defects fixed (task kind only from
+   task_started; per-block assistant line BEFORE content_block_stop).
+3. Remediation #2 engine (062aaeda5) and fakes (1768697c7): the 12 failure
+   buckets closed; R15 applied; store relays; rotation = post-clear init id;
+   Persistence.onFault/onDegradedWindow subscribed; typed store failure
+   arms; SHIM_BUILD_SHA from the spawn env; reader-side subagent join.
+4. Mock rebuild from the goldens (3dc64a89b): golden-conformance suite (59
+   mapped rows; 27 shape-exact, 32 pinned with reason); AGENTS.md marks
+   capture-grounded vs declared-only rows; denied tool → failure(no
+   content); observed /clear shape; detached causes; SourceCoordinates
+   unified; StartTurn reads its page BEFORE the submit.
+5. Remediation #3 (5721237ec): integration green; routes.ts boundary maps
+   every handler; stoppedBashTerminal; interim unknown-target refusal; held
+   cuts; teardown snapshot; knowsAgent.
+6. Remediation #4 = audit #2 (faef4c312, e0addd384, 3a60a11b5): 61 audit
+   items; standing grants validated against the OFFER; UpdateAgent subagent
+   target by wire id; non-zero bash exit = completed; workspace lock inside
+   StartSession; signal handlers before "serving"; failed StartSession undoes
+   itself; response compression off (early-head ruling); h1 multi-stream.
+7. Dead-code pass (sonnet-medium; lists in the final report and the ledger).
 
-## Failure inventory and disposition
+## Rulings received this wave (all recorded in shim.md / the ledger)
 
-- Run #2 (tree 731aa5f00, BEFORE remediation #1): 99 failed / 90 passed /
-  4 todo; log at the session scratchpad `itest-run1.log`/`itest-run2.log`
-  (may be reaped; numbers preserved here).
-- A read-only analysis bucketed the 99 into 12 root causes (full text in
-  the ledger section below); remediation #1 has ALREADY fixed parts of
-  bucket 3 (fast_mode, model_changed) and buckets addressed by items a–m.
-  The 12 buckets, condensed, with disposition:
-  1. Harness spawn-wait flake (~29, fs.watch lost events; fix: bounded
-     re-drain or logPipe delivery) — OPEN, harness-side, fix FIRST.
-  2. KillSession never exits the process (9; engine tears down but only
-     signal handlers call process.exit) — OPEN, engine.
-  3. Owned-arms filter drops fold-produced session arms; probes never
-     re-run (9–10) — PARTLY FIXED (fast_mode, model_changed landed);
-     accountUsage/mcpServer re-probe still OPEN.
-  4. Fake store fanOut drops upserts of rows predating the watch (~8–12;
-     pin compares the row's original pointer) — OPEN, test fake.
-  5. StartTurn's R15 writeDurable lets PersistenceError escape as
-     Code.Internal; WatchBash/StopBash same gap (7) — OPEN, engine/routes.
-  6. Fake store never refuses reads (3; typed arms exist in the protos and
-     the fake must serve them) — OPEN, test fake.
-  7. SHIM_BUILD_SHA baked by esbuild define; spawn env ignored (2) — OPEN,
-     build-identity/build.mjs.
-  8. DetachForeground has no foreground-unit table (three refusals collapse
-     to unknownUnit) and the mock's backgroundTasks mutates-then-emits so
-     the engine reads a stale flag (4) — OPEN, engine + mock.
-  9. Mock writes subagent files under its task id while the shim's AgentId
-     is the spawning tool_use_id (1 ENOENT + 2) — OPEN, mock.
-  10. Permission-gate arms/ordering (deny-user still runs the tool;
-      undecidable→policy; mismatch→no_open_ask; KillTurn noTurnOpen with
-      live detached work) (4) — OPEN, engine.
-  11. Residue never lands as vendor_specific unserved rows (2) — OPEN,
-      converter/writer.
-  12. Singletons (5): poisoned log sink kills the shim; SetSessionModel
-      resolves early; usage carrier absent; bash readability unset; and ONE
-      TEST-VS-DESIGN CONTRADICTION — "a fresh session's opening page is
-      EMPTY" vs R15 (the prompt row is durable before the page is read, so
-      the page contains it): needs a lead ruling at resumption.
+- R15 wins: StartTurn's page holds exactly the prompt row.
+- Store relays: WatchBashRun CodeNotFound before the first row (tolerated);
+  post-terminal deltas served then end (fake store still to model it —
+  resume queue).
+- Denied tool: starts never deferred; the unit settles `failure` with
+  content UNSET; drawn denied via the permission unit's shared id; no proto.
+- WatchAgent serves ONE book; fan-wide cancel = KillTurn/KillSession{force}.
+- Interim unknown-target refusal at the shim; `unknown_agent` on
+  OpenAgentSessionFailure proposed for landing 7.
+- Workspace lock taken inside StartSession; inert shim holds neither lock.
+- /clear rotates to the post-clear system:init.session_id.
+- Compaction helper stays synthetic (no longer-history capture approved).
+- api_error page line is the sidecar's (no stream-plane producer).
+- Busy-subagent UpdateAgent refusal is the ONE producer (daemon's
+  turn_already_open retired).
 
-## Post-merge individual integration verdicts (remediation #1, at its tip)
+## Capture-checklist answers (read from the goldens, not guessed)
 
-- PASS individually: `!fault-converter` + recovery (bucket 3a fix), `!model-fallback`
-  (3b), all three fast_mode arms (3c), and the keep-alive
-  "no keep-alive prompt appears in any page" test.
-- GetLiveWork-called-once FAILED on the 60 s harness spawn-wait flake only
-  (the test has no stream waits; bucket 1) — no code signal.
-- Never run (stopped by the wind-down): the second keep-alive test (the
-  rewind/yield assertion) and `!context-tip`.
+- Budget warning: NO context_tip and NO budget-warning attachment in any
+  capture; nearest carrier observed once: attachment `total_tokens_reminder`.
+  The spelling is an OPEN EVIDENCE GAP; the sidecar producer stays ungrounded.
+- Failed subagent: none in any capture.
+- Compaction summary line: none; /compact answered "Not enough messages to
+  compact" under the cheap model. Gap open pending a longer-history capture.
+- /clear rotation record: observed — see shim.md "ROTATION, OBSERVED".
+- Declared-only (not capture-grounded) mock rows are listed in AGENTS.md;
+  the MANIFEST evidence-gaps section lists: glob, grep, artifact,
+  schedule_wakeup, worktree, context_injected, failed subagent,
+  compact_boundary, `!fail-execution`/`!fail-stop-hook`/
+  `!fail-structured-output` failure terminals, api-error classes, refusals,
+  query death, cold resume.
 
-## Remediation #2 — full queued scope (NOT dispatched; opus-low when resumed)
+## Resume queue (in order)
 
-1. The 12 buckets above (order: 1, 2, 3-remainder, 4, then the rest).
-2. The triaged audit at docs/overhaul/reports/shim-audit-1.md: 26 untested
-   obligations (A), 15 weak assertions (B; B2's typed-arm reader fix is
-   DONE), 12 edge cases (C), todo dispositions (D; D1–D3 unblocked by
-   remediation #1), 8 flakiness/internals fixes (E).
-3. Capture-checklist questions (relay to the project lead's capture run):
-   the real context-budget-warning attachment carrier (context_tip is NOT
-   it); the failed-subagent transcript shape; the /clear rotation record;
-   the declared-only toolUseResult shapes listed in shim.md.
-4. After remediation #2: a fresh integration run, then the next
-   fresh-context fable audit; loop until clean per TEAMLEAD.md.
-
-## Dispatch order on resumption
-
-1. opus-low remediation #2 in a hand-made worktree `overhaul/shim-<slug>`
-   (brief = this file + shim-audit-1.md + a fresh run log).
-2. Fresh integration run; iterate.
-3. Fable auditor #2 (fresh context) once green-ish; loop.
-4. Report to the project lead per COMMON.md (must include: the R9 rule +
-   evidence — in shim.md; the mock file layout — shim.md mock section; the
-   prompt→scenario table location — agent-shim/claude/shim/AGENTS.md).
+1. Fake store models relay (b) — post-terminal deltas served then end — and
+   the detached test re-asserts against it.
+2. Retry-buffer overflow: survivors'-order half of the test (needs a drain
+   hook or an observable ledger; deferred this wave).
+3. `KillSession.query_refused_to_end` and `StartTurn.vendor_refused` stay
+   todos (no producer; fatalizing a refused vendor interrupt is a contract
+   change) — decide or leave.
+4. Landing 7 candidates for the project lead: store.v1
+   `OpenAgentSessionFailure.unknown_agent`; a `denied` marker only if the
+   daemon lead finds the permission-id join awkward.
+5. When a longer-history capture is approved: land compaction-directed's
+   real compact_boundary, rebuild `!compact*` and the compaction helper from
+   it, retire the "synthetic" label.
+6. Next fresh-context audit (#3) only if the lead wants another loop; #2's
+   61 items are all closed or dispositioned in
+   docs/overhaul/reports/shim-audit-2.md.
 
 ## Where everything is written down
 
-- docs/overhaul/shim-fanout.md — the lead plan, every adopted ruling, and
-  the LIVE LEDGER (agent ids, landings, rulings R1–R15 + relays).
-- docs/overhaul/shim.md — contract context + kickoff/landing relays + the
-  mock section (file layout, R9 settled, cross-plane rulings).
-- docs/overhaul/reports/shim-audit-1.md — the triaged audit (remediation
-  #2 input).
+- docs/overhaul/shim-fanout.md — architecture + LIVE LEDGER (every
+  dispatch, merge, ruling, override).
+- docs/overhaul/shim.md — contract context; mock section; R9 + ROTATION
+  OBSERVED; the gate ruling; capture-run negatives.
+- docs/overhaul/reports/shim-audit-1.md, shim-audit-2.md — the audits,
+  triaged.
+- agent-shim/claude/shim/AGENTS.md — module map, process shell, the
+  prompt→scenario table with capture-grounded marks.
+- agent-shim/claude/shim/testdata/captures/MANIFEST.md — the 69 goldens
+  and the evidence gaps.
 - The project lead is reached by SendMessage to `main`.
