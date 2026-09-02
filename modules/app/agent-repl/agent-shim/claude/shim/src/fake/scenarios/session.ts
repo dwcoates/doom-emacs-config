@@ -22,11 +22,12 @@ export const ROTATE = scenario({
   name: "rotate",
   prompt: "!rotate",
   emits:
-    "a `/clear`: the retired identity's transcript gets a closing record, `conversation_reset` announces the new " +
-    "id, a fresh `system:init` follows, and the REST of the turn — its result included — belongs to the new identity",
+    "a `/clear` in the OBSERVED shape: ONE `conversation_reset` carrying the OLD `session_id` and a " +
+    "`new_conversation_id` nothing later uses, then a SECOND `system:init` whose `session_id` is the REAL new id " +
+    "(a third uuid), and the REST of the turn — its result included — belongs to that identity",
   writes:
-    "a closing system record on the OLD `<old-session>.jsonl` (left otherwise intact), then a NEW " +
-    "`<new-session>.jsonl` carrying everything after the reset",
+    "a NEW `<new-session>.jsonl` carrying everything after the reset; the OLD file simply STOPS, with no closing " +
+    "record of any kind",
   arms: "SessionIdentityRotated + AgentUpdate.context_cut(ContextCleared)",
   run(ctx) {
     ctx.log({ turn: ctx.turn, branch: "rotate" }, "fake identity-rotation turn");
