@@ -53,16 +53,21 @@ func (r *resolver) drawContextCut(s *wsState, agent *conversationv1.AgentId, cut
 			}
 		}
 	case *conversationv1.ContextCut_CompactionFailed:
-		// NOTHING WAS CUT, so there is NO DIVIDER: drawing one would claim the
-		// conversation was compacted when the context is as it was — and still
-		// too large, which is why this is not silence either. It is a WARNING
-		// and it rides the turn's evidence.
+		// NOTHING WAS CUT, and the divider says so IN THE SLOT the compacted
+		// divider would have taken (landing 8): a compaction was offered and
+		// did not happen, which is neither a compaction nor silence. `tokens`
+		// stays UNSET — no size changed. It is still a WARNING, and it still
+		// rides the turn's evidence, because the terminal is where a reader
+		// looks when they ask what went wrong.
 		reason := arm.CompactionFailed.GetError()
 		r.addEvidence(s, "a compaction failed and nothing was cut: "+reason)
 		log.Warn("daemon.feed.compaction_failed",
-			"a compaction failed, so no separation divider was drawn; it rides the turn's evidence",
+			"a compaction failed, so the divider says nothing was cut; it also rides the turn's evidence",
 			dlog.Context{"agent": agent.GetValue(), "error": reason})
-		return
+		separation.Label = &frontendv1.FeedSessionSeparationLabel{Text: "compaction failed"}
+		separation.Kind = &frontendv1.FeedSessionSeparation_CompactionFailed{
+			CompactionFailed: &frontendv1.FeedContextCutCompactionFailed{Error: reason},
+		}
 	default:
 		log.Warn("daemon.feed.context_cut_unset",
 			"a context cut arrived with no arm set; no divider was drawn",
@@ -104,6 +109,8 @@ func separationArm(separation *frontendv1.FeedSessionSeparation) string {
 		return "cleared"
 	case *frontendv1.FeedSessionSeparation_Compacted:
 		return "compacted"
+	case *frontendv1.FeedSessionSeparation_CompactionFailed:
+		return "compaction_failed"
 	case *frontendv1.FeedSessionSeparation_WorktreeEntered:
 		return "worktree_entered"
 	case *frontendv1.FeedSessionSeparation_WorktreeLeft:
