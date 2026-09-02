@@ -24,7 +24,7 @@ import {
   answerQuestion,
   denyPermission,
   freshSession,
-  openStream,
+  openStream, openSessionUpdates,
   permissionMode,
   startTurnRequest,
   stopAgent,
@@ -263,7 +263,7 @@ describe("a permission ask", () => {
     // the daemon happens to have sent.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const session = openStream((options) =>
+    const session = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     await session.next();

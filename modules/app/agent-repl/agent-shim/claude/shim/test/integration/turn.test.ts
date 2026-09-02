@@ -17,7 +17,7 @@ import {
   agentId,
   allowOnce,
   freshSession,
-  openStream,
+  openStream, openSessionUpdates,
   pointer,
   promptAgent,
   readHistoryAfter,
@@ -988,7 +988,7 @@ describe("ReadHistory", () => {
   test("an unreachable store also raises a store_unreachable fault", async () => {
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
+    const watch = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     await watch.next();
@@ -1433,7 +1433,7 @@ describe("scope, arms and ordering the verbs owe", () => {
     // and saying so is different from `no_session`: the session is right there.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
-    const watch = openStream((options) =>
+    const watch = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
     await watch.next();

@@ -18,7 +18,7 @@ import { agentIdPath } from "../../src/engine/identity.js";
 import { cleanupShims, ITEST_BUILD_SHA, spawnShim } from "../integration-support/harness.js";
 import {
   freshSession,
-  openStream,
+  openStream, openSessionUpdates,
   permissionMode,
   remediationClear,
   remediationCompact,
@@ -46,6 +46,7 @@ import {
   killSessionLive,
   sessionKilled,
   sessionStarted,
+  sessionStartedFrame,
   sessionUpdate,
   setModelAccepted,
   setModelCause,
@@ -82,7 +83,7 @@ function contextCutOf(
 
 /** Open the session watch and consume its opening frames up to `arm`. */
 function watchSession(shim: Awaited<ReturnType<typeof spawnShim>>) {
-  return openStream((options) =>
+  return openSessionUpdates((options) =>
     shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
   );
 }
@@ -142,6 +143,46 @@ describe("WatchSession's opening frames", () => {
 
     expect(sessionUpdate(first).update.case).toBe("diagnostics");
     watch.close();
+  });
+
+  /** The unfiltered watch, which the re-announcement rides. */
+  function watchSessionRaw(shim: Awaited<ReturnType<typeof spawnShim>>) {
+    return openStream((options) =>
+      shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
+    );
+  }
+
+  test("the SECOND frame re-announces the session's opening", async () => {
+    // Landing 7: a daemon adopting an already-started shim (crash boot,
+    // handover) attaches purely and still learns the identity, runtime, model,
+    // catalog and live membership from the shim.
+    const shim = await spawnShim();
+    const opening = await shim.clients.h1.startSession(freshSession());
+
+    const watch = watchSessionRaw(shim);
+    await watch.next();
+    const second = await watch.next();
+
+    expect(sessionStartedFrame(second).vendorSessionId).toBe(
+      opening.result.case === "success" ? opening.result.value.session?.vendorSessionId : undefined,
+    );
+    watch.close();
+  });
+
+  test("re-announces on EVERY new watch, not only the first", async () => {
+    const shim = await spawnShim();
+    await shim.clients.h1.startSession(freshSession());
+    const first = watchSessionRaw(shim);
+    await first.next();
+    await first.next();
+
+    const second = watchSessionRaw(shim);
+    await second.next();
+    const frame = await second.next();
+
+    expect(frame.frame.case).toBe("sessionStarted");
+    first.close();
+    second.close();
   });
 
   test("a SECOND concurrent subscriber also opens with diagnostics", async () => {
