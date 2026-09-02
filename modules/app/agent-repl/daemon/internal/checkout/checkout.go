@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -63,9 +64,50 @@ func Root(exePath string) (string, error) {
 		dir = parent
 	}
 
+	// THE BINARY WAS NOT DEPLOYED INTO THE CHECKOUT. `go build -o <tmp>` puts
+	// it outside the tree, which is what every build from a test harness or a
+	// scratch directory does. The path this source file was COMPILED from is
+	// still inside the checkout, so it names the tree the binary was built
+	// from — the same tree a deployed binary would have been copied out of.
+	if root, ok := compiledRoot(); ok {
+		return root, nil
+	}
+
 	return "", fmt.Errorf(
-		"resolve agent-repl checkout: no ancestor of %q contains %q; set %s to override",
+		"resolve agent-repl checkout: no ancestor of %q contains %q, and the compiled-in source path names none either; set %s to override",
 		exePath, marker, Env)
+}
+
+// compiledRoot answers the checkout this package was COMPILED from, walking up
+// from the source path the compiler recorded for this file. It is the last
+// resort, after the environment and after the executable's own location,
+// because a checkout that moved after it was built leaves a path that no
+// longer exists — which is exactly what the existence check below catches.
+func compiledRoot() (string, bool) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", false
+	}
+	dir := filepath.Dir(file)
+	for {
+		if hasMarkerSuffix(dir) {
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				return dir, true
+			}
+			return "", false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+// VocabDir is the shared render vocabulary beneath root: the render-colors and
+// paint-class tables the resolvers refuse to serve an unpainted state without.
+func VocabDir(root string) string {
+	return filepath.Join(root, "proto", "vocab")
 }
 
 // hasMarkerSuffix reports whether dir's path ends with the marker's
