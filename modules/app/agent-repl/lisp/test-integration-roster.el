@@ -1603,6 +1603,494 @@ into the user's face."
           (agent-repl-itest--await-log daemon "elisp.roster.finish-edge" "info")
           (should (null agent-repl-itest-notifications)))))))
 
+;;;; ---- Audit-3 additions (R-SUITE-3) ----
+;;
+;; Findings 33-42 of docs/overhaul/reports/elisp-suite-audit-3.md.  Kept in
+;; their own section so they merge cleanly beside concurrent edits above.
+;;
+;; Finding #33 is a live PRODUCTION DEFECT under parallel repair (R-AUDIT3-PROD):
+;; roster.el:312 `agent-repl-roster--rename-tab' never re-keys
+;; `agent-repl-host--by-name' (workspace.el:240-252 mutates
+;; `agent-repl--workspaces' only).  Both of its tests below are scripted to
+;; the RULED post-fix behavior the finding spells out and are EXPECTED RED
+;; until that production fix lands.
+
+(declare-function agent-repl-host-composer-gate "host" (ws))
+(declare-function agent-repl--live-ws-names "workspace" ())
+(declare-function agent-repl-prompt-queue-pending "prompt-queue" (ws &optional kind))
+(declare-function agent-repl-roster-row-for-ws "roster" (ws))
+
+(defun agent-repl-itest-roster--host-live (composer)
+  "Return a minimal valid live `HostWorkspace' alist with COMPOSER's arm set.
+Every non-optional field of the live arm is populated, mirroring
+`test-integration-host.el''s own fixture, so a push through this exercises
+the composer gate alone."
+  `((existing . ((id . ((value . "host-session-1")))
+                 (live . ((generation . ((value . "gen-1")))
+                          (shimAttached . t)
+                          (claude . ((sessionId . "vendor-1")
+                                     (configDir . "/home/itest/.claude")))
+                          (backfill . ((done . ())))
+                          (,composer . ())))))
+    (naming . ())))
+
+(defun agent-repl-itest-roster--push-snapshot (daemon roster)
+  "Push ROSTER on DAEMON's roster stream as a SNAPSHOT.
+Stored and replayed to the next subscriber, which is how a reconnect's
+re-pull is staged without driving the real link/reconnect machinery that
+test-integration-link.el owns."
+  (agent-repl-itest--push daemon "roster" `((roster . ,roster)) nil t))
+
+;; audit-3 #33
+(ert-deftest agent-repl-itest-roster-rename-re-keys-the-host-entry ()
+  "RULING: a renamed tab's host entry moves to the NEW name, never stays keyed to OLD.
+WRONG today (roster.el:312): `agent-repl-roster--rename-tab' calls
+`agent-repl--ws-rename-state' and `--ws-rename-persp' but never re-keys
+`agent-repl-host--by-name'.  EXPECTED RED until that production fix lands
+— fanout §8 \"a rename of the row renames the tab\" + §7 host state keyed
+by WS-NAME + §9 REF via `agent-repl-host-ref' (nil -> `user-error' at every
+verb and the composer)."
+  ;; Arrange: a primary link, so the open tab starts a REAL host subscription.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-link--primary conn))
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "itest-rekey" "old" 'ready))))
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-host-ref "old")) nil "the old tab's host ref to attach")
+        (let ((ref (agent-repl-host-ref "old")))
+          ;; Act.
+          (agent-repl-itest-roster--push
+           daemon (agent-repl-itest-roster--roster
+                   (list (agent-repl-itest-roster--row "itest-rekey" "new" 'ready))))
+          (agent-repl-itest--wait-until
+           (lambda () (equal (agent-repl--ws-by-ref-id "itest-rekey") "new"))
+           nil "the renamed row's tab")
+          ;; Assert: the ref moved to the new name and the old key is gone.
+          (should (equal (agent-repl-host-ref "new") ref))
+          (should (null (agent-repl-host-ref "old")))
+          (should (not (member "old" (agent-repl--live-ws-names))))
+          (should (equal (agent-repl-roster-tab-order) '("new")))
+          ;; A following host push for the SAME id must update the NEW
+          ;; name's composer gate — not a name nothing reads any more.
+          (agent-repl-itest--push
+           daemon "host" `((host . ,(agent-repl-itest-roster--host-live 'open)))
+           "itest-rekey")
+          (agent-repl-itest--wait-until
+           (lambda () (eq (agent-repl-host-composer-gate "new") :open))
+           nil "the renamed tab's composer gate to update")
+          (should (eq (agent-repl-host-composer-gate "new") :open)))))))
+
+;; audit-3 #33
+(ert-deftest agent-repl-itest-roster-rename-colliding-with-a-tombstoned-name-is-refused-loudly-not-half-applied ()
+  "RULING: a rename target colliding with a TOMBSTONED name is refused loudly.
+`--ws-rename-state' signals `user-error' out of the push handler
+(workspace.el:225) when the target name is already registered, live or
+tombstoned — the push must be refused whole, never leave the old tab
+renamed halfway into some third state.  (This precondition sits ahead of
+the host re-key bug above and already holds independently of it.)"
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Arrange: two open rows, then tombstone one by closing it.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-collide-live" "live" 'ready)
+                     (agent-repl-itest-roster--row "itest-collide-dead" "dead" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (and (agent-repl--ws-by-ref-id "itest-collide-live")
+                       (agent-repl--ws-by-ref-id "itest-collide-dead")))
+       nil "both rows' tabs")
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-collide-live" "live" 'ready)
+                     (agent-repl-itest-roster--row
+                      "itest-collide-dead" "dead" 'merged '(closed . ((closed . t)))))))
+      (agent-repl-itest--wait-until
+       (lambda () (not (agent-repl--ws-by-ref-id "itest-collide-dead")))
+       nil "the dead row's tab to be torn down")
+      ;; Act: rename the live row onto the now-tombstoned name.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-collide-live" "dead" 'ready))))
+      ;; Assert: refused loudly, and the old tab untouched — never half-renamed.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (equal (agent-repl--ws-by-ref-id "itest-collide-live") "live")))))
+
+;; audit-3 #34
+(ert-deftest agent-repl-itest-roster-when-last-selected-at-ms-decodes-from-a-decimal-string ()
+  "`when.lastSelected.atMs' rides the wire as a STRING and still decodes.
+fanout §2: Go emits int64 as a decimal string; a decoder mis-typing
+`atMs' as a bare number would refuse every real push while a fixture
+that always sends unset `when' stays green."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-when-ls" "itest-when-ls" 'ready
+                      '(when . ((lastSelected . ((atMs . "1700000000000")))))))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-roster-row-for-ws "itest-when-ls")) nil "the row to be indexed")
+      ;; Assert.
+      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (let ((when-value (plist-get (agent-repl-roster-row-for-ws "itest-when-ls") :when)))
+        (should (eq (plist-get when-value :arm) :last-selected))
+        (should (= (plist-get (plist-get when-value :value) :at-ms) 1700000000000))))))
+
+;; audit-3 #34
+(ert-deftest agent-repl-itest-roster-when-merged-at-ms-decodes-from-a-decimal-string ()
+  "`when.merged.atMs' rides the wire as a STRING and still decodes.
+The `merged' arm of the same oneof, pinned separately from `lastSelected'."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-when-mg" "itest-when-mg" 'ready
+                      '(when . ((merged . ((atMs . "1700000005000")))))))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-roster-row-for-ws "itest-when-mg")) nil "the row to be indexed")
+      ;; Assert.
+      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (let ((when-value (plist-get (agent-repl-roster-row-for-ws "itest-when-mg") :when)))
+        (should (eq (plist-get when-value :arm) :merged))
+        (should (= (plist-get (plist-get when-value :value) :at-ms) 1700000005000))))))
+
+;; audit-3 #34
+(ert-deftest agent-repl-itest-roster-detail-s-three-lines-all-ride-a-push ()
+  "All three `detail' lines — branch, parentBranch, summary — ride one push.
+fanout §5: \"detail with presence-optional lines\" — every fixture row
+above sends an empty `detail', so a decoder mis-typing any one line would
+refuse every real push while the suite stayed green."
+  ;; Arrange / Act.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-detail" "itest-detail" 'ready
+                      '(detail . ((branch . ((name . "feature-x")))
+                                  (parentBranch . ((name . "main")))
+                                  (summary . ((text . "running the tests")))))))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl-roster-row-for-ws "itest-detail")) nil "the row to be indexed")
+      ;; Assert.
+      (should-not (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (let ((detail (plist-get (agent-repl-roster-row-for-ws "itest-detail") :detail)))
+        (should (equal (plist-get (plist-get detail :branch) :name) "feature-x"))
+        (should (equal (plist-get (plist-get detail :parent-branch) :name) "main"))
+        (should (equal (plist-get (plist-get detail :summary) :text) "running the tests"))))))
+
+;; audit-3 #35
+(ert-deftest agent-repl-itest-roster-a-clean-stream-end-is-a-loud-error-the-view-is-kept-and-a-fresh-subscribe-stands ()
+  "The roster stream ending CLEANLY (a bare end frame) is a loud ERROR.
+fanout §3; roster.el's `elisp.roster.stream-close' ERROR path — audit-2
+pinned this for the daemon (#2) and host (#12) streams only, never the
+roster's own GLOBAL stream.  The last view is KEPT and a fresh subscribe
+stands a fresh subscriber."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-end-clean" "itest-end-clean" 'ready))))
+      (agent-repl-itest-roster--await-view daemon)
+      (let ((kept agent-repl-roster-view))
+        ;; Act.
+        (agent-repl-itest--end daemon "roster")
+        ;; Assert.
+        (agent-repl-itest--await-log daemon "elisp.roster.stream-close" "error")
+        (should (equal agent-repl-roster-view kept))
+        (agent-repl-roster-subscribe conn)
+        (agent-repl-itest--await-subscriber daemon "roster")
+        (should (equal 1 (length (agent-repl-itest--subscribers daemon "roster"))))))))
+
+;; audit-3 #35
+(ert-deftest agent-repl-itest-roster-an-aborted-stream-is-a-loud-error-the-view-is-kept-and-a-fresh-subscribe-stands ()
+  "The roster stream ABORTING (no end frame at all) is a loud ERROR too.
+The other producer-side end fanout §3 names: a dropped TCP connection with
+no terminal envelope, which reaches roster.el's own catch-all branch
+rather than the `:ended' one."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-end-abort" "itest-end-abort" 'ready))))
+      (agent-repl-itest-roster--await-view daemon)
+      (let ((kept agent-repl-roster-view))
+        ;; Act.
+        (agent-repl-itest--end daemon "roster" nil nil t)
+        ;; Assert.
+        (agent-repl-itest--await-log daemon "elisp.roster.stream-close" "error")
+        (should (equal agent-repl-roster-view kept))
+        (agent-repl-roster-subscribe conn)
+        (agent-repl-itest--await-subscriber daemon "roster")
+        (should (equal 1 (length (agent-repl-itest--subscribers daemon "roster"))))))))
+
+;; audit-3 #36
+(ert-deftest agent-repl-itest-roster-closed-then-reopened-row-opens-once-and-a-repeat-adds-no-third ()
+  "A row cycling open -> closed -> open re-opens exactly ONCE; a repeat adds none.
+fanout §8 \"closed false -> ensure a tab exists\"; `--ws-del' tombstones and
+`--open-tab' writes through `--ws-put', so a reopen after teardown must
+open again rather than silently resurrecting the tombstone."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act: open.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-reopen" "itest-reopen" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl--ws-by-ref-id "itest-reopen")) nil "the first open")
+      ;; Act: close.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-reopen" "itest-reopen" 'merged '(closed . ((closed . t)))))))
+      (agent-repl-itest--wait-until
+       (lambda () (not (agent-repl--ws-by-ref-id "itest-reopen"))) nil "the teardown")
+      ;; Act: reopen the SAME id.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-reopen" "itest-reopen" 'ready))))
+      (agent-repl-itest--wait-until
+       (lambda () (agent-repl--ws-by-ref-id "itest-reopen")) nil "the reopen")
+      ;; Assert: a LIVE name and exactly two `tab-open' records.
+      (should (equal (agent-repl--ws-by-ref-id "itest-reopen") "itest-reopen"))
+      (should (equal 2 (length (agent-repl-itest--log-entries daemon "elisp.roster.tab-open"))))
+      ;; Act: the identical open push again.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-reopen" "itest-reopen" 'ready))))
+      (agent-repl-itest-roster--await-view daemon)
+      ;; Assert: no third `tab-open'.
+      (should (equal 2 (length (agent-repl-itest--log-entries daemon "elisp.roster.tab-open")))))))
+
+;; audit-3 #37
+(ert-deftest agent-repl-itest-roster-a-replayed-snapshot-after-a-reconnect-touches-no-tab ()
+  "The SAME rows replayed as a SNAPSHOT after a reconnect touch no tab.
+elisp.md \"a reconnect re-opens and re-pulls\": a re-pull that changes
+nothing must reconcile as `tab-kept' throughout — never a fresh
+`tab-open' and never a `tab-teardown' — and the tab order is unchanged."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((roster (agent-repl-itest-roster--roster
+                     (list (agent-repl-itest-roster--row "itest-reconn-a" "itest-reconn-a" 'ready)
+                           (agent-repl-itest-roster--row "itest-reconn-b" "itest-reconn-b" 'ready)))))
+        (agent-repl-itest-roster--push daemon roster)
+        (agent-repl-itest--wait-until
+         (lambda () (equal (agent-repl-roster-tab-order) '("itest-reconn-a" "itest-reconn-b")))
+         nil "both rows' tabs to open")
+        ;; Act: a SECOND connection stages the IDENTICAL roster as a
+        ;; SNAPSHOT and subscribes -- exactly what a reconnect's re-pull
+        ;; delivers, without driving the real link/reconnect machinery
+        ;; test-integration-link.el owns.
+        (let ((second (agent-repl-connect-open (agent-repl-itest-daemon-address daemon))))
+          (unwind-protect
+              (progn
+                (agent-repl-itest-roster--push-snapshot daemon roster)
+                (agent-repl-roster-subscribe second)
+                (agent-repl-itest--await-subscriber daemon "roster" nil 1)
+                (agent-repl-itest-roster--await-view daemon)
+                ;; Assert.
+                (should (equal (agent-repl-roster-tab-order)
+                               '("itest-reconn-a" "itest-reconn-b")))
+                (should (null (agent-repl-itest--log-entries daemon "elisp.roster.tab-teardown")))
+                (should (equal 2 (length (agent-repl-itest--log-entries
+                                          daemon "elisp.roster.tab-open")))))
+            (agent-repl-connect-close second)))))))
+
+;; audit-3 #38
+(ert-deftest agent-repl-itest-roster-duplicate-ref-id-in-one-push-drops-the-whole-push ()
+  "Two rows sharing one ref id in a single push are dropped WHOLE.
+sidebar.proto RosterRow.workspace: \"its identity\"; roster.el's own
+`reason=duplicate-ref-id' ERROR -- the push decodes fine (each row is
+individually valid) and is dropped by roster.el's own invariant, not by
+the wire decoder."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-dup-control" "itest-dup-control" 'ready))))
+      (agent-repl-itest-roster--await-view daemon)
+      (let ((kept agent-repl-roster-view))
+        ;; Act.
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "itest-dup-id" "dup-name-1" 'ready)
+                       (agent-repl-itest-roster--row "itest-dup-id" "dup-name-2" 'ready))))
+        ;; Assert.
+        (agent-repl-itest--await-log daemon "elisp.roster.push" "error")
+        (should (seq-some
+                 (lambda (entry)
+                   (string-match-p "duplicate-ref-id" (or (alist-get 'message entry) "")))
+                 (agent-repl-itest--log-entries daemon "elisp.roster.push" "error")))
+        (should (null (agent-repl--ws-by-ref-id "itest-dup-id")))
+        (should (equal agent-repl-roster-view kept))))))
+
+;; audit-3 #39
+(ert-deftest agent-repl-itest-roster-roster-missing-task-is-refused ()
+  "A `WorkspaceRoster' with no `task' field at all is a contract breach.
+sidebar.proto:60 marks `task' non-optional; audit-1 #49 pinned
+`repository' and `recentlyMerged' only, leaving this field unguarded."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      ;; Act.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster-missing
+               (list (agent-repl-itest-roster--row
+                      "ws-no-task-marker" "ws-no-task-marker" 'ready))
+               'task))
+      ;; Assert.
+      (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
+      (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error"))
+      (should (agent-repl-itest-roster--push-invalid-carries-raw
+               daemon "ws-no-task-marker")))))
+
+;; audit-3 #40
+(ert-deftest agent-repl-itest-roster-finish-edge-drain-carries-the-said-text-and-the-workspace-id ()
+  "The drained SubmitPrompt carries the held TEXT and the row's workspace id.
+fanout §8 \"deferred-prompt drain\": only `origin' is pinned elsewhere; a
+drain that resolved the wrong ref id or dropped the text on the way out
+would still pass that one assertion alone."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-link--primary conn)
+            (agent-repl-roster-finish-functions
+             (list #'agent-repl--prompt-queue-on-finish)))
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "itest-defer-body" "itest-defer-body" 'thinking))))
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-host-ref "itest-defer-body"))
+         nil "the tab's host ref to attach")
+        (agent-repl--prompt-queue-enqueue
+         "itest-defer-body" :deferred
+         (agent-repl--input-said "run the deferred tests" nil)
+         :deferred-prompt "run the deferred tests")
+        ;; Act.
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "itest-defer-body" "itest-defer-body" 'done))))
+        ;; Assert.
+        (agent-repl-itest--await-call daemon "SubmitPrompt")
+        (let ((body (car (agent-repl-itest--call-bodies daemon "SubmitPrompt"))))
+          (should (equal (agent-repl-itest--body-field body 'workspace 'id) "itest-defer-body"))
+          (should (equal (agent-repl-itest--body-field
+                          (car (agent-repl-itest--body-field body 'said 'content 'blocks))
+                          'text 'text)
+                         "run the deferred tests")))))))
+
+;; audit-3 #40
+(ert-deftest agent-repl-itest-roster-finish-edge-deferred-drain-stays-queued-behind-a-merging-gate ()
+  "A merging composer gate defers the drain instead of sending; INFO, not silence.
+fanout §8 reaction (4); fanout §10 the liveness gate: a drain into
+`merging' would be refused by the daemon and lose the prompt's place for
+nothing, so it stays queued and the finish edge logs
+`elisp.prompt-queue.finish-edge-deferred' rather than sending anything —
+the gated case fanout §10 names but nothing in this suite exercised."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-link--primary conn)
+            (agent-repl-roster-finish-functions
+             (list #'agent-repl--prompt-queue-on-finish)))
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "itest-defer-gated" "itest-defer-gated" 'thinking))))
+        (agent-repl-itest--wait-until
+         (lambda () (agent-repl-host-ref "itest-defer-gated"))
+         nil "the tab's host ref to attach")
+        (agent-repl-itest--push
+         daemon "host"
+         `((host . ,(agent-repl-itest-roster--host-live 'merging)))
+         "itest-defer-gated")
+        (agent-repl-itest--wait-until
+         (lambda () (eq (agent-repl-host-composer-gate "itest-defer-gated") :merging))
+         nil "the merging composer gate")
+        (agent-repl--prompt-queue-enqueue
+         "itest-defer-gated" :deferred
+         (agent-repl--input-said "run the tests once merging clears" nil)
+         :deferred-prompt "run the tests once merging clears")
+        ;; Act.
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row "itest-defer-gated" "itest-defer-gated" 'done))))
+        ;; Assert.
+        (agent-repl-itest--await-log daemon "elisp.prompt-queue.finish-edge-deferred" "info")
+        (should (null (agent-repl-itest--calls daemon "SubmitPrompt")))
+        (should (agent-repl-prompt-queue-pending "itest-defer-gated" :deferred))))))
+
+;; audit-3 #41
+(ert-deftest agent-repl-itest-roster-finish-edge-banner-names-the-workspace-and-activates ()
+  "The banner backend record's WS is the finished workspace, and ACTIVATE is set.
+R-CLICK backend shape `(WS TITLE MESSAGE ACTIVATE)': the message text
+alone does not pin which workspace clicking the banner would raise, nor
+that it raises anything at all."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (let ((agent-repl-roster-finish-functions
+             (list #'agent-repl-roster-notify-finished)))
+        (agent-repl--ws-put "itest-fin-banner-shape" :project-dir "/tmp/itest-fin-banner-shape")
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row
+                        "itest-fin-banner-shape" "itest-fin-banner-shape" 'thinking))))
+        (agent-repl-itest--wait-until
+         (lambda () (eq (agent-repl-status-tab-state "itest-fin-banner-shape") :thinking))
+         nil "the running state")
+        ;; Act.
+        (agent-repl-itest-roster--push
+         daemon (agent-repl-itest-roster--roster
+                 (list (agent-repl-itest-roster--row
+                        "itest-fin-banner-shape" "itest-fin-banner-shape" 'done))))
+        ;; Assert.
+        (agent-repl-itest--wait-until
+         (lambda () agent-repl-itest-notifications) nil "the desktop banner")
+        (let ((recorded (car agent-repl-itest-notifications)))
+          (should (equal (nth 0 recorded) "itest-fin-banner-shape"))
+          (should (nth 3 recorded)))))))
+
+;; audit-3 #42
+(ert-deftest agent-repl-itest-roster-priority-badge-clears-when-the-row-drops-it ()
+  "A row that stops carrying `priority' loses its badge on the next push.
+sidebar.proto RosterRowPriorityBadge: \"UNSET = unprioritized (no badge)\"
+-- a badge that never cleared would flag a workspace the resolver has
+since deprioritized."
+  (agent-repl-itest--with-fake-daemon daemon
+    (agent-repl-itest-roster--with-subscription daemon
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row
+                      "itest-badge-clear" "itest-badge-clear" 'ready
+                      '(priority . ((label . "P1")))))))
+      (agent-repl-itest--wait-until
+       (lambda () (string-prefix-p
+                   "P1" (or (agent-repl--tab-badge-str
+                             "itest-badge-clear"
+                             (agent-repl-status-tab-state "itest-badge-clear"))
+                            "")))
+       nil "the priority badge to draw")
+      ;; Act.
+      (agent-repl-itest-roster--push
+       daemon (agent-repl-itest-roster--roster
+               (list (agent-repl-itest-roster--row "itest-badge-clear" "itest-badge-clear" 'ready))))
+      ;; Assert.
+      (agent-repl-itest--wait-until
+       (lambda () (not (string-prefix-p
+                        "P1" (or (agent-repl--tab-badge-str
+                                  "itest-badge-clear"
+                                  (agent-repl-status-tab-state "itest-badge-clear"))
+                                 ""))))
+       nil "the priority badge to clear")
+      (should-not (string-prefix-p
+                   "P1" (or (agent-repl--tab-badge-str
+                             "itest-badge-clear"
+                             (agent-repl-status-tab-state "itest-badge-clear"))
+                            ""))))))
+
 (provide 'test-integration-roster)
 
 ;;; test-integration-roster.el ends here
