@@ -56,8 +56,7 @@ type refusal struct {
 // asRefusal normalizes a component error into a refusal, reporting false for an
 // ordinary failure that must surface as an error rather than an answer.
 func (s *server) asRefusal(err error) (refusal, bool) {
-	var wsRefusal *workspace.Refusal
-	if errors.As(err, &wsRefusal) {
+	if wsRefusal, ok := workspace.AsRefusal(err); ok {
 		return s.fill(refusal{
 			Arm:      wsRefusal.Arm,
 			Reason:   wsRefusal.Reason,
