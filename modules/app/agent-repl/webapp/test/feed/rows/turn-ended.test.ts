@@ -10,6 +10,7 @@ import { MalformedView } from "../../../src/rpc/malformed.js";
 import {
   TURN_ERROR_WAIT_ARMS,
   drawFeedTurnEnded,
+  drawFeedTurnEndedErrored,
 } from "../../../src/feed/rows/turn-ended.js";
 import { feedId, harness, rowContext, userPromptRow } from "../harness.js";
 
@@ -161,6 +162,35 @@ describe("drawFeedTurnEnded: every error arm", () => {
     expect(el.querySelector(".turn-ended-cause")?.textContent).toBe(
       "an API error this build does not model: teapot_error",
     );
+  });
+
+  it("states the vendor's own type name on the unmodeled arm", () => {
+    // Arrange / Act: the field is "the vendor's type name, drawn verbatim"
+    // (feed.proto), and it is the only handle the reader has on what happened.
+    const el = drawFeedTurnEndedErrored(
+      create(FeedTurnEndedErroredSchema, {
+        headline: { text: "an API error this build does not model" },
+        error: { case: "vendorUnmodeled", value: { type: "teapot_error" } },
+      }),
+      9_000,
+      contextWithRow(null),
+    );
+    // Assert
+    expect(el.querySelector("[data-vendor-type]")?.textContent).toBe("teapot_error");
+  });
+
+  it("draws no vendor-type element on a modeled arm", () => {
+    // Arrange / Act
+    const el = drawFeedTurnEndedErrored(
+      create(FeedTurnEndedErroredSchema, {
+        headline: { text: "the vendor failed internally" },
+        error: { case: "internal", value: {} },
+      }),
+      9_000,
+      contextWithRow(null),
+    );
+    // Assert
+    expect(el.querySelector("[data-vendor-type]")).toBeNull();
   });
 
   it("refuses an errored row with no headline to draw", () => {
