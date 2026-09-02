@@ -110,6 +110,13 @@ describe("drawFeedSubagent: the clocks", () => {
     expect(el.querySelector(".subagent-clock")?.textContent).toBe("5s");
   });
 
+  it("reads the live clock's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the start does not share the shared ticker's phase.
+    const { el } = drawRow(subagentRow("b1", { startedAtMs: 1_000_000n - 4920n }));
+    // Assert: five real seconds of running reads 5s, not the lagging 4s.
+    expect(el.querySelector(".subagent-clock")?.textContent).toBe("5s");
+  });
+
   it("stops the clock at the settled instant", () => {
     const { el } = drawRow(
       subagentRow("b1", {
@@ -125,6 +132,13 @@ describe("drawFeedSubagent: the clocks", () => {
   it("ticks 'quiet for' from the last beat the daemon observed", () => {
     const { el } = drawRow(subagentRow("b1", { lastProgressMs: 990_000n }));
     expect(el.querySelector(".subagent-quiet")?.textContent).toBe("quiet for 10s");
+  });
+
+  it("reads the quiet-for's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the last beat does not share the shared ticker's phase.
+    const { el } = drawRow(subagentRow("b1", { lastProgressMs: 1_000_000n - 4920n }));
+    // Assert: five real seconds of silence reads 5s, not the lagging 4s.
+    expect(el.querySelector(".subagent-quiet")?.textContent).toBe("quiet for 5s");
   });
 
   it("draws no quietness figure before the first beat", () => {

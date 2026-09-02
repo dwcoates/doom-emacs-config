@@ -52,7 +52,7 @@ import type {
   FooterTokensLineAlarm,
   FooterTokensLineVerdict,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
-import { formatElapsed } from "../duration.js";
+import { formatTickedElapsed } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -670,7 +670,7 @@ function runtimeClock(startedAtMs: bigint, deps: ExpandedDeps, path: string): HT
   clock.className = "footer-row-clock";
   const startedMs = msOf(startedAtMs, path);
   tick(clock, deps.ctx.ticker, (nowMs) => {
-    clock.textContent = formatElapsed(nowMs - startedMs);
+    clock.textContent = formatTickedElapsed(nowMs - startedMs);
   });
   return clock;
 }

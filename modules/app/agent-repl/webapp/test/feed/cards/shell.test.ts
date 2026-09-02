@@ -133,6 +133,14 @@ describe("drawFeedShell clocks", () => {
     expect(el.querySelector(".shell-clock")?.textContent).toBe("3s");
   });
 
+  it("reads the live clock's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the start does not share the shared ticker's phase.
+    vi.setSystemTime(4920);
+    const el = drawFeedShell(shell({ startedAtMs: 0n }), ctxFor().rc);
+    // Assert: five real seconds of running reads 5s, not the lagging 4s.
+    expect(el.querySelector(".shell-clock")?.textContent).toBe("5s");
+  });
+
   it("stops the clock at the settled instant", () => {
     vi.setSystemTime(999_999);
     const el = drawFeedShell(
@@ -146,6 +154,14 @@ describe("drawFeedShell clocks", () => {
     vi.setSystemTime(20_000);
     const el = drawFeedShell(shell({ lastProgressMs: 8000n }), ctxFor().rc);
     expect(el.querySelector(".shell-quiet")?.textContent).toBe("quiet for 12s");
+  });
+
+  it("reads the quiet-for's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the last append does not share the shared ticker's phase.
+    vi.setSystemTime(12_920);
+    const el = drawFeedShell(shell({ lastProgressMs: 8000n }), ctxFor().rc);
+    // Assert: five real seconds of silence reads 5s, not the lagging 4s.
+    expect(el.querySelector(".shell-quiet")?.textContent).toBe("quiet for 5s");
   });
 
   it("draws no quiet-for reading before the first byte", () => {

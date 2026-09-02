@@ -37,7 +37,7 @@ import type {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SelectWorkspaceResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_workspace_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { formatAge } from "../duration.js";
+import { formatTickedAge } from "../duration.js";
 import { log } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
@@ -443,7 +443,7 @@ function tickAge(
   compose: (age: string) => string,
 ): void {
   const paint = (nowMs: number): void => {
-    host.textContent = compose(formatAge(nowMs - atMs));
+    host.textContent = compose(formatTickedAge(nowMs - atMs));
   };
   paint(sc.ctx.ticker.now());
   sc.onDispose(sc.ctx.ticker.subscribe(paint));

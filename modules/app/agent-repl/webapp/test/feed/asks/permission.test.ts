@@ -385,6 +385,20 @@ describe("the settled card", () => {
     expect(el.querySelector(".perm-when")?.textContent).toBe("1m ago");
   });
 
+  it("reads the stamp's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the answer instant does not share the shared ticker's phase.
+    vi.setSystemTime(4920);
+    const el = drawFeedPermission(
+      permission({
+        case: "answered",
+        value: { atMs: 0n, answer: { case: "allowedOnce", value: {} } },
+      }),
+      askHarness().rc,
+    );
+    // Assert: five real seconds ago reads 5s, not the lagging 4s.
+    expect(el.querySelector(".perm-when")?.textContent).toBe("5s ago");
+  });
+
   it("draws an abandoned ask as gone, not as pending", () => {
     const el = drawFeedPermission(
       permission({ case: "abandoned", value: { atMs: 0n } }),

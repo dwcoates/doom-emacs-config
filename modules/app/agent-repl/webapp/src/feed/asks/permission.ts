@@ -30,7 +30,7 @@
  * row's own concern — so the instant is stamped on the element and carried
  * across re-pushes, which keeps a growing wait from restarting every push.
  */
-import { formatAge } from "../../duration.js";
+import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
 import {
   AnswerPermissionResponseSchema,
@@ -413,7 +413,7 @@ function waitingClock(card: HTMLElement, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "perm-waiting";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `waiting ${formatAge(nowMs - since)}`;
+    el.textContent = `waiting ${formatTickedAge(nowMs - since)}`;
   });
   return el;
 }
@@ -435,7 +435,7 @@ function stampedAge(atMs: bigint, path: string, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "perm-when";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `${formatAge(nowMs - at)} ago`;
+    el.textContent = `${formatTickedAge(nowMs - at)} ago`;
   });
   return el;
 }

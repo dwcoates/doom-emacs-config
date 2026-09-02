@@ -31,7 +31,7 @@
  * is missing. It does not send a partial batch and it does not silently drop the
  * question — either would answer for the user.
  */
-import { formatAge } from "../../duration.js";
+import { formatTickedAge } from "../../duration.js";
 import { log } from "../../log.js";
 import {
   AnswerQuestionResponseSchema,
@@ -450,7 +450,7 @@ function stampedAge(atMs: bigint, path: string, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "q-when";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `${formatAge(nowMs - at)} ago`;
+    el.textContent = `${formatTickedAge(nowMs - at)} ago`;
   });
   return el;
 }

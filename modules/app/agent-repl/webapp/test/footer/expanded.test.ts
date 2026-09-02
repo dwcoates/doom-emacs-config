@@ -278,6 +278,15 @@ describe("the agents panel", () => {
     expect(panel.querySelector(".footer-row-clock")?.textContent).toBe("1m 6s");
   });
 
+  it("reads the row clock's nearest second when a tick samples just short of one", () => {
+    // Arrange + Act: the row's start does not share the shared ticker's phase.
+    const { panel } = drawPanel("agents", {
+      agents: [{ ...AGENT_ROW, runtime: { startedAtMs: BigInt(NOW - 4920) } }],
+    });
+    // Assert: five real seconds of running reads 5s, not the lagging 4s.
+    expect(panel.querySelector(".footer-row-clock")?.textContent).toBe("5s");
+  });
+
   it("is a jump target carrying the bubble's id verbatim", () => {
     const { panel } = drawPanel("agents", { agents: [AGENT_ROW] });
     expect(panel.querySelector("[data-jump]")?.getAttribute("data-jump")).toBe("bubble-1");

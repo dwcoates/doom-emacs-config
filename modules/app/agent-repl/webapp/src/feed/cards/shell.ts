@@ -27,7 +27,7 @@
  * turn target, so there is NO confirm step here — every error arm is an
  * ordinary call-site refusal beside the button.
  */
-import { formatElapsed } from "../../duration.js";
+import { formatElapsed, formatTickedElapsed } from "../../duration.js";
 import { log } from "../../log.js";
 import type {
   FeedShell,
@@ -222,7 +222,7 @@ export function drawFeedShellLastProgress(
   const el = document.createElement("span");
   el.className = "shell-quiet";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = `quiet for ${formatElapsed(nowMs - atMs)}`;
+    el.textContent = `quiet for ${formatTickedElapsed(nowMs - atMs)}`;
   });
   return el;
 }
@@ -233,7 +233,7 @@ function drawLiveClock(runtime: FeedShellRuntime, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "shell-clock";
   tick(el, rc.ctx.ticker, (nowMs) => {
-    el.textContent = formatElapsed(nowMs - startedMs);
+    el.textContent = formatTickedElapsed(nowMs - startedMs);
   });
   return el;
 }
