@@ -501,14 +501,15 @@ func TestCloseWorkspaceWithATurnInFlightAnswersBlocked(t *testing.T) {
 	f.submit("do the thing", "k-close-blocked", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act
-	_, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
+	resp, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: f.ws}))
 
-	// Assert
-	if err == nil {
-		t.Fatal("CloseWorkspace with a turn in flight = success, want a refusal")
+	// Assert: CloseWorkspaceError.blocked IS a landed arm, so the refusal is a
+	// response arm rather than a transport error.
+	if err != nil {
+		t.Fatalf("CloseWorkspace with a turn in flight = transport error %v, want the blocked arm", err)
 	}
-	if !namesIntendedArm(err, "CloseWorkspaceError.blocked") && connectCode(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("CloseWorkspace refusal = %v, want it to name blocked", err)
+	if resp.Msg.GetError().GetBlocked() == nil {
+		t.Fatalf("CloseWorkspace with a turn in flight = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
 	awaitFooter(t, f, footer, "footer closing.blocked", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetClosing().GetBlocked() != nil
@@ -528,14 +529,14 @@ func TestCloseWorkspaceWithAQueuedMergeRefuses(t *testing.T) {
 	}
 
 	// Act
-	_, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ws}))
+	resp, err := d.Client().CloseWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: ws}))
 
-	// Assert
-	if err == nil {
-		t.Fatal("CloseWorkspace with a queued merge = success, want a refusal")
+	// Assert: the landed blocked arm, not a transport error.
+	if err != nil {
+		t.Fatalf("CloseWorkspace with a queued merge = transport error %v, want the blocked arm", err)
 	}
-	if !namesIntendedArm(err, "CloseWorkspaceError.blocked") && connectCode(err) != connect.CodeFailedPrecondition {
-		t.Fatalf("CloseWorkspace refusal = %v, want it to name blocked", err)
+	if resp.Msg.GetError().GetBlocked() == nil {
+		t.Fatalf("CloseWorkspace with a queued merge = %v, want CloseWorkspaceError.blocked", resp.Msg)
 	}
 	d.ExpectWarnings(harness.AllowAllWarnings)
 }
