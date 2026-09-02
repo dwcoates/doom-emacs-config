@@ -579,8 +579,10 @@ func TestMainAgentIsRecoveredFromTheOpeningPage(t *testing.T) {
 }
 
 // TestOnTurnOpenedTracksTheTurnAndItsPage covers the queue's hand-over: it
-// names the main agent, records the turn, and feeds StartTurnSuccess's page
-// through the opening-page path without mirroring the prompt a second time.
+// names the main agent, records the turn, states the turn-open edge to BOTH
+// surfaces that have no other source for it (the footer's clock and the feed's
+// running turn), and feeds StartTurnSuccess's page through the opening-page
+// path without mirroring the prompt a second time.
 func TestOnTurnOpenedTracksTheTurnAndItsPage(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("")})
@@ -594,7 +596,7 @@ func TestOnTurnOpenedTracksTheTurnAndItsPage(t *testing.T) {
 	got := h.drainNow()
 
 	// Assert.
-	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnHistoryPage"})
+	assertNames(t, got, []string{"footer.OnTurnOpened", "feed.OnTurnOpened", "feed.OnHistoryPage"})
 	turn := h.w.TurnInFlight()
 	if turn == nil || *turn != ids.TurnID("turn-9") {
 		t.Fatalf("turn in flight = %v, want turn-9", turn)

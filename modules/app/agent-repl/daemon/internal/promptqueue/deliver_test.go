@@ -10,7 +10,9 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"claude-repld/internal/feedid"
+	"claude-repld/internal/ids"
 	"claude-repld/internal/resolve/footer"
+	"claude-repld/internal/sessionwatcher"
 	"claude-repld/internal/wsm"
 )
 
@@ -292,5 +294,43 @@ func TestDeliveringAPromptTellsTheRosterATurnIsRunning(t *testing.T) {
 	}
 	if turns[0].Act != footer.ActPrompt {
 		t.Fatalf("roster act = %v, want the ordinary prompt", turns[0].Act)
+	}
+}
+
+func TestDeliverMirrorsTheAcceptedPromptAtTheSessionsOutputAddress(t *testing.T) {
+	// Arrange: a lease holder has addressed the session at a merge sub-feed.
+	h := newHarness(t)
+	lease := ids.LeaseID("lease-1")
+	h.feed.SetOutputAddress("ws-1", &sessionwatcher.OutputAddress{Feed: feedid.Feed{Merge: &lease}})
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert: the mirror carries the ADDRESSED feed's identity, not the root's.
+	want := feedid.Encode(feedid.Ref{
+		WS:   "ws-1",
+		Feed: feedid.Feed{Merge: &lease},
+		Row:  feedid.RowKey{Kind: feedid.KindPrompt, ID: "t1"},
+	})
+	if got := h.feed.mirrored()[0].GetId().GetValue(); got != want.GetValue() {
+		t.Fatalf("mirror id = %q, want the addressed feed's %q", got, want.GetValue())
+	}
+}
+
+func TestDeliverMirrorsOntoTheRootFeedWhenNoOutputAddressStands(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "hello")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assert
+	want := feedid.Encode(feedid.Ref{
+		WS:   "ws-1",
+		Feed: feedid.Feed{Root: true},
+		Row:  feedid.RowKey{Kind: feedid.KindPrompt, ID: "t1"},
+	})
+	if got := h.feed.mirrored()[0].GetId().GetValue(); got != want.GetValue() {
+		t.Fatalf("mirror id = %q, want the root feed's %q", got, want.GetValue())
 	}
 }

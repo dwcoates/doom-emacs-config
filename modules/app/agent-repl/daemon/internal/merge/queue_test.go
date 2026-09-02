@@ -473,8 +473,10 @@ func TestPauseWithAScopePausesOnlyThatRepository(t *testing.T) {
 	if _, err := h.db.EnqueueMerge(context.Background(), other, ids.WorkspaceID("ws-2"), h.clock()); err != nil {
 		t.Fatalf("enqueueing on the second repository: %v", err)
 	}
-	h.registerRepo("repo-one", string(h.repoKey()))
-	h.registerRepo("repo-two", string(other))
+	// THE REGISTRY HOLDS THE WORKTREE DIR; the queue is keyed by its common
+	// dir, which is what the scope has to resolve through.
+	h.registerRepo("repo-one", h.targetD)
+	h.registerRepo("repo-two", "/other/repo")
 
 	// Act.
 	err := h.o.Pause(context.Background(), &RepositoryScope{ID: "repo-one"})
@@ -504,8 +506,10 @@ func TestUnpauseWithAScopeResumesOnlyThatRepository(t *testing.T) {
 	if _, err := h.db.EnqueueMerge(context.Background(), other, ids.WorkspaceID("ws-2"), h.clock()); err != nil {
 		t.Fatalf("enqueueing on the second repository: %v", err)
 	}
-	h.registerRepo("repo-one", string(h.repoKey()))
-	h.registerRepo("repo-two", string(other))
+	// THE REGISTRY HOLDS THE WORKTREE DIR; the queue is keyed by its common
+	// dir, which is what the scope has to resolve through.
+	h.registerRepo("repo-one", h.targetD)
+	h.registerRepo("repo-two", "/other/repo")
 	if err := h.o.Pause(context.Background(), nil); err != nil {
 		t.Fatalf("pausing: %v", err)
 	}
@@ -526,6 +530,33 @@ func TestUnpauseWithAScopeResumesOnlyThatRepository(t *testing.T) {
 	}
 }
 
+// TestAScopedPauseKeysTheQueueByTheRepositorysCommonDir pins the keying the
+// scope resolves through: the registry holds the WORKTREE dir, the queue is
+// stored under the common dir, so a scoped pause must be visible to an
+// unscoped read of the queue's own key.
+func TestAScopedPauseKeysTheQueueByTheRepositorysCommonDir(t *testing.T) {
+	// Arrange: one queue, registered by its worktree dir.
+	h := newHarness(t)
+	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("enqueueing: %v", err)
+	}
+	h.registerRepo("repo-one", h.targetD)
+
+	// Act.
+	if err := h.o.Pause(context.Background(), &RepositoryScope{ID: "repo-one"}); err != nil {
+		t.Fatalf("the scoped pause failed: %v", err)
+	}
+
+	// Assert: the queue's OWN key carries the pause.
+	paused, err := h.db.MergeQueuePaused(context.Background(), h.repoKey())
+	if err != nil {
+		t.Fatalf("reading the queue's pause state: %v", err)
+	}
+	if !paused {
+		t.Fatal("the scoped pause wrote a key the queue is not stored under")
+	}
+}
+
 // TestPauseRefusesAnUnknownRepositoryRef covers the ref the registry does not
 // hold: it is refused rather than pausing a key nobody owns.
 func TestPauseRefusesAnUnknownRepositoryRef(t *testing.T) {
@@ -534,7 +565,9 @@ func TestPauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
-	h.registerRepo("repo-one", string(h.repoKey()))
+	// THE REGISTRY HOLDS THE WORKTREE DIR; the queue is keyed by its common
+	// dir, which is what the scope has to resolve through.
+	h.registerRepo("repo-one", h.targetD)
 
 	// Act.
 	err := h.o.Pause(context.Background(), &RepositoryScope{ID: "repo-nope"})
@@ -554,7 +587,9 @@ func TestUnpauseRefusesAnUnknownRepositoryRef(t *testing.T) {
 	if err := h.o.Enqueue(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("enqueueing: %v", err)
 	}
-	h.registerRepo("repo-one", string(h.repoKey()))
+	// THE REGISTRY HOLDS THE WORKTREE DIR; the queue is keyed by its common
+	// dir, which is what the scope has to resolve through.
+	h.registerRepo("repo-one", h.targetD)
 	if err := h.o.Pause(context.Background(), nil); err != nil {
 		t.Fatalf("pausing: %v", err)
 	}

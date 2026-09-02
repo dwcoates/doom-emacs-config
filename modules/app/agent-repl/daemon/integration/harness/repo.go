@@ -136,7 +136,7 @@ func (w *GitWorld) edit(fn func(*fakegit.State)) {
 // read answers a copy of the fixture file.
 func (w *GitWorld) read() *fakegit.State {
 	w.t.Helper()
-	s, err := fakegit.Load(w.StateFile)
+	s, err := fakegit.LoadLocked(w.StateFile)
 	if err != nil {
 		w.t.Fatalf("harness: fakegit state: %v", err)
 	}

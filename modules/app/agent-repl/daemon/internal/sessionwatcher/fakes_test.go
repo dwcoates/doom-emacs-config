@@ -353,6 +353,10 @@ func count(events []event, name string) int {
 
 type feedSink struct{ rec *recorder }
 
+func (s *feedSink) OnTurnOpened(_ ids.WorkspaceID, turn ids.TurnID) {
+	s.rec.emit(event{sink: "feed", method: "OnTurnOpened", detail: string(turn)})
+}
+
 func (s *feedSink) OnPrompt(_ ids.WorkspaceID, agent *conversationv1.AgentId, prompt *conversationv1.AgentPrompt, _ OutputAddress) {
 	s.rec.emit(event{sink: "feed", method: "OnPrompt", agent: agent.GetValue(), detail: prompt.GetId().GetValue()})
 }
