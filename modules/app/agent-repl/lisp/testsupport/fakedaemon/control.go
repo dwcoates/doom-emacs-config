@@ -203,6 +203,18 @@ func (s *fakeServer) handleGate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"gated": body.Method})
 }
 
+// handleReset drops every piece of per-test state the fake accumulated and
+// ends every standing stream, so the NEXT test starts against a fake that is
+// indistinguishable from a freshly spawned one.
+func (s *fakeServer) handleReset(w http.ResponseWriter, r *http.Request) {
+	var body struct{}
+	if err := decodeControlBody(r, &body); err != nil {
+		badRequest(w, "fakedaemon.control.reset-unparseable", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.reset())
+}
+
 func (s *fakeServer) handleCalls(w http.ResponseWriter, _ *http.Request) {
 	calls := s.recordedCalls()
 	if calls == nil {
@@ -232,6 +244,7 @@ func (s *fakeServer) registerControlPlane(mux *http.ServeMux, exit func()) {
 	mux.HandleFunc("/_fake/push", post("/_fake/push", s.handlePush))
 	mux.HandleFunc("/_fake/end", post("/_fake/end", s.handleEnd))
 	mux.HandleFunc("/_fake/gate", post("/_fake/gate", s.handleGate))
+	mux.HandleFunc("/_fake/reset", post("/_fake/reset", s.handleReset))
 	mux.HandleFunc("/_fake/calls", s.handleCalls)
 	mux.HandleFunc("/_fake/subscribers", s.handleSubscribers)
 	mux.HandleFunc("/_fake/exit", post("/_fake/exit", func(w http.ResponseWriter, _ *http.Request) {

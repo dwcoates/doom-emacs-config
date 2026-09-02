@@ -349,3 +349,60 @@ func handleUnary[Req any, Res any](ctx context.Context, s *fakeServer, method st
 		map[string]any{"method": method})
 	return connect.NewResponse(out), nil
 }
+
+// ---- reset ----
+
+// resetCounts reports what a /_fake/reset threw away, so a caller sees that
+// the fake really was carrying state rather than guessing.
+type resetCounts struct {
+	Calls     int `json:"calls"`
+	Scripts   int `json:"scripts"`
+	Snapshots int `json:"snapshots"`
+	Gates     int `json:"gates"`
+	Ended     int `json:"ended"`
+}
+
+// reset returns the fake to the state newFakeServer left it in, WITHOUT
+// restarting the process: the recording, the scripted table, the stored
+// snapshots and every armed gate are dropped, and every standing stream is
+// ended with a clean end frame.
+//
+// THIS IS WHAT MAKES ONE FAKE SERVE A WHOLE SUITE.  A per-test process spawn
+// costs seconds of boot; a per-test reset costs one request.  The clearing is
+// total on purpose — a reset that left one table behind would leak exactly the
+// state a fresh process used to guarantee away.
+//
+// An armed gate is CLOSED rather than merely forgotten, so a call still held
+// by the previous test's gate is released instead of hanging until its
+// client's deadline.
+func (s *fakeServer) reset() resetCounts {
+	s.mu.Lock()
+	counts := resetCounts{
+		Calls:     len(s.calls),
+		Scripts:   len(s.scripts),
+		Snapshots: len(s.snapshots),
+		Gates:     len(s.gates),
+	}
+	s.calls = nil
+	s.scripts = map[string]json.RawMessage{}
+	s.snapshots = map[snapshotKey][]proto.Message{}
+	for method, gate := range s.gates {
+		delete(s.gates, method)
+		close(gate)
+	}
+	subs := make([]*subscriber, 0, len(s.subscribers))
+	for _, sub := range s.subscribers {
+		subs = append(subs, sub)
+	}
+	s.callChanged.Broadcast()
+	s.mu.Unlock()
+
+	for _, sub := range subs {
+		sub.end <- endRequest{}
+	}
+	counts.Ended = len(subs)
+	logInfo("fakedaemon.reset", "reset the fake to its start-of-process state",
+		map[string]any{"calls": counts.Calls, "scripts": counts.Scripts,
+			"snapshots": counts.Snapshots, "gates": counts.Gates, "ended": counts.Ended})
+	return counts
+}
