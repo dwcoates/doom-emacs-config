@@ -630,7 +630,13 @@ func TestFooterShimExitFlipsToDeadAndStopsRedials(t *testing.T) {
 	// The lost link is also RECORDED as the session's own fault, which is what
 	// SessionHealth answers with: the watcher says so and the reporter opens
 	// it.
-	f.d.ExpectWarnings("daemon.shimclient.exit",
+	// daemon.shimclient.redial is the adopted-death witness doing its job: the
+	// monitor can see the stream break before the exit is decoded, so it says
+	// "shim link broke; redialing" and then, the moment the death is evidence,
+	// "redial stopped" -- which is precisely the stop this test asserts.
+	// Before the witness was wired the redials looped forever instead; both
+	// records are failure-path evidence and stay loud.
+	f.d.ExpectWarnings("daemon.shimclient.exit", "daemon.shimclient.redial",
 		"daemon.sessionwatcher.watch_session", "daemon.sessionwatcher.watch_agent",
 		"daemon.sessionwatcher.link_fault", "daemon.health.open_fault")
 }
