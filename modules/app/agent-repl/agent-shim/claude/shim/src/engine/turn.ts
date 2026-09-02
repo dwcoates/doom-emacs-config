@@ -28,7 +28,7 @@ import {
   type PersistEntry,
   type Persistence,
 } from "../store/persistence.js";
-import { detachedWorkId, storeItemPointerValue } from "../convert/ids.js";
+import { storeItemPointerValue } from "../convert/ids.js";
 import {
   detachForegroundDetached,
   detachForegroundRefused,
@@ -854,22 +854,5 @@ export class TurnEngine {
     this.session.concludeStoppedRuns([entry]);
     LOGGER.log({ work_id: work.value }, "stopped a detached shell run");
     return stopBashStopped();
-  }
-
-  /** The live set as `TurnLive` names it — the refusal's own vocabulary. */
-  turnLive(): conversationv1.TurnLive {
-    return create(conversationv1.TurnLiveSchema, {
-      liveWork: this.session.live.workIds(this.session.live.announceable()),
-    });
-  }
-
-  /**
-   * A work id, for callers that hold the SPAWNING CALL's id.
-   *
-   * The wire handle is the call's `tool_use_id` (ruling, landing 3); a caller
-   * holding a vendor task id resolves it through the live set first.
-   */
-  static workId(spawningToolUseId: string): conversationv1.DetachedWorkId {
-    return detachedWorkId(spawningToolUseId);
   }
 }
