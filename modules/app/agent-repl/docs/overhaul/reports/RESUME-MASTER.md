@@ -91,6 +91,24 @@ daemon binary against fakes of every neighbor; daemon/e2e = the cross-system
 suite (real shim + store + sidecar, hosted daemon, no frontends). Both
 survive the merge.
 
+## USER RULING 2026-09-02: only OUR systems run for real; e2e mocks git and the SDK
+
+Reverses the project lead's same-day ruling that e2e merge tests use real
+git. In every suite, including e2e, only claude-repld, the shim, shim-store,
+shim-sidecar (and the frontends where applicable) run for real; git is the
+scripted fake git, the SDK is the fake SDK, nothing external executes. Tests
+must be fast. After each suite run the worst offenders by duration get an
+opus-low root-cause pass: real external dependency executing, production
+timer ridden, or misbehavior; findings feed remediation.
+
+## LANDING 8 (2026-09-02, user-approved; protos 1fdf85e63, bindings 3791cd630)
+
+FeedSessionSeparation.compaction_failed and five FeedTurnEndedErrored arms
+(max_turns, max_budget, execution_error, turn_failed, stop_hook_prevented).
+Adaptation: opus-low implementers off overhaul/integration for daemon, webapp,
+elisp (worktrees integration-agents/landing8-<sys>); e2e writers update the
+compaction and turn-lifecycle assertions to the new arms.
+
 ## STEP 7 PROCEDURE (user, 2026-09-02): run once, table first, then remediation
 
 The project lead runs the rebuilt e2e suite ONCE with `-v -json` redirected to

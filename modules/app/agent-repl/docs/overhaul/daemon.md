@@ -1365,3 +1365,18 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
   each cause beside its one resolved sentence; the producers are Evict, the
   dequeue release, `OnWorkspaceClosed` (Kill and Nuke) and `recoverWaiting`
   (a merge the restart cannot re-queue).
+
+## Landing 8 relay (2026-09-02, project lead; user-approved)
+
+Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
+- ContextCut.compaction_failed → FeedSessionSeparation{kind: compaction_failed
+  {error}, label composed ("compaction failed"), tokens UNSET}; the footer's
+  compacting sub-status ends. Previously nothing was drawn.
+- AgentFailure.max_turns / budget_exhausted / execution_error /
+  structured_output_retry_exhausted / stop_hook_prevented → FeedTurnEnded
+  .errored with the matching new arm (max_turns, max_budget, execution_error,
+  turn_failed{stop_reason}, stop_hook_prevented), VendorFailureContext filled,
+  headline composed per arm ("stopped at the turn limit", "stopped at the
+  budget", "the run broke while executing", "the run ended: <stop_reason>",
+  "a Stop hook ended the run"), message = the vendor's wording when recorded.
+  The workspace resolves PURPLE per failure.proto for the four vendor arms.

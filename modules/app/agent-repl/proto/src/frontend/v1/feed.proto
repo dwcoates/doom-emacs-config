@@ -911,8 +911,28 @@ message FeedTurnEndedErrored {
     // The request asked for more output tokens than the model will produce;
     // retrying it unchanged cannot succeed.
     FeedTurnErrorMaxOutputTokens max_output_tokens = 17;
+
+    // THE RUN'S OWN TERMINALS (conversation.v1 AgentFailure arms that are not
+    // API error classes), imported from failure.proto as that file's header
+    // prescribes. Landing 8, 2026-09-02, user-approved: until then these five
+    // ends had no wire path to any frontend stream.
+    // AgentFailure.max_turns — the round-trip ceiling the user set, reached.
+    FailureVendorMaxTurns max_turns = 19;
+    // AgentFailure.budget_exhausted — the spending ceiling, reached.
+    FailureVendorMaxBudget max_budget = 20;
+    // AgentFailure.execution_error — the run broke while executing.
+    FailureVendorExecutionError execution_error = 21;
+    // AgentFailure.structured_output_retry_exhausted and every other
+    // unclassified abnormal end; `stop_reason` names the vendor's own word.
+    FailureVendorTurnFailed turn_failed = 22;
+    // AgentFailure.stop_hook_prevented — a configured Stop hook forbade the
+    // agent from continuing: deliberate, not a fault, but not completion.
+    FeedTurnErrorStopHookPrevented stop_hook_prevented = 23;
   }
 }
+// The Stop-hook class. Empty: the arm is the cause; the envelope's message
+// carries the hook's wording when the vendor recorded one.
+message FeedTurnErrorStopHookPrevented {}
 // The billing class. Empty: the arm is the cause; the envelope's message
 // carries the vendor's wording.
 message FeedTurnErrorBillingError {}
@@ -1526,10 +1546,12 @@ message FeedSessionSeparation {
   // The divider's label ("context compacted", "entered worktree …"),
   // composed by the daemon, drawn under the rule.
   FeedSessionSeparationLabel label = 1;
-  // ONE LEVEL: a separation is a recorded fact; it is never in flight and
-  // it does not fail (a compaction that read cold still compacted — see the
-  // cold-read notice; a worktree call that failed is a tool failure, not a
-  // divider).
+  // ONE LEVEL: a separation is a recorded fact; it is never in flight (a
+  // compaction that read cold still compacted — see the cold-read notice; a
+  // worktree call that failed is a tool failure, not a divider). The one
+  // failed shape it records is `compaction_failed`: the divider that was
+  // offered (the /compact command, the cold gate's compact remedy) and did
+  // not happen, drawn in the slot the compacted divider would have taken.
   oneof kind {
     // The conversation was discarded outright.
     FeedContextCutCleared cleared = 2;
@@ -1539,6 +1561,10 @@ message FeedSessionSeparation {
     FeedWorktreeEntered worktree_entered = 4;
     // The session RETURNED from the worktree.
     FeedWorktreeLeft worktree_left = 5;
+    // A compaction was attempted and FAILED; nothing was cut and the context
+    // is as it was (conversation.v1.ContextCompactionFailed relayed). `tokens`
+    // is UNSET. (Landing 8, 2026-09-02, user-approved.)
+    FeedContextCutCompactionFailed compaction_failed = 7;
   }
   // What the cut did to the context's size, drawn on the divider — SET ON
   // THE CONTEXT ARMS ONLY (every cut has one; even a clear reloads the
@@ -1720,6 +1746,12 @@ message FeedMergeFailed {
 // daemon's log. (summary: landing 7, 2026-09-02.)
 message FeedMergeAbandoned {
   string summary = 1;
+}
+
+// The failed-compaction divider. The producer's account, verbatim, is the
+// only evidence anyone has; the daemon composes the label.
+message FeedContextCutCompactionFailed {
+  string error = 1;
 }
 
 // The ▸/▾ state. UI preference the daemon holds; see the roster's fold.

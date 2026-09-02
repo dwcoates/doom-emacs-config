@@ -327,3 +327,7 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
   empty. Distinguish it from a real agent with no lines yet (that one still
   serves an empty page). Log at the refusal site with `refusal_site`.
 - No sidecar change.
+
+## Landing 8 relay (2026-09-02, project lead)
+
+- No shim.v1 / store.v1 / conversation.v1 change in landing 8 (frontend.v1 only).

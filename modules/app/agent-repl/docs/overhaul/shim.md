@@ -823,3 +823,7 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
   not_deliverable / detail-only answer).
 - OpenAgentSessionFailure.unknown_agent (store): map to Code.NotFound;
   retire the interim shim-side unknown-target rule once the store produces it.
+
+## Landing 8 relay (2026-09-02, project lead)
+
+- No shim.v1 / store.v1 / conversation.v1 change in landing 8 (frontend.v1 only).

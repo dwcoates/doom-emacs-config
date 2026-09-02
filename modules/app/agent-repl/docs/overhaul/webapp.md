@@ -472,3 +472,15 @@ Adapt to protos ab7e681f2 / bindings c10714a41 (see PROTO-CHANGES.md):
   only the decoder/type update.
 - FeedMergeAbandoned.summary: draw it on the collapsed merge line exactly as
   FeedMergeFailed.summary is drawn.
+
+## Landing 8 relay (2026-09-02, project lead; user-approved)
+
+Adapt to protos 1fdf85e63 / bindings 3791cd630 (PROTO-CHANGES.md "Landing 8"):
+- FeedSessionSeparation.kind.compaction_failed: the separation renderer's
+  exhaustive accent map and label path gain the arm (typecheck currently fails
+  on src/feed/rows/separation.ts); drawn as a divider with a failure accent
+  and the daemon's label; no tokens line.
+- FeedTurnEndedErrored.error: five new arms (max_turns, max_budget,
+  execution_error, turn_failed, stop_hook_prevented) render through the
+  existing headline path (the daemon composes the sentence); the schema-driven
+  arm enumeration must pick them up; one test per arm.
